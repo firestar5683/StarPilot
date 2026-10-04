@@ -21,7 +21,7 @@ DEFAULT_SPEED_MPS = MINIMUM_SPEED_MPS
 class LaneChangePolicy:
   enabled: bool = True
   minimum_speed_mps: float = DEFAULT_SPEED_MPS
-  one_per_signal: bool = False
+  one_per_signal: bool = True
   auto_lane_change: bool = False
   auto_delay_s: float = 1.0
   minimum_lane_width_m: float = 0.0

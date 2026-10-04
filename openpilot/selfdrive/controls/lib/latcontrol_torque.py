@@ -9,7 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
 from openpilot.starpilot.lateral.controller_selection import ControllerMode, default_selection, policy_for
-from openpilot.starpilot.lateral.torque_extension import create_extension
+from openpilot.starpilot.lateral.torque_extension import create_extension, create_turn_assist
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -51,6 +51,7 @@ class LatControlTorque(LatControl):
     self.lat_accel_request_buffer = deque([0.] * self.lat_accel_request_buffer_len , maxlen=self.lat_accel_request_buffer_len)
     self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / self.dt)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
+    self.turn_assist = create_turn_assist(CP, turn_assist)
     self.starpilot_extension = create_extension(self, CP, self.controller_mode, self.controller_policy, turn_assist=turn_assist)
 
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
@@ -104,6 +105,9 @@ class LatControlTorque(LatControl):
       freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < 5
       output_lataccel = self.pid.update(pid_log.error, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
+
+      if self.turn_assist is not None:
+        output_torque = self.turn_assist.apply(CS, VM, params, desired_curvature, output_torque, self.steer_max)
 
       pid_log.active = True
       pid_log.p = float(self.pid.p)

@@ -42,11 +42,11 @@ class TestTurnModelRuntime(unittest.TestCase):
     params.put(DOCUMENT_KEY, json.loads(replace_mode(None, cp, mode)), block=True)
     return Controls()
 
-  def test_off_and_standard_preserve_existing_commands(self):
+  def test_explicit_off_preserves_each_controller_commands(self):
     for mode in (ControllerMode.STARPILOT, ControllerMode.STANDARD):
       with self.subTest(mode=mode), OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
         selected = self.construct(False, mode)
-        reference = self.construct(mode == ControllerMode.STANDARD, mode)
+        reference = self.construct(False, mode)
         for tick in range(20):
           now = 1_000_000_000 + tick * 10_000_000
           rolling_feed(selected, now, tick)
@@ -57,24 +57,25 @@ class TestTurnModelRuntime(unittest.TestCase):
           self.assertEqual(selected.model_turn_assist.turn_hold_curvature, 0.)
 
   def test_model_bias_reaches_actual_curvature_and_torque_limits(self):
-    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
-      controls = self.construct(True)
-      reference = self.construct(False)
-      before = controls.LaC.torque_params.to_dict()
-      maximum_hold = maximum_difference = 0.
-      with patch.object(controls.model_turn_assist, 'update', wraps=controls.model_turn_assist.update) as update:
-        for tick in range(120):
-          rolling_feed(controls, 1_000_000_000 + tick * 10_000_000, tick)
-          rolling_feed(reference, 1_000_000_000 + tick * 10_000_000, tick)
-          command, _ = controls.state_control()
-          reference.state_control()
-          maximum_hold = max(maximum_hold, abs(controls.model_turn_assist.turn_hold_curvature))
-          maximum_difference = max(maximum_difference, abs(controls.desired_curvature - reference.desired_curvature))
-          self.assertLessEqual(abs(command.actuators.torque), 1.)
-        self.assertEqual(update.call_count, 120)
-        self.assertGreater(maximum_hold, 0.)
-        self.assertGreater(maximum_difference, 0.)
-      self.assertEqual(controls.LaC.torque_params.to_dict(), before)
+    for mode in (ControllerMode.STANDARD, ControllerMode.STARPILOT):
+      with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+        controls = self.construct(True, mode)
+        reference = self.construct(False, mode)
+        before = controls.LaC.torque_params.to_dict()
+        maximum_hold = maximum_difference = 0.
+        with patch.object(controls.model_turn_assist, 'update', wraps=controls.model_turn_assist.update) as update:
+          for tick in range(120):
+            rolling_feed(controls, 1_000_000_000 + tick * 10_000_000, tick)
+            rolling_feed(reference, 1_000_000_000 + tick * 10_000_000, tick)
+            command, _ = controls.state_control()
+            reference.state_control()
+            maximum_hold = max(maximum_hold, abs(controls.model_turn_assist.turn_hold_curvature))
+            maximum_difference = max(maximum_difference, abs(controls.desired_curvature - reference.desired_curvature))
+            self.assertLessEqual(abs(command.actuators.torque), 1.)
+          self.assertEqual(update.call_count, 120)
+          self.assertGreater(maximum_hold, 0.)
+          self.assertGreater(maximum_difference, 0.)
+        self.assertEqual(controls.LaC.torque_params.to_dict(), before)
 
   def test_standstill_speed_fault_reverse_and_inactive_deny_assist(self):
     for gate in ({'speed': 0.}, {'speed': .044}, {'standstill': True}, {'fault': True}, {'gear': 'reverse'}, {'active': False}):

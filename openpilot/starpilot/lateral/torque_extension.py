@@ -81,3 +81,11 @@ def create_extension(parent, cp, mode, selected, *, turn_assist=False):
 def selected_policy(controller):
   extension = controller.starpilot_extension
   return None if extension is None else extension.policy
+
+
+def create_turn_assist(cp, enabled):
+  from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
+  if not enabled or not turn_assist_supported(cp):
+    return None
+  from openpilot.starpilot.lateral.ioniq6_turn_assist import Ioniq6TurnAssist
+  return Ioniq6TurnAssist(cp)

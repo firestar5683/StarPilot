@@ -49,7 +49,8 @@ class VehicleStartupPreferences:
     except (OSError, TypeError, ValueError):
       pitch_enabled = True
     try:
-      assist = read_saved(params, "TurnAssist", 8) == (b"1", True)
+      assist_raw, assist_readable = read_saved(params, "TurnAssist", 8)
+      assist = assist_readable and assist_raw in (None, b"1")
     except (OSError, TypeError, ValueError):
       assist = False
     return cls(toyota_auto_hold=toyota, turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),

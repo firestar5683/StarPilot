@@ -26,7 +26,7 @@ from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.starpilot.car.hyundai.lateral_fault import LateralFaultLatch
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
-from openpilot.starpilot.lateral.model_turn_assist import ModelTurnAssist, update_twitch_guard, bind_turn_assist
+from openpilot.starpilot.lateral.model_turn_assist import ModelTurnAssist, update_twitch_guard
 from openpilot.starpilot.aol.runtime import current_axis, current_native, ordinary_lateral_requested, ordinary_axis_acknowledged
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed, allow_lateral_onset
 from openpilot.starpilot.lateral.lane_centering import (
@@ -120,7 +120,9 @@ class Controls:
                      "startupPidGain": [list(row) for row in self.LaC.pid._k_p],
                      "startupPidLimits": [self.LaC.pid.neg_limit, self.LaC.pid.pos_limit]})
 
-    self.turn_assist_enabled = bind_turn_assist(self.LaC)
+    from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
+    assist_enabled = self.vehicle_startup_preferences.turn_assist and turn_assist_supported(self.CP)
+    self.turn_assist_enabled = lambda: assist_enabled
 
   def update(self):
     self.sm.update(15)

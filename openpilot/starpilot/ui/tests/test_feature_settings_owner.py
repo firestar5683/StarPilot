@@ -1,6 +1,7 @@
 """Native saved-feature actions use real Params bytes and strict profile helpers."""
 
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 import os
 import tempfile
@@ -82,45 +83,34 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
                                                            vehicle_fingerprint=row.vehicle_fingerprint)))
     self.assertIsNone(registered.get("LaneCenteringE2EAuthority"))
 
-  def test_turn_assist_is_parked_selected_and_exact_source_guarded(self):
+  def test_turn_assist_defaults_on_independent_of_tune_and_exact_source_guarded(self):
     from openpilot.starpilot.lateral.tests.test_lane_runtime import ioniq_candidate
     from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY, ControllerMode, replace_mode
     _, cp = ioniq_candidate()
-    root = Path(self.params.get_param_path("LaneCentering")).parent
-    registered = self.params
-    class Files:
-      def get_param_path(self, key):
-        return str(root / key)
-      def get_default_value(self, key):
-        return registered.get_default_value(key)
-    self.owner.params = Files()
-    self.owner.controller.params = self.owner.params
     self.owner.vehicle_params = lambda: cp
     self.owner.controller.vehicle_params = self.owner.vehicle_params
     self.fingerprint = cp.carFingerprint
     row = self._row("torque", "TurnAssist")
-    self.assertEqual(row.value, "Off")
+    self.assertEqual(row.value, "On")
     self.assertTrue(row.available)
+    self.assertEqual(row.dependencies, ())
     request = required_change(row)
     self.assertTrue(self.owner.apply(request))
-    self.assertEqual((root / "TurnAssist").read_bytes(), b"1")
+    self.assertFalse(self.params.get_bool("TurnAssist"))
     self.assertFalse(self.owner.apply(request))
+    import json
+    self.params.put(DOCUMENT_KEY, json.loads(replace_mode(None, cp, ControllerMode.STANDARD)), block=True)
     row = self._row("torque", "TurnAssist")
-    request = required_change(row)
-    (root / DOCUMENT_KEY).write_bytes(replace_mode(None, cp, ControllerMode.STANDARD))
-    self.assertFalse(self.owner.apply(request))
-    self.assertFalse(self._row("torque", "TurnAssist").available)
-    (root / DOCUMENT_KEY).unlink()
-    self.owner.authority = lambda group: group != "parked_preferences"
-    self.assertFalse(self.owner.apply(required_change(self._row("torque", "TurnAssist"))))
+    self.assertTrue(row.available)
+    self.assertEqual(row.value, "Off")
+    self.assertFalse(self.params.get_bool("TurnAssist"))
     view = self.owner.snapshot("torque", parked=False, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(next(row for row in view.rows if row.key == "TurnAssist").available)
-    self.owner.authority = lambda group: True
     self.owner.vehicle_params = lambda: None
     view = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(any(row.key == "TurnAssist" for row in view.rows))
-    self.assertFalse(self.owner.apply(request))
-    self.assertEqual((root / "TurnAssist").read_bytes(), b"1")
+    self.assertFalse(self.owner.apply(required_change(row)))
+    self.assertFalse(self.params.get_bool("TurnAssist"))
 
   def test_live_lane_owner_maps_only_explicit_keys(self):
     self.owner.authority = lambda group: group == "lane_live"
@@ -155,7 +145,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertIsNone(self.params.get("QOLLongitudinal"))
 
   def test_force_stop_preserves_cruise_master_and_offset_bounds(self):
-    self.assertFalse(self._row("profiles", "ForceStops").available)
+    self.assertTrue(self._row("profiles", "ForceStops").available)
     self.params.put_bool("QOLLongitudinal", True, block=True)
     force = self._row("profiles", "ForceStops")
     self.assertTrue(force.available)
@@ -188,14 +178,16 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
 
   def test_readable_presets_keep_saved_tokens_and_numeric_help(self):
     preset = self._row("aggressive/acceleration", "profile:aggressive:acceleration")
-    self.assertEqual(preset.value, "StarPilot Default")
-    self.assertEqual(preset.choices, ("StarPilot Default", "Standard", "Eco", "Sport", "Sport+", "Custom"))
+    self.assertEqual(preset.value, "Selected Profile")
+    self.assertEqual(preset.choices, ("Selected Profile", "StarPilot Default", "Normal", "Comfort", "Sport", "Sport+"))
     self.assertTrue(self.owner.apply(FeatureSettingsRequest(preset.key, preset.source, "Sport+",
                                                           vehicle_fingerprint=preset.vehicle_fingerprint)))
     document = required_document(Path(self.params.get_param_path("LongitudinalPersonalityProfiles")).read_bytes())
     self.assertEqual(document["profiles"]["aggressive"]["acceleration"]["preset"], "sport_plus")
     self.assertIn("Higher values", self._row("aggressive", "AggressiveJerkAcceleration").reason)
-    self.assertIn("curves", self._row("aggressive", "AggressivePersonalityProfile").label)
+    self.assertFalse(any(row.key == "AggressivePersonalityProfile" for row in self.owner.snapshot(
+      "aggressive", parked=True, system_long=True, lateral_context=True, metric=False).rows))
+    self.assertIn("Sport+", self._row("aggressive/acceleration", "profile:aggressive:acceleration").value)
     self.assertIsNone(self.params.get("CustomPersonalities"))
 
   def test_release_rechecks_parked_authority_and_source(self):
@@ -317,53 +309,35 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.fingerprint = "OTHER CAR"
     self.assertFalse(self.owner.apply(required_change(fresh)))
 
-  def test_curve_learning_adopt_reset_and_saved_readout(self):
+  def test_curve_learning_automatic_readout_and_confirmed_reset(self):
     legacy = Path(self.params.get_param_path("CurvatureData"))
     legacy_raw = b'{"0.001":{"average":2.4,"count":2}}'
     legacy.write_bytes(legacy_raw)
-    progress = self._row("curve", "")
-    self.assertEqual(progress.label, "Saved learning")
-    saved_progress = next(row for row in self.owner.snapshot("curve", parked=True, system_long=True,
-                              lateral_context=True, metric=False).rows if row.label == "Saved progress")
-    self.assertNotEqual(saved_progress.value, "Unavailable")
-    comfort = next(row for row in self.owner.snapshot("curve", parked=True, system_long=True,
-                         lateral_context=True, metric=False).rows if row.label == "Saved cornering comfort")
+    state = self.owner.snapshot("curve", parked=True, system_long=True, lateral_context=True, metric=False)
+    self.assertFalse(any(row.key == "curve_adopt" for row in state.rows))
+    progress = next(row for row in state.rows if row.label == "Learning progress")
+    self.assertNotEqual(progress.value, "Unavailable")
+    comfort = next(row for row in state.rows if row.label == "Saved cornering comfort")
     self.assertIn("m/s²", comfort.value)
-    adopt = self._row("curve", "curve_adopt")
-    self.assertTrue(adopt.available)
-    request = FeatureSettingsRequest(adopt.key, adopt.source, "confirm", confirmation=True,
-                                     vehicle_fingerprint=adopt.vehicle_fingerprint, dependencies=adopt.dependencies)
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(adopt.key, adopt.source, "confirm",
-                                                              vehicle_fingerprint=adopt.vehicle_fingerprint,
-                                                              dependencies=adopt.dependencies)))
-    self.assertTrue(self.owner.apply(request))
-    self.assertEqual(legacy.read_bytes(), legacy_raw)
     canonical = Path(self.params.get_param_path("CurveComfortData"))
-    self.assertIn(b'"version":1', canonical.read_bytes())
-    self.assertFalse(self.owner.apply(request))
-    self.assertFalse(self._row("curve", "curve_adopt").available)
-    self.params.put_bool("CurveSpeedController", True, block=True)
-    self.assertFalse(self._row("curve", "curve_reset").available)
-    self.params.put_bool("CurveSpeedController", False, block=True)
-    reset = self._row("curve", "curve_reset")
-    self.assertTrue(reset.available)
-    stale = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
-                                   vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
-    canonical.write_bytes(b'{invalid')
-    self.assertFalse(self.owner.apply(stale))
-    reset = self._row("curve", "curve_reset")
-    self.assertTrue(reset.available)
-    confirmed = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
-                                       vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
-    self.assertTrue(self.owner.apply(confirmed))
+    self.assertFalse(canonical.exists())
     self.assertEqual(legacy.read_bytes(), legacy_raw)
+    reset = self._row("curve", "curve_reset")
+    request = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
+      vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
+    self.assertFalse(self.owner.apply(replace(request, confirmation=False)))
+    legacy.write_bytes(b'{"0.001":{"average":2.0,"count":2}}')
+    self.assertFalse(self.owner.apply(request))
+    reset = self._row("curve", "curve_reset")
+    request = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
+      vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
+    self.assertTrue(self.owner.apply(request))
     self.assertEqual(canonical.read_bytes(), b'{"version":1,"buckets":{}}')
-    self.assertFalse(self.params.get_bool("CurveSpeedController"))
-    self.assertEqual(self._row("curve", "curve_reset").available, True)
+    self.assertEqual(legacy.read_bytes(), b'{"0.001":{"average":2.0,"count":2}}')
 
   def test_curve_learning_action_rechecks_parked_vehicle(self):
-    Path(self.params.get_param_path("CurvatureData")).write_bytes(b'{}')
-    adopt = self._row("curve", "curve_adopt")
+    Path(self.params.get_param_path("CurvatureData")).write_bytes(b'{"0.001":{"average":2.0,"count":2}}')
+    adopt = self._row("curve", "curve_reset")
     request = FeatureSettingsRequest(adopt.key, adopt.source, "confirm", confirmation=True,
                                      vehicle_fingerprint=adopt.vehicle_fingerprint, dependencies=adopt.dependencies)
     self.allowed = False
@@ -482,7 +456,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
 
   def test_global_braking_saved_choice_is_parked_source_bound_and_preserved_by_profile_edit(self):
     row = self._row("profiles", "profile:global_braking")
-    self.assertEqual((row.value, row.choices), ("Standard", ("Standard", "Eco", "Sport")))
+    self.assertEqual((row.value, row.choices), ("Comfort", ("StarPilot Default", "Normal", "Comfort", "Sport")))
     self.assertFalse(self.params.get_bool("CustomPersonalities"))
     change = required_change(row)
     assert change is not None
@@ -491,12 +465,12 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.allowed = True
     self.assertTrue(self.owner.apply(change))
     saved = required_document(self.params.get("LongitudinalPersonalityProfiles"))
-    self.assertEqual(saved["globalBrakingResponse"], "eco")
+    self.assertEqual(saved["selectedDecelerationProfile"], "sport")
     self.assertFalse(saved["enabled"])
     self.assertFalse(self.owner.apply(change))
     category = self._row("standard/braking", "profile:standard:braking")
     self.assertTrue(self.owner.apply(required_change(category)))
-    self.assertEqual(required_document(self.params.get("LongitudinalPersonalityProfiles"))["globalBrakingResponse"], "eco")
+    self.assertEqual(required_document(self.params.get("LongitudinalPersonalityProfiles"))["selectedDecelerationProfile"], "sport")
     unparked = self.owner.snapshot("profiles", parked=False, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(next(row for row in unparked.rows if row.key == "profile:global_braking").available)
 
