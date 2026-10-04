@@ -24,6 +24,12 @@ class TorqueExtension:
 def create_extension(parent, cp, mode, selected, *, turn_assist=False):
   if mode != ControllerMode.STARPILOT:
     return None
+  from openpilot.starpilot.lateral.hkg_vehicle_policy import HKGVehicleTorquePolicy, PROFILES, policy_for
+  if selected in PROFILES:
+    if policy_for(cp) != selected:
+      raise ValueError('HKG torque selection does not match CarParams')
+    policy = HKGVehicleTorquePolicy(parent, cp)
+    return TorqueExtension(policy, parameter_factor=policy.FACTOR_MULT)
   if selected == 'ioniq6':
     from openpilot.starpilot.lateral.ioniq6_policy import Ioniq6TorquePolicy
     policy = Ioniq6TorquePolicy(parent, cp, turn_assist=turn_assist)

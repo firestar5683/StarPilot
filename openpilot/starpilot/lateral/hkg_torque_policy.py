@@ -56,6 +56,18 @@ class HKGShapedTorquePolicy:
     self.previous_setpoint = 0.0
     self.previous_pressed = False
 
+  def feedforward_context(self, value, setpoint, jerk, measurement, speed):
+    return self.feedforward(value, setpoint, jerk, speed)
+
+  def friction_context(self, setpoint, jerk, measurement, speed):
+    return self.friction(setpoint, jerk, speed)
+
+  def jerk_deadzone(self, setpoint, jerk, measurement, speed):
+    return 0.0
+
+  def output_context(self, value, setpoint, jerk, measurement, speed):
+    return self.output(value, setpoint, speed)
+
   def update(self, active, cs, vm, params, safety_limited, curvature, curvature_limited, delay):
     parent = self.parent
     pid_log = log.ControlsState.LateralTorqueState.new_message()
@@ -91,9 +103,9 @@ class HKGShapedTorquePolicy:
     error = (setpoint - measurement) * (1 + lsf / max(kp, 1e-3))
     gravity_adjusted = future - roll
     ff = gravity_adjusted - parent.torque_params.latAccelOffset * fade
-    ff = self.feedforward(ff, setpoint, jerk, cs.vEgo)
-    threshold, friction_scale = self.friction(setpoint, jerk, cs.vEgo)
-    jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, 0.0)
+    ff = self.feedforward_context(ff, setpoint, jerk, measurement, cs.vEgo)
+    threshold, friction_scale = self.friction_context(setpoint, jerk, measurement, cs.vEgo)
+    jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, self.jerk_deadzone(setpoint, jerk, measurement, cs.vEgo))
     friction_jerk = math.copysign(max(abs(jerk) - jerk_deadzone, 0.0), jerk)
     ff += friction_scale * get_friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, parent.torque_params)
     if cs.vEgo < self.low_speed_reset_threshold:
@@ -103,7 +115,7 @@ class HKGShapedTorquePolicy:
     output = parent.torque_from_lateral_accel(
       parent.pid.update(pid_log.error, error_rate=-rate, speed=cs.vEgo, feedforward=ff, freeze_integrator=freeze), parent.torque_params
     )
-    output = self.output(output, setpoint, cs.vEgo)
+    output = self.output_context(output, setpoint, jerk, measurement, cs.vEgo)
     self.previous_pressed = cs.steeringPressed
     pid_log.active = True
     pid_log.p, pid_log.i, pid_log.d, pid_log.f = map(float, (parent.pid.p, parent.pid.i, parent.pid.d, parent.pid.f))
