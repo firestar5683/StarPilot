@@ -85,7 +85,7 @@ class ConditionalModeHost:
     if not isinstance(selection, ModeSelection):
       self.reset()
       return HostProposal(ModeChoice.STOCK, None, None, None, 'invalid_selection', settings_revision)
-    if selection.choice is ModeChoice.STOCK:
+    if selection.choice is ModeChoice.STOCK and not self.projector.stop_detector.committed:
       self.reset()
       return HostProposal(ModeChoice.STOCK, None, None, None, 'stock', settings_revision)
     if (
@@ -100,12 +100,13 @@ class ConditionalModeHost:
     ):
       self.reset()
       return HostProposal(ModeChoice.STOCK, None, None, None, 'invalid_selection', settings_revision)
-    if self.drive_id != drive_id or self.choice is not selection.choice:
+    if self.drive_id != drive_id:
       self.reset()
       self.drive_id = drive_id
+    if self.choice is not selection.choice:
+      self.policy.reset()
       self.choice = selection.choice
     safe_value = _fresh_flag(safe_mode, now_ns=now_mono_ns, barrier_ns=self.projector.barrier_mono_ns)
-    barrier_before = self.projector.barrier_mono_ns
     projected = self.projector.project(
       sm,
       cp,
@@ -119,6 +120,9 @@ class ConditionalModeHost:
       signal_options=signal_options,
     )
     authority = projected.authority
+    if authority is not None and (not authority.fresh or not authority.system_long_capable or authority.safe_mode or
+                                  not authority.driving_enabled or not authority.long_active):
+      self.projector.stop_detector.reset()
     manual_valid = (
       isinstance(manual, ManualState)
       and isinstance(manual.intent, ManualIntent)
@@ -126,6 +130,7 @@ class ConditionalModeHost:
       and type(manual.observed_mono_ns) is int
       and drive_id <= manual.observed_mono_ns <= now_mono_ns
     )
+    manual_valid = manual_valid or (selection.choice is ModeChoice.STOCK and self.projector.stop_detector.committed)
     if (
       safe_value is None
       or safe_value is True
@@ -136,27 +141,12 @@ class ConditionalModeHost:
       self.policy.reset()
       return HostProposal(selection.choice, projected, None, None, 'authority_unavailable', settings_revision)
     if authority is None:
-      # A missing required 100 Hz sample cannot authorize an override. Keep the
-      # existing policy hold for a brief transport gap; step() expires it after
-      # SCENE_MAX_AGE_S, while explicit unsafe authority above resets it now.
-      missing_required = not {'carState', 'carControl', 'selfdriveState'} <= projected.fresh_services
-      cp_capable = (type(getattr(cp, 'openpilotLongitudinalControl', None)) is bool
-                    and cp.openpilotLongitudinalControl
-                    and type(getattr(cp, 'pcmCruise', None)) is bool)
-      car_invalid = 'carState' in projected.fresh_services and projected.scene.speed_mps is None
-      try:
-        control_invalid = 'carControl' in projected.fresh_services and any(
-          type(getattr(sm['carControl'], field, None)) is not bool for field in ('longActive', 'latActive'))
-        selfdrive_invalid = ('selfdriveState' in projected.fresh_services
-                             and type(getattr(sm['selfdriveState'], 'enabled', None)) is not bool)
-      except (KeyError, TypeError, ValueError, RuntimeError):
-        control_invalid = selfdrive_invalid = True
-      if not (missing_required and cp_capable and not (car_invalid or control_invalid or selfdrive_invalid)
-              and self.projector.barrier_mono_ns == barrier_before):
-        self.policy.reset()
+      self.projector.stop_detector.reset()
+      self.policy.reset()
       return HostProposal(selection.choice, projected, None, None, 'authority_unavailable', settings_revision)
-    assert manual is not None
-    decision = self.policy.step(now_mono_ns / 1e9, selection.choice, manual.intent, authority, projected.scene, selection.settings)
+    decision = self.policy.step(now_mono_ns / 1e9, selection.choice,
+                                manual.intent if manual is not None else ManualIntent.NONE,
+                                authority, projected.scene, selection.settings)
     if not decision.qualified:
       return HostProposal(selection.choice, projected, decision, None, 'invalid_preferences', settings_revision)
     override = decision.requested_experimental if decision.qualified and authority.driving_enabled and authority.long_active else None

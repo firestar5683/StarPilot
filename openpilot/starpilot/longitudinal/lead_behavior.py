@@ -56,7 +56,7 @@ def departure_floor(lead, speed, model_accel):
 def adjust(*, target, sm, cp, now_ns, key, follow_seconds, mpc_target, cruise_target, model_target,
            stopping, force_stop, traffic_mode, accel_min):
   leads = current_leads(sm, cp, now_ns, key)
-  if not leads or traffic_mode is not False or force_stop or stopping or not .75 <= follow_seconds <= 3.:
+  if not leads or traffic_mode is not False or force_stop or stopping or not .5 <= follow_seconds <= 3.:
     return target
   speed = float(sm['carState'].vEgo)
   if not all(math.isfinite(float(value)) for value in

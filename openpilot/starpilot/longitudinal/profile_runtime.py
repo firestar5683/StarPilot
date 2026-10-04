@@ -10,7 +10,7 @@ from opendbc.car.structs import car
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 from openpilot.starpilot.longitudinal.accel_profile import A_CRUISE_MAX_VALS_TRAFFIC_ALL, interpolate_accel_profile
 from openpilot.starpilot.longitudinal.profile_document import (
-  active_personality_id, interpolate_category_curve, is_truck_fingerprint,
+  DEFAULT_DECELERATION_PROFILE, active_personality_id, interpolate_category_curve, is_truck_fingerprint,
 )
 from openpilot.starpilot.longitudinal.profile_preferences import (
   FOLLOW_MIN_SECONDS, FOLLOW_MAX_SECONDS, NAMES, SCALARS, TRAFFIC_JERK_SUFFIXES,
@@ -381,7 +381,7 @@ class ProfileHost:
       try:
         saved = read_document_value(self.params)
         if saved.valid and saved.value is None:
-          self.global_braking_response = "standard"
+          self.global_braking_response = DEFAULT_DECELERATION_PROFILE
         elif saved.valid and isinstance(saved.value, dict):
           response = saved.value.get("selectedDecelerationProfile")
           self.global_braking_response = response if isinstance(response, str) else None

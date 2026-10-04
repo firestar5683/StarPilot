@@ -1,4 +1,3 @@
-from dataclasses import replace
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -107,11 +106,15 @@ class TestControllerCruise(unittest.TestCase):
     instance.CS_prev = self.cs
     instance.CI = SimpleNamespace(CS=SimpleNamespace(), update=lambda packets:self.cs)
     instance.RI = SimpleNamespace(update=lambda packets:None)
-    instance.params = SimpleNamespace(get_bool=lambda key:False)
+    directory = tempfile.TemporaryDirectory()
+    self.addCleanup(directory.cleanup)
+    instance.params = Params(directory.name)
     instance.can_sock = object()
     instance.can_rcv_cum_timeout_counter = 0
     instance.ioniq6_long_prearmed = False
-    instance.conditional_replay = instance.slc_replay = False
+    instance.conditional_replay = instance.slc_replay = instance.curve_replay = False
+    instance.switchback_button_tracker = instance.switchback_settings_owner = None
+    instance.wheel_publisher = card.WheelPublisher(instance.params)
     instance.aol_card_intent = None
     instance.is_metric = True
     instance.experimental_mode = False
@@ -149,8 +152,7 @@ class TestControllerCruise(unittest.TestCase):
         return {r.key:r for r in owner.snapshot(FeaturePage.PROFILES,parked=True,system_long=True,
                                                lateral_context=False,metric=True).rows}
       self.assertNotIn('CustomCruise',rows())
-      master=row_change(rows()['QOLLongitudinal'])
-      self.assertTrue(owner.apply(replace(master,confirmation=True)))
+      self.assertNotIn('QOLLongitudinal', rows())
       change=row_change(rows()['ReverseCruise'])
       self.assertTrue(owner.apply(change))
       self.assertEqual(params.get_bool('ReverseCruise'),True)

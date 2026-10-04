@@ -63,11 +63,10 @@ class TestTrafficStatus(unittest.TestCase):
     args.update(changes)
     return self.reader.project(event.slcState if event is not None else None, **args)
 
-  def test_no_traffic_wire_never_checks_partial_carparams(self):
+  def test_no_traffic_wire_remains_absent_with_independent_vehicle_checks(self):
     ui = ui_fake()
-    ui.CP = NS(openpilotLongitudinalControl=True, pcmCruise=False)  # Other UI tests intentionally use partial CP.
-    with mock.patch('openpilot.starpilot.ui.runtime_snapshot.ioniq6_media_eligible', side_effect=AssertionError('unneeded CP check')):
-      state = RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW).onroad
+    ui.CP = NS(carFingerprint="", openpilotLongitudinalControl=True, pcmCruise=False)
+    state = RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW).onroad
     self.assertIsNone(state.traffic_display)
     self.assertFalse(state.traffic_mode)
 
@@ -135,6 +134,7 @@ class TestTrafficStatus(unittest.TestCase):
       self.assertEqual(fonts.draw.call_args.args[:3], ('TRF', FontRole.SEMI_BOLD, 11))
       large = OnroadView.__new__(OnroadView)
       large.fonts = fonts
+      large.projection_viewport = None
       fonts.reset_mock()
       large._traffic_badge(shown, 101)
       self.assertEqual(fonts.draw.call_args.args[:5], ('TRAFFIC', FontRole.SEMI_BOLD, 25, 1390, 101))

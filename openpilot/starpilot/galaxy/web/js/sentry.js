@@ -13,7 +13,7 @@ export function validSentryEvents(value) {
         (event.images !== undefined && (!Array.isArray(event.images) || event.images.length > 2 ||
           new Set(event.images).size !== event.images.length || event.images.some((camera) => !["wide", "cabin"].includes(camera)))) ||
         typeof event.eventId !== "string" || !ID.test(event.eventId) || seen.has(event.eventId) ||
-        !["warning", "alarm"].includes(event.kind) || !Number.isSafeInteger(event.systemTimeMs) ||
+        !["warning", "alarm", "selfie"].includes(event.kind) || !Number.isSafeInteger(event.systemTimeMs) ||
         event.systemTimeMs <= 0 || event.systemTimeMs > 8_640_000_000_000_000) return false
     seen.add(event.eventId)
     return true
@@ -49,7 +49,7 @@ export const SentryEventsPage = {
     <div class="gx-view gx-home" aria-label="Sentry motion events">
       <div class="gx-home__hero"><div><h1>Motion Events</h1>
         <p class="gx-note">Local motion records only · System clock times may be inaccurate</p></div>
-        <button type="button" class="gx-btn gx-btn--tonal" @click="go('/cameras')">Back to Cameras</button></div>
+        </div>
 
       <SentryNotifications :mode="mode" :unauthorized="unauthorized" />
       <p v-if="mode !== 'local'" class="gx-card gx-message">Local motion records are unavailable in preview.</p>
@@ -61,7 +61,7 @@ export const SentryEventsPage = {
           <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local motion events may exist.</p>
           <p v-if="!data.events.length" role="status">No local motion events found in this scan.</p>
           <section v-for="event in data.events" :key="event.eventId" class="gx-card gx-home__card">
-            <h2>{{ event.kind === 'alarm' ? 'Alarm' : 'Warning' }}</h2>
+            <h2>{{ event.kind === 'selfie' ? 'Selfie' : event.kind === 'alarm' ? 'Alarm' : 'Warning' }}</h2>
             <p>System time: {{ systemTime(event.systemTimeMs) }}</p>
             <small>Event ID: {{ event.eventId }}</small>
             <img v-for="camera in (event.images || [])" :key="camera" :src="'./api/sentry/image/' + event.eventId + '/' + camera" :alt="camera + ' camera at motion event'" style="max-width:100%;height:auto" />

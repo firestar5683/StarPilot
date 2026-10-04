@@ -69,7 +69,7 @@ class ModeConsumer:
     if (
       authority is not True
       or type(stock_experimental) is not bool
-      or choice not in (ModeChoice.CEM, ModeChoice.CCM)
+      or choice not in (ModeChoice.CEM, ModeChoice.CCM, ModeChoice.STOCK)
       or settings_fingerprint is None
       or not 0 < drive_id <= now_ns
       or not self.barrier_ns < model_ns <= now_ns
@@ -86,6 +86,7 @@ class ModeConsumer:
       or value.choice is not choice
       or value.fingerprint != settings_fingerprint
       or value.override is None
+      or choice is ModeChoice.STOCK and (value.reason != 'cem_stop' or value.status_code != 8 or value.override is not True)
       or not self.barrier_ns < message_ns <= value.observed_ns <= now_ns
       or value.observed_ns - message_ns > LIFETIME_NS
       or not message_ns <= receipt_ns <= now_ns

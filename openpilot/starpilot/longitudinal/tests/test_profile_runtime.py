@@ -1,5 +1,6 @@
 """Saved profile migration and actual native longitudinal planner behavior."""
 
+from copy import deepcopy
 import shutil
 import tempfile
 import unittest
@@ -13,12 +14,25 @@ from openpilot.selfdrive.controls.plannerd import global_braking_for_frame, prof
 from openpilot.selfdrive.controls import plannerd
 from openpilot.starpilot.longitudinal.cruise_ceiling import CruiseCeiling
 from openpilot.starpilot.speed_limits.acceptance import Authority, LongitudinalOwner, Mode
-from openpilot.starpilot.longitudinal.profile_document import default_personality_profiles, profile_document
+from openpilot.starpilot.longitudinal.profile_document import default_personality_profiles, profile_document as current_profile_document
 from openpilot.starpilot.longitudinal.profile_runtime import (ProfileHost, ProfileSmoother, ProfileTuning,
                                                              read_settings, read_traffic_settings, resolve)
 from openpilot.starpilot.longitudinal.tests.test_cruise_ceiling import V_EGO, messages, snapshot
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.values import CAR
+
+
+def legacy_document(profiles, *, enabled, global_braking_response='standard'):
+  profiles = deepcopy(profiles)
+  for profile in profiles.values():
+    for category in ('acceleration', 'braking'):
+      if profile[category]['preset'] == 'selected_profile':
+        profile[category]['preset'] = 'dom_default'
+  document = current_profile_document(profiles, enabled=enabled, global_braking_response=global_braking_response)
+  document['schemaVersion'] = 4
+  document['globalBrakingResponse'] = document.pop('selectedDecelerationProfile')
+  document.pop('selectedAccelerationProfile')
+  return document
 
 
 class FrameSM:
@@ -72,9 +86,9 @@ class ProfileRuntimeTests(unittest.TestCase):
 
   def test_global_braking_is_independent_of_custom_master_and_v3_migrates_read_only(self):
     host = ProfileHost(self.params)
-    self.assertEqual(host.sample_global_braking(1_000_000_000), 'standard')
+    self.assertEqual(host.sample_global_braking(1_000_000_000), 'eco')
     self.assertIsNone(host.sample(1_000_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp))
-    document = profile_document(default_personality_profiles(False), enabled=False, global_braking_response='eco')
+    document = legacy_document(default_personality_profiles(False), enabled=False, global_braking_response='eco')
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     self.assertEqual(host.sample_global_braking(2_000_000_000), 'eco')
     self.assertIsNone(host.sample(2_000_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp))
@@ -89,7 +103,7 @@ class ProfileRuntimeTests(unittest.TestCase):
 
   def test_global_braking_host_bridge_requires_fresh_car_and_control_sources(self):
     self.params.put('LongitudinalPersonalityProfiles',
-                    profile_document(default_personality_profiles(False), enabled=False,
+                    legacy_document(default_personality_profiles(False), enabled=False,
                                      global_braking_response='sport'), block=True)
     data, _ = messages()
     data['carState'].canValid = True
@@ -126,7 +140,7 @@ class ProfileRuntimeTests(unittest.TestCase):
           self.assertAlmostEqual(component, jerk)
     profiles = default_personality_profiles(False)
     profiles['traffic']['following'] = {'preset': 'custom', 'curve': [2.25] * 10}
-    self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+    self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
     document_tuning = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.relaxed,
                               12.5, self.cp, traffic_mode=True)
     self.assertIsNotNone(document_tuning)
@@ -136,7 +150,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     profiles = default_personality_profiles(False)
     profiles['traffic']['acceleration'] = {'preset': 'custom', 'curve': [1.4] * 10}
     profiles['traffic']['braking'] = {'preset': 'custom', 'curve': [0.35] * 10}
-    self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+    self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
     self.params.put_bool('CustomPersonalities', True, block=True)
     self.params.put_bool('TrafficPersonalityProfile', True, block=True)
 
@@ -150,20 +164,20 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.assertIsNotNone(applied)  # Historical v3 braking value is admitted only in Traffic.
     self.assertLess(applied.cruise_brake_magnitude, 1.2)
 
-    self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=False), block=True)
+    self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=False), block=True)
     disabled_document = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                                 12.5, self.cp, traffic_mode=True)
     self.assertAlmostEqual(required_float(disabled_document.acceleration_max), 0.60)
     self.assertAlmostEqual(required_float(disabled_document.cruise_brake_magnitude), 0.42)
     self.assertFalse(disabled_document.traffic_braking_custom)
-    self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+    self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
 
     self.params.put_bool('TrafficPersonalityProfile', False, block=True)
-    disabled_profile = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
+    retained_profile = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                                12.5, self.cp, traffic_mode=True)
-    self.assertAlmostEqual(required_float(disabled_profile.cruise_brake_magnitude), 0.42)
-    self.assertFalse(disabled_profile.traffic_braking_custom)
-    self.assertNotAlmostEqual(required_float(disabled_profile.acceleration_max), 1.4)
+    self.assertAlmostEqual(required_float(retained_profile.cruise_brake_magnitude), 0.35)
+    self.assertTrue(retained_profile.traffic_braking_custom)
+    self.assertAlmostEqual(required_float(retained_profile.acceleration_max), 1.4)
     self.params.put_bool('CustomPersonalities', False, block=True)
     disabled_master = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                               12.5, self.cp, traffic_mode=True)
@@ -177,7 +191,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     profiles['traffic']['acceleration'] = {'preset': 'custom', 'curve': [6.0] * 10}
     profiles['traffic']['braking'] = {'preset': 'custom', 'curve': [0.35] * 10}
     profiles['traffic']['following'] = {'preset': 'custom', 'curve': [2.25] * 10}
-    self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+    self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
     self.params.put_bool('CustomPersonalities', True, block=True)
     self.params.put_bool('TrafficPersonalityProfile', True, block=True)
     settings = read_traffic_settings(self.params)
@@ -192,15 +206,16 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.assertIsNone(ProfileSmoother().sample(ordinary, log.LongitudinalPersonality.standard,
                                                0.05, traffic_mode=False))
 
-  def test_traffic_below_effective_floor_or_malformed_is_explicitly_unavailable(self):
+  def test_half_second_traffic_is_supported_but_malformed_values_are_unavailable(self):
     self.params.put_bool('CustomPersonalities', True, block=True)
     self.params.put('TrafficFollow', 0.5, block=True)
     settings = read_traffic_settings(self.params)
-    self.assertFalse(settings.valid)
-    self.assertEqual(settings.reason, 'unsupported_traffic_follow_below_effective_floor')
-    self.assertIsNone(resolve(settings, log.LongitudinalPersonality.standard, 0.0, self.cp, traffic_mode=True))
+    self.assertTrue(settings.valid)
+    tuning = resolve(settings, log.LongitudinalPersonality.standard, 0.0, self.cp, traffic_mode=True)
+    self.assertIsNotNone(tuning)
+    self.assertAlmostEqual(tuning.follow_seconds, 0.5)
     self.assertEqual(self.params.get('TrafficFollow'), 0.5)
-    self.assertIsNotNone(read_settings(self.params))  # Traffic repair does not disable ordinary profiles.
+    self.assertIsNotNone(read_settings(self.params))  # Traffic validation does not disable ordinary profiles.
     self.params.put('TrafficFollow', 0.75, block=True)
     Path(self.params.get_param_path('TrafficJerkDanger')).write_bytes(b'nan')
     self.assertFalse(read_traffic_settings(self.params).valid)
@@ -222,7 +237,9 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.assertIsNotNone(ordinary)
     self.assertAlmostEqual(ordinary.follow_seconds, 1.45)
     self.params.put('TrafficFollow', 0.5, block=True)
-    self.assertIsNone(host.sample(1_030_000_000, log.LongitudinalPersonality.standard, 12.5, self.cp, traffic_mode=True))
+    half_second = host.sample(1_030_000_000, log.LongitudinalPersonality.standard, 12.5, self.cp, traffic_mode=True)
+    self.assertIsNotNone(half_second)
+    self.assertAlmostEqual(half_second.follow_seconds, 1.05)
 
   def test_traffic_smoother_rejects_invalid_target_and_starts_from_native_personality(self):
     smoother = ProfileSmoother()
@@ -233,7 +250,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.assertIsNotNone(first)
     self.assertAlmostEqual(first.follow_seconds, 1.50)  # Ordinary standard starts at 1.45 s.
     self.assertGreaterEqual(first.follow_seconds, min(1.45, target.follow_seconds))
-    invalid = ProfileTuning('traffic', 0.5, 1.0, 1.0, 1.0, 1.0, 1.0)
+    invalid = ProfileTuning('traffic', 0.49, 1.0, 1.0, 1.0, 1.0, 1.0)
     self.assertIsNone(smoother.sample(invalid, log.LongitudinalPersonality.standard, 0.05,
                                       traffic_mode=True))
     self.assertIsNone(smoother.applied)
@@ -279,7 +296,8 @@ class ProfileRuntimeTests(unittest.TestCase):
     settings = read_settings(self.params)
     assert settings is not None
     self.assertTrue(settings.profile_enabled['standard'])
-    self.assertIsNone(settings.document)
+    self.assertEqual(settings.document['selectedDecelerationProfile'], 'eco')
+    self.assertIsNone(self.params.get('LongitudinalPersonalityProfiles'))
     low = resolve(settings, log.LongitudinalPersonality.standard, 45 * 0.44704, self.cp)
     high = resolve(settings, log.LongitudinalPersonality.standard, 70 * 0.44704, self.cp)
     assert low is not None and high is not None
@@ -291,7 +309,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.params.put_bool('CustomPersonalities', True, block=True)
     profiles = default_personality_profiles(False)
     profiles['standard']['following'] = {'preset': 'custom', 'curve': [2.25] * 10}
-    document = profile_document(profiles, enabled=True)
+    document = legacy_document(profiles, enabled=True)
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     settings = read_settings(self.params)
     assert settings is not None
@@ -305,7 +323,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     migrated = read_settings(self.params)
     assert migrated is not None and migrated.document is not None
-    self.assertEqual(migrated.document['schemaVersion'], 4)
+    self.assertEqual(migrated.document['schemaVersion'], 5)
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).write_text('{broken')
     self.assertIsNone(read_settings(self.params))
@@ -326,7 +344,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     for preset in ('dom_default', 'eco', 'standard', 'sport', 'custom'):
       profiles = default_personality_profiles(True)
       profiles['standard']['acceleration'] = {'preset': preset, 'curve': [0.3] * 10 if preset == 'custom' else []}
-      self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+      self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
       host = ProfileHost(self.params)
       tuning = host.sample(1_000_000_000, log.LongitudinalPersonality.standard, 0.0, self.cp)
       self.assertIsNotNone(tuning)
@@ -350,7 +368,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     profiles = default_personality_profiles(True)
     profiles['standard']['acceleration'] = {'preset': 'custom', 'curve': [0.6] * 10}
     profiles['standard']['following'] = {'preset': 'custom', 'curve': [2.25] * 10}
-    document = profile_document(profiles, enabled=True)
+    document = legacy_document(profiles, enabled=True)
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     for cp in (pedal_params(GM.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, setting=True, pedal=True),
                ascm_params(GM.CHEVROLET_BOLT_EUV, alpha=True),
@@ -386,7 +404,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     profiles = default_personality_profiles(False)
     profiles['standard']['acceleration'] = {'preset': 'sport_plus', 'curve': []}
     profiles['standard']['following'] = {'preset': 'custom', 'curve': [2.25] * 10}
-    document = profile_document(profiles, enabled=True)
+    document = legacy_document(profiles, enabled=True)
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     settings = read_settings(self.params)
     tuning = resolve(settings, log.LongitudinalPersonality.standard, 0.0, self.cp)
@@ -435,8 +453,14 @@ class ProfileRuntimeTests(unittest.TestCase):
 
     class LoopSM(FrameSM):
       def __init__(self, data):
+        data['deviceState'] = plannerd.messaging.new_message('deviceState').deviceState
+        data['deviceState'].started = True
+        data['deviceState'].startedMonoTime = 500_000_000
+        data['starpilotNavigation'] = plannerd.messaging.new_message('starpilotNavigation').starpilotNavigation
         super().__init__(data)
         self.updated = {'modelV2': True}
+        self.seen = dict.fromkeys(data, True)
+        self.recv_time = dict.fromkeys(data, 1.0)
         self.frame = 0
         for name in data:
           self.valid[name] = self.alive[name] = True
@@ -448,6 +472,7 @@ class ProfileRuntimeTests(unittest.TestCase):
           raise EndLoop
         for name in self.data:
           self.logMonoTime[name] = 1_000_000_000 + self.frame * 50_000_000
+          self.recv_time[name] = self.logMonoTime[name] / 1e9
 
       def all_checks(self, services=None):
         return True
@@ -472,7 +497,7 @@ class ProfileRuntimeTests(unittest.TestCase):
       data['carControl'].longActive = True
       sm = LoopSM(data)
       publisher = Publisher()
-      environment = {'REPLAY': '1'}
+      environment = {}
       if enabled:
         environment['LONG_PLANNER_REPLAY_RUNTIME'] = '1'
       with (mock.patch.object(plannerd, 'Params', return_value=self.params),
@@ -480,6 +505,9 @@ class ProfileRuntimeTests(unittest.TestCase):
             mock.patch.object(plannerd, 'LeadApproachPreferences', return_value=None),
             mock.patch.object(plannerd.messaging, 'SubMaster', return_value=sm),
             mock.patch.object(plannerd.messaging, 'PubMaster', return_value=publisher),
+            mock.patch.object(plannerd.time, 'monotonic_ns', side_effect=lambda: sm.logMonoTime['modelV2']),
+            mock.patch.object(plannerd, 'paired_clocks_ns',
+                              side_effect=lambda: (sm.logMonoTime['modelV2'], sm.logMonoTime['modelV2'], 0)),
             mock.patch.dict('os.environ', environment, clear=True)):
         with self.assertRaises(EndLoop):
           plannerd.main()

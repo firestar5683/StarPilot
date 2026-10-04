@@ -336,7 +336,7 @@ class LongitudinalMpc:
   def update(self, radarstate, personality=log.LongitudinalPersonality.standard,
              *, follow_seconds: float | None = None, acceleration_max: float | None = None, stop_line_m: float | None = None):
     t_follow = get_T_FOLLOW(personality)
-    if follow_seconds is not None and math.isfinite(follow_seconds) and 0.75 <= follow_seconds <= 3.0:
+    if follow_seconds is not None and math.isfinite(follow_seconds) and 0.5 <= follow_seconds <= 3.0:
       t_follow = follow_seconds
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)

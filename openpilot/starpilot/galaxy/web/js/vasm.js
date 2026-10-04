@@ -226,7 +226,7 @@ export const VasmPage = {
     <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings">
       <header class="gx-card gx-settings__header"><div><p class="gx-eyebrow">Saved preferences</p><h2>V-ASM Spot Monitoring</h2>
         <p>Draw camera window regions for a saved visual warning preference. Camera capture, model qualification, and current warnings are unavailable here.</p></div>
-        <button type="button" class="gx-btn gx-btn--tonal" @click="go('/cameras')">Back to Cameras</button></header>
+        </header>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
       <template v-else>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>

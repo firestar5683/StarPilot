@@ -27,8 +27,11 @@ VALUE_HELP = {
   "JerkDanger": "Weights the planner's penalty for entering a lead vehicle's buffer. Higher values discourage smaller gaps; not a safety limit.",
 }
 CATEGORY_HELP = {
-  "acceleration": "Limits acceleration by speed. Comfort is gentler; Sport and Sport+ allow stronger acceleration. Selected Profile follows the global choice. An explicit choice overrides it; StarPilot Default keeps vehicle behavior.",
-  "braking": "Sets the cruise braking response by speed. Comfort is gentler; Sport allows stronger braking. Selected Profile follows the global choice. An explicit choice overrides it; StarPilot Default keeps native cruise braking.",
+  "acceleration": "Limits acceleration by speed. Comfort is gentler; Sport and Sport+ allow stronger acceleration. " +
+                  "Selected Profile follows the global choice. " +
+                  "An explicit choice overrides it; StarPilot Default keeps vehicle behavior.",
+  "braking": "Sets the cruise braking response by speed. Comfort is gentler; Sport allows stronger braking. Selected Profile follows the global choice. " +
+                  "An explicit choice overrides it; StarPilot Default keeps native cruise braking.",
   "following": "Sets following time by speed and overrides the low/high-speed values. Default uses those values; higher times leave more space.",
 }
 
@@ -46,8 +49,6 @@ def preset_value(value: str) -> str:
 def long_confirm_question(row: FeatureRow) -> str:
   if row.key == REPAIR_PREFIX + "CustomPersonalities":
     return "Restore the invalid saved profiles switch to Off? This will not enable tuning."
-  if row.key == REPAIR_PREFIX + "TrafficFollow":
-    return "Replace the unsupported saved Traffic follow time with 0.75 s? Other saved Traffic values stay unchanged."
   if row.key.startswith(REPAIR_PREFIX):
     return f"{row.label}? If saved profiles are On, valid settings may resume. The saved switch will not change."
   return (f"Reset {row.label} to its seven default follow and jerk values? Saved curves, profile switches, " +

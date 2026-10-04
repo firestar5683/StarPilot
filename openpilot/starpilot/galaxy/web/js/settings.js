@@ -271,6 +271,22 @@ export const SettingsPage = {
       const page = section.pages.length === 1 ? section.pages[0] : "hub"
       if (this.state.data?.page !== page) this.feed.load(page)
     },
+    requestRouteLeave(proceed) {
+      if (this.busy) return
+      if (this.state.layoutOpen) this.$refs.layoutEditor.requestLeave(proceed)
+      else proceed()
+    },
+    navigateBack() {
+      if (this.state.pending) { this.feed.cancel(); return true }
+      if (this.busy) return true
+      if (this.state.layoutOpen) { this.$refs.layoutEditor.requestLeave("back"); return true }
+      if (this.state.favoritesOpen) { if (!this.$refs.favoritesEditor?.busy) this.closeFavorites(); return true }
+      if (this.state.developerOpen) return false
+      const nested = this.initialPage === "hub" ? !this.atSectionRoot : this.state.data?.page !== this.initialPage
+      if (!nested) return false
+      this.back()
+      return true
+    },
     back() {
       if (this.state.developerOpen) return
       const page = this.state.data?.page || this.initialPage
@@ -292,8 +308,8 @@ export const SettingsPage = {
     },
   },
   template: `
-    <OnroadLayoutPage v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
-    <FavoritesPage v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
+    <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
+    <FavoritesPage ref="favoritesEditor" v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
     <section v-else class="gx-settings" :aria-label="title">
       <div class="gx-settings__header"><div><h2>{{ title }}</h2>
         <p v-if="initialPage === 'pip'">Change the saved camera settings. Live camera preview is unavailable here.</p>
@@ -306,7 +322,6 @@ export const SettingsPage = {
         <p v-else-if="state.data?.page === 'traffic'">Traffic follow and jerk blend toward saved Relaxed values at higher speeds. Saved curves require Use saved profiles and the Traffic profile switch.</p>
         <p v-else-if="initialPage === 'sentry'" role="status">{{ state.data?.subtitle || "Checking motion monitor…" }}</p>
         </div>
-        <button v-if="(initialPage === 'hub' ? !atSectionRoot : state.data?.page !== initialPage) || returnTo" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="back">Back</button>
       </div>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local settings are unavailable in preview.</div>
       <template v-else>

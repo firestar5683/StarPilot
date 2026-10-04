@@ -315,6 +315,8 @@ class NotificationOwner:
       return self.snapshot()
 
   def _enqueue(self, event: dict, *, only: str | None = None) -> None:
+    if event['kind'] == 'selfie':
+      return
     now = self.clock()
     for name, cfg in self.state['channels'].items():
       if not cfg['enabled'] or (only is not None and only != name):

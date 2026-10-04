@@ -6,6 +6,7 @@ from openpilot.starpilot.favorites.actions import (
   BOOKMARK, INCREASE_SPEED, DECREASE_SPEED, TRAFFIC, SWITCHBACK, SCREEN_OFF, mapped_actions,
 )
 from openpilot.starpilot.ui.onroad import axis_status_color
+from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
 
 
@@ -29,10 +30,10 @@ def test_border_distinguishes_traffic_switchback_manual_chill_and_experimental()
   state = replace(state, switchback_mode=True)
   assert color() == (139, 108, 197)
   state = replace(state, traffic_mode=False, switchback_mode=False)
-  state = replace(state, conditional_effective=NS(reason='manual_chill', effective_experimental=False))
+  state = replace(state, conditional_effective=NS(choice=ModeChoice.CEM, reason='manual_chill', effective_experimental=False))
   assert color() == (255, 214, 0)
   for reason in ('manual_experimental', 'automatic'):
-    state = replace(state, conditional_effective=NS(reason=reason, effective_experimental=True))
+    state = replace(state, conditional_effective=NS(choice=ModeChoice.CEM, reason=reason, effective_experimental=True))
     assert color() == (218, 111, 37)
   state = replace(state, longitudinal_overridden=True)
   assert color() == (145, 155, 149)
@@ -41,7 +42,7 @@ def test_border_distinguishes_traffic_switchback_manual_chill_and_experimental()
 def test_actual_native_callbacks_recheck_safety_and_current_producer():
   from openpilot.starpilot.ui import runtime_app
   from openpilot.selfdrive.ui import ui_state as device_module
-  sm, cp = NS(), NS(carFingerprint='qualified', flags=0, pcmCruise=True)
+  sm, cp = {'deviceState': NS(startedMonoTime=0)}, NS(carFingerprint='qualified', flags=0, pcmCruise=True)
   params = NS(get_bool=lambda _: False)
   ui = NS(CP=cp, params=params, sm=sm, has_longitudinal_control=True, personality=0, started_frame=1)
   state = OnroadState(True, True, 15, 80, SpeedLimitObservation())

@@ -26,13 +26,14 @@ from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState, EV
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.starpilot.aol.intent import read_settings
-from openpilot.starpilot.aol.runtime import INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes, ordinary_lateral_requested, decide_ordinary_axis
+from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
+                                            ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
 from openpilot.starpilot.conditional_mode.consumer import ConsumerResult, ModeConsumer
 from openpilot.starpilot.conditional_mode.effective_status import publish_ack
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
-from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner, SwitchbackCooldown
+from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner, SwitchbackCooldown, ModeActionOwner
 from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
@@ -96,6 +97,8 @@ class SelfdriveD:
     self.conditional_settings = ConditionalSettingsOwner(self.params) if self.conditional_replay else None
     self.conditional_consumer = ModeConsumer() if self.conditional_replay else None
     self.conditional_status = 'disabled'
+    self.controller_action_sock = messaging.sub_sock('slcAction', conflate=False)
+    self.controller_action_owner = ModeActionOwner()
     self.switchback_capable = ioniq6_media_eligible(self.CP) and not self.CP.passive and not self.CP.dashcamOnly and not self.CP.notCar
     self.switchback_status = SwitchbackStatusOwner()
     self.switchback_cooldown = SwitchbackCooldown()
@@ -212,6 +215,16 @@ class SelfdriveD:
 
     self.events.clear()
     self.nostalgia_paddle_cancel = False
+    action_owner = getattr(self, 'controller_action_owner', None)
+    action_sock = getattr(self, 'controller_action_sock', None)
+    if action_owner is not None and action_sock is not None:
+      for _ in range(8):
+        request = messaging.recv_one_or_none(action_sock)
+        if request is None:
+          break
+        if (str(request.slcAction.kind) == 'disengageRequest' and self.enabled and
+            action_owner.update(request, self.sm, self.CP, now_ns=time.monotonic_ns())):
+          self.events.add(EventName.buttonCancel)
 
     if self.sm['controlsState'].lateralControlState.which() == 'debugState':
       self.events.add(EventName.joystickDebug)

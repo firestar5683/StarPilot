@@ -84,7 +84,9 @@ class StatusPublisher:
       and authority.long_active
       and type(proposal.override_experimental) is bool
       and proposal.override_experimental == decision.requested_experimental
-      and proposal.choice in (ModeChoice.CEM, ModeChoice.CCM)
+      and (proposal.choice in (ModeChoice.CEM, ModeChoice.CCM) or
+           proposal.choice is ModeChoice.STOCK and proposal.projected.scene.committed_stop is True and
+           decision.reason.value == 'cem_stop' and proposal.override_experimental is True)
     )
     event.slcState.conditionalMode = {
       'version': 1,
@@ -133,7 +135,8 @@ def observation(state, now_ns: int) -> ModeObservation | None:
       or len(reason) > 64
       or value.statusCode > 255
       or value.hasOverride
-      and (choice is ModeChoice.STOCK or status != 'proposed')
+      and (status != 'proposed' or choice is ModeChoice.STOCK and
+           (reason != 'cem_stop' or value.statusCode != 8 or not value.experimental))
     ):
       return None
     return ModeObservation(

@@ -9,7 +9,7 @@ import stat
 
 from openpilot.common.constants import CV
 from openpilot.starpilot.lateral.lane_change_preferences import (
-  KEY, MAX_BYTES, MAX_SPEED_MPS, LaneChangePolicy, SavedLaneChange, read_saved, to_value,
+  KEY, MAX_BYTES, MAX_SPEED_MPS, MINIMUM_SPEED_MPS, effective, LaneChangePolicy, SavedLaneChange, read_saved, to_value,
 )
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest
@@ -78,7 +78,7 @@ class LaneChangeFeature:
       reason = "Saved preference cannot be read" if not saved.readable else "Invalid saved preferences; restore defaults"
       return [replace(common, key=RESET, label="Restore Lane Change defaults", value="StarPilot driver-nudged behavior",
                       available=parked and allowed and self.authority("parked_preferences"), reason=reason)]
-    policy = saved.policy
+    policy = effective(saved)
     cp = self.vehicle_params()
     long_available = cp is not None and cp.openpilotLongitudinalControl is True
     inactive = "Saved for the next drive; driver nudge and blindspot checks remain available"
@@ -88,7 +88,7 @@ class LaneChangeFeature:
                     reason="Higher values change lanes more quickly; lower values make steering gentler. This does not change the delay after signaling."),
             replace(common, key=ENABLED, label="Allow lane changes", value="On" if policy.enabled else "Off",
                     choices=("Off", "On"), available=allowed, reason=inactive),
-            replace(common, key=SPEED, label="Minimum lane-change speed", value=str(speed), step=1.0, minimum=0.0,
+            replace(common, key=SPEED, label="Minimum lane-change speed", value=str(speed), step=1.0, minimum=MINIMUM_SPEED_MPS * multiplier,
                     maximum=math.floor(MAX_SPEED_MPS * multiplier * 1000) / 1000,
                     unit=unit if unit_valid else "", available=allowed and unit_valid,
                     reason=inactive if unit_valid else "Saved speed units unavailable",
@@ -161,7 +161,7 @@ class LaneChangeFeature:
       except ValueError:
         return None
       mps = value / 3.6 if request.display_unit == "km/h" else value * CV.MPH_TO_MS
-      if math.isfinite(mps) and 0 <= mps <= MAX_SPEED_MPS:
+      if math.isfinite(mps) and MINIMUM_SPEED_MPS <= mps <= MAX_SPEED_MPS:
         return replace(saved.policy, minimum_speed_mps=mps)
     return None
 

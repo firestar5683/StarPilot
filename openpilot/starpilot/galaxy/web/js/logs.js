@@ -28,7 +28,6 @@ export const Logs = {
     openTmux() { navigate("/logs/tmux") },
     openMonitor() { navigate("/logs/monitor") },
     openCrashes() { if (this.mode === "local") navigate("/logs/crashes") },
-    openLogs() { navigate("/logs") },
     reportDate(seconds) { return new Date(seconds * 1000).toLocaleString() },
     reportSize(bytes) { return `${(bytes / 1024).toFixed(1)} KiB` },
     async copyPreview() {
@@ -49,9 +48,9 @@ export const Logs = {
       </div>
       <TroubleshootPage v-else-if="path === '/logs/troubleshoot'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
       <TmuxPage v-else-if="path === '/logs/tmux'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
-      <template v-else-if="path === '/logs/monitor'"><button type="button" class="gx-btn gx-btn--tonal gx-logs-back" @click="openLogs"><i class="bi bi-arrow-left"></i> Logs & Diagnostics</button><SystemMonitor :mode="mode" :unauthorized="unauthorized" /></template>
+      <template v-else-if="path === '/logs/monitor'"><SystemMonitor :mode="mode" :unauthorized="unauthorized" /></template>
       <template v-else-if="path === '/logs/crashes' && mode === 'local'">
-        <button type="button" class="gx-btn gx-btn--tonal gx-logs-back" @click="openLogs"><i class="bi bi-arrow-left"></i> Logs & Diagnostics</button>
+
         <h2>Crash Reports</h2>
         <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"><button type="button" class="gx-btn gx-btn--tonal" @click="crashFeed.load()">Refresh</button></div>
         <p v-if="crashes.scanIncomplete" class="gx-note">Directory scan is incomplete; newer reports may be omitted.</p>

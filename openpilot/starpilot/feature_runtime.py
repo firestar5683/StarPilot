@@ -27,7 +27,7 @@ def _read(params, key: str, limit: int = 4096) -> tuple[bytes | None, bool]:
     return None, False
 
 
-def requested(params, feature: str) -> bool:
+def requested(params, feature: str, *, include_auxiliary: bool = False) -> bool:
   """Read one feature request, including the readable factory CEM default."""
   if feature == 'conditional':
     raw, document_readable = _read(params, 'ConditionalModeConfig')
@@ -47,7 +47,7 @@ def requested(params, feature: str) -> bool:
     master, readable = _read(params, 'AlwaysOnLateral', 8)
     if not readable or master not in (None, b'0', b'1'):
       return False
-    return independent_axis_requested(read_aol_settings(params))
+    return independent_axis_requested(read_aol_settings(params), include_auxiliary=include_auxiliary)
   if feature == 'profile':
     document = read_document_value(params)
     return (read_profile_settings(params) is not None or
@@ -72,7 +72,8 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str]) -> bool:
     policy = aol_policy_for(cp)
     return bool(policy.runtime_supported and
                 (environment.get(flags[feature]) == '1' or
-                 (policy.normal_runtime_supported and requested(params, feature))))
+                 (policy.normal_runtime_supported and requested(params, feature,
+                    include_auxiliary=policy.intent_supported and not policy.explicit_latch))))
   if feature == 'vision' and environment.get('SLC_REPLAY_RUNTIME') == '1' and environment.get(flags[feature]) == '1':
     return True
   if feature != 'vision' and environment.get(flags[feature]) == '1':

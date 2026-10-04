@@ -84,7 +84,7 @@ class LeadTakeoff:
     f = frame
     values = (f.speed, f.model_accel, f.mpc_accel, f.acceleration_max, f.follow_seconds, target)
     if (not f.eligible or f.blocked or f.drive_id <= 0 or not all(math.isfinite(x) for x in values) or
-        not 0 <= f.speed <= 2.0 or f.mpc_accel < 0 or f.acceleration_max <= 0 or not .75 <= f.follow_seconds <= 3 or
+        not 0 <= f.speed <= 2.0 or f.mpc_accel < 0 or f.acceleration_max <= 0 or not .5 <= f.follow_seconds <= 3 or
         not f.drive_id < f.model_ns <= f.now_ns or f.now_ns - f.model_ns > 150_000_000):
       self.reset()
       return target, should_stop

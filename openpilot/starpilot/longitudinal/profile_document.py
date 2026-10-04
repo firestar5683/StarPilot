@@ -9,6 +9,7 @@ import numbers
 PERSONALITY_PROFILES_PARAM = "LongitudinalPersonalityProfiles"
 PROFILE_SCHEMA_VERSION = 5
 GLOBAL_BRAKING_RESPONSES = ("standard", "eco", "sport")
+DEFAULT_DECELERATION_PROFILE = "eco"
 PERSONALITY_IDS = ("traffic", "aggressive", "standard", "relaxed")
 TRUCK_FINGERPRINT_TOKENS = (
   " RAM 1500 ",
@@ -41,7 +42,7 @@ FOLLOWING_PRESETS = ("dom_default", "close", "medium", "far", "traffic", "custom
 CURVE_BOUNDS = {
   "acceleration": (0.0, 3.5),
   "braking": (0.5, 2.0),
-  "following": (0.75, 3.0),
+  "following": (0.5, 3.0),
 }
 _V2_CURVE_BOUNDS = {
   "acceleration": (0.0, 6.0),
@@ -202,7 +203,7 @@ def default_personality_profiles(ev_tuning: bool, truck_tuning: bool = False) ->
   }
 
 
-def profile_document(profiles: dict[str, dict], *, enabled: bool, global_braking_response: str = "standard",
+def profile_document(profiles: dict[str, dict], *, enabled: bool, global_braking_response: str = DEFAULT_DECELERATION_PROFILE,
                      selected_acceleration_profile: str = "dom_default", selected_deceleration_profile: str | None = None) -> dict:
   if type(enabled) is not bool:
     raise ValueError("enabled must be a JSON boolean")
@@ -442,7 +443,7 @@ def migrate_profile_document(raw_document) -> dict | None:
   for profile in migrated_profiles.values():
     for category in ("acceleration", "braking"):
       profile[category]["legacyActivation"] = True
-  return strict_profile_document(profile_document(migrated_profiles, enabled=legacy["enabled"]))
+  return strict_profile_document(profile_document(migrated_profiles, enabled=legacy["enabled"], global_braking_response="standard"))
 
 
 def is_unconfigured_profile_document(raw_document) -> bool:
@@ -479,7 +480,7 @@ def load_personality_profiles(raw_document, ev_tuning: bool, truck_tuning: bool 
 
 
 def serialize_personality_profiles(profiles, ev_tuning: bool, truck_tuning: bool = False, *, enabled: bool,
-                                   global_braking_response: str = "standard",
+                                   global_braking_response: str = DEFAULT_DECELERATION_PROFILE,
                                    selected_acceleration_profile: str = "dom_default",
                                    selected_deceleration_profile: str | None = None) -> str:
   del ev_tuning, truck_tuning

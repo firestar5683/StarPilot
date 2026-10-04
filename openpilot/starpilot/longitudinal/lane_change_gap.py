@@ -80,7 +80,7 @@ class LaneChangeGap:
         policy.minimum_speed_mps < 0 or type(policy.close_gap_seconds) not in (int, float) or
         not math.isfinite(policy.close_gap_seconds) or not 0.75 <= policy.close_gap_seconds <= 1.0 or
         frame.force_decel or frame.gas_pressed or frame.brake_pressed or frame.model_should_stop or
-        type(base_follow) not in (int, float) or not math.isfinite(base_follow) or not 0.75 <= base_follow <= 3.0 or
+        type(base_follow) not in (int, float) or not math.isfinite(base_follow) or not 0.5 <= base_follow <= 3.0 or
         type(frame.speed_mps) not in (int, float) or not math.isfinite(frame.speed_mps) or
         not math.isfinite(frame.lead_accel_mps2)):
       self.reset()

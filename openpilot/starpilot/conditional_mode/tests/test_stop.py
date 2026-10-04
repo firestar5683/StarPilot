@@ -73,7 +73,7 @@ class TestStopDetector(unittest.TestCase):
     for withdrawal in ({'pedal': True}, {'pedal': None}, {'dashboard_sign': None}, {'standstill': False}, {'traffic': None}):
       detector = StopLightDetector()
       self.assertTrue(detector.step(frame(0, horizon=49.9, speed=0., standstill=True)).standstill_hold)
-      values = dict(horizon=51., speed=0., standstill=True)
+      values = {'horizon': 51., 'speed': 0., 'standstill': True}
       values.update(withdrawal)
       detector.step(frame(1, **values))
       self.assertFalse(detector.step(frame(2, horizon=51., speed=0., standstill=True)).standstill_hold)
@@ -141,12 +141,12 @@ class TestStopDetector(unittest.TestCase):
       result = detector.step(frame(tick))
     self.assertTrue(result.light_detected)
     turn = detector.step(frame(25, speed=5.0, left=True, steering=45.0))
-    self.assertFalse(turn.light_detected)
-    self.assertFalse(detector.light_detected)
+    self.assertTrue(turn.light_detected)
+    self.assertTrue(detector.committed)
     for tick in range(26, 50):
       detector.step(frame(tick))
     high = detector.step(frame(50, speed=34.0))
-    self.assertFalse(high.light_detected)
+    self.assertTrue(high.light_detected)
     unknown = detector.step(replace(frame(51), traffic_mode=None))
     self.assertIsNone(unknown.light_detected)
     self.assertFalse(detector.light_detected)

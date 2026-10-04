@@ -8,7 +8,11 @@ from openpilot.starpilot.ui.feature_settings_state import row_change
 BOOKMARK = "__starpilot_controller_action__:bookmark"
 INCREASE_SPEED = "__starpilot_controller_action__:increase_speed"
 DECREASE_SPEED = "__starpilot_controller_action__:decrease_speed"
+FORCE_COAST = "__starpilot_controller_action__:force_coast"
+PULSE_GLIDE = "__starpilot_controller_action__:pulse_and_glide"
+DISENGAGE = "__starpilot_controller_action__:disengage_openpilot"
 SET_SPEED = "__starpilot_controller_action__:set_speed"
+SELFIE = "__starpilot_controller_action__:selfie"
 EXPERIMENTAL = "ExperimentalMode"
 SCREEN_OFF = "__starpilot_controller_action__:toggle_screen_off"
 TRAFFIC = "__starpilot_controller_action__:traffic_mode"
@@ -54,7 +58,9 @@ def mapped_actions(feature_snapshot, feature_apply, appearance_snapshot, appeara
   actions[CYCLE_PERSONALITY] = FavoriteAction(CYCLE_PERSONALITY, "Cycle Driving Personality", kind="enum", state_label="On device",
                                             reason="Use this control on the device")
   for key, label in ((INCREASE_SPEED, "Increase Set Speed"), (DECREASE_SPEED, "Decrease Set Speed"),
-                     (TRAFFIC, "Traffic Mode"), (SWITCHBACK, "Switchback Mode"), (SCREEN_OFF, "Toggle Screen Off")):
+                     (SET_SPEED, "Set Speed To"), (FORCE_COAST, "Force Coasting"),
+                     (PULSE_GLIDE, "Pulse and Glide"), (DISENGAGE, "Disengage Openpilot"),
+                     (TRAFFIC, "Traffic Mode"), (SWITCHBACK, "Switchback Mode"), (SCREEN_OFF, "Toggle Screen Off"), (SELFIE, "Selfie")):
     actions[key] = FavoriteAction(key, label, kind="toggle" if key in (TRAFFIC, SWITCHBACK, SCREEN_OFF) else "action",
                                   reason="Use the qualified control on the device", section="Driving")
   return actions

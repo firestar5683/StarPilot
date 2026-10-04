@@ -162,7 +162,8 @@ class Ioniq6HostTests(unittest.TestCase):
     for alt in (False, True):
       stock, long_cp = candidate(alt)
       self.assertTrue(ioniq6_settings_capable(stock))
-      self.assertFalse(policy_for(stock).runtime_supported)
+      self.assertTrue(policy_for(stock).runtime_supported)
+      self.assertTrue(policy_for(stock).explicit_latch)
       self.assertTrue(ioniq6_settings_capable(long_cp))  # LONG saved choices do not require AOL's separate bit.
       tagged = long_cp.as_reader().as_builder()
       tagged.safetyConfigs[0].safetyParam |= 0x800
@@ -175,7 +176,7 @@ class Ioniq6HostTests(unittest.TestCase):
       changed.flags |= int(HyundaiFlags.CANFD_ALT_BUTTONS)
       self.assertFalse(ioniq6_settings_capable(changed))
       with mock.patch('openpilot.starpilot.car.hyundai.aol.IONIQ6_LONG_PREARM_ENABLED', False):
-        self.assertFalse(ioniq6_settings_capable(stock))
+        self.assertTrue(ioniq6_settings_capable(stock))
 
   def test_tcs_availability_never_arms_explicit_lateral_latch(self):
     settings = AolSettings(True, 0.0, 0, 0, (0, 0, 0), (0, 0, 0))

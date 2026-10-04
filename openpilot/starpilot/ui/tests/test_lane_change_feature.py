@@ -84,6 +84,26 @@ class LaneChangeFeatureTests(unittest.TestCase):
                                   vehicle_fingerprint=request.vehicle_fingerprint, capability=request.capability,
                                   dependencies=request.dependencies, display_unit=request.display_unit)
 
+  def test_legacy_zero_display_and_speed_floor_preserve_raw_document(self):
+    raw = json.dumps(to_value(LaneChangePolicy(minimum_speed_mps=0.))).encode()
+    Path(self.params.get_param_path(KEY)).write_bytes(raw)
+    speed = self.row(SPEED)
+    self.assertEqual(speed.value, "5.0")
+    self.assertAlmostEqual(speed.minimum, 5.)
+    self.assertEqual(read_saved(self.params).raw, raw)
+    invalid = FeatureSettingsRequest(speed.key, speed.source, "4", confirmation=True,
+      vehicle_fingerprint=speed.vehicle_fingerprint, capability=speed.capability,
+      dependencies=speed.dependencies, display_unit=speed.display_unit)
+    self.assertFalse(self.owner.apply(invalid))
+    self.assertEqual(read_saved(self.params).raw, raw)
+    self.params.put_bool("IsMetric", True, block=True)
+    snapshot = self.owner.snapshot(FeaturePage.LANE_CHANGE, parked=self.parked, system_long=False,
+                                   lateral_context=True, metric=True)
+    metric = next(row for row in snapshot.rows if row.key == SPEED)
+    self.assertEqual(metric.value, "8.047")
+    self.assertAlmostEqual(metric.minimum, 5 * .44704 * 3.6)
+    self.assertEqual(read_saved(self.params).raw, raw)
+
   def test_absent_document_stock_and_atomic_edits(self):
     self.assertIsNone(read_saved(self.params).raw)
     self.assertEqual(effective(read_saved(self.params)), LaneChangePolicy())
@@ -91,13 +111,13 @@ class LaneChangeFeatureTests(unittest.TestCase):
       FeaturePage.HUB, parked=True, system_long=False, lateral_context=True, metric=False).rows])
     speed = self.row(SPEED)
     self.assertEqual(speed.unit, "mph")
-    self.assertEqual(speed.value, "0.0")
+    self.assertEqual(speed.value, "5.0")
     unconfirmed = row_change(speed)
     self.assertIsNotNone(unconfirmed)
     assert unconfirmed is not None
     self.assertFalse(self.owner.apply(unconfirmed))
     self.assertTrue(self.owner.apply(self.request(speed)))
-    self.assertEqual(round(read_saved(self.params).policy.minimum_speed_mps, 5), 1 * 0.44704)
+    self.assertEqual(round(read_saved(self.params).policy.minimum_speed_mps, 5), 6 * 0.44704)
     self.assertTrue(self.owner.apply(self.request(self.row(ONE))))
     self.assertTrue(read_saved(self.params).policy.one_per_signal)
     self.assertTrue(self.owner.apply(self.request(self.row(ENABLED), -1)))

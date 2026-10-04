@@ -98,6 +98,9 @@ class StopLightDetector:
     self.approach_hold_until_s = 0.0
     self.standstill_model_stopped = False
     self.standstill_reason: str | None = None
+    self.committed = False
+    self.commit_distance_m = 0.0
+    self.commit_clear_since_s: float | None = None
     self.last_observed_mono_s: float | None = None
     self.last_model_tick_mono_s: float | None = None
 
@@ -109,6 +112,29 @@ class StopLightDetector:
     self.model_detected = False
     self.light_hold_until_s = 0.0
     self.approach_hold_until_s = 0.0
+
+  def _commit(self, frame: StopFrame, horizon: float | None, model_stopping: bool | None, acquire: bool, dt: float) -> None:
+    if frame.pedal_override is True:
+      self.committed = False
+      self.commit_clear_since_s = None
+      return
+    if acquire and not self.committed and horizon is not None:
+      self.committed = True
+      self.commit_distance_m = horizon
+    if self.committed:
+      self.commit_distance_m = max(0.0, self.commit_distance_m - frame.speed_mps * dt)
+      clear = (horizon is not None and model_stopping is False and
+               horizon >= max(FROZEN_RAW_STOP_DISTANCE_M + STOP_MODEL_RELEASE_MARGIN_M,
+                              self.commit_distance_m + STOP_MODEL_RELEASE_MARGIN_M))
+      if clear:
+        if self.commit_clear_since_s is None:
+          self.commit_clear_since_s = frame.now_mono_s
+        elif frame.now_mono_s - self.commit_clear_since_s >= 0.5:
+          self.committed = False
+          self.commit_clear_since_s = None
+          self._reset_light()
+      else:
+        self.commit_clear_since_s = None
 
   def _standstill(self, frame: StopFrame, model_stopped: bool) -> tuple[bool | None, str | None]:
     if not frame.standstill:
@@ -155,7 +181,6 @@ class StopLightDetector:
       or not 0.0 <= now - observed <= MAX_SOURCE_AGE_S
       or not observed <= model_tick <= now
       or speed is None
-      or horizon is None
       or model_time is None
       or _boolean(frame.traffic_mode) is None
       or _boolean(frame.stop_sign_confirmed) is None
@@ -181,14 +206,26 @@ class StopLightDetector:
       distance = _finite(lead.distance_m, 0.0, 500.0)
       lead_speed = _finite(lead.speed_mps, -30.0, 100.0)
       lead_prob = _finite(lead.model_probability, 0.0, 1.0)
-      if None in (distance, lead_speed, lead_prob) or _boolean(lead.radar) is None or _boolean(lead.tracked) is None:
+      if None in (distance, lead_speed, lead_prob) or _boolean(lead.radar) is None or (_boolean(lead.tracked) is None and not self.committed):
         self.reset()
         return unknown
     else:
       distance, lead_speed, lead_prob = None, None, None
     assert lead is not None
+    if frame.pedal_override is True:
+      self.reset()
+      return StopObservation(False, False, None, False)
+    dt = model_tick - self.last_model_tick_mono_s if self.last_model_tick_mono_s is not None else DT_MDL
     self.last_observed_mono_s = observed
     self.last_model_tick_mono_s = model_tick
+    if horizon is None or (self.committed and lead.present and lead.tracked is None):
+      self._commit(frame, None, None, False, dt)
+      if self.committed:
+        self.light_detected = True
+        hold, reason = self._standstill(frame, True)
+        return StopObservation(True, hold, reason, None)
+      self.reset()
+      return unknown
     # At standstill the speed-scaled detector has a zero threshold. Its raw
     # 50 m fallback therefore needs the same spatial release band as an approach;
     # otherwise a 49.9/50.1 m horizon alternates the actual CEM hold each tick.
@@ -213,8 +250,10 @@ class StopLightDetector:
       return unknown
     if turn_scene or frame.traffic_mode or speed * MPS_TO_MPH > 75.0:
       self._reset_light()
+      self._commit(frame, horizon, horizon < FROZEN_RAW_STOP_DISTANCE_M, False, dt)
+      self.light_detected = self.committed
       hold, reason = self._standstill(frame, model_stopped)
-      return StopObservation(False, hold, reason, False)
+      return StopObservation(self.light_detected, hold, reason, False)
 
     speed_mph = speed * MPS_TO_MPH
     self.light_filter.update_alpha(
@@ -257,6 +296,7 @@ class StopLightDetector:
     if filtered and (model_stopped or strong):
       self.light_hold_until_s = now + 4.0
     hold_context = not relevant or trackable_approach
-    self.light_detected = bool(active or (hold_context and now < self.light_hold_until_s))
+    self._commit(frame, horizon, model_stopping, filtered or handoff or approach_latched, dt)
+    self.light_detected = bool(self.committed or active or (hold_context and now < self.light_hold_until_s))
     hold, reason = self._standstill(frame, model_stopped)
     return StopObservation(self.light_detected, hold, reason, model_stopping)

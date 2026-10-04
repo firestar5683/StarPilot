@@ -213,6 +213,11 @@ struct SlcAction @0x9ccdc8676701b412 {
     driveStartMonoTime @5 :UInt64;
     carFingerprint @6 :Text;
     sourceCarControlMonoTime @7 :UInt64;
+    actionCode @8 :UInt8;
+    buttonKey @9 :Text;
+    sourceCarStateMonoTime @10 :UInt64;
+    carParamsFingerprint @11 :Text;
+    targetSpeedMps @12 :Float32;
   }
 
   struct ConditionalManualAction {
@@ -241,6 +246,10 @@ struct SlcAction @0x9ccdc8676701b412 {
     cruiseDecrease @6;
     trafficModeToggle @7;
     switchbackModeToggle @8;
+    cruiseSet @9;
+    forceCoastToggle @10;
+    pulseGlideToggle @11;
+    disengageRequest @12;
   }
 }
 
@@ -259,6 +268,7 @@ struct SlcCruiseEvent @0xcd96dafb67a082d0 {
   commandId @11 :UInt64;
   manualMode @12 :ManualModeGesture;
   trafficMode @13 :TrafficModeGesture;
+  wheelAction @14 :SlcAction.ControllerCruiseAction;
 
   enum Kind {
     unknown @0;
@@ -271,6 +281,7 @@ struct SlcCruiseEvent @0xcd96dafb67a082d0 {
     conditionalMode @7;
     trafficMode @8;
     switchbackMode @9;
+    wheelAction @10;
   }
 
   struct TrafficModeGesture {

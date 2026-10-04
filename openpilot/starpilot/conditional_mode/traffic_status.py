@@ -90,7 +90,7 @@ class TrafficDisplayProjector:
       if accepted and not effective and reason == 'authority_unavailable' and map_assigned:
         return TrafficDisplay('paused', 'TRAFFIC PAUSED')
       if (accepted and effective and reason == 'active' and map_assigned and long_active and selfdrive_enabled and
-          car_valid and system_long and source_boot > 0):
+          car_valid and system_long):
         if not ready or not profile_valid or profile_reason != 'qualified':
           return TrafficDisplay('unavailable_profile', 'TRAFFIC PROFILE UNAVAILABLE')
         return TrafficDisplay('active', 'TRAFFIC')

@@ -94,6 +94,36 @@ class TrafficOwnerTests(unittest.TestCase):
                              sm=self.sm, cp=self.cp, drive_id=DRIVE,
                              now_mono_ns=now, now_boot_ns=BOOT + now - NOW)
 
+  def test_valid_conditional_preference_change_preserves_controller_intent(self):
+    self.sm.advance(NOW)
+    on = self.owner.sample(None, params=self.params, settings=self.settings, sm=self.sm, cp=self.cp,
+                           drive_id=DRIVE, now_mono_ns=NOW, now_boot_ns=BOOT,
+                           controller_toggle=True, controller_requested=True)
+    self.assertTrue(on.requested)
+    self.params.put('ConditionalModeConfig', json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.CCM))), block=True)
+    later = NOW + 1_000_000_000
+    self.sm.advance(later)
+    continued = self.owner.sample(None, params=self.params, settings=self.settings, sm=self.sm, cp=self.cp,
+                                  drive_id=DRIVE, now_mono_ns=later, now_boot_ns=BOOT+later-NOW)
+    self.assertTrue(continued.requested and continued.effective)
+    self.assertTrue(continued.controller_source)
+    off = self.owner.sample(None, params=self.params, settings=self.settings, sm=self.sm, cp=self.cp,
+                            drive_id=DRIVE, now_mono_ns=later+50_000_000, now_boot_ns=BOOT+later-NOW+50_000_000,
+                            controller_toggle=True, controller_requested=False)
+    self.assertFalse(off.requested)
+
+  def test_explicit_controller_target_does_not_invert_after_owner_source_loss(self):
+    self.sm.advance(NOW)
+    self.owner.requested = False
+    off = self.owner.sample(None, params=self.params, settings=self.settings, sm=self.sm, cp=self.cp,
+                            drive_id=DRIVE, now_mono_ns=NOW, now_boot_ns=BOOT,
+                            controller_toggle=True, controller_requested=False)
+    self.assertFalse(off.requested)
+    on = self.owner.sample(None, params=self.params, settings=self.settings, sm=self.sm, cp=self.cp,
+                           drive_id=DRIVE, now_mono_ns=NOW+50_000_000, now_boot_ns=BOOT+50_000_000,
+                           controller_toggle=True, controller_requested=True)
+    self.assertTrue(on.requested)
+
   def test_unassigned_preserves_ordinary_profile_without_media(self):
     verdict = self.sample()
     self.assertEqual((verdict.effective, verdict.reason), (False, 'unassigned'))
@@ -136,18 +166,53 @@ class TrafficOwnerTests(unittest.TestCase):
     resumed = self.sample(NOW + 150_000_000)
     self.assertEqual((resumed.requested, resumed.effective), (True, True))
     lost = self.sample(NOW + 400_000_000)
-    self.assertEqual((lost.requested, lost.effective, lost.reason), (False, None, 'media_unavailable'))
+    self.assertEqual((lost.requested, lost.effective, lost.reason), (True, True, 'active'))
+    self.assertEqual(lost.source_boot_ns, 0)
 
-  def test_new_source_epoch_and_map_edit_revoke_prior_intent(self):
+  def test_new_source_epoch_preserves_intent_and_unassigning_is_explicit_exit(self):
     self.params.put('ModeButtonControl', 6, block=True)
     self.sample(NOW, self.event(1, NOW))
     self.assertTrue(self.sample(NOW + 50_000_000, self.event(2, NOW + 50_000_000, toggle=True)).requested)
     epoch = self.sample(NOW + 100_000_000, self.event(3, NOW + 100_000_000, epoch=1))
-    self.assertEqual((epoch.requested, epoch.effective), (False, False))
-    self.assertTrue(self.sample(NOW + 150_000_000, self.event(4, NOW + 150_000_000, toggle=True, epoch=1)).requested)
+    self.assertEqual((epoch.requested, epoch.effective), (True, True))
+    self.assertFalse(self.sample(NOW + 150_000_000, self.event(4, NOW + 150_000_000, toggle=True, epoch=1)).requested)
     self.params.put('ModeButtonControl', 0, block=True)
     changed = self.sample(NOW + 1_200_000_000)
     self.assertEqual((changed.requested, changed.effective, changed.reason), (False, False, 'unassigned'))
+
+  def test_physical_intent_survives_packet_silence_and_cem_change_until_new_toggle(self):
+    self.params.put('ModeButtonControl', 6, block=True)
+    self.sample(NOW, self.event(1, NOW))
+    original = self.event(2, NOW + 50_000_000, toggle=True)
+    self.assertTrue(self.sample(NOW + 50_000_000, original).requested)
+    self.params.put('ConditionalModeConfig', json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.CCM))), block=True)
+    later = NOW + 1_200_000_000
+    held = self.sample(later)
+    self.assertTrue(held.requested and held.effective)
+    stale = self.sample(later + 50_000_000, original)
+    self.assertTrue(stale.requested)
+    off = self.sample(later + 100_000_000, self.event(3, later + 100_000_000, toggle=True, epoch=1))
+    self.assertFalse(off.requested)
+
+  def test_expired_physical_receipt_keeps_fresh_serialized_active_display(self):
+    from openpilot.starpilot.conditional_mode.traffic_status import TrafficDisplayProjector
+    self.params.put('ModeButtonControl', 6, block=True)
+    self.sample(NOW, self.event(1, NOW))
+    self.sample(NOW + 50_000_000, self.event(2, NOW + 50_000_000, toggle=True))
+    later = NOW + 1_000_000_000
+    verdict = self.sample(later)
+    event = self.owner.attach(None, verdict, now_ns=later, drive_id=DRIVE,
+                              profile_target_ready=True, profile_reason='qualified')
+    state = messaging.log_from_bytes(event.to_bytes()).slcState
+    self.assertEqual(state.trafficMode.sourceBootTime, 0)
+    reader = TrafficDisplayProjector()
+    args = {'now_mono_ns': later, 'now_boot_ns': BOOT+later-NOW, 'drive_id': DRIVE,
+                'settings_fingerprint': verdict.settings_fingerprint, 'map_fingerprint': verdict.map_fingerprint,
+                'map_assigned': True, 'profile_valid': True, 'long_active': True, 'selfdrive_enabled': True,
+                'car_valid': True, 'system_long': True}
+    self.assertEqual(reader.project(state, **args).state, 'active')
+    args['now_mono_ns'] += 101_000_000
+    self.assertIsNone(reader.project(state, **args))
 
   def test_card_session_restart_retires_old_session_and_requires_new_toggle(self):
     self.params.put('ModeButtonControl', 6, block=True)
@@ -252,15 +317,27 @@ class TrafficOwnerTests(unittest.TestCase):
     self.assertIsNotNone(traffic)
     update_curve_frame(planner, sm, self.cp, NOW + 100_000_000,
                        profile_tuning=traffic, traffic_mode=on.profile_mode)
-    lost = self.sample(NOW + 450_000_000)
+    held = self.sample(NOW + 450_000_000)
+    self.assertTrue(held.profile_mode and held.requested)
+    retained = host.sample(NOW + 450_000_000, log.LongitudinalPersonality.standard,
+                           20.0, self.cp, traffic_mode=held.profile_mode)
+    self.assertIsNotNone(retained)
+    self.assertEqual(retained.follow_seconds, traffic.follow_seconds)
+    update_curve_frame(planner, sm, self.cp, NOW + 450_000_000,
+                       profile_tuning=retained, traffic_mode=held.profile_mode)
+    self.assertIsNotNone(planner.last_profile)
+    self.sm.payloads['carState'].canValid = False
+    lost = self.sample(NOW + 500_000_000)
     self.assertIsNone(lost.profile_mode)
     self.assertFalse(lost.requested)
-    self.assertIsNone(host.sample(NOW + 450_000_000, log.LongitudinalPersonality.standard,
+    self.assertIsNone(host.sample(NOW + 500_000_000, log.LongitudinalPersonality.standard,
                                   20.0, self.cp, traffic_mode=lost.profile_mode))
-    update_curve_frame(planner, sm, self.cp, NOW + 450_000_000,
+    sm['carState'].canValid = False
+    update_curve_frame(planner, sm, self.cp, NOW + 500_000_000,
                        profile_tuning=None, traffic_mode=lost.profile_mode)
     self.assertIsNone(planner.last_profile)
     self.assertAlmostEqual(float(planner.mpc.params[0, 4]), 1.45)
+
 
 
 if __name__ == '__main__':

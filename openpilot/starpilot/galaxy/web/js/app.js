@@ -1,5 +1,5 @@
 import { createApp, reactive, defineAsyncComponent } from "../vendor/vue/vue.esm-browser.js"
-import { route, navigate, startRouter } from "./router.js"
+import { route, navigate, navigateBack, setRouteLeaveGuard, startRouter } from "./router.js"
 import { loadCatalog } from "./startup.js"
 import { Tools } from "./tools.js"
 const Logs = page(() => import("./logs.js").then((module) => module.Logs))
@@ -91,13 +91,18 @@ createApp({
   methods: {
     retryStartup() { initialize() },
     reloadPage() { location.reload() },
-    go(path) { state.drawerOpen = false; state.searchPage = ""; navigate(path) },
-    openSearchHit(hit) { state.drawerOpen = false; state.searchPage = hit.page; navigate("/settings") },
+    go(path) { navigate(path, () => { state.drawerOpen = false; state.searchPage = "" }) },
+    openSearchHit(hit) { navigate("/settings", () => { state.drawerOpen = false; state.searchPage = hit.page }) },
     returnFromSearch() { state.searchPage = "" },
     returnToCameras() { this.go("/cameras") },
     returnToDriving() { this.go("/driving") },
     returnToDevice() { this.go("/device-preferences") },
-    back() { if (["/cameras/pip", "/cameras/events", "/cameras/sentry-settings", "/cameras/vasm"].includes(route.path)) this.go("/cameras"); else if (route.path === "/tools") history.back(); else this.go("/tools") },
+    routeBack() { state.drawerOpen = false; navigateBack() },
+    back() {
+      if (this.$refs.activeSettings?.navigateBack()) return
+      if (state.searchPage) { this.returnFromSearch(); return }
+      this.routeBack()
+    },
     toggleTheme() {
       state.theme = this.isLight ? "dark" : "light"
       document.documentElement.dataset.theme = state.theme
@@ -117,7 +122,14 @@ createApp({
     async signOut() { await auth.logout() },
     sessionExpired() { auth.expired(); auth.check() },
   },
-  mounted() { document.documentElement.dataset.theme = state.theme },
+  mounted() {
+    document.documentElement.dataset.theme = state.theme
+    setRouteLeaveGuard((proceed) => {
+      if (this.$refs.activeLayout) this.$refs.activeLayout.requestLeave(proceed)
+      else if (this.$refs.activeSettings) this.$refs.activeSettings.requestRouteLeave(proceed)
+      else proceed()
+    })
+  },
   template: `
     <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}">
       <header class="gx-appbar">
@@ -164,13 +176,13 @@ createApp({
         <LocalRecordingsPage v-else-if="route.path === '/recordings'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <CamerasPage v-else-if="route.path === '/cameras'" :mode="state.monitorMode" :go="go" :unauthorized="sessionExpired" />
         <SentryEventsPage v-else-if="route.path === '/cameras/events'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <SettingsPage v-else-if="route.path === '/cameras/sentry-settings'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="sentry" title="Sentry motion settings" :return-to="returnToCameras" />
+        <SettingsPage ref="activeSettings" v-else-if="route.path === '/cameras/sentry-settings'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="sentry" title="Sentry motion settings" :return-to="returnToCameras" />
         <PipPage v-else-if="route.path === '/cameras/pip'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <VasmPage v-else-if="route.path === '/cameras/vasm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <Tools v-else-if="route.path === '/tools'" :tools="state.tools" :mode="state.monitorMode" />
-        <SettingsPage v-else-if="route.path === '/developer/connect'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-section="developer" />
+        <SettingsPage ref="activeSettings" v-else-if="route.path === '/developer/connect'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-section="developer" />
         <GalaxyPage v-else-if="route.path === '/galaxy'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
-        <OnroadLayoutPage v-else-if="['/theme_maker', '/theme_maker/android_auto'].includes(route.path)" :key="route.path" :projection="route.path === '/theme_maker/android_auto'" :mode="state.monitorMode" :unauthorized="sessionExpired" @target="go($event === 'projection' ? '/theme_maker/android_auto' : '/theme_maker')" @close="go('/tools')" />
+        <OnroadLayoutPage ref="activeLayout" v-else-if="['/theme_maker', '/theme_maker/android_auto'].includes(route.path)" :key="route.path" :projection="route.path === '/theme_maker/android_auto'" :mode="state.monitorMode" :unauthorized="sessionExpired" @target="go($event === 'projection' ? '/theme_maker/android_auto' : '/theme_maker')" @close="routeBack" />
         <Logs v-else-if="route.path === '/logs' || route.path.startsWith('/logs/') || ['/troubleshoot', '/manage_tmux'].includes(route.path)" :path="route.path === '/troubleshoot' ? '/logs/troubleshoot' : route.path === '/manage_tmux' ? '/logs/tmux' : route.path" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <SoftwarePage v-else-if="route.path === '/system'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <NavigationPage v-else-if="route.path === '/navigation'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
@@ -180,13 +192,13 @@ createApp({
         <AndroidAutoPage v-else-if="route.path === '/android-auto'" :mode="state.monitorMode" :local-access="authState.localAccess" :unauthorized="sessionExpired" />
         <VehicleControlsPage v-else-if="route.path === '/vehicle'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <DevicePreferencesPage v-else-if="route.path === '/device-preferences'" :mode="state.monitorMode" :go="go" />
-        <SettingsPage v-else-if="deviceSettingsPage" :key="deviceSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="deviceSettingsPage" :title="deviceSettingsPage === 'sounds' ? 'Sounds & Alerts' : 'Display'" :return-to="returnToDevice" />
+        <SettingsPage ref="activeSettings" v-else-if="deviceSettingsPage" :key="deviceSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="deviceSettingsPage" :title="deviceSettingsPage === 'sounds' ? 'Sounds & Alerts' : 'Display'" :return-to="returnToDevice" />
         <DrivingPage v-else-if="route.path === '/driving'" :mode="state.monitorMode" :go="go" />
         <LongitudinalCurvesPage v-else-if="route.path === '/driving/longitudinal-curves'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <SettingsPage v-else-if="drivingSettingsPage" :key="drivingSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="drivingSettingsPage" :title="'Driving settings · ' + drivingSettingsPage.replaceAll('_', ' ')" :return-to="returnToDriving" />
-        <SettingsPage v-else-if="route.path === '/settings'" :key="state.searchPage || 'hub'" :mode="state.monitorMode" :unauthorized="sessionExpired"
+        <SettingsPage ref="activeSettings" v-else-if="drivingSettingsPage" :key="drivingSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="drivingSettingsPage" :title="'Driving settings · ' + drivingSettingsPage.replaceAll('_', ' ')" :return-to="returnToDriving" />
+        <SettingsPage ref="activeSettings" v-else-if="route.path === '/settings'" :key="state.searchPage || 'hub'" :mode="state.monitorMode" :unauthorized="sessionExpired"
           :initial-page="state.searchPage || 'hub'" :return-to="state.searchPage ? returnFromSearch : null" />
-        <SettingsPage v-else-if="route.path === '/appearance'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="appearance" title="Onroad Appearance" />
+        <SettingsPage ref="activeSettings" v-else-if="route.path === '/appearance'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="appearance" title="Onroad Appearance" />
         <section v-else-if="route.path === '/tuning'" class="gx-driving">
           <h2>Plots &amp; Analysis</h2>
           <button type="button" class="gx-card gx-driving__link" @click="go('/tuning/plots')"><span><strong>Live plots</strong><small>Compare steering and acceleration targets with measured response</small></span></button>
@@ -194,7 +206,7 @@ createApp({
         </section>
         <PlotsPage v-else-if="route.path === '/tuning/plots'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <div v-else class="gx-card gx-message" role="status"><h2>{{ pageName }}</h2><p>This capability is unavailable in this build. No operation was attempted.</p><button type="button" class="gx-btn" @click="go('/tools')">Back to Tools</button></div>
+        <div v-else class="gx-card gx-message" role="status"><h2>{{ pageName }}</h2><p>This capability is unavailable in this build. No operation was attempted.</p></div>
       </main>
       <nav class="blur-nav" aria-label="Primary navigation"><button v-for="item in NAV" :key="item.path" type="button" class="nav-item" :class="{active:isActive(item.path)}" @click="go(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button></nav>
     </div>

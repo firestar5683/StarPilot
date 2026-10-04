@@ -34,7 +34,7 @@ class SentryEvents:
       for value in source["events"]:
         if (type(value) is not dict or type(value.get("eventId")) is not str or
             ID.fullmatch(value["eventId"]) is None or type(value.get("kind")) is not str or
-            value["kind"] not in ("warning", "alarm") or
+            value["kind"] not in ("warning", "alarm", "selfie") or
             type(value.get("wallTimeNs")) is not int or not 0 < value["wallTimeNs"] < 2**63):
           raise ValueError("Invalid motion event")
         events.append({"eventId": value["eventId"], "kind": value["kind"],

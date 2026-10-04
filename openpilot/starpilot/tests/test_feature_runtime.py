@@ -63,14 +63,17 @@ def test_global_braking_choice_starts_only_qualified_profile_owner_without_custo
     params = Files(Path(temporary))
     source = params.root / 'LongitudinalPersonalityProfiles'
     with patch('openpilot.starpilot.feature_runtime.ioniq6_long_eligible', side_effect=lambda cp: cp == 'tagged'):
-      assert not requested(params, 'profile')
+      assert requested(params, 'profile')
+      assert enabled(params, 'tagged', 'profile', {})
+      assert not enabled(params, 'stock', 'profile', {})
       for response in ('eco', 'sport'):
         source.write_text(json.dumps(profile_document(default_personality_profiles(False), enabled=False,
                                                       global_braking_response=response)))
         assert requested(params, 'profile')
         assert enabled(params, 'tagged', 'profile', {})
         assert not enabled(params, 'stock', 'profile', {})
-      source.write_text(json.dumps(profile_document(default_personality_profiles(False), enabled=False)))
+      source.write_text(json.dumps(profile_document(default_personality_profiles(False), enabled=False,
+                                                    selected_deceleration_profile='dom_default')))
       assert not requested(params, 'profile')
       bad = profile_document(default_personality_profiles(False), enabled=False)
       bad['globalBrakingResponse'] = 'unsupported'
@@ -154,6 +157,8 @@ def test_gm_saved_profiles_require_existing_longitudinal_owner():
     assert not enabled(params, ascm_params(CAR.CHEVROLET_VOLT_CAMERA), 'profile', {})
     assert not enabled(params, ascm_params(CAR.CHEVROLET_VOLT_2019), 'profile', {})
     (root / 'CustomPersonalities').write_bytes(b'0')
+    (root / 'LongitudinalPersonalityProfiles').write_text(json.dumps(
+      profile_document(default_personality_profiles(True), enabled=True, selected_deceleration_profile='dom_default')))
     assert not enabled(params, ascm_params(CAR.CHEVROLET_VOLT, radar=True), 'profile', {})
     (root / 'CustomPersonalities').write_bytes(b'1')
     (root / 'LongitudinalPersonalityProfiles').write_text('{broken')

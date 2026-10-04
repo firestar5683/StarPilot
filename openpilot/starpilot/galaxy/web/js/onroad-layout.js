@@ -688,7 +688,8 @@ export const OnroadLayoutPage = {
     },
     leave(action) {
       this.state.discard = null
-      if (action === "back") { this.hideDevicePreview(); this.$emit("close") }
+      if (typeof action === "function") { this.hideDevicePreview(); action() }
+      else if (action === "back") { this.hideDevicePreview(); this.$emit("close") }
       else if (["projection", "device"].includes(action)) { this.hideDevicePreview(); this.$emit("target", action) }
       else this.feed.load()
     },
@@ -698,11 +699,11 @@ export const OnroadLayoutPage = {
     <section class="gx-settings gx-layout" aria-label="Colors and layout">
       <div class="gx-settings__header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
         <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
-        <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy || !!state.drag" @click="requestLeave('back')">Back</button>
+
       </div>
       <nav  class="gx-layout__tabs" aria-label="Layout target">
-        <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="busy || !!state.drag" @click="requestLeave('device')">Comma</button>
-        <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="busy || !!state.drag" @click="requestLeave('projection')">Android Auto</button>
+        <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="busy || !!state.drag" @click="$emit('target', 'device')">Comma</button>
+        <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="busy || !!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
       </nav>
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Connect to local Galaxy to edit this device’s colors and layouts.</div>
@@ -717,9 +718,9 @@ export const OnroadLayoutPage = {
         </div>
         <p v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}</p>
         <div v-if="state.discard" class="gx-card gx-layout__discard" role="alert">
-          <p>{{ ['back', 'device', 'projection'].includes(state.discard) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
+          <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
           <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" type="button" @click="state.discard = null">Keep editing</button>
-            <button class="gx-btn" type="button" @click="leave(state.discard)">{{ ['back', 'device', 'projection'].includes(state.discard) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
+            <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
         </div>
         <template v-if="state.data && state.draft">
           <p v-if="!state.data.editable && !(projection && state.data.reason)" class="gx-note" role="status">Park the vehicle and reload to edit. If it stays unavailable, reload saved settings.</p>

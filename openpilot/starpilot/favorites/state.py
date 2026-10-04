@@ -13,6 +13,7 @@ class FavoriteAction:
   token: str = ""
   invoke: Callable[[], bool] | None = field(default=None, compare=False, repr=False)
   section: str = "Actions"
+  invoke_value: Callable[[float], bool] | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

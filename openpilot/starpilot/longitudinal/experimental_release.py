@@ -82,7 +82,7 @@ class ExperimentalRelease:
            target: float, follow_seconds: float, blocked: bool) -> float | None:
     if (not valid_key(key) or frame is None or blocked or
         not all(math.isfinite(value) for value in (previous_target, target, follow_seconds, frame.speed)) or
-        frame.speed < 0 or not 0.75 <= follow_seconds <= 3.0 or type(frame.experimental) is not bool or
+        frame.speed < 0 or not 0.5 <= follow_seconds <= 3.0 or type(frame.experimental) is not bool or
         type(frame.now_ns) is not int or type(frame.model_ns) is not int or
         not 0 < frame.model_ns <= frame.now_ns or frame.now_ns - frame.model_ns > MAX_SOURCE_AGE_NS):
       self.reset()
