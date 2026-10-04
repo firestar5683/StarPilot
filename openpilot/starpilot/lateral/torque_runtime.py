@@ -59,8 +59,12 @@ def runtime_enabled(CP, params=None) -> bool:
   if str(CP.carFingerprint) in BOLT_VEHICLES:
     if params is None:
       return False
+    try:
+      advanced = _bool(_raw(params, 'AdvancedLateralTune'), False)
+    except (OSError, ValueError):
+      return False
     settings = read_settings(params, TorqueHost(params, CP).vehicle)
-    return settings.advanced and settings.valid and settings.user_friction is not None
+    return advanced and settings.valid and settings.user_friction is not None
   if os.getenv('TORQUE_REPLAY_RUNTIME') == '1':
     return True
   # Preserve native/default startup behavior. A first custom edit is saved for

@@ -44,7 +44,7 @@ class TorqueRuntimeTests(unittest.TestCase):
       params, cp = Params(), corolla()
       host = TorqueHost(params, cp)
       base = host.vehicle
-      self.assertFalse(read_settings(params, base).advanced)
+      self.assertIsNone(read_settings(params, base).user_friction)
       params.put_bool('AdvancedLateralTune', True, block=True)
       params.put('SteerLatAccel', base.lat_accel_factor * 1.2, block=True)
       params.put('SteerFriction', min(1.0, base.friction * 1.2), block=True)
