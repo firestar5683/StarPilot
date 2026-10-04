@@ -51,6 +51,8 @@ class TestVehicleCollection(unittest.TestCase):
          patch.object(run_vehicle_tests, 'vehicle_inventory', return_value={'platform_ids': ['A'], 'platform_count': 1}), \
          patch.object(run_vehicle_tests, 'native_provenance', return_value={}), \
          patch.object(run_vehicle_tests, 'audit_interface_modules', return_value=([], [])), \
+         patch.object(run_vehicle_tests.vehicle_pytest, "split_targets", return_value=(["fixture.py"], [])), \
+         patch.object(run_vehicle_tests.vehicle_pytest, "collect", return_value=([], [])), \
          patch.object(test_runner, 'collect', return_value=([test], [])), \
          patch.object(test_runner, 'run_batch', return_value=[test_runner.make_record(test_id)]), redirect_stdout(io.StringIO()):
       self.assertEqual(run_vehicle_tests.run('interfaces', directory), 1)
@@ -95,6 +97,8 @@ class TestVehicleCollection(unittest.TestCase):
          patch.object(run_vehicle_tests, "vehicle_inventory", return_value={"platform_ids": ["A"], "platform_count": 1}), \
          patch.object(run_vehicle_tests, "native_provenance", return_value={}), \
          patch.object(run_vehicle_tests, "audit_interface_modules", return_value=([], [])), \
+         patch.object(run_vehicle_tests.vehicle_pytest, "split_targets", return_value=(["fixture.py"], [])), \
+         patch.object(run_vehicle_tests.vehicle_pytest, "collect", return_value=([], [])), \
          patch.object(test_runner, "collect", return_value=(tests, [])), redirect_stdout(io.StringIO()):
       self.assertEqual(run_vehicle_tests.run("interfaces", directory), 1)
       result = json.loads((Path(directory) / "results.json").read_text())
@@ -118,6 +122,8 @@ class TestVehicleCollection(unittest.TestCase):
           for name in ("source_provenance", "vehicle_inventory", "native_provenance"):
             value = {"platform_ids": ["A"], "platform_count": 1} if name == "vehicle_inventory" else {}
             stack.enter_context(patch.object(run_vehicle_tests, name, side_effect=fail if name == failing else None, return_value=value))
+          stack.enter_context(patch.object(run_vehicle_tests.vehicle_pytest, "split_targets", return_value=(["fixture.py"], [])))
+          stack.enter_context(patch.object(run_vehicle_tests.vehicle_pytest, "collect", return_value=([], [])))
           if failing == "collect":
             stack.enter_context(patch.object(test_runner, "collect", side_effect=ImportError("fixture collection failed")))
           stack.enter_context(redirect_stdout(io.StringIO()))
@@ -160,7 +166,7 @@ class TestVehicleCollection(unittest.TestCase):
     self.assertEqual(modules[0]["collected_count"], 2)
     self.assertEqual(modules[0]["uncollected_test_methods"], [])
 
-  def test_module_audit_rejects_zero_collection_and_plain_pytest_tests(self):
+  def test_module_audit_rejects_uncollected_pytest_functions_and_methods(self):
     with tempfile.TemporaryDirectory() as directory, patch.object(run_vehicle_tests, "ROOT", Path(directory)):
       path = Path(directory) / "test_fixture.py"
       path.write_text("def test_function(): pass\nclass TestPytest:\n  def test_method(self): pass\n")

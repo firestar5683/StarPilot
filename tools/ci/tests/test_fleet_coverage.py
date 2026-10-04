@@ -5,6 +5,7 @@ import json
 import copy
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from typing import Any
@@ -33,6 +34,7 @@ class FleetCoverageTest(unittest.TestCase):
                      "source": {"revision": self.revision, "manifest_sha256": sha256(ROOT / "upstream-sync.json"),
                                 "runner_sha256": sha256(ROOT / "tools/test_runner.py"),
                                 "suite_runner_sha256": sha256(ROOT / "tools/ci/run_vehicle_tests.py"),
+                                "pytest_runner_sha256": sha256(ROOT / "tools/ci/vehicle_pytest.py"),
                                 "dependencies": upstream["dependencies"]}}
 
   def check(self, modes=None):
@@ -124,6 +126,23 @@ class FleetCoverageTest(unittest.TestCase):
     self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
     self.assertEqual(1, len(report["reported_relevant_dirty_paths"]))
 
+  def test_pytest_adapter_hash_is_required_and_current(self):
+    for value in (None, "0" * 64):
+      with self.subTest(value=value):
+        if value is None:
+          self.coverage["source"].pop("pytest_runner_sha256", None)
+        else:
+          self.coverage["source"]["pytest_runner_sha256"] = value
+        report = self.check()
+        self.assertIn("interface report pytest_runner_sha256 differs from current source", report["uncovered"])
+        self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
+
+  def test_reported_dirty_pytest_adapter_invalidates_current_evidence(self):
+    self.coverage["source"]["status"] = " M tools/ci/vehicle_pytest.py"
+    report = self.check()
+    self.assertEqual(report["reported_relevant_dirty_paths"], [" M tools/ci/vehicle_pytest.py"])
+    self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
+
   def test_mode_digest_is_verified_against_arrays(self):
     modes = {"schema_version": 1, "enumeration_complete": True, "configurations": [], "traces": [],
              "provenance": {"configuration_inventory_sha256": canonical_sha256([]), "trace_catalog_sha256": canonical_sha256([])}}
@@ -177,7 +196,7 @@ class FleetCoverageTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       output = Path(directory) / "report.json"
       output.write_text("earlier failed evidence\n")
-      run = subprocess.run([str(ROOT / ".venv/bin/python"), str(ROOT / "tools/ci/fleet_coverage.py"),
+      run = subprocess.run([sys.executable, str(ROOT / "tools/ci/fleet_coverage.py"),
                             "--interface-coverage", "missing.json", "--interface-results", "missing.json",
                             "--output", str(output)], cwd=ROOT, capture_output=True, text=True, check=False)
       self.assertNotEqual(0, run.returncode)
