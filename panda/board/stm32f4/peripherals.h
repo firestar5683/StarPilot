@@ -77,6 +77,7 @@ void peripherals_init(void) {
 
   // Timers
   RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;  // clock source timer
+  RCC->APB2ENR |= RCC_APB2ENR_TIM8EN;  // clock source slave timer
   RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // main counter
   RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;  // pedal and fan PWM
   RCC->APB1ENR |= RCC_APB1ENR_TIM4EN;  // IR PWM

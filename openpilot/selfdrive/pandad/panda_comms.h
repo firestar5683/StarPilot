@@ -29,9 +29,9 @@ public:
 template <typename SpiFactory, typename UsbFactory>
 std::unique_ptr<PandaCommsHandle> open_panda_handle(const std::string &serial, SpiFactory spi, UsbFactory usb) {
   try {
-    return spi(serial);
-  } catch (const std::exception &) {
     return usb(serial);
+  } catch (const std::exception &) {
+    return spi(serial);
   }
 }
 
