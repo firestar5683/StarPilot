@@ -1,0 +1,121 @@
+import unittest
+
+from opendbc.car import structs
+from opendbc.safety.tests.libsafety import libsafety_py
+
+
+class TestFordAolAdmission(unittest.TestCase):
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+
+  def tearDown(self):
+    self.safety.set_alternative_experience(0)
+    self.safety.set_safety_hooks(structs.CarParams.SafetyModel.noOutput, 0)
+
+  def test_no_frames_no_lateral_or_longitudinal_authority(self):
+    for word in (8, 9, 10, 11, 12, 13, 18, 19, 32, 33, 66, 67):
+      for ae in (0, 32, 33):
+        with self.subTest(word=word, ae=ae):
+          self.safety.init_tests()
+          self.safety.set_alternative_experience(ae)
+          self.safety.set_safety_hooks(structs.CarParams.SafetyModel.ford, word)
+          self.safety.set_timer(1_000_000)
+          self.safety.set_aol_test_heartbeat(True)
+          for mask in (0, 1, 2, 3):
+            self.safety.aol_set_host_request(mask)
+            self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+
+class TestFordAolDriverIntent(unittest.TestCase):
+  PROFILES = (32, 8, 10, 12, 18, 66)
+
+  def setUp(self):
+    from opendbc.can import CANPacker
+    self.safety = libsafety_py.libsafety
+    self.packer = CANPacker('ford_lincoln_base_pt')
+
+  def tearDown(self):
+    self.safety.set_alternative_experience(0)
+    self.safety.set_safety_hooks(structs.CarParams.SafetyModel.noOutput, 0)
+
+  def reset(self, word):
+    self.word = word
+    self.tick = 0
+    self.safety.init_tests()
+    self.safety.set_alternative_experience(32)
+    self.assertEqual(self.safety.set_safety_hooks(structs.CarParams.SafetyModel.ford, word), 0)
+    self.safety.set_aol_test_heartbeat(True)
+
+  def rx(self, name, values):
+    self.assertLessEqual(set(values), set(self.packer.dbc.name_to_msg[name].sigs))
+    address, data, bus = self.packer.make_can_msg(name, 0, values)
+    self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data)))
+
+  def pump(self, count, *, main=3, tja=False, gear=3, eps=0, mask=0, heartbeat=True):
+    gear_name, gear_signal = ('TransGearData', 'GearLvrPos_D_Actl') if self.word == 8 else (
+      ('Gear_Shift_by_Wire_FD1', 'TrnRng_D_RqGsm') if self.word == 10 else ('PowertrainData_10', 'TrnRng_D_Rq'))
+    for _ in range(count):
+      self.tick += 1
+      self.safety.set_timer(1_000_000 + self.tick * 10_000)
+      self.safety.set_aol_test_heartbeat(heartbeat)
+      values = (
+        ('BrakeSysFeatures', 50, {'Veh_V_ActlBrk': 36, 'VehVActlBrk_D_Qf': 3, 'VehVActlBrk_No_Cnt': (self.tick // 2) % 16}),
+        ('EngVehicleSpThrottle2', 50, {'Veh_V_ActlEng': 36, 'VehVActlEng_D_Qf': 3}),
+        ('Yaw_Data_FD1', 100, {'VehYaw_W_Actl': 0, 'VehYawWActl_D_Qf': 3, 'VehRollYaw_No_Cnt': self.tick % 256}),
+        ('EngBrakeData', 10, {'BpedDrvAppl_D_Actl': 1, 'CcStat_D_Actl': main}),
+        ('EngVehicleSpThrottle', 100, {'ApedPos_Pc_ActlArb': 0}),
+        ('DesiredTorqBrk', 50, {'VehStop_D_Stat': 0}),
+        ('Steering_Data_FD1', 10, {'TjaButtnOnOffPress': int(tja)}),
+        ('EPAS_INFO', 50, {'SteeringColumnTorque': 0, 'EPAS_Failure': eps}),
+        (gear_name, 10, {gear_signal: gear}),
+      )
+      for name, hz, fields in values:
+        if self.tick * hz // 100 != (self.tick - 1) * hz // 100:
+          self.rx(name, fields)
+      if self.word in (10, 12, 18, 66) and self.tick * 30 // 100 != (self.tick - 1) * 30 // 100:
+        self.rx('Lane_Assist_Data3_FD1', {'LatCtlSte_D_Stat': 1, 'LaActAvail_D_Actl': 3, 'LaActDeny_B_Actl': 0})
+      self.safety.aol_set_host_request(mask)
+      self.safety.aol_get_permission_mask()
+
+  def arm(self):
+    self.pump(40, main=0)
+    self.pump(10)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def rearm(self):
+    self.pump(20)
+    self.pump(10, tja=True)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+
+  def test_permanent_eps_then_clean_in_same_batch_revokes(self):
+    for word in self.PROFILES:
+      with self.subTest(word=word):
+        self.reset(word)
+        self.arm()
+        self.rx('EPAS_INFO', {'SteeringColumnTorque': 0, 'EPAS_Failure': 2})
+        self.rx('EPAS_INFO', {'SteeringColumnTorque': 0, 'EPAS_Failure': 0})
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.pump(30, mask=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.rearm()
+
+  def test_reverse_temporary_eps_retain_but_heartbeat_loss_rearms(self):
+    for word in self.PROFILES:
+      with self.subTest(word=word):
+        self.reset(word)
+        self.arm()
+        self.pump(30, gear=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.pump(20, mask=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.pump(30, eps=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.pump(20, mask=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.pump(30, gear=1, heartbeat=False)
+        self.pump(20, mask=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.rearm()

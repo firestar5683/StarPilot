@@ -1,3 +1,4 @@
+#include "openpilot/starpilot/car/ford/aol_policy.h"
 #include "selfdrive/pandad/aol_protocol.h"
 #include "openpilot/starpilot/car/honda/aol_policy.h"
 #include "openpilot/starpilot/car/hyundai/aol_policy.h"
@@ -20,7 +21,7 @@ constexpr AolSafetyProfile TEST_PROFILES[] = {
   {TEST_MODE, test_param, false}, {TEST_ALT_MODE, test_alt_param, false},
 };
 const AolProfileRegistry TEST_REGISTRY{TEST_PROFILES, std::size(TEST_PROFILES)};
-constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE};
+constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE};
 const AolProfileRegistry VEHICLE_REGISTRY{VEHICLE_PROFILES, std::size(VEHICLE_PROFILES)};
 
 aol_safety_health_t status(uint8_t request = 0U, uint8_t permission = 0U) {
@@ -81,6 +82,35 @@ void queue(FakeTransport &transport, const aol_safety_health_t &before,
 }  // namespace
 
 int main() {
+  constexpr uint16_t ford_words[] = {8U, 9U, 10U, 11U, 12U, 13U, 18U, 19U, 32U, 33U, 66U, 67U};
+  for (uint32_t word = 0U; word <= 65535U; ++word) {
+    bool expected = false;
+    for (const auto exact : ford_words) expected |= word == exact;
+    auto ford = status();
+    ford.safety_mode = 6U;
+    ford.safety_param = static_cast<uint16_t>(word);
+    assert(aol_capable(ford, 6U, VEHICLE_REGISTRY) == expected);
+  }
+  AolAxisNegotiator ford_pause(VEHICLE_REGISTRY);
+  FakeTransport ford_transport;
+  auto ford_status = status();
+  ford_status.safety_mode = 6U;
+  ford_status.safety_param = 32U;
+  auto ford_axis = axis("ford-session", false, false);
+  ford_axis.retain_lateral_arm = true;
+  queue(ford_transport, ford_status, ford_status);
+  auto ford_step = run(ford_pause, ford_transport, ford_axis, NOW, 6U);
+  assert(ford_step.plan.request_mask == 0U && !ford_step.plan.retain_lateral_arm);
+  queue(ford_transport, ford_status, ford_status);
+  ford_step = run(ford_pause, ford_transport, ford_axis, NOW, 6U);
+  assert(ford_step.plan.request_mask == 0U && ford_step.plan.retain_lateral_arm);
+  const bool ordinary_engaged = false;
+  const bool heartbeat_engaged = ordinary_engaged || ford_step.plan.request_mask != 0U || ford_step.plan.retain_lateral_arm;
+  assert(heartbeat_engaged);
+  queue(ford_transport, ford_status, ford_status);
+  ford_step = run(ford_pause, ford_transport, ford_axis, NOW + 201000000ULL, 6U);
+  assert(ford_step.plan.request_mask == 0U && !ford_step.plan.retain_lateral_arm);
+
   static_assert(sizeof(aol_safety_health_t) == 11U);
   static_assert(offsetof(aol_safety_health_t, safety_param) == 8U);
   static_assert(offsetof(aol_safety_health_t, capability_flags) == 10U);

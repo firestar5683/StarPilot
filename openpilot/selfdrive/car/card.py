@@ -32,6 +32,7 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
 from openpilot.starpilot.aol.intent import disarming_fault, independent_axis_requested, read_settings
+from opendbc.car.ford.aol import qualified as qualified_ford_aol, native_observation as ford_native_observation, temporary_restriction as ford_temporary_restriction
 from opendbc.car.hyundai.canfd_angle_aol import native_observation, temporary_restriction, qualified as qualified_angle_aol
 from openpilot.starpilot.aol.runtime import current_native
 from openpilot.starpilot.aol.vehicle import create_intent as create_aol_intent, native_latch_rejected, policy_for as aol_policy_for
@@ -426,19 +427,23 @@ class Car:
           self.sm.valid['onroadEvents'] and 0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
         fault_active = disarming_fault(self.sm['onroadEvents'], CS)
       angle_aol = qualified_angle_aol(self.CP, marked_only=True)
-      angle_panda_ready = not angle_aol or self.startup_panda_configured()
+      ford_aol = qualified_ford_aol(self.CP, marked_only=True)
+      permission_owner = angle_aol or ford_aol
+      angle_panda_ready = not permission_owner or self.startup_panda_configured()
       native = (
-        current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if angle_aol else None)
-        if self.aol_card_intent.explicit_latch and (angle_aol or self.sm.updated['aolSafetyWire'])
+        current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if permission_owner else None)
+        if self.aol_card_intent.explicit_latch and (permission_owner or self.sm.updated['aolSafetyWire'])
         else None
       )
       native_reset = False
-      if angle_aol:
-        pending_since, lost, native_reset = native_observation(
+      if permission_owner:
+        observe = ford_native_observation if ford_aol else native_observation
+        restrict = ford_temporary_restriction if ford_aol else temporary_restriction
+        pending_since, lost, native_reset = observe(
           native,
           latched=self.aol_card_intent.allowed_latch,
           panda_ready=angle_panda_ready,
-          restricted=temporary_restriction(self.CP, CS),
+          restricted=restrict(self.CP, CS),
           now_ns=now_ns,
           pending_since_ns=getattr(self, '_angle_aol_pending_since_ns', 0),
         )

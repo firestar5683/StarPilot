@@ -5,8 +5,9 @@ from openpilot.starpilot.aol.intent import AolCardIntent
 from openpilot.starpilot.car.honda import aol as honda
 from openpilot.starpilot.car.hyundai import aol as hyundai
 from openpilot.starpilot.car.gm import aol as gm
+from openpilot.starpilot.car.ford import aol as ford
 
-_PORTS = {'honda': honda, 'hyundai': hyundai, 'gm': gm}
+_PORTS = {'honda': honda, 'hyundai': hyundai, 'gm': gm, 'ford': ford}
 
 
 def policy_for(CP) -> AolVehiclePolicy:
