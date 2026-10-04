@@ -47,7 +47,7 @@ ivec3 px(int x, int y) {
   if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, size))) return ivec3(6, 6, 15);
   if (composeSource != 0) p.y = size.y - 1 - p.y;
   // Use RGB only. The UI texture starts from an opaque clear, so its RGB is
-  // already the final colour; its alpha depends on which blend mode drew each
+  // already the final color; its alpha depends on which blend mode drew each
   // pixel and changes between frames. Blending by it made bright areas flicker.
   vec3 color = texelFetch(texture0, p, 0).rgb;
   return ivec3(color * 255.0 + 0.5);
@@ -81,7 +81,7 @@ void main() {
 def compose_rgba(source, target, margin_w: int, margin_h: int, *, fit: bool = False) -> None:
   """RGBA fallback composition, matching ``Nv12Converter(compose=True)``.
 
-  Centres the UI texture inside the car's margins, flips it top-down and copies
+  Centers the UI texture inside the car's margins, flips it top-down and copies
   its RGB. Like the NV12 pass it never blends by the texture's alpha, which
   varies between frames; blending by it made bright areas flicker.
   """

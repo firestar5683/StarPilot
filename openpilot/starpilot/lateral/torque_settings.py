@@ -177,7 +177,7 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
 
 
 def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
-  vehicles = {}
+  vehicles: dict[str, dict] = {}
   version = 2 if any(p.gain_basis is not None for p in profiles.values()) else 1
   for fingerprint, profile in profiles.items():
     vehicles[fingerprint] = {
@@ -255,7 +255,7 @@ def parse_gain_basis(value: object) -> GainBasis:
       any(n <= 0 for n in table[1]) or
       not isinstance(basis, (list, tuple)) or not valid_basis(tuple(basis))):
     raise ValueError("Malformed gain basis")
-  return GainBasis(value["controller"], tuple(tuple(row) for row in table), tuple(basis))
+  return GainBasis(value["controller"], (tuple(table[0]), tuple(table[1])), tuple(basis))
 
 
 def replace_gain(profiles: dict[str, PlatformProfile], fingerprint: str, basis: GainBasis,

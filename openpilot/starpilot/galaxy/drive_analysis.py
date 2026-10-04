@@ -156,6 +156,7 @@ def _selected(route: dict) -> tuple[str, list[str]]:
     matched = SEGMENT_NAME.fullmatch(name) if type(name) is str and len(name) <= 180 else None
     if matched is None or matched.group('route').replace('_', '|') != route_id or int(matched.group('number')) != index:
       raise _Incomplete('Invalid route selection')
+    assert isinstance(name, str)
     names.append(name)
   if len(set(names)) != len(names):
     raise _Incomplete('Duplicate route segment')

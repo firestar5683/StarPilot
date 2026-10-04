@@ -83,7 +83,7 @@ def conditional_manual_candidate(CS: car.CarState, tracker: ButtonTracker, param
 
 def conditional_traffic_candidate(CS: car.CarState, tracker: ButtonTracker, params: Params,
                                   settings_owner: ConditionalSettingsOwner, CP: car.CarParams, sm, *,
-                                  now_ns: int, media: MediaObservation | None = None,
+                                  now_ns: int, media: MediaObservation | DistanceObservation | None = None,
                                   media_buttons: ButtonMap | None = None, media_map_captured: bool = False,
                                   distance: DistanceObservation | None = None, action: int = TRAFFIC_MODE_ACTION):
   """Source-backed wheel heartbeat and optional action-six proposal.

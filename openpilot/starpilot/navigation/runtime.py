@@ -110,7 +110,8 @@ class RouteRuntime:
 def publish_status(pm, value: dict) -> None:
   from openpilot.cereal import messaging
   message = messaging.new_message('starpilotNavigation', valid=True)
-  message.starpilotNavigation = value
+  from openpilot.starpilot.navigation.wire import navigation_envelope
+  message.starpilotNavigation = navigation_envelope(value)
   pm.send('starpilotNavigation', message)
 
 

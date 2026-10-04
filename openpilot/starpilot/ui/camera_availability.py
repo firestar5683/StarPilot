@@ -1,7 +1,6 @@
 """Publish already-observed native camera frames without UI-thread file I/O."""
 
 import threading
-import time
 
 from openpilot.starpilot.galaxy.camera_request import boot_ns, mark_frame
 
@@ -42,7 +41,7 @@ class CameraAvailability:
         self.changed.clear()
       if stamp is not None:
         try:
-          self.write(clock=lambda: stamp)
+          self.write(clock=lambda stamp=stamp: stamp)
         except (OSError, ValueError):
           pass
 

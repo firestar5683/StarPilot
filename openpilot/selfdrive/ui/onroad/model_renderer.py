@@ -177,7 +177,7 @@ class ModelRenderer(Widget):
     max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
     lines = [*self._lane_lines, *self._road_edges]
-    widths = [0.025 * prob for prob in self._lane_line_probs] + [0.025] * len(self._road_edges)
+    widths = [0.025 * float(prob) for prob in self._lane_line_probs] + [0.025] * len(self._road_edges)
     polygons = self._map_lines_to_polygons([line.raw_points for line in lines], widths, 0.0, max_idx, max_distance)
     for line, polygon in zip(lines, polygons, strict=True):
       line.projected_points = polygon

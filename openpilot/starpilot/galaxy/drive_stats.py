@@ -262,6 +262,7 @@ class DriveStatsOwner:
   def _run(self):
     if not self._allowed():
       return
+    assert self.root is not None
     try:
       inventory = self.history.snapshot()
       routes = inventory.get('routes', [])

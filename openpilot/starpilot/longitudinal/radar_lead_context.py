@@ -50,7 +50,7 @@ class RadarLeadContext:
   def _primary(self, now_ns):
     try:
       sm = self.sm
-      if not (sm.seen['radarState'] and sm.alive['radarState'] and sm.valid['radarState']):
+      if self.drive_id is None or not (sm.seen['radarState'] and sm.alive['radarState'] and sm.valid['radarState']):
         return None
       stamp = int(sm.logMonoTime['radarState'])
       receipt = int(sm.recv_time['radarState'] * 1e9)

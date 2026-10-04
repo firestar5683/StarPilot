@@ -70,7 +70,9 @@ def retire_settings(params):
   if not state_readable or not state_valid:
     issues.append("Invalid settings retirement completion state; safe first-migration reconciliation used")
     state = {"version": 1, "completed": []}
-  completed = set(state["completed"])
+  completed_raw = state["completed"]
+  assert isinstance(completed_raw, list)
+  completed = set(completed_raw)
   def finish(group):
     completed.add(group)
     # Separate from raw evidence, so corrupt older evidence cannot prevent a

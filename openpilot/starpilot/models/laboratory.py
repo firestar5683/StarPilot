@@ -81,9 +81,10 @@ class ModelLaboratory:
               "download": {"model": job.get("model", ""), "progress": job.get("progress", ""),
                            "downloading": job["downloading"], "jobId": job.get("jobId", ""),
                            "variant": job.get("variant", "standard")},
-              "summary": {"catalog": len(models), "eligible": sum(row["modelLabEligible"] for row in models), "ready": sum(row["modelLabArtifactInstalled"] for row in models),
-                          "published": sum(row["modelLabArtifactAvailable"] for row in models),
-                          "declaredSize": sum(row["artifactSize"] for row in models)},
+              "summary": {"catalog": len(models), "eligible": sum(row["modelLabEligible"] is True for row in models),
+                          "ready": sum(row["modelLabArtifactInstalled"] is True for row in models),
+                          "published": sum(row["modelLabArtifactAvailable"] is True for row in models),
+                          "declaredSize": sum(int(row["artifactSize"]) for row in models)},
               "models": models, "manifest": {"version": GENERATION},
               "capabilities": {"configure": parked, "download": parked,
                                "delete": parked, "cancel": True, "refresh": parked}}

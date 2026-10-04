@@ -122,7 +122,7 @@ class UIState:
       ignore_avg_freq=["starpilotSelfdriveState", "starpilotLateralState"],
     )
 
-    self.prime_state = ProjectionPrimeState(self.params) if self.projection_read_only else PrimeState()
+    self.prime_state = ProjectionPrimeState(self.params) if isinstance(self.params, ProjectionParams) else PrimeState()
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
@@ -278,13 +278,14 @@ class UIState:
       return
 
     model_seen = self.sm.recv_frame["modelV2"] > self.started_frame
+    model_stamp = self.sm.logMonoTime["modelV2"]
+    model_fresh = (model_seen and self.sm.valid["modelV2"] and self.sm.alive["modelV2"] and
+                   0 < model_stamp <= time.monotonic_ns() <= model_stamp + 250_000_000)
     if not self.chestnut_present:
       self.chestnut_state = ChestnutState.DISCONNECTED
-    elif not self.chestnut_compiled:
-      self.chestnut_state = ChestnutState.UNCOMPILED
     elif self.chestnut_loading or not model_seen:
       self.chestnut_state = ChestnutState.LOADING
-    elif self.chestnut_state == ChestnutState.FAILED or not detected or (model_seen and (not self.sm.alive["modelV2"] or not self.sm["modelV2"].big)):
+    elif not detected or not model_fresh or not self.sm["modelV2"].big:
       self.chestnut_state = ChestnutState.FAILED
     elif self.chestnut_active is False:
       self.chestnut_state = ChestnutState.FAILED

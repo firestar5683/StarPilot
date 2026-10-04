@@ -57,7 +57,7 @@ class _Job:
 
 
 def _payload(value: object) -> dict:
-  if type(value) is not dict or set(value) != {'document', 'profile', 'scene'}:
+  if not isinstance(value, dict) or type(value) is not dict or set(value) != {'document', 'profile', 'scene'}:
     raise PreviewInvalid('Invalid preview request')
   if type(value['profile']) is not str or type(value['scene']) is not str or \
      value['profile'] not in RENDER_PROFILES or value['scene'] not in SCENES:

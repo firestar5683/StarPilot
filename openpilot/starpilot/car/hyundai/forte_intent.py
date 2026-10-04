@@ -19,7 +19,7 @@ class ForteCardIntent(AolCardIntent):
     self.neutral_seen = False
     self._lkas_down = False
     self._aux_original = None
-    self._aux_settings = None
+    self._aux_settings = settings
 
   def update(self, CS, *, consumed_buttons=frozenset(), fault_active=None,
              now_ns=0, native_rejection_ns=0, standard_enabled=False):

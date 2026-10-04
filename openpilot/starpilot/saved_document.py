@@ -6,8 +6,25 @@ import fcntl
 import os
 from pathlib import Path
 import tempfile
+import time
 
 from openpilot.starpilot.saved_source import read_saved
+
+
+LOCK_WAIT_SECONDS = .25
+
+
+def acquire_native_lock(fd: int) -> None:
+  deadline = time.monotonic() + LOCK_WAIT_SECONDS
+  while True:
+    try:
+      fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      return
+    except BlockingIOError:
+      remaining = deadline - time.monotonic()
+      if remaining <= 0:
+        raise
+      time.sleep(min(.01, remaining))
 
 
 @dataclass(frozen=True)
@@ -36,7 +53,7 @@ def commit_exact(params, *, key: str, max_bytes: int, raw: bytes, expected: byte
       stage.flush()
       os.fsync(stage.fileno())
     lock_fd = os.open(root / ".lock", os.O_CREAT | os.O_RDONLY, 0o775)
-    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    acquire_native_lock(lock_fd)
     if not authorized():
       return WriteResult(False, False)
     source, readable = read_saved(params, key, max_bytes)

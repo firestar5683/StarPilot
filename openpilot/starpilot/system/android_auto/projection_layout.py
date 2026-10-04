@@ -127,6 +127,7 @@ def projection_customization(document, base_customization):
   shifts = {'current_speed': ((width - 1860) / 2, 0),
             'steering_wheel': (width - 1860, 0), 'driver_monitor': (0, height - 1080)}
   native = PROFILES['large']['widgets']
+  assert isinstance(native, dict)
   tx, ty, _, _ = maximum_footprint(30, 30, width - 60, height - 60, width)
   shifts['torque_bar'] = (tx - native['torque_bar']['default']['x'], ty - native['torque_bar']['default']['y'])
   result = copy.deepcopy(base_customization)

@@ -95,7 +95,7 @@ class ControllerOwner:
     self.clock = clock
     self._lock = RLock()
     self._devices = {}
-    self._learning = None
+    self._learning: dict | None = None
     self._testing_until = 0
     self._last_press = None
     self._sequences = {}
@@ -288,7 +288,7 @@ class ControllerOwner:
     if testing:
       self._press_status(device_id, code, slot, False, "Test press detected")
       return
-    if not readable or not valid or not document["enabled"] or binding is None:
+    if not readable or not valid or not document["enabled"] or binding is None or slot is None:
       return
     if slot < 3:
       favorite = self.favorites().slots[slot]

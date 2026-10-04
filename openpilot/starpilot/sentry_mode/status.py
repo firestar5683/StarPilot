@@ -75,7 +75,7 @@ class RuntimeStatus(EventStore):
     except (OSError, StorageUnavailable):
       pass
 
-  def snapshot(self, saved: SavedPreferences) -> tuple[str, str]:
+  def runtime_snapshot(self, saved: SavedPreferences) -> tuple[str, str]:
     if not saved.readable or not saved.valid:
       return "Unavailable", "Repair the saved motion settings before monitoring"
     if not saved.preferences.enabled:

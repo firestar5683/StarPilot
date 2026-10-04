@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 import math
-import os
 import signal
 import threading
 import time

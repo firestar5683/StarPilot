@@ -314,7 +314,7 @@ class SharedBluetoothOwner(BluetoothOwner):
         process_lock.close()
 
   @staticmethod
-  def _restore_visibility(client: PhoneRoleBlueZ, path: str, sender: str, pairable: bool, discoverable: bool) -> None:
+  def _restore_visibility(client: BlueZ, path: str, sender: str, pairable: bool, discoverable: bool) -> None:
     # Never apply old adapter state after bluetoothd restart or adapter replacement.
     now_path, _, now_sender = client.adapter_identity()
     if (now_path, now_sender) == (path, sender):
@@ -429,7 +429,8 @@ class SharedBluetoothOwner(BluetoothOwner):
       threading.Thread(target=self._outgoing_worker, args=(lease,), daemon=True).start()
 
   def _outgoing_live(self, lease: PhoneRoleLease) -> bool:
-    if self.phone_lease is not lease or lease.released or not self.parked() or not self.session_valid(lease.session) or self.clock() >= lease.deadline:
+    if (lease.session is None or self.phone_lease is not lease or lease.released or not self.parked() or
+        not self.session_valid(lease.session) or self.clock() >= lease.deadline):
       return False
     try:
       client = self._client()

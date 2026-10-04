@@ -36,8 +36,9 @@ def _line(x1: float, y1: float, x2: float, y2: float, color: rl.Color, width: fl
 def _curve_center(t: float) -> tuple[float, float]:
   points = ((-2, 24), (-3, 9), (-1, -9), (4, -24))
   u = 1 - t
-  return tuple(u**3 * points[0][axis] + 3 * u**2 * t * points[1][axis] +
-               3 * u * t**2 * points[2][axis] + t**3 * points[3][axis] for axis in (0, 1))
+  x = u**3 * points[0][0] + 3 * u**2 * t * points[1][0] + 3 * u * t**2 * points[2][0] + t**3 * points[3][0]
+  y = u**3 * points[0][1] + 3 * u**2 * t * points[1][1] + 3 * u * t**2 * points[2][1] + t**3 * points[3][1]
+  return x, y
 
 
 _CURVE_DASHES = tuple((_curve_center(start), _curve_center(end))
@@ -78,7 +79,7 @@ def draw_lead_icon(rect: rl.Rectangle) -> None:
       _line(x, y, x - side * 7, y, accent, 3)
       _line(x, y, x, y - edge * 7, accent, 3)
   roof = ((cx - 15, cy - 1), (cx - 10, cy - 13), (cx + 10, cy - 13), (cx + 15, cy - 1))
-  for start, end in zip(roof, roof[1:]):
+  for start, end in zip(roof, roof[1:], strict=False):
     _line(*start, *end, rl.WHITE, 3)
   rl.draw_rectangle_rounded(rl.Rectangle(cx - 16, cy - 3, 32, 18), 0.4, 8, rl.WHITE)
   for side in (-1, 1):

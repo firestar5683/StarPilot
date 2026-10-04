@@ -79,6 +79,7 @@ def policy_for(CP) -> AolVehiclePolicy:
       settings_supported=True,
       runtime_supported=True,
       normal_runtime_supported=True,
+      ordinary_axis_ack_required=qualified_ccnc_ev_stock(CP),
       explicit_latch=True,
       alternative_experience_addition=32,
     )

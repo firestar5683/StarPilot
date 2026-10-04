@@ -46,9 +46,9 @@ class FordCardIntent(AolCardIntent):
       effective = replace(settings, main_action=AOL_TOGGLE)
     super().__init__(effective, explicit_latch=True)
 
-  def update(self, cs, **kwargs):
-    state = structs.CarState(**cs.to_dict())
-    events = [structs.CarState.ButtonEvent(**event.to_dict()) for event in cs.buttonEvents]
+  def update(self, CS, **kwargs):
+    state = structs.CarState(**CS.to_dict())
+    events = [structs.CarState.ButtonEvent(**event.to_dict()) for event in CS.buttonEvents]
     available = bool(state.cruiseState.available)
     healthy = state.canValid and not state.canTimeout
     if healthy:

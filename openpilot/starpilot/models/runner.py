@@ -182,7 +182,7 @@ class CatalogModelState:
     self.parser = Parser()
     self.aux_parser = Parser(ignore_missing=True)
     self.frame_buf_size = get_nv12_info(cam_w, cam_h)[3]
-    image_layouts = tuple(tuple(image_shapes[key][-2:]) for key in (self.road_key, self.wide_key))
+    image_layouts = (tuple(image_shapes[self.road_key][-2:]), tuple(image_shapes[self.wide_key][-2:]))
     self.camera_warp_descriptor = (CameraWarpDescriptor((cam_w, cam_h), get_nv12_info(cam_w, cam_h), image_layouts,
                                                        (2, 6, *image_layouts[0]), dtypes.uint8, self.warp_device)
                                    if self.image_history_pipeline == "policy" else None)
@@ -250,8 +250,10 @@ class CatalogModelState:
   def run(self, bufs: dict, transforms: dict[str, np.ndarray], inputs: dict[str, np.ndarray],
           after_enqueue: Callable[[], None] | None = None, *, shared_warp: SharedCameraWarp | None = None) -> dict[str, np.ndarray]:
     self.last_warp = None
-    pointers = tuple(np.frombuffer(bufs[name].data, dtype=np.uint8).ctypes.data for name in self.vision_input_names)
-    transform_signature = tuple(np.asarray(transforms[name], dtype=np.float32).tobytes() for name in self.vision_input_names)
+    road_pointer, wide_pointer = (np.frombuffer(bufs[name].data, dtype=np.uint8).ctypes.data for name in self.vision_input_names)
+    pointers = (road_pointer, wide_pointer)
+    road_transform, wide_transform = (np.asarray(transforms[name], dtype=np.float32).tobytes() for name in self.vision_input_names)
+    transform_signature = (road_transform, wide_transform)
     if shared_warp is not None:
       self._validate_shared_warp(shared_warp, pointers, transform_signature)
       self._last_shared_warp = shared_warp

@@ -69,7 +69,7 @@ class OutputMaximum:
     if self.last_attempt_ns is None or now_ns < self.last_attempt_ns or now_ns - self.last_attempt_ns >= REFRESH_NS:
       self.last_attempt_ns = now_ns
       self.saved = read_maximum(self.params)
-      if self.saved.valid:
+      if self.saved.valid and self.saved.value is not None:
         self.maximum = self.saved.value
     return self.maximum
 

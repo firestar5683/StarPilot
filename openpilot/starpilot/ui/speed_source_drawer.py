@@ -4,7 +4,7 @@ import math
 
 import pyray as rl
 
-from openpilot.starpilot.ui.onroad_widget_style import CONTROL_ROUNDNESS, CONTROL_SEGMENTS
+from openpilot.starpilot.ui.onroad_widget_style import CONTROL_ROUNDNESS
 from openpilot.starpilot.ui import clip
 
 from openpilot.starpilot.ui.speed_source_drawer_model import DrawerMotion, SOURCE_DRAWER_WIDTH, _outline
@@ -53,6 +53,7 @@ class SpeedSourceDrawer(DrawerMotion):
 
   def draw_frame(self, rect: rl.Rectangle, drawer_top: float, fill: rl.Color, border: rl.Color) -> None:
     self._prepare_mesh(rect, drawer_top)
+    assert self._fill is not None
     rl.draw_triangle_fan(rl.ffi.cast('Vector2 *', self._fill), len(self._fill), fill)
     self.draw_border(rect, drawer_top, 7, rl.Color(border.r, border.g, border.b, 55))
     self.draw_border(rect, drawer_top, 2, border)

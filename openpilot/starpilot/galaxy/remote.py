@@ -18,12 +18,23 @@ from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from collections.abc import Callable
 import threading
+from typing import TypedDict
 
 SLUG = re.compile(r"[A-Za-z0-9]{16}\Z")
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 
 
-def gateway_cookie_valid(cookie: str | None, record: dict[str, str]) -> bool:
+class RemoteTokens(TypedDict):
+  slug: str
+  session: str
+
+
+class RemoteRecord(RemoteTokens):
+  version: int
+  authHash: str
+
+
+def gateway_cookie_valid(cookie: str | None, record: RemoteTokens) -> bool:
   """Validate this comma's token in either generation of the gateway cookie."""
   if cookie is None or not 1 <= len(cookie) <= 4096:
     return False
@@ -75,7 +86,7 @@ class RemotePairing:
     finally:
       os.close(fd)
 
-  def read(self) -> dict[str, str] | None:
+  def read(self) -> RemoteRecord | None:
     try:
       directory = self.root.lstat()
       if not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o077:
@@ -98,7 +109,7 @@ class RemotePairing:
       return None
 
   @staticmethod
-  def _legacy_record(root: Path, auth_hash: str | None = None) -> dict[str, str] | None:
+  def _legacy_record(root: Path, auth_hash: str | None = None) -> RemoteRecord | None:
     values = {}
     try:
       directory = root.lstat()
@@ -125,7 +136,7 @@ class RemotePairing:
       with self._locked():
         if os.path.lexists(self.root / self.FILE):
           return None
-        record = None
+        record: RemoteRecord | None = None
         if legacy_root is not None and not os.path.lexists(self.root / self.UNPAIRED):
           record = self._legacy_record(legacy_root, auth_hash)
         if record is None:
@@ -150,7 +161,7 @@ class RemotePairing:
     except (OSError, ValueError):
       return False
 
-  def _store(self, record: dict[str, str]) -> str | None:
+  def _store(self, record: RemoteRecord) -> str | None:
     fd, temporary = tempfile.mkstemp(prefix=".remote-", dir=self.root)
     try:
       os.fchmod(fd, 0o600)

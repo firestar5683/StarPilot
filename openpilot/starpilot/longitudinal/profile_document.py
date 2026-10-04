@@ -540,7 +540,7 @@ def update_personality_profile(
   return updated
 
 
-def active_personality_id(traffic_mode: bool, personality) -> str | None:
+def active_personality_id(traffic_mode: bool | None, personality) -> str | None:
   if type(traffic_mode) is not bool:
     return None
   if traffic_mode:

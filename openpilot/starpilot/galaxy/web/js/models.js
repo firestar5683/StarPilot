@@ -512,7 +512,7 @@ export const ModelsPage = {
         </section>
 
         <template v-if="!sorted.length">
-          <div class="gx-card"><div class="gx-empty">No models match these filters. Try Both or clear the favourite filters.</div></div>
+          <div class="gx-card"><div class="gx-empty">No models match these filters. Try Both or clear the favorite filters.</div></div>
         </template>
         <template v-else>
           <div class="gx-card-grid">

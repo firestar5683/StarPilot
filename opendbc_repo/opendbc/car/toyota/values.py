@@ -248,7 +248,7 @@ class CAR(Platforms):
     dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
   )
   TOYOTA_PRIUS_RETROFIT = PlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Prius 2016-20 with TSS2 EPS retrofit", package="Custom retrofit; stock longitudinal")],
+    [ToyotaCommunityCarDocs("Toyota Prius 2016-20", package="TSS2 EPS retrofit; stock longitudinal")],
     TOYOTA_PRIUS.specs,
     dbc_dict("toyota_nodsu_pt_generated", "toyota_adas"),
   )

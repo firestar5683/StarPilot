@@ -1,12 +1,13 @@
 """Durable, reversible preparation of saved steering preferences."""
 
 import base64
-import fcntl
 import json
 import os
 from pathlib import Path
 import tempfile
+from typing import Any, Literal
 
+from openpilot.starpilot.saved_document import acquire_native_lock
 from openpilot.starpilot.saved_source import read_saved
 
 KEY = 'TuningPreparationState'
@@ -17,7 +18,7 @@ def encode_values(values):
   return {key: None if value is None else base64.b64encode(value).decode() for key, value in values.items()}
 
 
-def decode(raw, keys):
+def decode(raw, keys) -> dict[str, Any] | Literal[False] | None:
   if raw is None:
     return None
   try:
@@ -60,7 +61,7 @@ def transition(params, vehicle, sources, desired, journal_raw, enabled, authoriz
   root = Path(params.get_param_path(KEY)).parent.parent
   try:
     with (root / '.lock').open('a') as lock:
-      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      acquire_native_lock(lock.fileno())
       if not authorized() or read_saved(params, KEY, LIMIT) != (journal_raw, True):
         return False
       journal = decode(journal_raw, sources)
@@ -71,7 +72,8 @@ def transition(params, vehicle, sources, desired, journal_raw, enabled, authoriz
       if journal is None:
         if not enabled:
           return True
-        journal = {'version': 1, 'vehicle': vehicle, 'prior': sources, 'prepared': desired}
+        created: dict[str, Any] = {'version': 1, 'vehicle': vehicle, 'prior': sources, 'prepared': desired}
+        journal = created
         stored = {**journal, 'prior': encode_values(sources), 'prepared': encode_values(desired)}
         replace_saved(params, KEY, json.dumps(stored, sort_keys=True, separators=(',', ':')).encode())
       if journal['vehicle'] != vehicle:

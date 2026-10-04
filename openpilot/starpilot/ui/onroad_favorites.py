@@ -1,5 +1,7 @@
 """Native Quick Select gestures and presentation over supplied owner snapshots."""
 
+from typing import Any
+
 from dataclasses import dataclass
 import math
 from collections.abc import Callable
@@ -24,7 +26,7 @@ class OnroadFavorites:
     self.fonts = fonts
     self.profile = fonts.profile
     self.emit = emit
-    self.data = {"revision": "", "slots": [], "options": []}
+    self.data: dict[str, Any] = {"revision": "", "slots": [], "options": []}
     self.mode = "collapsed"
     self.selected = None
     self.editing = None
@@ -344,6 +346,7 @@ class OnroadFavorites:
         rl.draw_ring(c, 52 * s, (52 + 24 * elapsed) * s, 0, 360, 32, rl.Color(214, 192, 255, round(180 * (1 - elapsed))))
 
   def _picker(self):
+    assert self.selected is not None
     s = self.scale
     panel, close, cells, prev, nxt = self.picker_geometry()
     rl.draw_rectangle_rec(rl.Rectangle(*self.rect), rl.Color(4, 4, 10, 188))

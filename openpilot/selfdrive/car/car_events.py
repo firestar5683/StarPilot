@@ -27,9 +27,6 @@ class CarEvents:
       return Events()
 
     events = self.create_common_events(CS, CS_prev)
-    if self.CP.brand == "tesla":
-      from openpilot.starpilot.car.tesla.stock_events import add_stock_events
-      add_stock_events(events, self.CP, CS, CS_prev)
 
     if self.CP.brand == 'chrysler':
       # Low speed steer alert hysteresis logic

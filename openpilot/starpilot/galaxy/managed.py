@@ -41,6 +41,7 @@ def serve_managed(server, *, extra_servers=(), tunnel=None) -> None:
 
   def serve_tunnel():
     try:
+      assert tunnel is not None
       tunnel(stop)
       if not stop.is_set():
         errors.append(RuntimeError('Galaxy tunnel supervisor stopped'))

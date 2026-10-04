@@ -40,14 +40,19 @@ def supported_cp(CP) -> bool:
 
 
 def production_supported_cp(CP) -> bool:
-  """Exact production consumer scope; replay qualification does not expand UI."""
-  return (supported_cp(CP) and str(CP.carFingerprint) in IONIQ6_VEHICLES and
+  """Exact production consumer scope shared by the host and settings editor."""
+  return (supported_cp(CP) and str(CP.carFingerprint) in IONIQ6_VEHICLES | BOLT_VEHICLES and
           not CP.passive and not CP.notCar)
 
 
 def manual_overrides_present(CP, params) -> bool:
   """Numeric intent alone admits the custom host and invalidates stale learning."""
-  if params is None or not (production_supported_cp(CP) or os.getenv('TORQUE_REPLAY_RUNTIME') == '1' and supported_cp(CP)):
+  if params is None:
+    return False
+  if str(CP.carFingerprint) in BOLT_VEHICLES:
+    if not runtime_enabled(CP, params):
+      return False
+  elif not (production_supported_cp(CP) or os.getenv('TORQUE_REPLAY_RUNTIME') == '1' and supported_cp(CP)):
     return False
   settings = read_settings(params, TorqueHost(params, CP).vehicle)
   return settings.valid and (settings.user_factor is not None or settings.user_friction is not None)
@@ -59,12 +64,8 @@ def runtime_enabled(CP, params=None) -> bool:
   if str(CP.carFingerprint) in BOLT_VEHICLES:
     if params is None:
       return False
-    try:
-      advanced = _bool(_raw(params, 'AdvancedLateralTune'), False)
-    except (OSError, ValueError):
-      return False
     settings = read_settings(params, TorqueHost(params, CP).vehicle)
-    return advanced and settings.valid and settings.user_friction is not None
+    return settings.valid and settings.user_friction is not None
   if os.getenv('TORQUE_REPLAY_RUNTIME') == '1':
     return True
   # Preserve native/default startup behavior. A first custom edit is saved for

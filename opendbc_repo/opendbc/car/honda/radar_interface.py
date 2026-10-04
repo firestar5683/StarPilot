@@ -52,6 +52,8 @@ class RadarInterface(RadarInterfaceBase):
     return rr
 
   def _update(self, updated_messages):
+    if self.bosch_a is not None:
+      return self.bosch_a._update_bosch_a(updated_messages)
     ret = structs.RadarData()
 
     for ii in sorted(updated_messages):

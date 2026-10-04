@@ -94,7 +94,7 @@ class ModelRecoveryOwner:
       self.camera_progress_since = 0
       self.last_cameras = ()
       return None
-    cameras_advance = bool(self.last_cameras and all(t > pt and f > pf for (t, f), (pt, pf) in zip(e.cameras, self.last_cameras)))
+    cameras_advance = bool(self.last_cameras and all(t > pt and f > pf for (t, f), (pt, pf) in zip(e.cameras, self.last_cameras, strict=True)))
     if cameras_advance:
       if not self.camera_progress_since:
         self.camera_progress_since = e.now_ns
@@ -104,7 +104,7 @@ class ModelRecoveryOwner:
     output = (e.model_ns, e.driving_ns)
     valid_output = (e.output_valid and e.output_big and all(e.loaded_ns <= t <= e.now_ns for t in output) and
                     e.now_ns - min(output) <= CAMERA_MAX_AGE_NS)
-    if valid_output and all(t > old for t, old in zip(output, self.last_output)):
+    if valid_output and all(t > old for t, old in zip(output, self.last_output, strict=True)):
       if not self.armed and self.last_progress_ns and e.now_ns - self.last_progress_ns > ARM_MAX_GAP_NS:
         self.first_output_ns = 0
       if not self.first_output_ns:

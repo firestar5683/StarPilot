@@ -106,7 +106,6 @@ def apply_learning(params, kind: str, expected_sources: tuple[tuple[str, bytes |
   current, legacy, master = (raw for _key, raw in sources)
   if master not in (None, b'0', b'1'):
     return ActionResult(False, 'invalid_curve_switch')
-  loaded = _loaded(sources)
   if kind == 'curve_reset' and current is None and legacy is None:
     return ActionResult(False, 'no_saved_learning')
   document = LearnedCurve().document()

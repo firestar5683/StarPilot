@@ -51,7 +51,7 @@ class SoundDownloads:
     self._closed = False
     self._thread = None
     self._lock_file = None
-    self._job = None
+    self._job: dict | None = None
     try:
       with Path(catalog_path).open("rb") as source:
         raw = source.read(65537)
@@ -162,6 +162,8 @@ class SoundDownloads:
       raise _Cancelled()
 
   def _run(self, pack: dict):
+    job = self._job
+    assert job is not None
     stage = None
     try:
       stage = Path(tempfile.mkdtemp(prefix=".sound-download-", dir=self.root))
@@ -179,12 +181,12 @@ class SoundDownloads:
             digest.update(chunk)
             remaining -= len(chunk)
             with self._lock:
-              self._job["bytes"] = pack["size"] - remaining
+              job["bytes"] = pack["size"] - remaining
           self._check_active()
           if response.read(1):
             raise ValueError("archive length mismatch")
       with self._lock:
-        self._job["state"] = "verifying"
+        job["state"] = "verifying"
       if digest.hexdigest() != pack["sha256"]:
         raise ValueError("archive checksum mismatch")
       sounds = stage / "sounds"
@@ -197,17 +199,17 @@ class SoundDownloads:
           raise ValueError("sound pack already exists")
         os.rename(stage, self.root / pack["id"])
         stage = None
-        self._job["state"] = "complete"
+        job["state"] = "complete"
     except _Cancelled:
       with self._lock:
-        self._job["state"] = "cancelled"
+        job["state"] = "cancelled"
     except Exception as exc:
       with self._lock:
         if self._cancel.is_set() or not self._safe_parked():
-          self._job["state"] = "cancelled"
+          job["state"] = "cancelled"
         else:
-          self._job["state"] = "failed"
-          self._job["error"] = str(exc) or "download failed"
+          job["state"] = "failed"
+          job["error"] = str(exc) or "download failed"
     finally:
       with self._lock:
         lock_file, self._lock_file = self._lock_file, None

@@ -1055,7 +1055,7 @@ class Supervisor:
         total_h = target_logo_h + gap + text_h
         start_y = max(8, (request.height - total_h) // 2)
         logo_x = (request.width - logo_w) // 2
-        canvas.paste(logo_resized, (logo_x, start_y), logo_resized)
+        canvas.paste(logo_resized, (logo_x, int(start_y)), logo_resized)
         text_y = start_y + target_logo_h + gap
       else:
         text_y = (request.height - text_h) // 2

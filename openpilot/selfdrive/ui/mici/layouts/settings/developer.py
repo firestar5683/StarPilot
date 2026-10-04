@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from openpilot.common.params import Params
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle, BigParamControl, BigCircleParamControl, GreyBigButton
@@ -31,6 +32,8 @@ class AlphaLongConfirmPage(NavScroller):
 class DeveloperLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
+    if not isinstance(ui_state.params, Params):
+      raise RuntimeError("Developer settings require the device UI")
     self._ssh_fetcher = SshKeyFetcher(ui_state.params)
 
     def github_username_callback(username: str):

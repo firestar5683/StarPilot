@@ -56,7 +56,7 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
       raise RuntimeError("Enable Android Auto under Toggles → Android Auto first")
   if command in AUTHENTICATED_COMMANDS:
     source = request.get('source')
-    if verifier is None or not verifier.valid(source):
+    if not isinstance(source, str) or verifier is None or not verifier.valid(source):
       raise RuntimeError('Authenticated Galaxy Android Auto source required')
     if command != 'bluetooth_action':
       supervisor.bind_source_session(('galaxy', source))
@@ -94,9 +94,15 @@ def handle(supervisor: Supervisor, request: dict[str, Any], verifier: GalaxySour
   elif command == "pairing_status":
     return {"pairing": supervisor.pairing_status()}
   elif command == "pair_device":
-    supervisor.pair_device(request.get("address"))
+    address = request.get("address")
+    if not isinstance(address, str):
+      raise ValueError("Invalid Bluetooth address")
+    supervisor.pair_device(address)
   elif command == "pairing_response":
-    supervisor.pairing_response(request.get('prompt_id'), request.get('accepted'), request.get('value', ''))
+    prompt, accepted = request.get('prompt_id'), request.get('accepted')
+    if not isinstance(prompt, str) or type(accepted) is not bool:
+      raise ValueError('Invalid pairing response')
+    supervisor.pairing_response(prompt, accepted, request.get('value', ''))
   elif command == "cancel_pairing":
     supervisor.cancel_pairing()
   elif command == "devices":

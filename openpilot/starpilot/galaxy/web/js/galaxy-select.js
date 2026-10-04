@@ -12,7 +12,7 @@ export const GalaxySelect = {
     buttonId() { return this.$attrs.id || this.uid },
     nativeAttrs() {
       const attrs = { ...this.$attrs }
-      for (const key of ["class", "style", "id", "aria-label", "aria-labelledby", "aria-describedby"]) delete attrs[key]
+      for (const key of ["class", "style", "id", "aria-label", "aria-labeledby", "aria-describedby"]) delete attrs[key]
       return attrs
     },
   },
@@ -26,13 +26,13 @@ export const GalaxySelect = {
       this.selected = native.value
       this.label = native.selectedOptions[0]?.dataset?.collapsedLabel || native.selectedOptions[0]?.label || "Choose an option"
       const button = this.$refs.button
-      const labelled = this.$attrs["aria-labelledby"]?.split(/\s+/).map(id => document.getElementById(id)?.textContent || "").join(" ")
+      const labeled = this.$attrs["aria-labeledby"]?.split(/\s+/).map(id => document.getElementById(id)?.textContent || "").join(" ")
       const labels = [...new Set([...(button?.labels || []), button?.closest("label")].filter(Boolean))].map(label => {
         const copy = label.cloneNode(true)
         copy.querySelectorAll(".gx-select, select, button").forEach(node => node.remove())
         return copy.textContent.trim()
       }).filter(Boolean).join(" ")
-      this.name = this.$attrs["aria-label"] || labelled || labels || button?.closest(".gx-row")?.querySelector(".gx-row__label")?.textContent || this.$attrs.title || "Choose an option"
+      this.name = this.$attrs["aria-label"] || labeled || labels || button?.closest(".gx-row")?.querySelector(".gx-row__label")?.textContent || this.$attrs.title || "Choose an option"
       if (this.disabled && this.open) this.close()
     },
     async show(event) {

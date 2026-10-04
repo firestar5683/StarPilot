@@ -317,7 +317,8 @@ class OnroadInput:
       px, py, request = self._slc_press
       current = next((item for item in slc_controls(self.profile, state) if item.request == request), None)
       card_accept = (self.profile == Profile.LARGE and request.kind == SlcActionKind.ACCEPT and
-                     _inside_widget(x, y, state, "cruise_limits", large_limit_bounds(state)) and _inside_widget(px, py, state, "cruise_limits", large_limit_bounds(state)))
+                     _inside_widget(x, y, state, "cruise_limits", large_limit_bounds(state)) and
+                     _inside_widget(px, py, state, "cruise_limits", large_limit_bounds(state)))
       in_control = current is not None and current.bounds[0] <= x <= current.bounds[2] and current.bounds[1] <= y <= current.bounds[3]
       if current is None or abs(x - px) > 5 or abs(y - py) > 5 or not (card_accept or in_control):
         self.cancel()

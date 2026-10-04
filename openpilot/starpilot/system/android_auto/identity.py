@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 DATA_DIR = Path(os.environ.get("ANDROID_AUTO_DIR", "/data/android_auto"))
 IDENTITY_DIR = DATA_DIR / "identity"
@@ -115,7 +116,7 @@ DEFAULT_CONFIG = {
 
 def load_config(path: Path | None = None) -> dict:
   path = path or CONFIG_PATH
-  config = dict(DEFAULT_CONFIG)
+  config: dict[str, Any] = dict(DEFAULT_CONFIG)
   try:
     stored = json.loads(path.read_text())
     if isinstance(stored, dict):
