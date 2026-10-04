@@ -1,6 +1,6 @@
 import numpy as np
 from typing import cast
-from collections import defaultdict
+from collections import defaultdict, deque
 from math import cos, sin
 from dataclasses import dataclass
 from opendbc.can import CANParser
@@ -8,6 +8,7 @@ from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import DBC, RADAR
+from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
 from opendbc.car.interfaces import RadarInterfaceBase
 
 DELPHI_ESR_RADAR_MSGS = list(range(0x500, 0x540))
@@ -100,6 +101,8 @@ class RadarInterface(RadarInterfaceBase):
 
     self.points: list[list[float]] = []
     self.clusters: list[Cluster] = []
+    self.generic_canfd_lead = generic_canfd_qualified(CP)
+    self.v_rel_history = deque(maxlen=20)
 
     self.updated_messages = set()
     self.radar = DBC[CP.carFingerprint].get(Bus.radar)
@@ -149,6 +152,9 @@ class RadarInterface(RadarInterfaceBase):
     return ret
 
   def _update_steer_assist(self):
+    if self.generic_canfd_lead:
+      self._update_generic_steer_assist()
+      return
     msg = self.rcp.vl["Steer_Assist_Data"]
     if not self.rcp.can_valid or msg["CmbbObjConfdnc_D_Stat"] <= 0 or msg["CmbbObjDistLong_L_Actl"] <= 0:
       self.pts.pop(0, None)
@@ -160,6 +166,34 @@ class RadarInterface(RadarInterfaceBase):
     self.pts[0].dRel = msg["CmbbObjDistLong_L_Actl"]
     self.pts[0].yRel = 0.
     self.pts[0].vRel = msg["CmbbObjRelLong_V_Actl"]
+
+  def _update_generic_steer_assist(self):
+    # Source-derived five-family camera lead owner. Retain current parser health
+    # and positive-distance gates; no change to Mach-E/Mondeo lead behavior.
+    msg = self.rcp.vl["Steer_Assist_Data"]
+    if not self.rcp.can_valid or msg["CmbbObjConfdnc_D_Stat"] <= 0 or msg["CmbbObjDistLong_L_Actl"] <= 0:
+      self.pts.pop(0, None)
+      self.v_rel_history.clear()
+      return
+    distance = msg["CmbbObjDistLong_L_Actl"]
+    velocity = msg["CmbbObjRelLong_V_Actl"]
+    new_track = 0 not in self.pts
+    if new_track:
+      self.pts[0] = structs.RadarData.RadarPoint()
+      self.pts[0].trackId = self.track_id
+      self.track_id += 1
+    elif abs(velocity) < 1e-2:
+      self.v_rel_history.append(distance - self.pts[0].dRel)
+      velocity = sum(self.v_rel_history)
+    else:
+      self.v_rel_history.clear()
+    if not new_track and (abs(self.pts[0].vRel - velocity) > 2.0 or abs(self.pts[0].dRel - distance) > 5.0):
+      self.pts[0].trackId = self.track_id
+      self.track_id += 1
+      self.v_rel_history.clear()
+    self.pts[0].dRel = distance
+    self.pts[0].yRel = msg["CmbbObjDistLat_L_Actl"]
+    self.pts[0].vRel = velocity
 
   def _update_delphi_esr(self):
     for ii in sorted(self.updated_messages):

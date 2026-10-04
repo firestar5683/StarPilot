@@ -3,6 +3,7 @@
 from opendbc.car import structs
 from opendbc.car.ford.values import CAR, FordFlags, FordSafetyFlags
 from opendbc.car.ford.classic_lateral import CLASSIC_EXTENDED_CARS
+from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
 
 
 class FordStockCruiseButton:
@@ -35,10 +36,12 @@ def qualified(CP) -> bool:
                                   CP.safetyConfigs[0].safetyParam != 0):
     return False
   safety = CP.safetyConfigs[-1]
-  if safety.safetyModel != structs.CarParams.SafetyModel.ford or safety.safetyParam not in (2, 8, 10, 12, 18, 32):
+  if safety.safetyModel != structs.CarParams.SafetyModel.ford or safety.safetyParam not in (2, 8, 10, 12, 18, 32, 66):
     return False
   if safety.safetyModel == structs.CarParams.SafetyModel.ford and safety.safetyParam == 32:
     return CP.carFingerprint in CLASSIC_EXTENDED_CARS and not CP.flags & ~int(FordFlags.HAS_BSM)
+  if safety.safetyParam == 66:
+    return generic_canfd_qualified(CP)
   expected = (int(FordSafetyFlags.CANFD) if CP.flags & FordFlags.CANFD else 0)
   expected |= int(FordSafetyFlags.NEW_PORT) if CP.flags & FordFlags.NEW_PORT else 0
   expected |= int(FordSafetyFlags.LKA_STEERING) if CP.flags & FordFlags.LKA_STEERING else 0

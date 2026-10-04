@@ -48,6 +48,7 @@ class FordSafetyFlags(IntFlag):
   MACH_E_EXTENDED = 16
   CLASSIC_EXTENDED = 32
   EXPLORER_EXTENDED = CLASSIC_EXTENDED  # Existing public profile spelling.
+  GENERIC_CANFD_EXTENDED = 64
 
 
 class FordFlags(IntFlag):
@@ -160,6 +161,7 @@ class CAR(Platforms):
       FordCarDocs("Ford Kuga Plug-in Hybrid 2024", "All"),
     ],
     CarSpecs(mass=1750, wheelbase=2.71, steerRatio=16.7),
+    dbc_dict={Bus.pt: 'ford_lincoln_base_pt', Bus.radar: RADAR.STEER_ASSIST_DATA},
   )
   FORD_EXPLORER_MK6 = FordPlatformConfig(
     [
@@ -171,14 +173,17 @@ class CAR(Platforms):
   FORD_EXPEDITION_MK4 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford Expedition 2022-24", "Co-Pilot360 Assist 2.0", hybrid=False)],
     CarSpecs(mass=2000, wheelbase=3.69, steerRatio=17.0),
+    dbc_dict={Bus.pt: 'ford_lincoln_base_pt', Bus.radar: RADAR.STEER_ASSIST_DATA},
   )
   FORD_F_150_MK14 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford F-150 2021-23", "Co-Pilot360 Assist 2.0", hybrid=True)],
-    CarSpecs(mass=2000, wheelbase=3.69, steerRatio=17.0),
+    CarSpecs(mass=3334, wheelbase=3.99, steerRatio=17.0),
+    dbc_dict={Bus.pt: 'ford_lincoln_base_pt', Bus.radar: RADAR.STEER_ASSIST_DATA},
   )
   FORD_F_150_LIGHTNING_MK1 = FordF150LightningPlatform(
     [FordCarDocs("Ford F-150 Lightning 2022-23", "Co-Pilot360 Assist 2.0")],
     CarSpecs(mass=2948, wheelbase=3.70, steerRatio=16.9),
+    dbc_dict={Bus.pt: 'ford_lincoln_base_pt', Bus.radar: RADAR.STEER_ASSIST_DATA},
   )
   FORD_FOCUS_MK4 = FordPlatformConfig(
     [FordCarDocs("Ford Focus 2018-22", "Adaptive Cruise Control with Lane Centering", footnotes=[Footnote.FOCUS], hybrid=True)],  # mHEV only
@@ -204,6 +209,7 @@ class CAR(Platforms):
   FORD_RANGER_MK2 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford Ranger 2024", "Adaptive Cruise Control with Lane Centering", setup_video="https://www.youtube.com/watch?v=2oJlXCKYOy0")],
     CarSpecs(mass=2000, wheelbase=3.27, steerRatio=17.0),
+    dbc_dict={Bus.pt: 'ford_lincoln_base_pt', Bus.radar: RADAR.STEER_ASSIST_DATA},
   )
   FORD_TRANSIT_MK5 = FordLKASteeringPlatformConfig(
     [FordCarDocs("Ford Transit 2025", "Co-Pilot360 Assist+")],

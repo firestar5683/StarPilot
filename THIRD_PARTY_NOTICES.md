@@ -69,4 +69,4 @@ the exclusion of the other.
 
 ## BluePilot Ford support
 
-The Ford lateral strategies, CAN constructors and native checks include work adapted from BluePilot's `bp-7.0` source, through StarPilot `2efe6017bfe14cee4807833e05f9a7f6ba255cdb`. See [CREDITS.md](CREDITS.md#ford-support-adapted-from-bluepilot) for contributors and source revisions. The upstream extension-file and `LICENSE.md` notices reproduced above also apply to the Ford extension sources; they are retained without resolving the difference between their published license descriptions.
+The Ford lateral strategies, CAN constructors, camera-radar filtering and native checks include work adapted from BluePilot's `bp-7.0` source, through StarPilot `2efe6017bfe14cee4807833e05f9a7f6ba255cdb`. See [CREDITS.md](CREDITS.md#ford-support-adapted-from-bluepilot) for contributors and source revisions. The upstream extension-file and `LICENSE.md` notices reproduced above also apply to the Ford extension sources; they are retained without resolving the difference between their published license descriptions.

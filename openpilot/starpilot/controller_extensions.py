@@ -75,7 +75,8 @@ def configure_controller(CI, params):
     controller.manual_turn_inputs = ManualTurnInputs(params)
 
   from opendbc.car.ford.classic_lateral import qualified as classic_qualified
-  if controller is not None and classic_qualified(cp) and getattr(controller, "classic_lateral", None) is not None:
+  from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
+  if controller is not None and (classic_qualified(cp) or generic_canfd_qualified(cp)) and getattr(controller, "classic_lateral", None) is not None:
     controller.manual_turn_inputs = ManualTurnInputs(params)
 
   from opendbc.car.hyundai.g90_lead import eligible as g90_lead_eligible
