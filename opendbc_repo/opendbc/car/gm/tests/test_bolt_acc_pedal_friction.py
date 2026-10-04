@@ -1,6 +1,5 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from opendbc.car import gen_empty_fingerprint, structs
 from opendbc.car.gm.carcontroller import CarController, bolt_acc_pedal_friction_brake
@@ -11,9 +10,7 @@ from opendbc.car.gm.values import CAR, DBC
 def pedal_params(candidate=CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
   fingerprint = gen_empty_fingerprint()
   fingerprint[0][0x201] = 6
-  with patch("opendbc.car.gm.interface.Params") as params:
-    params.return_value.get_bool.return_value = True
-    return CarInterface.get_params(candidate, fingerprint, [], False, False, False)
+  return CarInterface.get_params(candidate, fingerprint, [], False, False, False)
 
 
 def brake_frames(messages):
@@ -50,10 +47,8 @@ class TestBoltAccPedalFriction(unittest.TestCase):
                          cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
                          loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
                          buttons_counter=0,
-                         pscm_status={key: 0 for key in ("HandsOffSWDetectionMode", "HandsOffSWlDetectionStatus",
-                                                            "LKATorqueDeliveredStatus", "LKADriverAppldTrq",
-                                                            "LKATorqueDelivered", "LKATotalTorqueDelivered",
-                                                            "RollingCounter", "PSCMStatusChecksum")})
+                         pscm_status=dict.fromkeys(("HandsOffSWDetectionMode", "HandsOffSWlDetectionStatus", "LKATorqueDeliveredStatus",
+                                        "LKADriverAppldTrq", "LKATorqueDelivered", "LKATotalTorqueDelivered", "RollingCounter", "PSCMStatusChecksum"), 0))
     return controller, control, state, cs
 
   def step(self, fixture, frame, now=1_000_000_000):

@@ -766,8 +766,13 @@ class CarController(CarControllerBase):
       self.volt_cc_prev_enabled = bool(CC.enabled)
       cancel_ready = (isinstance(physical, (VoltCcPhysical, PhysicalObservation)) and physical.sources_current(now_nanos) and physical.neutral_button and
                       CS.out.canValid and not CS.out.canTimeout and CS.out.cruiseState.available and CS.out.cruiseState.enabled)
+      stock_cancel_requested = False
+      if self.ordinary_cc_profile and not self.CP.openpilotLongitudinalControl:
+        self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
+        stock_cancel_requested = self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES
       cancel_sent = False
-      if (self.volt_cc_cancel_pending and (not self.ordinary_cc_profile or self.CP.openpilotLongitudinalControl) and
+      if ((self.volt_cc_cancel_pending or stock_cancel_requested) and
+          (not self.ordinary_cc_profile or self.CP.openpilotLongitudinalControl or stock_cancel_requested) and
           cancel_ready and (self.frame - self.volt_cc_last_cancel_frame) * DT_CTRL > .04 and
           physical.button_credit_ns > 0 and physical.button_credit_ns != self.volt_cc_consumed_source_ns):
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))

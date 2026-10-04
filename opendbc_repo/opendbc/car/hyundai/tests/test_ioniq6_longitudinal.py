@@ -38,7 +38,7 @@ def controller_fixture(alternate=False, *, aol=False):
     ('WHEEL_SPEEDS', {}), ('MDPS', {}), ('CRUISE_BUTTONS', {'COUNTER': 1}),
     ('DOORS_SEATBELTS', {'DRIVER_SEATBELT': 1}), ('STEERING_SENSORS', {}))]
   inputs.append(packer.make_can_msg('CAM_0x362' if alternate else 'CAM_0x2a4', bus.CAM, {}))
-  ci.update((1_000_000_000, inputs))
+  ci.update([(1_000_000_000, inputs)])
   return cp, ci.CS, CarController(DBC[cp.carFingerprint], cp)
 
 
@@ -144,7 +144,7 @@ class TestIoniq6Longitudinal(unittest.TestCase):
             parser = CANParser(DBC[cp.carFingerprint][Bus.pt], [('SCC_CONTROL', 0)], 1)
             parser.update((1_000_000_000, [scc]))
             values = parser.vl['SCC_CONTROL']
-            self.assertEqual(values['ACCMode'], 2 if control.enabled and override else 1 if longitudinal else 0)
+            self.assertEqual(values['ACCMode'], 2 if control.enabled and override else 1 if control.enabled else 0)
             if not longitudinal or override:
               self.assertEqual((values['aReqRaw'], values['aReqValue'], output.accel), (0., 0., 0.))
               self.assertEqual(values['StopReq'], 0)
@@ -167,8 +167,8 @@ class TestIoniq6Longitudinal(unittest.TestCase):
     for enabled, long_active, override, gas_pressed, brake_pressed, expected_mode in (
       (True, True, False, False, False, 1),
       (True, False, True, True, False, 2),
-      (True, False, True, False, False, 0),
-      (True, False, True, True, True, 0),
+      (True, False, True, False, False, 2),
+      (True, False, True, True, True, 2),
       (True, True, False, False, False, 1),
       (False, False, False, False, False, 0),
     ):

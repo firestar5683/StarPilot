@@ -140,3 +140,11 @@ def configure_controller(CI, params):
     except OSError:
       controller.ev9_lead_inputs = None
       cloudlog.exception('Optional EV9 lead input transport unavailable')
+
+  if controller is not None and getattr(controller, 'ioniq6_longitudinal', None) is not None:
+    from openpilot.starpilot.longitudinal.canfd_lead import CANFDLeadInputs
+    try:
+      controller.ioniq6_lead_inputs = CANFDLeadInputs()
+    except OSError:
+      controller.ioniq6_lead_inputs = None
+      cloudlog.exception('Optional Ioniq 6 lead input transport unavailable')

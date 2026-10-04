@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 from math import fabs, exp
 import numpy as np
-from openpilot.common.params import Params, UnknownKeyName
 
 from opendbc.car import get_safety_config, structs
+from opendbc.car.pedal import supported_pedal_detected
+from opendbc.car.gm.pedal_capability import pedal_candidate
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
@@ -33,6 +34,10 @@ class CarInterface(CarInterfaceBase):
 
   DRIVABLE_GEARS = (structs.CarState.GearShifter.sport, structs.CarState.GearShifter.low,
                     structs.CarState.GearShifter.eco, structs.CarState.GearShifter.manumatic)
+
+  @classmethod
+  def get_params(cls, candidate, fingerprint, car_fw, alpha_long, is_release, docs):
+    return super().get_params(pedal_candidate(candidate, fingerprint), fingerprint, car_fw, alpha_long, is_release, docs)
 
   def update(self, can_packets):
     if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP) and not self.CP.openpilotLongitudinalControl:
@@ -342,13 +347,7 @@ class CarInterface(CarInterfaceBase):
       if candidate in PEDAL_BOLT_CAR:
         ret.openpilotLongitudinalControl = False
         ret.safetyConfigs[0].safetyParam &= ~GMSafetyFlags.HW_CAM_LONG.value
-        # A platform selection and a fingerprinted interceptor are separate facts.
-        # The saved opt-in defaults off; an absent registry key also fails closed.
-        try:
-          pedal_opt_in = Params().get_bool("GMPedalLongitudinal")
-        except UnknownKeyName:
-          pedal_opt_in = False
-        pedal_long = pedal_opt_in and 0x201 in fingerprint[CanBus.POWERTRAIN]
+        pedal_long = supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True)
         if candidate in NO_ACC_BOLT_CAR:
           ret.pcmCruise = False
           ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.NO_ACC.value
@@ -602,11 +601,7 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam = BOLT_CC_WORDS[candidate][camera_removed]
       ret.stopAccel = -0.25
     if candidate in ORDINARY_CC_CAR or candidate == CAR.CHEVROLET_SILVERADO_CC:
-      try:
-        pedal_opt_in = Params().get_bool("GMPedalLongitudinal")
-      except UnknownKeyName:
-        pedal_opt_in = False
-      if pedal_opt_in and fingerprint.get(CanBus.POWERTRAIN, {}).get(0x201) == 6:
+      if supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
         camera_length = fingerprint.get(CanBus.CAMERA, {}).get(0x320)
         removed = camera_length is None
         be_length = fingerprint.get(CanBus.POWERTRAIN, {}).get(0xBE)

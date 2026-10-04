@@ -1,3 +1,4 @@
+from opendbc.car.pedal import supported_pedal_detected
 from opendbc.car.hyundai.classic_scc_aol import CLASSIC_SCC_IDS
 from opendbc.car import Bus, get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
@@ -270,7 +271,7 @@ class CarInterface(CarInterfaceBase):
     elif ret.flags & HyundaiFlags.FCEV:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.FCEV_GAS.value
 
-    if (candidate == CAR.KIA_RAY_EV and fingerprint[0].get(0x201) == 6 and
+    if (supported_pedal_detected(fingerprint, 0, supported=candidate == CAR.KIA_RAY_EV) and
         ret.safetyConfigs[-1].safetyParam == int(HyundaiSafetyFlags.NON_SCC | HyundaiSafetyFlags.EV_GAS |
                                                HyundaiSafetyFlags.HAS_LDA_BUTTON | HyundaiSafetyFlags.CAN_REFRESH_MSGS)):
       ret.alphaLongitudinalAvailable = True
@@ -316,13 +317,16 @@ class CarInterface(CarInterfaceBase):
     return ret
 
   def update(self, can_packets):
-    if self.CS.gv70_camera_lead is not None or self.CS.ev9_camera_lead is not None or self.CS.forte_lkas_sources is not None:
+    if (self.CS.gv70_camera_lead is not None or self.CS.ev9_camera_lead is not None or
+        self.CS.ioniq6_camera_lead is not None or self.CS.forte_lkas_sources is not None):
       # This isolated optional parser must never join required controls health.
       can_packets = list(can_packets)
       if self.CS.gv70_camera_lead is not None:
         self.CS.gv70_camera_lead.update(can_packets)
       if self.CS.ev9_camera_lead is not None:
         self.CS.ev9_camera_lead.update(can_packets)
+      if self.CS.ioniq6_camera_lead is not None:
+        self.CS.ioniq6_camera_lead.update(can_packets)
       if self.CS.forte_lkas_sources is not None:
         self.CS.forte_lkas_sources.update(can_packets)
     ret = super().update(can_packets)
