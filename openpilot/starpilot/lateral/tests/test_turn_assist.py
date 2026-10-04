@@ -91,9 +91,9 @@ def test_startup_saved_exact_on_defaults_and_safe_mode():
       if raw is not None:
         path.write_bytes(raw)
       snapshot = VehicleStartupPreferences.read(source, enabled=True)
-      assert snapshot.turn_assist == (raw == b'1')
+      assert snapshot.turn_assist == (raw in (None, b'1'))
       path.write_bytes(b'0')
-      assert snapshot.turn_assist == (raw == b'1')
+      assert snapshot.turn_assist == (raw in (None, b'1'))
     path.write_bytes(b'1')
     assert not VehicleStartupPreferences.read(source, enabled=False).turn_assist
     (Path(root) / 'SafeMode').write_bytes(b'1')
@@ -111,3 +111,29 @@ def test_nonfinite_minimum_does_not_admit_assist():
   for minimum in (float('nan'), float('inf')):
     _, lac, cs = controller(True, minimum=minimum)
     assert not selected_policy(lac).turn_assist_active(cs)
+
+
+def test_stock_assist_is_independent_of_tune_and_explicit_off():
+  cp, off, cs = controller(False, ControllerMode.STANDARD)
+  _, on, _ = controller(True, ControllerMode.STANDARD)
+  vm = VehicleModel(cp)
+  params = SimpleNamespace(angleOffsetDeg=0., roll=0.)
+  assert selected_policy(on) is None
+  assert on.pid._k_p == off.pid._k_p
+  assert on.torque_params.to_dict() == off.torque_params.to_dict()
+  off_output, _, _ = off.update(True, cs, vm, params, False, -.001, False, .1)
+  on_output, _, _ = on.update(True, cs, vm, params, False, -.001, False, .1)
+  assert off_output != on_output
+  assert abs(on_output) <= on.steer_max
+
+
+def test_explicit_off_survives_repeated_startup_reads():
+  with tempfile.TemporaryDirectory() as root:
+    source = SimpleNamespace(get_param_path=lambda key: str(Path(root) / key))
+    path = Path(root) / 'TurnAssist'
+    assert VehicleStartupPreferences.read(source, enabled=True).turn_assist
+    assert not path.exists()
+    path.write_bytes(b'0')
+    for _ in range(3):
+      assert not VehicleStartupPreferences.read(source, enabled=True).turn_assist
+      assert path.read_bytes() == b'0'

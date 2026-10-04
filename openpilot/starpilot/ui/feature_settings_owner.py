@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import replace
+from typing import Any
 import json
 import math
 
@@ -63,7 +64,7 @@ from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_c
 
 
 BOOL_DEFAULTS = {
-  "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": False,
+  "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
   "ReverseCruise": False, "ToyotaAutoHold": False, "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": False,
   "SLCConfirmation": False, "SLCConfirmationHigher": False, "SLCConfirmationLower": False,
@@ -118,7 +119,8 @@ class FeatureSettingsOwner:
       "feature_snapshot_reads", default=None)
     self.authority = authority
     self.vehicle_fingerprint = vehicle_fingerprint
-    self.vehicle_params = vehicle_params or (lambda: None)
+    self._vehicle_params_source = vehicle_params or (lambda: None)
+    self._snapshot_vehicle: ContextVar[tuple[Any] | None] = ContextVar("feature_snapshot_vehicle", default=None)
     self.vision_development = vision_development or (lambda: False)
     self.show_cruise_intervals = show_cruise_intervals
     self.torque = TorqueFeature(self)
@@ -151,6 +153,18 @@ class FeatureSettingsOwner:
       return None
     return None
 
+  def _selected_vehicle_params(self) -> Any:
+    selected = self._snapshot_vehicle.get()
+    return selected[0] if selected is not None else self._vehicle_params_source()
+
+  @property
+  def vehicle_params(self) -> Callable[[], Any]:
+    return self._selected_vehicle_params
+
+  @vehicle_params.setter
+  def vehicle_params(self, provider: Callable[[], Any]) -> None:
+    self._vehicle_params_source = provider
+
   def _pedal_setup_capability(self) -> tuple | None:
     from opendbc.car.gm.values import CAR, ORDINARY_CC_CAR, PEDAL_BOLT_CAR
     cp = self.vehicle_params()
@@ -163,15 +177,7 @@ class FeatureSettingsOwner:
       return None
 
   def _apply_pedal_setup(self, request: FeatureSettingsRequest) -> bool:
-    if not request.confirmation or request.value not in ("Off", "On") or request.dependencies:
-      return False
-    def authorized() -> bool:
-      return (bool(request.vehicle_fingerprint) and self.vehicle_fingerprint() == request.vehicle_fingerprint and
-              request.capability is not None and request.capability == self._pedal_setup_capability() and
-              self.authority("parked_preferences") and request.expected in (None, b"0", b"1"))
-    return commit_exact(self.params, key="GMPedalLongitudinal", max_bytes=8,
-                        raw=b"1" if request.value == "On" else b"0", expected=request.expected,
-                        authorized=authorized, temp_prefix=".gm-pedal-setup-").verified
+    return False
 
   def _bolt_disable_capability(self) -> tuple | None:
     from openpilot.starpilot.vehicle_preferences import bolt_disable_supported
@@ -443,21 +449,18 @@ class FeatureSettingsOwner:
     return saved.value if isinstance(saved.value, dict) else None, saved.raw, saved.valid
 
   def _turn_assist_row(self, configurable: bool) -> FeatureRow:
-    from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as selection_key, turn_assist_supported
+    from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
     capability = self.controller.capability()
-    selection = self.controller.row()
     cp = self.vehicle_params()
     supported = cp is not None and turn_assist_supported(cp)
-    selected = selection is not None and selection.value == "StarPilot vehicle tune"
-    row = self._bool_row("TurnAssist", "Turn Assist", configurable and self.authority("torque") and supported and selected and capability is not None)
-    return replace(row, capability=capability, dependencies=((selection_key, self._raw(selection_key)),),
+    row = self._bool_row("TurnAssist", "Turn Assist", configurable and self.authority("torque") and supported and capability is not None)
+    return replace(row, capability=capability, dependencies=(),
                    reason=row.reason if row.value not in ("On", "Off") else
                           ("Adds steering help during rolling low-speed turns, above about 0.1 mph or the vehicle minimum. " +
                            "Never at standstill. Applies next drive.") if row.available else
-                          "Select the StarPilot vehicle tune on a supported vehicle to change this setting")
+                          "Turn Assist is available on supported vehicles when settings can be changed")
 
   def _apply_turn_assist(self, request: FeatureSettingsRequest) -> bool:
-    from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as selection_key
     raw = self._raw("TurnAssist")
     row = self._turn_assist_row(self.authority("preferences"))
     if (request.value not in ("Off", "On") or not row.available or not row.choices or request.expected != raw or
@@ -467,7 +470,7 @@ class FeatureSettingsOwner:
     def authorized():
       fresh = self._turn_assist_row(self.authority("preferences"))
       return (fresh.available and fresh.capability == request.capability and fresh.dependencies == request.dependencies and
-              self.vehicle_fingerprint() == request.vehicle_fingerprint and self._raw(selection_key) == dict(request.dependencies)[selection_key])
+              self.vehicle_fingerprint() == request.vehicle_fingerprint)
     result = commit_exact(self.params, key="TurnAssist", max_bytes=128,
                           raw=b"1" if request.value == "On" else b"0", expected=raw,
                           authorized=authorized, temp_prefix=".turn-assist-")
@@ -475,11 +478,14 @@ class FeatureSettingsOwner:
 
   def snapshot(self, page: str, *, parked: bool, system_long: bool, lateral_context: bool, metric: bool,
                configure_while_driving: bool = False) -> FeatureSettingsState:
+    selected_vehicle = self._vehicle_params_source()
     token = self._snapshot_reads.set({})
+    vehicle_token = self._snapshot_vehicle.set((selected_vehicle,))
     try:
       return self._build_snapshot(page, parked=parked, system_long=system_long, lateral_context=lateral_context,
                                   metric=metric, configure_while_driving=configure_while_driving)
     finally:
+      self._snapshot_vehicle.reset(vehicle_token)
       self._snapshot_reads.reset(token)
 
   def _build_snapshot(self, page: str, *, parked: bool, system_long: bool, lateral_context: bool, metric: bool,
@@ -515,9 +521,11 @@ class FeatureSettingsOwner:
       rows = [replace(row, available=row.available and self._readable("ToyotaAutoHold"), capability=capability)] if capability is not None else []
       pedal_capability = self._pedal_setup_capability()
       if pedal_capability is not None:
-        row = self._bool_row("GMPedalLongitudinal", "Pedal Speed Control", parked and self.authority("parked_preferences"),
-                             "Applies after the next startup only when a compatible connected interceptor is detected")
-        rows.append(replace(row, available=row.available and self._readable("GMPedalLongitudinal"), capability=pedal_capability))
+        from opendbc.car.gm.values import GMFlags
+        active = bool(pedal_capability[2] & GMFlags.PEDAL_LONG)
+        rows.append(FeatureRow("GMPedalLongitudinal", "Pedal Speed Control", "Automatic" if active else "Not detected",
+                               available=False, reason="Activates automatically with a supported connected interceptor",
+                               capability=pedal_capability))
       bolt_capability = self._bolt_disable_capability()
       if bolt_capability is not None:
         row = self._bool_row("DisableOpenpilotLongitudinal", "Disable StarPilot Speed Control",
@@ -845,9 +853,11 @@ class FeatureSettingsOwner:
     # A request may arrive through a callback during assembly. Its compare and
     # authorization checks must still observe current sources independently.
     token = self._snapshot_reads.set(None)
+    vehicle_token = self._snapshot_vehicle.set(None)
     try:
       return self._apply(request)
     finally:
+      self._snapshot_vehicle.reset(vehicle_token)
       self._snapshot_reads.reset(token)
 
   def _apply(self, request: FeatureSettingsRequest) -> bool:

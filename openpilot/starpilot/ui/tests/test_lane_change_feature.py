@@ -38,7 +38,7 @@ class LaneChangeFeatureTests(unittest.TestCase):
     self.assertTrue(row.available)
     request = self.request(row)
     self.assertTrue(self.owner.apply(request))
-    self.assertTrue(read_saved(self.params).policy.one_per_signal)
+    self.assertFalse(read_saved(self.params).policy.one_per_signal)
     self.assertFalse(self.owner.apply(request))
     other = self.request(self.row(ENABLED), -1)
     self.cp.carVin = "CHANGED"
@@ -119,7 +119,7 @@ class LaneChangeFeatureTests(unittest.TestCase):
     self.assertTrue(self.owner.apply(self.request(speed)))
     self.assertEqual(round(read_saved(self.params).policy.minimum_speed_mps, 5), 6 * 0.44704)
     self.assertTrue(self.owner.apply(self.request(self.row(ONE))))
-    self.assertTrue(read_saved(self.params).policy.one_per_signal)
+    self.assertFalse(read_saved(self.params).policy.one_per_signal)
     self.assertTrue(self.owner.apply(self.request(self.row(ENABLED), -1)))
     self.assertFalse(read_saved(self.params).policy.enabled)
 
@@ -235,7 +235,7 @@ class LaneChangeFeatureTests(unittest.TestCase):
     with patch.object(saved_document, "read_saved", side_effect=unverified):
       self.assertFalse(self.owner.apply(request))
     self.assertEqual(calls, 3)
-    self.assertTrue(read_saved(self.params).policy.one_per_signal)
+    self.assertFalse(read_saved(self.params).policy.one_per_signal)
     self.assertEqual(decode(path.read_bytes()), read_saved(self.params).policy)
 
   def test_runtime_reads_saved_policy_next_session(self):
@@ -246,7 +246,7 @@ class LaneChangeFeatureTests(unittest.TestCase):
       self.assertEqual(source.call_count, 1)
       helper.update(SimpleNamespace(vEgo=0.0, leftBlinker=False, rightBlinker=False), False, 1.0)
       self.assertEqual(source.call_count, 1)
-    self.assertTrue(helper.policy.one_per_signal)
+    self.assertFalse(helper.policy.one_per_signal)
     self.assertEqual(helper.policy.minimum_speed_mps, LaneChangePolicy().minimum_speed_mps)
 
   def test_fifo_and_symlink_sources_are_unavailable_without_repair(self):
@@ -329,7 +329,7 @@ class LaneChangeFeatureTests(unittest.TestCase):
       self.assertIsNone(read_saved(self.params).raw)
       session._confirm_lane_change(request)
       dialogs[-1].callback(DialogResult.CONFIRM)
-      self.assertTrue(read_saved(self.params).policy.one_per_signal)
+      self.assertFalse(read_saved(self.params).policy.one_per_signal)
       session._confirm_lane_change(self.request(self.row(AUTO)))
       dialogs[-1].callback(DialogResult.CONFIRM)
       self.assertTrue(read_saved(self.params).policy.auto_lane_change)
@@ -399,8 +399,8 @@ class LaneChangeFeatureTests(unittest.TestCase):
       next(card for card in child.items if card.text == "one change per signal").click()
       dialog = stack.pop()
       dialog.callback(DialogResult.CONFIRM)
-      self.assertTrue(read_saved(self.params).policy.one_per_signal)
-      self.assertTrue(any(card.text == "one change per signal" and card.value.startswith("On") for card in child.items),
+      self.assertFalse(read_saved(self.params).policy.one_per_signal)
+      self.assertTrue(any(card.text == "one change per signal" and card.value.startswith("Off") for card in child.items),
                       repr([(card.text, card.value) for card in child.items]))
 
 
