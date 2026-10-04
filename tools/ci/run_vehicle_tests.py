@@ -112,6 +112,8 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ray_pedal.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_mvl_stock.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_mazda_stock_aol.py",
+  "opendbc_repo/opendbc/car/mazda/tests/test_stock_aol_pause.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_rdx_gas_cap.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_aol_source.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_aol_family.py",
