@@ -23,7 +23,7 @@ from opendbc.car.hyundai.g90_longitudinal import G90LongitudinalPolicy
 from opendbc.car.hyundai.gv70_longitudinal import is_gv70, scc_request, suppress_stock_cancel
 from opendbc.car.hyundai.g90_lead import G90LeadState, eligible as g90_lead_eligible
 from opendbc.car.hyundai.gv70_camera_lead import eligible as gv70_lead_eligible
-from opendbc.car.hyundai.canfd_lead import ABSENT
+from opendbc.car.hyundai.canfd_lead import select_lead, ABSENT
 from opendbc.car.hyundai.ccnc_ev_stock import replacement_requested
 from opendbc.car.hyundai.values import is_blended, HyundaiFlags, HyundaiSafetyFlags, Buttons, CarControllerParams, CAR
 from opendbc.car.interfaces import CarControllerBase
@@ -116,6 +116,7 @@ class CarController(CarControllerBase):
     self.ev9_legacy_envelope = LegacyAngleEnvelope() if self.ev9_longitudinal is not None else None
     self.ev9_angle_filter = FirstOrderFilter(0.0, 0.2, DT_CTRL) if self.ev9_longitudinal is not None else None
     self.ioniq6_accel_request = None
+    self.ioniq6_lead_inputs = None
     self.adrv_template = None
     self.gv70_stock_fallback = False
     self.gv70_lead_inputs = None
@@ -509,9 +510,13 @@ class CarController(CarControllerBase):
           acc_options = {"direct_accel": True, "raw_accel": request.raw_accel,
                          "jerk_upper": request.jerk_upper, "jerk_lower": request.jerk_lower}
         elif self.ioniq6_accel_request is not None:
-          acc_enabled = CC.enabled and (CC.longActive or (CC.cruiseControl.override and CS.out.gasPressed and not CS.out.brakePressed))
+          lead = (self.ioniq6_lead_inputs.update(CS.ioniq6_camera_lead, hud_control.leadVisible, now_nanos)
+                  if self.ioniq6_lead_inputs is not None else
+                  select_lead(None, None, hud_visible=hud_control.leadVisible, observed_ns=now_nanos, epoch_floor_ns=0))
+          acc_enabled = CC.enabled
           acc_options = {"direct_accel": True, "main_mode_acc": int(CS.out.cruiseState.available),
-                         "jerk_upper": self.ioniq6_accel_request.jerk_upper, "jerk_lower": self.ioniq6_accel_request.jerk_lower}
+                         "jerk_upper": self.ioniq6_accel_request.jerk_upper, "jerk_lower": self.ioniq6_accel_request.jerk_lower,
+                         "lead_visible": lead.visible, "lead_distance": lead.distance, "lead_rel_speed": lead.relative_speed}
         if self.gv70_lead_enabled:
           lead = self.gv70_lead_inputs.update(CS.gv70_camera_lead, hud_control.leadVisible, now_nanos) \
             if self.gv70_lead_inputs is not None else ABSENT

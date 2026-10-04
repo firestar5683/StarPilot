@@ -278,7 +278,7 @@ LONG_PARAM = 0x5c95
 
 
 def copy_cp(cp):
-  with structs.CarParams.from_bytes(cp.to_bytes()) as reader:
+  with structs.CarParams.from_bytes(structs.CarParams.new_message(**cp.to_dict()).to_bytes()) as reader:
     return reader.as_builder()
 
 

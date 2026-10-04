@@ -2,6 +2,7 @@ from opendbc.car.hyundai.blended_stock_aol import qualified as qualified_blended
 from opendbc.car.hyundai.classic_long_aol import qualified as qualified_classic_long
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_scc, ClassicSccLkasSources
 from opendbc.car.hyundai.ev9_camera_lead import EV9CameraLead
+from opendbc.car.hyundai.canfd_camera_lead import CANFDCameraLead
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
 from collections import deque
 import copy
@@ -62,6 +63,8 @@ class CarState(CarStateBase):
       self.forte_lkas_sources = MixedStockLkasSources(CP)
     self.ev9_long = ev9_long_qualified(CP)
     self.ev9_camera_lead = EV9CameraLead(CP) if self.ev9_long else None
+    self.ioniq6_camera_lead = (CANFDCameraLead(CP, CanBus(CP).ECAN)
+                               if CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and CP.openpilotLongitudinalControl else None)
     self.angle_steering_angle = 0.0
     self.angle_steering_fault = False
     self.hba_icon = 0
