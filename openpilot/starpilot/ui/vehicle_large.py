@@ -13,7 +13,8 @@ SELECTION_PAGE = "vehicle:selection"
 class VehicleLarge:
   def __init__(self, session):
     self.session = session
-    self.owner = VehicleSelectionOwner(session.adapter.ui_state.params, session.confirmed_offroad)
+    # This next-startup preference also works offroad without vehicle telemetry.
+    self.owner = VehicleSelectionOwner(session.adapter.ui_state.params, session.adapter.ui_state.is_offroad)
     self.catalog = self.owner.choices()
     self.labels = {choice.platform: choice.label for choice in self.catalog}
 
@@ -25,7 +26,7 @@ class VehicleLarge:
                 "Needs review" if saved.readable else "Unavailable")
     return (FeatureRow("", "Reported vehicle", reported),
             FeatureRow("", "Vehicle selection", selected, source=saved.raw, page=SELECTION_PAGE, available=saved.readable,
-                       reason="Applies at next startup" if self.owner.parked() else "Parked state required to save"))
+                       reason="Applies at next startup" if self.owner.authorized() else "Offroad state required to save"))
 
   def open(self, expected: bytes | None) -> None:
     from openpilot.system.ui.lib.application import gui_app
@@ -45,11 +46,11 @@ class VehicleLarge:
     def save(platform):
       if not active():
         return
-      owner = VehicleSelectionOwner(self.owner.params, lambda: active() and self.owner.parked())
+      owner = VehicleSelectionOwner(self.owner.params, lambda: active() and self.owner.authorized())
       result = owner.choose(expected, platform)
       self.session._snapshot_cache = None
       if not result.verified:
-        self.session._unavailable("Vehicle selection not verified; park and reopen settings")
+        self.session._unavailable("Vehicle selection not verified; reopen settings while offroad")
 
     def models(make):
       choices = [choice for choice in self.catalog if choice.make == make]
