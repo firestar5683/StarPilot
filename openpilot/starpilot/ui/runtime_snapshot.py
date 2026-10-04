@@ -591,9 +591,9 @@ class RuntimeSnapshotAdapter:
 
     settings_pages = (Destination.STAR, Destination.DEVICE, Destination.SOFTWARE, Destination.TOGGLES,
                       Destination.DRIVING_CONTROLS, Destination.SOUNDS, Destination.APPEARANCE,
-                      Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH)
-    availability = tuple(DestinationAvailability(item, item in settings_pages or
-                          item == Destination.NETWORK and connectivity_allowed,
+                      Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH, Destination.DEVELOPER)
+    availability = tuple(DestinationAvailability(item, item in settings_pages and item != Destination.BLUETOOTH or
+                          item in (Destination.NETWORK, Destination.BLUETOOTH) and connectivity_allowed,
                           ("Available in Offroad mode" if connectivity_allowed else "Offroad state is unavailable")
                           if item == Destination.NETWORK else
                           "Manage Bluetooth devices" if item == Destination.BLUETOOTH else
@@ -603,8 +603,7 @@ class RuntimeSnapshotAdapter:
                              availability=availability)
     if mode != ShellMode.SETTINGS:
       selected = Destination.STAR
-    if selected not in (Destination.STAR, Destination.DEVICE, Destination.NETWORK, Destination.SOFTWARE, Destination.TOGGLES,
-                        Destination.DRIVING_CONTROLS, Destination.SOUNDS, Destination.APPEARANCE, Destination.SYSTEM):
+    if selected not in (*settings_pages, Destination.NETWORK):
       selected = Destination.STAR
     # Home and the compact menu consume no leaf-panel state. Keep temporal,
     # pairing and parked evidence current without reading unused preferences.

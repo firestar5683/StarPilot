@@ -102,10 +102,11 @@ def _galaxy_access_owner() -> GalaxyAccessOwner:
 class StarShellSession:
   """Own native shell resources and one request/router boundary per app."""
 
-  def __init__(self, profile: Profile, camera_owner: Any, *, network_layer: Any = None):
+  def __init__(self, profile: Profile, camera_owner: Any, *, network_layer: Any = None, settings_layer: Any = None):
     font_dir = os.environ.get("STARPILOT_UI_FONT_DIR")
     self.profile = profile
     self.network_layer = network_layer
+    self.settings_layer = settings_layer
     self.fonts = BitmapFonts(profile, Path(font_dir) if font_dir else default_font_directory())
     self.pip_renderer = PiPRenderer("bubble" if profile == Profile.LARGE else "curved")
     self.pip_warning = PiPWarningSource()
@@ -869,7 +870,7 @@ class StarShellSession:
         try:
           if self.model_source is None:
             self.model_source = ModelStatusSource(self.adapter.ui_state.params)
-          label = home_model_label(self.model_source.snapshot(), snapshot.home.commit)
+          label = home_model_label(self.model_source.snapshot(), snapshot.home.commit if self.profile == Profile.COMPACT else "")
         except (OSError, RuntimeError, ValueError):
           label = "Driving model unavailable"
         self._home_model = (now, label)
@@ -931,7 +932,10 @@ class StarShellSession:
         renderer.deactivate()
     # Scroller and NavWidget place compact pages at changing screen positions.
     with placed_at(rect, parent_clip):
-      self.view.render(snapshot)
+      external = self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and snapshot.selected in (Destination.BLUETOOTH, Destination.DEVELOPER)
+      self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot)
+      if external:
+        self.view.settings.render_rail(snapshot.settings, selected=snapshot.selected)
       if mode == ShellMode.ONROAD:
         self.favorites.render(time.monotonic())
       if self.notice and time.monotonic() < self.notice_until:
@@ -950,6 +954,12 @@ class StarShellSession:
         if self._on_destination_change is not None:
           self._on_destination_change(Destination.STAR)
         self._unavailable("network panel is unavailable")
+
+    if (mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and
+        snapshot.selected in (Destination.BLUETOOTH, Destination.DEVELOPER) and self.settings_layer is not None):
+      rail_width = 500 if snapshot.settings.sidebar_expanded else 0
+      content = rl.Rectangle(rect.x + rail_width + 50, rect.y + 25, rect.width - rail_width - 100, rect.height - 50)
+      self.settings_layer(snapshot.selected, content)
 
   def _unavailable(self, label: str) -> None:
     self.notice = f"Unavailable: {label}"
@@ -1278,8 +1288,10 @@ class StarMainLayout(MainLayout):
     from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
     native_network = self._layouts[MainState.SETTINGS]._panels[PanelType.NETWORK].instance
     self._network_bridge = NetworkPanelBridge(native_network, self._network_authority)
+    self._large_panels = {Destination.DEVELOPER: self._layouts[MainState.SETTINGS]._panels[PanelType.DEVELOPER].instance}
+    self._large_destination = None
     try:
-      self.star = StarShellSession(Profile.LARGE, self._native_onroad, network_layer=self._network_bridge.render)
+      self.star = StarShellSession(Profile.LARGE, self._native_onroad, network_layer=self._network_bridge.render, settings_layer=self._render_large_panel)
     except Exception:
       self._native_onroad.close()
       raise
@@ -1312,7 +1324,27 @@ class StarMainLayout(MainLayout):
     return bool(self._current_mode == MainState.SETTINGS and self.star.selected == Destination.NETWORK and
                 self.star.connectivity_allowed())
 
+  def _render_large_panel(self, destination: Destination, rect) -> None:
+    self._network_destination(destination)
+    panel = self._large_panels.get(destination)
+    if panel is not None and self._large_destination == destination:
+      panel.render(rect)
+
+  def _leave_large_panel(self) -> None:
+    if self._large_destination is not None:
+      self._large_panels[self._large_destination].hide_event()
+      self._large_destination = None
+
   def _network_destination(self, destination: Destination) -> None:
+    if destination != self._large_destination:
+      self._leave_large_panel()
+      if destination == Destination.BLUETOOTH and self.star.connectivity_allowed():
+        if destination not in self._large_panels:
+          from openpilot.starpilot.ui.bluetooth_large import BluetoothLarge
+          self._large_panels[destination] = BluetoothLarge(self.star.connectivity_allowed)
+      if destination in self._large_panels and (destination != Destination.BLUETOOTH or self.star.connectivity_allowed()):
+        self._large_destination = destination
+        self._large_panels[destination].show_event()
     if destination == Destination.NETWORK:
       if not self._network_bridge.enter():
         self.star.selected = Destination.STAR
@@ -1391,6 +1423,11 @@ class StarMainLayout(MainLayout):
     return True
 
   def _render_main_content(self) -> None:
+    if self._large_destination == Destination.BLUETOOTH and not self.star.connectivity_allowed():
+      self._leave_large_panel()
+      self.star.selected = Destination.STAR
+      self.star.cancel()
+      self.star._snapshot_cache = None
     if (self._current_mode == MainState.SETTINGS and self.star.selected == Destination.NETWORK and
         not self._network_authority()):
       self._network_bridge.leave()
@@ -1407,6 +1444,7 @@ class StarMainLayout(MainLayout):
 
   def _set_current_layout(self, layout: MainState) -> None:
     if layout != MainState.SETTINGS and hasattr(self, "_network_bridge"):
+      self._leave_large_panel()
       self._network_bridge.leave()
       if hasattr(self, "star") and self.star.selected == Destination.NETWORK:
         self.star.selected = Destination.STAR
@@ -1441,6 +1479,7 @@ class StarMainLayout(MainLayout):
     super()._on_body_changed()
 
   def close(self) -> None:
+    self._leave_large_panel()
     self._network_bridge.leave()
     self.star.close()
     self._native_onroad.close()

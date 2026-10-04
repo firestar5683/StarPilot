@@ -94,6 +94,16 @@ def ui_fake():
 
 
 class TestRuntimeSnapshot(unittest.TestCase):
+  def test_every_registered_settings_destination_stays_selected(self):
+    adapter = RuntimeSnapshotAdapter(ui_fake())
+    state = adapter.build(ShellMode.SETTINGS)
+    for item in state.settings.availability:
+      if item.available:
+        with self.subTest(destination=item.destination):
+          self.assertEqual(adapter.build(ShellMode.SETTINGS, item.destination).selected, item.destination)
+    self.assertEqual(adapter.build(ShellMode.SETTINGS, 'unknown').selected, Destination.STAR)
+    self.assertEqual(adapter.build(ShellMode.HOME, Destination.BLUETOOTH).selected, Destination.STAR)
+
   def test_home_keeps_live_fields_without_querying_leaf_panels(self):
     ui = ui_fake()
     ui.started = False
