@@ -168,8 +168,8 @@ class Soundd:
       cloudlog.warning(f"soundd stream over/underflow: {status}")
       if stream is not None:
         cloudlog.info(f"soundd stream diagnostics: status_callbacks={self.stream_status_count} "
-                      f"output_underflows={self.output_underflow_count} "
-                      f"latency={stream.latency} cpu_load={stream.cpu_load}")
+                      + f"output_underflows={self.output_underflow_count} "
+                      + f"latency={stream.latency} cpu_load={stream.cpu_load}")
 
   def update_alert(self, new_alert):
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_sound])

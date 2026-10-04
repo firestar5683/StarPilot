@@ -659,7 +659,16 @@ class Car:
 
     # carState wakes selfdrived. Commit its companion intent first, so a
     # consumer scheduled at the wakeup cannot sample the preceding intent.
+    if self.CP.brand == 'tesla':
+      from openpilot.starpilot.car.tesla.stock_events import publish_stock_status
+      internal = getattr(self.CI.CS, 'preap', None)
+      if internal is not None:
+        self.slc_cruise_event_id += 1
+        publish_stock_status(self.pm, self.CP, internal, session=self.slc_producer_session,
+                             sequence=self.slc_cruise_event_id, car_state_stamp=int(cs_send.logMonoTime),
+                             valid=bool(cs_send.valid and not CS.canTimeout))
     self.pm.send('carState', cs_send)
+
     wheel = getattr(self, 'wheel_publisher', None)
     if wheel is not None:
       wheel.publish(self.wheel_commands, self.CP, self.pm, now_ns=int(cs_send.logMonoTime),

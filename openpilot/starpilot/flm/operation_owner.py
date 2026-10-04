@@ -198,7 +198,8 @@ class FlmAnalysisOwner:
           else:
             code = 'unavailable' if self._closed else \
                    'canceled' if canceled.is_set() and error != 'not_parked' else error or 'canceled'
-            state = 'canceled' if code == 'canceled' else 'unavailable' if code in ('not_parked', 'unavailable', 'recording_unavailable', 'decode_failed', 'resource_limit') else 'failed'
+            unavailable = code in ('not_parked', 'unavailable', 'recording_unavailable', 'decode_failed', 'resource_limit')
+            state = 'canceled' if code == 'canceled' else 'unavailable' if unavailable else 'failed'
             self._status = self._fresh_status(state, token, len(names), self._status['processed'], code)
             self._report = None
         if child is not None and self._child is child and reaped:
@@ -244,7 +245,9 @@ class FlmAnalysisOwner:
                 self._status['processed'] = max(self._status['processed'], message['processed'])
           elif message.get('kind') == 'result' and type(message.get('report')) is dict:
             result = message['report']
-          elif message.get('kind') == 'error' and message.get('code') in ('unavailable', 'process_failed', 'recording_unavailable', 'decode_failed', 'resource_limit'):
+          elif message.get('kind') == 'error' and message.get('code') in (
+            'unavailable', 'process_failed', 'recording_unavailable', 'decode_failed', 'resource_limit',
+          ):
             error = message['code']
           else:
             return None, 'process_failed'

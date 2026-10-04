@@ -266,7 +266,10 @@ class AugmentedRoadView(CameraView):
     if not self._bookmark_icon.interacting():
       super()._handle_mouse_release(mouse_pos)
 
-  def _render(self, _):
+  def _render(self, rect: rl.Rectangle, /, *, paint: bool = True):
+    if not paint:
+      super()._render(rect, paint=False)
+      return
     # Draw text if not onroad
     if not ui_state.started:
       rl.draw_rectangle_rec(self.rect, rl.BLACK)

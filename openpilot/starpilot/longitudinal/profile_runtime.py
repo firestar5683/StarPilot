@@ -339,7 +339,7 @@ class ProfileHost:
   def __init__(self, params):
     self.params = params
     self.disabled = False
-    self.selected_document = None
+    self.selected_document: dict | None = None
     self.selected_attempt_ns = -self.REFRESH_NS
     self.selected_success_ns = -1
     self.settings: ProfileSettings | TrafficSettings | None = None
@@ -361,7 +361,7 @@ class ProfileHost:
       self.selected_attempt_ns = now_ns
       try:
         saved = read_document_value(self.params)
-        self.selected_document = saved.value if saved.valid else None
+        self.selected_document = saved.value if saved.valid and isinstance(saved.value, dict) else None
         self.selected_success_ns = now_ns if saved.valid else -1
       except (OSError, RuntimeError, ValueError, TypeError, KeyError):
         self.selected_document = None

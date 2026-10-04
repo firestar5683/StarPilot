@@ -279,7 +279,7 @@ class ButtonTracker:
       if not self.distance_held:
         self.suppress_distance_release = True
 
-  def observe(self, state: car.CarState, media: MediaObservation | None = None) -> tuple[Gesture, ...]:
+  def observe(self, state: car.CarState, media: MediaObservation | DistanceObservation | None = None) -> tuple[Gesture, ...]:
     self.suppress_distance_release = False
     if not state.canValid or state.canTimeout:
       self.neutral_seen = False

@@ -116,6 +116,8 @@ def register_konik(params):
     return known
   try:
     algorithm, private, public = get_key_pair()
+    if private is None or public is None:
+      return UNREGISTERED_DONGLE_ID
     token = jwt.encode({'register': True, 'exp': datetime.now(UTC) + timedelta(hours=1)}, private, algorithm=algorithm)
     response = api_get('v2/pilotauth/', method='POST', timeout=10, imei=HARDWARE.get_imei() or '', imei2='',
                        serial=HARDWARE.get_serial(), public_key=public, register_token=token)

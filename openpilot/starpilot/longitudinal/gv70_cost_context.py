@@ -74,7 +74,7 @@ class GV70CostContext:
       risk = max((v * brake_scale * math.exp(-.6 * i * DT_MDL) for i, v in enumerate(brakes)), default=0.)
       if new_model:
         self.uncertainty.update(entropy + risk)
-      context = CostContext(car.vEgo, self.distance if active_lead else 50., self.uncertainty.x, mode,
+      context = CostContext(car.vEgo, self.distance if active_lead and self.distance is not None else 50., self.uncertainty.x, mode,
                             acceleration_factor, speed_factor, danger_factor,
                             stop_plan.forcing or stop_plan.approach_distance_m > 0., follow_scale == 1.75,
                             prev_accel_constraint)

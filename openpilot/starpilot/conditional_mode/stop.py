@@ -122,6 +122,7 @@ class StopLightDetector:
       self.committed = True
       self.commit_distance_m = horizon
     if self.committed:
+      assert frame.speed_mps is not None
       self.commit_distance_m = max(0.0, self.commit_distance_m - frame.speed_mps * dt)
       clear = (horizon is not None and model_stopping is False and
                horizon >= max(FROZEN_RAW_STOP_DISTANCE_M + STOP_MODEL_RELEASE_MARGIN_M,

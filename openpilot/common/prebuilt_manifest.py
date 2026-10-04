@@ -52,9 +52,9 @@ def valid_receipt(git, revision):
 
 def write_receipt(repo):
   repo = Path(repo).resolve()
-  def git(*args, input=None):
+  def git(*args, stdin=None):
     return subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', '-C', str(repo), *args],
-                                   input=input, timeout=30).decode()
+                                   input=stdin, timeout=30).decode()
   entries = []
   regular = []
   for record in git('ls-files', '--stage', '-z').split('\0'):
@@ -70,7 +70,7 @@ def write_receipt(repo):
     info = file.lstat()
     if stat.S_ISLNK(info.st_mode):
       mode = '120000'
-      blob = git('hash-object', '--stdin', input=os.fsencode(os.readlink(file))).strip()
+      blob = git('hash-object', '--stdin', stdin=os.fsencode(os.readlink(file))).strip()
     elif stat.S_ISREG(info.st_mode):
       mode = '100755' if info.st_mode & 0o111 else '100644'
       regular.append((path, mode))
@@ -84,7 +84,7 @@ def write_receipt(repo):
     if len(blobs) != len(batch):
       raise ValueError('Prebuilt source hashing was incomplete')
     entries.extend((path, mode, blob) for (path, mode), blob in zip(batch, blobs, strict=True))
-  receipt = dict(schema_version=1, protected_inventory_sha256=inventory_digest(entries))
+  receipt = {'schema_version': 1, 'protected_inventory_sha256': inventory_digest(entries)}
   temporary = repo / (RECEIPT + '.tmp')
   try:
     temporary.write_text(json.dumps(receipt, sort_keys=True) + '\n')

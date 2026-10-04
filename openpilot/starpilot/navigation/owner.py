@@ -43,7 +43,8 @@ def destination(value: dict) -> dict:
   name = value.get('name', '')
   latitude, longitude = value.get('latitude'), value.get('longitude')
   if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 256 or
-      any(type(v) not in (int, float) or not math.isfinite(v) for v in (latitude, longitude)) or
+      (not isinstance(latitude, (int, float)) or isinstance(latitude, bool) or not math.isfinite(latitude) or
+       not isinstance(longitude, (int, float)) or isinstance(longitude, bool) or not math.isfinite(longitude)) or
       not -90 <= latitude <= 90 or not -180 <= longitude <= 180):
     raise ValidationError('Destination name and coordinates are invalid')
   identity = hashlib.sha256(f'{latitude:.6f},{longitude:.6f}'.encode()).hexdigest()[:20]
@@ -275,12 +276,12 @@ class NavigationOwner:
         # navigationd is the sole durable writer; HTTP reads must not checkpoint older samples.
         saved = self.position_store.read()
         bearing = result['location'].get('bearing')
-        if saved and 'bearing' in saved and (type(bearing) not in (int, float) or not math.isfinite(bearing)):
+        if saved and 'bearing' in saved and (not isinstance(bearing, (int, float)) or isinstance(bearing, bool) or not math.isfinite(bearing)):
           result['location'] = dict(result['location'], bearing=saved['bearing'])
       if result['location'] is None:
         result['location'] = self.position_store.read()
       state = (self.runtime_source() if callable(self.runtime_source) else self.runtime_source.snapshot()) if document['destination'] else None
-      if document['destination'] and state and state.get('revision') == document['revision']:
+      if document['destination'] and isinstance(state, dict) and state.get('revision') == document['revision']:
         for key in ('status', 'instruction', 'route'):
           result[key] = state[key]
     return result

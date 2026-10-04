@@ -9,7 +9,7 @@ import os
 import secrets
 import threading
 import time
-from typing import Protocol
+from typing import Protocol, cast
 
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.controller_feature import SETUP_ACTION, SETUP_QUESTION
@@ -142,7 +142,7 @@ class LiveContextSource:
     if self.messages is None:
       from openpilot.cereal import messaging
       self.messages = messaging.SubMaster(["deviceState", "pandaStates", "carState", "selfdriveState"])
-    return self.messages.snapshot() if hasattr(self.messages, "snapshot") else self.messages
+    return cast(Callable[[], object], self.messages.snapshot)() if hasattr(self.messages, "snapshot") else self.messages
 
   def close(self) -> None:
     with self.lock:
@@ -612,7 +612,7 @@ class SettingsGateway:
     elif special:
       if direction != 0:
         raise SettingsChanged("Invalid action")
-      value = "confirm"
+      value = ("Off" if row.value == "On" else "On") if row.key == SETUP_ACTION else "confirm"
       if row.key == VASM_ANNOTATION:
         if draft is None:
           raise SettingsChanged("Camera regions are required")

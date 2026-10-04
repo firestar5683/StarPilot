@@ -173,7 +173,8 @@ class _LocalHTTPServer(ThreadingHTTPServer):
 
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
                 plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
-                sentry_events=None, notifications=None, flm_operations=None, bluetooth=None, vehicle_selection=None, model_manager=None, layouts=None, favorites=None,
+                sentry_events=None, notifications=None, flm_operations=None, bluetooth=None, vehicle_selection=None,
+                model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
@@ -928,7 +929,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         source = aa_source_registry().current(identity)
         try:
-          result = aa_client().call('pairing_status', source=source) if source and configuration_allowed() else \
+          result: dict = aa_client().call('pairing_status', source=source) if source and configuration_allowed() else \
                    {'pairing': {'active': False, 'receiver': None, 'prompt': None, 'approved': False}}
         except (OSError, RuntimeError):
           self.json(503, {'error': 'Android Auto pairing service is unavailable'})

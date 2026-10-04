@@ -88,7 +88,7 @@ def _remote_operation(action: str, password: str = "") -> RemoteStatus:
   url = result.get("url")
   if paired and (type(url) is not str or REMOTE_URL.fullmatch(url) is None):
     return RemoteStatus(error="Galaxy pairing status is unavailable")
-  return RemoteStatus(paired, url if paired else "", result.get("tunnelClientAvailable") is True,
+  return RemoteStatus(paired, url if paired and isinstance(url, str) else "", result.get("tunnelClientAvailable") is True,
                       result.get("legacyPairingAvailable") is True)
 
 
@@ -228,13 +228,17 @@ class GalaxyConnectionView(Widget):
     keyboard.set_callback(entered)
     gui_app.push_widget(keyboard)
 
+  def _unpair_result(self, result) -> None:
+    from openpilot.system.ui.widgets import DialogResult
+    if result == DialogResult.CONFIRM:
+      self.flow.unpair()
+
   def _confirm_unpair(self):
     if not self.flow.parked() or self.flow.busy or not self._remote.paired:
       return
-    from openpilot.system.ui.widgets import DialogResult
     from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
     gui_app.push_widget(ConfirmDialog("Disconnect remote Galaxy access?", "Unpair",
-                                      callback=lambda result: self.flow.unpair() if result == DialogResult.CONFIRM else None))
+                                      callback=self._unpair_result))
 
   def _update_state(self):
     url = self.flow._url()
@@ -323,14 +327,20 @@ class GalaxyConnectionPage:
         self._scroller.add_widgets([self._pair, self._remote_qr, self._remote_address, self._remote_state,
                                     self._unpair, self._qr, self._address])
 
+      def _submit_password(self, password: str) -> None:
+        flow.pair(password)
+
+      def _submit_unpair(self) -> None:
+        flow.unpair()
+
       def _enter_password(self):
         if flow.parked() and not flow.busy and not flow.remote.paired:
           gui_app.push_widget(BigInputDialog("Galaxy password", minimum_length=6 if flow.remote.legacy else 8, password_mode=True,
-                                             confirm_callback=flow.pair))
+                                             confirm_callback=self._submit_password))
 
       def _confirm_unpair(self):
         if flow.parked() and not flow.busy and flow.remote.paired:
-          gui_app.push_widget(BigConfirmationDialog("slide to unpair", gui_app.texture(GALAXY_ICON, 64, 64), flow.unpair, red=True))
+          gui_app.push_widget(BigConfirmationDialog("slide to unpair", gui_app.texture(GALAXY_ICON, 64, 64), self._submit_unpair, red=True))
 
       @staticmethod
       def _set_qr(widget, url: str):

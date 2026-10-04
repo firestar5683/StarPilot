@@ -359,7 +359,9 @@ class Session:
         self.send(0, MSG_SSL_HANDSHAKE, response, encrypted=False)
       if done:
         break
-    self.event("tls_established", version=self.tls.version(), cipher=self.tls.cipher()[0])
+    cipher = self.tls.cipher()
+    assert cipher is not None
+    self.event("tls_established", version=self.tls.version(), cipher=cipher[0])
     if self.peer_verification_enabled:
       peer_cert = self.tls.getpeercert() or {}
       organizations = [value for rdn in peer_cert.get("subject", ()) for name, value in rdn if name == "organizationName"]
@@ -377,7 +379,7 @@ class Session:
       self.event("authentication_rejected", status=status)
       raise AuthenticationRejected(f"Head unit rejected the phone certificate (status {status})")
     self.authenticated = True
-    self.event("authenticated", version=self.tls.version(), cipher=self.tls.cipher()[0])
+    self.event("authenticated", version=self.tls.version(), cipher=cipher[0])
 
   def discover(self, device_name: str, device_brand: str) -> list[dict]:
     self.send(0, MSG_SERVICE_DISCOVERY_REQUEST, field(4, device_name) + field(5, device_brand))

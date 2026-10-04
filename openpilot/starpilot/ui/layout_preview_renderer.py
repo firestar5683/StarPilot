@@ -3,7 +3,7 @@
 from pathlib import Path
 import struct
 import time
-from types import SimpleNamespace
+from openpilot.common.filter_simple import FirstOrderFilter
 import zlib
 
 import numpy as np
@@ -104,9 +104,9 @@ class _DriverMonitorArt:
     self.renderer._is_active = True
     self.renderer._force_active = False
     self.renderer._awareness_unfull = False
-    self.renderer._fade_filter = SimpleNamespace(x=1.0)
-    self.renderer._rotation_filter = SimpleNamespace(x=90.0)
-    self.renderer._color_fade_filter = SimpleNamespace(update=lambda _value: 1.0)
+    self.renderer._fade_filter = FirstOrderFilter(1.0, 0.05, 1 / 60)
+    self.renderer._rotation_filter = FirstOrderFilter(90.0, 0.05, 1 / 60)
+    self.renderer._color_fade_filter = FirstOrderFilter(1.0, 0.05, 1 / 60)
     directory = ASSET_DIRECTORY / "icons_mici/onroad/driver_monitoring"
     try:
       for name in ("dm_background", "dm_person", "dm_cone"):
@@ -163,7 +163,7 @@ class _Canvas:
       self.fonts = BitmapFonts(profile, default_font_directory())
       layers = {'background_layer': lambda rect, state: render_sample_road(rect, state, profile)}
       if viewport is None:
-        self.view = OnroadView(self.fonts, ASSET_DIRECTORY, **layers)
+        self.view = OnroadView(self.fonts, ASSET_DIRECTORY, background_layer=layers['background_layer'])
       else:
         from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
         self.view = ProjectionOnroad.create_view(OnroadView, self.fonts, viewport=viewport, **layers)

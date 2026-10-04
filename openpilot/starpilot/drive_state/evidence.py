@@ -28,7 +28,8 @@ class PhysicalSource:
           from openpilot.cereal import messaging
           self.messages = messaging.SubMaster(['deviceState', 'pandaStates', 'carState', 'selfdriveState'])
           self.owns_messages = True
-        sm = self.messages.snapshot() if hasattr(self.messages, "snapshot") else self.messages
+        snapshot = getattr(self.messages, "snapshot", None)
+        sm = snapshot() if callable(snapshot) else self.messages
         if sm is None:
           return False
         self.floor = max(self.floor, getattr(sm, "after_mono_ns", self.floor))
@@ -80,7 +81,8 @@ class PhysicalSource:
         if not 0 <= now - before <= RESUME_SKEW_NS or abs(offset - self.offset) > RESUME_SKEW_NS:
           self.floor, self.offset = now, None
           return None
-        sm = self.messages.snapshot() if hasattr(self.messages, "snapshot") else self.messages
+        snapshot = getattr(self.messages, "snapshot", None)
+        sm = snapshot() if callable(snapshot) else self.messages
         if sm is None:
           return None
         self.floor = max(self.floor, getattr(sm, "after_mono_ns", self.floor))

@@ -3,6 +3,8 @@ import time
 
 from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
 
+from openpilot.starpilot.navigation.wire import navigation_state
+
 GPS_TTL_NS = 2_500_000_000
 GPS_SOURCES = {"gpsLocationExternal": "ublox", "gpsLocation": "qcomdiag"}
 
@@ -26,7 +28,9 @@ class NavigationStatusSource:
     stamp = self.sm.logMonoTime['starpilotNavigation']
     if not self.sm.valid['starpilotNavigation'] or not 0 < stamp <= time.monotonic_ns() <= stamp + 3_000_000_000:
       return None
-    state = self.sm['starpilotNavigation']
+    state = navigation_state(self.sm['starpilotNavigation'])
+    if state is None:
+      return None
     return {'revision': state.revision, 'status': state.status,
                 'instruction': state.instruction.to_dict() if state.status in ('guiding', 'arrived') else None,
                 'route': [row.to_dict() for row in state.route]}

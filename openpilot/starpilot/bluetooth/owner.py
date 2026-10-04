@@ -649,6 +649,7 @@ class BluetoothOwner:
       if self.pairing is not None and self.pairing.state == 'pairing' and operation != 'stop_scan':
         raise BluetoothRejected('Pairing is in progress', code='busy')
       if operation == 'power':
+        assert enabled is not None
         self.power_change_active = True
         if enabled:
           state = self.systemctl(['systemctl', 'show', '--property=ActiveState', '--value', RADIO_UNIT],

@@ -602,11 +602,11 @@ class ModelRenderer(Widget):
     polygons = []
     start = 0
     for count in counts:
-     end = start + count
-     l = left[:, start:end][:, keep[start:end]]
-     r = right[:, start:end][:, keep[start:end]]
-     polygons.append(np.vstack((l.T, r[:, ::-1].T)).astype(np.float32) if l.shape[1] else np.empty((0, 2), dtype=np.float32))
-     start = end
+      end = start + count
+      l = left[:, start:end][:, keep[start:end]]
+      r = right[:, start:end][:, keep[start:end]]
+      polygons.append(np.vstack((l.T, r[:, ::-1].T)).astype(np.float32) if l.shape[1] else np.empty((0, 2), dtype=np.float32))
+      start = end
     return polygons
 
   @staticmethod

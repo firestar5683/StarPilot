@@ -2,7 +2,8 @@
 
 import json
 import re
-from typing import Protocol
+from collections.abc import Callable
+from typing import Protocol, cast
 
 from openpilot.starpilot.sentry_mode.storage import EventStore, StorageUnavailable
 
@@ -39,7 +40,7 @@ class SentryEvents:
           raise ValueError("Invalid motion event")
         events.append({"eventId": value["eventId"], "kind": value["kind"],
                        "systemTimeMs": value["wallTimeNs"] // 1_000_000,
-                       "images": self.store.images(value["eventId"]) if hasattr(self.store, "images") else []})
+                       "images": cast(Callable[[str], list], self.store.images)(value["eventId"]) if hasattr(self.store, "images") else []})
       result = {"schemaVersion": 1, "source": "local", "scanIncomplete": source["incomplete"],
                 "capacity": source["capacity"], "events": events}
       if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_RESPONSE_BYTES:

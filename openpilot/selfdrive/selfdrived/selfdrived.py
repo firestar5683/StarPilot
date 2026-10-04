@@ -110,6 +110,8 @@ class SelfdriveD:
     self.conditional_result = ConsumerResult(False, False, 'disabled')
 
     self.car_events = CarEvents(self.CP)
+    from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
+    self.tesla_stock_consumer = StockCruiseConsumer(self.CP)
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -151,7 +153,7 @@ class SelfdriveD:
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark',
                                    'lateralManeuverPlan', 'laneChangeAssistWire'] + (['aolIntentWire'] if self.aol_replay else []) +
-                                   (['aolSafetyWire'] if self.axis_transport_required else []) + \
+                                   (['aolSafetyWire'] if self.axis_transport_required else []) +
                                    (['slcState'] if self.conditional_replay or self.switchback_capable else []) + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
@@ -312,6 +314,12 @@ class SelfdriveD:
     if CS.canValid:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
       self.events.add_from_msg(car_events)
+      if self.tesla_stock_consumer.binding is not None:
+        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+        companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
+                                   previous=self.aol_last_intent)
+        session = companion.producerSessionId if companion is not None else None
+        self.tesla_stock_consumer.poll(self.events, self.sm, now_ns=now_ns, session=session)
 
       paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)
       self.nostalgia_paddle_cancel = bool(paddle_pressed and EventName.buttonCancel not in self.events.names and

@@ -18,7 +18,8 @@ from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSet
 
 CHOICES = ('Stock Controller', 'StarPilot Controller')
 MODES = dict(zip(CHOICES, (ControllerMode.STANDARD, ControllerMode.STARPILOT), strict=True))
-TUNING_GUIDANCE = "StarPilot's torque controller can provide higher low-speed steering accuracy, but may require additional tuning. Join the StarPilot Discord and open a tuning request: https://firestar.link/discord"
+TUNING_GUIDANCE = ("StarPilot's torque controller can provide higher low-speed steering accuracy, but may require additional tuning. " +
+                   "Join the StarPilot Discord and open a tuning request: https://firestar.link/discord")
 SETUP_ACTION = 'torque_prepare_firestar'
 SETUP_QUESTION = 'Change tuning preparation? Turning it off restores your previous steering preferences.'
 SETUP_DEFAULTS = {'TurnAssist': b'0', LEARNING_OFF_KEY: b'1', 'LaneCentering': b'0',

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from opendbc.car.pedal import supported_pedal_detected
 import numpy as np
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
@@ -59,7 +60,7 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
 
       ret.pcmCruise = True
-      if CAN.pt == 0 and fingerprint[CAN.pt].get(0x201) == 6:
+      if supported_pedal_detected(fingerprint, CAN.pt, supported=CAN.pt == 0):
         ret.flags |= HondaFlags.GAS_INTERCEPTOR.value
         ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.GAS_INTERCEPTOR.value
         ret.pcmCruise = False

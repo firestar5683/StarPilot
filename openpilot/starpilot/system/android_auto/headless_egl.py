@@ -47,7 +47,7 @@ class FrameReadback:
 
   Asynchronous: ``start`` queues the reads into a pixel-pack buffer behind a
   fence and returns at once. ``finish`` waits for the fence, normally long
-  signalled because the caller does the next frame's CPU work in between, and
+  signaled because the caller does the next frame's CPU work in between, and
   maps the buffer. One frame is in flight at a time.
   """
 
@@ -117,6 +117,7 @@ class FrameReadback:
     if not self.pending:
       raise RuntimeError("No frame to finish")
     if not self.asynchronous:
+      assert self.pixels is not None
       return self.pixels
     gl = self.gl
     fence, self._fence = self._fence, None

@@ -138,7 +138,8 @@ def package_file(path, destination):
       destination.with_name(get_chunk_name(destination.name, i, count)).write_bytes(block)
       parts.append({'bytes': len(block), 'sha256': hashlib.sha256(block).hexdigest()})
   final_stat = path.stat()
-  if (source_stat.st_size, source_stat.st_mtime_ns, source_stat.st_ino) != (final_stat.st_size, final_stat.st_mtime_ns, final_stat.st_ino) or sum(part['bytes'] for part in parts) != size:
+  unchanged = (source_stat.st_size, source_stat.st_mtime_ns, source_stat.st_ino) == (final_stat.st_size, final_stat.st_mtime_ns, final_stat.st_ino)
+  if not unchanged or sum(part['bytes'] for part in parts) != size:
     raise ValueError('compiled model changed while packaging')
   Path(f'{destination}.chunksha256').write_text(json.dumps({'bytes': size, 'sha256': digest.hexdigest(), 'parts': parts}, indent=2) + '\n')
   Path(get_manifest_path(destination)).write_text(str(count))

@@ -5,6 +5,7 @@ import json
 import math
 import re
 from functools import lru_cache
+from typing import Any, NotRequired, TypedDict
 
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
@@ -17,12 +18,52 @@ PATH_MODES = ("default", "color", "rainbow", "acceleration")
 WHEEL_SIZES = {"large": (144, 192, 240), "compact": (40, 50, 70)}
 
 
-def _widget(label, kind, width, height, x, y):
+class Bounds(TypedDict):
+  x: float
+  y: float
+  width: float
+  height: float
+
+
+class WidgetPlacement(TypedDict):
+  x: float
+  y: float
+  enabled: bool
+
+
+class Widget(TypedDict):
+  label: str
+  kind: str
+  width: float
+  height: float
+  default: WidgetPlacement
+  bounds: NotRequired[Bounds]
+  visualInsetTop: NotRequired[float]
+  layer: NotRequired[str]
+  note: NotRequired[str]
+  defaultAnchor: NotRequired[str]
+  colors: NotRequired[dict[str, str | None]]
+  resizable: NotRequired[dict[str, int]]
+
+
+class LayoutProfile(TypedDict):
+  label: str
+  width: float
+  height: float
+  bounds: Bounds
+  widgets: dict[str, Widget]
+  reservedZones: list[Bounds]
+  protectedWidget: NotRequired[str]
+  inputZones: NotRequired[list[dict[str, Any]]]
+  inputZonePriority: NotRequired[str]
+
+
+def _widget(label: str, kind: str, width: float, height: float, x: float, y: float) -> Widget:
   return {"label": label, "kind": kind, "width": width, "height": height,
           "default": {"x": x, "y": y, "enabled": True}}
 
 
-PROFILES = {
+PROFILES: dict[str, LayoutProfile] = {
   "large": {"label": "Large UI", "width": 2160, "height": 1080,
             "bounds": {"x": 30, "y": 30, "width": 1800, "height": 1020},
             "reservedZones": [],
@@ -51,7 +92,7 @@ LEGACY_WIDGETS = {"large": {"current_speed", "cruise_limits", "steering_wheel"},
 DM_WIDGETS = {profile: keys | {"driver_monitor"} for profile, keys in LEGACY_WIDGETS.items()}
 for _profile, _data in PROFILES.items():
   _bounds = _data["bounds"]
-  _x, _y, _width, _height = maximum_footprint(*(_bounds[key] for key in ("x", "y", "width", "height")), _data["width"])
+  _x, _y, _width, _height = maximum_footprint(_bounds["x"], _bounds["y"], _bounds["width"], _bounds["height"], _data["width"])
   _data["widgets"]["torque_bar"] = {
     **_widget("Torque bar", "torque_bar", _width, _height, _x, _y), "layer": "underlay",
     "note": "Torque output, or steering-effort estimate on angle-controlled vehicles"}
@@ -283,6 +324,7 @@ def rgba(document, key, profile=None, widget=None):
   if profile is None:
     color = document["palette"][key]
   else:
+    assert widget is not None
     default = WIDGET_COLORS[str(profile)][widget][key]
     color = document.get("widgetColors", {}).get(str(profile), {}).get(widget, {}).get(key, default or document["palette"][key])
   return _rgba_value(color)

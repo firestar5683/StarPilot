@@ -85,7 +85,7 @@ def fit_content(source_w: int, source_h: int, width: int, height: int, margin_w:
   """Largest undistorted rectangle for the source inside the receiver's visible area.
 
   Android Auto margins are split evenly on both sides of the encoded frame; the
-  visible area is centred. Returns even-aligned ``(x, y, w, h)``.
+  visible area is centered. Returns even-aligned ``(x, y, w, h)``.
   """
   visible_w, visible_h = width - margin_w, height - margin_h
   scale = min(visible_w / source_w, visible_h / source_h)
@@ -244,6 +244,8 @@ class FrameProducer:
     now = time.monotonic() if now is None else now
     if not self.demand_active(now):
       return False
+    if self.mm is None:
+      return False
     sent = _SENT.unpack_from(self.mm, _SENT_OFFSET)[0]
     return sent > 0 and 0 <= int(now * 1e9) - sent < 1_000_000_000
 
@@ -288,7 +290,7 @@ class FrameProducer:
 class SyntheticFrames:
   """Consumer-compatible moving test pattern, to prove the car link without the UI.
 
-  Colour bars that slide one step per frame plus a frame counter make frozen,
+  Color bars that slide one step per frame plus a frame counter make frozen,
   torn or stale video obvious on the car's screen.
   """
 

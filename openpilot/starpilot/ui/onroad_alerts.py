@@ -37,7 +37,7 @@ class AlertRenderer:
         self._previous = None
         self._alpha.x = 0
         return
-      if self._lane_visible:
+      if self._lane_visible and self._lane_renderer is not None:
         self._lane_renderer._prev_alert = None
         self._lane_renderer._alpha_filter.x = 0
         self._lane_visible = False

@@ -55,9 +55,9 @@ class LastPositionStore:
     previous = self.read() or {}
     value = {key: float(point[key]) for key in ('longitude', 'latitude')}
     bearing = point.get('bearing', previous.get('bearing'))
-    if type(bearing) not in (int, float) or not math.isfinite(bearing):
+    if not isinstance(bearing, (int, float)) or isinstance(bearing, bool) or not math.isfinite(bearing):
       bearing = previous.get('bearing')
-    if type(bearing) in (int, float) and math.isfinite(bearing):
+    if isinstance(bearing, (int, float)) and not isinstance(bearing, bool) and math.isfinite(bearing):
       value['bearing'] = float(bearing) % 360
     if all(previous.get(key) == value.get(key) for key in ('longitude', 'latitude', 'bearing')):
       self.flush()

@@ -148,8 +148,6 @@ def update_stock(cs, can_parsers):
   cs.pedal_speed_kph = cs.engagement.pedal_speed_kph
   cs.preap_cc_cancel_needed = cs.engagement.preap_cc_cancel_needed
   cs.preap_cc_engage_needed = cs.engagement.preap_cc_engage_needed
-  ret.teslaStockCruiseEngaged = cs.di_cruise_state == "ENABLED"
-  ret.teslaStockCruiseNotArmed = cs.cruiseEnabled and cs.enableLongControl and cs.di_cruise_state not in ("STANDBY", "ENABLED")
 
   return ret
 

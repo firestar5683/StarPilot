@@ -11,34 +11,86 @@ using Car = import "/car.capnp";
 # DO rename the structs
 # DON'T change the identifier (e.g. @0x81c2f05a394cf4af)
 
-struct StarPilotNavigation @0x81c2f05a394cf4af {
-  sessionId @0 :Text;
-  frameMonoTime @1 :UInt64;
-  startedMonoTime @2 :UInt64;
-  revision @3 :Text;
-  enabled @4 :Bool;
-  status @5 :Text;
-  destinationName @6 :Text;
-  instruction @7 :Instruction;
-  route @8 :List(Coordinate);
-  nextManeuver @9 :Instruction;
-  locationMonoTime @10 :UInt64;
-  controlValid @11 :Bool;
+struct StarPilotCarControl @0x81c2f05a394cf4af {
+  hudControl @0 :HUDControl;
+  steeringLimitInfo @1 :SteeringLimitInfo;
 
-  struct Coordinate {
-    latitude @0 :Float64;
-    longitude @1 :Float64;
+  struct HUDControl {
+    audibleAlert @0 :AudibleAlert;
+
+    enum AudibleAlert {
+      none @0;
+
+      engage @1;
+      disengage @2;
+      refuse @3;
+
+      warningSoft @4;
+      warningImmediate @5;
+
+      prompt @6;
+      promptRepeat @7;
+      promptDistracted @8;
+
+      # Random Events
+      angry @9;
+      continued @10;
+      dejaVu @11;
+      doc @12;
+      fart @13;
+      firefox @14;
+      goat @15;
+      hal9000 @16;
+      mail @17;
+      nessie @18;
+      noice @19;
+      startup @20;
+      thisIsFine @21;
+      uwu @22;
+    }
   }
-  struct Instruction {
-    text @0 :Text;
-    maneuverType @1 :Text;
-    maneuverModifier @2 :Text;
-    distanceMeters @3 :Float32;
-    remainingDistanceMeters @4 :Float32;
-    remainingDurationSeconds @5 :Float32;
+
+  struct SteeringLimitInfo {
+    valid @0 :Bool;
+    modelLimitErrorDeg @1 :Float32;
+    resumeLimitErrorDeg @2 :Float32;
+    cooperativeLimitErrorDeg @3 :Float32;
+    cooperativeOffsetDeg @4 :Float32;
+    monoTime @5 :UInt64;
+    combinedLimitErrorDeg @6 :Float32;
+  }
+
+  navigation @2 :Navigation;
+
+  struct Navigation {
+  sessionId @0 :Text;
+    frameMonoTime @1 :UInt64;
+    startedMonoTime @2 :UInt64;
+    revision @3 :Text;
+    enabled @4 :Bool;
+    status @5 :Text;
+    destinationName @6 :Text;
+    instruction @7 :Instruction;
+    route @8 :List(Coordinate);
+    nextManeuver @9 :Instruction;
+    locationMonoTime @10 :UInt64;
+    controlValid @11 :Bool;
+
+    struct Coordinate {
+      latitude @0 :Float64;
+      longitude @1 :Float64;
+    }
+    struct Instruction {
+      text @0 :Text;
+      maneuverType @1 :Text;
+      maneuverModifier @2 :Text;
+      distanceMeters @3 :Float32;
+      remainingDistanceMeters @4 :Float32;
+      remainingDurationSeconds @5 :Float32;
+    }
+    version @12 :UInt16;
   }
 }
-
 struct CustomReserved1 @0xaedffd8f31e7b55d {
 }
 
@@ -269,6 +321,15 @@ struct SlcCruiseEvent @0xcd96dafb67a082d0 {
   manualMode @12 :ManualModeGesture;
   trafficMode @13 :TrafficModeGesture;
   wheelAction @14 :SlcAction.ControllerCruiseAction;
+  teslaStockCruise @15 :TeslaStockCruise;
+
+  struct TeslaStockCruise {
+    version @0 :UInt16;
+    carStateMonoTime @1 :UInt64;
+    cpFingerprint @2 :Text;
+    engaged @3 :Bool;
+    notArmed @4 :Bool;
+  }
 
   enum Kind {
     unknown @0;
@@ -282,6 +343,7 @@ struct SlcCruiseEvent @0xcd96dafb67a082d0 {
     trafficMode @8;
     switchbackMode @9;
     wheelAction @10;
+    teslaStockCruise @11;
   }
 
   struct TrafficModeGesture {

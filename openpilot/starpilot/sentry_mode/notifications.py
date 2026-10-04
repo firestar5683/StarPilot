@@ -402,24 +402,26 @@ class NotificationOwner:
     message = 'This is a test StarPilot Sentry notification.' if job['kind'] == 'test' else f"Parked motion detected ({job['kind']})."
     event = {'eventId': job['eventId'], 'kind': job['kind'], 'systemTimeMs': int(job['created'] * 1000)}
     headers = {'Idempotency-Key': key}
-    kwargs = {'timeout': (3, 10), 'allow_redirects': False, 'stream': True}
     if name == 'webPush':
+      if subscription is None:
+        raise ValueError('Missing browser subscription')
       body, push_headers = web_push.request(subscription, {'title': 'StarPilot Sentry Mode', 'body': message,
                                             'eventId': job['eventId'], 'url': '/#/cameras/events'}, pem)
       headers.update(push_headers)
-      response = requests.post(subscription['endpoint'], data=body, headers=headers, **kwargs)
+      response = requests.post(subscription['endpoint'], data=body, headers=headers, timeout=(3, 10), allow_redirects=False, stream=True)
     else:
       if cfg['token']:
         headers['Authorization'] = 'Bearer ' + cfg['token']
       if name == 'discord':
-        response = requests.post(cfg['url'], json={'content': 'StarPilot Sentry Mode: ' + message}, headers=headers, **kwargs)
+        response = requests.post(cfg['url'], json={'content': 'StarPilot Sentry Mode: ' + message},
+                                 headers=headers, timeout=(3, 10), allow_redirects=False, stream=True)
       elif name == 'webhook':
         # Preserve the original general-webhook content/event form contract.
         response = requests.post(cfg['url'], data={'content': 'StarPilot Sentry Mode: ' + message,
-                                  'event': json.dumps(event, separators=(',', ':'))}, headers=headers, **kwargs)
+                                  'event': json.dumps(event, separators=(',', ':'))}, headers=headers, timeout=(3, 10), allow_redirects=False, stream=True)
       else:
         headers.update({'Title': 'StarPilot Sentry Mode', 'Priority': 'urgent', 'Tags': 'warning,car'})
-        response = requests.post(cfg['url'], data=message.encode(), headers=headers, **kwargs)
+        response = requests.post(cfg['url'], data=message.encode(), headers=headers, timeout=(3, 10), allow_redirects=False, stream=True)
     try:
       return response.status_code
     finally:

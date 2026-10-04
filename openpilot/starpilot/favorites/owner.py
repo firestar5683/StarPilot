@@ -161,7 +161,11 @@ class FavoritesOwner:
     if not fresh or current != raw:
       return FavoriteResult(False, "Quick Select changed. Try again.")
     try:
-      applied = action.invoke_value(slot.get("value") if slot.get("value") is not None else 30) if action.invoke_value is not None else action.invoke()
+      if action.invoke_value is not None:
+        applied = action.invoke_value(slot.get("value") if slot.get("value") is not None else 30)
+      else:
+        assert action.invoke is not None
+        applied = action.invoke()
       if not applied:
         return FavoriteResult(False, "Control is unavailable or changed. Try again.")
       updated = self.actions().get(request.key)

@@ -14,7 +14,7 @@ REFRESH_NS = 1_000_000_000
 def gain_basis(cp, controller) -> GainBasis:
   tune = cp.lateralTuning.torque
   return GainBasis(str(controller.controller_mode),
-                   tuple(tuple(row) for row in controller.pid._k_p),
+                   (tuple(controller.pid._k_p[0]), tuple(controller.pid._k_p[1])),
                    (tune.latAccelFactor, tune.latAccelOffset, tune.friction))
 
 
