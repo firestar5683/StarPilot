@@ -8,6 +8,7 @@ from functools import lru_cache
 import pyray as rl
 from openpilot.starpilot.ui.home_geometry import outside_rounded_border
 from openpilot.starpilot.ui.presentation import FontRole
+from openpilot.starpilot.ui.feature_settings_state import FEATURE_HEADER_HEIGHT, FEATURE_BACK_WIDTH
 
 TILE_RADIUS_PX = 18.0
 
@@ -120,32 +121,30 @@ def elide_text(fonts, text: str, role: FontRole, size: float, width: float) -> s
 
 def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str = "", *, back: bool = False) -> None:
   left = 520 if sidebar_expanded else 20
-  rect = rl.Rectangle(left, 12, 2140 - left, 128)
-  draw_hud_background(rect, ACCENT, 0.5, radius_px=34)
+  rect = rl.Rectangle(left, 12, 2140 - left, FEATURE_HEADER_HEIGHT)
+  draw_hud_background(rect, ACCENT, 0.5, radius_px=24)
+  role, size = FontRole.MEDIUM, 35
   x = left + 34
-  if back:
-    top, bottom = fonts.vertical_ink("< Back", FontRole.MEDIUM, 50)
-    fonts.draw("< Back", FontRole.MEDIUM, 50, left + 28, 76 - (top + bottom) / 2, TEXT_PRIMARY)
-    rl.draw_line(left + 250, 36, left + 250, 116, CONTROL_BORDER)
-    x = left + 284
-  available = 2110 - x
-  title = elide_text(fonts, title, FontRole.SEMI_BOLD, 50, available)
   segments = []
+  if back:
+    segments.append(("< Back", left + 28, TEXT_PRIMARY))
+    rl.draw_line(left + FEATURE_BACK_WIDTH, 32, left + FEATURE_BACK_WIDTH, 80, CONTROL_BORDER)
+    x = left + FEATURE_BACK_WIDTH + 28
+  available = 2110 - x
+  title = elide_text(fonts, title, role, size, available)
   separator = " > "
-  parent_width = available - fonts.measure(title, FontRole.SEMI_BOLD, 50).width - fonts.measure(separator, FontRole.MEDIUM, 35).width
+  parent_width = available - fonts.measure(title + separator, role, size).width
   if parent and parent_width >= 120:
-    segments.extend(((elide_text(fonts, parent, FontRole.MEDIUM, 35, parent_width), FontRole.MEDIUM, 35, TEXT_SECONDARY),
-                     (separator, FontRole.MEDIUM, 35, TEXT_MUTED)))
-  segments.append((title, FontRole.SEMI_BOLD, 50, TEXT_PRIMARY))
-  # Share a cap-height baseline, then center the combined visible ink, including descenders.
-  bounds = [(fonts.vertical_ink(text, role, size), fonts.vertical_ink("H", role, size)[1])
-            for text, role, size, _ in segments]
-  top = min(ink[0] - baseline for ink, baseline in bounds)
-  bottom = max(ink[1] - baseline for ink, baseline in bounds)
-  baseline_y = 76 - (top + bottom) / 2
-  for (text, role, size, color), (_, baseline) in zip(segments, bounds, strict=True):
-    fonts.draw(text, role, size, x, baseline_y - baseline, color)
-    x += fonts.measure(text, role, size).width
+    breadcrumb = elide_text(fonts, parent, role, size, parent_width) + separator
+    segments.append((breadcrumb, x, TEXT_SECONDARY))
+    x += fonts.measure(breadcrumb, role, size).width
+  segments.append((title, x, TEXT_PRIMARY))
+  # One font and one baseline for the entire navigation bar.
+  bounds = [fonts.vertical_ink(text, role, size) for text, _, _ in segments]
+  y = rect.y + rect.height / 2 - (min(top for top, _ in bounds) + max(bottom for _, bottom in bounds)) / 2
+  for text, x, color in segments:
+    fonts.draw(text, role, size, x, y, color)
+
 
 def _build_constellation_nodes(
   rng: random.Random,

@@ -6,7 +6,7 @@ from openpilot.starpilot.ui import clip
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureRow, FeatureSettingsState, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, boolean_value as _boolean_value,
   FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
-  FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN,
+  FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN, FEATURE_HEADER_HEIGHT,
 )
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.settings_geometry import (
@@ -35,7 +35,7 @@ class FeatureSettingsView:
     draw_rounded_fill(shell, PANEL_BG, radius_px=32)
     draw_rounded_stroke(shell, PANEL_BORDER, radius_px=32)
     draw_rounded_stroke(rl.Rectangle(shell.x + 2, 12, shell.width - 4, 1056), PANEL_INNER_BORDER, radius_px=29)
-    clip.begin_scissor_mode(left, 12, 2140 - left, 128)
+    clip.begin_scissor_mode(left, 12, 2140 - left, FEATURE_HEADER_HEIGHT)
     try:
       draw_settings_header(self.fonts, state.sidebar_expanded, state.title, state.parent_title, back=True)
     finally:
@@ -43,7 +43,7 @@ class FeatureSettingsView:
     subtitle = self._elide(state.subtitle, FontRole.NORMAL, DETAIL_SIZE, 2094 - left - 55)
     if subtitle:
       top, _ = self.fonts.vertical_ink(subtitle, FontRole.NORMAL, DETAIL_SIZE)
-      self.fonts.draw(subtitle, FontRole.NORMAL, DETAIL_SIZE, left + 55, 150 - top, TEXT_SECONDARY)
+      self.fonts.draw(subtitle, FontRole.NORMAL, DETAIL_SIZE, left + 55, 116 - top, TEXT_SECONDARY)
     clip.begin_scissor_mode(left + 25, FEATURE_ROW_TOP, 2100 - left, FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT)
     try:
       for visible, row in enumerate(state.rows[state.scroll:state.scroll + FEATURE_VISIBLE_ROWS]):
