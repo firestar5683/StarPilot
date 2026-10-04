@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools import test_runner
+from tools.ci import vehicle_pytest
 
 RELEASE_TARGETS = (
   "opendbc_repo/opendbc/car/ford/tests/test_aol_startup.py",
@@ -109,6 +110,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ccnc_angle_two.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ioniq6_long.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ray_pedal.py",
+  "opendbc_repo/opendbc/safety/tests/test_honda_mvl_stock.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_stock_aol.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_rdx_gas_cap.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_aol_source.py",
@@ -185,12 +187,14 @@ def audit_interface_modules(targets, test_ids):
         for method in node.body:
           if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and method.name.startswith("test_"):
             expected = f"{module}.{node.name}.{method.name}"
-            if not any(test_id == expected or test_id.startswith(expected + "_") for test_id in selected):
+            if not any(test_id == expected or test_id.startswith((expected + "_", expected + "[")) for test_id in selected):
               missing_methods.append(f"{node.name}.{method.name}")
     if not selected:
       errors.append(f"Interface test module collected zero tests: {target}")
-    if functions:
-      errors.append(f"Unsupported module-level tests require an explicit runner: {target}: {functions}")
+    for function in functions:
+      expected = f"{module}.{function}"
+      if not any(test_id == expected or test_id.startswith(expected + "[") for test_id in selected):
+        errors.append(f"Declared module-level test was not collected: {target}: {function}")
     if missing_methods:
       errors.append(f"Declared interface tests were not collected: {target}: {missing_methods}")
     modules.append({"path": target, "source_sha256": sha256(path), "collected_count": len(selected),
@@ -230,7 +234,8 @@ def source_provenance():
   return {"revision": git("rev-parse", "HEAD"), "status": git("status", "--porcelain"),
           "inputs": source_input_snapshot(),
           "manifest_sha256": sha256(manifest), "dependencies": json.loads(manifest.read_text())["dependencies"],
-          "runner_sha256": sha256(ROOT / "tools/test_runner.py"), "suite_runner_sha256": sha256(__file__)}
+          "runner_sha256": sha256(ROOT / "tools/test_runner.py"), "suite_runner_sha256": sha256(__file__),
+          "pytest_runner_sha256": sha256(ROOT / "tools/ci/vehicle_pytest.py")}
 
 
 def native_provenance():
@@ -281,6 +286,7 @@ def run(suite, output, collect_only=False):
   output.mkdir(parents=True, exist_ok=True)
   started = time.monotonic()
   tests, errors = [], []
+  pytest_nodeids = []
   records, platform_tests, gate_errors = [], {}, []
   phase = "initialization"
   plan = {"schema_version": 1, "suite": suite, "status": "initializing", "workers": 1,
@@ -300,8 +306,14 @@ def run(suite, output, collect_only=False):
     if suite != "interfaces" and not collect_only:
       plan["native"]["safety"] = build_safety_library(suite == "safety-release", output)
     phase = "collection"
-    tests, errors = test_runner.collect(plan["targets"], None)
-    ids = [test.id() for test in tests]
+    unittest_targets, pytest_targets = vehicle_pytest.split_targets(ROOT, plan["targets"])
+    plan["runners"] = {"unittest": unittest_targets, "pytest": pytest_targets}
+    tests, errors = test_runner.collect(unittest_targets, None) if unittest_targets else ([], [])
+    pytest_nodeids, pytest_errors = vehicle_pytest.collect(pytest_targets)
+    errors.extend(pytest_errors)
+    ids = [test.id() for test in tests] + [vehicle_pytest.test_id(nodeid) for nodeid in pytest_nodeids]
+    if len(set(ids)) != len(ids):
+      errors.append("Vehicle runners selected duplicate test IDs")
     if suite == "interfaces":
       plan["module_collection"], module_errors = audit_interface_modules(plan["targets"], ids)
       errors.extend(module_errors)
@@ -316,7 +328,10 @@ def run(suite, output, collect_only=False):
       return 0
     if not errors:
       phase = "execution"
-      records = test_runner.run_batch(ids, capture_output=True)
+      records = test_runner.run_batch([test.id() for test in tests], capture_output=True) if tests else []
+      pytest_records, pytest_errors = vehicle_pytest.run(pytest_nodeids)
+      records.extend(pytest_records)
+      errors.extend(pytest_errors)
       phase = "source verification"
       plan["source_after"] = source_provenance()
       if plan["source"].get("inputs") != plan["source_after"].get("inputs"):
@@ -324,7 +339,7 @@ def run(suite, output, collect_only=False):
   except Exception:
     errors.append(f"{phase} error:\n{traceback.format_exc()}")
     plan["error_phase"] = phase
-  ids = [test.id() for test in tests]
+  ids = [test.id() for test in tests] + [vehicle_pytest.test_id(nodeid) for nodeid in pytest_nodeids]
   records = test_runner.account_for_tests(ids, records, tests)
   if not errors and suite == "interfaces":
     gate_errors.extend(interface_execution_errors(platform_tests, records))

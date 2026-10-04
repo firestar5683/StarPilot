@@ -114,10 +114,12 @@ reproducible input generation. An explicit `MAX_EXAMPLES` override is recorded.
 The interface suite recursively includes `test_*.py` files throughout `opendbc/car`,
 including brand-specific tests. Only the exact route module `car/tests/test_models.py`
 is excluded. Each module's source hash and collected count are recorded; a module
-that silently collects zero tests fails the gate. AST checks also reject unsupported
-module-level pytest-style functions and declared class test methods with no
-collected counterpart, including when other tests in that module were collected.
-Those tests need explicit runner support rather than silent omission.
+that silently collects zero tests fails the gate. Files containing module-level
+pytest tests or plain pytest classes run once through pytest, including any unittest
+classes in those mixed files; other files retain the unittest runner. Both runners
+execute serially in the same process with the pinned native library. AST checks
+reject declared test functions and methods without a collected counterpart,
+including when other tests in that module were collected.
 It asserts exact equality between the current platform registry and concrete
 generated interface tests: a missing, duplicate or extra platform fails collection.
 Abstract-class skips cannot satisfy platform coverage.

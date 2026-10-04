@@ -18,7 +18,7 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 REVISION = re.compile(r"[0-9a-f]{40}\Z")
 NATIVE_CAN_SOURCES = {"opendbc_repo/opendbc/can/packer.py", "opendbc_repo/opendbc/can/parser.py"}
 RELEVANT_SOURCE_PATHS = ("opendbc_repo", "openpilot/common", "openpilot/cereal", "msgq_repo",
-                         "tools/ci/run_vehicle_tests.py", "tools/test_runner.py", "upstream-sync.json")
+                         "tools/ci/run_vehicle_tests.py", "tools/ci/vehicle_pytest.py", "tools/test_runner.py", "upstream-sync.json")
 
 
 def sha256(path):
@@ -161,7 +161,8 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
   current_manifest = ROOT / "upstream-sync.json"
   current_runner = ROOT / "tools/ci/run_vehicle_tests.py"
   current_test_runner = ROOT / "tools/test_runner.py"
-  for field, path in (("manifest_sha256", current_manifest), ("suite_runner_sha256", current_runner), ("runner_sha256", current_test_runner)):
+  for field, path in (("manifest_sha256", current_manifest), ("suite_runner_sha256", current_runner), ("runner_sha256", current_test_runner),
+                      ("pytest_runner_sha256", ROOT / "tools/ci/vehicle_pytest.py")):
     if source.get(field) != sha256(path):
       uncovered.append(f"interface report {field} differs from current source")
   pinned = json.loads(current_manifest.read_text()).get("dependencies", [])
