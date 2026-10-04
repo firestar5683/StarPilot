@@ -24,6 +24,7 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 DESCRIPTIONS = {
   'pair_device': tr_noop("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."),
   'cabin_camera': tr_noop("Preview the cabin camera to ensure that driver monitoring has good visibility. (vehicle must be off)"),
+  'reset_driver_monitoring': tr_noop("Clears the saved driver monitoring wheel-side calibration."),
   'reset_calibration': tr_noop("openpilot requires the device to be mounted within 4° left or right and within 5° up or 9° down."),
   'review_guide': tr_noop("Review the rules, features, and limitations of openpilot"),
 }
@@ -39,7 +40,7 @@ class DeviceLayout(Widget):
     self._training_guide: TrainingGuide | None = None
 
     items = self._initialize_items()
-    self._scroller = Scroller(items, line_separator=True, spacing=0)
+    self._scroller = self._child(Scroller(items, line_separator=True, spacing=0))
 
     ui_state.add_offroad_transition_callback(self._offroad_transition)
 
@@ -61,6 +62,8 @@ class DeviceLayout(Widget):
       self._pair_device_btn,
       button_item(lambda: tr("Cabin Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['cabin_camera']),
                   callback=lambda: gui_app.push_widget(CabinCameraDialog()), enabled=ui_state.is_offroad),
+      button_item(lambda: tr("Reset Driver Monitoring"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_driver_monitoring']),
+                  callback=self._reset_driver_monitoring_prompt, enabled=self._can_reset_driver_monitoring),
       self._reset_calib_btn,
       button_item(lambda: tr("Review Training Guide"), lambda: tr("REVIEW"), lambda: tr(DESCRIPTIONS['review_guide']),
                   self._on_review_training_guide, enabled=ui_state.is_offroad),
@@ -72,10 +75,6 @@ class DeviceLayout(Widget):
 
   def _offroad_transition(self):
     self._power_off_btn.action_item.right_button.set_visible(ui_state.is_offroad())
-
-  def show_event(self):
-    super().show_event()
-    self._scroller.show_event()
 
   def _render(self, rect):
     self._scroller.render(rect)
@@ -111,6 +110,21 @@ class DeviceLayout(Widget):
 
     dialog = ConfirmDialog(tr("Are you sure you want to reset calibration?"), tr("Reset"), callback=reset_calibration)
     gui_app.push_widget(dialog)
+
+  def _can_reset_driver_monitoring(self) -> bool:
+    return ui_state.is_offroad() and not ui_state.engaged and not self._params.get_bool("IsDriverViewEnabled")
+
+  def _reset_driver_monitoring_prompt(self):
+    if not self._can_reset_driver_monitoring():
+      return
+
+    def reset_driver_monitoring(result: DialogResult):
+      if result == DialogResult.CONFIRM and self._can_reset_driver_monitoring():
+        self._params.remove("IsRhdDetected")
+        self._params.put_bool("OnroadCycleRequested", True, block=True)
+
+    gui_app.push_widget(ConfirmDialog(tr("Are you sure you want to reset driver monitoring calibration?"), tr("Reset"),
+                                      callback=reset_driver_monitoring))
 
   def _update_calib_description(self):
     desc = tr(DESCRIPTIONS['reset_calibration'])

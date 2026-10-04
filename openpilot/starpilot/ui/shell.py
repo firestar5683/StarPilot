@@ -134,9 +134,10 @@ class ShellView:
 class ShellInput:
   """One pointer, one pane: transitions cancel pending presses before reuse."""
 
-  def __init__(self, profile: Profile, emit: Callable[[ShellRequest], None]):
+  def __init__(self, profile: Profile, emit: Callable[[ShellRequest], None], *, native_panels: tuple[Destination, ...] = ()):
     self.profile = profile
     self.emit = emit
+    self.native_panels = native_panels
     self._pane: tuple[ShellMode, Destination] | None = None
     self._selected = Destination.STAR
     self._settings_emitted = False
@@ -186,6 +187,8 @@ class ShellInput:
       self.onroad.press(x, y, snapshot.onroad)
     else:
       self.settings.press(x, y, snapshot.settings)
+      if snapshot.selected in self.native_panels:
+        return
       if self.profile == Profile.LARGE and snapshot.selected == Destination.DEVICE:
         self.device.press(x, y, snapshot.device)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOFTWARE:
@@ -214,6 +217,8 @@ class ShellInput:
       self.onroad.move(x, y, snapshot.onroad)
     else:
       self.settings.move(x, y, snapshot.settings)
+      if snapshot.selected in self.native_panels:
+        return
       if self.profile == Profile.LARGE and snapshot.selected == Destination.DEVICE:
         self.device.move(x, y, snapshot.device)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOFTWARE:
@@ -244,7 +249,8 @@ class ShellInput:
       # the press that caused it must never also activate a leaf control.
       self._settings_emitted = False
       self.settings.release(x, y, snapshot.settings)
-      if not self._settings_emitted and self._pane == (snapshot.mode, snapshot.selected):
+      if (not self._settings_emitted and self._pane == (snapshot.mode, snapshot.selected) and
+          snapshot.selected not in self.native_panels):
         if self.profile == Profile.LARGE and snapshot.selected == Destination.DEVICE:
           self.device.release(x, y, snapshot.device)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOFTWARE:

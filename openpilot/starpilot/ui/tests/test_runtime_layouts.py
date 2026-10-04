@@ -30,13 +30,14 @@ class TestOptInLayouts(unittest.TestCase):
     def parent_init(layout):
       from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
       settings = Mock()
-      settings._panels = {PanelType.NETWORK: NS(instance=Mock())}
+      settings._panels = {panel: NS(instance=Mock()) for panel in PanelType}
       layout._layouts = {runtime_app.MainState.HOME: Mock(), runtime_app.MainState.SETTINGS: settings,
                          runtime_app.MainState.ONROAD: camera}
       layout._current_mode = runtime_app.MainState.HOME
 
     with patch.object(runtime_app, "validate_runtime_fonts"), patch.object(runtime_app, "validate_runtime_assets"), \
          patch.object(runtime_app.MainLayout, "__init__", parent_init), \
+         patch.object(runtime_app, "button_item"), \
          patch.object(runtime_app, "StarShellSession", return_value=session):
       layout = runtime_app.StarMainLayout()
       navigate = session.set_navigation.call_args.kwargs

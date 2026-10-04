@@ -72,7 +72,10 @@ from openpilot.starpilot.ui.software_state import DownloadLabel, SoftwareAction,
 from openpilot.starpilot.ui.toggles_state import Personality, ToggleKey, ToggleRequest
 from openpilot.system.ui.lib.application import MouseEvent, MousePos, gui_app
 from openpilot.system.ui.widgets import Widget
+from openpilot.system.ui.widgets.list_view import button_item
 from openpilot.system.ui.widgets.nav_widget import NavWidget
+
+NATIVE_SETTINGS_PANELS = (Destination.DEVICE, Destination.SOFTWARE, Destination.BLUETOOTH, Destination.DEVELOPER)
 
 
 def validate_runtime_fonts(profile: Profile) -> None:
@@ -176,7 +179,8 @@ class StarShellSession:
         self.slc_actions = SlcActionDispatcher(_slc_action_publisher(), self._live_slc_message)
       except (OSError, RuntimeError):
         pass  # The shell stays readable and reports action unavailability.
-    self.input = ShellInput(profile, self._emit)
+    self.input = ShellInput(profile, self._emit,
+                            native_panels=NATIVE_SETTINGS_PANELS if profile == Profile.LARGE and settings_layer is not None else ())
     if profile == Profile.LARGE:
       self.input.onroad.drawer_bounds = self.view.onroad.unified_speed.source_bounds
     self.selected = Destination.STAR
@@ -946,7 +950,8 @@ class StarShellSession:
         renderer.deactivate()
     # Scroller and NavWidget place compact pages at changing screen positions.
     with placed_at(rect, parent_clip):
-      external = self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and snapshot.selected in (Destination.BLUETOOTH, Destination.DEVELOPER)
+      external = (self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and
+                  snapshot.selected in NATIVE_SETTINGS_PANELS and self.settings_layer is not None)
       self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot)
       if external:
         self.view.settings.render_rail(snapshot.settings, selected=snapshot.selected)
@@ -970,7 +975,7 @@ class StarShellSession:
         self._unavailable("network panel is unavailable")
 
     if (mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and
-        snapshot.selected in (Destination.BLUETOOTH, Destination.DEVELOPER) and self.settings_layer is not None):
+        snapshot.selected in NATIVE_SETTINGS_PANELS and self.settings_layer is not None):
       rail_width = 500 if snapshot.settings.sidebar_expanded else 0
       content = rl.Rectangle(rect.x + rail_width + 50, rect.y + 25, rect.width - rail_width - 100, rect.height - 50)
       self.settings_layer(snapshot.selected, content)
@@ -1302,7 +1307,11 @@ class StarMainLayout(MainLayout):
     from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
     native_network = self._layouts[MainState.SETTINGS]._panels[PanelType.NETWORK].instance
     self._network_bridge = NetworkPanelBridge(native_network, self._network_authority)
-    self._large_panels = {Destination.DEVELOPER: self._layouts[MainState.SETTINGS]._panels[PanelType.DEVELOPER].instance}
+    self._large_panels = {
+      destination: self._layouts[MainState.SETTINGS]._panels[panel].instance
+      for destination, panel in ((Destination.DEVICE, PanelType.DEVICE), (Destination.SOFTWARE, PanelType.SOFTWARE),
+                                  (Destination.DEVELOPER, PanelType.DEVELOPER))
+    }
     self._large_destination = None
     try:
       self.star = StarShellSession(Profile.LARGE, self._native_onroad, network_layer=self._network_bridge.render, settings_layer=self._render_large_panel)
@@ -1310,6 +1319,8 @@ class StarMainLayout(MainLayout):
       self._native_onroad.close()
       raise
     self.page = StarShellPage(self.star, ShellMode.HOME)
+    self._large_panels[Destination.DEVICE]._scroller.add_widget(
+      button_item("Galaxy", "OPEN", callback=self.star.galaxy_flow.open_large))
     self.star.set_navigation(on_settings=lambda: self._set_current_layout(MainState.SETTINGS),
                              on_home=self._set_mode_for_state,
                              on_pairing=self._show_pairing,

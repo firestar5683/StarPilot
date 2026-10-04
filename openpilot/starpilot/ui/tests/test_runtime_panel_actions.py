@@ -357,7 +357,7 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_compact_network_in_drive_shows_status_without_native_network_owner(self):
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
-    layout.star = NS(confirmed_offroad=Mock(return_value=False),
+    layout.star = NS(connectivity_allowed=Mock(return_value=False),
                      snapshot=Mock(return_value=NS(home=NS(network="wifi"))))
     page = NS(_scroller=NS(add_widgets=Mock()))
     with patch("openpilot.system.ui.widgets.scroller.NavScroller", return_value=page), \
@@ -367,7 +367,7 @@ class TestRuntimePanelActions(unittest.TestCase):
       layout._open_compact_destination(Destination.NETWORK)
     native.assert_not_called()
     self.assertEqual(page._scroller.add_widgets.call_args.args[0], [("network", "Wi-Fi"),
-                                                                     ("network changes", "Available while parked")])
+                                                                     ("network changes", "Use Offroad mode to change network settings")])
     push.assert_called_once_with(page)
 
   def test_software_check_owner_and_waiting_gate_with_mocked_final_effect(self):
