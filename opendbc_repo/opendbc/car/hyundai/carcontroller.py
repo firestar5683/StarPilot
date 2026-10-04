@@ -1,4 +1,12 @@
-from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalPolicy, LegacyAngleEnvelope, lateral_request_allowed, qualified as ev9_long_qualified, update_blindspot_warning, BlindspotWarningOutput
+from opendbc.car.hyundai.canfd_angle_aol import qualified as qualified_angle_aol, command_allowed as angle_aol_command_allowed
+from opendbc.car.hyundai.ev9_longitudinal import (
+  EV9LongitudinalPolicy,
+  LegacyAngleEnvelope,
+  lateral_request_allowed,
+  qualified as ev9_long_qualified,
+  update_blindspot_warning,
+  BlindspotWarningOutput,
+)
 from opendbc.car.hyundai import ev9_long_sender
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import get_max_angle_vm, get_max_angle_delta_vm
@@ -338,6 +346,8 @@ class CarController(CarControllerBase):
       self.last_ccnc_now_ns = now_nanos
 
     ev9_long = self.ev9_longitudinal is not None
+    angle_aol = qualified_angle_aol(self.CP, marked_only=True)
+    angle_aol_active = angle_aol and CC.latActive and angle_aol_command_allowed(self.CP, CS.out)
     ccnc_ev_stock = self.CP.carFingerprint in (CAR.HYUNDAI_IONIQ_5_PE, CAR.KIA_EV9) and not ev9_long
     ccnc_ev_replacement = replacement_requested(self.CP, CC, CS.out) if ccnc_ev_stock else False
 
@@ -385,6 +395,8 @@ class CarController(CarControllerBase):
                           not CS.out.gasPressed and not CS.out.steerFaultTemporary and
                           (not (self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG_ALT or drive_gear_required) or
                            CS.out.gearShifter == structs.CarState.GearShifter.drive))
+      if angle_aol:
+        angle_active = angle_aol_active
       if ccnc_ev_stock:
         angle_active = ccnc_ev_replacement
       desired_angle = float(np.clip(CC.actuators.steeringAngleDeg, -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
@@ -396,9 +408,19 @@ class CarController(CarControllerBase):
       self.angle_gain_last = angle_torque_reduction_gain(CS.out.steeringTorque, CS.out.vEgoRaw,
                                                          angle_active, self.angle_gain_last)
       if not ccnc_ev_stock or ccnc_ev_replacement:
-        can_sends.extend(hyundaicanfd.create_angle_steering_messages(
-          self.packer, self.CP, self.CAN, CC.enabled, angle_active, self.apply_angle_last,
-          self.angle_gain_last, CS.angle_lkas_status, CS.out.steeringAngleDeg))
+        can_sends.extend(
+          hyundaicanfd.create_angle_steering_messages(
+            self.packer,
+            self.CP,
+            self.CAN,
+            CC.enabled or (angle_aol and angle_active),
+            angle_active,
+            self.apply_angle_last,
+            self.angle_gain_last,
+            CS.angle_lkas_status,
+            CS.out.steeringAngleDeg,
+          )
+        )
     else:
       steering_status_active = CC.enabled
       if self.ioniq6_longitudinal is not None and self.CP.safetyConfigs[-1].safetyParam in (0x8815, 0x8895):
@@ -408,7 +430,13 @@ class CarController(CarControllerBase):
                                                             steering_status_active, apply_steer_req, apply_torque))
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
-    if self.frame % 5 == 0 and lka_steering and (not ccnc_ev_stock or ccnc_ev_replacement) and (not ev9_long or ev9_lateral_allowed):
+    if (
+      self.frame % 5 == 0
+      and lka_steering
+      and (not angle_aol or angle_aol_active)
+      and (not ccnc_ev_stock or ccnc_ev_replacement)
+      and (not ev9_long or ev9_lateral_allowed)
+    ):
       can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg,
                                                         self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG_ALT))
 

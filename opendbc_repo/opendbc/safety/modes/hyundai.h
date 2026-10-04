@@ -3,6 +3,7 @@
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/hyundai_common.h"
 #include "opendbc/safety/modes/hyundai_classic_non_scc_aol.h"
+#include "opendbc/safety/modes/hyundai_blended_stock_aol.h"
 
 #define HYUNDAI_LIMITS(steer, rate_up, rate_down) { \
   .max_torque = (steer), \
@@ -213,6 +214,7 @@ static void hyundai_blended_cancel_check(void) {
 
 static void hyundai_rx_hook(const CANPacket_t *msg) {
   classic_non_scc_aol_rx(msg);
+  blended_aol_rx(msg);
   hyundai_blended_cancel_check();
 
   const uint8_t pt_bus = hyundai_blended_hda2 ? 1U : 0U;
@@ -232,7 +234,7 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (hyundai_blended_stock && (msg->addr == 0x420U) && (msg->bus == pt_bus)) {
+  if (hyundai_blended_stock && (msg->addr == 0x421U) && (msg->bus == pt_bus)) {
     acc_main_on = GET_BIT(msg, 27U);
   }
 
@@ -299,7 +301,8 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
       gas_pressed = msg->data[7] != 0U;
     } else if ((msg->addr == 0x91U) && hyundai_fcev_gas_signal) {
       gas_pressed = msg->data[6] != 0U;
-    } else if ((msg->addr == 0x260U) && !hyundai_ev_gas_signal && !hyundai_hybrid_gas_signal) {
+    } else if ((msg->addr == 0x260U) && !hyundai_ev_gas_signal && !hyundai_hybrid_gas_signal &&
+               !(classic_scc_aol_enabled && hyundai_fcev_gas_signal)) {
       gas_pressed = (msg->data[7] >> 6) != 0U;
     } else {
     }
@@ -518,6 +521,8 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  tx &= blended_aol_integrity(msg);
+  blended_aol_tx(msg, tx);
   return tx;
 }
 
@@ -537,8 +542,16 @@ static void hyundai_classic_scc_aol_rx_config(safety_config *config, bool legacy
     HYUNDAI_SCC12_ADDR_CHECK(0)
     {.msg = {{0x420, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
   };
+  static RxCheck fcev[] = {
+    HYUNDAI_COMMON_RX_CHECKS(false)
+    HYUNDAI_SCC12_ADDR_CHECK(0)
+    {.msg = {{0x420, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+    HYUNDAI_FCEV_GAS_ADDR_CHECK
+  };
   if (classic_scc_aol_enabled) {
-    if (legacy) {
+    if (hyundai_fcev_gas_signal && !legacy) {
+      SET_RX_CHECKS(fcev, (*config));
+    } else if (legacy) {
       SET_RX_CHECKS(older, (*config));
     } else if (classic_scc_aol_camera) {
       SET_RX_CHECKS(camera, (*config));
@@ -584,6 +597,7 @@ static safety_config hyundai_init(uint16_t param) {
 
   hyundai_common_init(param);
   classic_non_scc_aol_configure(param, false);
+  blended_aol_configure(param);
   hyundai_blended_alpha = false;
 #ifdef ALLOW_DEBUG
   hyundai_blended_alpha = (param == 0x2004U) || (param == 0x2014U);
@@ -653,12 +667,18 @@ static safety_config hyundai_init(uint16_t param) {
       {0x2A4, 0, 24, .check_relay = true},
       {0x485, 1, 8, .check_relay = true},
     };
+    static const CanMsg blended_aol_tx_msgs[] = {
+      {0x340, 0, 8, .check_relay = true, .disable_static_blocking = true},
+      {0x4F1, 0, 4, .check_relay = false},
+      {0x485, 0, 8, .check_relay = true, .disable_static_blocking = true},
+      {0x364, 0, 8, .check_relay = true, .disable_static_blocking = true},
+    };
     if (hyundai_blended_hda2) {
       static RxCheck blended_hda2_rx[] = {HYUNDAI_BLENDED_COMMON_RX_CHECKS(1, 50U)};
       ret = BUILD_SAFETY_CFG(blended_hda2_rx, blended_hda2_tx);
     } else {
       static RxCheck blended_rx[] = {HYUNDAI_BLENDED_COMMON_RX_CHECKS(0, 100U)};
-      ret = BUILD_SAFETY_CFG(blended_rx, blended_tx);
+      ret = blended_aol_enabled ? BUILD_SAFETY_CFG(blended_rx, blended_aol_tx_msgs) : BUILD_SAFETY_CFG(blended_rx, blended_tx);
     }
   } else if (hyundai_ray_pedal) {
     static const CanMsg ray_tx_msgs[] = {
@@ -851,6 +871,9 @@ static safety_config hyundai_legacy_init(uint16_t param) {
 }
 
 static void hyundai_optional_rx_hook(const CANPacket_t *msg) {
+  if ((msg->addr == 0x391U) || (msg->addr == 0x50CU)) {
+    blended_aol_rx(msg);
+  }
   // The unselected physical alternative does not renew mandatory RX health.
   // Only these exact classic LDA profiles may use shape-checked button evidence.
   if (classic_non_scc_aol_enabled && classic_non_scc_aol_lda && (msg->bus == 0U) && (GET_LEN(msg) == 8U) &&
@@ -860,6 +883,7 @@ static void hyundai_optional_rx_hook(const CANPacket_t *msg) {
 }
 
 const safety_hooks hyundai_hooks = {
+  .fwd = blended_aol_fwd,
   .init = hyundai_init,
   .optional_rx = hyundai_optional_rx_hook,
   .rx = hyundai_rx_hook,

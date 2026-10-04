@@ -1,3 +1,5 @@
+from opendbc.car.hyundai.blended_stock_aol import qualified as qualified_blended_stock, WORDS as BLENDED_STOCK_WORDS
+from opendbc.car.hyundai.canfd_angle_aol import qualified as qualified_angle_aol, temporary_restriction, ANGLE_AOL_WORDS
 from opendbc.car.hyundai.classic_long_aol import (
   qualified as qualified_classic_long,
   aol_word as classic_long_word,
@@ -68,6 +70,18 @@ def ioniq6_settings_capable(CP) -> bool:
 
 
 def policy_for(CP) -> AolVehiclePolicy:
+  if qualified_blended_stock(CP):
+    return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
+                            normal_runtime_supported=True, explicit_latch=True, alternative_experience_addition=32)
+  if qualified_angle_aol(CP):
+    return AolVehiclePolicy(
+      intent_supported=True,
+      settings_supported=True,
+      runtime_supported=True,
+      normal_runtime_supported=True,
+      explicit_latch=True,
+      alternative_experience_addition=32,
+    )
   if qualified_classic_long(CP):
     return AolVehiclePolicy(
       intent_supported=True,
@@ -129,14 +143,21 @@ def policy_for(CP) -> AolVehiclePolicy:
 
 def native_profile_supported(model: int, param: int) -> bool:
   return (
-    (model == int(car.CarParams.SafetyModel.hyundai) and param in LONG_AOL_WORDS)
+    (model == int(car.CarParams.SafetyModel.hyundai) and param in LONG_AOL_WORDS | BLENDED_STOCK_WORDS)
     or classic_native_profile_supported(model, param)
-    or (model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param in IONIQ6_AOL_SAFETY_PARAMS | STOCK_AOL_WORDS | set(STOCK_SAFETY_PARAMS.values()))
+    or (
+      model == int(car.CarParams.SafetyModel.hyundaiCanfd)
+      and param in IONIQ6_AOL_SAFETY_PARAMS | ANGLE_AOL_WORDS | STOCK_AOL_WORDS | set(STOCK_SAFETY_PARAMS.values())
+    )
     or (model == int(car.CarParams.SafetyModel.hyundai) and param in AOL_WORDS)
   )
 
 
 def native_accepts_cp(CP, model: int, param: int) -> bool:
+  if qualified_blended_stock(CP, marked_only=True):
+    return model == int(car.CarParams.SafetyModel.hyundai) and param == CP.safetyConfigs[0].safetyParam
+  if qualified_angle_aol(CP, marked_only=True):
+    return model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == CP.safetyConfigs[0].safetyParam
   if qualified_classic_long(CP, marked_only=True):
     return classic_long_accepts(CP, model, param)
   if qualified_classic_scc(CP, marked_only=True):
@@ -155,7 +176,9 @@ def native_latch_rejected(CP, native) -> bool:
   # through pedal override; denial means the physical authorization was lost.
   return (
     (
-      qualified_classic_long(CP, marked_only=True)
+      qualified_angle_aol(CP, marked_only=True)
+      or qualified_blended_stock(CP, marked_only=True)
+      or qualified_classic_long(CP, marked_only=True)
       or qualified_ioniq6(CP)
       or qualified_non_scc(CP)
       or qualified_canfd_stock(CP, marked_only=True)
@@ -192,3 +215,7 @@ def allow_lateral_onset(CP, *, requested, normal_enabled, steering_pressed, prev
   if not (qualified_non_scc(CP) and CP.carFingerprint == HyundaiCAR.HYUNDAI_KONA_NON_SCC):
     return bool(requested)
   return kona_lateral_onset(permitted=requested, normal_enabled=normal_enabled, steering_pressed=steering_pressed, previous_active=previous_active)
+
+
+def retain_on_native_denial(CP, native, state):
+  return bool(qualified_angle_aol(CP, marked_only=True) and native.requestedLateral and not native.lateralAllowed and temporary_restriction(CP, state))

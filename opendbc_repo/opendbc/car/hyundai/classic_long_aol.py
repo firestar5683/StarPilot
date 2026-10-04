@@ -4,7 +4,7 @@ from opendbc.car.hyundai.classic_scc_aol import CLASSIC_SCC_IDS, stock_word
 
 AOL_MARKER = 0x0400
 AOL_EXPERIENCE = 32
-_EXCLUDED = int(HyundaiFlags.LEGACY | HyundaiFlags.UNSUPPORTED_LONGITUDINAL | HyundaiFlags.ALT_LIMITS_2 | HyundaiFlags.CAMERA_SCC)
+_EXCLUDED = int(HyundaiFlags.LEGACY | HyundaiFlags.UNSUPPORTED_LONGITUDINAL | HyundaiFlags.ALT_LIMITS_2 | HyundaiFlags.CAMERA_SCC | HyundaiFlags.FCEV)
 CLASSIC_LONG_IDS = frozenset(identity for identity in CLASSIC_SCC_IDS if not int(identity.config.flags) & _EXCLUDED)
 LONG_AOL_WORDS = frozenset(AOL_MARKER | 4 | gas | limits | lda for gas in (0, 1, 2) for limits in (0, 64) for lda in (0, 2048))
 

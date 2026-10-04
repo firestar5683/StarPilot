@@ -2,22 +2,23 @@
 
 #include "selfdrive/pandad/aol_protocol.h"
 #include "opendbc/safety/modes/hyundai_canfd_aol.h"
+#include "opendbc/safety/modes/hyundai_canfd_angle_aol.h"
 
 inline bool hyundai_aol_param(uint16_t param) {
   // Existing mode28 entry also transports exact ordinary PE/EV9 requests.
-  return hyundai_canfd_stock_torque_aol_param(param) || param == 0x8815U || param == 0x8895U || param == 0x5491U || param == 0x5C91U;
+  return hyundai_canfd_angle_aol_param(param) || hyundai_canfd_stock_torque_aol_param(param) || param == 0x8815U || param == 0x8895U || param == 0x5491U || param == 0x5C91U;
 }
 
 inline constexpr AolSafetyProfile HYUNDAI_AOL_PROFILE{28U, hyundai_aol_param, true};
 
 inline bool hyundai_classic_scc_aol_param(uint16_t param) {
-  return param == 0x8408U || param == 0x840AU || param == 0x8C08U || param == 0x8C0AU ||
+  return param == 0x0500U || param == 0x0D00U || param == 0x8408U || param == 0x840AU || param == 0x8C08U || param == 0x8C0AU ||
          (((param & 0x0400U) != 0U) && ((param & 0xF1B4U) == 0U) &&
           ((param & 3U) != 3U) && ((param & 0x0240U) != 0x0240U));
 }
 
 inline bool hyundai_legacy_aol_param(uint16_t param) {
-  return hyundai_classic_scc_aol_param(param) && ((param & 8U) == 0U);
+  return hyundai_classic_scc_aol_param(param) && ((param & (8U | 256U)) == 0U);
 }
 
 inline constexpr AolSafetyProfile HYUNDAI_LEGACY_AOL_PROFILE{23U, hyundai_legacy_aol_param, true};
@@ -27,7 +28,7 @@ inline bool hyundai_classic_long_aol_param(uint16_t param) {
 }
 
 inline bool hyundai_classic_aol_param(uint16_t param) {
-  return hyundai_classic_long_aol_param(param) || hyundai_classic_scc_aol_param(param) || param == 0x1400U || param == 0x1C00U || param == 0x1440U || param == 0x1C40U ||
+  return param == 0x2000U || hyundai_classic_long_aol_param(param) || hyundai_classic_scc_aol_param(param) || param == 0x1400U || param == 0x1C00U || param == 0x1440U || param == 0x1C40U ||
          param == 0x1402U || param == 0x1C02U || param == 0x1441U || param == 0x1C41U;
 }
 

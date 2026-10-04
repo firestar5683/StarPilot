@@ -26,4 +26,8 @@ def request_allowed(cp, state):
 
 
 def replacement_requested(cp, control, state):
+  from opendbc.car.hyundai.canfd_angle_aol import qualified as angle_qualified, command_allowed
+
+  if angle_qualified(cp, marked_only=True):
+    return command_allowed(cp, state) and control.latActive
   return request_allowed(cp, state) and control.latActive

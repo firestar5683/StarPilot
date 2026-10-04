@@ -3,6 +3,7 @@
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/hyundai_common.h"
 #include "opendbc/safety/modes/hyundai_canfd_aol.h"
+#include "opendbc/safety/modes/hyundai_canfd_angle_aol.h"
 
 #define HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(bus) \
   {0x1CF, bus, 8, .check_relay = false},  /* CRUISE_BUTTON */   \
@@ -68,6 +69,13 @@
 #define HYUNDAI_EV9_LONG_PARAM 0x5C95U
 static bool hyundai_canfd_ev9_long = false;
 static uint8_t hyundai_ev9_inactive_accel_count = 0U;
+static bool hyundai_angle_aol_enabled = false;
+static bool hyundai_angle_aol_drive = false;
+static bool hyundai_angle_aol_eps_fault = false;
+static bool hyundai_angle_aol_gear_seen = false;
+static uint32_t hyundai_angle_aol_gear_ts = 0U;
+static uint8_t hyundai_angle_aol_fault_mask = 2U;
+static uint8_t hyundai_angle_aol_permission_mask(void);
 static bool hyundai_ordinary_angle_stock = false;
 static bool hyundai_ordinary_angle_drive = false;
 static bool hyundai_ordinary_angle_eps_fault = false;
@@ -79,7 +87,7 @@ static uint32_t hyundai_ordinary_angle_accepted_ts = 0U;
 static void hyundai_ordinary_angle_release(void) {
   hyundai_ordinary_angle_owned = false;
   hyundai_ordinary_angle_counter_seen = false;
-  if (hyundai_ordinary_angle_stock) {
+  if (hyundai_ordinary_angle_stock || hyundai_angle_aol_enabled) {
     // Match the shared limiter's inactive/violation baseline. Its rate and
     // acceleration envelopes and real-time message budget remain unchanged.
     desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -3600, 3600);
@@ -87,6 +95,11 @@ static void hyundai_ordinary_angle_release(void) {
 }
 
 static void hyundai_ordinary_angle_reset(void) {
+  hyundai_angle_aol_enabled = false;
+  hyundai_angle_aol_drive = false;
+  hyundai_angle_aol_eps_fault = false;
+  hyundai_angle_aol_gear_seen = false;
+  hyundai_angle_aol_gear_ts = 0U;
   hyundai_ordinary_angle_release();
   hyundai_ordinary_angle_stock = false;
   hyundai_canfd_ev9_long = false;
@@ -117,8 +130,13 @@ static uint8_t hyundai_ordinary_angle_request_mask(void) {
 
 static uint8_t hyundai_ordinary_angle_permission_mask(void) {
   uint8_t result = 0U;
-  if (aol_rx_healthy() && controls_allowed && vehicle_moving && hyundai_ordinary_angle_drive && !hyundai_ordinary_angle_eps_fault &&
-      !brake_pressed && !gas_pressed && ((hyundai_ordinary_angle_request_mask() & 1U) != 0U)) {
+  if (hyundai_angle_aol_enabled) {
+    result = hyundai_angle_aol_permission_mask();
+    if (result == 0U) {
+      hyundai_ordinary_angle_release();
+    }
+  } else if (aol_rx_healthy() && controls_allowed && vehicle_moving && hyundai_ordinary_angle_drive && !hyundai_ordinary_angle_eps_fault &&
+             !brake_pressed && !gas_pressed && ((hyundai_ordinary_angle_request_mask() & 1U) != 0U)) {
     result = 1U;
   } else {
     hyundai_ordinary_angle_release();
@@ -136,7 +154,8 @@ static bool hyundai_ordinary_angle_owner_current(void) {
 
 static bool hyundai_canfd_fwd_hook(int bus, int addr) {
   bool blocked = false;
-  if (hyundai_ordinary_angle_stock && (bus == 2) && ((addr == 0x110) || (addr == 0x362))) {
+  if ((bus == 2) && ((hyundai_ordinary_angle_stock && ((addr == 0x110) || (addr == 0x362))) ||
+      (hyundai_angle_aol_enabled && ((addr == 0x50) || (addr == 0x110) || (addr == 0x12A) || (addr == 0xCB) || (addr == 0x2A4) || (addr == 0x362))))) {
     blocked = hyundai_ordinary_angle_owner_current();
   }
   if (hyundai_canfd_ev9_long) {
@@ -248,7 +267,7 @@ static uint8_t aol_ioniq6_permission_mask(void) {
     aol_host_axis_mask = 0U;
   } else {
     const uint8_t request = aol_get_request_mask();
-    if (((request & 0x1U) != 0U) && (aol_ioniq6_lateral_latch || controls_allowed)) {
+    if (((request & 0x1U) != 0U) && (aol_ioniq6_lateral_latch || (!hyundai_angle_aol_enabled && controls_allowed))) {
       permission |= 0x1U;
     }
     if (hyundai_longitudinal && ((request & 0x2U) != 0U) && controls_allowed) {
@@ -256,6 +275,14 @@ static uint8_t aol_ioniq6_permission_mask(void) {
     }
   }
   return permission;
+}
+
+static uint8_t hyundai_angle_aol_permission_mask(void) {
+  const uint8_t request = aol_ioniq6_permission_mask();
+  const bool gear_current = hyundai_angle_aol_gear_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), hyundai_angle_aol_gear_ts) <= 100000U);
+  return (((request & 1U) != 0U) && gear_current && hyundai_angle_aol_drive && vehicle_moving &&
+         !hyundai_angle_aol_eps_fault && !gas_pressed && !brake_pressed) ? 1U : 0U;
 }
 
 static void aol_ioniq6_rx_invalid(void) {
@@ -381,6 +408,19 @@ static uint8_t hyundai_canfd_ioniq6_bsm_level(bool detected, bool lamp, uint32_t
 }
 
 static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
+  if (hyundai_angle_aol_enabled) {
+    const unsigned int pt = hyundai_canfd_lka_steer_msg ? 1U : 0U;
+    const unsigned int gear_addr = hyundai_ev_gas_signal ? 0x35U : 0x70U;
+    if (msg_matches(msg, gear_addr, pt)) {
+      hyundai_angle_aol_drive = (hyundai_ev_gas_signal ? (msg->data[24] & 7U) : ((msg->data[7] >> 4U) & 7U)) == 5U;
+      hyundai_angle_aol_gear_seen = true;
+      hyundai_angle_aol_gear_ts = microsecond_timer_get();
+    }
+    if (msg_matches(msg, 0xEAU, pt)) {
+      hyundai_angle_aol_eps_fault = (((msg->data[6] >> 6U) & 3U) != 0U) ||
+        ((((msg->data[18] >> 4U) & 7U) & hyundai_angle_aol_fault_mask) != 0U);
+    }
+  }
   if ((hyundai_ordinary_angle_stock || hyundai_canfd_ev9_long) && (msg->bus == 1U) && (msg->addr == 0x35U)) {
     hyundai_ordinary_angle_drive = (msg->data[24] & 0x7U) == 5U;
   }
@@ -877,7 +917,26 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
   bool tx = false;
   const bool ordinary_angle_frame = hyundai_ordinary_angle_stock && ((msg->addr == 0x110U) || (msg->addr == 0x362U));
   bool ordinary_angle_valid = true;
-  if (hyundai_ordinary_angle_stock) {
+  const bool independent_command = hyundai_angle_aol_enabled &&
+    ((msg->addr == 0x50U) || (msg->addr == 0x110U) ||
+     ((msg->addr == 0x12AU) && !hyundai_canfd_angle_observed_adas) || (msg->addr == 0xCBU));
+  bool independent_active = false;
+  if (independent_command) {
+    independent_active = (msg->addr == 0xCBU) ? (((msg->data[3] >> 4U) & 0xFU) == 2U) : (((msg->data[9] >> 4U) & 3U) == 2U);
+    if (independent_active) {
+      const unsigned int len = GET_LEN(msg);
+      const uint32_t xor_out = (len == 16U) ? 0x041DU : 0U;
+      ordinary_angle_valid = (hyundai_angle_aol_permission_mask() != 0U) &&
+        (hyundai_canfd_get_checksum(msg) == (hyundai_common_canfd_compute_checksum(msg) ^ xor_out));
+      if (hyundai_ordinary_angle_counter_seen) {
+        const uint8_t delta = (uint8_t)(msg->data[2] - hyundai_ordinary_angle_counter);
+        ordinary_angle_valid &= (delta > 0U) && (delta <= 127U);
+      }
+    } else {
+      hyundai_ordinary_angle_release();
+    }
+  }
+  if (hyundai_ordinary_angle_stock && !hyundai_angle_aol_enabled) {
     // Core whitelisting precedes this hook; relay is its only final denial.
     ordinary_angle_valid = !relay_malfunction;
     if (ordinary_angle_frame) {
@@ -903,12 +962,16 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
   if (ordinary_angle_valid && !((hyundai_canfd_ioniq6_long || hyundai_canfd_ev9_long) && safety_rx_checks_invalid)) {
     tx = hyundai_canfd_tx_hook_valid(msg);
   }
-  if (hyundai_ordinary_angle_stock && tx && (msg->addr == 0x110U)) {
+  if ((hyundai_ordinary_angle_stock && !hyundai_angle_aol_enabled && (msg->addr == 0x110U) && tx) ||
+      (independent_command && independent_active && tx)) {
     // Commit only after every shape, CRC, counter and actuation guard accepts.
     hyundai_ordinary_angle_owned = true;
     hyundai_ordinary_angle_accepted_ts = microsecond_timer_get();
     hyundai_ordinary_angle_counter_seen = true;
     hyundai_ordinary_angle_counter = msg->data[2];
+  }
+  if (hyundai_angle_aol_enabled && independent_command && !tx) {
+    hyundai_ordinary_angle_release();
   }
   return tx;
 }
@@ -951,8 +1014,9 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
   const uint16_t HYUNDAI_PARAM_ANGLE_TOPOLOGY_MASK = 8U | 16U | 32U | 128U;
   const bool angle_requested = GET_FLAG(param, HYUNDAI_PARAM_CANFD_ANGLE);
   const bool ioniq6_stock_aol_requested = hyundai_canfd_stock_torque_aol_param(param);
-  const bool pe_requested = (param == HYUNDAI_IONIQ5_PE_STOCK_PARAM) && ((unsigned int)alternative_experience == 0U);
-  const bool ev9_requested = (param == HYUNDAI_EV9_STOCK_PARAM) && ((unsigned int)alternative_experience == 0U);
+  const bool angle_aol_requested = hyundai_canfd_angle_aol_param(param) && ((unsigned int)alternative_experience == 32U);
+  const bool pe_requested = (param == HYUNDAI_IONIQ5_PE_STOCK_PARAM) && (((unsigned int)alternative_experience == 0U) || angle_aol_requested);
+  const bool ev9_requested = (param == HYUNDAI_EV9_STOCK_PARAM) && (((unsigned int)alternative_experience == 0U) || angle_aol_requested);
   const bool ordinary_angle_requested = pe_requested || ev9_requested;
 #ifdef ALLOW_DEBUG
   const bool ev9_long_requested = (param == HYUNDAI_EV9_LONG_PARAM) && ((unsigned int)alternative_experience == 0U);
@@ -1564,6 +1628,115 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
     }
     ret.rx_checks = selected;
     ret.rx_checks_len = 6;
+  }
+  if (angle_aol_requested && hyundai_canfd_angle_steering && !hyundai_longitudinal) {
+    static CanMsg independent_tx_msgs[64];
+    const bool bounded = (ret.tx_msgs_len > 0) && (ret.tx_msgs_len <= 64);
+    if (bounded) {
+      RxCheck *selected = NULL;
+      if (hyundai_canfd_lka_steer_msg) {
+        if (hyundai_ev_gas_signal) {
+          static RxCheck angle_hda2_ev_alt[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x35)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+          };
+          static RxCheck angle_hda2_ev_std[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x35)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+          };
+          selected = hyundai_canfd_alt_buttons ? angle_hda2_ev_alt : angle_hda2_ev_std;
+        }
+        else if (hyundai_hybrid_gas_signal) {
+          static RxCheck angle_hda2_hybrid_alt[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x105)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+            {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          static RxCheck angle_hda2_hybrid_std[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x105)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+            {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          selected = hyundai_canfd_alt_buttons ? angle_hda2_hybrid_alt : angle_hda2_hybrid_std;
+        }
+        else {
+          static RxCheck angle_hda2_ice_alt[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x100)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+            {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          static RxCheck angle_hda2_ice_std[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x100)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+            {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          selected = hyundai_canfd_alt_buttons ? angle_hda2_ice_alt : angle_hda2_ice_std;
+        }
+      }
+      else {
+        if (hyundai_ev_gas_signal) {
+          static RxCheck angle_camera_ev_alt[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+          };
+          static RxCheck angle_camera_ev_std[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+          };
+          selected = hyundai_canfd_alt_buttons ? angle_camera_ev_alt : angle_camera_ev_std;
+        }
+        else if (hyundai_hybrid_gas_signal) {
+          static RxCheck angle_camera_hybrid_alt[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+            {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          static RxCheck angle_camera_hybrid_std[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+            {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          selected = hyundai_canfd_alt_buttons ? angle_camera_hybrid_alt : angle_camera_hybrid_std;
+        }
+        else {
+          static RxCheck angle_camera_ice_alt[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+            {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          static RxCheck angle_camera_ice_std[] = {
+            HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
+            HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+            {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
+          };
+          selected = hyundai_canfd_alt_buttons ? angle_camera_ice_alt : angle_camera_ice_std;
+        }
+      }
+      ret.rx_checks = selected;
+      ret.rx_checks_len = hyundai_ev_gas_signal ? 6 : 7;
+      for (int i = 0; i < ret.tx_msgs_len; i++) {
+        independent_tx_msgs[i] = ret.tx_msgs[i];
+        const unsigned int addr = independent_tx_msgs[i].addr;
+        if ((addr == 0x50U) || (addr == 0x110U) || (addr == 0x12AU) || (addr == 0xCBU) || (addr == 0x2A4U) || (addr == 0x362U)) {
+          independent_tx_msgs[i].disable_static_blocking = true;
+        }
+      }
+      ret.tx_msgs = independent_tx_msgs;
+      hyundai_angle_aol_enabled = true;
+      hyundai_angle_aol_fault_mask = (pe_requested || ev9_requested) ? 7U : 2U;
+      aol_ioniq6_long = true;
+      static const AolSafetyPolicy independent_policy = {
+        .reset = aol_ioniq6_reset,
+        .host_request = aol_ioniq6_host_request,
+        .request_mask = aol_ioniq6_request_mask,
+        .permission_mask = hyundai_angle_aol_permission_mask,
+        .rx_invalid = aol_ioniq6_rx_invalid,
+      };
+      aol_policy = &independent_policy;
+    } else {
+      ret.rx_checks_len = 0;
+      ret.tx_msgs_len = 0;
+    }
   }
   return ret;
 }
