@@ -1,5 +1,8 @@
 """Actual get_car/owner/CI publication path with explicit diagnostic transport replies."""
 import ast
+import gc
+
+import pytest
 import inspect
 import textwrap
 import time
@@ -31,6 +34,7 @@ class Replies:
     assert responses == [expected[request]], (request, responses)
     self.requests.append(request)
     owner = self
+
     class Query:
       def get_data(self, timeout):
         send([CanData(addresses[0][0], bytes((len(request),)) + request + bytes(7-len(request)), bus)])
@@ -50,13 +54,14 @@ class TestG90Startup(unittest.TestCase):
   # Mac has no BOOTTIME constant. This fixture-only shim uses its monotonic
   # clock for both producer and consumer; Linux exercises native BOOTTIME.
   @patch.object(time, 'CLOCK_BOOTTIME', getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC), create=True)
-  def run_prepublication(self, mode, *, warm_mode=None, admission=lambda: True, requested=True):
+  def run_prepublication(self, mode, *, warm_mode=None, admission=lambda: True, requested=True, aol=False, lda=False, aol_mutation=None):
     replies = Replies(mode)
     holder = VehicleStartupOwner()
     holder_ci = []
     original = params()
     sent = []
     packer = CANPacker(DBC[CAR.GENESIS_G90][Bus.pt])
+
     def recv(wait_for_one=False):
       if not holder_ci:
         return []
@@ -71,9 +76,13 @@ class TestG90Startup(unittest.TestCase):
           frames.extend([packet] * (7 if warm_mode == 'counter' else 1))
       stamp = 1 if warm_mode == 'stale' else time.clock_gettime_ns(time.CLOCK_BOOTTIME)
       return [TimestampedCanPacket(frames, stamp)]
+
     def hook(cp, candidate, fingerprints, firmware):
       return holder.prepare(cp, CarInterface, (recv, sent.extend), requested=requested, admission=admission)
-    fingerprint = (CAR.GENESIS_G90, gen_empty_fingerprint(), '0'*17, [], original.fingerprintSource, True)
+    frames = gen_empty_fingerprint()
+    if lda:
+      frames[0][0x391] = 8
+    fingerprint = (CAR.GENESIS_G90, frames, '0'*17, [], original.fingerprintSource, True)
     with patch.object(car_helpers, 'fingerprint', return_value=fingerprint), \
          patch.object(disable_module, 'IsoTpParallelQuery', side_effect=replies.query), \
          patch.object(g90_startup, 'IsoTpParallelQuery', side_effect=replies.query):
@@ -89,6 +98,15 @@ class TestG90Startup(unittest.TestCase):
           holder.configure(ci)
       else:
         holder.configure(ci)
+      if aol:
+        from openpilot.starpilot.car.hyundai.aol import policy_for
+        policy = policy_for(ci.CP)
+        assert policy.intent_supported
+        ci.CP.safetyConfigs[0].safetyParam |= policy.safety_param_addition
+        ci.CP.alternativeExperience |= policy.alternative_experience_addition
+        if aol_mutation is not None:
+          aol_mutation(ci.CP)
+        holder.finalize_aol_configuration(ci)
       holder.seal_publication()
     return ci, holder, replies, original
 
@@ -188,3 +206,139 @@ class TestG90Startup(unittest.TestCase):
     self.assertLess(source.index('self.vehicle_startup.seal_publication()'), source.index('self.CP.to_bytes()'))
     tree = ast.parse(textwrap.dedent(source))
     self.assertFalse(any(isinstance(node, ast.Constant) and node.value == 'GENESIS_G90' for node in ast.walk(tree)))
+
+  def test_exact_aol_finalization_preserves_transaction_outcome_and_ud_s_contract(self):
+    from opendbc.car.hyundai.classic_long_aol import qualified as long_qualified
+    from opendbc.car.hyundai.classic_scc_aol import qualified as stock_qualified
+    for mode, outcome in (('sent', Outcome.SENT_UNCONFIRMED), ('untouched', Outcome.STOCK_UNTOUCHED), ('restored', Outcome.STOCK_RESTORED)):
+      for lda in (False, True):
+        with self.subTest(mode=mode, lda=lda):
+          ci, holder, replies, original = self.run_prepublication(mode, aol=True, lda=lda)
+          self.assertIs(holder.owner.outcome, outcome)
+          self.assertTrue(holder.owner.prepared_for(ci.CP))
+          self.assertTrue(holder.owner.published)
+          self.assertEqual(ci.CP.openpilotLongitudinalControl, mode == 'sent')
+          self.assertEqual(ci.CP.pcmCruise, mode != 'sent')
+          self.assertTrue(long_qualified(ci.CP, marked_only=True) if mode == 'sent' else stock_qualified(ci.CP, marked_only=True))
+          self.assertEqual(ci.CP.alternativeExperience, 32)
+          self.assertEqual(ci.CP.steerActuatorDelay, original.steerActuatorDelay)
+          self.assertEqual(ci.CP.longitudinalActuatorDelay, original.longitudinalActuatorDelay)
+          self.assertNotIn(b'\x28\x03\x01', replies.requests)
+          self.assertEqual(b'\x28\x00\x01' in replies.requests, mode == 'restored')
+
+  def test_aol_finalization_rejects_unrelated_cp_changes_before_publication(self):
+    for mode in ('sent', 'untouched', 'restored'):
+      with self.subTest(mode=mode), self.assertRaisesRegex(RuntimeError, 'unrelated CarParams'):
+        self.run_prepublication(mode, aol=True, aol_mutation=lambda cp: setattr(cp, 'steerActuatorDelay', cp.steerActuatorDelay + .01))
+
+  def test_aol_finalization_requires_ready_unpublished_matching_owner(self):
+    ci, holder, replies, original = self.run_prepublication('sent', aol=True)
+    with self.assertRaisesRegex(RuntimeError, 'configured startup'):
+      holder.finalize_aol_configuration(ci)
+
+
+@pytest.mark.parametrize('mode', ('sent', 'untouched', 'restored', 'uncertain'))
+@pytest.mark.parametrize('aol', (False, True))
+@pytest.mark.parametrize('lda', (False, True))
+def test_actual_card_owner_publication_and_controls(mode, aol, lda, monkeypatch):
+  from copy import deepcopy
+
+  from opendbc.car.hyundai.radar_interface import RadarInterface
+  from openpilot.cereal import messaging
+  from openpilot.common.params import Params
+  from openpilot.common.prefix import OpenpilotPrefix
+  from openpilot.selfdrive.controls.controlsd import Controls
+  from openpilot.starpilot.aol.intent import AOL_TOGGLE
+  from openpilot.starpilot.car.hyundai.aol import policy_for
+  from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
+
+  monkeypatch.setenv('SIMULATION', '1')
+  monkeypatch.setenv('REPLAY', '1')
+  monkeypatch.setenv('AOL_REPLAY_RUNTIME', '0')
+  with OpenpilotPrefix():
+    saved = Params()
+    for key, value in (('OpenpilotEnabledToggle', True), ('AlphaLongitudinalEnabled', True),
+                       ('IsReleaseBranch', False), ('AlwaysOnLateral', aol)):
+      saved.put_bool(key, value, block=True)
+    saved.put('LKASButtonControl', AOL_TOGGLE, block=True)
+    saved.put('MainCruiseButtonControl', AOL_TOGGLE, block=True)
+    holder = VehicleStartupOwner()
+    replies = Replies(mode)
+    live_ci = []
+    sent = []
+    packer = CANPacker(DBC[CAR.GENESIS_G90][Bus.pt])
+
+    def recv(wait_for_one=False):
+      if not live_ci:
+        return []
+      frames = []
+      for parser in live_ci[0].can_parsers.values():
+        for address in parser.addresses:
+          message = parser.dbc.addr_to_msg[address]
+          frames.append(CanData(*packer.make_can_msg(message.name, parser.bus, {})))
+      return [TimestampedCanPacket(frames, time.clock_gettime_ns(time.CLOCK_BOOTTIME))]
+
+    def prepare(cp, candidate, fingerprints, firmware):
+      return holder.prepare(cp, CarInterface, (recv, sent.extend), requested=True, admission=lambda: True)
+
+    fingerprint = gen_empty_fingerprint()
+    if lda:
+      fingerprint[0][0x391] = 8
+    identity = (CAR.GENESIS_G90, fingerprint, '0' * 17, [], params().fingerprintSource, True)
+    subscriber = messaging.sub_sock('carParams', timeout=100, conflate=True)
+    ci = card = controls = None
+    try:
+      with patch.object(car_helpers, 'fingerprint', return_value=identity), \
+           patch.object(disable_module, 'IsoTpParallelQuery', side_effect=replies.query), \
+           patch.object(g90_startup, 'IsoTpParallelQuery', side_effect=replies.query):
+        if mode == 'uncertain':
+          with pytest.raises(RuntimeError, match='restoration unverified'):
+            car_helpers.get_car(recv, sent.extend, lambda *args: None, True, False, pre_create_hook=prepare)
+          assert holder.owner.outcome is Outcome.ABORT_UNCERTAIN
+          assert not holder.owner.published
+          assert saved.get('CarParams') is None
+          assert messaging.recv_one(subscriber) is None
+          return
+        ci = car_helpers.get_car(recv, sent.extend, lambda *args: None, True, False, pre_create_hook=prepare)
+        live_ci.append(ci)
+        expected = deepcopy(ci.CP.to_dict())
+        policy = policy_for(ci.CP)
+        assert policy.intent_supported
+        if aol:
+          expected['safetyConfigs'][0]['safetyParam'] |= policy.safety_param_addition
+          expected['alternativeExperience'] |= policy.alternative_experience_addition
+        card = Car(CI=ci, RI=RadarInterface(ci.CP), startup_owner=holder.owner)
+      assert card.CP.to_dict() == expected
+      assert card.vehicle_startup.owner is holder.owner
+      assert holder.owner.published and holder.owner.ready
+      assert holder.owner.prepared_for(card.CP)
+      assert holder.owner.outcome is {'sent': Outcome.SENT_UNCONFIRMED,
+                                     'untouched': Outcome.STOCK_UNTOUCHED,
+                                     'restored': Outcome.STOCK_RESTORED}[mode]
+      assert card.CP.openpilotLongitudinalControl == (mode == 'sent')
+      assert card.CP.pcmCruise == (mode != 'sent')
+      assert card.aol_qualified == aol
+      assert b'\x28\x03\x01' not in replies.requests
+      assert (b'\x28\x00\x01' in replies.requests) == (mode == 'restored')
+      with structs.CarParams.from_bytes(saved.get('CarParams')) as published:
+        assert published.to_dict() == expected
+      event = None
+      for _ in range(10):
+        card.car_params_published = False
+        card.state_publish(ci.update([]), None)
+        event = messaging.recv_one(subscriber)
+        if event is not None:
+          break
+        time.sleep(0.01)
+      assert event is not None and event.which() == 'carParams' and event.valid
+      assert event.carParams.to_dict() == expected
+      controls = Controls()
+      assert controls.CP.to_dict() == expected
+      feed(controls, 1_000_000_000, 0, active=False, enabled=False, can_valid=False, can_timeout=True)
+      command, lateral_log = controls.state_control()
+      assert not command.enabled and not command.latActive and not command.longActive
+      controls.publish(command, lateral_log)
+    finally:
+      del controls, card, ci, subscriber
+      live_ci.clear()
+      gc.collect()

@@ -45,7 +45,7 @@ def test_actual_final_factory_state_and_exact_marked_configuration(identity, lda
   assert not qualified(release)
 
 
-@pytest.mark.parametrize('identity', (CAR.GENESIS_G80, CAR.KIA_XCEED_PHEV, CAR.GENESIS_G90, CAR.HYUNDAI_ELANTRA_2024, CAR.HYUNDAI_ELANTRA_HEV_2024))
+@pytest.mark.parametrize('identity', (CAR.GENESIS_G80, CAR.KIA_XCEED_PHEV, CAR.HYUNDAI_ELANTRA_2024, CAR.HYUNDAI_ELANTRA_HEV_2024))
 def test_unqualified_legacy_prepared_owner_and_camera_topologies_excluded(identity):
   assert not qualified(params(identity))
 
