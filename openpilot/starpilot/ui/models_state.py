@@ -2,7 +2,7 @@
 
 import unicodedata
 
-from openpilot.starpilot.models.catalog import BY_ID
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID
 from openpilot.starpilot.models.status import ModelHealth, ModelStatus, ModelVariant
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
 
@@ -133,4 +133,7 @@ def home_model_label(status: ModelStatus, commit: str = "") -> str:
     return "Driving model unavailable"
   commit = commit.strip().lower()
   revision = commit[:7] if 7 <= len(commit) <= 64 and all(char in "0123456789abcdef" for char in commit) else ""
-  return model_display_text(entry.name + (f" · {revision}" if revision else ""))
+  name = entry.name
+  if entry.model_id == BUNDLED_CURRENT:
+    name = "Cinque v2" if status.variant is ModelVariant.CHESTNUT else "CD210"
+  return model_display_text(name + (f" · {revision}" if revision else ""))

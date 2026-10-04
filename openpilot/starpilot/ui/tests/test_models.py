@@ -38,13 +38,14 @@ class TestModelPage(unittest.TestCase):
   def test_home_prefers_verified_loaded_identity_over_pending_selection(self):
     requested = next(model_id for model_id in BY_ID if model_id != BUNDLED_CURRENT)
     status = ModelStatus(requested, BUNDLED_CURRENT, ModelVariant.SMALL, ModelHealth.ACTIVE, True, None, "a" * 64)
-    actual = _display_text(BY_ID[BUNDLED_CURRENT].name)
+    actual = "CD210"
     commit = "abcdef1234567890" * 2 + "abcdef12"
     for health in (ModelHealth.ACTIVE, ModelHealth.STALE, ModelHealth.LOADING):
       self.assertEqual(home_model_label(replace(status, health=health), commit), f"{actual} • abcdef1")
     self.assertEqual(home_model_label(replace(status, loaded_id=None, health=ModelHealth.UNAVAILABLE), commit),
                      f"{_display_text(BY_ID[requested].name)} • abcdef1")
     self.assertEqual(home_model_label(status), actual)
+    self.assertEqual(home_model_label(replace(status, variant=ModelVariant.CHESTNUT)), "Cinque v2")
     self.assertEqual(home_model_label(status, "not-a-revision"), actual)
 
   def test_bundled_identity_health_and_inert_rows(self):
