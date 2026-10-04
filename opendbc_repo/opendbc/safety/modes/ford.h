@@ -666,8 +666,14 @@ static safety_config ford_init(uint16_t param) {
     ret.rx_checks = ford_aol_rx_workspace;
     ret.rx_checks_len = selected_len;
     ret.disable_forwarding = false;
-    static CanMsg ford_aol_tx_msgs[16];
-    const bool bounded = (ret.tx_msgs_len > 0) && (ret.tx_msgs_len <= 16);
+    static CanMsg ford_aol_tx_msgs[7];
+    _Static_assert(sizeof(FORD_CANFD_STOCK_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford CAN FD stock TX capacity");
+    _Static_assert(sizeof(FORD_STOCK_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford stock TX capacity");
+    _Static_assert(sizeof(FORD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford long TX capacity");
+#ifdef ALLOW_DEBUG
+    _Static_assert(sizeof(FORD_CANFD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford CAN FD long TX capacity");
+#endif
+    const bool bounded = (ret.tx_msgs_len > 0) && (ret.tx_msgs_len <= 7);
     if (bounded) {
       for (int i = 0; i < ret.tx_msgs_len; i++) {
         ford_aol_tx_msgs[i] = ret.tx_msgs[i];
