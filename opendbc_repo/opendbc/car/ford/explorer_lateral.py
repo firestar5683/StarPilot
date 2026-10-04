@@ -46,10 +46,12 @@ def qualified(CP) -> bool:
 
 
 def bounded_command(owner: ExplorerLateralController, demanded: FordLateralResult,
-                    previous: float, speed: float, measured: float) -> FordLateralResult:
+                    previous: float, speed: float, measured: float, *, absolute_cap: float | None = None) -> FordLateralResult:
   """Keep classic demand inside the modern common ISO/jerk envelope."""
   limits = CarControllerParams.CURVATURE_LIMITS
   cap = min(limits.CURVATURE_MAX, limits.MAX_LATERAL_ACCEL / max(speed, 1.0) ** 2)
+  if absolute_cap is not None:
+    cap = min(cap, absolute_cap)
   modern_delta = limits.MAX_LATERAL_JERK / max(speed, 1.0) ** 2 * STEER_DT
   source_up = FORD_CURVATURE_LIMITS.ANGLE_RATE_LIMIT_UP
   source_down = FORD_CURVATURE_LIMITS.ANGLE_RATE_LIMIT_DOWN

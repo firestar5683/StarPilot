@@ -36,12 +36,13 @@ class TestMachEProfile(unittest.TestCase):
         cp = CarInterface._get_params(cp, CAR.FORD_MUSTANG_MACH_E_MK1, fingerprint(), [], False, False, False)
         self.assertFalse(cp.safetyConfigs[-1].safetyParam & FordSafetyFlags.MACH_E_EXTENDED)
 
-  def test_sibling_canfd_keeps_existing_profiles(self):
+  def test_sibling_canfd_uses_separate_generic_profile(self):
     for candidate in (CAR.FORD_F_150_MK14, CAR.FORD_ESCAPE_MK4_5, CAR.FORD_F_150_LIGHTNING_MK1):
-      for alpha, word in ((False, 2), (True, 3)):
+      for alpha, word in ((False, 66), (True, 67)):
         with self.subTest(candidate=candidate, alpha=alpha):
           cp = CarInterface.get_params(candidate, fingerprint(), [], alpha, False, False)
           self.assertEqual(cp.safetyConfigs[-1].safetyParam, word)
+          self.assertFalse(cp.safetyConfigs[-1].safetyParam & FordSafetyFlags.MACH_E_EXTENDED)
 
   def test_bus_offset_keeps_no_output_first(self):
     cp = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, fingerprint(offset=4), [], False, False, False)

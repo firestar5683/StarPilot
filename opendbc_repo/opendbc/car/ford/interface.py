@@ -5,6 +5,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.carcontroller import CarController
 from opendbc.car.ford.carstate import CarState
 from opendbc.car.ford.classic_lateral import CLASSIC_EXTENDED_CARS
+from opendbc.car.ford.generic_canfd_lateral import GENERIC_CANFD_CARS
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.radar_interface import RadarInterface
 from opendbc.car.ford.values import CarControllerParams, DBC, Ecu, FordFlags, RADAR, FordSafetyFlags, CAR
@@ -53,7 +54,11 @@ class CarInterface(CarInterfaceBase):
     ret.safetyConfigs = cfgs
 
     new_port = bool(ret.flags & FordFlags.NEW_PORT)
-    if candidate in CLASSIC_EXTENDED_CARS:
+    if candidate in GENERIC_CANFD_CARS:
+      ret.alphaLongitudinalAvailable = not is_release
+      ret.steerActuatorDelay = 0.22
+      longitudinal_requested = bool(alpha_long and not is_release)
+    elif candidate in CLASSIC_EXTENDED_CARS:
       # Original shared classic ownership is explicit stock/OP-long selection.
       # Actuator delay is live; modern LongControl already supplies the original P=0.
       ret.alphaLongitudinalAvailable = True
@@ -137,4 +142,9 @@ class CarInterface(CarInterfaceBase):
         ret.openpilotLongitudinalControl = False
         ret.safetyConfigs[-1].safetyParam = FordSafetyFlags.CANFD.value
       ret.safetyConfigs[-1].safetyParam |= FordSafetyFlags.MACH_E_EXTENDED.value
+    if (candidate in GENERIC_CANFD_CARS and ret.flags & FordFlags.CANFD and
+        not ret.flags & ~int(FordFlags.CANFD | FordFlags.HAS_BSM) and
+        not ret.dashcamOnly and not ret.passive and not ret.notCar and ret.alternativeExperience == 0):
+      ret.safetyConfigs[-1].safetyParam |= FordSafetyFlags.GENERIC_CANFD_EXTENDED.value
+
     return ret

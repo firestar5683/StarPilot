@@ -9,6 +9,8 @@ from opendbc.car.ford.curvature_preview import blend_curvature
 from opendbc.car.ford import mache_can
 from opendbc.car.ford.extended_classic_can import create_extended_classic_lat_ctl_msg
 from opendbc.car.ford.classic_lateral import create_controller as create_classic_controller, bounded_command as classic_bounded_command
+from opendbc.car.ford.generic_canfd_can import create_extended_canfd_msg
+from opendbc.car.ford.generic_canfd_lateral import GenericCanfdLateralController, qualified as generic_canfd_qualified, bounded_command as generic_canfd_bounded_command
 from opendbc.car.ford.mache_lateral import MachELateralController, FordLateralResult, bounded_command, qualified as mache_qualified
 from opendbc.car.ford.values import CarControllerParams, FordFlags, FordSafetyFlags, CAR
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
@@ -52,10 +54,11 @@ class CarController(CarControllerBase):
     self.manual_turn_inputs = None
     self.mache_lateral = MachELateralController(CP) if mache_qualified(CP) else None
     self.mache_extended_announced = False
-    self.classic_lateral = create_classic_controller(CP)
+    self.generic_canfd = generic_canfd_qualified(CP)
+    self.classic_lateral = GenericCanfdLateralController(CP) if self.generic_canfd else create_classic_controller(CP)
     self.classic_extended_announced = False
     self.classic_profile = any(s.safetyModel == structs.CarParams.SafetyModel.ford and
-                                s.safetyParam & FordSafetyFlags.CLASSIC_EXTENDED for s in CP.safetyConfigs)
+                                s.safetyParam & (FordSafetyFlags.CLASSIC_EXTENDED | FordSafetyFlags.GENERIC_CANFD_EXTENDED) for s in CP.safetyConfigs)
     self.mache_profile = any(s.safetyModel == structs.CarParams.SafetyModel.ford and
                              s.safetyParam & FordSafetyFlags.MACH_E_EXTENDED for s in CP.safetyConfigs)
     self.apply_curvature_last = 0
@@ -138,13 +141,20 @@ class CarController(CarControllerBase):
         self.classic_lateral.set_inputs(None, (), 0.2, self.manual_turn_inputs.enabled if self.manual_turn_inputs is not None else True)
       previous = self.classic_lateral.curvature_last
       demanded = self.classic_lateral.update(CC, CS, actuators) if self.classic_extended_announced else FordLateralResult()
-      lateral = classic_bounded_command(self.classic_lateral, demanded, previous, CS.out.vEgoRaw,
+      bound = generic_canfd_bounded_command if self.generic_canfd else classic_bounded_command
+      lateral = bound(self.classic_lateral, demanded, previous, CS.out.vEgoRaw,
                                          -CS.out.yawRate / max(CS.out.vEgoRaw, 0.1))
       self.classic_lateral_demand = demanded
       self.apply_curvature_last = lateral.curvature
-      can_sends.append(create_extended_classic_lat_ctl_msg(
-        self.packer, self.CAN, lateral.active, lateral.ramp_type, lateral.precision_type,
-        -lateral.curvature, -lateral.curvature_rate))
+      if self.generic_canfd:
+        counter = (self.frame // CarControllerParams.STEER_STEP) % 0x10
+        can_sends.append(create_extended_canfd_msg(
+          self.packer, self.CAN, lateral.active, lateral.ramp_type, lateral.precision_type,
+          -lateral.curvature, -lateral.curvature_rate, counter))
+      else:
+        can_sends.append(create_extended_classic_lat_ctl_msg(
+          self.packer, self.CAN, lateral.active, lateral.ramp_type, lateral.precision_type,
+          -lateral.curvature, -lateral.curvature_rate))
     elif (self.frame % CarControllerParams.STEER_STEP) == 0:
       lateral_active = CC.latActive and not self.mache_profile and not self.classic_profile
       manual_turn = False

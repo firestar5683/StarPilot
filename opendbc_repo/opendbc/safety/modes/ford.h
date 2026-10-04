@@ -117,6 +117,9 @@ static const CurvatureSteeringLimits FORD_LKA_STEERING_LIMITS = {
 static bool ford_stock_switch = false;
 static bool ford_cancel_resume_button = false;
 
+static bool ford_generic_canfd_extended = false;
+static bool ford_generic_canfd_announced = false;
+
 static bool ford_explorer_extended = false;
 static bool ford_explorer_announced = false;
 
@@ -334,6 +337,10 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     ford_mach_e_announced = (msg->data[4] & 0x2U) != 0U;
   }
 
+  if (ford_generic_canfd_extended && tx && (msg->addr == FORD_Lane_Assist_Data1)) {
+    ford_generic_canfd_announced = (msg->data[4] & 0x2U) != 0U;
+  }
+
   if (ford_explorer_extended && tx && (msg->addr == FORD_Lane_Assist_Data1)) {
     ford_explorer_announced = (msg->data[4] & 0x2U) != 0U;
   }
@@ -428,11 +435,31 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
         violation |= SAFETY_ABS(desired_path_angle - ford_mach_e_path_angle_last) > 110;
       }
       violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_MACH_E_STEERING_LIMITS);
+    } else if (ford_generic_canfd_extended) {
+      // One generic CAN FD owner; Mach-E's wider error/path assist stays separate.
+      static const struct lookup_t source_rate = {{5.0F, 16.0F, 25.0F}, {0.0025F, 0.0014F, 0.00018F}};
+      const float source_speed = SAFETY_MAX(vehicle_speed.min / VEHICLE_SPEED_FACTOR, 1.0F);
+      const float source_delta_float = (safety_interpolate(source_rate, source_speed - 1.0F) * 50000.0F) + 1.0F;
+      const int source_delta = (int)source_delta_float;
+      const float source_max_float = ((3.0F - (9.81F * 0.06F)) / (source_speed * source_speed) * 50000.0F) + 1.0F;
+      const int source_max = (int)source_max_float;
+      violation |= raw_path_angle != FORD_INACTIVE_PATH_ANGLE;
+      violation |= steer_control_enabled && !ford_generic_canfd_announced;
+      if (steer_control_enabled) {
+        violation |= SAFETY_ABS(desired_curvature - curvature_state.desired_last) > source_delta;
+        violation |= SAFETY_ABS(desired_curvature) > source_max;
+      } else {
+        violation |= (desired_curvature != 0) || (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE);
+      }
+      violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
     } else {
       violation |= (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE);
       violation |= steer_curvature_cmd_checks(desired_curvature, 0, steer_control_enabled, FORD_STEERING_LIMITS);
     }
     tx &= !violation;
+    if (ford_generic_canfd_extended && !tx) {
+      curvature_state.desired_last = 0;
+    }
     if (ford_mach_e_extended && !tx) {
       // External path/announcement checks must not retain a rejected command.
       curvature_state.desired_last = 0;
@@ -507,6 +534,13 @@ static safety_config ford_init(uint16_t param) {
   const uint16_t FORD_PARAM_NEW_PORT = 8;
   const uint16_t FORD_PARAM_MACH_E_EXTENDED = 16U;
   const uint16_t FORD_PARAM_EXPLORER_EXTENDED = 32U;
+  const uint16_t FORD_PARAM_GENERIC_CANFD_EXTENDED = 64U;
+  const bool generic_canfd_namespace = GET_FLAG(param, FORD_PARAM_GENERIC_CANFD_EXTENDED);
+  ford_generic_canfd_extended = (param == 66U) && ((unsigned int)alternative_experience == 0U);
+#ifdef ALLOW_DEBUG
+  ford_generic_canfd_extended |= (param == 67U) && ((unsigned int)alternative_experience == 0U);
+#endif
+  ford_generic_canfd_announced = false;
   const bool explorer_namespace = GET_FLAG(param, FORD_PARAM_EXPLORER_EXTENDED);
   ford_explorer_extended = ((param == 32U) || (param == 33U)) &&
                            ((unsigned int)alternative_experience == 0U);
@@ -519,7 +553,8 @@ static safety_config ford_init(uint16_t param) {
   ford_stock_switch = ((unsigned int)alternative_experience == 0U) &&
                       ((param == 2U) || (param == 8U) || (param == 10U) || (param == 12U) ||
                        ((param == 18U) && ford_mach_e_extended) ||
-                       ((param == 32U) && ford_explorer_extended));
+                       ((param == 32U) && ford_explorer_extended) ||
+                       ((param == 66U) && ford_generic_canfd_extended));
   ford_cancel_resume_button = false;
   ford_mach_e_path_angle_last = 0;
   ford_mach_e_announced = false;
@@ -567,7 +602,8 @@ static safety_config ford_init(uint16_t param) {
     }
   }
   if ((mach_e_namespace && !ford_mach_e_extended) ||
-      (explorer_namespace && !ford_explorer_extended)) {
+      (explorer_namespace && !ford_explorer_extended) ||
+      (generic_canfd_namespace && !ford_generic_canfd_extended)) {
     ret.tx_msgs = NULL;
     ret.tx_msgs_len = 0;
   }
