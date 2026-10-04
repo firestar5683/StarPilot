@@ -108,15 +108,15 @@ int main() {
   };
   {
     auto handle = open_panda_handle("second", spi, usb);
-    assert(handle->hw_serial == "second" && spi_opens == 1 && usb_opens == 0);
+    assert(handle->hw_serial == "second" && spi_opens == 0 && usb_opens == 1);
   }
   {
-    auto unavailable_spi = [&](const std::string &) -> std::unique_ptr<PandaCommsHandle> {
-      ++spi_opens;
-      throw std::runtime_error("SPI unavailable");
+    auto unavailable_usb = [&](const std::string &) -> std::unique_ptr<PandaCommsHandle> {
+      ++usb_opens;
+      throw std::runtime_error("USB unavailable");
     };
-    auto handle = open_panda_handle("second", unavailable_spi, usb);
-    assert(handle->hw_serial == "second" && spi_opens == 2 && usb_opens == 1);
+    auto handle = open_panda_handle("second", spi, unavailable_usb);
+    assert(handle->hw_serial == "second" && spi_opens == 1 && usb_opens == 2);
   }
   reset();
   assert((PandaUsbHandle::list() == std::vector<std::string>{"first", "second"}));
