@@ -61,7 +61,7 @@ class TestBoltFactoryAcc(unittest.TestCase):
         self.assertTrue(out.canValid)
         for source in sources:
           native('rx', source, now // 1000)
-        safety.safety_tick_current_safety_config()
+        safety.safety_tick()
         self.assertTrue(safety.safety_config_valid())
         if cp.openpilotLongitudinalControl:
           native('rx', packer.make_can_msg('ASCMSteeringButton', 0, {'ACCButtons': 2}), now // 1000)

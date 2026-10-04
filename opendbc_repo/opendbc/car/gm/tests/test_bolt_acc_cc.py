@@ -134,7 +134,7 @@ class TestBoltAccCc(unittest.TestCase):
     packet(0x370, bytes((0, 0, 128, 0, 0, 0)), 1_000_001, bus=2)
     safety = libsafety_py.libsafety
     safety.set_timer(3_000_000)
-    safety.safety_tick_current_safety_config()
+    safety.safety_tick()
     self.assertFalse(safety.get_controls_allowed())
     for address, data in frames:
       packet(address, data, 3_001_000)
@@ -165,6 +165,7 @@ class TestBoltAccCc(unittest.TestCase):
       Params().put('CarParams', cp.to_bytes(), block=True)
       controls = Controls()
       controls.sm.simulation = False
+
       def publish(now, mode, valid=True):
         drive = messaging.new_message('selfdriveState', valid=valid)
         drive.selfdriveState.enabled = drive.selfdriveState.active = True

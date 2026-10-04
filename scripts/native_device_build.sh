@@ -55,6 +55,7 @@ case "${mode}" in
     fi
     python3 -m tools.laptop_device_build.package_model_chunks --source "${ROOT_DIR}/openpilot/selfdrive/modeld/models" --destination "${ROOT_DIR}/openpilot/selfdrive/modeld/models"
     python3 "${ROOT_DIR}/tools/laptop_device_build/validate_artifacts.py" "${ROOT_DIR}"
+    python3 "${ROOT_DIR}/tools/laptop_device_build/validate_params_registry.py" "${ROOT_DIR}"
     python3 "${ROOT_DIR}/openpilot/common/prebuilt_manifest.py" "${ROOT_DIR}"
     touch prebuilt
     ;;
