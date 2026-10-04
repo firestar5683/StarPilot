@@ -21,9 +21,12 @@ class VehicleStartupPreferences:
   gm_long_pitch: bool = True
   disable_bolt_long: bool = False
   honda_bosch_a_radar: bool = True
+  tesla_preap_stock: bool = True
 
   @classmethod
   def read(cls, params, *, enabled: bool):
+    from openpilot.starpilot.car.tesla.preap_preferences import stock_configuration
+    preap_stock = stock_configuration(params)
     try:
       raw_radar, radar_readable = read_saved(params, "HondaBoschARadar", 8)
       honda_radar = radar_readable and raw_radar in (None, b"1")
@@ -39,7 +42,7 @@ class VehicleStartupPreferences:
       safe, readable = read_saved(params, "SafeMode", 8)
       toyota = bool(enabled and requested and readable and safe in (None, b"0"))
     except (OSError, TypeError, ValueError):
-      return cls(disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar)
+      return cls(disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock)
     try:
       pitch, pitch_readable = read_saved(params, "LongPitch", 8)
       pitch_enabled = not (enabled and pitch_readable and pitch == b"0" and readable and safe in (None, b"0"))
@@ -50,7 +53,7 @@ class VehicleStartupPreferences:
     except (OSError, TypeError, ValueError):
       assist = False
     return cls(toyota_auto_hold=toyota, turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
-               gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar)
+               gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock)
 
   def _prepare_honda_radar(self, cp) -> None:
     if cp.brand != "honda":
@@ -86,6 +89,8 @@ class VehicleStartupPreferences:
             cp.dashcamOnly = True
 
   def prepare(self, cp, *, fingerprints=None):
+    from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
+    prepare_stock(cp, self.tesla_preap_stock)
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp, fingerprints)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
@@ -94,6 +99,8 @@ class VehicleStartupPreferences:
     return cp
 
   def finalize(self, cp) -> None:
+    from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
+    prepare_stock(cp, self.tesla_preap_stock)
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)

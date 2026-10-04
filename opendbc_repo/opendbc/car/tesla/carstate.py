@@ -3,12 +3,18 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.tesla.preap.stock import PreAPStockCarState, get_stock_parsers
 from opendbc.car.tesla.hw1 import HW1CarState, get_hw1_can_parsers
 from opendbc.car.tesla.values import CAR, DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
 
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      self.preap = PreAPStockCarState(CP)
+      self.engagement = self.preap.engagement
+      self.preap_lateral_authorized = False
+      return
     if CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
       self.hw1 = HW1CarState(CP)
       self.hands_on_level = 0
@@ -34,6 +40,11 @@ class CarState(CarStateBase):
     self.cruise_enabled_prev = cruise_enabled
 
   def update(self, can_parsers) -> structs.CarState:
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      ret = self.preap.update(can_parsers)
+      self.hands_on_level = self.preap.hands_on_level
+      self.di_cruise_state = self.preap.di_cruise_state
+      return ret
     if self.CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
       ret = self.hw1.update(can_parsers)
       self.hands_on_level = self.hw1.hands_on_level
@@ -128,6 +139,8 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      return get_stock_parsers(CP)
     if CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
       return get_hw1_can_parsers(CP)
     return {

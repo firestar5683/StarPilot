@@ -13,6 +13,7 @@ class AolVehiclePolicy:
   explicit_latch: bool = False
   distance_personality: bool = False
   fixed_cruise_buttons: bool = False
+  physical_stalk_owner: bool = False
   distance_pause_only: bool = False
   paddle_pause: bool = False
   safety_param_addition: int = 0
