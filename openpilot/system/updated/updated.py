@@ -48,6 +48,8 @@ class UserRequest:
   FETCH = 2
   FAST = 3
   ROLLBACK = 4
+  VERSIONS = 5
+  VERSION = 6
 
 class WaitTimeHelper:
   def __init__(self):
@@ -55,7 +57,7 @@ class WaitTimeHelper:
     self.user_request = UserRequest.NONE
     self.request_lock = threading.RLock()
     self.request_generation = 0
-    self.fast_target: tuple[str, str] | None = None
+    self.fast_target: tuple[str, str] | tuple[str, str, str] | None = None
     signal.signal(signal.SIGHUP, self.update_now)
     signal.signal(signal.SIGUSR1, self.check_now)
     self.control = UpdaterControlServer(self._control_request)
@@ -66,22 +68,28 @@ class WaitTimeHelper:
     else:
       atexit.register(self.control.close)
 
-  def _request(self, request: int, *, branch=None, commit=None) -> None:
+  def _request(self, request: int, *, branch=None, commit=None, selected_commit=None) -> None:
     with self.request_lock:
       self.user_request = request
-      if request in (UserRequest.FAST, UserRequest.ROLLBACK):
+      if request in (UserRequest.FAST, UserRequest.ROLLBACK, UserRequest.VERSIONS, UserRequest.VERSION):
         if not isinstance(branch, str) or not isinstance(commit, str):
           raise ValueError("Update source identity is required")
-        self.fast_target = (branch, commit)
+        if request == UserRequest.VERSION:
+          if not isinstance(selected_commit, str):
+            raise ValueError("Selected version is required")
+          self.fast_target = (branch, commit, selected_commit)
+        else:
+          self.fast_target = (branch, commit)
       else:
         self.fast_target = None
       self.request_generation += 1
       self.ready_event.set()
 
-  def _control_request(self, action: str, *, branch=None, commit=None) -> None:
-    request = {'check': UserRequest.CHECK, 'download': UserRequest.FETCH, 'fast': UserRequest.FAST, 'rollback': UserRequest.ROLLBACK}.get(action)
+  def _control_request(self, action: str, *, branch=None, commit=None, selected_commit=None) -> None:
+    request = {'check': UserRequest.CHECK, 'download': UserRequest.FETCH, 'fast': UserRequest.FAST, 'rollback': UserRequest.ROLLBACK,
+               'versions': UserRequest.VERSIONS, 'version': UserRequest.VERSION}.get(action)
     if request is not None:
-      self._request(request, branch=branch, commit=commit)
+      self._request(request, branch=branch, commit=commit, selected_commit=selected_commit)
 
   def update_now(self, signum: int, frame) -> None:
     cloudlog.info("caught SIGHUP, attempting to downloading update")
@@ -91,7 +99,7 @@ class WaitTimeHelper:
     cloudlog.info("caught SIGUSR1, checking for updates")
     self._request(UserRequest.CHECK)
 
-  def current_request(self) -> tuple[int, int, tuple[str, str] | None]:
+  def current_request(self) -> tuple[int, int, tuple[str, str] | tuple[str, str, str] | None]:
     with self.request_lock:
       self.ready_event.clear()
       return self.user_request, self.request_generation, self.fast_target
@@ -429,7 +437,7 @@ class Updater:
     else:
       cloudlog.info(f"up to date on {cur_branch} ({str(cur_commit)[:7]})")
 
-  def fast_update(self, branch: str, commit: str, *, rollback=False) -> str:
+  def fast_update(self, branch: str, commit: str, selected_commit=None, *, rollback=False, versions_only=False) -> str:
     from openpilot.starpilot.drive_state.evidence import PhysicalSource
     from openpilot.starpilot.software.fast_update import fast_update
 
@@ -457,7 +465,8 @@ class Updater:
 
     try:
       return fast_update(Path(BASEDIR), branch, expected_commit=commit, params=self.params, parked=parked,
-                         current_os=HARDWARE.get_os_version(), invalidate=invalidate, rollback=rollback, progress=progress)
+                         current_os=HARDWARE.get_os_version(), invalidate=invalidate, rollback=rollback, progress=progress,
+                         selected_commit=selected_commit, versions_only=versions_only)
     finally:
       source.close()
 
@@ -559,18 +568,22 @@ def main() -> None:
 
       # Attempt an update
       exception = None
-      fast_requested = requested in (UserRequest.FAST, UserRequest.ROLLBACK)
+      fast_requested = requested in (UserRequest.FAST, UserRequest.ROLLBACK, UserRequest.VERSIONS, UserRequest.VERSION)
       try:
         if fast_requested:
           update_failed_count += 1
           params.put("UpdaterState", "updating...", block=True)
           if fast_target is None:
             raise ValueError("Update source identity is required")
-          updater.fast_update(*fast_target, rollback=requested == UserRequest.ROLLBACK)
+          if requested == UserRequest.VERSIONS:
+            updater.fast_update(*fast_target, versions_only=True)
+          else:
+            updater.fast_update(*fast_target, rollback=requested == UserRequest.ROLLBACK)
           if requested == UserRequest.ROLLBACK:
             params.put_bool(AUTOMATIC_DOWNLOADS, False, block=True)
           write_time_to_param(params, "UpdaterLastFetchTime")
-          write_time_to_param(params, "LastUpdateTime")
+          if requested != UserRequest.VERSIONS:
+            write_time_to_param(params, "LastUpdateTime")
         else:
           # TODO: reuse overlay from previous updated instance if it looks clean
           init_overlay()
@@ -609,11 +622,13 @@ def main() -> None:
           returncode=e.returncode
         )
         exception = f"command failed: {e.cmd}\n{e.output}"
-        OVERLAY_INIT.unlink(missing_ok=True)
+        if requested != UserRequest.VERSIONS:
+          OVERLAY_INIT.unlink(missing_ok=True)
       except Exception as e:
         cloudlog.exception("uncaught updated exception, shouldn't happen")
         exception = str(e)
-        OVERLAY_INIT.unlink(missing_ok=True)
+        if requested != UserRequest.VERSIONS:
+          OVERLAY_INIT.unlink(missing_ok=True)
 
       try:
         update_successful = (update_failed_count == 0)

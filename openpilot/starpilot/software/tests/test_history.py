@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import subprocess
 
-from openpilot.starpilot.software.history import commit_history, release_notes
+from openpilot.starpilot.software.history import commit_history, release_notes, recent_versions
 
 
 def test_history_is_bounded_and_pinned_to_the_requested_commit(tmp_path):
@@ -21,6 +21,12 @@ def test_history_is_bounded_and_pinned_to_the_requested_commit(tmp_path):
   assert all(row['date'] for row in rows)
   assert commit_history(tmp_path, '--all') == []
   assert commit_history(tmp_path, 'f' * 40) == []
+  assert recent_versions(tmp_path, 'Dom')['entries'] == []
+  git('update-ref', 'refs/starpilot/recent/Dom', commit)
+  recent = recent_versions(tmp_path, 'Dom')
+  assert recent['head'] == commit and recent['branch'] == 'Dom' and recent['entries'] == rows
+  assert recent_versions(tmp_path, '../escape')['entries'] == []
+  assert recent_versions(tmp_path, 'Dom')['entries'][0]['hash'] == commit
 
 
 def test_release_notes_are_bounded_plain_text(tmp_path):

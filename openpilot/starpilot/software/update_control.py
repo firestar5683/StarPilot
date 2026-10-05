@@ -81,10 +81,15 @@ def available(pid: int, start: int) -> bool:
     return False
 
 
-def _command(action: str, branch=None, commit=None) -> bytes:
+def _command(action: str, branch=None, commit=None, selected_commit=None) -> bytes:
+  if action == 'version' and type(selected_commit) is str and _COMMIT.fullmatch(selected_commit):
+    base = _command('fast', branch, commit).decode('ascii').split(' ', 1)[1]
+    return f'version {base} {selected_commit}'.encode('ascii')
+  if selected_commit is not None:
+    raise UpdaterControlError('Invalid updater version target')
   if action in ('check', 'download') and branch is None and commit is None:
     return action.encode('ascii')
-  if action in ('fast', 'rollback') and type(branch) is str and type(commit) is str and _BRANCH.fullmatch(branch) and _COMMIT.fullmatch(commit):
+  if action in ('fast', 'rollback', 'versions') and type(branch) is str and type(commit) is str and _BRANCH.fullmatch(branch) and _COMMIT.fullmatch(commit):
     return f'{action} {branch} {commit}'.encode('ascii')
   raise UpdaterControlError('Invalid updater control action')
 
@@ -93,16 +98,21 @@ def _parse(command: bytes):
   if command in (b'status\n', b'check\n', b'download\n'):
     return command[:-1].decode('ascii'), None, None
   try:
-    action, branch, commit = command[:-1].decode('ascii').split(' ')
+    parts = command[:-1].decode('ascii').split(' ')
+    if len(parts) == 4 and parts[0] == 'version' and command.endswith(b'\n'):
+      action, branch, commit, selected = parts
+      if _command(action, branch, commit, selected) + b'\n' == command:
+        return action, branch, commit, selected
+    action, branch, commit = parts
   except (UnicodeError, ValueError):
     raise UpdaterControlError('Invalid updater control message') from None
-  if not command.endswith(b'\n') or action not in ('fast', 'rollback') or _command(action, branch, commit) + b'\n' != command:
+  if not command.endswith(b'\n') or action not in ('fast', 'rollback', 'versions') or _command(action, branch, commit) + b'\n' != command:
     raise UpdaterControlError('Invalid updater control message')
   return action, branch, commit
 
 
-def send(pid: int, start: int, action: str, *, branch=None, commit=None) -> None:
-  _exchange(pid, start, _command(action, branch, commit))
+def send(pid: int, start: int, action: str, *, branch=None, commit=None, selected_commit=None) -> None:
+  _exchange(pid, start, _command(action, branch, commit, selected_commit))
 
 
 class UpdaterControlServer:
@@ -147,8 +157,11 @@ class UpdaterControlServer:
           if uid != os.geteuid():
             connection.sendall(b'error\n')
           else:
-            action, branch, commit = _parse(command)
-            if action in ('fast', 'rollback'):
+            parsed = _parse(command)
+            action, branch, commit = parsed[:3]
+            if action == 'version':
+              self.request(action, branch=branch, commit=commit, selected_commit=parsed[3])
+            elif action in ('fast', 'rollback', 'versions'):
               self.request(action, branch=branch, commit=commit)
             elif action != 'status':
               self.request(action)

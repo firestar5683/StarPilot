@@ -374,3 +374,35 @@ const unavailableRollback = { ...rollbackPage, operations: { canRollback: false 
 SoftwarePage.methods.askRollback.call(unavailableRollback)
 assert.equal(unavailableRollback.dialog, null)
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canRollback: "yes" } })), false)
+
+
+// Recent-version selection pins both the installed revision and listed target.
+{
+  const h = fixture()
+  h.feed.start()
+  const selected = "b".repeat(40)
+  const history = { installed: [], downloaded: [], currentReleaseNotes: null, downloadedReleaseNotes: null,
+    recent: { branch: "Dom", head: "c".repeat(40), entries: [{ hash: selected, date: "2026-10-05", subject: "Older build" }] } }
+  await h.reply(0, snapshot({ operations: { ...operations, canFastUpdate: true, history } }))
+  assert.equal(h.feed.action("version", "Dom", { expectedCommit: "f".repeat(40), selectedCommit: selected }), null)
+  assert.equal(h.feed.action("version", "Dom", { expectedCommit: installed.commit, selectedCommit: "f".repeat(40) }), null)
+  const pending = h.feed.action("version", "Dom", { expectedCommit: installed.commit, selectedCommit: selected })
+  assert.deepEqual(JSON.parse(h.requests[1].options.body), { action: "version", branch: "Dom", expectedCommit: installed.commit, selectedCommit: selected })
+  await h.reply(1, snapshot({ operations: { ...operations, canFastUpdate: false, history,
+    request: { ...request("version", "pending", "Dom"), selectedCommit: selected } } }))
+  await pending
+  assert.equal(h.feed.installBaseline.selectedCommit, selected)
+  h.fire(1000)
+  await h.reply(2, snapshot({ operations: { ...operations, history,
+    request: { ...request("version", "complete", "Dom"), selectedCommit: "c".repeat(40), outcome: "up_to_date" } } }))
+  assert.equal(h.feed.installBaseline.selectedCommit, selected)
+  h.fire(1000)
+  await h.reply(3, snapshot({ installed: { ...installed, commit: "c".repeat(40) }, operations: { ...operations, history } }))
+  assert.equal(h.feed.installBaseline.selectedCommit, selected)
+  assert.notEqual(h.feed.notice, "Installed build verified after reconnect.")
+  h.fire(1000)
+  await h.reply(4, snapshot({ installed: { ...installed, commit: selected }, operations: { ...operations, history } }))
+  assert.equal(h.feed.installBaseline, null)
+  assert.equal(h.feed.notice, "Installed build verified after reconnect.")
+  h.feed.stop()
+}
