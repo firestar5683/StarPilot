@@ -1,0 +1,98 @@
+{
+  "regenAA0FC4ED71E|2025-04-08--22-57-50--0": {
+    "input_sha256": "0b6734026f7c775f7fd648ef76130f9b9a672c5236c6a328eff31ec9cc3c5343",
+    "reference_sha256": "3ae04a6add96dea4ecdbd363ee875935331c308c61397ce10b2255ee6b8f42a0",
+    "input_bytes": 11873030,
+    "reference_bytes": 249723
+  },
+  "regenAFB9780D823|2025-04-08--23-00-34--0": {
+    "input_sha256": "4cc51a77bf8d128d5720fd692e5a0994c887ee35fdd949cc0ce54d4215e2b7a2",
+    "reference_sha256": "e3ac4fc1ce239d1bb864e32d1acf6b33ad134a1bf898ef739a0cc3faf3b18d58",
+    "input_bytes": 12527194,
+    "reference_bytes": 282094
+  },
+  "regen218A4DCFAA1|2025-04-08--22-57-51--0": {
+    "input_sha256": "6c028c0d40328fc00fa12acf91dba30d9f152e89d99a7089aadac62f6c7d5d64",
+    "reference_sha256": "9688b1b72e3c992cb6c72e41e1607d2a38625e141caed9b356fadea5ee53aea2",
+    "input_bytes": 10846201,
+    "reference_bytes": 305708
+  },
+  "regen1455E3B4BDF|2025-04-09--03-26-06--0": {
+    "input_sha256": "876100021b13ddd1a39efad5fdb4e7376ad5b298f64bf390b5f58742ffc6e429",
+    "reference_sha256": "a987635c68085a9c9c25dbb92e23dc859d6a1644cd84f4b968a047b95a1c9033",
+    "input_bytes": 9272538,
+    "reference_bytes": 368030
+  },
+  "regenB328FF8BA0A|2025-04-08--22-57-45--0": {
+    "input_sha256": "8ea4ab5412a99bfc65fbe95cd169a54edb6bcb68f6fa20c97f2bc58ed4bba538",
+    "reference_sha256": "9f6932a3371a59a890ee0a5a94a0a6ef1970021559ef8d83c85545f69ef365de",
+    "input_bytes": 10090147,
+    "reference_bytes": 305603
+  },
+  "regen6170C8C9A35|2025-04-08--22-57-46--0": {
+    "input_sha256": "fc9ab2b4fd9702ceb8e3342186076dc6a85dbd6a3bd859ac6b965234bcc65c69",
+    "reference_sha256": "5c4b0d7f7679666a15ce14956a6952fba116873994aadcb3264be15b221c2b38",
+    "input_bytes": 10419375,
+    "reference_bytes": 269746
+  },
+  "regen5B28FC2A437|2025-04-08--23-04-24--0": {
+    "input_sha256": "a30f65eb1033afbd0cff70d965aa9c0a276cc5ceb73d28baa817430df178009a",
+    "reference_sha256": "4d8db52f2a003e52530d840d1a6e89ed5fb760673c89a3ef59654c4912b1f7ce",
+    "input_bytes": 11951101,
+    "reference_bytes": 268350
+  },
+  "regenBF81EA96E08|2025-04-08--23-06-54--0": {
+    "input_sha256": "cc1d8bb9729a71c3166e04343e436a67fbc1ff7107a30201a5d13ea9b45ea143",
+    "reference_sha256": "697b28fe6f4491c6309865da6db451ad0971d1c53a9b1edf8aaf914b8fcfcd23",
+    "input_bytes": 11420074,
+    "reference_bytes": 244613
+  },
+  "regen7366F13F6A1|2025-04-08--23-07-07--0": {
+    "input_sha256": "f501c1c99bae27ca710f40f723a1960ea4e898836d7edfb57ea6397591e5aff2",
+    "reference_sha256": "0da8d89136f8eb1a2870b269a90837c3f892eaac832b076a7029d4f68c1cb758",
+    "input_bytes": 9393878,
+    "reference_bytes": 243288
+  },
+  "regen1271097D038|2025-04-09--03-26-00--0": {
+    "input_sha256": "6c10ce899270e4fc8350730e44cb39dfbda451670dd598798207ffc929baa69a",
+    "reference_sha256": "e455f07b55370e68761f303608012412d7bc8f02c7737fccebb0f0981af11f1c",
+    "input_bytes": 9846869,
+    "reference_bytes": 194676
+  },
+  "regen15D60604EAB|2025-04-08--23-06-59--0": {
+    "input_sha256": "58f3822418e86d8c4afca79ef9058602c8825fadaedf8b63477ed53a2b9ba748",
+    "reference_sha256": "d3b50c5fee29eb5db18d2eda52a57a010ce8849d43a17a701ccd94416c3c2f75",
+    "input_bytes": 11775886,
+    "reference_bytes": 264883
+  },
+  "regen0F2F06C9539|2025-04-08--23-06-56--0": {
+    "input_sha256": "bca512375f61ade1af793227f4aa9137ba1cbd0067d3b92f1242f5907f84a0af",
+    "reference_sha256": "0920d61a0dac46ab593d077a9d204bd60b7923cdab5d860cc403fd2bbc6c00a5",
+    "input_bytes": 10593610,
+    "reference_bytes": 242924
+  },
+  "regenACF84CCF482|2024-08-30--03-21-55--0": {
+    "input_sha256": "a84e9f84c39802f58a64031e7c56b362c0e745b5c216848ca2d561f5ae6d440a",
+    "reference_sha256": "32b9c2b6e7f2fb9a60585c1a0d8860ca951a75a11c9f9378b620b10fef3d70a8",
+    "input_bytes": 12309353,
+    "reference_bytes": 230854
+  },
+  "regen755D8CB1E1F|2025-04-08--23-13-43--0": {
+    "input_sha256": "786dfef08325d24e8205320862adc940706ff3475ae082ea104127fb5da62823",
+    "reference_sha256": "d7394671f4bf515436a418e649e3030e46c40e556f7564c09beaa24d7b543bc7",
+    "input_bytes": 11315727,
+    "reference_bytes": 460163
+  },
+  "regen5FCAC896BBE|2025-04-08--23-13-35--0": {
+    "input_sha256": "2f2574c057b7cb55fbb2e05c99c5f1b1d6d894222422c4b51d4363ad66e6c840",
+    "reference_sha256": "8fcdeb24f6dff05fb485faf8eb973032b68990b758629bad61bc1ee8cbeff157",
+    "input_bytes": 11022997,
+    "reference_bytes": 260417
+  },
+  "aebd8f1d4ea16066|000002d8--5850d3ea5c--2": {
+    "input_sha256": "1770f70d8f8053e5b1984ed4f9d704be8d58f6d55b59cafd6aa11109aaf777c1",
+    "reference_sha256": "df15d8f473eafcc8c61ca1923e75159111d01b5a9affc22b11165fc6c880275c",
+    "input_bytes": 12375667,
+    "reference_bytes": 224967
+  }
+}

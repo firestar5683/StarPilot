@@ -39,7 +39,7 @@ class TestPredeploy(unittest.TestCase):
       plan = commands(Path('/results'), Path('/cache'))
     self.assertIn('replay', STAGES)
     self.assertEqual(plan['replay'], [('process-replay', [sys.executable,
-      'openpilot/selfdrive/test/process_replay/test_processes.py', '-j', '8'])])
+      'openpilot/selfdrive/test/process_replay/test_processes.py', '-j', '8', '--output', '/results/process-replay'])])
 
   def test_default_run_includes_process_replay(self):
     with tempfile.TemporaryDirectory() as temporary, \

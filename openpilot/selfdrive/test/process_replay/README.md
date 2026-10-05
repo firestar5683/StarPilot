@@ -1,6 +1,8 @@
 # Process replay
 
-Process replay is a regression test designed to identify any changes in the output of a process. This test replays a segment through individual processes and compares the output to a known good replay. Each make is represented in the test with a segment.
+Process replay is a regression test designed to identify any changes in the output of a process. This test replays available segments through individual processes and compares the output to a known good replay.
+
+All 16 currently selected recording inputs remain required in a full run. Volvo C1/V40 has no available recording. This exact platform is reported as an unrecorded gap in `coverage.json` and the GitHub job summary; it is not a passing replay. The interfaces job requires its existing host tests, and both native safety jobs require its existing C1 safety tests. New unrecorded brands, changed active Volvo platform scope, missing required test suites, and a newly available Volvo recording require coverage review and fail input accounting. Source/native tests and recorded replay outcomes remain separate evidence; neither this inventory nor the missing-input classification qualifies the fleet.
 
 If the test fails, make sure that you didn't unintentionally change anything. If there are intentional changes, the reference logs will be updated.
 
@@ -98,9 +100,26 @@ unless a verified envelope was supplied. Configuration is checked before Params
 writes. An explicit current vehicle fingerprint can avoid firmware-cache seeding,
 but does not qualify the remaining logged messages.
 
-The complete historical process-replay suite is not currently qualified: cases
-depending on these implicit caches are blocked pending fixture conversion. Do not
-regenerate expected outputs to hide that boundary or count these cases as passing.
+The checked-in replay recording catalog supplies a separate, reviewed firmware
+cache adapter. It pins each input and its independently published card reference,
+decodes the reference with its producing source schemas, checks firmware/VIN
+identity against the recording, and converts the reference CarParams into a
+verified current envelope. The current vehicle factory still recomputes control
+and safety settings. This adapter does not alter expected outputs or authorize
+implicit cache conversion for other historical recordings. Input, reference or
+schema changes require a new review; do not regenerate expected outputs to hide
+differences.
+
+Default `ref_commit` and unlisted expected logs use the immutable official artifact
+revision. Eleven exact segment/process pairs use reviewed StarPilot references in
+`refs/starpilot`, preserving intentional controller and capability changes. Their
+manifest pins inputs, comparison configurations, producing source snapshots and
+both official and reviewed output hashes. Every original comparison remains active;
+an arbitrary local output cannot override a default expectation. Deliberate alternate
+`ref_commit` and `--update-refs` retain their local reference behavior.
+
+Use `--output DIRECTORY` to place coverage, new logs and both diff reports outside
+the source tree. The predeploy runner supplies its results directory automatically.
 
 Replaying processes that use VisionIPC (e.g. modeld, dmonitoringmodeld) require additional `frs` dictionary with camera states as keys and `FrameReader` objects as values.
 

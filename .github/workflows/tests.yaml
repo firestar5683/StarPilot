@@ -355,6 +355,13 @@ jobs:
       id: print-diff
       if: ${{ always() && hashFiles('openpilot/selfdrive/test/process_replay/diff.txt') != '' }}
       run: cat openpilot/selfdrive/test/process_replay/diff.txt
+    - name: Save process replay input coverage
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: process-replay-coverage
+        path: openpilot/selfdrive/test/process_replay/coverage.json
+        if-no-files-found: error
     - name: Print diff report
       if: ${{ always() && hashFiles('openpilot/selfdrive/test/process_replay/diff_report.txt') != '' }}
       run: cat openpilot/selfdrive/test/process_replay/diff_report.txt

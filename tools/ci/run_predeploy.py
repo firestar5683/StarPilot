@@ -42,7 +42,7 @@ def commands(output, cache, download=False):
   return {'build': [('native-build', [python, '-m', 'SCons', '-j4'])],
           'source': source, 'host': host, 'native': native, 'vehicles': vehicles, 'recorded': recorded,
           'replay': [('process-replay', [python, 'openpilot/selfdrive/test/process_replay/test_processes.py',
-                                        '-j', str(os.cpu_count() or 1)])]}
+                                        '-j', str(os.cpu_count() or 1), '--output', str(output / 'process-replay')])]}
 
 
 def run(plan, output, *, environment=None):
