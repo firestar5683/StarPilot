@@ -130,21 +130,22 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     return host, snapshots, published
 
   def test_gm_hold_card_publishes_admitted_configuration_and_honors_live_opt_out(self):
-    from opendbc.car.gm.values import CAR as GM_CAR, is_volt_auto_hold
-    for accelerator in (False, True):
+    from opendbc.car.gm.values import CAR as GM_CAR, is_gm_auto_hold
+    for candidate, accelerator, radar in ((GM_CAR.CHEVROLET_VOLT, False, 0x460), (GM_CAR.CHEVROLET_VOLT, True, 0x460),
+                                           (GM_CAR.BUICK_LACROSSE, True, 0x460), (GM_CAR.BUICK_LACROSSE, True, 0x420)):
       observed = gen_empty_fingerprint()
-      observed[1][0x460] = 8
+      observed[1][radar] = 8
       if accelerator:
         observed[0][0xBE] = 6
-      base = 0x4004 if accelerator else 0xC004
+      base = (0x4004 if accelerator else 0xC004) if candidate == GM_CAR.CHEVROLET_VOLT else 0
       for enabled, requested, change_saved in ((True, True, False), (True, True, True), (True, False, False), (False, True, False)):
-        with self.subTest(accelerator=accelerator, enabled=enabled, requested=requested, change_saved=change_saved):
-          host, constructed, published = self.start(GM_CAR.CHEVROLET_VOLT, key="GMAutoHold", observed=observed,
+        with self.subTest(candidate=candidate, radar=radar, accelerator=accelerator, enabled=enabled, requested=requested, change_saved=change_saved):
+          host, constructed, published = self.start(candidate, key="GMAutoHold", observed=observed,
             capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam), enabled=enabled,
             requested=requested, change_saved=change_saved)
           admitted = enabled and requested
           self.assertEqual(constructed, [base | (0x80 if admitted else 0)])
-          self.assertEqual(is_volt_auto_hold(published), admitted)
+          self.assertEqual(is_gm_auto_hold(published), admitted)
           if enabled:
             self.assertEqual(published.safetyConfigs[0].safetyParam, constructed[0])
             self.assertEqual(host.CI.CC.gm_auto_hold, requested)
@@ -156,7 +157,7 @@ class TestVehicleStartupPreferences(unittest.TestCase):
             self.assertEqual(published.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
 
   def test_camera_volt_hold_startup_retains_release_and_disable_longitudinal_owners(self):
-    from opendbc.car.gm.values import CAR as GM_CAR, is_volt_auto_hold
+    from opendbc.car.gm.values import CAR as GM_CAR, is_gm_auto_hold
     for candidate in (GM_CAR.CHEVROLET_VOLT_ASCM, GM_CAR.CHEVROLET_VOLT_CAMERA, GM_CAR.CHEVROLET_VOLT_2019):
       for radar in (False, True):
         for brake_c9 in ((True,) if candidate == GM_CAR.CHEVROLET_VOLT_CAMERA else (False, True)):
@@ -189,13 +190,40 @@ class TestVehicleStartupPreferences(unittest.TestCase):
               admitted = not release and not disable and sascm
               self.assertEqual(constructed, [stock_word | (0x4082 if admitted else 0)])
               self.assertEqual(published.safetyConfigs[0].safetyParam, constructed[0])
-              self.assertEqual(is_volt_auto_hold(published), admitted)
+              self.assertEqual(is_gm_auto_hold(published), admitted)
               self.assertEqual(published.openpilotLongitudinalControl, admitted)
               self.assertEqual(published.pcmCruise, not admitted)
               self.assertEqual(host.CI.CC.gm_auto_hold, admitted)
               self.assertEqual(host.CI.CC.gm_auto_hold_input is not None, admitted)
               self.assertTrue(self.params.get_bool("GMAutoHold"))
               self.assertTrue(self.params.get_bool("AlphaLongitudinalEnabled"))
+
+  def test_removed_volt_and_lacrosse_hold_withdraw_before_interface_construction(self):
+    from opendbc.car.gm.values import CAR as GM_CAR, is_gm_auto_hold
+    for candidate, alternate in ((GM_CAR.CHEVROLET_VOLT_CAMERA, False), (GM_CAR.CHEVROLET_VOLT_CAMERA, True),
+                                 (GM_CAR.BUICK_LACROSSE, False)):
+      removed = candidate == GM_CAR.CHEVROLET_VOLT_CAMERA
+      observed = gen_empty_fingerprint()
+      observed[0] = {0x184: 8, 0x34A: 5, 0x1C4: 8, 0xC9: 8, 0x1E1: 7, 0xF1 if alternate else 0xBE: 6}
+      observed[1][0x460] = 8
+      for release in (False, True):
+        for disable in (False, True):
+          with self.subTest(candidate=candidate, alternate=alternate, release=release, disable=disable):
+            self.params.put_bool("IsReleaseBranch", release, block=True)
+            self.params.put_bool("AlphaLongitudinalEnabled", True, block=True)
+            self.params.put_bool("DisableOpenpilotLongitudinal", disable, block=True)
+            host, constructed, published = self.start(candidate, key="GMAutoHold", observed=observed,
+              capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam))
+            admitted = not disable and not (removed and release)
+            expected = ((0xC1D3 if alternate else 0xC1D1) if admitted else 0xC150) if removed else (0x80 if admitted else 0)
+            self.assertEqual(constructed, [expected])
+            self.assertEqual(published.safetyConfigs[0].safetyParam, expected)
+            self.assertEqual(published.openpilotLongitudinalControl, admitted)
+            self.assertEqual(published.pcmCruise, removed and not admitted)
+            self.assertEqual(is_gm_auto_hold(published), admitted)
+            self.assertEqual(host.CI.CC.gm_auto_hold, admitted)
+            self.assertEqual(host.CI.CC.gm_auto_hold_input is not None, admitted)
+            self.assertTrue(self.params.get_bool("GMAutoHold"))
 
   def test_real_card_admits_before_construction_and_publishes_final_permission(self):
     for candidate, permission in ((CAR.TOYOTA_COROLLA_TSS2, ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD),

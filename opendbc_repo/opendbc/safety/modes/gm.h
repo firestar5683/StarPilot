@@ -435,14 +435,14 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     int brake = ((msg->data[0] & 0xFU) << 8) + msg->data[1];
     brake = (0x1000 - brake) & 0xFFF;
     const bool ordinary_brake_violation = longitudinal_brake_checks(brake, *gm_long_limits);
-    if (gm_volt_auto_hold && !get_longitudinal_allowed()) {
+    if (gm_auto_hold && !get_longitudinal_allowed()) {
       tx &= gm_hold_brake_tx(msg, brake);
     } else if (ordinary_brake_violation) {
       tx = false;
     } else {
       // Preserve ordinary longitudinal brake authority.
     }
-    if (gm_volt_auto_hold && get_longitudinal_allowed()) { gm_hold_counter_seen = false; gm_hold_accepted = false; }
+    if (gm_auto_hold && get_longitudinal_allowed()) { gm_hold_counter_seen = false; gm_hold_accepted = false; }
     if (gm_pedal_acc) {
       const uint8_t mode = msg->data[0] >> 4;
       const uint8_t counter = msg->data[4] & 0x3U;
@@ -741,23 +741,33 @@ static safety_config gm_init(uint16_t safety_param) {
   const uint16_t GM_PARAM_HW_CAM_LONG = 2;
   const bool volt_hold_standard = param == (GM_PARAM_EV | GM_PARAM_VOLT_LONG | GM_PARAM_PADDLE_SCHED);
   const bool volt_hold_alternate = param == (GM_PARAM_EV | GM_PARAM_VOLT_LONG | GM_PARAM_PADDLE_SCHED | GM_PARAM_VOLT_GATEWAY_ALT_BRAKE);
-  bool volt_hold_sdgm = false;
-  bool volt_hold_extended_be = false;
-  bool volt_hold_c9 = false;
-  bool volt_hold_enabled = volt_hold_standard || volt_hold_alternate;
-  uint8_t volt_hold_bus = volt_hold_standard ? 2U : 0U;
+  const bool hold_ice = param == 0x80U;
+  GMHoldConfig hold_config = {
+    .enabled = volt_hold_standard || volt_hold_alternate || hold_ice,
+    .alternate = volt_hold_alternate,
+    .extended_be = hold_ice,
+    .regen = !hold_ice,
+    .tx_bus = (volt_hold_standard || hold_ice) ? 2U : 0U,
+  };
 #ifdef ALLOW_DEBUG
   const bool volt_hold_ascm = (param == 0x4287U) || (param == 0x4687U) || (param == 0x4A87U) || (param == 0x4E87U);
   const bool volt_hold_camera = param == 0x4087U;
-  volt_hold_sdgm = (param == 0x5087U) || (param == 0x5487U);
-  volt_hold_extended_be = volt_hold_ascm || volt_hold_camera || volt_hold_sdgm;
-  volt_hold_c9 = volt_hold_camera || ((volt_hold_ascm || volt_hold_sdgm) && GET_FLAG(param, GM_PARAM_ASCM_BRAKE_C9));
-  volt_hold_enabled = volt_hold_enabled || volt_hold_extended_be;
-  if (volt_hold_sdgm) { volt_hold_bus = 2U; }
+  const bool volt_hold_sdgm = (param == 0x5087U) || (param == 0x5487U);
+  const bool hold_removed = (param == 0xC1D1U) || (param == 0xC1D3U);
+  hold_config.extended_be |= volt_hold_ascm || volt_hold_camera || volt_hold_sdgm;
+  hold_config.c9_brake = volt_hold_camera || hold_removed || ((volt_hold_ascm || volt_hold_sdgm) && GET_FLAG(param, GM_PARAM_ASCM_BRAKE_C9));
+  hold_config.enabled |= hold_config.extended_be || hold_removed;
+  hold_config.sdgm = volt_hold_sdgm;
+  hold_config.analog_required = hold_removed;
+  hold_config.alternate |= param == 0xC1D3U;
+  if (volt_hold_sdgm) { hold_config.tx_bus = 2U; }
 #endif
-  gm_hold_reset(volt_hold_enabled, volt_hold_alternate, volt_hold_c9, volt_hold_extended_be,
-                volt_hold_bus, volt_hold_sdgm);
-  if (gm_volt_auto_hold) { param &= (uint16_t)(~GM_PARAM_PADDLE_SCHED); }
+  gm_hold_reset(&hold_config);
+  if (gm_auto_hold) { param &= (uint16_t)(~GM_PARAM_PADDLE_SCHED); }
+#ifdef ALLOW_DEBUG
+  // The F1 contextual word is not a generic bit-mask alias of C151.
+  if (hold_removed) { param = 0xC151U; }
+#endif
 
   if (gm_cc_pedal) { param = GM_PARAM_HW_CAM; }
   gm_volt_camera_removed = param == 0xC150U;
@@ -1252,22 +1262,6 @@ static safety_config gm_init(uint16_t safety_param) {
     SET_RX_CHECKS(gm_volt_alt_brake_rx_checks, ret);
     SET_TX_MSGS(GM_VOLT_GATEWAY_ALT_BRAKE_TX_MSGS, ret);
   }
-  if (gm_volt_auto_hold) {
-    gm_volt_hold_rx_checks[8].msg[0].addr = gm_hold_alt_brake ? 0xF1U : 0xBEU;
-    gm_volt_hold_rx_checks[8].msg[1] = (CanMsgCheck){0};
-    gm_volt_hold_rx_checks[8].msg[2] = (CanMsgCheck){0};
-    if (gm_hold_extended_be) {
-      gm_volt_hold_rx_checks[8].msg[1] = gm_volt_hold_rx_checks[8].msg[0];
-      gm_volt_hold_rx_checks[8].msg[1].len = 7U;
-      gm_volt_hold_rx_checks[8].msg[2] = gm_volt_hold_rx_checks[8].msg[0];
-      gm_volt_hold_rx_checks[8].msg[2].len = 8U;
-    }
-    SET_RX_CHECKS(gm_volt_hold_rx_checks, ret);
-#ifdef ALLOW_DEBUG
-    // ASCM/SDGM C9 rows have no BE health requirement. Camera-present retains its existing BE check.
-    if ((volt_hold_ascm || volt_hold_sdgm) && gm_hold_c9_brake) { ret.rx_checks_len -= 1; }
-#endif
-  }
 
   if (gm_volt_cc_long || gm_ordinary_cc_long) {
     if (gm_ordinary_cc_long) { SET_RX_CHECKS(gm_ordinary_cc_rx_checks, ret); }
@@ -1400,11 +1394,54 @@ static safety_config gm_init(uint16_t safety_param) {
     SET_RX_CHECKS(gm_ordinary_camera_rx_checks, ret);
   }
 
+  if (gm_auto_hold) {
+    // Restore the shared table after a prior ICE init moved regen to the unused tail.
+    if (gm_volt_hold_rx_checks[8].msg[0].addr == 0xBD) {
+      RxCheck analog = {0};
+      analog = gm_volt_hold_rx_checks[5];
+      gm_volt_hold_rx_checks[5] = gm_volt_hold_rx_checks[8];
+      gm_volt_hold_rx_checks[8] = analog;
+    }
+    for (uint8_t i = 0U; i < 9U; i++) { gm_volt_hold_rx_checks[i].msg[0].frequency = 10U; }
+    gm_volt_hold_rx_checks[5].msg[0].frequency = 40U;
+    gm_volt_hold_rx_checks[8].msg[0].addr = gm_hold_alt_brake ? 0xF1U : 0xBEU;
+    gm_volt_hold_rx_checks[8].msg[1] = (CanMsgCheck){0};
+    gm_volt_hold_rx_checks[8].msg[2] = (CanMsgCheck){0};
+    if (gm_hold_extended_be) {
+      gm_volt_hold_rx_checks[8].msg[1] = gm_volt_hold_rx_checks[8].msg[0];
+      gm_volt_hold_rx_checks[8].msg[1].len = 7U;
+      gm_volt_hold_rx_checks[8].msg[2] = gm_volt_hold_rx_checks[8].msg[0];
+      gm_volt_hold_rx_checks[8].msg[2].len = 8U;
+    }
+#ifdef ALLOW_DEBUG
+    if (hold_removed) {
+      gm_volt_hold_rx_checks[1].msg[0].frequency = 20U;
+      gm_volt_hold_rx_checks[2].msg[0].frequency = 33U;
+      gm_volt_hold_rx_checks[3].msg[0].frequency = 33U;
+      gm_volt_hold_rx_checks[4].msg[0].frequency = 100U;
+      gm_volt_hold_rx_checks[5].msg[0].frequency = 50U;
+      gm_volt_hold_rx_checks[8].msg[0].frequency = gm_hold_alt_brake ? 100U : 80U;
+    }
+#endif
+    if (hold_ice) {
+      RxCheck regen = {0};
+      regen = gm_volt_hold_rx_checks[5];
+      gm_volt_hold_rx_checks[5] = gm_volt_hold_rx_checks[8];
+      gm_volt_hold_rx_checks[8] = regen;
+    }
+    SET_RX_CHECKS(gm_volt_hold_rx_checks, ret);
+    if (hold_ice) { ret.rx_checks_len -= 1; }
+#ifdef ALLOW_DEBUG
+    // C9-only ASCM/SDGM has no analog requirement; removed C9 requires both sources.
+    if ((volt_hold_ascm || volt_hold_sdgm) && gm_hold_c9_brake) { ret.rx_checks_len -= 1; }
+#endif
+  }
+
   // Independent lateral authority also needs the physical main source on BE-selected rows.
   const bool gm_aol_be_main = ((unsigned int)alternative_experience == GM_ALT_EXP_ALWAYS_ON_LATERAL) &&
     gm_aol_profile_word(param) && !gm_volt_invalid && !gm_sdgm_invalid && !gm_cc_gateway_invalid &&
     ((gm_ascm_intercept && !gm_ascm_brake_c9) || (gm_sdgm && !gm_sdgm_brake_c9));
-  if (gm_aol_be_main && !gm_volt_auto_hold) {
+  if (gm_aol_be_main && !gm_auto_hold) {
     if (gm_ev) {
       SET_RX_CHECKS(gm_aol_be_ev_rx_checks, ret);
     } else {

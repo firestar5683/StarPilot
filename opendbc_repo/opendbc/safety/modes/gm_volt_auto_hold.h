@@ -1,10 +1,12 @@
 #pragma once
 
-// Exact admitted Volt inactive friction owner. This never grants controls_allowed.
-static bool gm_volt_auto_hold = false;
+// Exact admitted GM inactive friction owner. This never grants controls_allowed.
+static bool gm_auto_hold = false;
 static bool gm_hold_alt_brake = false;
 static bool gm_hold_c9_brake = false;
 static bool gm_hold_extended_be = false;
+static bool gm_hold_analog_required;
+static bool gm_hold_has_regen;
 static bool gm_hold_sdgm;
 static bool gm_hold_accepted;
 static bool gm_hold_near_stop;
@@ -27,13 +29,27 @@ static bool gm_hold_regen_released;
 static bool gm_hold_counter_seen;
 static uint8_t gm_hold_counter;
 
-static void gm_hold_reset(bool enabled, bool alternate, bool c9_brake, bool extended_be, uint8_t tx_bus, bool sdgm) {
-  gm_volt_auto_hold = enabled;
-  gm_hold_alt_brake = alternate;
-  gm_hold_c9_brake = c9_brake;
-  gm_hold_extended_be = extended_be;
-  gm_hold_tx_bus = tx_bus;
-  gm_hold_sdgm = sdgm; gm_hold_accepted = false; gm_hold_near_stop = false;
+typedef struct {
+  bool enabled;
+  bool alternate;
+  bool c9_brake;
+  bool extended_be;
+  bool sdgm;
+  bool analog_required;
+  bool regen;
+  uint8_t tx_bus;
+} GMHoldConfig;
+
+static void gm_hold_reset(const GMHoldConfig *config) {
+  gm_auto_hold = config->enabled;
+  gm_hold_alt_brake = config->alternate;
+  gm_hold_c9_brake = config->c9_brake;
+  gm_hold_extended_be = config->extended_be;
+  gm_hold_tx_bus = config->tx_bus;
+  gm_hold_sdgm = config->sdgm;
+  gm_hold_analog_required = config->analog_required;
+  gm_hold_has_regen = config->regen;
+  gm_hold_accepted = false; gm_hold_near_stop = false;
   for (uint8_t i = 0U; i < 7U; i++) { gm_hold_seen[i] = false; gm_hold_us[i] = 0U; }
   gm_hold_brake_unavailable = true;
   gm_hold_main = false; gm_hold_forward = false; gm_hold_gas = false;
@@ -45,7 +61,9 @@ static void gm_hold_reset(bool enabled, bool alternate, bool c9_brake, bool exte
 static bool gm_hold_sources_current(uint32_t now) {
   bool current = true;
   for (uint8_t i = 0U; i < 7U; i++) {
-    current &= gm_hold_seen[i] && (safety_get_ts_elapsed(now, gm_hold_us[i]) <= 300000U);
+    if ((i != 5U) || gm_hold_has_regen) {
+      current &= gm_hold_seen[i] && (safety_get_ts_elapsed(now, gm_hold_us[i]) <= 300000U);
+    }
   }
   return current;
 }
@@ -60,14 +78,14 @@ static bool gm_hold_ready(uint32_t now) {
 }
 
 static void gm_hold_rx(const CANPacket_t *msg) {
-  if (gm_volt_auto_hold && (msg->bus == 0U)) {
+  if (gm_auto_hold && (msg->bus == 0U)) {
     const uint32_t now = microsecond_timer_get();
     int source = -1;
     if ((msg->addr == 0xC9U) && (GET_LEN(msg) == 8U)) {
       source = 0; gm_hold_main = GET_BIT(msg, 29U);
       if (gm_hold_c9_brake) {
         gm_hold_brake = GET_BIT(msg, 40U);
-        gm_hold_seen[2] = true; gm_hold_us[2] = now;
+        if (!gm_hold_analog_required) { gm_hold_seen[2] = true; gm_hold_us[2] = now; }
       }
     } else if ((msg->addr == 0x1F5U) && (GET_LEN(msg) == 8U)) {
       source = 1;
@@ -75,9 +93,10 @@ static void gm_hold_rx(const CANPacket_t *msg) {
       // Physical forward gear remains valid in manumatic; never synthesize PRNDL.
       gm_hold_forward = (gear == 4U) || (gear == 6U) || ((gear >= 4U) && (gear <= 7U) && GET_BIT(msg, 41U));
       if (!gm_hold_forward) { gm_hold_drive_us = 0U; }
-    } else if (!gm_hold_c9_brake && (msg->addr == (gm_hold_alt_brake ? 0xF1U : 0xBEU)) &&
+    } else if ((!gm_hold_c9_brake || gm_hold_analog_required) && (msg->addr == (gm_hold_alt_brake ? 0xF1U : 0xBEU)) &&
                ((GET_LEN(msg) == 6U) || (gm_hold_extended_be && ((GET_LEN(msg) == 7U) || (GET_LEN(msg) == 8U))))) {
-      source = 2; gm_hold_brake = msg->data[1] >= (gm_hold_alt_brake ? 6U : 8U);
+      source = 2;
+      if (!gm_hold_c9_brake) { gm_hold_brake = msg->data[1] >= (gm_hold_alt_brake ? 6U : 8U); }
     } else if ((msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
       source = 3; gm_hold_gas = msg->data[5] != 0U; gm_hold_acc = msg->data[1] >> 5;
     } else if ((msg->addr == 0x34AU) && (GET_LEN(msg) == 5U)) {
@@ -93,7 +112,7 @@ static void gm_hold_rx(const CANPacket_t *msg) {
       if (gm_hold_sources_current(now) && gm_hold_forward && (left >= 12U) && (right >= 12U) && (elapsed <= 300000U)) {
         gm_hold_drive_us = SAFETY_MIN(gm_hold_drive_us + elapsed, 3000000U);
       }
-    } else if ((msg->addr == 0xBDU) && (GET_LEN(msg) == 7U)) {
+    } else if (gm_hold_has_regen && (msg->addr == 0xBDU) && (GET_LEN(msg) == 7U)) {
       source = 5;
       const bool pressed = (msg->data[0] >> 4) != 0U;
       if (gm_hold_regen && !pressed) { gm_hold_regen_release_us = now; gm_hold_regen_released = true; }

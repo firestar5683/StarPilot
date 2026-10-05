@@ -13,7 +13,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 class TestVoltAutoHold(unittest.TestCase):
   def init(self, alternate=False, extra=0, alternative=0, word=None):
     self.safety = libsafety_py.libsafety
-    self.alternate = alternate
+    self.alternate = alternate or word == 0xC1D3
     self.safety.set_alternative_experience(alternative)
     word = int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_AUTO_HOLD) if word is None else word
     if alternate:
@@ -23,8 +23,8 @@ class TestVoltAutoHold(unittest.TestCase):
     self.time = 1
     self.counter = 0
     self.packer = CANPacker(DBC[CAR.CHEVROLET_VOLT][Bus.pt])
-    self.c9_brake = word in (0x4687, 0x4E87, 0x4087, 0x5487)
-    self.tx_bus = 0 if word in (0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087) or alternate else 2
+    self.c9_brake = word in (0x4687, 0x4E87, 0x4087, 0x5487, 0xC1D1, 0xC1D3)
+    self.tx_bus = 0 if word in (0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0xC1D1, 0xC1D3) or alternate else 2
 
   def tearDown(self):
     libsafety_py.libsafety.set_alternative_experience(0)
@@ -33,7 +33,7 @@ class TestVoltAutoHold(unittest.TestCase):
     return self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, bytes(data)))
 
   def observations(self, *, speed=100, gear=4, main=True, brake=False, gas=False, regen=False, acc=0, manual=False,
-                   brake_unavailable=False, status=True, healthy=True, c9_brake=None, be_brake=None, be_length=6):
+                   brake_unavailable=False, status=True, healthy=True, regen_source=True, analog_source=True, c9_brake=None, be_brake=None, be_length=6):
     self.time += 100000
     self.safety.set_timer(self.time)
     c9 = bytearray(8)
@@ -56,6 +56,10 @@ class TestVoltAutoHold(unittest.TestCase):
       self.assertTrue(self.rx(frame[0], frame[1]))
     for address, data in ((0xC9, c9), (0x1F5, prndl), (0xF1 if self.alternate else 0xBE, pedal),
                           (0x1C4, engine), (0xBD, [0x10 if regen else 0, 0, 0, 0, 0, 0, 0]), (0x34A, wheels)):
+      if address == 0xBD and not regen_source:
+        continue
+      if address in (0xBE, 0xF1) and not analog_source:
+        continue
       self.assertTrue(self.rx(address, data), hex(address))
     self.safety.safety_tick()
     if healthy:

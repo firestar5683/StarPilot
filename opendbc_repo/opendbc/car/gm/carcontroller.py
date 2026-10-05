@@ -1,6 +1,6 @@
 from opendbc.car.gm.longitudinal import volt_sng_release
 from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for
-from opendbc.car.gm.values import is_volt_auto_hold
+from opendbc.car.gm.values import is_gm_auto_hold
 from opendbc.car.gm.ordinary import demands as ascm_demands
 import math
 import numpy as np
@@ -348,7 +348,7 @@ class CarController(CarControllerBase):
   def update(self, CC, CS, now_nanos):
     # Sample physical hold dwell at parser/controller cadence, before current brake demands.
     hold_brake = None
-    if is_volt_auto_hold(self.CP):
+    if is_gm_auto_hold(self.CP):
       hold_enabled = self.gm_auto_hold and self.gm_auto_hold_input is not None and self.gm_auto_hold_input.update(now_nanos)
       hold_brake = self.gm_auto_hold_state.update(
         CS.out, enabled=hold_enabled, sources_current=all(0 < stamp <= now_nanos and now_nanos - stamp <= limit

@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import is_volt_longitudinal, is_volt_auto_hold
+from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
 from opendbc.car.gm.auto_hold import config_for as auto_hold_config_for, stopped_for_hold
 import copy
 from math import isfinite
@@ -215,8 +215,9 @@ class CarState(CarStateBase):
       if requires_camera_state_sources(self.CP):
         cam_cp.vl["ASCMActiveCruiseControlStatus"]
         self.volt_sng_sources += ((cam_cp.ts_nanos["ASCMActiveCruiseControlStatus"]["ACCCruiseState"], 100_000_000),)
-    if is_volt_auto_hold(self.CP):
+    if is_gm_auto_hold(self.CP):
       alternate = is_volt_gateway_alternate_brake(self.CP)
+      alternate_force = alternate or (is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG))
       c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and (
         not self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) or
         bool(self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9))
@@ -224,15 +225,18 @@ class CarState(CarStateBase):
                                   ("ECMEngineStatus", "BrakePressed") if c9 else ("ECMAcceleratorPos", "BrakePedalPos"))
       names = (("ECMEngineStatus", "CruiseMainOn"), ("ECMPRDNL2", "PRNDL2"), (brake_name, brake_signal),
                ("AcceleratorPedal2", "CruiseState"), ("EBCMWheelSpdRear", "RLWheelSpd"),
-               ("EBCMRegenPaddle", "RegenPaddle"), ("EBCMFrictionBrakeStatus", "FrictionBrakeUnavailable"))
+               ("EBCMFrictionBrakeStatus", "FrictionBrakeUnavailable"))
+      if self.CP.transmissionType == TransmissionType.direct:
+        names += (("EBCMRegenPaddle", "RegenPaddle"),)
       for name, _ in names:
         pt_cp.vl[name]
       self.gm_auto_hold_sources = tuple((pt_cp.ts_nanos[name][signal], 300_000_000) for name, signal in names)
-      # C9 is the pressed authority, never an analog force estimate. The absent-BE
-      # Missing-BE profiles retain the original minimum hold estimate.
+      # C9 is pressed authority, never analog force; missing-BE profiles retain minimum hold.
       absent_be = c9 and bool(self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM))
-      if alternate:
-        self.gm_auto_hold_brake = pt_cp.vl[brake_name][brake_signal] / 208.
+      if alternate_force:
+        self.gm_auto_hold_brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 208.
+        if c9:
+          self.gm_auto_hold_sources += ((pt_cp.ts_nanos["EBCMBrakePedalPosition"]["BrakePedalPosition"], 300_000_000),)
       else:
         self.gm_auto_hold_brake = 0. if absent_be else pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
         if c9 and not absent_be:
@@ -442,7 +446,7 @@ class CarState(CarStateBase):
     hold_config = self.gm_auto_hold_config
     hold_stopped = ret.standstill or (hold_config.continued_stop_speed > .02 and
                                      stopped_for_hold(ret, hold_config, self.gm_auto_hold_engaged))
-    hold_current = (is_volt_auto_hold(self.CP) and pt_cp.can_valid and not pt_cp.bus_timeout and
+    hold_current = (is_gm_auto_hold(self.CP) and pt_cp.can_valid and not pt_cp.bus_timeout and
                     (not requires_camera_state_sources(self.CP) or cam_cp.can_valid and not cam_cp.bus_timeout) and
                     hold_sources_current and not self.gm_auto_hold_unavailable and self.gm_auto_hold_forward and
                     ret.cruiseState.available and hold_stopped and

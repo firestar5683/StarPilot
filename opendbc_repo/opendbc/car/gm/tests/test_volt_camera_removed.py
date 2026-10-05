@@ -44,6 +44,15 @@ class TestVoltCameraRemoved(unittest.TestCase):
             self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC151 if enabled else 0xC150)
             self.assertEqual(cp.openpilotLongitudinalControl, enabled)
             self.assertEqual(cp.pcmCruise, not enabled)
+            if enabled:
+              from opendbc.car.gm.values import apply_gm_auto_hold, is_gm_auto_hold
+              marked = cp.as_reader().as_builder()
+              apply_gm_auto_hold(marked, True)
+              self.assertEqual(marked.safetyConfigs[0].safetyParam, 0xC1D3 if alternate else 0xC1D1)
+              self.assertTrue(is_gm_auto_hold(marked))
+              self.assertEqual(marked.lateralTuning.to_dict(), cp.lateralTuning.to_dict())
+              marked.safetyConfigs[0].safetyParam = 0xC1D1 if alternate else 0xC1D3
+              self.assertFalse(is_gm_auto_hold(marked))
             from opendbc.car.gm.lateral import lane_centering_supported
             from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
             from openpilot.starpilot.lateral.torque_extension import selected_policy

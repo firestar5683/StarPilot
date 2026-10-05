@@ -253,6 +253,8 @@ class FeatureSettingsOwner:
     cp = self.vehicle_params()
     try:
       identities = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019}
+      if key == "GMAutoHold":
+        identities.add(CAR.BUICK_LACROSSE)
       if key not in ("VoltSNG", "GMAutoHold") or cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
         return None
       selection = read_selection(self.params)
@@ -576,7 +578,8 @@ class FeatureSettingsOwner:
               FeatureRow("", "Always On Lateral", "Saved settings", page=FeaturePage.AOL, available=True),
               FeatureRow("", "Wheel Controls", "Button assignments", page=FeaturePage.WHEEL, available=True)]
       if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
-          self._pedal_setup_capability() is not None or self._gm_stop_capability("VoltSNG") is not None):
+          self._pedal_setup_capability() is not None or self._gm_stop_capability("VoltSNG") is not None or
+          self._gm_stop_capability("GMAutoHold") is not None):
         rows.append(FeatureRow("", "Vehicle Settings", "Saved preferences", page=FeaturePage.VEHICLE, available=True))
       rows.extend(FeatureRow("", name.title() + " Personality", "", page=name, available=True)
                   for name in (*PROFILE_NAMES, "traffic"))
@@ -612,8 +615,10 @@ class FeatureSettingsOwner:
         rows.append(replace(row, available=row.available and self._readable("VoltSNG"), capability=sng_capability))
       gm_hold_capability = self._gm_stop_capability("GMAutoHold")
       if gm_hold_capability is not None:
+        from opendbc.car.gm.values import CAR
+        release = "gas" if gm_hold_capability[0] == CAR.BUICK_LACROSSE else "gas or regen paddle"
         row = self._bool_row("GMAutoHold", "Automatic Brake Hold", parked and self.authority("parked_preferences"),
-                             "Holds the brakes at a stop with cruise main on. Press the gas or regen paddle to release. " +
+                             f"Holds the brakes at a stop with cruise main on. Press the {release} to release. " +
                              "Requires StarPilot speed control and applies after the next startup")
         rows.append(replace(row, available=row.available and self._readable("GMAutoHold"), capability=gm_hold_capability))
       pitch_capability = self._long_pitch_capability()

@@ -187,15 +187,33 @@ def is_volt_gateway_longitudinal(cp: CarParams) -> bool:
   return is_volt_gateway_profile(cp) and cp.openpilotLongitudinalControl
 
 
-def is_volt_auto_hold(cp: CarParams) -> bool:
+def is_lacrosse_gateway_profile(cp: CarParams) -> bool:
+  """Exact ICE LaCrosse gateway owner, including its disabled longitudinal choice."""
+  try:
+    return (cp.brand == 'gm' and cp.carFingerprint == CAR.BUICK_LACROSSE and
+            cp.networkLocation == CarParams.NetworkLocation.gateway and not cp.pcmCruise and
+            cp.transmissionType == CarParams.TransmissionType.automatic and
+            not cp.passive and not cp.dashcamOnly and not cp.notCar and not cp.radarUnavailable and control_flags(cp) == 0 and
+            len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+            cp.safetyConfigs[0].safetyParam in (0, 0x80))
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False
+
+
+def is_gm_auto_hold(cp: CarParams) -> bool:
   return ((is_volt_gateway_longitudinal(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or
-           is_volt_sdgm_profile(cp, longitudinal=True)) and
-          int(cp.safetyConfigs[0].safetyParam) in (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487))
+           is_volt_sdgm_profile(cp, longitudinal=True) or is_volt_camera_removed(cp, longitudinal=True) or
+           is_lacrosse_gateway_profile(cp) and cp.openpilotLongitudinalControl) and
+          int(cp.safetyConfigs[0].safetyParam) in (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487,
+                                                 0xC1D1, 0xC1D3, 0x80))
 
 
-def apply_volt_auto_hold(cp: CarParams, enabled: bool) -> None:
+def apply_gm_auto_hold(cp: CarParams, enabled: bool) -> None:
+  if is_volt_camera_removed(cp, longitudinal=True):
+    cp.safetyConfigs[0].safetyParam = (0xC1D3 if cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG else 0xC1D1) if enabled else 0xC151
+    return
   if (is_volt_gateway_profile(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or
-      is_volt_sdgm_profile(cp, longitudinal=True)):
+      is_volt_sdgm_profile(cp, longitudinal=True) or is_lacrosse_gateway_profile(cp)):
     word = int(cp.safetyConfigs[0].safetyParam)
     cp.safetyConfigs[0].safetyParam = (word | int(GMSafetyFlags.VOLT_AUTO_HOLD)) if enabled and cp.openpilotLongitudinalControl else (
       word & ~int(GMSafetyFlags.VOLT_AUTO_HOLD))
@@ -235,7 +253,8 @@ def is_volt_camera_removed(cp: CarParams, *, longitudinal=None) -> bool:
             (not is_long or cp.alphaLongitudinalAvailable) and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and len(cp.safetyConfigs) == 1 and
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            cp.safetyConfigs[0].safetyParam == (0xC151 if is_long else 0xC150))
+            (cp.safetyConfigs[0].safetyParam == (0xC151 if is_long else 0xC150) or
+             is_long and cp.safetyConfigs[0].safetyParam == (0xC1D3 if cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG else 0xC1D1)))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
