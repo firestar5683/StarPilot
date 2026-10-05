@@ -103,6 +103,11 @@ class AolCardIntent:
     self._fault_inhibit = False
     self._last_latch_edge_ns = 0
     self._native_rejection_ns = 0
+    self._calibration_inhibit = False
+    self._calibration_fault = False
+    self._calibration_rearm_required = False
+    self._calibration_main = False
+    self._calibration_engaged = False
     self._timers = {int(ButtonType.gapAdjustCruise): 0}
     self._held = {int(ButtonType.gapAdjustCruise): False}
     self._aux_cancel_tracker = ButtonTracker()
@@ -225,6 +230,33 @@ class AolCardIntent:
           self._perform(actions[1])
         elif self._timers[button] == CRUISE_LONG_PRESS * 5:
           self._perform(actions[2])
+
+  def observe_calibration(self, CS, *, events=None, standard_enabled: bool = False) -> None:
+    if self.explicit_latch:
+      return
+    if events is not None:
+      self._calibration_fault = disarming_fault(events, CS)
+      self._calibration_inhibit = any(event.name in (
+        log.OnroadEvent.EventName.calibrationInvalid,
+        log.OnroadEvent.EventName.calibrationIncomplete,
+        log.OnroadEvent.EventName.calibrationRecalibrating) for event in events)
+    main = bool(CS.cruiseState.available)
+    engaged = bool(CS.cruiseState.enabled or standard_enabled)
+    main_derived = not self.explicit_latch and self.settings.lkas_action != AOL_TOGGLE and self.settings.main_action != AOL_TOGGLE
+    if not main_derived:
+      self._calibration_rearm_required = False
+    fresh_edge = ((main and not self._calibration_main) or (engaged and not self._calibration_engaged))
+    rearm_safe = (CS.canValid and not CS.canTimeout and not self._calibration_fault and
+                  not CS.steerFaultPermanent and not CS.steerFaultTemporary and
+                  CS.gearShifter not in (GearShifter.park, GearShifter.neutral, GearShifter.reverse, GearShifter.unknown))
+    if self._calibration_inhibit and main_derived:
+      self._calibration_rearm_required = True
+    elif self._calibration_rearm_required and fresh_edge and rearm_safe and self.settings.enabled:
+      self._calibration_rearm_required = False
+    if self._calibration_inhibit or self._calibration_rearm_required:
+      self.allowed_latch = False
+    self._calibration_main = main
+    self._calibration_engaged = engaged
 
   def auxiliary_supported(self) -> bool:
     return not self.explicit_latch

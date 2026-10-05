@@ -504,6 +504,8 @@ class Car:
     if self.aol_card_intent is not None:
       self.aol_card_intent.update_auxiliary(CS, media=media_observation,
         media_eligible=ioniq6_media_eligible(self.CP), fault_active=fault_active)
+      self.observe_aol_calibration(CS, now_ns,
+        host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False) else host_control_enabled)
     self.observe_distance_personality(CS, now_ns)
     gm_claim = getattr(self, 'gm_distance_claim_tracker', None)
     if gm_claim is not None:
@@ -610,6 +612,14 @@ class Car:
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, RD
+
+  def observe_aol_calibration(self, CS, now_ns: int, standard_enabled: bool) -> None:
+    calibration_events = None
+    event_ns = int(self.sm.logMonoTime['onroadEvents'])
+    if (self.sm.updated['onroadEvents'] and self.sm.valid['onroadEvents'] and
+        0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
+      calibration_events = self.sm['onroadEvents']
+    self.aol_card_intent.observe_calibration(CS, events=calibration_events, standard_enabled=standard_enabled)
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None):
     """carState and carParams publish loop"""

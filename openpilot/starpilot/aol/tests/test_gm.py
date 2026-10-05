@@ -452,6 +452,94 @@ class TestGmAol(unittest.TestCase):
         self.assertEqual(any(requested), supported)
 
 
+  def test_calibration_recovery_requires_new_main_edge_through_actual_callers(self):
+    from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+    from openpilot.selfdrive.selfdrived.state import StateMachine
+    from openpilot.selfdrive.selfdrived.events import Events, EventName
+    from openpilot.starpilot.aol.runtime import AxisDecision
+    from openpilot.starpilot.aol.wire import encode_intent
+
+    for calibration_event in (EventName.calibrationInvalid, EventName.calibrationIncomplete, EventName.calibrationRecalibrating):
+      with self.subTest(calibration=calibration_event), OpenpilotPrefix(), patch.dict(
+          os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+        settings = Params()
+        settings.put_bool('AlwaysOnLateral', True, block=True)
+        selected = self.card(factory_params(alpha=False), settings)
+        controls = Controls()
+        sd = SelfdriveD.__new__(SelfdriveD)
+        sd.CP, sd.initialized, sd.aol_replay = selected.CP, True, True
+        sd.aol_session_id, sd.aol_axis_decision = 'calibration-test', AxisDecision()
+        sd.aol_dm_lateral_inhibit, sd.aol_settings = False, selected.aol_settings
+        sd.nostalgia_paddle_cancel = False
+        sd.state_machine, sd.events = StateMachine(), Events()
+        sd.sm = messaging.SubMaster(['aolIntentWire', 'aolSafetyWire', 'modelV2',
+                                     'extrinsicsCalibration', 'driverMonitoringState'])
+        cs = structs.CarState(canValid=True, vEgo=20., gearShifter='drive')
+        for tick, (phase, expected) in enumerate((('healthy', True), ('invalid', False), ('recovered', False),
+                                                  ('held', False), ('unmapped_lkas', False), ('unmapped_main', False),
+                                                  ('release_lkas', False), ('main_off', False), ('fault_edge', False),
+                                                  ('recovered_again', False), ('main_off', False), ('new_main', True),
+                                                  ('temporary', False), ('healthy', True), ('reverse', False),
+                                                  ('healthy', True), ('model_stale', False), ('healthy', True))):
+          now = 1_000_000_000 + tick * 10_000_000
+          cs.cruiseState.available = phase != 'main_off'
+          cs.buttonEvents = []
+          if phase in ('unmapped_lkas', 'unmapped_main', 'release_lkas'):
+            cs.buttonEvents = [structs.CarState.ButtonEvent(
+              type='mainCruise' if phase == 'unmapped_main' else 'lkas', pressed=phase != 'release_lkas')]
+          cs.steerFaultTemporary = phase == 'temporary'
+          cs.gearShifter = 'reverse' if phase == 'reverse' else 'drive'
+          events = Events()
+          if phase == 'invalid':
+            events.add(calibration_event)
+          if phase == 'fault_edge':
+            events.add(EventName.overheat)
+          onroad = messaging.new_message('onroadEvents', 0, valid=True, logMonoTime=now)
+          onroad.onroadEvents = events.to_msg()
+          selected.sm.update_msgs(now / 1e9, [onroad.as_reader()])
+          selected.aol_card_intent.update(cs)
+          selected.observe_aol_calibration(cs, now, False)
+          self.assertEqual(selected.aol_card_intent.allowed_latch,
+                           phase not in ('invalid', 'recovered', 'held', 'unmapped_lkas', 'unmapped_main', 'release_lkas',
+                                         'main_off', 'fault_edge', 'recovered_again'))
+          intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=now)
+          allowed, pause_lat, pause_long = selected.aol_card_intent.output(cs)
+          intent.aolIntentWire = encode_intent(IntentState('card', tick + 1, now, now, now + 30_000_000,
+                                                          allowed, pause_lat, pause_long, True, True))
+          native = SafetyState(1, True, now, now + 200_000_000, int(structs.CarParams.SafetyModel.gm),
+                               selected.CP.safetyConfigs[0].safetyParam, expected, False, expected, False,
+                               'panda', 'calibration-test')
+          receipt = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
+          receipt.aolSafetyWire = encode_safety(native)
+          model = messaging.new_message('modelV2', valid=phase != 'model_stale', logMonoTime=now)
+          calibration = messaging.new_message('extrinsicsCalibration', valid=True, logMonoTime=now)
+          calibration.extrinsicsCalibration.calStatus = 'uncalibrated' if phase == 'invalid' else 'calibrated'
+          monitoring = messaging.new_message('driverMonitoringState', valid=True, logMonoTime=now)
+          sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
+                                       calibration.as_reader(), monitoring.as_reader()])
+          sd.aol_car_state_log_ns, sd.enabled, sd.active = now, False, False
+          sd.events.clear()
+          with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
+               patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
+               patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
+               patch.object(sd, 'publish_selfdriveState'):
+            sd.step()
+          self.assertEqual(sd.aol_axis_decision.lateral_active, expected, phase)
+          feed(controls, now, tick, active=False, enabled=False)
+          axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
+          axis.aolAxisState.qualified = axis.aolAxisState.nativeAcknowledged = True
+          axis.aolAxisState.desiredLateral = sd.aol_axis_decision.desired_lateral
+          axis.aolAxisState.lateralActive = sd.aol_axis_decision.lateral_active
+          axis.aolAxisState.sessionId = 'calibration-test'
+          axis.aolAxisState.observedMonoTime = now
+          axis.aolAxisState.validUntilMonoTime = now + 30_000_000
+          state = messaging.new_message('carState', valid=True, logMonoTime=now)
+          state.carState = cs
+          controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), state.as_reader()])
+          command, _ = controls.state_control()
+          self.assertEqual(command.latActive, expected, phase)
+          self.assertFalse(command.longActive)
+
   def test_actual_selfdrived_gas_override_keeps_longitudinal_request(self):
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
     from openpilot.selfdrive.selfdrived.state import StateMachine
