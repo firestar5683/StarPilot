@@ -1001,6 +1001,24 @@ class SettingsGatewayTest(unittest.TestCase):
       self.assertIsNone(self.params.get("RecordFront"))
       self.assertIsNone(self.params.get("RecordFrontLock"))
 
+  def test_usage_statistics_default_and_opt_out_are_vehicle_independent(self):
+    self.context.value = AuthorityContext(False, None, None)
+    self.params.remove("ShareUsageStats")
+    page = self.page("data")
+    index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Share Usage Statistics")
+    row = page["rows"][index]
+    self.assertEqual(row["value"], "On")
+    self.assertTrue(row["available"])
+    self.assertIn("precise GPS", row["reason"])
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value="Off")
+    self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
+    self.assertFalse(self.params.get_bool("ShareUsageStats"))
+    self.gateway = SettingsGateway(self.params, self.context, clock=lambda: 100.0)
+    page = self.page("data")
+    row = next(row for row in page["rows"] if row["label"] == "Share Usage Statistics")
+    self.assertEqual(row["value"], "Off")
+    self.assertFalse(self.params.get_bool("ShareUsageStats"))
+
   def test_force_stop_off_onroad_with_master_off_and_session_vehicle_guards(self):
     cp = self.context.value.cp
     self.context.value = AuthorityContext(False, cp, b"verified-cp")

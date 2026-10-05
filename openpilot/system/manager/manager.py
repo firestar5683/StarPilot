@@ -218,12 +218,24 @@ def main() -> None:
   # SystemExit on sigterm
   signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(1))
 
+  analytics = None
+  try:
+    from openpilot.starpilot.analytics.runtime import start_optional_worker
+    analytics = start_optional_worker()
+  except Exception:
+    cloudlog.warning("Usage statistics worker unavailable")
+
   try:
     manager_thread()
   except Exception:
     traceback.print_exc()
     cloudlog.exception("crash")
   finally:
+    if analytics is not None:
+      try:
+        analytics.close()
+      except Exception:
+        cloudlog.warning("Usage statistics shutdown failed")
     try:
       from openpilot.starpilot.system.jetlink.lifecycle import shutdown as shutdown_jetlink
       shutdown_jetlink(Params())
