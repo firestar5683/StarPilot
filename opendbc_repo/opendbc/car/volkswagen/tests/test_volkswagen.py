@@ -102,6 +102,24 @@ class TestVolkswagenPlatformConfigs(unittest.TestCase):
           matches = FW_QUERY_CONFIG.match_fw_to_car_fuzzy({(0x757, None): [radar_fw]}, "".join(vin), FW_VERSIONS)
           self.assertEqual(matches, {expected} if expected is not None else set())
 
+  def test_id4_chassis_year_and_radar_firmware_match(self):
+    radar_fw = FW_VERSIONS[CAR.VOLKSWAGEN_ID4_MK1][Ecu.fwdRadar, 0x757, None][0]
+    for wmi in ("1V2", "WVW", "WVG", "XXX"):
+      for chassis in ("E2", "E8"):
+        for year in ("M", "N", "P", "R", "S", "L", "T", "0"):
+          vin = list("00000000000000000")
+          vin[:3], vin[6:8], vin[9] = wmi, chassis, year
+          expected = set()
+          if wmi != "XXX":
+            if year in ("M", "N", "P"):
+              expected = {CAR.VOLKSWAGEN_ID4_MK1}
+            elif chassis == "E8" and year in ("R", "S"):
+              expected = {CAR.VOLKSWAGEN_ID4_MK2}
+          for firmware in ({(0x757, None): [radar_fw]}, {}, {(0x757, None): [b"unknown"]}):
+            with self.subTest(wmi=wmi, chassis=chassis, year=year, firmware=firmware):
+              matches = FW_QUERY_CONFIG.match_fw_to_car_fuzzy(firmware, "".join(vin), FW_VERSIONS)
+              self.assertEqual(matches, expected if firmware.get((0x757, None)) == [radar_fw] else set())
+
   def test_six_meb_interfaces_and_native_controller_frames(self):
     for car_model in self.MEB_BATCH:
       gen2 = bool(car_model.config.flags & VolkswagenFlags.MEB_GEN2)
