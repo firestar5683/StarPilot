@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from opendbc.car import structs
-from opendbc.car.gm.carcontroller import CarController, bolt_pedal_slew
+from opendbc.car.gm.carcontroller import CarController, bolt_pedal_fraction, bolt_pedal_slew
 from opendbc.car.gm.tests.test_bolt_pedal import params
 from opendbc.car.gm.values import DBC, PEDAL_BOLT_CAR
 
@@ -52,6 +52,52 @@ def pedal_wire(fraction, counter):
 
 
 class TestBoltPedalSlew(unittest.TestCase):
+  def test_paddle_switching_matches_original_scalar_outputs(self):
+    import json
+    from pathlib import Path
+    reference = json.loads(Path(__file__).with_name('bolt_paddle_original_oracle.json').read_text())
+    for candidate in PEDAL_BOLT_CAR:
+      for history in reference['histories']:
+        cp = params(candidate, setting=True, pedal=True)
+        cc = CarController(DBC[candidate], cp)
+        speed = history['speed']
+        for expected in history['frames']:
+          with self.subTest(candidate=candidate, speed=speed, tick=expected['tick']):
+            cc.maneuver_paddle_mode = expected['selected']
+            cc.bolt_regen_hold = expected['planner_hold']
+            pressed = cc.update_bolt_paddle(expected['accel'], expected['measured'], speed, expected['active'])
+            if expected['active']:
+              target = bolt_pedal_fraction(expected['accel'], speed, pressed)
+              cc.pedal_steady = (bolt_pedal_slew(target, cc.pedal_steady, expected['accel'], speed)
+                                 if cc.pedal_active_last and not (cc.bolt_paddle_switched and speed > 1.) else target)
+              cc.pedal_active_last = True
+            else:
+              cc.pedal_steady = 0.
+              cc.pedal_active_last = False
+            self.assertEqual(pressed, expected['pressed'])
+            self.assertAlmostEqual(cc.pedal_steady, expected['pedal'], places=12)
+            self.assertEqual(cc.regen_press_count, expected['press_count'])
+            self.assertEqual(cc.regen_release_count, expected['release_count'])
+            self.assertEqual(cc.regen_min_on_frames, expected['min_on'])
+            self.assertEqual(cc.regen_min_off_frames, expected['min_off'])
+
+  def test_paddle_modes_preserve_automatic_counters_and_switch_law(self):
+    cp = params(next(iter(PEDAL_BOLT_CAR)), setting=True, pedal=True)
+    cc = CarController(DBC[cp.carFingerprint], cp)
+    cc.maneuver_paddle_mode = "force"
+    cc.regen_min_off_frames = 20
+    self.assertTrue(cc.update_bolt_paddle(-.03, 0., 10., True))
+    self.assertFalse(cc.bolt_paddle_switched)
+    self.assertEqual(cc.regen_min_off_frames, 19)
+    cc.maneuver_paddle_mode = "off"
+    self.assertFalse(cc.update_bolt_paddle(-2., -2., 10., True))
+    self.assertEqual((cc.regen_press_count, cc.regen_release_count, cc.regen_min_on_frames), (0, 0, 0))
+    self.assertEqual(cc.regen_min_off_frames, 18)
+    cc.maneuver_paddle_mode = "force"
+    self.assertFalse(cc.update_bolt_paddle(-.02, -2., 10., True))
+    self.assertFalse(cc.update_bolt_paddle(-2., -2., 10., False))
+    self.assertEqual(cc.regen_min_off_frames, 0)
+
   def test_rate_boundaries_and_falling_invariance(self):
     for speed in (0, 3, 6, 6.0001, 8, 12, 20, 25):
       for accel in (-3, -.35, 0, .12, .25, .35, .45, .8, 1.2, 1.2001, 1.5, 2):

@@ -11,8 +11,6 @@ from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.values import CAR, DBC, GMFlags, GMSafetyFlags, NO_ACC_BOLT_CAR, PEDAL_BOLT_CAR
 
 
-
-
 def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=False, camera=False):
   fingerprint = gen_empty_fingerprint()
   if camera:
@@ -281,3 +279,143 @@ class TestBoltPedalStartupParser(unittest.TestCase):
           self.assertFalse(state.canValid)
           if missing == (0, 'GAS_SENSOR'):
             self.assertFalse(ci.CS.pedal_sensor_healthy)
+
+
+class TestBoltPaddleModes(unittest.TestCase):
+  def test_hidden_mode_binds_only_to_actual_active_pedal_owners(self):
+    import os
+    from unittest.mock import patch
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.starpilot.aol.tests.test_gm import TestGmAol
+
+    for candidate in PEDAL_BOLT_CAR:
+      for observed, disabled in ((False, False), (True, True)):
+        with self.subTest(candidate=candidate, observed=observed, disabled=disabled), OpenpilotPrefix(), \
+             patch.dict(os.environ, {'SIMULATION': '1'}):
+          settings = Params()
+          settings.put('LongitudinalManeuverPaddleMode', 'force', block=True)
+          settings.put_bool('DisableOpenpilotLongitudinal', disabled, block=True)
+          card = TestGmAol.card(params(candidate, pedal=observed, camera=True), settings)
+          self.assertIsNone(card.CI.CC.maneuver_paddle_input)
+          self.assertEqual(card.CI.CC.maneuver_paddle_mode, 'auto')
+
+  def test_saved_modes_cross_actual_card_parser_and_native_scheduler(self):
+    import os
+    from unittest.mock import patch
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.starpilot.aol.tests.test_gm import TestGmAol
+    from opendbc.car.gm.bolt_cc import button_bytes
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from opendbc.safety.tests.test_gm_bolt_pedal import TestGmBoltPedalSafety
+
+    for candidate in PEDAL_BOLT_CAR:
+      with self.subTest(candidate=candidate), OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1'}):
+        settings = Params()
+        card = TestGmAol.card(params(candidate, pedal=True, camera=True), settings)
+        ci, cp = card.CI, card.CP
+        self.assertIsNotNone(ci.CC.maneuver_paddle_input)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        safety = libsafety_py.libsafety
+        self.assertEqual(safety.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
+        safety.init_tests()
+        recorder = TestGmBoltPedalSafety()
+        recorder.safety = safety
+        control = structs.CarControl()
+        control.actuators.accel = -.5
+        counter = 0
+        observed = set()
+        last_feeds = {}
+        mode = 'auto'
+        for tick in range(875):
+          now = 1_000_000_000 + tick * 10_000_000
+          safety.set_timer(now // 1000)
+          if tick in (251, 326, 426, 526):
+            mode = {251: 'force', 326: 'off', 426: 'auto', 526: 'force'}[tick]
+            settings.put('LongitudinalManeuverPaddleMode', mode, block=True)
+          live = {675: ('OpenpilotEnabledToggle', False), 700: ('OpenpilotEnabledToggle', True),
+                  725: ('SafeMode', True), 750: ('SafeMode', False),
+                  775: ('DisableOpenpilotLongitudinal', True), 800: ('DisableOpenpilotLongitudinal', False),
+                  825: ('LongitudinalManeuverPaddleMode', 'garbage'),
+                  850: ('LongitudinalManeuverPaddleMode', ' FoRcE ')}
+          if tick in live:
+            settings.put(*live[tick], block=True)
+          fallback = any(start <= tick < start + 25 for start in (675, 725, 775, 825))
+          control.actuators.accel = .35 if fallback else -.5
+          control.enabled = tick >= 250
+          control.longActive = tick >= 250
+          withdrawals = {576: 'gas', 586: 'brake', 596: 'regen', 606: 'gear', 616: 'main', 626: 'sensor', 636: 'stock'}
+          override = next((value for start, value in withdrawals.items() if start <= tick < start + 4), None)
+          values = {
+            'ECMEngineStatus': {'CruiseMainOn': int(override != 'main'), 'BrakePressed': int(override == 'brake')},
+            'ECMPRDNL2': {'PRNDL2': 4 if override == 'gear' else 6},
+            'AcceleratorPedal2': {'AcceleratorPedal2': 30 if override == 'gas' else 0,
+                                 'CruiseState': int(override == 'stock')},
+            'ECMAcceleratorPos': {'BrakePedalPos': 12 if override == 'brake' else 0},
+            'EBCMRegenPaddle': {'RegenPaddle': int(override == 'regen')},
+            'EBCMWheelSpdRear': {'RLWheelSpd': 43.2, 'RRWheelSpd': 43.2},
+            'EBCMWheelSpdFront': {'FLWheelSpd': 43.2, 'FRWheelSpd': 43.2},
+            'BCMDoorBeltStatus': {'LeftSeatBelt': 1},
+            'ASCMActiveCruiseControlStatus': {'ACCCmdActive': int(override == 'stock')},
+          }
+          frames = [packer.make_can_msg(name, 0, values.get(name, {}))
+                    for name in TestBoltPedalStartupParser.PT_MESSAGES if name not in ('GAS_SENSOR', 'ASCMSteeringButton')]
+          if tick % 2 == 0:
+            frames.append(TestBoltPedalMessages.sensor(packer, 30 if override == 'gas' else 0, counter % 16, state=int(override == 'sensor')))
+            counter += 1
+          # Every withdrawal is followed by physical SET press/release before positive commands resume.
+          buttons = 3 if tick in (248, *(start + 4 for start in withdrawals)) else 1
+          if buttons == 3:
+            control.enabled = control.longActive = False
+          frames.append((0x1E1, button_bytes(buttons, tick % 4), 0))
+          frames.extend(packer.make_can_msg(name, 2, values.get(name, {})) for name in
+                        ('ASCMLKASteeringCmd', 'AEBCmd', 'ASCMActiveCruiseControlStatus'))
+          frames.append(packer.make_can_msg('ASCMLKASteeringCmd', 128, {}))
+          safety.reset_recorded_can()
+          for frame in sorted(frames, key=lambda frame: frame[0] in (0x1F5, 0xBD)):
+            if frame[2] != 128:
+              safety.safety_rx_hook(recorder.packet(frame))
+          recorded = recorder.recorded()
+          if tick in (277, 353):
+            expected_pressed = tick == 277
+            self.assertEqual({address for address, _, _ in recorded}, {0xBD, 0x1F5})
+            for address, _, payload in recorded:
+              if address == 0xBD:
+                self.assertEqual(payload[0], 0x20 if expected_pressed else 0)
+              else:
+                self.assertEqual((payload[3], payload[5]),
+                                 ((5 if candidate in (CAR.CHEVROLET_BOLT_CC_2022_2023,
+                                                      CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL) else 7), 2)
+                                 if expected_pressed else (6, 0))
+          if override is not None and (override not in ('main', 'stock') or candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+            self.assertFalse(any(payload[0] == 0x20 if address == 0xBD else payload[5] == 2
+                                 for address, _, payload in recorded))
+          for address, bus, payload in recorded:
+            self.assertEqual(bus, 0)
+            self.assertEqual(payload, last_feeds[address])
+          state = ci.update([(now, frames)])
+          if tick >= 250:
+            self.assertTrue(state.canValid)
+          _, messages = ci.apply(control.as_reader(), now)
+          expected_mode = ('auto' if tick < 275 else 'force' if tick < 350 else 'off' if tick < 450 else
+                           'auto' if tick < 550 or fallback else 'force')
+          self.assertEqual(ci.CC.maneuver_paddle_mode, expected_mode)
+          if tick >= 250:
+            observed.add(expected_mode)
+          if fallback and tick % 4 == 0:
+            self.assertGreater(ci.CC.pedal_steady, 0.)  # Selection falls back to auto; physical authority is unchanged.
+          for message in messages:
+            allowed = safety.safety_tx_hook(recorder.packet(message))
+            if message[0] in (0xBD, 0x1F5):
+              self.assertFalse(allowed)  # Host feed is consumed; only the internal scheduler may transmit.
+              last_feeds[message[0]] = message[1]
+              if tick in (276, 352) and message[0] == 0xBD:
+                self.assertEqual(message[1][0], 0x20 if tick == 276 else 0)
+            else:
+              self.assertTrue(allowed, (candidate, tick, hex(message[0])))
+          if override is not None and tick % 4 == 0 and (override not in ('main', 'stock') or
+                                                      candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+            self.assertFalse(ci.CC.regen_paddle_pressed, (tick, override))
+            self.assertEqual(ci.CC.pedal_steady, 0., (tick, override))
+        self.assertEqual(observed, {'auto', 'off', 'force'})
