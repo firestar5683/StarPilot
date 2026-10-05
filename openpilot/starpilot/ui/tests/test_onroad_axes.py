@@ -114,7 +114,7 @@ class TestOnroadAxes(unittest.TestCase):
       for profile in (Profile.LARGE, Profile.COMPACT):
         with self.subTest(profile=profile, lateral=lateral, longitudinal=longitudinal):
           view = onroad.OnroadView.__new__(onroad.OnroadView)
-          object.__setattr__(view, "fonts", NS(profile=profile))
+          object.__setattr__(view, "fonts", NS(profile=profile, draw=Mock(), measure=Mock(return_value=NS(width=100, height=30))))
           view.camera_layer = Mock()
           view.extra_overlays = None
           view.alert = Mock()
