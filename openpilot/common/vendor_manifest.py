@@ -9,12 +9,18 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 MANIFEST = "upstream-sync.json"
-DEPENDENCIES = frozenset({"msgq_repo", "opendbc_repo", "panda", "rednose_repo", "teleoprtc_repo", "tinygrad_repo", "mapd_repo", "jetlink_repo"})
+BASE_DEPENDENCIES = frozenset({"msgq_repo", "opendbc_repo", "panda", "rednose_repo", "teleoprtc_repo", "tinygrad_repo", "mapd_repo"})
+EXTENSIONS = frozenset({"jetlink_repo"})
+DEPENDENCIES = BASE_DEPENDENCIES | EXTENSIONS
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def git(repo: Path | str, *args: str) -> bytes:
   return subprocess.check_output(["git", "-C", str(repo), *args])
+
+
+def dependency_entries(manifest: dict) -> list[dict]:
+  return [*manifest["dependencies"], *manifest.get("vendored_extensions", [])]
 
 
 def parse_manifest(data: bytes | str) -> dict:
@@ -26,10 +32,12 @@ def parse_manifest(data: bytes | str) -> dict:
     raise ValueError("Unsupported source manifest schema")
   upstream = value.get("upstream")
   dependencies = value.get("dependencies")
-  if not isinstance(upstream, dict) or not isinstance(dependencies, list):
+  extensions = value.get("vendored_extensions", [])
+  if not isinstance(upstream, dict) or not isinstance(dependencies, list) or not isinstance(extensions, list):
     raise ValueError("Source manifest must define upstream and dependencies")
+  entries = dependency_entries(value)
   paths = []
-  for entry in [upstream, *dependencies]:
+  for entry in [upstream, *entries]:
     if not isinstance(entry, dict):
       raise ValueError("Invalid source manifest entry")
     if not isinstance(entry.get("commit"), str) or not SHA.fullmatch(entry["commit"]):
@@ -37,7 +45,10 @@ def parse_manifest(data: bytes | str) -> dict:
     url = entry.get("url")
     if not isinstance(url, str) or not url.startswith("https://") or not urlsplit(url).hostname or urlsplit(url).username:
       raise ValueError("Source URLs must use HTTPS")
-  for entry in dependencies:
+  for entry in extensions:
+    if not isinstance(entry.get("path"), str) or entry["path"] not in EXTENSIONS:
+      raise ValueError("Unexpected vendored extension path")
+  for entry in entries:
     path = entry.get("path")
     if not isinstance(path, str) or path not in DEPENDENCIES:
       raise ValueError(f"Unexpected dependency path: {path!r}")
@@ -51,7 +62,7 @@ def parse_manifest(data: bytes | str) -> dict:
       invalid_name = not name or name == "." or "\0" in name or name != PurePosixPath(name).as_posix()
       if invalid_name or any(p in ("..", ".git") for p in PurePosixPath(name).parts) or name.startswith("/"):
         raise ValueError(f"Unsafe exclusion for {path}")
-  if len(paths) != len(DEPENDENCIES) or set(paths) != DEPENDENCIES:
+  if len(paths) != len(set(paths)) or not BASE_DEPENDENCIES <= set(paths):
     raise ValueError("Source manifest must list each dependency exactly once")
   return value
 
@@ -74,7 +85,12 @@ def validate_layout(manifest: dict, entries: dict[str, str]) -> None:
       raise ValueError(f"Source tree contains excluded metadata: {path}")
   if entries.get(MANIFEST) != "100644":
     raise ValueError("Source manifest must be a tracked regular file")
-  for dependency in manifest["dependencies"]:
+  dependencies = dependency_entries(manifest)
+  declared = {entry["path"] for entry in dependencies}
+  for extension in EXTENSIONS - declared:
+    if extension in entries or any(name.startswith(extension + "/") for name in entries):
+      raise ValueError(f"Missing source provenance for {extension}")
+  for dependency in dependencies:
     path = dependency["path"]
     members = [name for name in entries if name.startswith(path + "/")]
     if path in entries or not members:
@@ -110,7 +126,7 @@ def validate_worktree(repo: Path | str) -> dict:
       raise ValueError(f"Unresolved source conflict: {name.decode()}")
     entries[name.decode()] = mode.decode()
   validate_layout(manifest, entries)
-  for dependency in manifest["dependencies"]:
+  for dependency in dependency_entries(manifest):
     folder = repo / dependency["path"]
     if not folder.is_dir() or folder.is_symlink():
       raise ValueError(f"Dependency must be an ordinary folder: {folder.name}")

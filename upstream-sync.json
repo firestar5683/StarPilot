@@ -59,7 +59,9 @@
         "Readme.md",
         "Roadmap.md"
       ]
-    },
+    }
+  ],
+  "vendored_extensions": [
     {
       "path": "jetlink_repo",
       "url": "https://github.com/zoompilot/jetlink.git",

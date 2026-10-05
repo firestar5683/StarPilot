@@ -107,6 +107,35 @@ class TestSourceSync(unittest.TestCase):
     self.assertEqual(entry["commit"], target)
     self.assertEqual(entry["tree"], self.git(self.source, "rev-parse", "HEAD^{tree}").strip().decode())
 
+  def test_extension_sync_preserves_manifest_groups_and_local_edits(self):
+    entry = next(item for item in self.manifest['dependencies'] if item['path'] == 'jetlink_repo')
+    self.manifest['dependencies'].remove(entry)
+    self.manifest['vendored_extensions'] = [entry]
+    entry['exclude'] = ['AGENTS.md']
+    self.write_manifest()
+    # Give the extension the same real pinned upstream base as the ordinary fixture.
+    shutil.rmtree(self.repo / 'jetlink_repo')
+    shutil.copytree(self.repo / 'panda', self.repo / 'jetlink_repo', symlinks=True)
+    (self.repo / 'jetlink_repo/local.txt').write_text('local extension customization\n')
+    self.commit(self.repo)
+    original_dependencies = json.loads(json.dumps(self.manifest['dependencies']))
+    (self.source / 'upstream.txt').write_text('extension upstream update\n')
+    target = self.commit(self.source)
+    before = self.snapshot()
+    preview = sync(self.repo, 'jetlink_repo', target, self.source, apply=False)
+    self.assertFalse(preview['applied'])
+    self.assertEqual(self.snapshot(), before)
+    sync(self.repo, 'jetlink_repo', target, self.source, apply=True)
+    manifest = validate_worktree(self.repo)
+    self.assertEqual(manifest['dependencies'], original_dependencies)
+    self.assertEqual(len(manifest['vendored_extensions']), 1)
+    self.assertEqual(manifest['vendored_extensions'][0]['commit'], target)
+    self.assertEqual(manifest['vendored_extensions'][0]['tree'],
+                     self.git(self.source, 'rev-parse', 'HEAD^{tree}').strip().decode())
+    self.assertEqual((self.repo / 'jetlink_repo/local.txt').read_text(), 'local extension customization\n')
+    self.assertEqual((self.repo / 'jetlink_repo/upstream.txt').read_text(), 'extension upstream update\n')
+    self.assertEqual(self.git(self.repo, 'diff', '--name-only'), b'')
+
   def test_conflict_leaves_worktree_index_and_manifest_unchanged(self):
     (self.repo / "panda/local.txt").write_text("local side\n")
     self.commit(self.repo)

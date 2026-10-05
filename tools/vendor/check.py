@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from openpilot.common.vendor_manifest import validate_revision, validate_worktree
+from openpilot.common.vendor_manifest import dependency_entries, validate_revision, validate_worktree
 
 
 def main() -> int:
@@ -21,7 +21,7 @@ def main() -> int:
   except (ValueError, OSError, subprocess.CalledProcessError) as e:
     print(f"Source validation failed: {e}", file=sys.stderr)
     return 1
-  print(f"Source layout valid: {len(manifest['dependencies'])} tracked dependency folders")
+  print(f"Source layout valid: {len(dependency_entries(manifest))} tracked dependency folders")
   return 0
 
 

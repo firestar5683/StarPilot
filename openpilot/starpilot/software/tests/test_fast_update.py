@@ -163,6 +163,44 @@ class TestFastUpdate(unittest.TestCase):
     self.git(self.remote, 'commit', '-m', 'UI update')
     self.assertEqual(self.update(), 'reboot-requested')
 
+  def test_vendored_extension_update_and_rollback_preserve_downloaded_model(self):
+    self.git(self.remote, 'reset', '--hard', self.previous)
+    manifest_path = self.remote / 'upstream-sync.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['dependencies'] = [entry for entry in manifest['dependencies'] if entry['path'] != 'jetlink_repo']
+    manifest.pop('vendored_extensions', None)
+    if (self.remote / 'jetlink_repo').exists():
+      self.git(self.remote, 'rm', '-r', 'jetlink_repo')
+    manifest_path.write_text(json.dumps(manifest))
+    self.git(self.remote, 'add', '.')
+    self.receipt_commit()
+    self.previous = self.git(self.remote, 'rev-parse', 'HEAD')
+    self.git(self.repo, 'fetch', 'origin', 'Dom')
+    self.git(self.repo, 'reset', '--hard', self.previous)
+    model = self.repo / 'models' / 'download'
+    model.parent.mkdir()
+    model.write_bytes(b'downloaded model')
+
+    extension = self.remote / 'jetlink_repo'
+    extension.mkdir()
+    (extension / 'source.py').write_text('API_VERSION = 1\n')
+    manifest['vendored_extensions'] = [{'path': 'jetlink_repo', 'commit': '4' * 40, 'tree': '5' * 40,
+                                      'url': 'https://example.invalid/jetlink', 'exclude': []}]
+    manifest_path.write_text(json.dumps(manifest))
+    self.git(self.remote, 'add', '.')
+    self.receipt_commit()
+    target = self.git(self.remote, 'rev-parse', 'HEAD')
+
+    self.assertEqual(self.update(), 'reboot-requested')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), target)
+    self.assertEqual((self.repo / 'jetlink_repo/source.py').read_text(), 'API_VERSION = 1\n')
+    self.assertEqual(model.read_bytes(), b'downloaded model')
+    self.assertEqual(self.update(rollback=True), 'reboot-requested')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertFalse((self.repo / 'jetlink_repo').exists())
+    self.assertEqual(model.read_bytes(), b'downloaded model')
+    self.assertEqual(len(self.invalidations), 2)
+
   def test_native_source_change_rejected_without_artifact_proof(self):
     (self.remote / 'native.cc').write_text('int main() {}')
     self.git(self.remote, 'add', '.')
