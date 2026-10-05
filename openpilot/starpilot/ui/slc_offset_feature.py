@@ -63,26 +63,28 @@ def _display(value: float) -> str:
   return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def _capability(cp) -> tuple | None:
+def _capability(cp, configuration_longitudinal=False) -> tuple | None:
   try:
-    if cp is None or not cp.carFingerprint or not cp.openpilotLongitudinalControl or cp.pcmCruise or \
+    if cp is None or not cp.carFingerprint or not (cp.openpilotLongitudinalControl or configuration_longitudinal) or \
+       (cp.pcmCruise and not configuration_longitudinal) or \
        cp.notCar or cp.dashcamOnly or cp.passive:
       return None
-    return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
+    return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl or configuration_longitudinal), bool(cp.pcmCruise and not configuration_longitudinal),
             bool(cp.notCar), bool(cp.dashcamOnly), bool(cp.passive))
   except (AttributeError, TypeError, ValueError):
     return None
 
 
 class SlcOffsetOwner:
-  def __init__(self, params, parked, vehicle_params, repair_parked=None):
+  def __init__(self, params, parked, vehicle_params, repair_parked=None, *, configuration_longitudinal=lambda: False):
     self.params = params
     self.parked = parked
     self.repair_parked = repair_parked or parked
     self.vehicle_params = vehicle_params
+    self.configuration_longitudinal = configuration_longitudinal
 
   def capability(self) -> tuple | None:
-    return _capability(self.vehicle_params())
+    return _capability(self.vehicle_params(), self.configuration_longitudinal())
 
   def _raw(self, key: str) -> bytes | None:
     return read_saved(self.params, key, od.MAX_DOCUMENT_BYTES)[0]
@@ -156,7 +158,7 @@ class SlcOffsetOwner:
                                reason="Legacy value; adopt to edit" if snap.raw_document is None else
                                       "Speed ranges are rounded for display; saved limits keep their exact values",
                                related_source=snap.raw_unit, capability=capable, dependencies=deps,
-                               display_unit=unit))
+                               display_unit=unit, default_value="0"))
       rows.append(FeatureRow("", "Above final band", "Zero offset"))
     else:
       for index, key in enumerate(OFFSET_KEYS, start=1):

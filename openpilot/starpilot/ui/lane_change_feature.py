@@ -47,11 +47,17 @@ def _unit_source(params) -> tuple[bytes | None, bool]:
 
 
 class LaneChangeFeature:
-  def __init__(self, params, authority: Callable[[str], bool], fingerprint: Callable[[], str | None], vehicle_params: Callable[[], object | None]):
+  def __init__(self, params, authority: Callable[[str], bool], fingerprint: Callable[[], str | None], vehicle_params: Callable[[], object | None],
+               *, configuration_longitudinal: Callable[[], bool] = lambda: False):
     self.params = params
     self.authority = authority
     self.fingerprint = fingerprint
     self.vehicle_params = vehicle_params
+    self.configuration_longitudinal = configuration_longitudinal
+
+  def longitudinal_available(self):
+    cp = self.vehicle_params()
+    return bool(cp is not None and (cp.openpilotLongitudinalControl or self.configuration_longitudinal()))
 
   def capability(self) -> tuple | None:
     cp = self.vehicle_params()
@@ -59,7 +65,7 @@ class LaneChangeFeature:
       if cp is None or cp.notCar or cp.passive or cp.dashcamOnly or not cp.carFingerprint:
         return None
       return (str(cp.carFingerprint), str(cp.brand), str(cp.steerControlType),
-              bool(cp.notCar), bool(cp.passive), bool(cp.dashcamOnly), bool(cp.openpilotLongitudinalControl),
+              bool(cp.notCar), bool(cp.passive), bool(cp.dashcamOnly), self.longitudinal_available(),
               str(cp.carVin) if getattr(cp, "carVin", None) else None)
     except (AttributeError, TypeError, ValueError):
       return None
@@ -79,11 +85,10 @@ class LaneChangeFeature:
       return [replace(common, key=RESET, label="Restore Lane Change defaults", value="StarPilot driver-nudged behavior",
                       available=parked and allowed and self.authority("parked_preferences"), reason=reason)]
     policy = effective(saved)
-    cp = self.vehicle_params()
-    long_available = cp is not None and cp.openpilotLongitudinalControl is True
+    long_available = self.longitudinal_available()
     inactive = "Saved for the next drive; driver nudge and blindspot checks remain available"
     speed = round(policy.minimum_speed_mps * multiplier, 3)
-    return [replace(common, key=PACE, label="Lane Change Speed", value=str(round(1.0 + (8.0 - policy.duration_s) * 9.0 / 5.0, 2)),
+    rows = [replace(common, key=PACE, label="Lane Change Speed", value=str(round(1.0 + (8.0 - policy.duration_s) * 9.0 / 5.0, 2)),
                     step=1.0, minimum=1.0, maximum=10.0, unit="", available=allowed,
                     reason="Higher values change lanes more quickly; lower values make steering gentler. This does not change the delay after signaling."),
             replace(common, key=ENABLED, label="Allow lane changes", value="On" if policy.enabled else "Off",
@@ -110,6 +115,14 @@ class LaneChangeFeature:
             replace(common, key=GAP, label="Lane-change follow gap", value=str(round(policy.close_gap_seconds, 2)),
                     step=0.05, minimum=0.75, maximum=1.0, unit="s", available=allowed and long_available,
                     reason="Following time while Close lane-change gap is active. Higher values leave more space; returns to the normal gap afterward.")]
+
+    defaults = LaneChangePolicy()
+    targets = {ENABLED: "On" if defaults.enabled else "Off", ONE: "On" if defaults.one_per_signal else "Off",
+               AUTO: "On" if defaults.auto_lane_change else "Off", CLOSE: "On" if defaults.close_gap else "Off",
+               SPEED: str(round(defaults.minimum_speed_mps * multiplier, 3)), DELAY: str(defaults.auto_delay_s),
+               WIDTH: str(defaults.minimum_lane_width_m), GAP: str(defaults.close_gap_seconds),
+               PACE: str(round(1.0 + (8.0 - defaults.duration_s) * 9.0 / 5.0, 2))}
+    return [replace(row, default_value=targets.get(row.key)) for row in rows]
 
   def _fresh(self, request: FeatureSettingsRequest) -> SavedLaneChange | None:
     if (not request.vehicle_fingerprint or self.fingerprint() != request.vehicle_fingerprint or
@@ -173,7 +186,7 @@ class LaneChangeFeature:
     def authorized() -> bool:
       if request.key in (CLOSE, GAP):
         cp = self.vehicle_params()
-        if cp is None or cp.openpilotLongitudinalControl is not True:
+        if cp is None or not self.longitudinal_available():
           return False
       return self._fresh(request) is not None
 

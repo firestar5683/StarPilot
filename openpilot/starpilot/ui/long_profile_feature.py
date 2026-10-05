@@ -64,10 +64,10 @@ class LongProfileFeature:
   def capability(self) -> tuple | None:
     cp = self.owner.vehicle_params()
     try:
-      if (cp is None or not cp.carFingerprint or not cp.openpilotLongitudinalControl or cp.pcmCruise or
+      if (cp is None or not cp.carFingerprint or not self.owner.longitudinal_available() or (cp.pcmCruise and not self.owner.configuration_longitudinal()) or
           cp.passive or cp.notCar or cp.dashcamOnly):
         return None
-      return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
+      return (str(cp.carFingerprint), self.owner.longitudinal_available(), bool(cp.pcmCruise and not self.owner.configuration_longitudinal()),
               bool(cp.passive), bool(cp.notCar), bool(cp.dashcamOnly),
               str(cp.carVin) if getattr(cp, "carVin", None) else None)
     except (AttributeError, TypeError, ValueError):

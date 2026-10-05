@@ -92,7 +92,7 @@ class ControllerFeature:
     conflict = isinstance(journal, dict) and (journal['vehicle'] != str(CP.carFingerprint) or
       any(raw not in (journal['prior'][key], journal['prepared'][key]) for key, raw in (sources or {}).items()))
     return FeatureRow(SETUP_ACTION, 'Prep My Vehicle for Tuning', 'On' if active else 'Off',
-                      journal_raw, choices=('Off', 'On'),
+                      journal_raw, choices=('Off', 'On'), default_value='Off',
                       available=valid and readable and journal is not False and not conflict and
                                 self.authority('parked_preferences') and self.authority('preferences'),
                       reason=('Enable before recording a route for a tuning request on the StarPilot Discord. ' +
@@ -137,7 +137,8 @@ class ControllerFeature:
     reason = ('Choose the steering controller for your next drive. ' + TUNING_GUIDANCE if valid and learning_valid else
               'Saved steering preferences are unreadable or invalid; no change was made.')
     return FeatureRow(DOCUMENT_KEY, 'Steering Controller', value, raw, CHOICES if valid else (),
-                      available=allowed, reason=reason, capability=capability, dependencies=((LEARNING_OFF_KEY, learning),))
+                      available=allowed, reason=reason, capability=capability, dependencies=((LEARNING_OFF_KEY, learning),),
+                      default_value=CHOICES[0] if selection_from_bytes(CP, None).mode == ControllerMode.STANDARD else CHOICES[1])
 
   def learning_row(self) -> FeatureRow | None:
     CP = self.vehicle_params()
@@ -155,7 +156,7 @@ class ControllerFeature:
     return FeatureRow(LEARNING_OFF_KEY, 'Automatic Steering Learning', value, raw, ('Off', 'On') if valid else (),
                       available=valid and not starpilot and self.authority('preferences'),
                       reason=reason if valid else 'Saved controller or learning preference is unreadable or invalid.',
-                      capability=capability, dependencies=((DOCUMENT_KEY, controller),))
+                      capability=capability, dependencies=((DOCUMENT_KEY, controller),), default_value="On")
 
   def apply_learning(self, request: FeatureSettingsRequest) -> bool:
     row = self.learning_row()

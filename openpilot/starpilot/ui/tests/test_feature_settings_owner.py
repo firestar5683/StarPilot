@@ -11,7 +11,7 @@ from unittest.mock import patch
 from openpilot.common.params import Params
 from openpilot.starpilot.longitudinal.profile_document import migrate_profile_document
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change, row_default
 from openpilot.starpilot import saved_document
 from openpilot.starpilot.ui import feature_settings_owner
 
@@ -47,6 +47,25 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
   def _row(self, page, key):
     state = self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     return next(row for row in state.rows if row.key == key)
+
+  def test_malformed_numeric_default_has_no_reset_target(self):
+    self.params.put("StandardFollow", 2.8, block=True)
+    with patch.object(self.owner, "_default", return_value="not a number"):
+      row = self.owner._number_row("StandardFollow", "Follow", True)
+    self.assertIsNone(row.default_value)
+    self.assertIsNone(row_default(row))
+
+  def test_source_profile_defaults_and_single_numeric_reset(self):
+    self.params.put("StandardFollow", 2.8, block=True)
+    row = self._row("standard", "StandardFollow")
+    self.assertEqual(float(row.default_value), float(self.params.get_default_value("StandardFollow")))
+    request = row_default(row)
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.owner.apply(request))
+    preset = self._row("standard/acceleration", "profile:standard:acceleration")
+    self.assertEqual(preset.default_value, "Selected Profile")
+    self.assertEqual(self._row("profiles", "profile:global_braking").default_value, "Comfort")
 
   def test_strength_has_actual_runtime_admission_percent_range_and_source_guard(self):
     from openpilot.starpilot.lateral.tests.test_lane_runtime import ioniq_candidate

@@ -57,6 +57,9 @@ class SoundsOwner:
         rows.append(FeatureRow(AUTO_PREFIX + key, "Use Auto " + label, "Follow ambient sound", source=saved.raw,
                                available=parked and saved.readable, repair_value="Auto"))
     rows.append(pack_row)
+    defaults = dict.fromkeys(SPECS, 'Auto')
+    defaults['SoundPack'] = PACK_LABELS.get(DEFAULT_PACK, DEFAULT_PACK)
+    rows = tuple(replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows)
     return FeatureSettingsState(page="sounds", title="Sounds & Alerts",
                                 subtitle="Installed sound packs and alert levels; Auto follows ambient sound.",
                                 rows=tuple(rows), parked=parked)

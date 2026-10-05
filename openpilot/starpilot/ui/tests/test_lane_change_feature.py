@@ -11,7 +11,7 @@ from unittest.mock import patch
 from openpilot.common.params import Params
 from openpilot.starpilot.lateral.lane_change_preferences import KEY, LaneChangePolicy, decode, effective, read_saved, to_value
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeaturePage, FeatureSettingsRequest, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeaturePage, FeatureSettingsRequest, row_change, row_default
 from openpilot.starpilot.ui.lane_change_feature import AUTO, CLOSE, DELAY, ENABLED, GAP, ONE, PACE, RESET, SPEED, WIDTH
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot import saved_document
@@ -29,6 +29,16 @@ class LaneChangeFeatureTests(unittest.TestCase):
                               openpilotLongitudinalControl=True)
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.parked and group in ("lane_change", "parked_preferences"),
                                       vehicle_fingerprint=lambda: self.fingerprint, vehicle_params=lambda: self.cp)
+
+  def test_default_resets_one_lane_field_without_resetting_other_choices(self):
+    row = self.row(AUTO)
+    self.assertTrue(self.owner.apply(self.request(row)))
+    speed = self.row(SPEED)
+    self.assertEqual(float(speed.default_value), round(LaneChangePolicy().minimum_speed_mps * 2.2369362920544, 3))
+    request = row_default(speed)
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(self.row(AUTO).value, "On")
 
   def test_saved_lane_choice_can_be_configured_during_drive_with_current_vehicle(self):
     self.parked = False

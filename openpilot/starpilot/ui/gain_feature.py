@@ -41,15 +41,18 @@ class GainFeature:
                          "Controller or vehicle tune changed. Confirm this response for the selected controller.", raw,
                          available=repair_allowed, capability=capability, dependencies=dependencies),
               FeatureRow("torque:gain:mode", "Steering response source", "Custom", raw,
-                         choices=("Selected controller",), available=allowed, capability=capability, dependencies=dependencies))
+                         choices=("Selected controller",), available=allowed, capability=capability, dependencies=dependencies,
+                         default_value="Selected controller"))
     rows = [FeatureRow("", "Manual steering response",
                        "Enable before the next drive. Higher values respond more strongly; lower values respond more gently.")]
     rows.append(FeatureRow("torque:gain:mode", "Steering response source",
                            "Custom" if choice.mode == "custom" else "Selected controller", raw,
-                           choices=("Selected controller", "Custom"), available=allowed, capability=capability, dependencies=dependencies))
+                           choices=("Selected controller", "Custom"), available=allowed, capability=capability, dependencies=dependencies,
+                           default_value="Selected controller"))
     if choice.mode == "custom":
       rows.append(FeatureRow("torque:gain:value", "Steering response", f"{choice.custom_value:.2f}", raw,
                              minimum=0.3, maximum=0.9, step=0.05, available=allowed,
+                             default_value="Selected controller", default_key="torque:gain:mode",
                              capability=capability, dependencies=dependencies))
     return tuple(rows)
 

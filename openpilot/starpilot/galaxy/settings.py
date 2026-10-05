@@ -22,7 +22,7 @@ from openpilot.starpilot.audio.alert_volume import SPECS as SOUND_SPECS
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.common.hardware import HARDWARE
 from openpilot.starpilot.ui.feature_settings_state import (
-  FeatureRow, FeatureSettingsRequest, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, row_change,
+  FeatureRow, FeatureSettingsRequest, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, row_change, row_default,
 )
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
@@ -62,7 +62,9 @@ class AuthorityContext:
   cp: object | None
   cp_raw: bytes | None
   metric: bool = False
-  editing_saved_tune: bool = False
+  editing_saved_vehicle: bool = False
+  configuration_longitudinal: bool = False
+  configuration_vehicle: bool = False
 
 
 class ContextSource(Protocol):
@@ -71,8 +73,6 @@ class ContextSource(Protocol):
 
 def _qualified(ctx: AuthorityContext, group: str) -> bool:
   cp = ctx.cp
-  if ctx.editing_saved_tune and group not in ("preferences", "parked_preferences", "torque"):
-    return False
   if group == "preferences":
     return True
   if group == "parked_preferences":
@@ -93,9 +93,9 @@ def _qualified(ctx: AuthorityContext, group: str) -> bool:
       from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
       return bool(ioniq6_media_eligible(cp) and not cp.notCar and not cp.passive and not cp.dashcamOnly)
     if group in ("conditional", "conditional_wheel", "long_output"):
-      return bool(cp.openpilotLongitudinalControl and not cp.notCar and not cp.dashcamOnly and not cp.passive)
+      return bool((cp.openpilotLongitudinalControl or ctx.configuration_longitudinal) and not cp.notCar and not cp.dashcamOnly and not cp.passive)
     if group in ("slc", "long"):
-      return bool(cp.openpilotLongitudinalControl and not cp.pcmCruise and
+      return bool(((cp.openpilotLongitudinalControl and not cp.pcmCruise) or ctx.configuration_longitudinal) and
                   not cp.notCar and not cp.dashcamOnly and not cp.passive)
     if group in ("torque", "aol", "aol_wheel"):
       return bool(not cp.notCar and not cp.dashcamOnly and not cp.passive)
@@ -281,12 +281,15 @@ class LiveContextSource:
           cp = messaging.log_from_bytes(inspected.payload, car.CarParams)
       except (OSError, RuntimeError, TypeError, ValueError, OverflowError):
         cp = None
+    editing_saved = configurable_long = configuration_vehicle = False
     if parked and self.offroad():
-      from openpilot.starpilot.galaxy.vehicle_configuration import configuration_context
-      cp, cp_raw = configuration_context(self.params, cp, cp_raw if readable else None)
+      from openpilot.starpilot.galaxy.vehicle_configuration import settings_configuration
+      cp, cp_raw, editing_saved, configurable_long = settings_configuration(self.params, cp, cp_raw if readable else None)
+      configuration_vehicle = cp is not None
       readable = True
     units, unit_readable = read_saved(self.params, "IsMetric", 8)
-    return AuthorityContext(parked, cp, cp_raw if readable else None, bool(unit_readable and units == b"1"))
+    return AuthorityContext(parked, cp, cp_raw if readable else None, bool(unit_readable and units == b"1"),
+                            editing_saved, configurable_long, configuration_vehicle)
 
 
 @dataclass(frozen=True)
@@ -307,6 +310,7 @@ class _Intent:
   request: FeatureSettingsRequest
   cp_raw: bytes | None
   expires: float
+  reset_row: FeatureRow | None = None
 
 
 def _session_key(token: str) -> bytes:
@@ -320,7 +324,7 @@ def _projection(row: FeatureRow, page: str) -> dict:
           "page": row.page if row.page in PAGES else "", "action": bool(row.key and row.available and not row.page),
           "confirm": bool(row.key in CONFIRM_ACTIONS or is_long_confirm_action(row.key) or
                           row.key in (PIP_RESET, PIP_EDITOR, VASM_RESET, VASM_ANNOTATION) or row.key.startswith(PIP_FORMAT_PREFIX)),
-          "repairValue": row.repair_value}
+          "repairValue": row.repair_value, "defaultValue": row.default_value, "resetAvailable": row_default(row) is not None}
 
 
 def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
@@ -440,34 +444,27 @@ class SettingsGateway:
               "note": "Saved configuration is shown here. It does not confirm that a feature is active while driving. Change settings in Toggles."}
 
   def _context(self, page: str) -> AuthorityContext:
-    ctx = self.context.sample()
-    if page == "torque" and ctx.cp is None and ctx.parked and getattr(self.context, "offroad", lambda: False)():
-      from openpilot.starpilot.galaxy.vehicle_configuration import saved_torque_context
-      cp, token = saved_torque_context(self.params)
-      if cp is not None:
-        return replace(ctx, cp=cp, cp_raw=token, editing_saved_tune=True)
-    return ctx
-
-  def _fresh_context(self, ctx: AuthorityContext) -> AuthorityContext:
-    return self._context("torque") if ctx.editing_saved_tune else self.context.sample()
+    return self.context.sample()
 
   def _owner(self, ctx: AuthorityContext, *, live: bool = False,
              session_valid: Callable[[], bool] = lambda: True) -> FeatureSettingsOwner:
     def current() -> AuthorityContext:
       if not session_valid():
         return AuthorityContext(False, None, None)
-      fresh = self._fresh_context(ctx) if live else ctx
+      fresh = self.context.sample() if live else ctx
       return fresh if fresh.cp_raw == ctx.cp_raw else AuthorityContext(False, None, fresh.cp_raw)
     def authorized(group: str) -> bool:
       if not session_valid():
         return False
-      fresh = self._fresh_context(ctx) if live else ctx
+      fresh = self.context.sample() if live else ctx
       return fresh.cp_raw == ctx.cp_raw and _qualified(fresh, group)
     return FeatureSettingsOwner(self.params, authorized,
                                 vehicle_fingerprint=lambda: getattr(current().cp, "carFingerprint", None),
                                 vehicle_params=lambda: current().cp,
                                 vision_development=lambda: diagnostic_choice_enabled(os.environ, current().cp),
-                                show_cruise_intervals=True)
+                                show_cruise_intervals=True,
+                                configuration_longitudinal=lambda: current().configuration_longitudinal,
+                                configuration_vehicle=lambda: current().configuration_vehicle)
 
   def _pip_owner(self, ctx: AuthorityContext, *, live: bool = False,
                  session_valid: Callable[[], bool] = lambda: True) -> PiPOwner:
@@ -540,11 +537,11 @@ class SettingsGateway:
                                       system_long=_qualified(ctx, "long"),
                                       lateral_context=_qualified(ctx, "lane") or (page == "lane" and _qualified(ctx, "lane_live")),
                                       metric=ctx.metric, configure_while_driving=True)
-    if ctx.editing_saved_tune:
+    if ctx.editing_saved_vehicle:
       from opendbc.car.values import PLATFORMS
       platform = PLATFORMS[ctx.cp.carFingerprint]
       label = platform.config.car_docs[0].name if platform.config.car_docs else str(ctx.cp.carFingerprint).replace("_", " ").title()
-      return replace(state, subtitle=f"{label} · Saved steering settings")
+      return replace(state, subtitle=f"{label} · Saved vehicle settings. {state.subtitle}")
     return state
 
   def _clean(self) -> None:
@@ -588,7 +585,7 @@ class SettingsGateway:
     return result
 
   def preview(self, view_id: str, index: int, direction: int, token: str, generation: bytes,
-              *, draft: dict | None = None, value: str | int | float | None = None) -> dict:
+              *, draft: dict | None = None, value: str | int | float | None = None, reset_default: bool = False) -> dict:
     with self.lock:
       self._clean()
       view = self.views.get(view_id)
@@ -609,7 +606,13 @@ class SettingsGateway:
       raise SettingsChanged("Unexpected camera region draft")
     special = (row.key in CONFIRM_ACTIONS or is_long_confirm_action(row.key) or
                row.key in (PIP_RESET, PIP_EDITOR, SENTRY_RESET, VASM_RESET, VASM_ANNOTATION) or row.key.startswith(PIP_FORMAT_PREFIX))
-    if value is not None:
+    if reset_default:
+      if direction != 0 or value is not None or draft is not None:
+        raise SettingsChanged("Invalid default reset")
+      request = row_default(row)
+      if request is None:
+        raise SettingsChanged("Default is unavailable")
+    elif value is not None:
       if direction != 0 or draft is not None or special or row.repair_value or type(value) not in (str, int, float):
         raise SettingsChanged("Invalid value selection")
       if isinstance(value, str) and len(value) > 128:
@@ -671,8 +674,12 @@ class SettingsGateway:
       if len(self.intents) >= MAX_INTENTS:
         self.intents.pop(next(iter(self.intents)))
       intent_id = secrets.token_urlsafe(24)
-      self.intents[intent_id] = _Intent(_session_key(token), generation, view.page, request, ctx.cp_raw, self.clock() + TTL)
-    return {"intent": intent_id, "question": _question(row, request), "proposed": request.value}
+      self.intents[intent_id] = _Intent(_session_key(token), generation, view.page, request, ctx.cp_raw, self.clock() + TTL,
+                                         row if reset_default else None)
+    question = _question(row, request)
+    if reset_default:
+      question = f"Reset {row.label} to its default? " + question
+    return {"intent": intent_id, "question": question, "proposed": request.value}
 
   def confirm(self, intent_id: str, token: str, generation: bytes,
               *, session_valid: Callable[[], bool] = lambda: True) -> bool:
@@ -685,6 +692,10 @@ class SettingsGateway:
     ctx = self._context(intent.page)
     if not session_valid() or not (ctx.parked or _onroad_preference(intent.page, intent.request.key)) or ctx.cp_raw != intent.cp_raw:
       raise SettingsChanged("Vehicle changed or this operation requires offroad mode")
+    if intent.reset_row is not None:
+      fresh_rows = self._state(intent.page, ctx).rows
+      if intent.reset_row not in fresh_rows or row_default(intent.reset_row) != intent.request:
+        raise SettingsChanged("Default or saved settings changed")
     if intent.page == "pip":
       return self._pip_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
     if intent.page == "appearance":

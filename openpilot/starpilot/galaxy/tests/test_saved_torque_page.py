@@ -36,7 +36,7 @@ class TestSavedTorquePage(unittest.TestCase):
     self.assertEqual(set(rows), {'Steering Controller', 'Turn Assist', 'Prep My Vehicle for Tuning',
                                 'Automatic Steering Learning', 'Lat Accel', 'Lateral acceleration — Reset to Default',
                                 'Friction', 'Friction — Reset to Default'})
-    self.assertIn('Saved steering settings', page['subtitle'])
+    self.assertIn('Saved vehicle settings', page['subtitle'])
     self.assertFalse(any(row['page'] for row in page['rows']))
     for label in ('Steering Controller', 'Turn Assist', 'Prep My Vehicle for Tuning', 'Lat Accel', 'Friction'):
       self.assertTrue(rows[label]['available'], label)
@@ -48,12 +48,12 @@ class TestSavedTorquePage(unittest.TestCase):
     for key in ('VehicleSelection', 'CarParams', 'CarParamsPersistent', 'CarParamsCache'):
       self.assertFalse(Path(self.params.get_param_path(key)).exists(), key)
 
-  def test_saved_tune_does_not_supply_other_pages_or_live_context(self):
-    self.assertTrue(self.gateway._context('torque').editing_saved_tune)
-    self.assertIsNone(self.context.sample().cp)
-    self.assertIsNone(self.gateway._context('slc').cp)
-    slc = next(row for row in self.page('slc')['rows'] if row['label'] == 'Speed Limit Controller')
-    self.assertFalse(slc['available'])
+  def test_saved_vehicle_configures_all_pages_but_never_onroad(self):
+    self.assertTrue(self.gateway._context('torque').editing_saved_vehicle)
+    self.assertEqual(self.context.sample().cp.carFingerprint, 'HYUNDAI_IONIQ_6')
+    self.assertEqual(self.gateway._context('slc').cp.carFingerprint, 'HYUNDAI_IONIQ_6')
+    slc = next(row for row in self.page('slc')['rows'] if row['label'] == 'Require confirmation')
+    self.assertTrue(slc['available'])
     self.offroad.return_value = False
     with patch.object(self.context, 'configuration_allowed', return_value=True):
       self.assertIsNone(self.gateway._context('torque').cp)

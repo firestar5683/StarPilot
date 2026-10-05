@@ -110,7 +110,7 @@ class ConditionalFeature:
                                      "Choose this button action. May take effect this drive.") if enabled else
                                     "Reload to read saved button actions",
                              vehicle_fingerprint=self.owner.vehicle_fingerprint(), capability=capability,
-                             dependencies=sources.dependencies, repair_value=repair if sources.readable else ""))
+                             dependencies=sources.dependencies, repair_value=repair if sources.readable else "", default_value="Off"))
     return rows
 
   def wheel_rows(self) -> list[FeatureRow]:
@@ -149,7 +149,7 @@ class ConditionalFeature:
     if page == "conditional":
       choice = {"stock": MODES[0], "conditional_experimental": MODES[1],
                 "conditional_chill": MODES[2]}[preferences.mode.value]
-      rows.append(FeatureRow(MODE, "Saved driving mode", choice, document, MODES,
+      rows.append(FeatureRow(MODE, "Saved driving mode", choice, document, MODES, default_value=MODES[0],
                              available=allowed, reason="Chill uses the normal driving mode; conditional modes switch automatically when their conditions match."
                              if allowed else unavailable,
                              dependencies=dependencies))
@@ -172,6 +172,7 @@ class ConditionalFeature:
       if name == "persist_manual":
         rows.append(FeatureRow(PREFIX + section + ":persist_manual", "Remember manual choice",
                                "On" if getattr(option, name) else "Off", document, ("Off", "On"),
+                               default_value="On" if getattr(getattr(decode_preferences(stock_document()), section), name) else "Off",
                                available=manual_available and manual.status in ("valid", "absent"),
                                reason="Keeps your manual choice across drives. Changing this setting first resets the choice to Automatic."
                                if manual_available and
@@ -183,12 +184,14 @@ class ConditionalFeature:
       key = PREFIX + section + ":" + name
       if name in BOOLEAN_FIELDS[section]:
         rows.append(FeatureRow(key, LABELS[name], "On" if value else "Off", document, ("Off", "On"),
+                               default_value="On" if getattr(getattr(decode_preferences(stock_document()), section), name) else "Off",
                                available=allowed, reason=SIGNAL_LANE_HELP.get(name, "") if allowed else unavailable,
                                dependencies=dependencies))
       elif name in NUMBER_FIELDS[section]:
         displayed = display_number(name, value, metric)
         unit = _unit(name, metric)
         rows.append(FeatureRow(key, LABELS[name], _display(displayed) if valid_units else "Invalid saved units", document,
+                               default_value=_display(display_number(name, getattr(getattr(decode_preferences(stock_document()), section), name), metric)),
                                step=0.1 if name == "model_stop_s" else 1.0 if valid_units else 0.0,
                                minimum=0.0, maximum=max(field_limit(section, name, metric), float(_display(displayed))),
                                unit=unit if valid_units else "",

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+import math
 from collections.abc import Callable
 
 FEATURE_HEADER_HEIGHT = 88
@@ -69,6 +70,8 @@ class FeatureRow:
   dependencies: tuple[tuple[str, bytes | None], ...] = ()
   display_unit: str = ""
   repair_value: str = ""
+  default_value: str | None = None
+  default_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -232,3 +235,21 @@ def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | 
   return FeatureSettingsRequest(row.key, row.source, value, related_source=row.related_source,
                                 vehicle_fingerprint=row.vehicle_fingerprint, capability=row.capability,
                                 dependencies=row.dependencies, display_unit=row.display_unit)
+
+
+def row_default(row: FeatureRow) -> FeatureSettingsRequest | None:
+  if not row.available or not row.key or row.page or row.default_value is None:
+    return None
+  if not row.default_key and row.default_value not in row.choices:
+    if row.step:
+      try:
+        number = float(row.default_value)
+      except ValueError:
+        return None
+      if not math.isfinite(number) or not row.minimum <= number <= row.maximum:
+        return None
+    elif row.choices:
+      return None
+  return FeatureSettingsRequest(row.default_key or row.key, row.source, row.default_value, confirmation=True,
+                                related_source=row.related_source, vehicle_fingerprint=row.vehicle_fingerprint,
+                                capability=row.capability, dependencies=row.dependencies, display_unit=row.display_unit)

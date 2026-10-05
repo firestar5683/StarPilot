@@ -59,6 +59,9 @@ class PowerOwner:
             FeatureRow(VOLTS, "Low-Voltage Cutoff", f"{policy.cutoff_tenths / 10:.1f} V" if saved.valid else "Invalid",
                        source=saved.raw, choices=VOLT_CHOICES, available=parked and saved.readable and saved.valid,
                        reason=inactive or "Uses filtered car voltage"))
+    initial = PowerPolicy()
+    defaults = {ENABLED: 'Stock', HOURS: f'{initial.delay_hours} h', VOLTS: f'{initial.cutoff_tenths / 10:.1f} V'}
+    rows = tuple(replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows)
     return FeatureSettingsState(page="power", title="Parked Power",
                                 subtitle="Saved limits for automatic offroad shutdown.", rows=rows, parked=parked)
 

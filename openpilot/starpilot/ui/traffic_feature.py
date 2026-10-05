@@ -68,7 +68,7 @@ class TrafficFeature:
       value, valid = self._value(key, source[key])
       unit = "s" if key == FOLLOW else "%"
       shown = str(value) if valid else "Invalid saved value"
-      rows.append(FeatureRow(key, LABELS[key], shown, source[key],
+      rows.append(FeatureRow(key, LABELS[key], shown, source[key], default_value=str(self.params.get_default_value(key)),
                              step=0.05 if key == FOLLOW else 5.0,
                              minimum=0.5 if key == FOLLOW else 25.0,
                              maximum=3.0 if key == FOLLOW else 200.0, unit=unit,

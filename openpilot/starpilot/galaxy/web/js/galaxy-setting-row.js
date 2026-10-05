@@ -38,7 +38,7 @@ export const GalaxySettingRow = {
     disabled: { type: Boolean, default: false },
     saveValue: { type: Function, required: true },
   },
-  emits: ["open", "review"],
+  emits: ["open", "review", "reset-default"],
   data() { return { preview: undefined, interacting: false, fineScrub: null, isFineScrubbing: false, updating: false } },
   computed: {
     control() { return settingControl(this.row) },
@@ -160,6 +160,10 @@ export const GalaxySettingRow = {
         <span class="gx-row__label">{{ row.label }}</span>
         <span v-if="row.reason" class="gx-row__desc">{{ row.reason.replace('https://firestar.link/discord', '') }}<a v-if="row.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
         <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ row.value }}</span>
+        <button v-if="row.defaultValue !== null && row.defaultValue !== undefined && !row.page" type="button"
+          class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
+          :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
+          @click="$emit('reset-default', index)">Default</button>
       </div>
       <label v-if="control === 'switch'" class="gx-switch">
         <input type="checkbox" role="switch" :aria-label="row.label" :checked="currentValue === 'On'" :disabled="locked" @change="onSwitch">
