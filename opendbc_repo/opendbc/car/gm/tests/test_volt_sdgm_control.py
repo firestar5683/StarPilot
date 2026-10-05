@@ -35,6 +35,20 @@ class TestVoltSdgmControl(unittest.TestCase):
               self.assertEqual(cp.pcmCruise, not enabled)
               self.assertEqual(cp.alphaLongitudinalAvailable, sascm and not release)
               self.assertEqual(cp.safetyConfigs[0].safetyParam, (0x5007 if enabled else 0x1005) | (0x400 if c9 else 0))
+              if enabled:
+                from opendbc.car.gm.auto_hold import config_for
+                from opendbc.car.gm.values import apply_volt_auto_hold, is_volt_auto_hold
+                from opendbc.car.gm.aol import qualified_gm
+                from opendbc.car.gm.lateral import lane_centering_supported
+                marked = cp.as_reader().as_builder()
+                apply_volt_auto_hold(marked, True)
+                self.assertTrue(is_volt_auto_hold(marked))
+                self.assertEqual(config_for(marked).minimum_brake, 100)
+                self.assertEqual(config_for(marked).continued_stop_speed, .25)
+                self.assertEqual(config_for(cp).minimum_brake, 80)
+                self.assertEqual(marked.lateralTuning.to_dict(), cp.lateralTuning.to_dict())
+                self.assertEqual(lane_centering_supported(marked), lane_centering_supported(cp))
+                self.assertEqual(qualified_gm(marked), qualified_gm(cp))
               self.assertTrue(is_volt_sdgm_profile(cp, longitudinal=enabled))
               self.assertTrue(requires_camera_state_sources(cp))
               self.assertEqual(cp.radarUnavailable, not radar)

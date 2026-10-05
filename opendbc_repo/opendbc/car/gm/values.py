@@ -188,12 +188,14 @@ def is_volt_gateway_longitudinal(cp: CarParams) -> bool:
 
 
 def is_volt_auto_hold(cp: CarParams) -> bool:
-  return ((is_volt_gateway_longitudinal(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp)) and
-          int(cp.safetyConfigs[0].safetyParam) in (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087))
+  return ((is_volt_gateway_longitudinal(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or
+           is_volt_sdgm_profile(cp, longitudinal=True)) and
+          int(cp.safetyConfigs[0].safetyParam) in (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487))
 
 
 def apply_volt_auto_hold(cp: CarParams, enabled: bool) -> None:
-  if is_volt_gateway_profile(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp):
+  if (is_volt_gateway_profile(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or
+      is_volt_sdgm_profile(cp, longitudinal=True)):
     word = int(cp.safetyConfigs[0].safetyParam)
     cp.safetyConfigs[0].safetyParam = (word | int(GMSafetyFlags.VOLT_AUTO_HOLD)) if enabled and cp.openpilotLongitudinalControl else (
       word & ~int(GMSafetyFlags.VOLT_AUTO_HOLD))
@@ -265,7 +267,7 @@ def is_volt_camera_longitudinal(cp: CarParams) -> bool:
 
 def is_volt_sdgm_profile(cp: CarParams, *, longitudinal=False) -> bool:
   try:
-    words = (0x5007, 0x5407) if longitudinal else (0x1005, 0x1405)
+    words = (0x5007, 0x5407, 0x5087, 0x5487) if longitudinal else (0x1005, 0x1405)
     return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_VOLT_2019 and
             cp.networkLocation == CarParams.NetworkLocation.fwdCamera and not cp.passive and not cp.dashcamOnly and
             not cp.notCar and control_flags(cp) == 0 and cp.openpilotLongitudinalControl == longitudinal and

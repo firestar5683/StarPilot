@@ -10,6 +10,28 @@ FORWARD_GEARS = (structs.CarState.GearShifter.drive, structs.CarState.GearShifte
                  structs.CarState.GearShifter.manumatic)
 
 
+@dataclass(frozen=True)
+class AutoHoldConfig:
+  minimum_brake: int = 80
+  continued_stop_speed: float = .02
+
+
+def config_for(cp) -> AutoHoldConfig:
+  from opendbc.car.gm.values import is_volt_auto_hold, is_volt_sdgm_profile
+  return AutoHoldConfig(100, .25) if is_volt_auto_hold(cp) and is_volt_sdgm_profile(cp, longitudinal=True) else AutoHoldConfig()
+
+
+def stopped_for_hold(cs, config: AutoHoldConfig, sent_hold: bool) -> bool:
+  if config.continued_stop_speed == .02:
+    return cs.standstill or cs.vEgo < .02
+  if not math.isfinite(cs.wheelSpeeds.rl) or not math.isfinite(cs.wheelSpeeds.rr):
+    return False
+  # Physical GM wheel quantization puts raw28 below .25m/s and raw29 above it.
+  # This bound tolerates Float32 rounding without borrowing filtered-speed authority.
+  return cs.standstill or (sent_hold and cs.vEgo < config.continued_stop_speed and
+                          abs(cs.wheelSpeeds.rl) < .25 and abs(cs.wheelSpeeds.rr) < .25)
+
+
 def hold_brake(driver_brake: float, controller_brake: float, minimum: int = 80) -> int:
   driver_hold = float(np.interp(driver_brake, (8., 20., 40., 80.), (80., 110., 150., 220.)))
   return int(round(np.clip(max(controller_brake, driver_hold), minimum, 240)))
@@ -17,6 +39,7 @@ def hold_brake(driver_brake: float, controller_brake: float, minimum: int = 80) 
 
 @dataclass
 class AutoHold:
+  config: AutoHoldConfig = AutoHoldConfig()
   drive_ns: int = 0
   wheel_ns: int = 0
   regen_release_ns: int = 0
@@ -35,7 +58,7 @@ class AutoHold:
 
   def update(self, cs, *, enabled: bool, sources_current: bool, long_active: bool,
              driver_brake: float, controller_brake: int, wheel_ns: int, now_ns: int,
-             physical_forward: bool, moving: bool) -> int | None:
+             physical_forward: bool, moving: bool, sent_hold: bool = False) -> int | None:
     if (not enabled or not sources_current or not cs.canValid or cs.canTimeout or
         not all(math.isfinite(value) for value in (cs.vEgo, driver_brake, controller_brake))):
       self.reset()
@@ -68,11 +91,11 @@ class AutoHold:
     if cs.vEgo > 0.1 or cs.gasPressed or not forward:
       self.brake = 0
     elif cs.brakePressed or controller_brake > 0:
-      self.brake = hold_brake(driver_brake, controller_brake)
+      self.brake = hold_brake(driver_brake, controller_brake, self.config.minimum_brake)
 
     active = (ready and (self.armed or self.engaged or cs.brakePressed) and not cs.gasPressed and
-              (cs.standstill or cs.vEgo < 0.02) and not long_active and not cs.regenBraking and not cooldown)
+              stopped_for_hold(cs, self.config, sent_hold) and not long_active and not cs.regenBraking and not cooldown)
     self.engaged = active
     if active:
-      return self.brake or hold_brake(driver_brake, controller_brake)
+      return self.brake or hold_brake(driver_brake, controller_brake, self.config.minimum_brake)
     return None

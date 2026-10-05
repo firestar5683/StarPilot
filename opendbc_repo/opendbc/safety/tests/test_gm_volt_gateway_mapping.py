@@ -45,7 +45,7 @@ class TestGmVoltGatewayMapping(unittest.TestCase):
                 EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE | GMSafetyFlags.VOLT_AUTO_HOLD)]
     if not release:
       expected += [7, 515, 1539, 2563, 3587, 4099, 5123, 16391, 16903, 17927, 18951, 19975,
-                   20487, 21511, 49489, 49520, 49523, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087]
+                   20487, 21511, 49489, 49520, 49523, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487]
     self.assertEqual(accepted, sorted(expected))
 
   def test_new_ceiling_boundaries_disabled_wrong_bus_and_actual_controller_frames(self):

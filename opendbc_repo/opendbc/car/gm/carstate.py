@@ -1,4 +1,5 @@
 from opendbc.car.gm.values import is_volt_longitudinal, is_volt_auto_hold
+from opendbc.car.gm.auto_hold import config_for as auto_hold_config_for, stopped_for_hold
 import copy
 from math import isfinite
 from opendbc.can import CANDefine, CANParser, CANPacker
@@ -30,6 +31,7 @@ BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.D
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    self.gm_auto_hold_config = auto_hold_config_for(CP)
     self.stock_fcw_alert = 0
     self.ordinary_removed_sources = ()
     self.volt_removed_sources = ()
@@ -216,7 +218,7 @@ class CarState(CarStateBase):
     if is_volt_auto_hold(self.CP):
       alternate = is_volt_gateway_alternate_brake(self.CP)
       c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and (
-        not self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.ASCM_INTERCEPT or
+        not self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) or
         bool(self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9))
       brake_name, brake_signal = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else
                                   ("ECMEngineStatus", "BrakePressed") if c9 else ("ECMAcceleratorPos", "BrakePedalPos"))
@@ -227,8 +229,8 @@ class CarState(CarStateBase):
         pt_cp.vl[name]
       self.gm_auto_hold_sources = tuple((pt_cp.ts_nanos[name][signal], 300_000_000) for name, signal in names)
       # C9 is the pressed authority, never an analog force estimate. The absent-BE
-      # SASCM factory branch retains the original zero estimate (minimum hold80).
-      absent_be = c9 and bool(self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.ASCM_INTERCEPT)
+      # Missing-BE profiles retain the original minimum hold estimate.
+      absent_be = c9 and bool(self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM))
       if alternate:
         self.gm_auto_hold_brake = pt_cp.vl[brake_name][brake_signal] / 208.
       else:
@@ -257,6 +259,10 @@ class CarState(CarStateBase):
     # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
     left_whl_sign = -1 if pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2 else 1
     right_whl_sign = -1 if pt_cp.vl["EBCMWheelSpdRear"]["RRWheelDir"] == 2 else 1
+    if self.gm_auto_hold_config.continued_stop_speed > .02:
+      # Publish unscaled physical rear speeds for the exact SDGM retained-hold bound.
+      ret.wheelSpeeds.rl = pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"] * CV.KPH_TO_MS
+      ret.wheelSpeeds.rr = pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"] * CV.KPH_TO_MS
     self.parse_wheel_speeds(ret,
       left_whl_sign * pt_cp.vl["EBCMWheelSpdFront"]["FLWheelSpd"],
       right_whl_sign * pt_cp.vl["EBCMWheelSpdFront"]["FRWheelSpd"],
@@ -433,13 +439,17 @@ class CarState(CarStateBase):
     hold_sources_current = (bool(self.gm_auto_hold_sources) and
                             all(0 < stamp <= pt_cp._last_update_nanos and pt_cp._last_update_nanos - stamp <= limit
                                 for stamp, limit in self.gm_auto_hold_sources))
+    hold_config = self.gm_auto_hold_config
+    hold_stopped = ret.standstill or (hold_config.continued_stop_speed > .02 and
+                                     stopped_for_hold(ret, hold_config, self.gm_auto_hold_engaged))
     hold_current = (is_volt_auto_hold(self.CP) and pt_cp.can_valid and not pt_cp.bus_timeout and
                     (not requires_camera_state_sources(self.CP) or cam_cp.can_valid and not cam_cp.bus_timeout) and
                     hold_sources_current and not self.gm_auto_hold_unavailable and self.gm_auto_hold_forward and
-                    ret.cruiseState.available and ret.standstill and not ret.gasPressed and not ret.regenBraking)
+                    ret.cruiseState.available and hold_stopped and
+                    not ret.gasPressed and not ret.regenBraking)
     if not hold_current:
       self.gm_auto_hold_engaged = False
-    ret.brakeHoldActive = bool(hold_current and self.gm_auto_hold_engaged)
+    ret.brakeHoldActive = bool(hold_current and self.gm_auto_hold_engaged and ret.standstill)
 
     return ret
 
