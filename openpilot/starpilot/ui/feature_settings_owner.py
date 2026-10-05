@@ -559,7 +559,10 @@ class FeatureSettingsOwner:
       title = "Vehicle Settings"
       capability = self._auto_hold_capability()
       allowed = configurable and capability is not None and self.authority("vehicle")
-      row = self._bool_row("ToyotaAutoHold", "Automatic Brake Hold", allowed, "Applies after the next startup")
+      from opendbc.car.toyota.values import TOYOTA_AUTO_HOLD_AEB_CARS
+      stops = "manual stops" if capability is not None and capability[0] in TOYOTA_AUTO_HOLD_AEB_CARS else "manual and cruise-controlled stops"
+      row = self._bool_row("ToyotaAutoHold", "Automatic Brake Hold", allowed,
+                           f"Holds {stops} with cruise main on until you press the gas. Applies after the next startup.")
       rows = [replace(row, available=row.available and self._readable("ToyotaAutoHold"), capability=capability)] if capability is not None else []
       pedal_capability = self._pedal_setup_capability()
       if pedal_capability is not None:
