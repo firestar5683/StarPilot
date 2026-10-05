@@ -7,9 +7,50 @@ import unittest
 from unittest.mock import patch
 
 from tools.ci.run_predeploy import STAGES, commands, run, main
+from tools.ci import run_local_tests
 
 
 class TestPredeploy(unittest.TestCase):
+  def test_local_command_preserves_failure_and_uses_isolated_host(self):
+    with tempfile.TemporaryDirectory() as temporary, \
+         patch.dict(os.environ, {'SP_HOST_RUNTIME': '0'}), \
+         patch.object(run_local_tests.subprocess, 'run') as invoke:
+      invoke.return_value.returncode = 7
+      output = (Path(temporary) / 'results').resolve()
+      self.assertEqual(run_local_tests.main(['--output', str(output)]), 7)
+      self.assertEqual(invoke.call_args.args[0], [str(run_local_tests.ROOT / 'dev'), 'python',
+                       'tools/ci/run_local_tests.py', '--output', str(output)])
+
+  def test_local_regressions_use_disposable_state_and_full_lint(self):
+    observed = {}
+    def invoke(plan, output, *, environment):
+      observed.update(environment)
+      self.assertTrue(Path(environment['PARAMS_ROOT']).is_dir())
+      self.assertNotIn('FAST', environment)
+      self.assertNotIn('SKIP', environment)
+      self.assertNotIn('PYTEST_ADDOPTS', environment)
+      self.assertEqual(plan[0], ('lint', ['bash', 'scripts/lint/lint.sh']))
+      self.assertIn('openpilot/starpilot/tests', plan[-1][1])
+      self.assertIn('opendbc_repo/opendbc/safety/tests/test_gm_bolt_pedal.py', plan[-1][1])
+      self.assertIn('opendbc_repo/opendbc/safety/tests/test_hyundai_ioniq6_long.py', plan[-1][1])
+      return 9
+    with tempfile.TemporaryDirectory() as temporary, \
+         patch.dict(os.environ, {'SP_HOST_RUNTIME': '1', 'FAST': '1', 'SKIP': 'ty', 'PYTEST_ADDOPTS': '--collect-only'}), \
+         patch.object(run_local_tests, 'run', side_effect=invoke):
+      self.assertEqual(run_local_tests.main(['--output', str(Path(temporary) / 'results')]), 9)
+    self.assertFalse(Path(observed['PARAMS_ROOT']).exists())
+
+  def test_full_local_command_delegates_to_existing_suite(self):
+    with tempfile.TemporaryDirectory() as temporary, \
+         patch.dict(os.environ, {'SP_HOST_RUNTIME': '1', 'PYTEST_ADDOPTS': '--collect-only'}), \
+         patch.object(run_local_tests.platform, 'system', return_value='Linux'), \
+         patch.object(run_local_tests.subprocess, 'call', return_value=3) as invoke:
+      output = (Path(temporary) / 'results').resolve()
+      self.assertEqual(run_local_tests.main(['--full', '--download', '--output', str(output)]), 3)
+      self.assertEqual(invoke.call_args.args[0], [sys.executable, 'tools/ci/run_predeploy.py',
+                       '--output', str(output), '--download'])
+      self.assertNotIn('PYTEST_ADDOPTS', invoke.call_args.kwargs['env'])
+
   def test_failure_is_preserved_and_later_check_does_not_run(self):
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)

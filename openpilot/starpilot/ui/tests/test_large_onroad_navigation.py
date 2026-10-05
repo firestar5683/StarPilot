@@ -18,7 +18,7 @@ from openpilot.system.ui.widgets import Widget
 
 @pytest.fixture
 def large_layout():
-  session = Mock(profile=runtime_app.Profile.LARGE)
+  session = Mock(profile=runtime_app.Profile.LARGE, fonts=Mock(profile=runtime_app.Profile.LARGE))
   session.release.return_value = False
 
   def native_init(layout):
@@ -39,7 +39,9 @@ def large_layout():
   with (patch.object(runtime_app, 'validate_runtime_fonts'), patch.object(runtime_app, 'validate_runtime_assets'),
         patch.object(runtime_app.MainLayout, '__init__', native_init),
         patch.object(runtime_app.gui_app, 'texture', return_value=NS(width=100, height=100)),
-        patch.object(runtime_app.gui_app, 'font'), patch.object(runtime_app, 'button_item'),
+        patch.object(runtime_app.gui_app, 'font', return_value=rl.Font()),
+        patch('openpilot.system.ui.widgets.list_view.measure_text_cached', return_value=rl.Vector2(80, 40)),
+        patch.object(runtime_app, 'button_item'),
         patch.object(runtime_app, 'StarShellSession', return_value=session),
         patch.object(runtime_app, 'ui_state', NS(is_body=False, started=True)),
         patch.object(main, 'ui_state', NS(is_body=False, started=True)),

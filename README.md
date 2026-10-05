@@ -26,6 +26,7 @@ The familiar development entry points are retained:
 | `./c4` | Open the comma four interface on a development host |
 | `./onroad` | Open the onroad development view |
 | `./dev` | Use the isolated host development environment |
+| `./test` | Run local pre-push regression checks without changing device artifacts |
 
 See the [build guide](docs/how-to/laptop-device-build.md) for setup, prerequisites, and target-specific behavior. The [UI guide](openpilot/starpilot/ui/README.md) describes desktop previews and their limits.
 

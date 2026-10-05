@@ -102,6 +102,7 @@ jobs:
       run: |
         ./build --help
         ./dev help
+        ./test --help
         ./tool help
         ./tools/host help
         ./c3 --help

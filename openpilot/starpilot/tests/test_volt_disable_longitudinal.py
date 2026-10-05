@@ -52,7 +52,8 @@ class TestVoltDisableLongitudinal(unittest.TestCase):
   def test_unqualified_and_sibling_configs_unchanged(self):
     candidates = [volt_cc_params(release=True), ordinary_params(CAR.CHEVROLET_VOLT, radar=False),
                   ordinary_params(CAR.CHEVROLET_VOLT_CAMERA), ordinary_params(CAR.CHEVROLET_VOLT_2019),
-                  ordinary_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True)]
+                  ordinary_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True),
+                  ordinary_params(CAR.CHEVROLET_VOLT_ASCM, alpha=True)]
     for cp in candidates:
       before = cp.to_dict()
       self.assertFalse(disable_long_supported(cp))
@@ -62,6 +63,26 @@ class TestVoltDisableLongitudinal(unittest.TestCase):
       cp = configured('be')
       setattr(cp, field, True)
       self.assertFalse(disable_long_supported(cp))
+
+  def test_qualified_ascm_withdraws_to_exact_stock_owner(self):
+    for accelerator in (True, False):
+      for radar in (False, True):
+        with self.subTest(accelerator=accelerator, radar=radar):
+          cp = ordinary_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True,
+                               radar=radar, accelerator=accelerator)
+          word = 0x4207 | (0 if accelerator else 0x400) | (0x800 if radar else 0)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+          self.assertTrue(disable_long_supported(cp))
+          before = cp.to_dict()
+          VehicleStartupPreferences(disable_bolt_long=True).prepare(cp)
+          expected = dict(before)
+          expected['openpilotLongitudinalControl'] = False
+          expected['pcmCruise'] = True
+          expected['safetyConfigs'] = [dict(before['safetyConfigs'][0], safetyParam=word & ~0x4002)]
+          self.assertEqual(cp.to_dict(), expected)
+          self.assertFalse(disable_long_supported(cp))
+          VehicleStartupPreferences(disable_bolt_long=True).prepare(cp)
+          self.assertEqual(cp.to_dict(), expected)
 
   def test_parked_ui_recovery_changes_only_next_startup(self):
     for variant in ('be', 'f1', 'cc'):
