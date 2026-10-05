@@ -23,7 +23,7 @@ constexpr AolSafetyProfile TEST_PROFILES[] = {
   {TEST_MODE, test_param, false}, {TEST_ALT_MODE, test_alt_param, false},
 };
 const AolProfileRegistry TEST_REGISTRY{TEST_PROFILES, std::size(TEST_PROFILES)};
-constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HONDA_STOCK_AOL_PROFILE, HONDA_NIDEC_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE, MAZDA_AOL_PROFILE, TESLA_PREAP_AOL_PROFILE};
+constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HONDA_STOCK_AOL_PROFILE, HONDA_NIDEC_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE, MAZDA_AOL_PROFILE, TESLA_PREAP_AOL_PROFILE, TESLA_SCREEN_AOL_PROFILE};
 const AolProfileRegistry VEHICLE_REGISTRY{VEHICLE_PROFILES, std::size(VEHICLE_PROFILES)};
 
 aol_safety_health_t status(uint8_t request = 0U, uint8_t permission = 0U) {
@@ -101,6 +101,32 @@ int main() {
     ford.safety_mode = 6U;
     ford.safety_param = static_cast<uint16_t>(word);
     assert(aol_capable(ford, 6U, VEHICLE_REGISTRY) == expected);
+  }
+  constexpr uint16_t tesla_screen_words[] = {512U, 513U, 1536U, 1537U};
+  for (uint32_t word = 0U; word <= 65535U; ++word) {
+    bool expected = false;
+    for (const auto exact : tesla_screen_words) expected |= word == exact;
+    auto tesla = status();
+    tesla.safety_mode = 10U;
+    tesla.safety_param = static_cast<uint16_t>(word);
+    assert(aol_capable(tesla, 10U, VEHICLE_REGISTRY) == expected);
+  }
+  for (const auto word : tesla_screen_words) {
+    AolAxisNegotiator negotiator(VEHICLE_REGISTRY);
+    FakeTransport transport;
+    auto tesla = status();
+    tesla.safety_mode = 10U;
+    tesla.safety_param = word;
+    queue(transport, tesla, tesla);
+    auto neutral = run(negotiator, transport, axis("tesla-screen", false, false), NOW, 10U);
+    assert(neutral.plan.capable && neutral.plan.request_mask == 0U && neutral.outcome.compatible);
+    auto active = tesla;
+    active.request_mask = 1U;
+    active.permission_mask = 1U;
+    queue(transport, tesla, active);
+    auto engaged = run(negotiator, transport, axis("tesla-screen", true, false), NOW, 10U);
+    assert(engaged.plan.request_mask == 1U && engaged.outcome.compatible);
+    assert(engaged.outcome.status && engaged.outcome.status->safety_param == word && engaged.outcome.status->permission_mask == 1U);
   }
   AolAxisNegotiator ford_pause(VEHICLE_REGISTRY);
   FakeTransport ford_transport;

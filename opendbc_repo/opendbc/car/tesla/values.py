@@ -131,6 +131,8 @@ class CarControllerParams:
 class TeslaSafetyFlags(IntFlag):
   LONG_CONTROL = 1
   HW1 = 16
+  AOL_SCREEN_BUTTON = 512
+  AOL_SCREEN_DISENGAGE_ON_BRAKE = 1024
 
   # deprecated flags
   DAS_STEERING_3_BIT_DEPRECATED = 2
@@ -139,6 +141,8 @@ class TeslaSafetyFlags(IntFlag):
 class TeslaFlags(IntFlag):
   LONG_CONTROL = 1
   MISSING_DAS_SETTINGS = 4
+  HAS_VEHICLE_BUS = 8
+  AOL_SCREEN_BUTTON = 16
 
   # deprecated flags
   # old 2-bit FW is now dashcammed

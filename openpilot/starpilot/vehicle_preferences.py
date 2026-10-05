@@ -25,6 +25,8 @@ class VehicleStartupPreferences:
   volt_sng: bool = False
   gm_auto_hold: bool = False
   volt_one_pedal: bool = False
+  tesla_screen: bool = False
+  tesla_screen_brake: bool = False
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -62,7 +64,12 @@ class VehicleStartupPreferences:
       assist = assist_readable and assist_raw in (None, b"1")
     except (OSError, TypeError, ValueError):
       assist = False
-    return cls(toyota_auto_hold=toyota, volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
+    screen = bool(enabled and readable and safe in (None, b"0") and
+                  read_saved(params, 'AlwaysOnLateral', 8) == (b'1', True) and
+                  read_saved(params, 'TeslaAOLScreenTap', 8) == (b'1', True))
+    screen_brake = read_saved(params, 'TeslaAOLDisengageOnBrake', 8) == (b'1', True)
+    return cls(tesla_screen=screen, tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
+               volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
                turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
                gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock)
 
@@ -103,6 +110,8 @@ class VehicleStartupPreferences:
     from opendbc.car.gm.values import apply_gm_auto_hold, apply_volt_one_pedal
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
     prepare_stock(cp, self.tesla_preap_stock)
+    from opendbc.car.tesla.screen_button import apply_screen_button
+    apply_screen_button(cp, self.tesla_screen, self.tesla_screen_brake)
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp, fingerprints)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
@@ -118,6 +127,8 @@ class VehicleStartupPreferences:
     admitted_hold = is_gm_auto_hold(cp)
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
     prepare_stock(cp, self.tesla_preap_stock)
+    from opendbc.car.tesla.screen_button import apply_screen_button
+    apply_screen_button(cp, self.tesla_screen, self.tesla_screen_brake)
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)

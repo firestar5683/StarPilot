@@ -1,11 +1,22 @@
 import copy
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.tesla.preap.stock import PreAPStockCarState, get_stock_parsers
 from opendbc.car.tesla.hw1 import HW1CarState, get_hw1_can_parsers
 from opendbc.car.tesla.values import CAR, DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
+
+class TeslaScreenCANParser(CANParser):
+  def __init__(self):
+    super().__init__('tesla_model3_vehicle', [('UI_status2', 0)], CANBUS.vehicle)
+
+  def update(self, strings, sendcan=False):
+    if strings and not isinstance(strings[0], list | tuple):
+      strings = [strings]
+    return super().update([(stamp, [frame for frame in frames if frame[0] == 0x3DF and len(frame[1]) == 8])
+                           for stamp, frames in strings], sendcan)
+
 
 class CarState(CarStateBase):
   def __init__(self, CP):
@@ -23,12 +34,22 @@ class CarState(CarStateBase):
     self.can_define = CANDefine(DBC[CP.carFingerprint][Bus.party])
     self.shifter_values = self.can_define.dv["DI_systemStatus"]["DI_gear"]
 
+    self.active_touch_points = None
     self.autopark = False
     self.autopark_prev = False
     self.cruise_enabled_prev = False
 
     self.hands_on_level = 0
     self.das_control = None
+
+  def update_screen_button(self, parser):
+    events = []
+    for count in parser.vl_all['UI_status2']['UI_activeTouchPoints']:
+      count = int(count)
+      if self.active_touch_points is not None:
+        events.extend(create_button_events(count, self.active_touch_points, {3: structs.CarState.ButtonEvent.Type.lkas}))
+      self.active_touch_points = count
+    return events
 
   def update_autopark_state(self, autopark_state: str, cruise_enabled: bool):
     autopark_now = autopark_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -130,6 +151,9 @@ class CarState(CarStateBase):
     if not (self.CP.flags & TeslaFlags.MISSING_DAS_SETTINGS):
       ret.invalidLkasSetting = cp_ap_party.vl["DAS_settings"]["DAS_autosteerEnabled"] != 0
 
+    if self.CP.flags & TeslaFlags.AOL_SCREEN_BUTTON:
+      ret.buttonEvents = self.update_screen_button(can_parsers[Bus.adas])
+
     # Buttons # ToDo: add Gap adjust button
 
     # Messages needed by carcontroller
@@ -145,5 +169,6 @@ class CarState(CarStateBase):
       return get_hw1_can_parsers(CP)
     return {
       Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
-      Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party)
+      Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party),
+      **({Bus.adas: TeslaScreenCANParser()} if CP.flags & TeslaFlags.AOL_SCREEN_BUTTON else {})
     }

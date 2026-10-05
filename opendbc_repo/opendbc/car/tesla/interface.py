@@ -21,7 +21,11 @@ class CarInterface(CarInterfaceBase):
     if candidate == CAR.TESLA_MODEL_S_HW1:
       return get_hw1_params(ret, fingerprint, alpha_long)
 
+    ret.flags &= ~int(TeslaFlags.HAS_VEHICLE_BUS | TeslaFlags.AOL_SCREEN_BUTTON)
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.tesla)]
+
+    if candidate in (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y) and fingerprint[CANBUS.vehicle].get(0x3DF) == 8:
+      ret.flags |= TeslaFlags.HAS_VEHICLE_BUS.value
 
     ret.steerLimitTimer = 0.4
     ret.steerActuatorDelay = 0.1

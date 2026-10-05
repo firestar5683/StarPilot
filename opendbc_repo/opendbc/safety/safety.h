@@ -558,7 +558,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
         current_safety_param = 0;
         continue;
       }
-      if ((mode == SAFETY_TESLA) && ((param & ~(TESLA_HW1_FLAG | 1U)) != 0U)) {
+      if ((mode == SAFETY_TESLA) && ((param & ~(TESLA_HW1_FLAG | 1U)) != 0U) && !tesla_screen_param_valid(param)) {
         current_hooks = &nooutput_hooks;
         current_safety_mode = SAFETY_NOOUTPUT;
         current_safety_param = 0;

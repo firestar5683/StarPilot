@@ -27,8 +27,9 @@ def physical_cancel(cs) -> bool:
   return any(event.type == ButtonType.cancel for event in cs.buttonEvents)
 
 
-def aol_no_entry(event_names, cs, *, paddle_only_cancel: bool) -> bool:
-  """Keep a paddle-only cancel from vetoing lateral while honoring every other veto."""
+def aol_no_entry(event_names, cs, *, paddle_only_cancel: bool, cruise_main_required: bool = True) -> bool:
+  """Apply vehicle-owned lateral exceptions without changing ordinary cruise events."""
   return any(event != EventName.pedalPressed and ET.NO_ENTRY in EVENTS.get(event, {}) and
+             (event != EventName.wrongCarMode or cruise_main_required) and
              (event != EventName.buttonCancel or not paddle_only_cancel or physical_cancel(cs))
              for event in event_names)

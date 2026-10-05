@@ -10,6 +10,7 @@ class AolVehiclePolicy:
   runtime_supported: bool = False
   normal_runtime_supported: bool = False
   ordinary_axis_ack_required: bool = False
+  cruise_main_required: bool = True
   explicit_latch: bool = False
   distance_personality: bool = False
   fixed_cruise_buttons: bool = False
@@ -18,3 +19,4 @@ class AolVehiclePolicy:
   paddle_pause: bool = False
   safety_param_addition: int = 0
   alternative_experience_addition: int = 0
+  full_axis_runtime_required: bool = False

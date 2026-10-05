@@ -184,7 +184,7 @@ class Controls:
                            self.CP.openpilotLongitudinalControl and
                            not any(e.overrideLongitudinal for e in self.sm['onroadEvents']))
 
-    if getattr(self, 'ordinary_axis_ack_required', False):
+    elif getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = int(self.sm.logMonoTime['carState']) if os.getenv('REPLAY') == '1' else time.monotonic_ns()
       CC.latActive = bool(CC.latActive and CS.canValid and not CS.canTimeout and
                           ordinary_axis_request_allowed(self.CP, CS) and

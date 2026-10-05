@@ -1,6 +1,7 @@
 #pragma once
 
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/modes/tesla_screen_aol.h"
 
 static bool tesla_longitudinal = false;
 static bool tesla_stock_aeb = false;
@@ -13,6 +14,7 @@ static bool tesla_stock_lkas_prev = false;
 // Only Summon is currently supported due to Autopark not setting Autopark state properly
 static bool tesla_autopark = false;
 static bool tesla_autopark_prev = false;
+
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
   uint8_t cnt = 0;
@@ -161,6 +163,8 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     pcm_cruise_check(cruise_engaged);
   }
 
+  tesla_screen_rx(msg, tesla_autopark);
+
   if (msg_matches(msg, 0x155U, 0U)) {
     vehicle_moving = !GET_BIT(msg, 41U);  // ESP_vehicleStandstillSts
   }
@@ -177,7 +181,8 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     bool tesla_stock_lkas_now = steering_control_type == 2;  // "LANE_KEEP_ASSIST"
 
     // Only consider rising edges while controls are not allowed
-    if (tesla_stock_lkas_now && !tesla_stock_lkas_prev && !controls_allowed) {
+    if (tesla_stock_lkas_now && !tesla_stock_lkas_prev &&
+        !(controls_allowed || (tesla_screen_enabled && (tesla_screen_permission() != 0U)))) {
       tesla_stock_lkas = true;
     }
     if (!tesla_stock_lkas_now) {
@@ -323,12 +328,11 @@ static safety_config tesla_init(uint16_t param) {
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},  // APS_eacMonitor
   };
 
-  SAFETY_UNUSED(param);
+  tesla_longitudinal = false;
 #ifdef ALLOW_DEBUG
-  const uint16_t TESLA_FLAG_LONGITUDINAL_CONTROL = 1;
-  tesla_longitudinal = GET_FLAG(param, TESLA_FLAG_LONGITUDINAL_CONTROL);
+  tesla_longitudinal = GET_FLAG(param, 1U);
 #endif
-
+  tesla_screen_configure(param);
   tesla_stock_aeb = false;
   tesla_stock_lkas = false;
   tesla_stock_lkas_prev = false;
@@ -361,6 +365,7 @@ static safety_config tesla_init(uint16_t param) {
 const safety_hooks tesla_hooks = {
   .init = tesla_init,
   .rx = tesla_rx_hook,
+  .optional_rx = tesla_screen_optional_rx,
   .tx = tesla_tx_hook,
   .fwd = tesla_fwd_hook,
   .get_counter = tesla_get_counter,

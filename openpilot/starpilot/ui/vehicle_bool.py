@@ -1,6 +1,7 @@
 """Confirmation text for parked vehicle preferences."""
 
-VEHICLE_BOOL_KEYS = frozenset(("GMPedalLongitudinal", "DisableOpenpilotLongitudinal", "LongPitch", "VoltSNG", "GMAutoHold", "VoltOnePedalMode"))
+VEHICLE_BOOL_KEYS = frozenset(("GMPedalLongitudinal", "DisableOpenpilotLongitudinal", "LongPitch", "VoltSNG", "GMAutoHold", "VoltOnePedalMode",
+                              "TeslaAOLScreenTap", "TeslaAOLDisengageOnBrake"))
 
 
 def confirmation_question(request):
@@ -23,4 +24,8 @@ def confirmation_question(request):
     return f"{verb} Volt one-pedal driving after the next startup? Lifting off the accelerator can apply the brakes with cruise disengaged and cruise main on."
   if request.key == "LongPitch":
     return f"{verb} Grade Compensation after the next startup?"
+  if request.key == "TeslaAOLScreenTap":
+    return f"{verb} three-finger screen taps for Always On Lateral after the next startup? Cruise control stays independent."
+  if request.key == "TeslaAOLDisengageOnBrake":
+    return f"{verb} disarming Always On Lateral with the brake after the next startup? This applies to screen-tap steering."
   raise ValueError("Unsupported vehicle preference")
