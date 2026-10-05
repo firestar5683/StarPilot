@@ -1,4 +1,8 @@
-"""Bounded analytics line protocol and the fixed StarPilot write endpoint."""
+"""Bounded analytics line protocol and the fixed StarPilot write endpoint.
+
+This branch reports to upstreamtel.didesigns.fyi, a Cloudflare Worker that speaks the same
+Influx v2 write API, instead of stats.firestar.link.
+"""
 from __future__ import annotations
 
 import json
@@ -10,8 +14,8 @@ import requests
 
 from openpilot.starpilot.analytics.credentials import CLIENT_TOKEN
 
-WRITE_URL = "https://stats.firestar.link/api/v2/write"
-COMMITS_URL = "https://api.github.com/repos/firestar5683/StarPilot/commits/"
+WRITE_URL = "https://upstreamtel.didesigns.fyi/api/v2/write"
+COMMITS_URL = "https://api.github.com/repos/dirwin31/openpilot/commits/"  # where this branch is published, for up_to_date
 MAX_PAYLOAD = 128 * 1024
 MAX_SETTINGS = 2051
 MAX_TEXT_BYTES = 256

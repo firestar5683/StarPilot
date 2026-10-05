@@ -1,6 +1,7 @@
 # Usage statistics
 
-The manager worker reports to `stats.firestar.link` after a drive and
+The manager worker reports to `upstreamtel.didesigns.fyi` (a Cloudflare
+Worker speaking the Influx v2 write API, in place of `stats.firestar.link`) after a drive and
 once after startup with a valid clock. It starts requests only while offroad.
 Reporting failures do not affect manager process health or engagement.
 
