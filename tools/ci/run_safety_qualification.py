@@ -21,7 +21,7 @@ SAFETY_TESTS = ROOT / "opendbc_repo/opendbc/safety/tests"
 MAX_MUTATION_ARTIFACT_BYTES = 256 * 1024 * 1024
 SOURCE_PREFIXES = (
   "opendbc_repo/", "panda/", "openpilot/", "msgq_repo/", "rednose_repo/",
-  "teleoprtc_repo/", "tinygrad_repo/", "tools/", "scripts/",
+  "teleoprtc_repo/", "tinygrad_repo/", "jetlink_repo/", "tools/", "scripts/",
 )
 SOURCE_EXACT = {".github/workflows/safety.yaml", "pyproject.toml", "uv.lock", "SConstruct",
                 "panda/SConscript", "panda/SConstruct", "opendbc_repo/SConscript", "opendbc_repo/pyproject.toml",
@@ -226,7 +226,7 @@ class Gate:
     self.python = str(python)
     self.env = dict(os.environ)
     self.env.update({"PYTHONPATH": os.pathsep.join(str(ROOT / part) for part in
-                                           ("", "opendbc_repo", "msgq_repo", "rednose_repo", "teleoprtc_repo", "tinygrad_repo")),
+                                           ("", "opendbc_repo", "msgq_repo", "rednose_repo", "teleoprtc_repo", "tinygrad_repo", "jetlink_repo")),
                      "PARAMS_ROOT": str(output / "params"), "OPENPILOT_PREFIX": f"safety_qual_{os.getpid()}",
                      "PYTHONDONTWRITEBYTECODE": "1", "FUZZ_SEED": "0", "SCALE": "1", "PWD": str(ROOT)})
     for inherited_key in ("HITL", "RELEASE", "CERT", "SKIP_BUILD", "SKIP_TABLES_DIFF",

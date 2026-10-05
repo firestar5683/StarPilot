@@ -1,5 +1,9 @@
 # Source provenance
 
+## Jetlink external inference
+
+The comma-side Jetlink client and USB transport in `jetlink_repo` are by Zeph Leggett and the [Jetlink contributors](https://github.com/zoompilot/jetlink). They are vendored from revision `c17cd5c52be0ee83b9a6265b7da69d24ad6c5d02` under the MIT license, retained in [jetlink_repo/LICENSE](jetlink_repo/LICENSE). StarPilot owns the adapter to its model runner, settings and process lifecycle. Companion applications and inference servers remain distributed by Jetlink.
+
 ## MRR35 Hyundai angle and radar
 
 The four MRR35 angle platforms (2026 Genesis GV70, second-generation electrified GV70, 2025 Genesis GV80, and Hyundai Ioniq 9) adapt Hyundai CAN FD angle-control design and the MRR35 radar DBC generator from the locally frozen StarPilot source snapshot `678af783`. That snapshot traces its Hyundai extension work to sunnypilot/opendbc `hkg-angle-steering-2025` at `cc4b08625a98e94b318cab15e45e05dad58042bd`; its historical import revision is not established. The relevant upstream contributors include Haibin (Jason) Wen, Shane Smiskol, and DevTekVE. Their authorship remains attributable to the upstream history; they do not maintain or endorse this port.

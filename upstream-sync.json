@@ -59,6 +59,37 @@
         "Readme.md",
         "Roadmap.md"
       ]
+    },
+    {
+      "path": "jetlink_repo",
+      "url": "https://github.com/zoompilot/jetlink.git",
+      "commit": "c17cd5c52be0ee83b9a6265b7da69d24ad6c5d02",
+      "tree": "5199f58cb390fcaa4c798be82566cc87d9271da7",
+      "exclude": [
+        ".github",
+        ".gitignore",
+        "CHANGELOG.md",
+        "JetlinkKit",
+        "android",
+        "docs",
+        "install.sh",
+        "ios",
+        "macos",
+        "tests",
+        "scripts/99-jetlink-host.rules",
+        "scripts/99-jetlink-usb-wakeup.rules",
+        "scripts/bench_link.py",
+        "scripts/build-linux.sh",
+        "scripts/changelog.py",
+        "scripts/deploy_to_comma.sh",
+        "scripts/jetlink",
+        "scripts/jetlink-server.service",
+        "scripts/verify_parity.py",
+        "scripts/comma/jetlink_bench.py",
+        "scripts/comma/jetlink_hold.py",
+        "scripts/comma/jetlink_live_bench.sh",
+        "scripts/comma/jetlink_replay.py"
+      ]
     }
   ]
 }

@@ -197,7 +197,7 @@ EOF
 
   # Local Python package sources are shipped in the checkout. Bootstrap Python
   # before running the full manifest validator on machines without Python yet.
-  for path in upstream-sync.json panda/pyproject.toml opendbc_repo/pyproject.toml msgq_repo/pyproject.toml rednose_repo/pyproject.toml teleoprtc_repo/pyproject.toml tinygrad_repo/pyproject.toml; do
+  for path in upstream-sync.json panda/pyproject.toml opendbc_repo/pyproject.toml msgq_repo/pyproject.toml rednose_repo/pyproject.toml teleoprtc_repo/pyproject.toml tinygrad_repo/pyproject.toml jetlink_repo/pyproject.toml; do
     if [[ ! -f "$OPENPILOT_ROOT/$path" ]]; then
       echo "Missing tracked dependency source: $path. Restore the complete checkout."
       return 1

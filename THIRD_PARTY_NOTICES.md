@@ -1,5 +1,9 @@
 # Third-party notices
 
+## Jetlink
+
+Jetlink's comma client is copyright (c) 2026 Zeph Leggett and distributed under the MIT License. Its complete license and permission notice are retained in [jetlink_repo/LICENSE](jetlink_repo/LICENSE); source and revision are recorded in [CREDITS.md](CREDITS.md#jetlink-external-inference) and `upstream-sync.json`.
+
 ## MRR35 Hyundai angle and radar
 
 The MRR35 radar generator and related Hyundai angle integration derive from the frozen StarPilot snapshot `678af783`, with relevant sunnypilot/opendbc angle-branch ancestry at `cc4b08625a98e94b318cab15e45e05dad58042bd`. Both upstream `LICENSE` and `LICENSE.md` were published for that source. Their scope is not unambiguous, so both applicable notices and the extension-file attribution are retained here without choosing between them. See [CREDITS.md](CREDITS.md) for the narrow source map.

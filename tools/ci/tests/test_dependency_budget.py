@@ -25,14 +25,14 @@ class DirectDependencyBudgetTest(unittest.TestCase):
       'optional-dependencies': {
         'testing': ['test'] * 4,
         'tools': ['tool'] * 5,
-        'vendored': ['vendor'] * 6,
+        'vendored': ['vendor'] * 7,
         'dev': ['dev'] * 3,
         'safety': ['safety'] * 5,
       },
     }
 
   def test_existing_separate_budgets_are_admitted(self):
-    self.assertEqual(direct_dependency_counts(self.project), {'baseline': 37, 'dev': 3, 'safety': 5})
+    self.assertEqual(direct_dependency_counts(self.project), {'baseline': 38, 'dev': 3, 'safety': 5})
     self.assertTrue(direct_dependencies_within_limits(self.project))
 
   def test_new_extra_and_each_over_budget_category_fail(self):

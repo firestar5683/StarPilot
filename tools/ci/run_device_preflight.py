@@ -106,9 +106,10 @@ source = pathlib.Path(sys.argv[1]).resolve()
 vendor = {'openpilot': source / 'openpilot',
           'msgq': source / 'msgq_repo',
           'opendbc': source / 'opendbc_repo',
-          'tinygrad': source / 'tinygrad_repo'}
+          'tinygrad': source / 'tinygrad_repo',
+          'jetlink': source / 'jetlink_repo'}
 sys.path[:0] = [str(source / path) for path in
-                ('', 'msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinygrad_repo')]
+                ('', 'msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinygrad_repo', 'jetlink_repo')]
 try: importlib.import_module(sys.argv[2])
 except Exception as error:
  print(type(error).__name__)

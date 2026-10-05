@@ -448,6 +448,22 @@ wheels = [
 ]
 
 [[package]]
+name = "jetlink"
+source = { editable = "jetlink_repo" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "onnx", marker = "extra == 'dev'", specifier = ">=1.16" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7" },
+    { name = "ruff", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -739,6 +755,7 @@ tools = [
     { name = "matplotlib" },
 ]
 vendored = [
+    { name = "jetlink" },
     { name = "msgq" },
     { name = "opendbc" },
     { name = "pandacan" },
@@ -773,6 +790,7 @@ requires-dist = [
     { name = "gcovr", marker = "extra == 'safety'", specifier = "==8.6" },
     { name = "inputs" },
     { name = "jeepney" },
+    { name = "jetlink", marker = "extra == 'vendored'", editable = "jetlink_repo" },
     { name = "matplotlib", marker = "extra == 'tools'" },
     { name = "msgq", marker = "extra == 'vendored'", editable = "msgq_repo" },
     { name = "numpy", specifier = ">=2.0" },

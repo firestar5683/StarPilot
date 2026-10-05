@@ -122,7 +122,7 @@ done < <(git ls-files -z openpilot)
 SHELL_FILES=()
 while IFS= read -r -d '' f; do
   case $f in
-    msgq_repo/*|opendbc_repo/*|panda/*|rednose_repo/*|teleoprtc_repo/*|tinygrad_repo/*) continue ;;
+    msgq_repo/*|opendbc_repo/*|panda/*|rednose_repo/*|teleoprtc_repo/*|tinygrad_repo/*|jetlink_repo/*) continue ;;
   esac
   if [[ -f $f ]]; then
     SHELL_FILES+=("$f")

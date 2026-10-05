@@ -41,7 +41,7 @@ Shared commands wait while another shared command is running; Cabana is separate
 COMMANDS = {'c3', 'c4', 'onroad', 'replay', 'cabana', 'plotjuggler', 'galaxy', 'python', 'pytest', 'shell', 'sync'}
 BUCKET_ALIASES = dict.fromkeys(('shared', 'default', 'ui', 'c3', 'c4', 'onroad', 'replay', 'shell', 'plotjuggler', 'juggle'), 'shared')
 BUCKET_ALIASES['cabana'] = 'cabana'
-VENDORS = ('msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinygrad_repo')
+VENDORS = ('msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinygrad_repo', 'jetlink_repo')
 # Never inherit a device/cross compiler or another project's editable imports.
 REMOVE_ENV = ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS',
               'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'PKG_CONFIG_PATH', 'CPATH', 'LIBRARY_PATH',
