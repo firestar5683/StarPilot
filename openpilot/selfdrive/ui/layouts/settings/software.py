@@ -114,7 +114,9 @@ class SoftwareLayout(Widget):
     for action, button in (("fast", self._fast_btn), ("rollback", self._rollback_btn)):
       button.set_visible(ui_state.is_offroad())
       button.action_item.set_enabled(self._direct_update.available(action))
-    self._fast_btn.action_item.set_value(self._direct_update.detail())
+    detail = self._direct_update.detail()
+    self._fast_btn.set_description(detail)
+    self._fast_btn.action_item.set_value(tr("Use Download for full update") if "use a full validated update" in detail else detail)
     # Show/hide onroad warning
     self._onroad_label.set_visible(ui_state.is_onroad())
 

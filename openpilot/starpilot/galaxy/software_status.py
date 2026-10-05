@@ -108,9 +108,10 @@ class SoftwareStatus:
       before = os.fstat(fd)
       if not stat.S_ISREG(before.st_mode):
         raise SoftwareUnavailable
+      limit = 8192 if key == "UpdaterFastState" else MAX_FIELD_BYTES
       content = bytearray()
-      while len(content) <= MAX_FIELD_BYTES:
-        chunk = os.read(fd, MAX_FIELD_BYTES + 1 - len(content))
+      while len(content) <= limit:
+        chunk = os.read(fd, limit + 1 - len(content))
         if not chunk:
           break
         content.extend(chunk)
@@ -119,7 +120,7 @@ class SoftwareStatus:
         named = os.stat(key, dir_fd=root_fd, follow_symlinks=False)
       except OSError:
         raise SoftwareUnavailable from None
-      if _identity(before) != _identity(after) or _identity(before) != _identity(named) or len(content) > MAX_FIELD_BYTES:
+      if _identity(before) != _identity(after) or _identity(before) != _identity(named) or len(content) > limit:
         raise SoftwareUnavailable
       return bytes(content), _identity(before)
     except OSError:

@@ -67,6 +67,14 @@ class SoftwareReaderTest(unittest.TestCase):
     self.raw("UpdateFailedCount", b"00")
     self.assertIsNone(self.reader.snapshot()["updater"]["failedCount"])
 
+  def test_fast_progress_supports_full_unicode_detail_and_remains_bounded(self):
+    detail = "\U0001f680" * 512
+    self.params.put("UpdaterFastState", {"version": 1, "stage": "fetching", "detail": detail, "branch": "a" * 128}, block=True)
+    self.assertEqual(self.reader.snapshot()["updater"]["fast"], {"stage": "fetching", "detail": detail})
+    self.raw("UpdaterFastState", b"x" * 8193)
+    with self.assertRaises(SoftwareUnavailable):
+      self.reader.snapshot()
+
   def test_oversized_symlink_and_replacement_fail_closed(self):
     path = Path(self.params.get_param_path("Version"))
     path.write_bytes(b"x" * (MAX_FIELD_BYTES + 1))
