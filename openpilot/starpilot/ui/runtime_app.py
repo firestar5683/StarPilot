@@ -197,6 +197,7 @@ class StarShellSession:
       self.input.onroad.drawer_bounds = self.view.onroad.unified_speed.source_bounds
     self.selected = Destination.STAR
     self.sidebar_expanded = True
+    self._onroad_width = 1860.0
     self.compact_y = 0.0
     self.compact_scroll_x = 0.0
     self.notice = ""
@@ -1000,6 +1001,8 @@ class StarShellSession:
     snapshot = self.adapter.build(mode, self.selected, compact_y=self.compact_y,
                                   compact_scroll_x=self.compact_scroll_x, sidebar_expanded=self.sidebar_expanded,
                                   menu_only=self.profile == Profile.COMPACT and mode == ShellMode.SETTINGS)
+    if mode == ShellMode.ONROAD and self.profile == Profile.LARGE:
+      snapshot = replace(snapshot, onroad=replace(snapshot.onroad, viewport_width=getattr(self, '_onroad_width', 1860.0)))
     if mode == ShellMode.HOME:
       now = time.monotonic()
       previous = getattr(self, "_home_model", None)
@@ -1054,6 +1057,11 @@ class StarShellSession:
     return snapshot
 
   def render(self, mode: ShellMode, rect: rl.Rectangle, parent_clip: rl.Rectangle | None = None) -> None:
+    if mode == ShellMode.ONROAD and self.profile == Profile.LARGE:
+      width = rect.width - 300
+      if width != self._onroad_width:
+        self._onroad_width = width
+        self._snapshot_cache = None
     snapshot = self.snapshot(mode)
     self._mode = mode
     self._rendered_settings = (time.monotonic_ns(), snapshot) if mode == ShellMode.SETTINGS else None
@@ -1273,6 +1281,7 @@ class StarShellSession:
     now, snapshot = time.monotonic(), self.snapshot(mode)
     self._favorite_claimed = False
     self._navigation_claimed = False
+    self._onroad_claimed = False
     if mode == ShellMode.ONROAD:
       self._update_favorites(snapshot.onroad, now)
       if self.favorites.is_open:
@@ -1280,6 +1289,7 @@ class StarShellSession:
         self.input.cancel()
         return
     self.input.press(x, y, now, self._input_snapshot(mode))
+    self._onroad_claimed = mode == ShellMode.ONROAD and self.input.onroad.claimed
     if mode == ShellMode.ONROAD and not self.input.onroad.claimed:
       if self.view.onroad.navigation.press(x, y, snapshot.onroad):
         self._navigation_claimed = True
@@ -1323,7 +1333,7 @@ class StarShellSession:
       self.favorites.release(x, y, now)
       return True
     self.input.release(x, y, time.monotonic(), self._input_snapshot(mode))
-    return self._request_emitted
+    return self._request_emitted or getattr(self, '_onroad_claimed', False)
 
   def cancel(self) -> None:
     self._settings_touch = None
@@ -1379,14 +1389,13 @@ class StarShellPage(Widget):
 
   def _handle_mouse_event(self, mouse_event: MouseEvent) -> None:
     if mouse_event.left_down and not mouse_event.left_pressed:
-      if self._press_pos is not None and (abs(mouse_event.pos.x - self._press_pos[0]) > 5 or
-                                          abs(mouse_event.pos.y - self._press_pos[1]) > 5):
-        self._dragged = True
+      self._track_background_drag(mouse_event.pos)
       self.session.move(self.mode, mouse_event.pos.x - self.rect.x, mouse_event.pos.y - self.rect.y)
     elif mouse_event.left_released and not rl.check_collision_point_rec(mouse_event.pos, self.rect):
       self.session.cancel()
 
   def _handle_mouse_release(self, mouse_pos: MousePos) -> None:
+    self._track_background_drag(mouse_pos)
     handled = self.session.release(self.mode, mouse_pos.x - self.rect.x, mouse_pos.y - self.rect.y)
     bookmark_handled = (self.mode == ShellMode.ONROAD and self.session.profile == Profile.COMPACT and
                         self.session.camera_owner._bookmark_icon.interacting())
@@ -1394,6 +1403,11 @@ class StarShellPage(Widget):
       self.on_background_tap()
     self._press_pos = None
     self._dragged = False
+
+  def _track_background_drag(self, pos: MousePos) -> None:
+    tolerance = 36 if self.session.profile == Profile.LARGE else 5
+    if self._press_pos is not None and math.hypot(pos.x - self._press_pos[0], pos.y - self._press_pos[1]) > tolerance:
+      self._dragged = True
 
   def hide_event(self) -> None:
     self.session.cancel()
@@ -1470,7 +1484,7 @@ class StarMainLayout(MainLayout):
     except Exception:
       self._native_onroad.close()
       raise
-    self.page = StarShellPage(self.star, ShellMode.HOME)
+    self.page = StarShellPage(self.star, ShellMode.HOME, on_background_tap=self._on_background_tap)
     self._large_panels[Destination.DEVICE]._scroller.add_widget(
       button_item("Galaxy", "OPEN", callback=self.star.galaxy_flow.open_large))
     self.star.set_navigation(on_settings=lambda: self._set_current_layout(MainState.SETTINGS),
@@ -1605,10 +1619,22 @@ class StarMainLayout(MainLayout):
     if self._current_mode == MainState.HOME and ui_state.is_body:
       super()._render_main_content()
       return
+    rect = self._rect
+    if self._current_mode == MainState.ONROAD:
+      self._update_layout_rects()
+      if self._sidebar.is_visible:
+        self._sidebar.render(self._sidebar_rect)
+        if self._current_mode != MainState.ONROAD or not self._sidebar.is_visible:
+          return
+        rect = self._content_rect
     mode = {MainState.HOME: ShellMode.HOME, MainState.SETTINGS: ShellMode.SETTINGS,
             MainState.ONROAD: ShellMode.ONROAD}[self._current_mode]
     self.page.mode = mode
-    self.page.render(self._rect)
+    self.page.render(rect)
+
+  def _on_background_tap(self) -> None:
+    if self._current_mode == MainState.ONROAD:
+      self._on_onroad_clicked()
 
   def _set_current_layout(self, layout: MainState) -> None:
     if layout != MainState.SETTINGS and hasattr(self, "_network_bridge"):

@@ -26,6 +26,7 @@ from openpilot.starpilot.ui.onroad_curve import controlling as curve_controlling
 from openpilot.starpilot.ui.onroad_conditional import status as conditional_status, stop_active, reason as conditional_reason
 from openpilot.starpilot.ui.onroad_corner import CornerHintCache, render_corner_hint
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
+from openpilot.starpilot.ui.live_developer_sidebar import render_sidebar as render_live_sidebar
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, slc_controls
 from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
@@ -168,11 +169,11 @@ class OnroadView:
     traffic_color = (rl.Color(200, 32, 48, 255) if state.traffic_display.state == 'active' else
                      rl.Color(255, 155, 63, 255) if state.traffic_display.state in ('paused', 'unavailable_profile', 'unavailable_source') else
                      rl.Color(165, 175, 180, 255))
-    x = 1390 + (self.projection_viewport[0] - 1860 if self.projection_viewport else 0)
+    x = 1390 + (self.projection_viewport[0] if self.projection_viewport else state.viewport_width) - 1860
     self.fonts.draw(state.traffic_display.label, FontRole.SEMI_BOLD, 25, x, y, traffic_color)
 
   def _large(self, state: OnroadState) -> None:
-    width, height = self.projection_viewport or (1860, 1080)
+    width, height = self.projection_viewport or (state.viewport_width, 1080)
     right_shift = width - 1860
     frame = rl.Rectangle(0, 0, width, height)
     content = rl.Rectangle(30, 30, width - 60, height - 60)
@@ -218,6 +219,8 @@ class OnroadView:
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
+    if not self.projection_viewport:
+      render_live_sidebar(self.fonts, rl.Rectangle(width, 0, 300, height), state.developer_metrics)
     if state.alert.size != AlertSize.FULL:
       render_corner_hint(content, cache=self._corner_cache)
     label = status_label(state)

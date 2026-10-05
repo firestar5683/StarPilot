@@ -93,6 +93,8 @@ class UIState:
       [
         "modelV2",
         "controlsState",
+        "lateralDelay",
+        "lateralTorqueParameters",
         "onroadEvents",
         "extrinsicsCalibration",
         "radarState",

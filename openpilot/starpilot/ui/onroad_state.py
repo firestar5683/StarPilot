@@ -22,6 +22,7 @@ from openpilot.starpilot.ui.traffic_status import TrafficDisplay
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
 from openpilot.starpilot.ui.wheel_feedback import WheelFeedback
 from openpilot.starpilot.ui.navigation_state import NavigationDisplay
+from openpilot.starpilot.ui.live_developer_sidebar import DeveloperMetric
 
 
 class ObservationKind(StrEnum):
@@ -167,6 +168,8 @@ class OnroadState:
   experimental_action_token: str = ""
   drive_frame: int | None = None
   observed_ns: int = 0
+  viewport_width: float = 1860.0
+  developer_metrics: tuple[DeveloperMetric, ...] = ()
 
   @property
   def cruise_active(self) -> bool:
@@ -238,6 +241,7 @@ def _inside_widget(x, y, state, widget, bounds):
   dx, dy = offset(state.customization, Profile.LARGE, widget)
   left, top, right, bottom = bounds
   if widget == "steering_wheel":
+    left += state.viewport_width - 1860
     size, _ = widget_size(state.customization, Profile.LARGE, widget)
     right, bottom = left + size, top + size
   return left + dx <= x <= right + dx and top + dy <= y <= bottom + dy
