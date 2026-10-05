@@ -22,6 +22,7 @@ from openpilot.common.version import get_build_metadata
 from openpilot.common.vendor_manifest import validate_revision
 from openpilot.starpilot.software.update_control import UpdaterControlError, UpdaterControlServer
 from openpilot.starpilot.software.preferences import AUTOMATIC_DOWNLOADS, download_permitted
+from openpilot.starpilot.software.fast_update import run as run_git
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -112,6 +113,8 @@ def write_time_to_param(params, param) -> None:
   params.put(param, t, block=True)
 
 def run(cmd: list[str], cwd: str | None = None) -> str:
+  if cmd and cmd[0] == 'git':
+    return run_git(cmd, cwd, timeout=300 if 'fetch' in cmd or 'gc' in cmd else 120)
   return subprocess.check_output(cmd, cwd=cwd, stderr=subprocess.STDOUT, encoding='utf8')
 
 
@@ -240,7 +243,6 @@ def finalize_update() -> None:
   t = time.monotonic()
   try:
     run(["git", "gc"], FINALIZED)
-    run(["git", "lfs", "prune"], FINALIZED)
     cloudlog.event("Done git cleanup", duration=time.monotonic() - t)
   except subprocess.CalledProcessError:
     cloudlog.exception(f"Failed git cleanup, took {time.monotonic() - t:.3f} s")

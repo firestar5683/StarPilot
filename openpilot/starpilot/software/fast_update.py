@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 import selectors
+import signal
 
 from openpilot.common.vendor_manifest import validate_revision
 from openpilot.common.prebuilt_manifest import revision_digest, valid_receipt
@@ -13,13 +14,32 @@ class FastUpdateError(RuntimeError):
   pass
 
 
-def run(command, cwd, progress=None):
+def _stop_process(process):
+  try:
+    os.killpg(process.pid, signal.SIGTERM)
+  except ProcessLookupError:
+    pass
+  deadline = time.monotonic() + 5
+  while time.monotonic() < deadline:
+    process.poll()
+    try:
+      os.killpg(process.pid, 0)
+    except ProcessLookupError:
+      break
+    time.sleep(0.05)
+  try:
+    os.killpg(process.pid, signal.SIGKILL)
+  except ProcessLookupError:
+    pass
+  process.wait(timeout=5)
+
+
+def run(command, cwd, progress=None, *, timeout=None):
   environment = dict(os.environ, GIT_LFS_SKIP_SMUDGE='1', GIT_TERMINAL_PROMPT='0', GIT_ASKPASS='/bin/false', SSH_ASKPASS='/bin/false')
-  timeout = 120 if "fetch" in command or "reset" in command or "checkout" in command else 30
-  if progress is None or "fetch" not in command:
-    return subprocess.check_output(command, cwd=cwd, env=environment, stderr=subprocess.STDOUT, timeout=timeout).decode()
+  if timeout is None:
+    timeout = 120 if "fetch" in command or "reset" in command or "checkout" in command else 30
   output = bytearray()
-  with subprocess.Popen(command, cwd=cwd, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
+  with subprocess.Popen(command, cwd=cwd, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True) as process:
     assert process.stdout is not None
     with selectors.DefaultSelector() as selector:
       selector.register(process.stdout, selectors.EVENT_READ)
@@ -41,14 +61,13 @@ def run(command, cwd, progress=None):
             for line in lines:
               detail = line.decode('utf-8', errors='replace')
               pattern = r'(?:remote: )?(?:Enumerating objects|Counting objects|Compressing objects|Receiving objects|Resolving deltas|Total|Updating files):'
-              if re.match(pattern, detail):
+              if progress is not None and re.match(pattern, detail):
                 progress(detail[-512:])
         result = process.wait(timeout=max(0.01, deadline - time.monotonic()))
         if result:
           raise subprocess.CalledProcessError(result, command, output=bytes(output))
       except BaseException:
-        process.kill()
-        process.wait()
+        _stop_process(process)
         raise
   return output.decode('utf-8', errors='replace')
 
