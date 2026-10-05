@@ -189,6 +189,126 @@ class TestVoltStop(unittest.TestCase):
           else:
             self.assertIsNone(evidence)
 
+  def test_card_resume_provider_remains_fresh_at_actual_gas_sender_cadence(self):
+    import time
+    from openpilot.starpilot.controller_extensions import ResumePlanInputs
+    provider = ResumePlanInputs()
+    pm = messaging.PubMaster(['deviceState', 'carState', 'longitudinalPlan'])
+    drive = time.monotonic_ns() - 1_000_000_000
+    healthy = []
+    started = time.monotonic()
+    #100HzcarState/20Hzplan producers coalesce into the actual25Hzgas sender consumer.
+    for tick in range(204):
+      for name, cadence in (('carState', 1), ('longitudinalPlan', 5), ('deviceState', 50)):
+        if tick % cadence == 0:
+          event = messaging.new_message(name)
+          event.valid = True
+          if name == 'deviceState':
+            event.deviceState.started = True
+            event.deviceState.startedMonoTime = drive
+          elif name == 'carState':
+            event.carState.canValid = True
+          else:
+            event.longitudinalPlan.shouldStop = False
+          pm.send(name, event)
+      if tick % 4 == 0:
+        current = provider.update(time.monotonic_ns())
+        if tick >= 120:
+          healthy.append(current)
+      time.sleep(max(0., started + (tick + 1) * .01 - time.monotonic()))
+    self.assertTrue(all(healthy))
+    tracker = provider.sm.freq_tracker['carState'].recent_avg_dt
+    self.assertEqual(tracker.count, tracker.window_size)
+    self.assertTrue(provider.sm.freq_ok['carState'])
+    event = messaging.new_message('longitudinalPlan')
+    event.valid = True
+    event.longitudinalPlan.shouldStop = True
+    pm.send('longitudinalPlan', event)
+    self.assertFalse(provider.update(time.monotonic_ns()))
+    time.sleep(.16)
+    self.assertFalse(provider.update(time.monotonic_ns()))
+
+  def test_frozen_card_opt_in_qualifies_plan_when_controls_snapshot_is_off(self):
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    from openpilot.starpilot.controller_extensions import configure_controller
+    controls, _, _, _, _, now, offset = fixture()
+    cp = ordinary_params(CAR.CHEVROLET_VOLT, radar=True)
+    ci = CarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    rx = physical_frames(packer, speed=0., gear=4, counter=0)
+    rx += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 4})]
+    ci.update([(now - 1_000_000, rx)])
+    ci.update([(now, rx)])
+    self.assertTrue(ci.CS.out.canValid)
+    VehicleStartupPreferences(volt_sng=True).configure_controller(ci)
+    with patch('openpilot.starpilot.controller_extensions.messaging.SubMaster', return_value=controls.sm):
+      configure_controller(ci, None)
+    ci.CC.volt_sng_plan_input.freshness.offset_ns = offset
+    ci.CC.volt_sng_plan_input.freshness.floor_ns = now - 500_000_000
+    controls.CP, controls.LoC = cp, LongControl(cp)
+    controls.vehicle_startup_preferences = VehicleStartupPreferences(volt_sng=False)
+    controls.sm.data['carState'] = ci.CS.out
+    controls.sm['longitudinalPlan'].shouldStop = False
+    lateral = messaging.new_message('controlsState').controlsState.lateralControlState.init('torqueState')
+    for stale in (True, False):
+      controls.sm.logMonoTime['longitudinalPlan'] = now - (200_000_000 if stale else 10_000_000)
+      cc = messaging.new_message('carControl').carControl
+      cc.enabled = cc.longActive = True
+      cc.actuators.longControlState = "starting"
+      cc.actuators.accel = .5
+      controls.publish(cc, lateral)
+      self.assertTrue(cc.cruiseControl.resume)  # Default/off publication is unchanged.
+      ci.CC.frame = 4
+      with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now + offset)), \
+           patch('openpilot.starpilot.controller_extensions.time.monotonic_ns', return_value=now):
+        _, tx = ci.apply(cc.as_reader(), now)
+      gas = next(data for address, data, _ in tx if address == 0x2CB)
+      self.assertEqual(bool(gas[0] & 1), stale)
+
+  def test_saved_sng_on_non_volt_does_not_read_optional_resume_sources(self):
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    controls, _, _, _, _, _, _ = fixture()
+    controls.CP = ordinary_params(CAR.CHEVROLET_SUBURBAN, radar=True)
+    controls.LoC = LongControl(controls.CP)
+    self.assertIsNone(controls.LoC.extension.resume_policy)
+    controls.vehicle_startup_preferences = VehicleStartupPreferences(volt_sng=True)
+    controls.sm.data.pop('deviceState', None)
+    controls.sm['carState'].cruiseState.standstill = True
+    controls.sm['longitudinalPlan'].shouldStop = False
+    cc = messaging.new_message('carControl').carControl
+    cc.enabled = cc.longActive = True
+    lateral = messaging.new_message('controlsState').controlsState.lateralControlState.init('torqueState')
+    with patch.object(controls.longitudinal_inputs, 'resume_sources_current', side_effect=AssertionError('unsubscribed source')):
+      controls.publish(cc, lateral)
+    self.assertTrue(cc.cruiseControl.resume)
+
+  def test_sng_resume_honors_stop_owner_and_fresh_plan_in_actual_publication(self):
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    controls, _, _, _, _, now, offset = fixture()
+    controls.CP = ordinary_params(CAR.CHEVROLET_VOLT, radar=True)
+    controls.LoC = LongControl(controls.CP)
+    controls.vehicle_startup_preferences = VehicleStartupPreferences(volt_sng=True)
+    from openpilot.starpilot.longitudinal.inputs import ResumeFreshness
+    controls.longitudinal_inputs.resume_freshness = ResumeFreshness()
+    controls.longitudinal_inputs.resume_freshness.offset_ns = offset
+    controls.longitudinal_inputs.resume_freshness.floor_ns = now - 500_000_000
+    controls.sm['carState'].cruiseState.enabled = True
+    controls.sm['carState'].cruiseState.standstill = True
+    controls.sm['longitudinalPlan'].speeds = [2.] * 17
+    cc = messaging.new_message('carControl').carControl
+    cc.enabled = cc.longActive = True
+    lateral = messaging.new_message('controlsState').controlsState.lateralControlState.init('torqueState')
+    for should_stop, stale, requested, expected in ((True, False, True, False), (False, False, True, True),
+                                                   (False, True, True, False), (False, True, False, True)):
+      controls.vehicle_startup_preferences = VehicleStartupPreferences(volt_sng=requested)
+      controls.sm['longitudinalPlan'].shouldStop = should_stop
+      controls.sm.logMonoTime['longitudinalPlan'] = now - (200_000_000 if stale else 10_000_000)
+      with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now + offset)):
+        controls.publish(cc, lateral)
+      self.assertTrue(cc.cruiseControl.cancel)  # Existing non-pcm stock cancel is not a driver cancel.
+      self.assertEqual(cc.cruiseControl.resume, expected)
+      self.assertEqual(controls.sm['longitudinalPlan'].shouldStop, should_stop)
+
   def test_parsed_controls_card_moving_stop_wire(self):
     for cp, accelerator, sascm, alpha in profiles():
       if sascm and not alpha:

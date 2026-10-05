@@ -113,6 +113,7 @@ class GMSafetyFlags(IntFlag):
   BOLT_2017 = 32
   BOLT_ACC_PEDAL = 64
   PADDLE_SCHED = 128
+  VOLT_AUTO_HOLD = 128  # Contextual only on exact gateway Volt OP-long words.
   BOLT_GEN2 = 256
   ASCM_INTERCEPT = 512
   ASCM_BRAKE_C9 = 1024
@@ -176,13 +177,25 @@ def is_volt_gateway_profile(cp: CarParams) -> bool:
             len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
             int(cp.safetyConfigs[0].safetyParam) in (
               int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG),
-              int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)))
+              int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE),
+              0x4084, 0xC084))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
 
 def is_volt_gateway_longitudinal(cp: CarParams) -> bool:
   return is_volt_gateway_profile(cp) and cp.openpilotLongitudinalControl
+
+
+def is_volt_auto_hold(cp: CarParams) -> bool:
+  return is_volt_gateway_longitudinal(cp) and int(cp.safetyConfigs[0].safetyParam) in (0x4084, 0xC084)
+
+
+def apply_volt_auto_hold(cp: CarParams, enabled: bool) -> None:
+  if is_volt_gateway_profile(cp):
+    word = int(cp.safetyConfigs[0].safetyParam)
+    cp.safetyConfigs[0].safetyParam = (word | int(GMSafetyFlags.VOLT_AUTO_HOLD)) if enabled and cp.openpilotLongitudinalControl else (
+      word & ~int(GMSafetyFlags.VOLT_AUTO_HOLD))
 
 
 def is_volt_ascm_longitudinal(cp: CarParams) -> bool:

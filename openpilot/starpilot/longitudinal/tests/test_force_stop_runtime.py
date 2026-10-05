@@ -245,6 +245,37 @@ class ForceStopRuntimeTests(unittest.TestCase):
       self.assertEqual(event.longitudinalPlan.modelMonoTime, sm.stamp)
       if not gas:
         self.assertTrue(event.longitudinalPlan.shouldStop)
+        # The actual committed stop remains authoritative even when a legacy speed tail is positive.
+        from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
+        from opendbc.car.gm.values import CAR as GM_CAR
+        from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+        from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+        from openpilot.starpilot.longitudinal.tests.test_gm_volt_cc_policy import fixture
+        controls, _, _, _, _, _, offset = fixture()
+        controls.CP = ordinary_params(GM_CAR.CHEVROLET_VOLT, radar=True)
+        controls.LoC = LongControl(controls.CP)
+        controls.vehicle_startup_preferences = VehicleStartupPreferences(volt_sng=True)
+        event.longitudinalPlan.speeds = [2.] * 17
+        controls.sm.data['longitudinalPlan'] = event.longitudinalPlan
+        controls.sm['carState'].cruiseState.enabled = controls.sm['carState'].cruiseState.standstill = True
+        controls.sm['deviceState'].startedMonoTime = sm.stamp - 1_000_000_000
+        for name in ('carState', 'longitudinalPlan', 'deviceState'):
+          controls.sm.logMonoTime[name] = sm.stamp - 10_000_000
+          controls.sm.recv_time[name] = (sm.stamp - 1_000_000) / 1e9
+        from openpilot.starpilot.longitudinal.inputs import ResumeFreshness
+        controls.longitudinal_inputs.resume_freshness = ResumeFreshness()
+        controls.longitudinal_inputs.resume_freshness.offset_ns = offset
+        controls.longitudinal_inputs.resume_freshness.floor_ns = sm.stamp - 500_000_000
+        from unittest.mock import patch
+        from openpilot.cereal import messaging
+        cc = messaging.new_message('carControl').carControl
+        cc.enabled = cc.longActive = True
+        lateral = messaging.new_message('controlsState').controlsState.lateralControlState.init('torqueState')
+        with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(sm.stamp, sm.stamp + offset)):
+          self.assertTrue(controls.longitudinal_inputs.resume_sources_current())
+          controls.publish(cc, lateral)
+        self.assertFalse(cc.cruiseControl.resume)
+        self.assertTrue(event.longitudinalPlan.shouldStop)
 
   def test_saved_malformed_and_safe_mode_disable_instead_of_defaulting_on(self):
     for key, raw in (('ForceStops', b'true'), ('ForceStopDistanceOffset', b'21'),

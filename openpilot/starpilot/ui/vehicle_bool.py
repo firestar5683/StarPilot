@@ -1,6 +1,6 @@
 """Confirmation text for parked vehicle preferences."""
 
-VEHICLE_BOOL_KEYS = frozenset(("GMPedalLongitudinal", "DisableOpenpilotLongitudinal", "LongPitch"))
+VEHICLE_BOOL_KEYS = frozenset(("GMPedalLongitudinal", "DisableOpenpilotLongitudinal", "LongPitch", "VoltSNG", "GMAutoHold"))
 
 
 def confirmation_question(request):
@@ -13,6 +13,10 @@ def confirmation_question(request):
   if request.key == "DisableOpenpilotLongitudinal":
     verb = "Turn off" if request.value == "On" else "Turn on"
     return f"{verb} StarPilot speed control after the next startup? Steering stays unchanged."
+  if request.key == "VoltSNG":
+    return f"{verb} Volt stop-and-go assistance after the next startup?"
+  if request.key == "GMAutoHold":
+    return f"{verb} Automatic Brake Hold after the next startup? Press the gas or regen paddle to release a hold."
   if request.key == "LongPitch":
     return f"{verb} Grade Compensation after the next startup?"
   raise ValueError("Unsupported vehicle preference")

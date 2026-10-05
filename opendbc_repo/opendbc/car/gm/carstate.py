@@ -1,3 +1,4 @@
+from opendbc.car.gm.values import is_volt_longitudinal, is_volt_auto_hold
 import copy
 from math import isfinite
 from opendbc.can import CANDefine, CANParser, CANPacker
@@ -56,6 +57,12 @@ class CarState(CarStateBase):
     self.volt_cc_button_counter = None
     self.volt_cc_button_source_ns = self.volt_cc_button_credit_ns = 0
     self.volt_gateway_source_ns = ()
+    self.volt_sng_sources = ()
+    self.gm_auto_hold_sources = ()
+    self.gm_auto_hold_brake = 0.
+    self.gm_auto_hold_forward = self.gm_auto_hold_moving = False
+    self.gm_auto_hold_wheel_ns = 0
+    self.gm_auto_hold_unavailable = True
     self.cc_gateway_cruise_ts_nanos = 0
     self.cc_gateway_buttons_ts_nanos = 0
     self.camera_stock_status_ts_nanos = 0
@@ -185,6 +192,42 @@ class CarState(CarStateBase):
         pt_cp.ts_nanos["AcceleratorPedal2"]["AcceleratorPedal2"],
         pt_cp.ts_nanos["ECMEngineStatus"]["CruiseMainOn"],
         pt_cp.ts_nanos["EBCMRegenPaddle"]["RegenPaddle"])
+    if is_volt_longitudinal(self.CP):
+      # Observe only actual resume/driver sources, using the finalized brake owner.
+      alternate = is_volt_gateway_alternate_brake(self.CP) or (
+        is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG))
+      c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and not (
+        self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) and
+        not self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9)
+      brake = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else
+               ("ECMEngineStatus", "BrakePressed") if c9 else ("ECMAcceleratorPos", "BrakePedalPos"))
+      names = (("AcceleratorPedal2", "CruiseState", 100_000_000),
+               ("ECMPRDNL2", "PRNDL2", 300_000_000),
+               ("ECMEngineStatus", "BrakePressed", 100_000_000),
+               ("EBCMRegenPaddle", "RegenPaddle", 100_000_000),
+               (*brake, 300_000_000))
+      for name, _, _ in names:
+        pt_cp.vl[name]
+      self.volt_sng_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in names)
+      if requires_camera_state_sources(self.CP):
+        cam_cp.vl["ASCMActiveCruiseControlStatus"]
+        self.volt_sng_sources += ((cam_cp.ts_nanos["ASCMActiveCruiseControlStatus"]["ACCCruiseState"], 100_000_000),)
+    if is_volt_auto_hold(self.CP):
+      alternate = is_volt_gateway_alternate_brake(self.CP)
+      brake_name, brake_signal = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else ("ECMAcceleratorPos", "BrakePedalPos"))
+      names = (("ECMEngineStatus", "CruiseMainOn"), ("ECMPRDNL2", "PRNDL2"), (brake_name, brake_signal),
+               ("AcceleratorPedal2", "CruiseState"), ("EBCMWheelSpdRear", "RLWheelSpd"),
+               ("EBCMRegenPaddle", "RegenPaddle"), ("EBCMFrictionBrakeStatus", "FrictionBrakeUnavailable"))
+      for name, _ in names:
+        pt_cp.vl[name]
+      self.gm_auto_hold_sources = tuple((pt_cp.ts_nanos[name][signal], 300_000_000) for name, signal in names)
+      self.gm_auto_hold_brake = pt_cp.vl[brake_name][brake_signal] / (208. if alternate else 1.)
+      gear = pt_cp.vl["ECMPRDNL2"]["PRNDL2"]
+      self.gm_auto_hold_forward = gear in (4, 6) or (4 <= gear <= 7 and pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1)
+      wheels = pt_cp.vl["EBCMWheelSpdRear"]
+      self.gm_auto_hold_moving = wheels["RLWheelSpd"] >= 12 * .0311 and wheels["RRWheelSpd"] >= 12 * .0311
+      self.gm_auto_hold_wheel_ns = pt_cp.ts_nanos["EBCMWheelSpdRear"]["RLWheelSpd"]
+      self.gm_auto_hold_unavailable = bool(pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"])
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
 
     # Variables used for avoiding LKAS faults

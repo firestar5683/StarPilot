@@ -7,6 +7,8 @@ def extension_state(controller, name):
 
 
 def attach_inputs(controls):
+  from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+  controls.vehicle_startup_preferences = VehicleStartupPreferences()
   controls.turn_assist_enabled = lambda: False
   inputs = LongitudinalInputs.__new__(LongitudinalInputs)
   inputs.messages = lambda: controls.sm

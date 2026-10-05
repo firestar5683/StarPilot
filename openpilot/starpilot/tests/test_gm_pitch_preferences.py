@@ -69,6 +69,48 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     self.saved.put_bool('OpenpilotEnabledToggle', True, block=True)
     self.path = Path(self.saved.get_param_path('LongPitch'))
 
+  def test_stop_preferences_can_be_saved_before_physical_admission(self):
+    from dataclasses import replace
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.gm.interface import CarInterface
+    from openpilot.starpilot.vehicle_selection import encode
+    from openpilot.starpilot.ui.feature_settings_state import FeaturePage, row_change, row_default
+    settings = (("VoltSNG", "volt_sng", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
+                                        CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)),
+                ("GMAutoHold", "gm_auto_hold", (CAR.CHEVROLET_VOLT,)))
+    for key, preference, identities in settings:
+      for identity in identities:
+        with self.subTest(key=key, identity=identity):
+          Path(self.saved.get_param_path('VehicleSelection')).write_bytes(encode(str(identity)))
+          cp = CarInterface.get_params(identity, gen_empty_fingerprint(), [], False, False, False)
+          current, owner, _ = self.settings(cp)
+          def row(owner=owner, key=key):
+            return next(r for r in owner.snapshot(FeaturePage.VEHICLE, parked=True, system_long=False,
+                        lateral_context=False, metric=False).rows if r.key == key)
+          self.assertTrue(row().available)
+          change = row_change(row())
+          assert change is not None
+          self.assertTrue(owner.apply(replace(change, confirmation=True)))
+          self.assertEqual(self.saved.get_bool(key), change.value == 'On')
+          self.assertTrue(owner.apply(row_default(row())))
+          self.assertFalse(self.saved.get_bool(key))
+          controller = SimpleNamespace(volt_sng=False, gm_auto_hold=False, long_pitch=True)
+          VehicleStartupPreferences(**{preference: True}).configure_controller(SimpleNamespace(CP=cp, CC=controller))
+          self.assertFalse(getattr(controller, preference))
+          fresh = row()
+          pending = row_change(fresh)
+          assert pending is not None
+          pending = replace(pending, confirmation=True)
+          path = Path(self.saved.get_param_path(key))
+          path.write_bytes(b'0' if fresh.value == 'On' else b'1')
+          self.assertFalse(owner.apply(pending))
+          assert pending.expected is not None
+          path.write_bytes(pending.expected)
+          Path(self.saved.get_param_path('VehicleSelection')).write_bytes(encode(str(CAR.CHEVROLET_BOLT_EUV)))
+          self.assertFalse(owner.apply(pending))
+          current.parked = False
+          self.assertFalse(owner.apply(replace(change, confirmation=True)))
+
   def test_native_typed_key_default_and_read_write(self):
     from openpilot.common.params import ParamKeyType
     self.assertEqual(self.saved.get_type('LongPitch'), ParamKeyType.BOOL)
