@@ -96,7 +96,7 @@ def decide_axes(*, standard_lateral: bool, standard_longitudinal: bool, intent,
                   not car_state.steerFaultTemporary and
                   (not car_state.brakePressed or car_state.vEgo >= pause_brake_mps or car_state.standstill))
   desired_lateral = bool(lateral_safe and not intent.pauseLateral and (standard_lateral or intent.allowedLatch))
-  desired_longitudinal = bool(driving and standard_longitudinal and not intent.pauseLongitudinal)
+  desired_longitudinal = bool(driving and standard_longitudinal and not car_state.seatbeltUnlatched and not intent.pauseLongitudinal)
   lateral_ack = native is not None and bool(native.requestedLateral) == desired_lateral
   longitudinal_ack = native is not None and bool(native.requestedLongitudinal) == desired_longitudinal
   return AxisDecision(

@@ -37,7 +37,7 @@ def test_cruise_baseline_screen_toggle_and_normal_engagement_reset():
   assert owner.allowed_latch and owner.screen_override is None
 
 
-@pytest.mark.parametrize('field', ['doorOpen', 'seatbeltUnlatched', 'steerFaultPermanent', 'steeringDisengage', 'accFaulted'])
+@pytest.mark.parametrize('field', ['doorOpen', 'steerFaultPermanent', 'steeringDisengage', 'accFaulted'])
 def test_fault_cannot_be_overridden_by_screen(field):
   owner = intent()
   cs = state(press=True)
@@ -97,3 +97,19 @@ def test_actual_startup_preferences_preserve_off_and_freeze_brake(tmp_path):
   assert cp.safetyConfigs[0].safetyParam == 0
   assert not cp.flags & 16
   assert policy_for(cp).settings_supported and not policy_for(cp).runtime_supported
+
+
+def test_unbuckled_screen_gesture_preserves_independent_lateral_intent():
+  owner = intent()
+  cs = state(available=False, press=False)
+  cs.seatbeltUnlatched = True
+  owner.update(cs.as_reader(), now_ns=1)
+  cs.buttonEvents[0].pressed = True
+  owner.update(cs.as_reader(), now_ns=2)
+  assert owner.allowed_latch
+  cs.buttonEvents = []
+  owner.update(cs.as_reader(), now_ns=3)
+  assert owner.allowed_latch
+  cs.seatbeltUnlatched = False
+  owner.update(cs.as_reader(), now_ns=4)
+  assert owner.allowed_latch and not cs.cruiseState.enabled

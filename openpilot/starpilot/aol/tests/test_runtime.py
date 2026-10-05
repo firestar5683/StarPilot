@@ -24,6 +24,55 @@ def car_state(*, brake=False):
 
 
 class CardIntentTests(unittest.TestCase):
+  def test_seatbelt_blocks_standard_longitudinal_without_disarming_aol(self):
+    from openpilot.starpilot.nostalgia import aol_no_entry
+
+    owner = AolCardIntent(AolSettings(True, 0, 9, 0, (0, 0, 0), (0, 0, 0)), explicit_latch=True)
+    state = car_state()
+    state.cruiseState.available = True
+    state.seatbeltUnlatched = True
+    events = Events()
+    events.add(log.OnroadEvent.EventName.seatbeltNotLatched)
+    self.assertTrue(events.contains(ET.NO_ENTRY))
+    self.assertTrue(events.contains(ET.SOFT_DISABLE))
+    owner.update(state, fault_active=disarming_fault(events.to_msg(), state))
+    self.assertFalse(owner.allowed_latch)
+    state.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
+    owner.update(state, fault_active=disarming_fault(events.to_msg(), state))
+    self.assertTrue(owner.allowed_latch)
+    state.buttonEvents = []
+    standard = StateMachine()
+    events.add(log.OnroadEvent.EventName.buttonEnable)
+    self.assertEqual(standard.update(events), (False, False))
+    native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=False,
+                             lateralAllowed=True, longitudinalAllowed=True)
+    for unlatched in (True, True, False):
+      state.seatbeltUnlatched = unlatched
+      events.clear()
+      if unlatched:
+        events.add(log.OnroadEvent.EventName.seatbeltNotLatched)
+      owner.update(state, fault_active=disarming_fault(events.to_msg(), state))
+      enabled, active = standard.update(events)
+      self.assertFalse(enabled or active)  # Buckling alone is not an engagement gesture.
+      allowed, pause_lat, pause_long = owner.output(state)
+      decision = decide_axes(standard_lateral=active, standard_longitudinal=enabled,
+        intent=SimpleNamespace(allowedLatch=allowed, pauseLateral=pause_lat, pauseLongitudinal=pause_long),
+        native=native, car_state=state, initialized=True, model_ready=True,
+        no_entry=aol_no_entry(events.names, state, paddle_only_cancel=False),
+        immediate_disable=False, dm_lockout=False, pause_brake_mps=0.)
+      self.assertTrue(decision.lateral_active)
+      self.assertFalse(decision.desired_longitudinal or decision.longitudinal_active)
+    state.seatbeltUnlatched = True
+    direct = decide_axes(standard_lateral=True, standard_longitudinal=True,
+      intent=SimpleNamespace(allowedLatch=True, pauseLateral=False, pauseLongitudinal=False),
+      native=native, car_state=state, initialized=True, model_ready=True, no_entry=False,
+      immediate_disable=False, dm_lockout=False, pause_brake_mps=0.)
+    self.assertTrue(direct.lateral_active)
+    self.assertFalse(direct.desired_longitudinal)
+    events.add(log.OnroadEvent.EventName.doorOpen)
+    self.assertTrue(disarming_fault(events.to_msg(), state))
+    self.assertTrue(aol_no_entry(events.names, state, paddle_only_cancel=False))
+
   def test_temporary_eps_and_known_gears_preserve_latch_with_zero_steering(self):
     owner = AolCardIntent(AolSettings(True, 0, 0, 0, (0, 0, 0), (0, 0, 0)), explicit_latch=True)
     state = car_state()

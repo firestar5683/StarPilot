@@ -500,7 +500,7 @@ class Car:
         native is not None and native.lateralAllowed and self.aol_card_intent.allowed_latch and
         not self.aol_card_intent.pause_lateral and CS.canValid and not CS.canTimeout and
         CS.gearShifter == structs.CarState.GearShifter.drive and not CS.doorOpen and
-        not CS.seatbeltUnlatched and not CS.steerFaultPermanent and not CS.steeringDisengage)
+        not CS.steerFaultPermanent and not CS.steeringDisengage)
     if self.aol_card_intent is not None:
       self.aol_card_intent.update_auxiliary(CS, media=media_observation,
         media_eligible=ioniq6_media_eligible(self.CP), fault_active=fault_active)
