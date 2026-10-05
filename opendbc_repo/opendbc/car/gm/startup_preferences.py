@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, ALT_ACCS
 """Finalized GM speed-control choices; existing native envelopes are retained."""
 
 from opendbc.car.gm.values import (is_volt_gateway_profile, is_volt_cc_profile, is_ordinary_cc_profile,
@@ -9,12 +9,22 @@ from opendbc.car.gm.values import (is_volt_ascm_longitudinal, is_volt_camera_lon
 
 
 def disable_long_supported(cp) -> bool:
-  return (is_conventional_cc_pedal_profile(cp) or is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
+  return (camera_acc_pedal_profile(cp) is not None or is_conventional_cc_pedal_profile(cp) or
+          is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
           is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or is_volt_sdgm_profile(cp, longitudinal=True) or
           is_volt_camera_removed(cp, longitudinal=True) or is_lacrosse_gateway_profile(cp))
 
 
 def prepare_disable_longitudinal(cp, requested: bool) -> None:
+  profile = camera_acc_pedal_profile(cp)
+  if requested and profile is not None:
+    stock_words = {0xE100: 0xE110, 0xE101: 0xE111, 0xE102: 0xE112, 0xE103: 0xE113}
+    cp.safetyConfigs[0].safetyParam = stock_words.get(int(cp.safetyConfigs[0].safetyParam), int(cp.safetyConfigs[0].safetyParam))
+    cp.openpilotLongitudinalControl = False
+    cp.pcmCruise = True
+    cp.autoResumeSng = False
+    cp.minEnableSpeed = -1. if cp.carFingerprint in ALT_ACCS else 5. / 3.6
+    return
   if requested and is_volt_one_pedal(cp):
     cp.safetyConfigs[0].safetyParam = gm_control_word(cp)
   if requested and is_volt_camera_removed(cp, longitudinal=True):

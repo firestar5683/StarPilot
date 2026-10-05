@@ -48,6 +48,28 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     state = self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     return next(row for row in state.rows if row.key == key)
 
+  def test_camera_interceptor_setup_reports_actual_owner_and_preserves_preferences(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import params
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    cp = params()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.params.put_bool('GMPedalLongitudinal', False, block=True)
+    pedal = self._row('vehicle', 'GMPedalLongitudinal')
+    self.assertEqual(pedal.value, 'Automatic')
+    self.assertFalse(pedal.available)
+    pitch = self._row('vehicle', 'LongPitch')
+    self.assertTrue(pitch.available)
+    request = replace(required_change(pitch), confirmation=True)
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.params.get_bool('LongPitch'))
+    prepare_disable_longitudinal(cp, True)
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Detected, inactive')
+    self.assertFalse(self.owner.apply(request))
+    self.assertFalse(self.params.get_bool('GMPedalLongitudinal'))
+    self.assertNotIn('LongPitch', [row.key for row in self.owner.snapshot(
+      'vehicle', parked=True, system_long=False, lateral_context=True, metric=False).rows])
+
   def test_malformed_numeric_default_has_no_reset_target(self):
     self.params.put("StandardFollow", 2.8, block=True)
     with patch.object(self.owner, "_default", return_value="not a number"):

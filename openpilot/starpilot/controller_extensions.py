@@ -110,7 +110,11 @@ class ResumePlanInputs:
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
-  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_one_pedal, is_bolt_pedal_profile
+  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_one_pedal, is_bolt_pedal_profile, camera_acc_pedal_profile
+  camera_pedal = camera_acc_pedal_profile(cp)
+  if controller is not None and camera_pedal is not None and camera_pedal.longitudinal:
+    from openpilot.starpilot.car.gm.camera import CameraPedalPreference
+    controller.camera_pedal_input = CameraPedalPreference(cp, params)
   if controller is not None and is_bolt_pedal_profile(cp):
     from openpilot.starpilot.car.gm.paddle import PADDLE_IDS, PaddlePreference
     if cp.carFingerprint in PADDLE_IDS:

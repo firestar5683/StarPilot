@@ -2,7 +2,7 @@
 
 from opendbc.car.gm.lateral import lane_centering_supported
 from opendbc.car.gm.suburban import stopping_decel_rate
-from opendbc.car.gm.values import (control_flags, CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_euv_longitudinal,
+from opendbc.car.gm.values import (camera_acc_pedal_profile, control_flags, CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_euv_longitudinal,
                                   is_bolt_pedal_profile, is_volt_cc_longitudinal, is_volt_longitudinal,
                                   uses_camera_stock_controls, is_ordinary_ascm_profile, is_ordinary_camera_profile,
                                   is_ordinary_sdgm_profile, is_ordinary_cc_profile, is_conventional_cc_pedal_profile)
@@ -19,7 +19,8 @@ def longitudinal_supported(cp) -> bool:
   try:
     if not _healthy(cp) or not cp.openpilotLongitudinalControl or cp.pcmCruise:
       return False
-    return (is_ordinary_camera_profile(cp, longitudinal=True) or is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp) or
+    return (camera_acc_pedal_profile(cp) is not None or is_ordinary_camera_profile(cp, longitudinal=True) or
+            is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp) or
             is_ordinary_ascm_profile(cp, longitudinal=True) or is_ordinary_sdgm_profile(cp, longitudinal=True)
         or is_volt_longitudinal(cp) or is_volt_cc_longitudinal(cp) or is_bolt_euv_longitudinal(cp) or
             is_bolt_pedal_profile(cp) or

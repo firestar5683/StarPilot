@@ -1,5 +1,5 @@
 from opendbc.car.gm.one_pedal import VoltOnePedal
-from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile
 from opendbc.car.gm.longitudinal import volt_sng_release
 from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for, hold_brake as estimate_hold_brake
 from opendbc.car.gm.values import is_gm_auto_hold
@@ -260,9 +260,14 @@ class CarController(CarControllerBase):
     self.silverado_pedal_command = SilveradoPedalCommand(self.CP) if self.silverado_cc_pedal_profile else None
     self.conventional_pedal_command = (ConventionalPedalCommand(self.CP)
                                        if self.conventional_pedal_profile and not self.silverado_cc_pedal_profile else None)
-    self.ordinary_camera_long = is_ordinary_camera_profile(self.CP, longitudinal=True)
+    self.camera_pedal_profile = camera_acc_pedal_profile(self.CP)
+    self.camera_pedal_launch = False
+    self.camera_pedal_input = None
+    self.ordinary_camera_long = (is_ordinary_camera_profile(self.CP, longitudinal=True) or
+                                 self.camera_pedal_profile is not None and self.camera_pedal_profile.longitudinal)
     self.ordinary_camera_stock = is_ordinary_camera_profile(self.CP)
-    self.ordinary_camera_removed = is_ordinary_camera_removed(self.CP)
+    self.ordinary_camera_removed = (is_ordinary_camera_removed(self.CP) or
+                                    self.camera_pedal_profile is not None and self.camera_pedal_profile.removed)
     self.ordinary_sdgm_long = is_ordinary_sdgm_profile(self.CP, longitudinal=True)
     self.volt_sdgm_long = is_volt_sdgm_profile(self.CP, longitudinal=True)
     self.volt_camera_removed = is_volt_camera_removed(self.CP)
@@ -448,9 +453,16 @@ class CarController(CarControllerBase):
                           CS.out.cruiseState.available and (aol_lateral or bool(bolt_sources[1][1][4] & 128)) and
                           CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low) and
                           (aol_lateral or not CS.out.brakePressed and not CS.out.regenBraking))
-    if self.ordinary_camera_removed:
+    if self.ordinary_camera_removed and self.camera_pedal_profile is None:
       stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(CS.ordinary_removed_sources) == 6 and
                            all(stamp > 0 and 0 <= now_nanos - stamp <= 300_000_000 for stamp in CS.ordinary_removed_sources))
+    if self.camera_pedal_profile is not None and self.camera_pedal_profile.removed:
+      sources = CS.camera_pedal_sources if self.camera_pedal_profile.longitudinal else CS.camera_pedal_sources[:6]
+      stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and bool(sources) and
+                           all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources))
+      if self.camera_pedal_profile.longitudinal:
+        stock_steer_ready = (stock_steer_ready and CS.pedal_sensor_healthy and
+                            0 <= now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS)
     if self.volt_camera_removed:
       stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(CS.volt_removed_sources) == 6 and
                            all(stamp > 0 and 0 <= now_nanos - stamp <= 300_000_000 for stamp in CS.volt_removed_sources))
@@ -532,7 +544,7 @@ class CarController(CarControllerBase):
         self.pedal_steady = self.conventional_pedal_command.steady
         self.pedal_active_last = self.conventional_pedal_command.active_last
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 4))
-    elif self.CP.flags & GMFlags.PEDAL_LONG.value and self.CP.openpilotLongitudinalControl:
+    elif self.CP.flags & GMFlags.PEDAL_LONG.value and self.CP.openpilotLongitudinalControl and self.camera_pedal_profile is None:
       active, stock_ownership_clear, in_regen_gear = self.bolt_pedal_admission(CC, CS, now_nanos)
       if not active or self.maneuver_paddle_mode == "off":
         self.bolt_regen_hold = False
@@ -664,6 +676,9 @@ class CarController(CarControllerBase):
         if self.CP.networkLocation == NetworkLocation.fwdCamera and not (self.conventional_pedal_profile and self.CP.flags & GMFlags.NO_CAMERA):
           at_full_stop = at_full_stop and stopping
           friction_brake_bus = CanBus.CAMERA if self.volt_sdgm_long or self.ordinary_sdgm_long else CanBus.POWERTRAIN
+        if self.camera_pedal_profile is not None:
+          resume = actuators.longControlState != LongCtrlState.starting or CC.cruiseControl.resume
+          at_full_stop = at_full_stop and not resume
 
         if (self.volt_camera_long and not self.volt_camera_removed or
             self.ordinary_camera_long and not self.ordinary_camera_removed):
@@ -683,6 +698,26 @@ class CarController(CarControllerBase):
             self.apply_gas = self.params.INACTIVE_REGEN
             self.apply_brake = max(self.apply_brake, one_pedal_brake)
 
+        camera_pedal = 0.
+        if self.camera_pedal_profile is not None:
+          sources = CS.camera_pedal_sources
+          runtime_allowed = self.camera_pedal_input is not None and self.camera_pedal_input.update(now_nanos)
+          ready = (runtime_allowed and len(sources) == 7 and all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources) and
+                   CS.pedal_sensor_healthy and 0 <= now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS and
+                   CS.out.canValid and not CS.out.canTimeout and CS.camera_pedal_forward and
+                   CS.out.cruiseState.available and not CS.out.brakePressed and not CS.out.gasPressed and not CS.out.accFaulted)
+          launch = (ready and CC.enabled and CC.longActive and CC.cruiseControl.resume and
+                    self.apply_gas > self.params.INACTIVE_REGEN and
+                    CS.out.cruiseState.standstill and all(math.isfinite(speed) and 0 <= speed <= 34 * .0311
+                                                         for speed in CS.camera_pedal_rear))
+          if launch:
+            camera_pedal = 18. / 255.
+          if not ready or launch:
+            self.apply_gas, self.apply_brake = self.params.INACTIVE_REGEN, 0
+          if not launch:
+            can_sends.append(gmcan.create_pedal_command(self.packer_pt, 0., idx))
+          self.camera_pedal_launch = launch
+
         one_pedal_braking = one_pedal_active and self.volt_one_pedal_state is not None and self.volt_one_pedal_state.brake > 0
         if one_pedal_braking:
           at_full_stop = at_full_stop or CS.out.cruiseState.standstill
@@ -692,6 +727,8 @@ class CarController(CarControllerBase):
         acc_engaged = CC.enabled and not volt_sng_release(
           self.CP, self.volt_sng, CC, CS, now_nanos,
           plan_current=self.volt_sng_plan_input.update(now_nanos) if self.volt_sng and self.volt_sng_plan_input is not None else False)
+        if self.camera_pedal_profile is not None and not ready:
+          acc_engaged = False
         if hold_brake is None:
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         else:
@@ -701,6 +738,8 @@ class CarController(CarControllerBase):
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                              idx, CC.enabled, near_stop, at_full_stop, self.CP,
                                                              auto_hold=hold_brake is not None or one_pedal_braking))
+        if self.camera_pedal_profile is not None and self.camera_pedal_launch:
+          can_sends.append(gmcan.create_pedal_command(self.packer_pt, camera_pedal, idx))
         CS.gm_auto_hold_engaged = hold_brake is not None
 
         if self.bolt_euv_long:
@@ -715,12 +754,15 @@ class CarController(CarControllerBase):
             camera_fcw = 3
         dashboard_state = 2 if (self.ordinary_camera_long or self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_camera_long or
                                 self.volt_sdgm_long or self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN) else None
-        can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
-                                                           hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw,
-                                                           cruise_state=dashboard_state,
-                                                           fcw_alert=camera_fcw,
-                                                           acc_always_one=0 if (self.ordinary_camera_long or self.ordinary_sdgm_long
-                                                               and self.CP.carFingerprint == CAR.CHEVROLET_BLAZER) else 1))
+        if self.camera_pedal_profile is None or runtime_allowed:
+          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+                                                             hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw,
+                                                             cruise_state=dashboard_state,
+                                                             fcw_alert=camera_fcw,
+                                                             acc_always_one=0 if ((self.ordinary_camera_long and
+                                                                 (self.camera_pedal_profile is None or self.CP.carFingerprint not in
+                                                                  (CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA))) or
+                                                                 self.ordinary_sdgm_long and self.CP.carFingerprint == CAR.CHEVROLET_BLAZER) else 1))
 
       # Radar needs to know current speed and yaw rate (50hz),
       # and that ADAS is alive (10hz)

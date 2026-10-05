@@ -64,7 +64,7 @@ class CarControllerParams:
       self.INACTIVE_REGEN = -500.0
       self.NEAR_STOP_BRAKE_PHASE = 0.25
       max_regen_acceleration = 0.0
-    elif is_ordinary_camera_profile(CP, longitudinal=True):
+    elif is_ordinary_camera_profile(CP, longitudinal=True) or (camera_acc_pedal_profile(CP) is not None and CP.openpilotLongitudinalControl):
       self.MAX_GAS = 2698.0
       self.MAX_ACC_REGEN = -540.0
       self.INACTIVE_REGEN = -500.0
@@ -143,6 +143,12 @@ VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
 
 def gm_control_word(cp: CarParams) -> int:
   word = int(cp.safetyConfigs[0].safetyParam)
+  if word in CAMERA_ACC_PEDAL_PROFILES:
+    profile = camera_acc_pedal_profile(cp)
+    if profile is not None:
+      return ((0xC173 if profile.longitudinal else 0xC172) if profile.removed else
+              (0xC170 if profile.longitudinal else 0xC171))
+    return word
   if word not in VOLT_ONE_PEDAL_WORDS:
     return word
   index = word - (0xD110 if word >= 0xD110 else 0xD100)
@@ -179,6 +185,9 @@ def control_flags(cp: CarParams) -> int:
 
 
 def uses_camera_stock_controls(cp: CarParams) -> bool:
+  profile = camera_acc_pedal_profile(cp)
+  if profile is not None:
+    return not profile.longitudinal and not profile.removed
   return (is_ordinary_camera_profile(cp, longitudinal=False) or is_ordinary_sdgm_profile(cp, longitudinal=False) or is_volt_sdgm_profile(cp) or
           cp.carFingerprint in CAMERA_STOCK_CAR and not is_volt_camera_longitudinal(cp) and not is_volt_camera_removed(cp) or
           cp.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023 and not cp.openpilotLongitudinalControl or
@@ -186,6 +195,9 @@ def uses_camera_stock_controls(cp: CarParams) -> bool:
 
 
 def requires_camera_state_sources(cp: CarParams) -> bool:
+  profile = camera_acc_pedal_profile(cp)
+  if profile is not None:
+    return not profile.removed
   return (uses_camera_stock_controls(cp) or is_ordinary_camera_profile(cp, longitudinal=True) or is_ordinary_sdgm_profile(cp, longitudinal=True) or
           is_volt_camera_longitudinal(cp) or is_volt_sdgm_profile(cp, longitudinal=True))
 
@@ -834,6 +846,53 @@ ORDINARY_CAMERA_ALPHA_CAR = frozenset((CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_EQ
                                       CAR.CHEVROLET_TRAILBLAZER, CAR.CHEVROLET_TRAX))
 ORDINARY_CAMERA_CAR = ORDINARY_CAMERA_ALPHA_CAR | frozenset((CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA))
 
+
+CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR
+
+
+class BrakeSource(Enum):
+  BE = "BE"
+  F1 = "F1"
+
+
+@dataclass(frozen=True)
+class CameraAccPedalProfile:
+  removed: bool
+  brake_source: BrakeSource
+  longitudinal: bool
+
+
+CAMERA_ACC_PEDAL_PROFILES = MappingProxyType({
+  0xE100: CameraAccPedalProfile(False, BrakeSource.BE, True),
+  0xE101: CameraAccPedalProfile(False, BrakeSource.F1, True),
+  0xE102: CameraAccPedalProfile(True, BrakeSource.BE, True),
+  0xE103: CameraAccPedalProfile(True, BrakeSource.F1, True),
+  0xE110: CameraAccPedalProfile(False, BrakeSource.BE, False),
+  0xE111: CameraAccPedalProfile(False, BrakeSource.F1, False),
+  0xE112: CameraAccPedalProfile(True, BrakeSource.BE, False),
+  0xE113: CameraAccPedalProfile(True, BrakeSource.F1, False),
+})
+
+
+def camera_acc_pedal_profile(cp):
+  try:
+    if len(cp.safetyConfigs) != 1:
+      return None
+    profile = CAMERA_ACC_PEDAL_PROFILES.get(int(cp.safetyConfigs[0].safetyParam))
+    if profile is None:
+      return None
+    flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if profile.removed else 0) |
+                (GMFlags.NO_ACCELERATOR_POS_MSG if profile.brake_source == BrakeSource.F1 else 0))
+    if (cp.brand == 'gm' and cp.carFingerprint in CAMERA_ACC_PEDAL_CAR and
+        cp.transmissionType == CarParams.TransmissionType.automatic and
+        cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.radarUnavailable and
+        not cp.passive and not cp.dashcamOnly and not cp.notCar and control_flags(cp) == flags and
+        cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+        bool(cp.openpilotLongitudinalControl) == profile.longitudinal and bool(cp.pcmCruise) != profile.longitudinal):
+      return profile
+  except (AttributeError, IndexError, TypeError, ValueError):
+    pass
+  return None
 
 def is_ordinary_camera_profile(cp, *, longitudinal=False):
   try:
