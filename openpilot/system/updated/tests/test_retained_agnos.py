@@ -191,7 +191,9 @@ op_run_command() { echo effect >> "$log"; }
     function = shell_function(ROOT / 'launch_chffrplus.sh', 'agnos_init')
     self.run_shell(function, 'agnos_init', '19.8.2', model='comma tici')
     rule = (self.root / 'stock-gpio.rules').read_text().splitlines()[0]
-    command = shlex.split(re.search(r'PROGRAM="(.*)"', rule)[1])[2]
+    program = re.search(r'PROGRAM="(.*)"', rule)
+    assert program is not None
+    command = shlex.split(program[1])[2]
     self.assertEqual(command.count('{} +'), 2)
 
     gpio = self.root / 'gpio'
@@ -209,7 +211,9 @@ op_run_command() { echo effect >> "$log"; }
     log = self.root / 'permission.log'
     for name in ('chown', 'chmod'):
       wrapper = commands / name
-      wrapper.write_text(f'#!/bin/sh\necho {name} >> "$GPIO_TEST_LOG"\nexec {shlex.quote(shutil.which(name))} "$@"\n')
+      executable = shutil.which(name)
+      assert executable is not None, f"Required permission command missing: {name}"
+      wrapper.write_text(f'#!/bin/sh\necho {name} >> "$GPIO_TEST_LOG"\nexec {shlex.quote(executable)} "$@"\n')
       wrapper.chmod(0o755)
     environment = dict(os.environ, PATH=f'{commands}:{os.environ["PATH"]}', GPIO_TEST_LOG=str(log))
     paths = [gpio, gpio / 'export', pin, *(pin / name for name in ('direction', 'value', 'edge', 'uevent'))]
