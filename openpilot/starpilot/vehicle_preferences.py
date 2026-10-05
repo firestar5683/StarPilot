@@ -97,34 +97,35 @@ class VehicleStartupPreferences:
             cp.dashcamOnly = True
 
   def prepare(self, cp, *, fingerprints=None):
-    from opendbc.car.gm.values import apply_volt_auto_hold
+    from opendbc.car.gm.values import apply_gm_auto_hold
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
     prepare_stock(cp, self.tesla_preap_stock)
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp, fingerprints)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
-    apply_volt_auto_hold(cp, self.gm_auto_hold)
+    apply_gm_auto_hold(cp, self.gm_auto_hold)
     if cp.brand == "toyota":
       apply_toyota_auto_hold(cp, self.toyota_auto_hold)
     return cp
 
   def finalize(self, cp) -> None:
-    from opendbc.car.gm.values import apply_volt_auto_hold, is_volt_auto_hold
+    from opendbc.car.gm.values import apply_gm_auto_hold, is_gm_auto_hold
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
     prepare_stock(cp, self.tesla_preap_stock)
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
-    apply_volt_auto_hold(cp, self.gm_auto_hold and is_volt_auto_hold(cp))
+    apply_gm_auto_hold(cp, self.gm_auto_hold and is_gm_auto_hold(cp))
     if cp.brand == "toyota":
       admitted = bool(cp.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
       apply_toyota_auto_hold(cp, self.toyota_auto_hold and admitted)
 
   def configure_controller(self, ci) -> None:
-    from opendbc.car.gm.values import CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_volt_auto_hold
+    from opendbc.car.gm.values import CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_gm_auto_hold
     cp = ci.CP
     if ci.CC is not None and is_volt_longitudinal(cp):
       ci.CC.volt_sng = self.volt_sng
-      ci.CC.gm_auto_hold = self.gm_auto_hold and is_volt_auto_hold(cp)
+    if ci.CC is not None and cp.brand == "gm":
+      ci.CC.gm_auto_hold = self.gm_auto_hold and is_gm_auto_hold(cp)
     if ci.CC is not None and (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or cp.carFingerprint == CAR.CHEVROLET_SUBURBAN):
       ci.CC.long_pitch = self.gm_long_pitch

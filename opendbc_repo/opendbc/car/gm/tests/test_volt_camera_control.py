@@ -56,12 +56,12 @@ class TestVoltCameraControl(unittest.TestCase):
               self.assertEqual(cp.radarUnavailable, not radar if present else True)
               self.assertEqual(RadarInterface(cp).rcp is None, cp.radarUnavailable)
               if active:
-                from opendbc.car.gm.values import apply_volt_auto_hold, is_volt_auto_hold
+                from opendbc.car.gm.values import apply_gm_auto_hold, is_gm_auto_hold
                 from opendbc.car.gm.lateral import lane_centering_supported
                 from opendbc.car.gm.aol import qualified_gm
                 marked = cp.as_reader().as_builder()
-                apply_volt_auto_hold(marked, True)
-                self.assertTrue(is_volt_auto_hold(marked))
+                apply_gm_auto_hold(marked, True)
+                self.assertTrue(is_gm_auto_hold(marked))
                 self.assertEqual(lane_centering_supported(marked), lane_centering_supported(cp))
                 self.assertEqual(qualified_gm(marked), qualified_gm(cp))
                 self.assertEqual(marked.lateralTuning.to_dict(), cp.lateralTuning.to_dict())

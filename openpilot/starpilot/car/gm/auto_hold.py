@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import is_volt_auto_hold
+from opendbc.car.gm.values import is_gm_auto_hold
 from openpilot.starpilot.saved_source import read_saved
 
 
@@ -9,7 +9,7 @@ class AutoHoldPreference:
     self.enabled = False
 
   def update(self, now_ns):
-    if type(now_ns) is not int or now_ns <= 0 or not is_volt_auto_hold(self.cp):
+    if type(now_ns) is not int or now_ns <= 0 or not is_gm_auto_hold(self.cp):
       self.enabled = False
       return False
     if now_ns < self.read_ns:

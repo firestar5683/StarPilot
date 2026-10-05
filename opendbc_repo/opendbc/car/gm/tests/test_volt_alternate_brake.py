@@ -71,11 +71,44 @@ class TestVoltAlternateBrake(unittest.TestCase):
         self.assertTrue(denied.pcmCruise)
         self._hold_release_factory(denied, camera=True, alternative=alternative)
 
+  def test_auto_hold_actual_removed_lacrosse_parser_controller_native(self):
+    from opendbc.car import structs
+    from opendbc.car.gm.tests.test_volt_camera_removed import removed_params
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    release = libsafety_py.libsafety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    for accelerator in (True, False):
+      for alternative in (0, 32):
+        cp = removed_params(release=release, alternate=not accelerator)
+        if release:
+          VehicleStartupPreferences(gm_auto_hold=True).prepare(cp)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC150)
+          self._hold_release_factory(cp, camera=False, alternative=alternative)
+        else:
+          self._auto_hold_join(cp, accelerator=accelerator, alternative=alternative,
+                               expected_word=0xC1D1 if accelerator else 0xC1D3)
+          preferences = VehicleStartupPreferences(gm_auto_hold=True, disable_bolt_long=True)
+          preferences.prepare(cp)
+          preferences.finalize(cp)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC150)
+          self.assertFalse(cp.openpilotLongitudinalControl)
+          self.assertTrue(cp.pcmCruise)
+          self._hold_release_factory(cp, camera=False, alternative=alternative)
+    cp = ordinary_params(CAR.BUICK_LACROSSE, radar=True)
+    self._auto_hold_join(cp, accelerator=True, alternative=0, expected_word=0x80)
+    preferences = VehicleStartupPreferences(gm_auto_hold=True, disable_bolt_long=True)
+    preferences.prepare(cp)
+    preferences.finalize(cp)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 0)
+    self.assertFalse(cp.openpilotLongitudinalControl or cp.pcmCruise)
+    self._hold_release_factory(cp, camera=False, alternative=0)
+
   def _hold_release_factory(self, cp, *, camera, alternative):
     from types import SimpleNamespace
     from opendbc.car import structs
     from opendbc.car.gm.interface import CarInterface
     from opendbc.car.gm import gmcan
+    from opendbc.car.gm.values import is_volt_camera_removed, GMFlags
     from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
     from opendbc.safety.tests.libsafety import libsafety_py
     from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
@@ -90,8 +123,15 @@ class TestVoltAlternateBrake(unittest.TestCase):
       libsafety_py.libsafety.set_safety_hooks(int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam)
       for tick in range(40):
         now = 1_000_000_000 + tick * 10_000_000
-        _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=0., camera=True)
-        rx.append(packer.make_can_msg("ASCMActiveCruiseControlStatus", 2, {"ACCCruiseState": 3}))
+        removed = is_volt_camera_removed(cp)
+        _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=0.,
+                     camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not removed)
+        if removed and cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG:
+          rx.append(packer.make_can_msg("EBCMBrakePedalPosition", 0, {"BrakePedalPosition": 0}))
+        if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not removed:
+          rx.append(packer.make_can_msg("ASCMActiveCruiseControlStatus", 2, {"ACCCruiseState": 3}))
+        if cp.carFingerprint == CAR.BUICK_LACROSSE:
+          rx = [message for message in rx if message[0] != 0xBD]
         ci.update([(now - 1_000_000, rx)])
         self.assertTrue(ci.update([(now, rx)]).canValid)
         for message in rx:
@@ -105,7 +145,7 @@ class TestVoltAlternateBrake(unittest.TestCase):
         for message in commands:
           self.assertTrue(native("tx", message, now // 1000), message)
       brake_packer = CANPacker(DBC[cp.carFingerprint][Bus.chassis])
-      positive = gmcan.create_friction_brake_command(brake_packer, 2 if cp.carFingerprint == CAR.CHEVROLET_VOLT_2019 else 0,
+      positive = gmcan.create_friction_brake_command(brake_packer, 2 if cp.carFingerprint in (CAR.CHEVROLET_VOLT_2019, CAR.BUICK_LACROSSE) else 0,
                                                     100 if cp.carFingerprint == CAR.CHEVROLET_VOLT_2019 else 80,
                                                     1, False, True, False, cp, auto_hold=True)
       self.assertFalse(native("tx", positive, now // 1000))
@@ -133,8 +173,8 @@ class TestVoltAlternateBrake(unittest.TestCase):
       self.assertEqual(cp.safetyConfigs[0].safetyParam, expected_word)
       from opendbc.car.gm.aol import qualified_gm
       from opendbc.car.gm.lateral import lane_centering_supported
-      self.assertTrue(qualified_gm(cp))
-      self.assertTrue(lane_centering_supported(cp))
+      self.assertEqual(qualified_gm(cp), cp.carFingerprint != CAR.BUICK_LACROSSE)
+      self.assertEqual(lane_centering_supported(cp), cp.carFingerprint != CAR.BUICK_LACROSSE)
       ci = CarInterface(cp)
       preferences.configure_controller(ci)
       configure_controller(ci, params)
@@ -145,19 +185,23 @@ class TestVoltAlternateBrake(unittest.TestCase):
       from openpilot.selfdrive.car.car_events import CarEvents, EventName
       events = CarEvents(cp)
       sdgm = cp.carFingerprint == CAR.CHEVROLET_VOLT_2019
+      ice = cp.carFingerprint == CAR.BUICK_LACROSSE
+      from opendbc.car.gm.values import is_volt_camera_removed
+      removed = is_volt_camera_removed(cp)
       seen_retained = seen_normal_credit_withdrawn = False
       seen_hold = seen_near_stop = seen_normal = seen_feedback = False
       last_sent_hold = False
-      for tick in range(1570 if camera else 1000):
+      for tick in range(1570 if camera or removed else 1000):
         now = 1_000_000_000 + tick * 10_000_000
         moving = (tick < 309 and not 290 <= tick < 300) or 320 <= tick < 340 or 540 <= tick < 870 or 1000 <= tick < 1350
-        regen = 360 <= tick < 370
+        regen = not ice and 360 <= tick < 370
         unavailable = 490 <= tick < 500
         gas = 470 <= tick < 480
         unknown_gear = 480 <= tick < 490
         stale_brake_status = 920 <= tick < 960
         main_off = 910 <= tick < 915
         camera_missing = camera and 1400 <= tick < 1550
+        analog_missing = removed and 1400 <= tick < 1550
         if tick == 500:
           params.put_bool("GMAutoHold", False, block=True)
         if tick == 540:
@@ -168,7 +212,7 @@ class TestVoltAlternateBrake(unittest.TestCase):
         speed = raw_wheel * .0311 / 3.6 if raw_wheel is not None else 2. if moving else 0.
         _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=speed,
                      brake=not moving and not 880 <= tick < 900, gas=gas, regen=regen,
-                     camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not camera_missing)
+                     camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not removed and not camera_missing)
         rx = [message for message in rx if message[0] not in (0xBE, 0xF1, 0x1C4, 0x232, 0x1E1, 0x1F5, 0xC9)]
         brake_name, brake_signal = (("ECMAcceleratorPos", "BrakePedalPos") if accelerator else
                                     ("EBCMBrakePedalPosition", "BrakePedalPosition"))
@@ -189,8 +233,15 @@ class TestVoltAlternateBrake(unittest.TestCase):
         if camera:
           rx = [message for message in rx if message[0] != 0xBE]
           rx.append(packer.make_can_msg("ECMAcceleratorPos", 0, {"BrakePedalPos": 20 if not moving else 0}))
-        if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not camera_missing:
+        if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not removed and not camera_missing:
           rx.append(packer.make_can_msg("ASCMActiveCruiseControlStatus", 2, {"ACCCruiseState": 3, "ACCSpeedSetpoint": 60}))
+        if analog_missing:
+          rx = [message for message in rx if message[0] != (0xBE if accelerator else 0xF1)]
+          wrong_name, wrong_signal = (("EBCMBrakePedalPosition", "BrakePedalPosition") if accelerator else
+                                      ("ECMAcceleratorPos", "BrakePedalPos"))
+          rx.append(packer.make_can_msg(wrong_name, 0, {wrong_signal: 200}))
+        if ice:
+          rx = [message for message in rx if message[0] != 0xBD]
         if stale_brake_status:
           rx = [message for message in rx if message[0] != 0x232]
         ci.update([(now - 1_000_000, rx)])
@@ -200,15 +251,15 @@ class TestVoltAlternateBrake(unittest.TestCase):
           self.assertAlmostEqual(out.wheelSpeeds.rl, speed, places=6)
           self.assertAlmostEqual(out.wheelSpeeds.rr, speed, places=6)
           self.assertGreater(out.wheelSpeeds.rl, 0.)
-        if not stale_brake_status and not camera_missing:
+        if not stale_brake_status and not camera_missing and not analog_missing:
           self.assertTrue(out.canValid, tick)
           self.assertFalse(out.canTimeout)
-        if camera and 1510 <= tick < 1550:
+        if (camera or removed) and 1510 <= tick < 1550:
           self.assertFalse(out.canValid)
         if unavailable:
           self.assertTrue(out.accFaulted)
         physical_withdrawal = (moving or regen or unavailable or gas or unknown_gear or main_off or
-                               950 <= tick < 960 or camera and 1510 <= tick < 1550)
+                               950 <= tick < 960 or (camera or removed) and 1510 <= tick < 1550)
         if physical_withdrawal or not out.standstill:
           self.assertFalse(out.brakeHoldActive)
         elif (last_sent_hold and not normal_long and not 500 <= tick < 540 and out.canValid and
@@ -262,9 +313,9 @@ class TestVoltAlternateBrake(unittest.TestCase):
           self.assertFalse(any(message[0] == 0x2CB for message in commands))
           self.assertGreaterEqual(tick, 340)
           self.assertFalse(regen or unavailable or gas or unknown_gear or main_off)
-          self.assertFalse(370 <= tick < 470)
-        if (moving or regen or unavailable or gas or unknown_gear or main_off or 370 <= tick < 470 or
-            525 <= tick < 540 or 950 <= tick < 960 or camera and 1510 <= tick < 1550):
+          self.assertFalse(not ice and 370 <= tick < 470)
+        if (moving or regen or unavailable or gas or unknown_gear or main_off or not ice and 370 <= tick < 470 or
+            525 <= tick < 540 or 950 <= tick < 960 or (camera or removed) and 1510 <= tick < 1550):
           self.assertFalse(hold)
         if 290 <= tick < 300 or 309 <= tick < 320:
           self.assertFalse(hold)

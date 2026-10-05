@@ -17,8 +17,8 @@ class AutoHoldConfig:
 
 
 def config_for(cp) -> AutoHoldConfig:
-  from opendbc.car.gm.values import is_volt_auto_hold, is_volt_sdgm_profile
-  return AutoHoldConfig(100, .25) if is_volt_auto_hold(cp) and is_volt_sdgm_profile(cp, longitudinal=True) else AutoHoldConfig()
+  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_sdgm_profile
+  return AutoHoldConfig(100, .25) if is_gm_auto_hold(cp) and is_volt_sdgm_profile(cp, longitudinal=True) else AutoHoldConfig()
 
 
 def stopped_for_hold(cs, config: AutoHoldConfig, sent_hold: bool) -> bool:

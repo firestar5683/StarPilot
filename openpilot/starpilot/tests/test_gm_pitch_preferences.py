@@ -78,7 +78,7 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     settings = (("VoltSNG", "volt_sng", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
                                         CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)),
                 ("GMAutoHold", "gm_auto_hold", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
-                                              CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)))
+                                              CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019, CAR.BUICK_LACROSSE)))
     for key, preference, identities in settings:
       for identity in identities:
         with self.subTest(key=key, identity=identity):
@@ -89,6 +89,10 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
             return next(r for r in owner.snapshot(FeaturePage.VEHICLE, parked=True, system_long=False,
                         lateral_context=False, metric=False).rows if r.key == key)
           self.assertTrue(row().available)
+          self.assertTrue(any(r.page == FeaturePage.VEHICLE for r in owner.snapshot(
+            FeaturePage.HUB, parked=True, system_long=False, lateral_context=False, metric=False).rows))
+          if key == "GMAutoHold":
+            self.assertEqual("regen paddle" in row().reason, identity != CAR.BUICK_LACROSSE)
           change = row_change(row())
           assert change is not None
           self.assertTrue(owner.apply(replace(change, confirmation=True)))

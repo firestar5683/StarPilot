@@ -21,6 +21,7 @@ inline bool gm_aol_param(uint16_t param) {
     case 0xC110U: case 0xC111U: case 0xC120U: case 0xC121U:
     case 0xC130U: case 0xC131U: case 0xC140U: case 0xC141U:
     case 0xC150U: case 0xC151U:
+    case 0xC1D1U: case 0xC1D3U:
       return true;
     default:
       return false;
