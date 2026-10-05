@@ -46,6 +46,21 @@ class SettingsGatewayTest(unittest.TestCase):
   def page(self, name):
     return self.gateway.page(name, self.session, self.generation)
 
+  def test_pcm_cruise_long_owner_can_configure_slc_without_custom_cruise_authority(self):
+    cp = self.context.value.cp
+    cp.carFingerprint = "TOYOTA_HIGHLANDER_TSS2"
+    cp.pcmCruise = True
+    page = self.page("slc")
+    index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Adopt fixed offsets")
+    self.assertTrue(page["rows"][index]["available"])
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation)
+    self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
+    row = next(row for row in self.page("slc")["rows"] if row["label"] == "Speed Limit Controller")
+    self.assertTrue(row["available"])
+    cp.openpilotLongitudinalControl = False
+    row = next(row for row in self.page("slc")["rows"] if row["label"] == "Speed Limit Controller")
+    self.assertFalse(row["available"])
+
   def test_row_revision_is_stable_only_for_same_source_vehicle_and_session(self):
     first, second = self.page("lane"), self.page("lane")
     self.assertNotEqual(first["view"], second["view"])
@@ -1155,7 +1170,7 @@ class LiveContextTest(unittest.TestCase):
     self.params.put_bool("IsOffroad", True, block=True)
     self.messages.pandas[0].ignitionCan = True
     self.assertTrue(self.source.sample().parked)  # Effective Offroad permits configuration with ignition on.
-    self.assertFalse(self.source.parked())       # Installation/physical parked proof stays separate.
+    self.assertTrue(self.source.parked())       # Operations also follow the effective offroad state.
     self.messages.pandas[0].ignitionCan = False
     self.messages.device.started = True
     self.assertFalse(self.source.sample().parked)
@@ -1171,7 +1186,7 @@ class LiveContextTest(unittest.TestCase):
 
   def test_wait_never_admits_missing_or_known_unsafe_evidence(self):
     messages = FakeMessages(self.mono, self.boot)
-    messages.pandas[0].ignitionCan = True
+    messages.device.started = True
     source = LiveContextSource(self.params, messages, mono_clock=lambda: self.mono,
                                boot_clock=lambda: self.boot)
     self.assertFalse(source.parked())
@@ -1201,11 +1216,11 @@ class LiveContextTest(unittest.TestCase):
     self.assertFalse(source.parked())
     self.assertEqual(len(messages.calls), 3)
 
-  def test_wait_stops_on_ignition_transition(self):
+  def test_wait_allows_ignition_when_effective_state_is_offroad(self):
     messages = self.queued_messages(lambda m: setattr(m.pandas[0], "ignitionLine", True))
     source = LiveContextSource(self.params, messages, mono_clock=lambda: self.mono,
                                boot_clock=lambda: self.boot, wait_clock=lambda: self.wait_now)
-    self.assertFalse(source.parked())
+    self.assertTrue(source.parked())
     self.assertEqual(len(messages.calls), 3)
 
   def test_wait_rejects_stale_invalid_then_accepts_new_valid_frames(self):

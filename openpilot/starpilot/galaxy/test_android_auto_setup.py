@@ -113,7 +113,7 @@ def test_forced_offroad_with_powered_car_admits_setup_and_rechecks_authority(tmp
                             identity_status=lambda: {'installed': True}, install_ready=lambda: True,
                             service_ready=lambda: True, bluetooth_enabled=lambda: True,
                             set_enabled=lambda enabled: state.update(enabled=enabled))
-  assert not authority.parked()  # Strict installation authority still rejects ignition.
+  assert authority.parked()  # All offroad operations use the effective drive state.
   assert service.status(state['session'])['parked'] is True
   with pytest.raises(SetupRejected, match='session expired'):
     service.enable(('galaxy', 'expired'), True)

@@ -769,6 +769,7 @@ class FeatureSettingsOwner:
       title = "Wheel Controls"
       rows.extend(self.wheel.rows())
     elif page == FeaturePage.SLC:
+      system_long = (system_long if self.vehicle_params() is None else self.longitudinal_available()) and self.authority("slc")
       allowed = configurable and system_long
       offsets_ready, offset_rows = self.slc_offsets.rows(allowed, repair_allowed=parked and allowed)
       control, _, _ = self._value("SpeedLimitController")

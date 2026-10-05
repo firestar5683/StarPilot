@@ -42,6 +42,19 @@ class TestVehicleConfiguration(unittest.TestCase):
     from opendbc.car.gm.values import GMFlags
     self.assertFalse(cp.flags & GMFlags.PEDAL_LONG)
 
+  def test_passive_physical_configuration_is_only_cloned_for_saved_editor(self):
+    self.select('HYUNDAI_IONIQ_6')
+    cp, _ = configuration_context(self.params, None, None)
+    physical = cp.as_builder()
+    physical.passive = True
+    returned, token = configuration_context(self.params, physical.as_reader(), b'physical-cache')
+    self.assertFalse(returned.passive)
+    self.assertTrue(physical.passive)
+    self.assertTrue(token.endswith(b'physical-cache'))
+    physical.dashcamOnly = True
+    refused, _ = configuration_context(self.params, physical.as_reader(), b'unsupported-cache')
+    self.assertTrue(refused.dashcamOnly)
+
   def test_matching_physical_configuration_is_preserved(self):
     self.select('HYUNDAI_IONIQ_6')
     cp, _ = configuration_context(self.params, None, None)

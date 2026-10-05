@@ -9,16 +9,25 @@ STARTUP_KEYS = ('AlphaLongitudinalEnabled', 'IsReleaseBranch', 'OpenpilotEnabled
                 'HondaBoschARadar', 'NAPPedalEnabled', 'NAPRadarEnabled', 'NAPRadarBehindNosecone')
 
 
+def _editor_cp(cp):
+  if cp is None or not getattr(cp, 'passive', False):
+    return cp
+  from opendbc.car.structs import car
+  copied = car.CarParams(**cp.to_dict())
+  copied.passive = False
+  return copied.as_reader()
+
+
 def configuration_context(params, physical_cp, physical_raw):
   selection = read_selection(params)
   if not selection.readable or not selection.valid:
     return None, None
   if selection.platform is None:
-    return physical_cp, physical_raw
+    return _editor_cp(physical_cp), physical_raw
   saved = tuple((key, *read_saved(params, key, 512)) for key in STARTUP_KEYS)
   revision = hashlib.sha256(repr((selection.raw, saved)).encode()).digest()
   if physical_cp is not None and physical_cp.carFingerprint == selection.platform:
-    return physical_cp, b'vehicle-configuration:' + revision + (physical_raw or b'')
+    return _editor_cp(physical_cp), b'vehicle-configuration:' + revision + (physical_raw or b'')
   cp, raw = _factory_context(params, selection.platform, saved)
   if read_selection(params) != selection or _startup_snapshot(params) != saved:
     return None, None
@@ -92,13 +101,7 @@ def settings_configuration(params, physical_cp, physical_raw):
     editing_saved = cp is not None
   if cp is None or _startup_snapshot(params) != saved:
     return None, token, False, False
-  values = {key: (raw, readable) for key, raw, readable in saved}
-  requested_long = (values['AlphaLongitudinalEnabled'] == (b'1', True) and
-                    values['IsReleaseBranch'] in ((None, True), (b'0', True)) and
-                    values['OpenpilotEnabledToggle'] == (b'1', True) and
-                    values['SafeMode'] in ((None, True), (b'0', True)) and
-                    values['DisableOpenpilotLongitudinal'] in ((None, True), (b'0', True)))
   from openpilot.starpilot.car.hyundai.settings import supports_long_configuration
-  configurable_long = bool(supports_long_configuration(cp) and requested_long)
+  configurable_long = bool(supports_long_configuration(cp))
   revision = hashlib.sha256(repr(saved).encode()).digest()
   return cp, b'settings-configuration:' + revision + (token or b''), editing_saved, configurable_long

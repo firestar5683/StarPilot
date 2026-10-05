@@ -635,7 +635,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
     ui.sm.logMonoTime["vehicleParameters"] = NOW - 1_000_000_000
     self.assertFalse(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.torque_source_available)
 
-  def test_slc_controls_require_fresh_system_long_non_pcm_authority(self):
+  def test_slc_controls_require_fresh_system_long_independent_of_pcm_cruise(self):
     ui = ui_fake()
     ui.CP = NS(carFingerprint="", openpilotLongitudinalControl=True, pcmCruise=False)
     ui.sm.messages["carState"].canTimeout = False
@@ -645,8 +645,10 @@ class TestRuntimeSnapshot(unittest.TestCase):
     ui.sm.put("controlsState", NS(longControlState="pid"))
     self.assertTrue(RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW).onroad.slc_system_long_available)
     ui.CP.pcmCruise = True
+    self.assertTrue(RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW).onroad.slc_system_long_available)
+    ui.CP.openpilotLongitudinalControl = False
     self.assertFalse(RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW).onroad.slc_system_long_available)
-    ui.CP.pcmCruise = False
+    ui.CP.openpilotLongitudinalControl = True
     ui.sm.messages["carState"].canValid = False
     self.assertFalse(RuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD, now_ns=NOW).onroad.slc_system_long_available)
     ui.sm.messages["carState"].canValid = True
@@ -690,15 +692,15 @@ class TestParkedClockDomains(unittest.TestCase):
       self.assertEqual(self.adapter._last_mode, ShellMode.ONROAD)
       conditional.assert_not_called()
       self.ui.sm['pandaStates'][0].ignitionCan = True
-      self.assertFalse(self.adapter.confirmed_offroad())
+      self.assertTrue(self.adapter.confirmed_offroad())
 
-  def test_connectivity_offroad_with_ignition_preserves_strict_vehicle_gate(self):
+  def test_forced_offroad_unlocks_settings_and_connectivity_with_ignition(self):
     self.ui.sm['pandaStates'][0].ignitionCan = True
     self.assertTrue(self.adapter.connectivity_allowed())
-    self.assertFalse(self.adapter.confirmed_offroad())
+    self.assertTrue(self.adapter.confirmed_offroad())
     snapshot = self.adapter.build(ShellMode.SETTINGS, Destination.NETWORK, now_ns=self.mono)
     self.assertTrue(snapshot.settings.destination(Destination.NETWORK).available)
-    self.assertFalse(snapshot.device.offroad)
+    self.assertTrue(snapshot.device.offroad)
     self.ui.started = True
     self.assertFalse(self.adapter.connectivity_allowed())
     self.ui.started = False
@@ -741,7 +743,7 @@ class TestParkedClockDomains(unittest.TestCase):
     self.boot += 100_000_000
     self.refresh_both()
     self.assertTrue(self.adapter.connectivity_allowed())
-    self.assertFalse(self.adapter.confirmed_offroad())
+    self.assertTrue(self.adapter.confirmed_offroad())
 
   def test_fresh_publishers_use_their_own_clock_domains(self):
     self.assertIsNotNone(current_message(self.ui.sm, "pandaStates", self.mono, boot_now_ns=self.boot))
@@ -766,14 +768,12 @@ class TestParkedClockDomains(unittest.TestCase):
     self.ui.sm.updated["deviceState"] = True
     self.assertTrue(self.parked())
 
-  def test_missing_invalid_ignited_onroad_and_future_sources_deny(self):
+  def test_missing_invalid_onroad_and_future_sources_deny(self):
     self.assertTrue(self.parked())
     cases = ((lambda: self.ui.sm.seen.__setitem__("pandaStates", False),
               lambda: self.ui.sm.seen.__setitem__("pandaStates", True)),
              (lambda: self.ui.sm.valid.__setitem__("deviceState", False),
               lambda: self.ui.sm.valid.__setitem__("deviceState", True)),
-             (lambda: setattr(self.ui.sm["pandaStates"][0], "ignitionCan", True),
-              lambda: setattr(self.ui.sm["pandaStates"][0], "ignitionCan", False)),
              (lambda: setattr(self.ui, "started", True), lambda: setattr(self.ui, "started", False)),
              (lambda: self.ui.sm.logMonoTime.__setitem__("deviceState", self.mono + 1_000_000),
               lambda: self.refresh_both()),
