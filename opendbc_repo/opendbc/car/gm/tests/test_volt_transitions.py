@@ -39,6 +39,24 @@ def volt_gateway_pedal_params(*, camera=True, be=True, pedal=True, gear=True, re
   return CarInterface.get_params(CAR.CHEVROLET_VOLT, fingerprint, [], alpha, release, False)
 
 
+
+def volt_ascm_pedal_params(*, be=True, radar=True, sascm=False, alpha=False, release=False, pedal=True, gear=True, be_length=6):
+  from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7, 0x232: 8})
+  fingerprint[0][0xBE if be else 0xF1] = be_length if be else 6
+  if pedal:
+    fingerprint[0][0x201] = 6
+  if gear:
+    fingerprint[0][0x1F5] = 8
+  if sascm:
+    fingerprint[0][0x2FF] = 8
+  fingerprint[2].update({0x320: 6, 0x180: 4, 0x370: 6})
+  if radar:
+    fingerprint[1][RADAR_HEADER_MSG] = 8
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_ASCM, fingerprint, [], alpha, release, False)
+
+
 @dataclass(frozen=True)
 class Phase:
   name: str
@@ -448,6 +466,94 @@ class TestVoltGatewayPedalProfiles(unittest.TestCase):
                 self.assertEqual(buttons, [])
               cancellations.extend(buttons)
           self.assertTrue(cancellations)
+
+
+class TestVoltAscmPedalProfiles(unittest.TestCase):
+  def test_stale_physical_source_withdraws_dashboard_while_enabled(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm import gmcan
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    cp = volt_ascm_pedal_params()
+    ci = CarInterface(cp)
+    ci.CC.camera_pedal_input = SimpleNamespace(update=lambda now: True)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    command = structs.CarControl()
+    command.enabled = True
+    command.longActive = True
+    command.actuators.accel = .2
+    dashboards = []
+    healthy_dashboards = []
+    for tick in range(180):
+      now = 1_000_000_000 + tick * 10_000_000
+      frames = [frame for frame in pt_frames(packer, counter=tick % 4, acc_cruise=2)
+                if frame[0] not in (0xF1, 0x184) or tick < 40]
+      frames += [packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                 packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                 packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {})]
+      if tick % 2 == 0:
+        sensor = bytearray.fromhex('0279012a0000')
+        sensor[4] = tick // 2 % 16
+        sensor[5] = gmcan.pedal_crc(sensor)
+        frames.append((0x201, bytes(sensor), 0))
+      ci.update([(now, frames)])
+      _, sends = ci.apply(command.as_reader(), now)
+      if 32 <= tick < 40:
+        healthy_dashboards += [frame for frame in sends if frame[0] == 0x370]
+      if tick >= 160:
+        dashboards += [frame for frame in sends if frame[0] == 0x370]
+    self.assertTrue(healthy_dashboards)
+    self.assertTrue(all(frame[1][2] & 0x80 for frame in healthy_dashboards))
+    self.assertTrue(command.enabled)
+    self.assertTrue(dashboards)
+    self.assertTrue(all(not (frame[1][2] & 0x80) for frame in dashboards))
+
+  def test_actual_factory_admits_hardware_without_sascm_and_preserves_tune(self):
+    from opendbc.car.gm.values import (camera_acc_pedal_profile, apply_gm_auto_hold, apply_volt_one_pedal,
+                                      is_gm_auto_hold, is_volt_one_pedal, is_volt_ascm_longitudinal, CarControllerParams)
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.camera import policy_for
+    for be in (True, False):
+      for radar in (False, True):
+        index = int(radar) * 2 + int(not be)
+        for sascm, alpha in ((False, False), (False, True), (True, False), (True, True)):
+          for hold, one, start in ((False, False, 0xE400), (True, False, 0xE420),
+                                   (False, True, 0xE440), (True, True, 0xE460)):
+            with self.subTest(be=be, radar=radar, sascm=sascm, alpha=alpha, hold=hold, one=one):
+              cp = volt_ascm_pedal_params(be=be, radar=radar, sascm=sascm, alpha=alpha)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE400 + index)
+              self.assertEqual(cp.alphaLongitudinalAvailable, sascm)
+              apply_gm_auto_hold(cp, hold)
+              apply_volt_one_pedal(cp, one, hold)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, start + index)
+              profile = camera_acc_pedal_profile(cp)
+              self.assertEqual((profile.topology, profile.radar, profile.removed), ("ascm", radar, False))
+              self.assertTrue(is_volt_ascm_longitudinal(cp))
+              self.assertEqual(is_gm_auto_hold(cp), hold or one)
+              self.assertEqual(is_volt_one_pedal(cp), one)
+              self.assertEqual(list(cp.longitudinalTuning.kiBP), [5., 35.])
+              self.assertEqual(list(cp.longitudinalTuning.kiV), [.5, .5])
+              policy = policy_for(cp)
+              self.assertEqual((policy.kp, policy.starting_speed, policy.stopping_decel_rate), (0., .25, 1.))
+              self.assertEqual(policy.feedforward(1., 12., 0.), 1.)
+              self.assertEqual(CarInterface.get_pid_accel_limits(cp, 0., 0.),
+                               (CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+              params = CarControllerParams(cp)
+              self.assertEqual((params.MAX_GAS, params.INACTIVE_REGEN), (2041., -650.))
+              prepare_disable_longitudinal(cp, True)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE410 + index)
+              self.assertFalse(cp.openpilotLongitudinalControl or cp.pcmCruise or cp.autoResumeSng)
+              apply_gm_auto_hold(cp, True)
+              apply_volt_one_pedal(cp, True, True)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE410 + index)
+        if be:
+          for length in (6, 7, 8):
+            self.assertEqual(volt_ascm_pedal_params(radar=radar, be_length=length).safetyConfigs[0].safetyParam,
+                             0xE400 + index)
+          self.assertTrue(volt_ascm_pedal_params(radar=radar, be_length=5).dashcamOnly)
+        for options in ({"release": True}, {"gear": False}):
+          cp = volt_ascm_pedal_params(be=be, radar=radar, **options)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE410 + index)
 
 
 class TestVoltCameraLaunchCurrentSchema(unittest.TestCase):

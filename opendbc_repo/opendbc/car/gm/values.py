@@ -147,6 +147,11 @@ def gm_control_word(cp: CarParams) -> int:
     profile = camera_acc_pedal_profile(cp)
     if profile is not None:
       if profile.volt:
+        if profile.topology == "ascm":
+          word = 0x4207 if profile.longitudinal else 0x205
+          word |= int(GMSafetyFlags.BRAKE_C9) if profile.brake_source == BrakeSource.F1 else 0
+          word |= int(GMSafetyFlags.ASCM_RADAR) if profile.radar else 0
+          return word | (0x80 if profile.auto_hold or profile.one_pedal else 0)
         if profile.topology == "gateway":
           return (0xC084 if profile.brake_source == BrakeSource.F1 else 0x4084) if (
             profile.auto_hold or profile.one_pedal) else (0xC004 if profile.brake_source == BrakeSource.F1 else 0x4004)
@@ -299,8 +304,11 @@ def apply_gm_auto_hold(cp: CarParams, enabled: bool) -> None:
 
 
 def is_volt_ascm_longitudinal(cp: CarParams) -> bool:
-  """Admit only the observed SASCM Volt with explicit development longitudinal control."""
+  """Admit the exact ASCM Volt longitudinal and physical interceptor configurations."""
   try:
+    profile = camera_acc_pedal_profile(cp)
+    if profile is not None and profile.topology == "ascm":
+      return profile.longitudinal
     required = int(GMSafetyFlags.EV | GMSafetyFlags.HW_CAM | GMSafetyFlags.HW_CAM_LONG |
                    GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.VOLT_LONG)
     optional = int(GMSafetyFlags.ASCM_BRAKE_C9 | GMSafetyFlags.ASCM_RADAR)
@@ -877,7 +885,7 @@ ORDINARY_CAMERA_ALPHA_CAR = frozenset((CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_EQ
 ORDINARY_CAMERA_CAR = ORDINARY_CAMERA_ALPHA_CAR | frozenset((CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA))
 
 
-CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR | frozenset((CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT))
+CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR | frozenset((CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM))
 
 
 class BrakeSource(Enum):
@@ -894,9 +902,15 @@ class CameraAccPedalProfile:
   auto_hold: bool = False
   one_pedal: bool = False
   topology: str = "camera"
+  radar: bool = False
 
 
 CAMERA_ACC_PEDAL_PROFILES = MappingProxyType({
+  **{start + index: CameraAccPedalProfile(False, BrakeSource.F1 if index % 2 else BrakeSource.BE,
+                                       start != 0xE410, True, hold, one, "ascm", index >= 2)
+     for start, hold, one in ((0xE400, False, False), (0xE410, False, False),
+                              (0xE420, True, False), (0xE440, False, True), (0xE460, True, True))
+     for index in range(4)},
   **{start + index: CameraAccPedalProfile(index >= 2, BrakeSource.F1 if index % 2 else BrakeSource.BE,
                                        start != 0xE310, True, hold, one, "gateway")
      for start, hold, one in ((0xE300, False, False), (0xE310, False, False),
@@ -924,7 +938,9 @@ def volt_camera_pedal_word(profile, auto_hold: bool, one_pedal: bool) -> int:
     start = 0xE210
   if profile.topology == "gateway":
     start += 0x100
-  return start + int(profile.removed) * 2 + int(profile.brake_source == BrakeSource.F1)
+  elif profile.topology == "ascm":
+    start += 0x200
+  return start + int(profile.radar if profile.topology == "ascm" else profile.removed) * 2 + int(profile.brake_source == BrakeSource.F1)
 
 
 def camera_acc_pedal_profile(cp):
@@ -936,16 +952,18 @@ def camera_acc_pedal_profile(cp):
       return None
     flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if profile.removed else 0) |
                 (GMFlags.NO_ACCELERATOR_POS_MSG if profile.brake_source == BrakeSource.F1 else 0))
-    identity = CAR.CHEVROLET_VOLT if profile.topology == "gateway" else CAR.CHEVROLET_VOLT_CAMERA
+    identity = (CAR.CHEVROLET_VOLT if profile.topology == "gateway" else
+                CAR.CHEVROLET_VOLT_ASCM if profile.topology == "ascm" else CAR.CHEVROLET_VOLT_CAMERA)
     if (cp.brand == 'gm' and cp.carFingerprint in (frozenset((identity,)) if profile.volt else ORDINARY_CAMERA_CAR) and
         cp.transmissionType == (CarParams.TransmissionType.direct if profile.volt else CarParams.TransmissionType.automatic) and
         cp.networkLocation == CarParams.NetworkLocation.fwdCamera and (profile.volt or cp.radarUnavailable) and
         (profile.topology != "gateway" or not cp.radarUnavailable) and
+        (profile.topology != "ascm" or profile.radar != cp.radarUnavailable) and
         not cp.passive and not cp.dashcamOnly and not cp.notCar and int(cp.flags) & ~int(GMFlags.HAS_BSM) == flags and
         cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
         bool(cp.openpilotLongitudinalControl) == profile.longitudinal and
-        bool(cp.pcmCruise) == (not profile.longitudinal and profile.topology != "gateway") and
-        (not profile.volt or not profile.longitudinal or cp.alphaLongitudinalAvailable)):
+        bool(cp.pcmCruise) == (not profile.longitudinal and profile.topology == "camera") and
+        (not profile.volt or not profile.longitudinal or profile.topology == "ascm" or cp.alphaLongitudinalAvailable)):
       return profile
   except (AttributeError, IndexError, TypeError, ValueError):
     pass

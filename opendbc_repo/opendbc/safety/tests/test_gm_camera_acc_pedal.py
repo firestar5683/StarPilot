@@ -42,10 +42,13 @@ class TestGmCameraAccPedal(unittest.TestCase):
     self.rx(0x1E1, bytes(7))
     if analog:
       alternate = self.word in (0xE101, 0xE103, 0xE111, 0xE113,
+                                0xE401, 0xE403, 0xE411, 0xE413, 0xE421, 0xE423, 0xE441, 0xE443, 0xE461, 0xE463,
                                 0xE301, 0xE303, 0xE311, 0xE313, 0xE321, 0xE323, 0xE341, 0xE343, 0xE361, 0xE363,
                                 0xC171, 0xE201, 0xE203, 0xE211, 0xE213, 0xE221, 0xE223, 0xE241, 0xE243, 0xE261, 0xE263)
       gateway_f1 = self.word in (0xE301, 0xE303, 0xE321, 0xE323, 0xE341, 0xE343, 0xE361, 0xE363)
-      self.rx(0xF1 if alternate else 0xBE, bytes([0, 6 if brake and gateway_f1 else 0]) + bytes(4))
+      ascm_be = self.word in (0xE400, 0xE402, 0xE410, 0xE412, 0xE420, 0xE422, 0xE440, 0xE442, 0xE460, 0xE462)
+      analog_brake = 6 if brake and gateway_f1 else (8 if brake and ascm_be else 0)
+      self.rx(0xF1 if alternate else 0xBE, bytes([0, analog_brake]) + bytes(4))
     engine = bytearray(8)
     engine[1] = acc << 5
     engine[5] = int(gas)
@@ -76,7 +79,9 @@ class TestGmCameraAccPedal(unittest.TestCase):
 
   def gas(self, demand=None, idx=0, enabled=True):
     if demand is None:
-      demand = -650 if self.word in tuple(base + i for base in (0xE300, 0xE310, 0xE320, 0xE340, 0xE360) for i in range(4)) else -500
+      volt_legacy = tuple(base + i for base in (0xE300, 0xE310, 0xE320, 0xE340, 0xE360,
+                                               0xE400, 0xE410, 0xE420, 0xE440, 0xE460) for i in range(4))
+      demand = -650 if self.word in volt_legacy else -500
     return self.packet(gmcan.create_gas_regen_command(self.packer, 0, demand, idx, enabled, False))
 
   def brake(self, demand=0, idx=0):
@@ -95,7 +100,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
     self.engage()
 
   def test_volt_gateway_exact_compositions_and_neutral_codec(self):
-    words = tuple(base + i for base in (0xE300, 0xE320, 0xE340, 0xE360) for i in range(4))
+    words = tuple(base + i for base in (0xE300, 0xE320, 0xE340, 0xE360, 0xE400, 0xE420, 0xE440, 0xE460) for i in range(4))
     for word in words:
       self.init(word)
       if self.release:
@@ -114,7 +119,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
       self.assertTrue(self.safety.safety_tx_hook(self.pedal(0, idx=1)))
       self.assertTrue(self.safety.safety_tx_hook(self.gas(100, idx=1)))
       self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x315, 2, bytes(5))))
-    for word in (0xE304, 0xE314, 0xE324, 0xE344, 0xE364):
+    for word in (0xE304, 0xE314, 0xE324, 0xE344, 0xE364, 0xE404, 0xE414, 0xE424, 0xE444, 0xE464):
       self.ready(word)
       self.assertFalse(self.safety.safety_tx_hook(self.pedal()))
 
@@ -136,10 +141,58 @@ class TestGmCameraAccPedal(unittest.TestCase):
     self.rx(0xF1, bytes([0, 6]) + bytes(4))
     self.assertTrue(self.safety.get_brake_pressed_prev())
 
+  def test_volt_ascm_forbidden_adas_outputs(self):
+    for word in (0xE410, 0xE411, 0xE412, 0xE413, 0xE400, 0xE401, 0xE402, 0xE403):
+      self.init(word)
+      for addr, bus, length in ((0x409, 0, 7), (0x40A, 0, 7), (0xA1, 1, 7), (0x306, 1, 8), (0x308, 1, 7), (0x310, 1, 8)):
+        self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, bytes(length))))
+
+  def test_volt_ascm_analog_dlc_and_profile_reset(self):
+    for length in (6, 7, 8):
+      self.init(0xE410)
+      self.observations(sensor=False, gear_source=False, analog=False)
+      self.rx(0xBE, bytes(length))
+      self.safety.safety_tick()
+      self.assertTrue(self.safety.safety_config_valid())
+      if not self.release:
+        self.init(0xE400)
+        self.observations(analog=False)
+        self.rx(0xBE, bytes(length))
+        self.safety.safety_tick()
+        self.engage()
+        self.assertTrue(self.safety.safety_tx_hook(self.gas(100)))
+    # Alternate BE layouts are not inherited by the next gateway owner.
+    self.init(0xE310)
+    self.observations(sensor=False, gear_source=False, analog=False)
+    self.rx(0xBE, bytes(8))
+    self.safety.safety_tick()
+    self.assertFalse(self.safety.safety_config_valid())
+    self.rx(0xBE, bytes(6))
+    self.safety.safety_tick()
+    self.assertTrue(self.safety.safety_config_valid())
+
+  def test_volt_ascm_selected_physical_brake(self):
+    if self.release:
+      self.skipTest("Active Volt interceptor profiles are DEBUG-only")
+    for word in (0xE400, 0xE402):
+      self.ready(word)
+      self.rx(0xC9, bytes([0, 0, 0, 32, 0, 1, 0, 0]))
+      self.assertFalse(self.safety.get_brake_pressed_prev())
+      self.rx(0xBE, bytes([0, 7]) + bytes(4))
+      self.assertFalse(self.safety.get_brake_pressed_prev())
+      self.rx(0xBE, bytes([0, 8]) + bytes(4))
+      self.assertTrue(self.safety.get_brake_pressed_prev())
+    for word in (0xE401, 0xE403):
+      self.ready(word)
+      self.rx(0xF1, bytes([0, 100]) + bytes(4))
+      self.assertFalse(self.safety.get_brake_pressed_prev())
+      self.observations(brake=True)
+      self.assertTrue(self.safety.get_brake_pressed_prev())
+
   def test_volt_gateway_gear_cadence_and_expiry(self):
     if self.release:
       self.skipTest("Active Volt interceptor profiles are DEBUG-only")
-    for word in (0xE300, 0xE301, 0xE302, 0xE303):
+    for word in (0xE300, 0xE301, 0xE302, 0xE303, 0xE400, 0xE401, 0xE402, 0xE403):
       self.ready(word)
       for tick in range(220):
         self.observations(gear_source=tick % 11 == 0)
@@ -157,7 +210,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
       self.assertTrue(self.safety.safety_tx_hook(self.gas(100)))
 
   def test_volt_gateway_stock_no_pedal_or_gear_authority(self):
-    for word in (0xE310, 0xE311, 0xE312, 0xE313):
+    for word in (0xE310, 0xE311, 0xE312, 0xE313, 0xE410, 0xE411, 0xE412, 0xE413):
       self.init(word)
       self.observations(sensor=False, gear_source=False)
       self.engage()
@@ -166,7 +219,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
         self.assertFalse(self.safety.safety_tx_hook(frame))
 
   def test_volt_gateway_stock_cancel_physical_credit(self):
-    for word in (0xE310, 0xE311, 0xE312, 0xE313):
+    for word in (0xE310, 0xE311, 0xE312, 0xE313, 0xE410, 0xE411, 0xE412, 0xE413):
       self.init(word)
       self.observations(sensor=False, gear_source=False)
       neutral = gmcan.create_buttons(self.packer, 0, 1, 1)
@@ -202,7 +255,8 @@ class TestGmCameraAccPedal(unittest.TestCase):
     if self.release:
       self.skipTest("Active Volt interceptor profiles are DEBUG-only")
     for word in (0xE220, 0xE221, 0xE222, 0xE223, 0xE260, 0xE261, 0xE262, 0xE263,
-                 0xE320, 0xE321, 0xE322, 0xE323, 0xE360, 0xE361, 0xE362, 0xE363):
+                 0xE320, 0xE321, 0xE322, 0xE323, 0xE360, 0xE361, 0xE362, 0xE363,
+                 0xE420, 0xE421, 0xE422, 0xE423, 0xE460, 0xE461, 0xE462, 0xE463):
       for fault in ('gas', 'adc', 'stale'):
         self.init(word)
         for _ in range(320):

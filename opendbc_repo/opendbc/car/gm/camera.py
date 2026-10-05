@@ -27,7 +27,8 @@ class CameraPedalLongitudinalPolicy(CameraLongitudinalPolicy):
 def policy_for(cp):
   profile = camera_acc_pedal_profile(cp)
   if profile is not None and profile.longitudinal:
-    return GMVoltLongitudinalPolicy(gateway=True) if profile.topology == "gateway" else CameraPedalLongitudinalPolicy()
+    return (GMVoltLongitudinalPolicy(gateway=profile.topology == "gateway")
+            if profile.topology in ("gateway", "ascm") else CameraPedalLongitudinalPolicy())
 
   if not is_ordinary_camera_profile(cp, longitudinal=True):
     return None
