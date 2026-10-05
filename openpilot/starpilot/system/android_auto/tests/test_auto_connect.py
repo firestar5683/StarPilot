@@ -239,6 +239,19 @@ def test_config_sanitizes_channel_cache(tmp_path):
   assert identity_store.load_config(tmp_path / "missing.json")["rfcomm_cache"] is not identity_store.DEFAULT_CONFIG["rfcomm_cache"]
 
 
+def test_config_v2_rgba_pipeline_upgrades_to_gpu_nv12(tmp_path):
+  from openpilot.starpilot.system.android_auto import identity as identity_store
+  path = tmp_path / "config.json"
+  # Every v2 save wrote these off; the car view could not do anything else then.
+  path.write_text(json.dumps({"config_version": 2, "gpu_nv12": False, "async_readback": False, "fps": 20}))
+  config = identity_store.load_config(path)
+  assert config["gpu_nv12"] is True and config["async_readback"] is True and config["fps"] == 20
+  identity_store.save_config(config, path)
+  # From v3 on they are a real choice and stay as saved.
+  path.write_text(json.dumps({**json.loads(path.read_text()), "gpu_nv12": False}))
+  assert identity_store.load_config(path)["gpu_nv12"] is False
+
+
 def _wireless_backoff_harness(sup, monkeypatch, failure):
   from openpilot.starpilot.system.android_auto import supervisor
   now = [100.0]

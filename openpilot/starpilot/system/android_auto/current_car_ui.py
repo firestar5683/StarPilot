@@ -1,21 +1,75 @@
 """Read-only headless producer for a separate large StarPilot projection view.
 
 Frames are rendered only while requested. Projection does not receive touch input.
+Onroad, each new camera frame is drawn exactly once, as soon as it lands (see
+CameraPacer). When the encoder takes NV12, the frame is converted on the GPU,
+and it can be read back without stalling the renderer.
 """
 
 from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+import gc
 import os
 import signal
 import time
 
-from openpilot.starpilot.system.android_auto.frame_source import FrameProducer, FrameRequest, frame_bytes
+from openpilot.starpilot.system.android_auto.frame_source import (FLAG_ASYNC_READBACK, FLAG_NV12, FORMAT_NV12, FORMAT_RGBA,
+                                                                  FrameProducer, FrameRequest, frame_bytes)
 
 from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
 
 STARTUP_WAIT_SECONDS = 15.0
+CAMERA_WAIT_STEP = 0.01    # s; keeps demand/stop checks responsive while waiting for the camera
+CAMERA_MAX_GAP = 0.1       # s; a shown camera silent this long stops pacing (the encoder rate applies)
+
+
+class CameraPacer:
+  """Onroad, draw each frame of the camera on screen exactly once, as soon as it lands.
+
+  The road cameras and the driving model run at 20 Hz. A 30 fps timer redraws
+  every third frame for nothing and shows camera frames in an uneven 2-1
+  cadence; a 20 fps timer drifts against the camera clock and periodically
+  repeats one frame and skips the next. camerad hands the frame to VisionIPC
+  before it publishes the matching CameraState, so waking on that message means
+  CameraView's non-blocking recv already has the new frame.
+
+  Only the shown camera's CameraState is subscribed, conflated and never
+  deserialized: the pacer only needs to know that one arrived. When that camera
+  goes quiet, it stops pacing and the encoder's frame rate applies again.
+  """
+
+  def __init__(self, sock_factory=None, stream_types=None):
+    if sock_factory is None:
+      import openpilot.cereal.messaging as messaging
+
+      def sock_factory(name):
+        poller = messaging.Poller()
+        return poller, messaging.sub_sock(name, poller=poller, conflate=True)
+    if stream_types is None:
+      from openpilot.cereal.visionipc import VisionStreamType as stream_types
+    self.state_for_stream = {int(stream_types.VISION_STREAM_NARROW_ROAD): "narrowRoadCameraState",
+                             int(stream_types.VISION_STREAM_WIDE_ROAD): "wideRoadCameraState",
+                             int(stream_types.VISION_STREAM_CABIN): "cabinCameraState"}
+    self._sock_factory = sock_factory
+    self._socks: dict[str, tuple] = {}   # opened on first use, so an unshown camera costs nothing
+    self._last_arrival: dict[str, float] = {}
+
+  def wait(self, stream_type, now: float) -> bool:
+    """True when a new frame of ``stream_type`` is ready, or when that camera is quiet; waits at most one step."""
+    state = self.state_for_stream.get(int(stream_type))
+    if state is None:
+      return True
+    if state not in self._socks:
+      self._socks[state] = self._sock_factory(state)
+    poller, sock = self._socks[state]
+    quiet = now - self._last_arrival.get(state, float("-inf")) >= CAMERA_MAX_GAP
+    # A quiet camera must not hold rendering back: just check whether it has resumed.
+    arrived = bool(poller.poll(0 if quiet else int(CAMERA_WAIT_STEP * 1000))) and sock.receive(non_blocking=True) is not None
+    if arrived:
+      self._last_arrival[state] = now
+    return arrived or quiet
 
 
 def visible_geometry(request: FrameRequest) -> tuple[int, int, float, int, int]:
@@ -56,7 +110,7 @@ def run(frames_path: str) -> int:
   signal.signal(signal.SIGTERM, stop)
   signal.signal(signal.SIGINT, stop)
   from openpilot.starpilot.system.android_auto.headless_egl import FrameReadback, HeadlessContext
-  from openpilot.starpilot.system.android_auto.gpu_nv12 import compose_rgba
+  from openpilot.starpilot.system.android_auto import gpu_nv12
   from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
   import pyray as rl
   from openpilot.system.ui.lib.application import gui_app
@@ -91,8 +145,24 @@ def run(frames_path: str) -> int:
     if not output.id:
       raise RuntimeError('Projection output target unavailable')
     resources.callback(rl.unload_render_texture, output)
-    readback = FrameReadback(frame_bytes(request.width, request.height, 0), asynchronous=False)
+    converter = None
+    if request.flags & FLAG_NV12:
+      try:
+        # The composed frame already carries the margins and the top-down flip,
+        # so it converts as is. Reading back NV12 moves 1.5 bytes per pixel
+        # instead of 4, and the encoder skips its own RGBA conversion on the CPU.
+        converter = gpu_nv12.Nv12Converter(request.width, request.height)
+        resources.callback(converter.close)
+      except Exception as error:
+        print(f"NV12 conversion unavailable, publishing RGBA: {error}", flush=True)
+        converter = None
+    pixel_format = FORMAT_NV12 if converter is not None else FORMAT_RGBA
+    readback = FrameReadback(frame_bytes(request.width, request.height, pixel_format),
+                             asynchronous=bool(request.flags & FLAG_ASYNC_READBACK))
     resources.callback(readback.close)
+    rgba_regions = [(output.id, request.width, request.height, 0)]
+    pipeline = f"{'nv12' if converter is not None else 'rgba'}, {'async' if readback.asynchronous else 'sync'} readback"
+    print(f"car view pipeline: {pipeline}", flush=True)
     from openpilot.starpilot.system.android_auto import identity as identity_store
     from openpilot.starpilot.system.android_auto.render_profile import RenderSampler, RenderSummary
     config = identity_store.load_config()
@@ -102,10 +172,26 @@ def run(frames_path: str) -> int:
       sampler.start()
       resources.callback(sampler.close)
     summary = RenderSummary(time.monotonic())
+    camera_pacer = CameraPacer()
+    in_flight_ns = 0
+
+    def publish_readback() -> None:
+      """Hand the frame read back last to android_autod."""
+      try:
+        producer.publish(request, readback.finish(), in_flight_ns, pixel_format, advance=False)
+      finally:
+        readback.release()
+
+    # Everything built so far lives for the whole session. Frozen, it is never rescanned
+    # by the collector, whose full passes over the UI's objects stall a frame every few seconds.
+    gc.collect()
+    gc.freeze()
     while not stopped and os.getppid() == parent:
       now = time.monotonic()
       pending = producer.pending_request(now)
       if pending is None:
+        if readback.pending:
+          readback.release()
         if sampler is not None:
           sampler.rendering = False
         context.pause()
@@ -115,12 +201,26 @@ def run(frames_path: str) -> int:
       if pending != request:
         return 3  # supervisor starts a new renderer for the new geometry
       captured_ns = time.monotonic_ns()
+      # The requested frame rate (the encoder's budget) always applies. Rendering
+      # only when it is due also keeps the schedule from running ahead of real time.
       delay = producer.capture_delay(request, captured_ns)
       if delay > 0:
+        if readback.pending:
+          publish_readback()  # never hold a finished frame back just to pace the next one
         if sampler is not None:
           sampler.rendering = False
         time.sleep(min(delay, 0.05))
         continue
+      if layout.camera_stream is not None:
+        # Within that budget, draw as soon as the camera on screen has a new frame.
+        if readback.pending:
+          publish_readback()
+        if not camera_pacer.wait(layout.camera_stream, now):
+          if sampler is not None:
+            sampler.rendering = False
+          continue
+        captured_ns = time.monotonic_ns()
+        now = captured_ns / 1e9
       if sampler is not None:
         sampler.rendering = True
       frame_began = time.monotonic()
@@ -134,12 +234,17 @@ def run(frames_path: str) -> int:
         layout.render()
       finally:
         rl.end_texture_mode()
-      compose_rgba(content.texture, output, request.margin_w, request.margin_h, fit=True)
-      readback.start([(output.id, request.width, request.height, 0)])
-      try:
-        producer.publish(request, readback.finish(), captured_ns)
-      finally:
-        readback.release()
+      if readback.pending:
+        # The previous frame, read back while this one was drawn: waiting any
+        # later only adds latency.
+        publish_readback()
+      gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h, fit=True)
+      regions = converter.convert(output.texture) if converter is not None else rgba_regions
+      producer.advance(request, captured_ns)
+      readback.start(regions)
+      in_flight_ns = captured_ns
+      if not readback.asynchronous:
+        publish_readback()
       report = summary.frame_done(frame_began, time.monotonic())
       if report is not None and sampler is not None:
         sampler.summary = report

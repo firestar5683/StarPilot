@@ -16,8 +16,8 @@ SOURCE = Path(__file__).parents[1]
 class TestCurrentDisplaySource(unittest.TestCase):
   def test_defaults_match_current_renderer_capabilities(self):
     self.assertEqual(DEFAULT_CONFIG['view'], 'car')
-    self.assertFalse(DEFAULT_CONFIG['gpu_nv12'])
-    self.assertFalse(DEFAULT_CONFIG['async_readback'])
+    self.assertTrue(DEFAULT_CONFIG['gpu_nv12'])        # current_car_ui converts with gpu_nv12.Nv12Converter
+    self.assertTrue(DEFAULT_CONFIG['async_readback'])  # and publishes the asynchronous readback one step later
     self.assertTrue(DEFAULT_CONFIG['render_profile'])  # render_profile.RenderSampler, started by current_car_ui
 
   def test_visible_geometry_never_crops_current_ui(self):
@@ -42,7 +42,7 @@ class TestCurrentDisplaySource(unittest.TestCase):
     self.assertNotIn("openpilot.starpilot.ui.runtime_app", imports)
     self.assertIn("openpilot.starpilot.system.android_auto.frame_source", imports)
     self.assertNotIn("openpilot.starpilot.system.android_auto.ui.main", imports)
-    self.assertIn("producer.publish(request, readback.finish(), captured_ns)", source)
+    self.assertIn("producer.publish(request, readback.finish(), in_flight_ns, pixel_format, advance=False)", source)
 
   def test_view_uses_current_renderer(self):
     source = (SOURCE / "view.py").read_text()
