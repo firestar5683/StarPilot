@@ -12,7 +12,7 @@ from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.values import (CANFD_ANGLE_CCNC_MODEL_BANK_BIT, CANFD_ANGLE_MODEL_BITS,
                                         CANFD_ANGLE_OBSERVED_ADAS_BIT, CAR, DBC, HyundaiFlags,
                                         HyundaiSafetyFlags)
-from opendbc.car.lateral import get_max_angle_vm
+from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm
 from opendbc.safety.tests.libsafety import libsafety_py
 
 
@@ -289,6 +289,52 @@ class TestHyundaiCcncAngleTwo(unittest.TestCase):
                   self.assertGreater(abs(controller.apply_angle_last), min(5.0, bound * 0.7))
                   self.assertLessEqual(abs(controller.apply_angle_last), min(360.0, bound) + 0.2)
     self.assertEqual(cases, 128)
+
+  def test_measured_physical_speed_and_adjacent_angle_ticks(self):
+    for car in CARS:
+      for topology in ("lfa", "lfa_alt"):
+        for speed_mps in (2.0, 10.0, 25.0, 41.0):
+          _, state, safety, _, controller, steering, _, _ = self.joined(
+            car, topology, speed=speed_mps * 3.6, measured=0.0, desired=0.0)
+          packer = CANPacker(DBC[car][Bus.pt])
+          for counter in range(1, 7):
+            wheel_frame = packer.make_can_msg("WHEEL_SPEEDS", CanBus(controller.CP).ECAN,
+                          {"COUNTER": counter, **dict.fromkeys(
+                            ("WHL_SpdFLVal", "WHL_SpdFRVal", "WHL_SpdRLVal", "WHL_SpdRRVal"), speed_mps * 3.6)})
+            self.assertTrue(safety.safety_rx_hook(self.packet(wheel_frame)))
+          measured_speed = safety.get_vehicle_speed_min()
+          self.assertAlmostEqual(measured_speed, speed_mps, delta=0.02)
+          self.assertAlmostEqual(state.out.vEgoRaw, measured_speed, delta=0.02)
+          effective_speed = max(measured_speed - 1.0, 1.0)
+          max_ticks = int(get_max_angle_vm(effective_speed, controller.angle_vm, controller.params) * 10 + 1)
+          delta_ticks = int(get_max_angle_delta_vm(effective_speed, controller.angle_vm, controller.params) * 10 + 1)
+          frame = steering[0]
+
+          def angle_packet(ticks, frame=frame):
+            data = bytearray(frame[1])
+            raw = ticks & 0x3FFF
+            data[10] = (data[10] & 3) | ((raw & 63) << 2)
+            data[11] = raw >> 6
+            data[:2] = hkg_can_fd_checksum(frame[0], None, data).to_bytes(2, "little")
+            return self.packet((frame[0], bytes(data), frame[2]))
+
+          for sign in (-1, 1):
+            with self.subTest(car=car, topology=topology, speed=speed_mps, sign=sign):
+              allowed = min(max_ticks, 3600) * sign
+              safety.set_controls_allowed(True)
+              safety.set_desired_angle_last(allowed)
+              self.assertTrue(safety.safety_tx_hook(angle_packet(allowed)))
+              if max_ticks < 3600:
+                rejected = (max_ticks + 1) * sign
+                safety.set_controls_allowed(True)
+                safety.set_desired_angle_last(rejected)
+                self.assertFalse(safety.safety_tx_hook(angle_packet(rejected)))
+              safety.set_controls_allowed(True)
+              safety.set_desired_angle_last(0)
+              self.assertTrue(safety.safety_tx_hook(angle_packet(delta_ticks * sign)))
+              safety.set_controls_allowed(True)
+              safety.set_desired_angle_last(0)
+              self.assertFalse(safety.safety_tx_hook(angle_packet((delta_ticks + 1) * sign)))
 
   def test_actuation_fields_forwarding_and_relay(self):
     for car in CARS:
