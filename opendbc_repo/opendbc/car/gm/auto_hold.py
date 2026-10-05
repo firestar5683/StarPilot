@@ -17,9 +17,11 @@ class AutoHoldConfig:
 
 
 def config_for(cp) -> AutoHoldConfig:
-  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_sdgm_profile
+  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_sdgm_profile, camera_acc_pedal_profile
   if is_gm_auto_hold(cp) and is_volt_sdgm_profile(cp, longitudinal=True):
-    solo = 0xD100 <= int(cp.safetyConfigs[0].safetyParam) <= 0xD10A
+    profile = camera_acc_pedal_profile(cp)
+    solo = (profile.one_pedal and not profile.auto_hold if profile is not None else
+            0xD100 <= int(cp.safetyConfigs[0].safetyParam) <= 0xD10A)
     return AutoHoldConfig(100, .02 if solo else .25)
   return AutoHoldConfig()
 
