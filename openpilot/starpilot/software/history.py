@@ -13,13 +13,13 @@ MAX_COMMITS = 20
 MAX_NOTES_BYTES = 32768
 
 
-def commit_history(path: Path, commit: str) -> list[dict]:
+def commit_history(path: Path, commit: str, *, first_parent: bool = False) -> list[dict]:
   if not COMMIT.fullmatch(commit):
     return []
   try:
     output = subprocess.run(
       ['git', '-C', str(path), '--no-pager', 'log', '--no-decorate', '--no-color', '--no-show-signature',
-       f'-{MAX_COMMITS}', '--format=%H%x00%cI%x00%<(240,trunc)%s%x00', commit, '--'],
+       *(['--first-parent'] if first_parent else []), f'-{MAX_COMMITS}', '--format=%H%x00%cI%x00%<(240,trunc)%s%x00', commit, '--'],
       check=True, capture_output=True, text=True, timeout=2).stdout
     if len(output.encode()) > 32768:
       return []
@@ -72,3 +72,19 @@ def release_notes(params, key: str) -> str | None:
     return re.sub(r'\n{3,}', '\n\n', ''.join(parser.parts)).strip()
   except (UnicodeError, ValueError):
     return None
+
+
+def recent_versions(path: Path, branch: str | None) -> dict:
+  empty = {'branch': branch, 'head': None, 'entries': []}
+  if type(branch) is not str or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9._/+@-]{0,127}', branch):
+    return empty
+  ref = f'refs/starpilot/recent/{branch}'
+  try:
+    subprocess.run(['git', '-C', str(path), 'check-ref-format', ref], check=True, capture_output=True, timeout=2)
+    head = subprocess.run(['git', '-C', str(path), 'rev-parse', '--verify', ref + '^{commit}'],
+                          check=True, capture_output=True, text=True, timeout=2).stdout.strip()
+    if not COMMIT.fullmatch(head):
+      return empty
+    return {'branch': branch, 'head': head, 'entries': commit_history(path, head, first_parent=True)}
+  except (OSError, subprocess.SubprocessError):
+    return empty

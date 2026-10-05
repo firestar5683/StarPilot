@@ -79,6 +79,76 @@ class TestFastUpdate(unittest.TestCase):
     arguments.update(kwargs)
     return owner.fast_update(self.repo, 'Dom', **arguments)
 
+  def test_recent_listing_preserves_installed_state_and_rollback_receipt(self):
+    self.git(self.repo, 'update-ref', 'refs/starpilot/previous', self.previous)
+    (self.repo / 'private-data').write_text('preserved')
+    commands = []
+    def traced(command, cwd):
+      commands.append(command)
+      return owner.run(command, cwd)
+    self.assertEqual(self.update(versions_only=True, run=traced), 'versions-listed')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'refs/starpilot/previous'), self.previous)
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'refs/starpilot/recent/Dom'), self.target)
+    self.assertEqual((self.repo / 'private-data').read_text(), 'preserved')
+    self.assertEqual(self.params.calls, [])
+    self.assertEqual(self.invalidations, [])
+    self.assertIn('--depth=20', next(command for command in commands if 'fetch' in command))
+
+  def test_selected_older_version_uses_same_install_and_rollback_transaction(self):
+    self.update()
+    self.params.calls.clear()
+    self.invalidations.clear()
+    self.assertEqual(self.update(selected_commit=self.previous), 'reboot-requested')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'refs/starpilot/previous'), self.target)
+    self.assertEqual(self.invalidations, [True])
+    self.assertEqual(self.params.calls, [(('DoReboot', True), {'block': True})])
+
+  def test_forged_out_of_window_and_rebased_selected_versions_rejected(self):
+    def rejected(target):
+      with self.assertRaisesRegex(owner.FastUpdateError, 'recent branch history'):
+        self.update(selected_commit=target)
+      self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+      self.assertEqual(self.params.calls, [])
+      self.assertEqual(self.invalidations, [])
+    rejected('f' * 40)
+    for index in range(21):
+      (self.remote / 'openpilot/starpilot/ui/source.py').write_text(str(index))
+      self.git(self.remote, 'commit', '-am', 'recent build')
+    rejected(self.target)
+    abandoned = self.git(self.remote, 'rev-parse', 'HEAD')
+    self.git(self.remote, 'reset', '--hard', self.previous)
+    (self.remote / 'openpilot/starpilot/ui/source.py').write_text('replacement branch history')
+    self.git(self.remote, 'commit', '-am', 'replacement')
+    rejected(abandoned)
+
+  def test_selected_version_rechecks_os_and_native_artifact_contracts(self):
+    (self.remote / 'launch_env.sh').write_text('export AGNOS_VERSION="different"\n')
+    self.git(self.remote, 'commit', '-am', 'different OS')
+    bad_os = self.git(self.remote, 'rev-parse', 'HEAD')
+    (self.remote / 'launch_env.sh').write_text('export AGNOS_VERSION="19.8.1"\n')
+    self.git(self.remote, 'commit', '-am', 'compatible latest')
+    with self.assertRaisesRegex(owner.FastUpdateError, 'operating system'):
+      self.update(selected_commit=bad_os)
+    (self.remote / 'native.cc').write_text('int missing_artifact_proof;')
+    self.git(self.remote, 'add', '.')
+    self.git(self.remote, 'commit', '-m', 'unqualified native inputs')
+    bad_native = self.git(self.remote, 'rev-parse', 'HEAD')
+    with self.assertRaisesRegex(owner.FastUpdateError, 'matching build receipt'):
+      self.update(selected_commit=bad_native)
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertEqual(self.params.calls, [])
+
+  def test_version_snapshot_and_parked_state_withdrawal_prevent_listing_or_install(self):
+    with self.assertRaisesRegex(owner.FastUpdateError, 'Approved source revision changed'):
+      self.update(versions_only=True, expected_commit='f' * 40)
+    checks = iter((True, False))
+    with self.assertRaisesRegex(owner.FastUpdateError, 'parked state'):
+      self.update(versions_only=True, parked=lambda: next(checks))
+    self.assertEqual(self.params.calls, [])
+    self.assertEqual(self.invalidations, [])
+
   def test_applies_exact_revision_and_retains_untracked_models(self):
     (self.repo / 'models').mkdir()
     (self.repo / 'models' / 'download').write_bytes(b'model')

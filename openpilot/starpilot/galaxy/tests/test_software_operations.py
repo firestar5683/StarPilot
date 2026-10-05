@@ -72,6 +72,57 @@ class SoftwareOperationsTest(unittest.TestCase):
       self.act(action, branch)
     self.assertEqual(caught.exception.status, status)
 
+  def test_recent_version_admission_pins_installed_snapshot_and_listed_target(self):
+    selected = 'c' * 40
+    recent = {'branch': 'main', 'head': 'b' * 40,
+              'entries': [{'hash': selected, 'date': '2026-09-29T12:00:00+00:00', 'subject': 'Previous build'}]}
+    payload = {'action': 'version', 'branch': 'main', 'expectedCommit': 'a' * 40, 'selectedCommit': selected}
+    with mock.patch('openpilot.starpilot.galaxy.software_operations.recent_versions', return_value=recent), \
+         mock.patch.object(self.process, 'send') as send:
+      for field, value in (('selectedCommit', 'f' * 40), ('expectedCommit', 'b' * 40), ('branch', 'release')):
+        with self.subTest(field=field), self.assertRaises(SoftwareOperationError):
+          self.owner.action('version', dict(payload, **{field: value}), authorized=lambda: True)
+      self.parked = False
+      with self.assertRaises(SoftwareOperationError):
+        self.owner.action('version', payload, authorized=lambda: True)
+      self.parked = True
+      self.owner.action('version', payload, authorized=lambda: True)
+      send.assert_called_once_with('version', branch='main', commit='a' * 40, selected_commit=selected)
+      self.assertIsNotNone(self.owner.request)
+      assert self.owner.request is not None
+      self.assertEqual(self.owner.request['selectedCommit'], selected)
+
+  def test_version_installed_snapshot_cannot_change_at_final_dispatch(self):
+    selected = 'c' * 40
+    recent = {'branch': 'main', 'head': selected,
+              'entries': [{'hash': selected, 'date': '2026-09-29T12:00:00+00:00', 'subject': 'Build'}]}
+    calls = 0
+    def authorized():
+      nonlocal calls
+      calls += 1
+      if calls == 3:
+        self.params.put('GitCommit', 'd' * 40, block=True)
+        self.git[self.installed] = ('main', 'd' * 40)
+      return True
+    with mock.patch('openpilot.starpilot.galaxy.software_operations.recent_versions', return_value=recent), \
+         mock.patch.object(self.process, 'send') as send, self.assertRaises(SoftwareOperationError):
+      self.owner.action('version', {'action': 'version', 'branch': 'main', 'expectedCommit': 'a' * 40,
+                                    'selectedCommit': selected}, authorized=authorized)
+    send.assert_not_called()
+
+  def test_listing_request_completes_without_install_timestamp_or_reboot(self):
+    self.params.put('LastUpdateTime', datetime(2026, 9, 1), block=True)
+    self.params.put('UpdaterLastFetchTime', datetime(2026, 9, 1), block=True)
+    with mock.patch.object(self.process, 'send') as send:
+      self.act('versions', 'main')
+      send.assert_called_once_with('versions', branch='main', commit='a' * 40)
+    self.params.put('UpdaterLastFetchTime', datetime(2026, 9, 2), block=True)
+    state = self.owner.snapshot()['request']
+    self.assertEqual(state['state'], 'complete')
+    self.assertNotIn('outcome', state)
+    self.assertEqual(self.params.get('LastUpdateTime'), datetime(2026, 9, 1))
+    self.assertFalse(self.params.get_bool('DoReboot'))
+
   def test_select_then_check_then_download_signals_exact_updater(self):
     self.assertTrue(self.owner.snapshot()["canSelect"])
     self.assertEqual(self.owner.snapshot()["selectedTarget"], "main")
@@ -250,18 +301,25 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.owner.history_reader = reader
     self.params.put('UpdaterCurrentReleaseNotes', b'<h1>Current</h1>', block=True)
     self.params.put('UpdaterNewReleaseNotes', b'<h1>Next</h1>', block=True)
-    first = self.owner.snapshot()['history']
-    self.assertEqual(first['installed'][0]['hash'], 'a' * 40)
-    self.assertEqual(first['downloaded'][0]['hash'], 'b' * 40)
-    self.assertEqual(first['currentReleaseNotes'], 'Current')
-    self.assertEqual(first['downloadedReleaseNotes'], 'Next')
-    self.assertEqual(reader.call_count, 2)
-    self.assertEqual(self.owner.snapshot()['history'], first)
-    self.assertEqual(reader.call_count, 2)
-    self.params.put('UpdaterNewDescription', 'new description', block=True)
-    self.owner.snapshot()
-    self.assertEqual(reader.call_count, 4)
-
+    with mock.patch('openpilot.starpilot.galaxy.software_operations.recent_versions',
+                    return_value={'branch': 'main', 'head': 'c' * 40, 'entries': []}) as recent:
+      first = self.owner.snapshot()['history']
+      self.assertEqual(first['installed'][0]['hash'], 'a' * 40)
+      self.assertEqual(first['downloaded'][0]['hash'], 'b' * 40)
+      self.assertEqual(first['currentReleaseNotes'], 'Current')
+      self.assertEqual(first['downloadedReleaseNotes'], 'Next')
+      self.assertEqual(reader.call_count, 2)
+      self.assertEqual(self.owner.snapshot()['history'], first)
+      self.assertEqual(reader.call_count, 2)
+      self.assertEqual(recent.call_count, 1)
+      self.params.put('UpdaterNewDescription', 'new description', block=True)
+      self.owner.snapshot()
+      self.assertEqual(reader.call_count, 4)
+      self.assertEqual(recent.call_count, 2)
+      self.params.put('UpdaterLastFetchTime', datetime(2026, 10, 4, 12), block=True)
+      self.owner.snapshot()
+      self.assertEqual(recent.call_count, 3)
+      self.assertEqual(reader.call_count, 6)
 
   def test_fast_current_branch_without_branch_list_or_selected_target(self):
     self.params.remove("UpdaterAvailableBranches")

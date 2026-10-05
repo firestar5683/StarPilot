@@ -96,6 +96,40 @@ class TestFastRequest(unittest.TestCase):
     self.assertEqual(self.values['UpdaterState'], 'updating...')
     self.assertTrue(self.values['DoReboot'])
 
+  def test_versions_listing_is_not_installation_or_staging(self):
+    self.helper._control_request('versions', branch='Dom', commit='a' * 40)
+    self.updater.fast_update.return_value = 'versions-listed'
+    with self.assertRaises(StopLoop):
+      self.updated.main()
+    self.updater.fast_update.assert_called_once_with('Dom', 'a' * 40, versions_only=True)
+    self.updated.init_overlay.assert_not_called()
+    self.updater.set_params.assert_not_called()
+    self.assertIn('UpdaterLastFetchTime', self.values)
+    self.assertNotIn('LastUpdateTime', self.values)
+    self.assertNotIn('DoReboot', self.values)
+    self.assertEqual(self.values['UpdaterState'], 'idle')
+
+  def test_failed_listing_preserves_existing_staging_marker(self):
+    self.updated.OVERLAY_INIT.write_text('retained validated staging')
+    self.helper._control_request('versions', branch='Dom', commit='a' * 40)
+    self.updater.fast_update.side_effect = RuntimeError('version download unavailable')
+    with self.assertRaises(StopLoop):
+      self.updated.main()
+    self.assertEqual(self.updated.OVERLAY_INIT.read_text(), 'retained validated staging')
+    self.assertNotIn('DoReboot', self.values)
+    self.assertNotIn('LastUpdateTime', self.values)
+
+  def test_selected_version_dispatch_and_superseding_request(self):
+    self.helper._control_request('version', branch='Dom', commit='a' * 40, selected_commit='b' * 40)
+    _, generation, target = self.helper.current_request()
+    self.assertEqual(target, ('Dom', 'a' * 40, 'b' * 40))
+    with self.assertRaises(StopLoop):
+      self.updated.main()
+    self.updater.fast_update.assert_called_once_with('Dom', 'a' * 40, 'b' * 40, rollback=False)
+    self.helper._control_request('versions', branch='Dom', commit='a' * 40)
+    self.assertFalse(self.helper.finish_request(generation))
+    self.assertEqual(self.helper.current_request()[2], ('Dom', 'a' * 40))
+
   def test_new_request_is_not_lost_when_previous_work_finishes(self):
     _, generation, target = self.helper.current_request()
     self.assertEqual(target, ('SecretGoodStarPilot', 'a' * 40))

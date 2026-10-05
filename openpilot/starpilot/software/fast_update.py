@@ -10,6 +10,9 @@ from openpilot.common.vendor_manifest import validate_revision
 from openpilot.common.prebuilt_manifest import revision_digest, valid_receipt
 
 
+RECENT_VERSION_LIMIT = 20
+
+
 class FastUpdateError(RuntimeError):
   pass
 
@@ -75,12 +78,17 @@ def run(command, cwd, progress=None, *, timeout=None):
 _DEFAULT_RUN = run
 
 
-def fast_update(repo, branch, *, params, parked, expected_commit, current_os=None, invalidate=None, run=run, rollback=False, progress=None, sleep=None):
+def fast_update(repo, branch, *, params, parked, expected_commit, current_os=None, invalidate=None, run=run, rollback=False,
+                progress=None, sleep=None, selected_commit=None, versions_only=False):
   repo = Path(repo)
 
   def notify(stage, detail):
     if progress is not None:
       progress(stage, detail)
+
+  if (selected_commit is not None and (type(selected_commit) is not str or not re.fullmatch(r'[0-9a-f]{40}', selected_commit)) or
+      rollback and (selected_commit is not None or versions_only) or versions_only and selected_commit is not None):
+    raise FastUpdateError('Invalid recent version request')
 
   notify('preparing', 'Resolving active branch...')
 
@@ -130,9 +138,25 @@ def fast_update(repo, branch, *, params, parked, expected_commit, current_os=Non
     git('check-ref-format', '--branch', branch)
     notify('fetching', 'Previous installed version is available locally.')
   else:
-    notify('fetching', f'Fetching latest shallow commit on {branch}...')
-    git('fetch', '--progress', '--depth=1', '--no-tags', '--no-recurse-submodules', 'origin', f'refs/heads/{branch}')
+    recent = versions_only or selected_commit is not None
+    notify('fetching', f'Fetching {"recent versions" if recent else "latest shallow commit"} on {branch}...')
+    git('fetch', '--progress', f'--depth={RECENT_VERSION_LIMIT if recent else 1}', '--no-tags', '--no-recurse-submodules', 'origin', f'refs/heads/{branch}')
     target = git('rev-parse', 'FETCH_HEAD^{commit}').strip()
+    if recent:
+      members = git('log', '--first-parent', f'-{RECENT_VERSION_LIMIT}', '--format=%H', target, '--').splitlines()
+      if selected_commit is not None:
+        if selected_commit not in members:
+          raise FastUpdateError('Selected version is no longer in recent branch history; refresh and try again')
+        target = selected_commit
+      else:
+        admitted()
+        if git('rev-parse', 'HEAD^{commit}').strip() != previous:
+          raise FastUpdateError('Source changed during version download')
+        ref = f'refs/starpilot/recent/{branch}'
+        git('check-ref-format', ref)
+        git('update-ref', ref, target)
+        notify('complete', 'Recent versions are ready to review.')
+        return 'versions-listed'
   notify('validating', 'Checking downloaded operating system and native artifacts...')
   validate_revision(repo, target)
   launch = git('show', f'{target}:launch_env.sh')

@@ -35,8 +35,27 @@ class UpdaterControlTests(unittest.TestCase):
     with self.assertRaises(update_control.UpdaterControlError):
       update_control.send(123, 456, 'check', branch='Dom', commit=commit)
 
+  def test_version_wire_keeps_installed_and_selected_revisions_separate(self):
+    expected, selected = 'a' * 40, 'b' * 40
+    command = update_control._command('version', 'Dom', expected, selected)
+    self.assertEqual(update_control._parse(command + b'\n'), ('version', 'Dom', expected, selected))
+    self.assertLessEqual(len(update_control._command('version', 'x' * 128, expected, selected)) + 1, update_control.MAX_COMMAND)
+    self.assertEqual(update_control._parse(update_control._command('versions', 'Dom', expected) + b'\n'),
+                     ('versions', 'Dom', expected))
+    with mock.patch.object(update_control, '_exchange') as exchange:
+      update_control.send(123, 456, 'version', branch='Dom', commit=expected, selected_commit=selected)
+      exchange.assert_called_once_with(123, 456, command)
+    for target in (None, 'b' * 39, 'B' * 40, 'HEAD', 'b' * 40 + '\ncheck'):
+      with self.subTest(target=target), self.assertRaises(update_control.UpdaterControlError):
+        update_control._command('version', 'Dom', expected, target)
+    with self.assertRaises(update_control.UpdaterControlError):
+      update_control._command('fast', 'Dom', expected, selected)
+
   def test_server_delivers_fast_identity_and_legacy_callback_shape(self):
     for raw, expected in ((b'fast Dom ' + b'a' * 40 + b'\n', mock.call('fast', branch='Dom', commit='a' * 40)),
+                          (b'version Dom ' + b'a' * 40 + b' ' + b'b' * 40 + b'\n',
+                           mock.call('version', branch='Dom', commit='a' * 40, selected_commit='b' * 40)),
+                          (b'versions Dom ' + b'a' * 40 + b'\n', mock.call('versions', branch='Dom', commit='a' * 40)),
                           (b'check\n', mock.call('check')), (b'download\n', mock.call('download'))):
       with self.subTest(raw=raw):
         client, connection = socket.socketpair()

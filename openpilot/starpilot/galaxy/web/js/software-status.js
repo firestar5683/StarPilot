@@ -1,7 +1,7 @@
 import { decodeLayoutBackup, encodeLayoutBackup, MAX_LAYOUT_BACKUP_BYTES } from "./layout-backup.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
-const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback"])
+const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback", "versions", "version"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
 const UPDATER_ACTIVE = new Set(["checking...", "downloading...", "finalizing update...", "updating..."])
 const PRIMARY_BRANCHES = ["StarPilot", "Dom"]
@@ -24,6 +24,7 @@ export function validSoftwareSnapshot(data) {
       typeof branch === "string" && branch.length > 0 && branch.length <= 128) &&
     text(operations.selectedTarget) && text(operations.reason) &&
     (operations.canFastUpdate === undefined || typeof operations.canFastUpdate === "boolean") &&
+    (request?.selectedCommit === undefined || /^[0-9a-f]{40}$/.test(request.selectedCommit)) &&
     (operations.canRollback === undefined || typeof operations.canRollback === "boolean") &&
     (operations.automaticDownloads === undefined || flag(operations.automaticDownloads)) &&
     (operations.canConfigure === undefined || typeof operations.canConfigure === "boolean") &&
@@ -39,6 +40,8 @@ export function validHistory(value) {
     /^[0-9a-f]{40}$/.test(row?.hash) && typeof row.date === "string" && row.date.length <= 64 &&
     typeof row.subject === "string" && row.subject.length <= 512)
   return !!value && rows(value.installed) && rows(value.downloaded) &&
+    (value.recent === undefined || !!value.recent && (value.recent.branch === null || typeof value.recent.branch === "string") &&
+      (value.recent.head === null || /^[0-9a-f]{40}$/.test(value.recent.head)) && rows(value.recent.entries)) &&
     [value.currentReleaseNotes, value.downloadedReleaseNotes].every((notes) => notes === null || typeof notes === "string" && notes.length <= 65536)
 }
 
@@ -151,7 +154,7 @@ export class SoftwareStatusFeed {
         this.uncertain = false
         this.uncertainAction = null
         this.actionPriorRequestId = null
-        if (["fast", "rollback"].includes(body.action)) {
+        if (["fast", "rollback", "version"].includes(body.action)) {
           this.notice = `Updating ${body.branch}. Waiting for completion or reconnect.`
         } else if (body.action === "install") {
           this.installBaseline = this.installBaseline || { commit: payload.installed.commit, branch: payload.installed.branch, target: body.branch }
@@ -162,7 +165,8 @@ export class SoftwareStatusFeed {
         const observed = payload.operations.request
         const requestObserved = !!observed && !!this.uncertainAction && observed.action === this.uncertainAction.action &&
           observed.id !== this.actionPriorRequestId &&
-          (!this.uncertainAction?.branch || observed.target === this.uncertainAction.branch)
+          (!this.uncertainAction?.branch || observed.target === this.uncertainAction.branch) &&
+          (!this.uncertainAction?.selectedCommit || observed.selectedCommit === this.uncertainAction.selectedCommit)
         const selectionObserved = this.uncertainAction?.action === "select" &&
           payload.operations.selectedTarget === this.uncertainAction.branch
         const preferenceObserved = this.uncertainAction?.action === "preferences" &&
@@ -172,7 +176,8 @@ export class SoftwareStatusFeed {
           this.uncertainAction = null
           this.actionPriorRequestId = null
         }
-        if (this.installBaseline?.action === "fast" && observed?.action === "fast" && observed.target === this.installBaseline.target &&
+        if (["fast", "version"].includes(this.installBaseline?.action) && observed?.action === this.installBaseline.action && observed.target === this.installBaseline.target &&
+            (!this.installBaseline.selectedCommit || observed.selectedCommit === this.installBaseline.selectedCommit) &&
             ["complete", "failed"].includes(observed.state)) {
           if (observed.state === "failed" || observed.outcome === "up_to_date") {
             this.installBaseline = null
@@ -180,6 +185,7 @@ export class SoftwareStatusFeed {
           } else this.notice = "Update installed. Waiting to reconnect and verify the installed build."
         }
         if (this.installBaseline && payload.installed.branch === this.installBaseline.target &&
+            (!this.installBaseline.selectedCommit || payload.installed.commit === this.installBaseline.selectedCommit) &&
             (payload.installed.commit && payload.installed.commit !== this.installBaseline.commit ||
              payload.installed.branch !== this.installBaseline.branch)) {
           this.installBaseline = null
@@ -199,7 +205,7 @@ export class SoftwareStatusFeed {
         if (body !== null) {
           this.uncertain = !error?.rejected
           this.uncertainAction = this.uncertain ? body : null
-          if (error?.rejected && ["install", "fast", "rollback"].includes(body.action)) this.installBaseline = null
+          if (error?.rejected && ["install", "fast", "rollback", "version"].includes(body.action)) this.installBaseline = null
         }
         this.error = error?.message || "Software request failed. Refresh to try again."
         this.emit(this.data ? "ready" : this.attempted ? "unavailable" : "loading")
@@ -225,19 +231,25 @@ export class SoftwareStatusFeed {
       expectedAutomaticDownloads: this.data.operations.automaticDownloads })
   }
 
-  action(action, branch = null) {
+  action(action, branch = null, selection = null) {
     const operations = this.data?.operations
-    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", fast: "canFastUpdate", rollback: "canRollback" }[action]
+    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", fast: "canFastUpdate", rollback: "canRollback", versions: "canFastUpdate", version: "canFastUpdate" }[action]
     if (!this.active || !capability || this.mutating || this.blocked || this.uncertain || !operations?.parked ||
         operations[capability] !== true || operations.request?.state === "pending") return null
     if (action === "select" && (branch === "other:" || !operations.availableBranches.includes(branch) || branch === operations.selectedTarget)) return null
     if (["download", "install"].includes(action) && (!branch || branch !== operations.selectedTarget)) return null
-    if (action === "fast" && (!branch || branch !== this.data.installed.branch && !operations.availableBranches.includes(branch))) return null
+    if (["fast", "versions", "version"].includes(action) && (!branch || branch !== this.data.installed.branch && !operations.availableBranches.includes(branch))) return null
     if (action === "rollback" && branch !== this.data.installed.branch) return null
+    if (action === "version") {
+      if (selection?.expectedCommit !== this.data.installed.commit || !/^[0-9a-f]{40}$/.test(selection?.selectedCommit) ||
+          operations.history?.recent?.branch !== branch ||
+          !operations.history.recent.entries.some((row) => row.hash === selection.selectedCommit)) return null
+    }
     this.actionPriorRequestId = operations.request?.id ?? null
     if (action === "install") this.installBaseline = { commit: this.data.installed.commit,
       branch: this.data.installed.branch, target: branch }
-    if (["fast", "rollback"].includes(action)) this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action }
+    if (["fast", "rollback", "version"].includes(action)) this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action, ...(action === "version" ? { selectedCommit: selection.selectedCommit } : {}) }
+    if (action === "version") return this.run({ action, branch, expectedCommit: selection.expectedCommit, selectedCommit: selection.selectedCommit })
     return this.run(action === "check" ? { action } : { action, branch })
   }
 }
@@ -362,9 +374,10 @@ export const SoftwarePage = {
     requestMessage(request) {
       if (!request) return ""
       if (request.state === "failed") return request.error || "Update request failed. Refresh and try again."
-      if (["fast", "rollback"].includes(request.action)) return request.state === "pending" ? `Updating ${request.target}…` :
+      if (["fast", "rollback", "version"].includes(request.action)) return request.state === "pending" ? `Updating ${request.target}…` :
         request.outcome === "up_to_date" ? "Installed branch is already up to date. No restart needed." :
         "Update installed. Waiting to reconnect and verify the installed build."
+      if (request.action === "versions") return request.state === "pending" ? "Loading recent versions…" : "Recent versions loaded."
       if (request.action === "install") return "Restart requested. Waiting to reconnect and verify the installed build."
       if (request.state === "pending") return request.action === "check" ? "Checking for updates…" : "Downloading and preparing update…"
       return request.action === "check" ? "Update check finished." : request.action === "download" ? "Download finished." : "Target branch saved."
@@ -379,6 +392,15 @@ export const SoftwarePage = {
       if (this.actionDisabled || this.operations?.canFastUpdate !== true || !branch) return
       this.dialog = { action: "fast", branch, title: "Fast Update",
         message: `Download latest version of ${branch} and restart?`, label: "Fast Update" }
+    },
+    loadVersions() {
+      return this.feed.action("versions", this.operations?.selectedTarget || this.data?.installed?.branch)
+    },
+    askVersion(entry) {
+      const branch = this.operations?.history?.recent?.branch
+      if (this.actionDisabled || this.operations?.canFastUpdate !== true || !branch) return
+      this.dialog = { action: "version", branch, selectedCommit: entry.hash, expectedCommit: this.data.installed.commit,
+        title: "Install recent version", message: `Install ${entry.subject} (${this.shortCommit(entry.hash)}) on ${branch} and restart?`, label: "Install" }
     },
     askRollback() {
       const branch = this.data?.installed?.branch
@@ -397,7 +419,7 @@ export const SoftwarePage = {
       if (!choice) return
       this.dialog = null
       if (choice.action === "restoreLayout") { await this.restoreLayout(); return }
-      const result = await this.feed.action(choice.action, choice.branch)
+      const result = await this.feed.action(choice.action, choice.branch, choice)
       if (result && choice.action === "select") {
         this.draftTouched = false
         this.syncDraftBranch(result.operations.selectedTarget)
@@ -470,6 +492,14 @@ export const SoftwarePage = {
           </section>
           <section v-if="operations.history" class="gx-card gx-software-card">
             <h3>Release Notes &amp; History</h3>
+            <details><summary>Recent versions</summary>
+              <p class="gx-note">Choose from the last 20 versions of the selected branch. Only compatible builds can be installed.</p>
+              <button class="gx-btn" type="button" :disabled="actionDisabled || !operations.canFastUpdate" @click="loadVersions">Load recent versions</button>
+              <ol v-if="operations.history.recent?.entries.length" class="gx-build-history"><li v-for="entry in operations.history.recent.entries" :key="entry.hash">
+                <strong>{{ entry.subject }}</strong><small>{{ reported(entry.date) }} · {{ shortCommit(entry.hash) }}</small>
+                <button class="gx-btn" type="button" :disabled="actionDisabled || !operations.canFastUpdate || entry.hash === data.installed.commit" @click="askVersion(entry)">Select version</button>
+              </li></ol>
+            </details>
             <details v-if="operations.history.currentReleaseNotes"><summary>Installed Release Notes</summary><pre class="gx-release-notes">{{ operations.history.currentReleaseNotes }}</pre></details>
             <details v-if="operations.history.downloadedReleaseNotes"><summary>Downloaded Release Notes</summary><pre class="gx-release-notes">{{ operations.history.downloadedReleaseNotes }}</pre></details>
             <details v-for="group in [{key:'installed',label:'Installed Build History'},{key:'downloaded',label:'Downloaded Build History'}]" :key="group.key">
