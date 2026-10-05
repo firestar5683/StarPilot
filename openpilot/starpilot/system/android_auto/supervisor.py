@@ -49,6 +49,7 @@ MAX_LOG_FILES = 20
 ENCODER_RECOVERIES = 3       # hardware encoder reopens allowed per window before the session is torn down
 ENCODER_RECOVERY_WINDOW = 10.0
 CAR_LINK_HOLD = 10.0         # a hands-free connection from the car counts as "car present" this long
+HFP_FRESH = 3.0              # a hands-free link from the car this recent still means "the car is reaching out now"
 WIRED_USB_VERIFIED = False   # configfs gadget/vehicle CAN USB isolation has not been proven on target
 
 
@@ -164,6 +165,7 @@ class Supervisor:
     self._pairing_until = 0.0
     self._pairing_known: set[str] | None = None  # Android Auto cars already paired when the pairing window opened
     self._car_seen_at = -CAR_LINK_HOLD
+    self._hfp_link = threading.Event()  # set when the chosen car opens the hands-free link
     self.auto = AutoConnectPolicy()
     self._companion_retry_at = 0.0
     self.log = EventLog()
@@ -580,6 +582,7 @@ class Supervisor:
   def _hfp_connected(self, address: str) -> None:
     if address.upper() in (self.config["receiver_address"].upper(), self.config.get("companion_address", "").upper()):
       self._car_seen_at = time.monotonic()
+      self._hfp_link.set()
 
   def _release_phone(self) -> None:
     """Stop looking like a phone; keep only the standby gateway auto-connect needs."""
@@ -658,6 +661,27 @@ class Supervisor:
     if self._stop.wait(seconds):
       raise Cancelled()
 
+  def _car_link_fresh(self) -> bool:
+    return time.monotonic() - self._car_seen_at < HFP_FRESH
+
+  def _wait_backoff(self, delay: float, car_can_wake: bool) -> None:
+    """Sleep out a retry delay, but retry at once when the car opens hands-free to us.
+
+    That is the car reaching out (at startup, or when the driver taps Android Auto); it hangs
+    up again within a second, so waiting out a 30 s backoff would miss it.
+    """
+    if not car_can_wake:
+      self._wait(delay)
+      return
+    if not self._car_link_fresh():
+      self._hfp_link.clear()
+    deadline = time.monotonic() + delay
+    while (remaining := deadline - time.monotonic()) > 0:
+      if self._hfp_link.is_set():
+        self.log("retry_early", reason="car opened hands-free", skipped_s=round(remaining, 1))
+        return
+      self._wait(min(0.1, remaining))
+
   # ---------------------------------------------------------------- session
 
   def _run(self, generation: int, trigger: str = "manual") -> None:
@@ -700,7 +724,7 @@ class Supervisor:
           delay = max(delay, PEER_STOP_RETRY_SECONDS)  # the car ended projection itself; do not bounce straight back
         self._set(state="backoff", attempt=attempt, retry_in=delay, mode=None)
         try:
-          self._wait(delay)
+          self._wait_backoff(delay, car_can_wake=not wired and not peer_stopped)
         except Cancelled:
           break
     finally:

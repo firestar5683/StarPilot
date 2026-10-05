@@ -237,3 +237,51 @@ def test_config_sanitizes_channel_cache(tmp_path):
   config = identity_store.load_config(path)
   assert config["rfcomm_cache"] == {CAR: 8} and config["auto_connect"] is True
   assert identity_store.load_config(tmp_path / "missing.json")["rfcomm_cache"] is not identity_store.DEFAULT_CONFIG["rfcomm_cache"]
+
+
+def _wireless_backoff_harness(sup, monkeypatch, failure):
+  from openpilot.starpilot.system.android_auto import supervisor
+  now = [100.0]
+  monkeypatch.setattr(supervisor.time, "monotonic", lambda: now[0])
+  monkeypatch.setattr(sup, "_lease", lambda: supervisor.NoLease())
+  sup.config["connection"] = "wireless"
+  starts, waits = [], []
+
+  def attempt(_):
+    starts.append(now[0])
+    if len(starts) == 2:
+      sup._stop.set()
+    raise failure
+
+  def wait(seconds):
+    waits.append(seconds)
+    now[0] += seconds
+    if len(starts) == 1 and now[0] - starts[0] >= 5 and not sup._hfp_link.is_set():
+      sup._hfp_connected(CAR.lower())  # the car reaches out mid-backoff, e.g. the driver taps Android Auto
+    if sup._stop.is_set():
+      raise supervisor.Cancelled()
+
+  monkeypatch.setattr(sup, "_attempt", attempt)
+  monkeypatch.setattr(sup, "_wait", wait)
+  return starts, waits
+
+
+def test_car_opening_hands_free_ends_the_backoff_early(identity, tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import supervisor
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: socket.socketpair()[0])
+  sup.select_receiver(CAR, "Civic")
+  monkeypatch.setattr(supervisor, "BACKOFF_SECONDS", (30.0,))
+  starts, _ = _wireless_backoff_harness(sup, monkeypatch, RuntimeError("car not answering"))
+  sup._run(1)
+  assert len(starts) == 2
+  assert starts[1] - starts[0] < 6  # retried when the car connected, not after the 30 s backoff
+
+
+def test_car_ending_projection_still_gets_its_full_pause(identity, tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import supervisor
+  from openpilot.starpilot.system.android_auto.session import PeerRequestedStop
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: socket.socketpair()[0])
+  sup.select_receiver(CAR, "Civic")
+  starts, waits = _wireless_backoff_harness(sup, monkeypatch, PeerRequestedStop("Head unit ended projection"))
+  sup._run(1)
+  assert waits[0] == supervisor.PEER_STOP_RETRY_SECONDS
