@@ -7,7 +7,7 @@ import pyray as rl
 from openpilot.starpilot.ui.clip import placed_at
 from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsState, feature_scroll
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.application import gui_app, MouseEvent, MousePos
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.wifi_manager import SecurityType, normalize_ssid
 from openpilot.system.ui.widgets import Widget
@@ -131,16 +131,16 @@ class StarPilotSettingsAdapterLarge(Widget):
     with placed_at(rl.Rectangle(*self.origin, 2160, 1080)):
       self.view.render(self.snapshot())
 
-  def _position(self, pos):
+  def _position(self, pos: MousePos) -> tuple[float, float]:
     return pos.x - self.origin[0], pos.y - self.origin[1]
 
   def _handle_mouse_press(self, pos):
     self.input.press(*self._position(pos), self.snapshot())
 
-  def _handle_mouse_event(self, event):
-    self.input.move(*self._position(event.pos), self.snapshot())
+  def _handle_mouse_event(self, mouse_event: MouseEvent):
+    self.input.move(*self._position(mouse_event.pos), self.snapshot())
     if self.input.held is not None:
-      x, y = self._position(event.pos)
+      x, y = self._position(mouse_event.pos)
       if abs(x - self.input.held[0]) > 36 or abs(y - self.input.held[1]) > 36:
         self.input.cancel()
 

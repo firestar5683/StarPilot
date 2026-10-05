@@ -16,7 +16,7 @@ from openpilot.starpilot.ui.starpilot_settings_adapter_large import StarPilotSet
 from openpilot.starpilot.ui.network_panel import NetworkPanelBridge
 from openpilot.starpilot.ui.tests.test_feature_settings_visuals import fake_fonts
 from openpilot.system.ui.lib.application import gui_app, MouseEvent, MousePos
-from openpilot.system.ui.lib.wifi_manager import Network, SecurityType
+from openpilot.system.ui.lib.wifi_manager import Network, SecurityType, WifiManager
 from openpilot.system.ui.widgets import DialogResult, Widget
 from openpilot.system.ui.widgets.list_view import ButtonAction, DualButtonAction, ItemAction, MultipleButtonAction, ToggleAction
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
@@ -50,7 +50,7 @@ class NativeSettingsPageTests(unittest.TestCase):
     items = [item(str(index), button_action()) for index in range(12)]
     pane = self.panel(items)
     reached = []
-    for page in range(3):
+    for _page in range(3):
       state = pane.snapshot()
       reached.extend(row.label for row in state.rows[state.scroll:state.scroll + 5])
       pane._emit(FeatureUiAction("scroll"))
@@ -162,8 +162,8 @@ class NativeSettingsPageTests(unittest.TestCase):
   def test_developer_ssh_preserves_native_fetcher_loading_and_add_remove_actions(self):
     # Execute the actual SSH control with its Params/network dependencies isolated.
     source = Path('openpilot/selfdrive/ui/widgets/ssh_key.py')
-    nodes = [node for node in ast.parse(source.read_text()).body
-             if isinstance(node, ast.ClassDef) and node.name in ('SshKeyActionState', 'SshKeyAction')]
+    nodes: list[ast.stmt] = [node for node in ast.parse(source.read_text()).body
+                             if isinstance(node, ast.ClassDef) and node.name in ('SshKeyActionState', 'SshKeyAction')]
     params = NS(get=lambda _: '', remove=Mock())
     module = ModuleType('openpilot.selfdrive.ui.widgets.ssh_key')
     module.__dict__.update(Enum=Enum, ItemAction=ItemAction, Params=lambda: params, SshKeyFetcher=lambda _: Mock(),
@@ -218,10 +218,11 @@ class NativeSettingsPageTests(unittest.TestCase):
     layout.body = [node for node in layout.body if isinstance(node, ast.FunctionDef) and node.name in methods]
     ui = NS(CP=None, engaged=False, update_params=Mock(), sm=NS(updated={'selfdriveState': False}))
     app = NS(push_widget=Mock())
-    namespace = dict(tr=lambda text: text, ui_state=ui, gui_app=app, DialogResult=DialogResult,
-                     ConfirmDialog=lambda *args, **kwargs: NS(callback=kwargs['callback']))
-    exec(compile(ast.Module(body=[layout], type_ignores=[]), str(source), 'exec'), namespace)
-    owner = namespace['TogglesLayout']()
+    namespace = ModuleType('toggles_controller_test')
+    namespace.__dict__.update(tr=lambda text: text, ui_state=ui, gui_app=app, DialogResult=DialogResult,
+                              ConfirmDialog=lambda *args, **kwargs: NS(callback=kwargs['callback']))
+    exec(compile(ast.Module(body=[layout], type_ignores=[]), str(source), 'exec'), namespace.__dict__)
+    owner = namespace.TogglesLayout()
     saved = {'IsLdwEnabled': False, 'LongitudinalPersonality': 1}
     owner._params = NS(get_bool=lambda key: bool(saved.get(key, False)), get=lambda key, **_: saved.get(key),
                        put_bool=lambda key, value, **_: saved.__setitem__(key, value),
@@ -232,7 +233,7 @@ class NativeSettingsPageTests(unittest.TestCase):
     with patch.object(gui_app, 'font', return_value=rl.Font()):
       personality = item('Driving Personality', MultipleButtonAction(['Aggressive', 'Standard', 'Relaxed'], 255, selected_index=1))
     owner._toggles = {'IsLdwEnabled': toggle, 'ExperimentalMode': experimental}
-    owner._toggle_defs = {key: ('', '', '', False) for key in owner._toggles}
+    owner._toggle_defs = dict.fromkeys(owner._toggles, ('', '', '', False))
     owner._locked_toggles = set()
     owner._slc_offsets = NS(_raw=lambda key: b'0')
     owner._update_experimental_mode_icon = Mock()
@@ -266,7 +267,7 @@ class NativeSettingsPageTests(unittest.TestCase):
     self.assertEqual(pane.snapshot().rows[2].value, 'Off')
 
   def network_panel(self):
-    manager = NS(is_connection_saved=lambda ssid: ssid == "Saved", connected_ssid="Saved",
+    manager = Mock(spec=WifiManager, is_connection_saved=lambda ssid: ssid == "Saved", connected_ssid="Saved",
                  wifi_state=NS(ssid="Saved"), set_active=Mock(), process_callbacks=Mock(), activate_connection=Mock(),
                  connect_to_network=Mock(), forget_connection=Mock())
     wifi = WifiManagerUI.__new__(WifiManagerUI)
