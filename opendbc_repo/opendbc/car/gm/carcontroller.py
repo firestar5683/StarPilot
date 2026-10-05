@@ -1,5 +1,5 @@
 from opendbc.car.gm.longitudinal import volt_sng_release
-from opendbc.car.gm.auto_hold import AutoHold
+from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for
 from opendbc.car.gm.values import is_volt_auto_hold
 from opendbc.car.gm.ordinary import demands as ascm_demands
 import math
@@ -227,7 +227,7 @@ class CarController(CarControllerBase):
     self.volt_sng_plan_input = None
     self.gm_auto_hold = False
     self.gm_auto_hold_input = None
-    self.gm_auto_hold_state = AutoHold()
+    self.gm_auto_hold_state = AutoHold(config=auto_hold_config_for(CP))
     self.regen_paddle_pressed = False
     self.bolt_regen_hold = False
     self.regen_press_count = 0
@@ -355,7 +355,7 @@ class CarController(CarControllerBase):
                                                          for stamp, limit in CS.gm_auto_hold_sources) and bool(CS.gm_auto_hold_sources) and
         not CS.gm_auto_hold_unavailable, long_active=CC.longActive, driver_brake=CS.gm_auto_hold_brake,
         controller_brake=self.apply_brake, wheel_ns=CS.gm_auto_hold_wheel_ns, now_ns=now_nanos,
-        physical_forward=CS.gm_auto_hold_forward, moving=CS.gm_auto_hold_moving)
+        physical_forward=CS.gm_auto_hold_forward, moving=CS.gm_auto_hold_moving, sent_hold=CS.gm_auto_hold_engaged)
       if hold_brake is None:
         CS.gm_auto_hold_engaged = False
     actuators = CC.actuators

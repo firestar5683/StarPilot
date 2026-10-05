@@ -77,7 +77,8 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     from openpilot.starpilot.ui.feature_settings_state import FeaturePage, row_change, row_default
     settings = (("VoltSNG", "volt_sng", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
                                         CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)),
-                ("GMAutoHold", "gm_auto_hold", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA)))
+                ("GMAutoHold", "gm_auto_hold", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
+                                              CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)))
     for key, preference, identities in settings:
       for identity in identities:
         with self.subTest(key=key, identity=identity):

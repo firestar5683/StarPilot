@@ -44,6 +44,33 @@ class TestVoltAlternateBrake(unittest.TestCase):
           self._auto_hold_join(candidate, accelerator=accelerator, alternative=alternative,
                                expected_word=expected_word, camera=camera)
 
+  def test_auto_hold_actual_sdgm_parser_controller_native(self):
+    from itertools import product
+    from opendbc.car import structs
+    from opendbc.car.gm.tests.test_volt_sdgm_control import sdgm_params
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    release = libsafety_py.libsafety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    for brake_c9, alternative in product((False, True), (0, 32)):
+      cp = sdgm_params(brake_c9=brake_c9, radar=True, release=release)
+      base_word = int(cp.safetyConfigs[0].safetyParam)
+      if release:
+        VehicleStartupPreferences(gm_auto_hold=True).prepare(cp)
+        self.assertFalse(cp.openpilotLongitudinalControl)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, base_word)
+        self._hold_release_factory(cp, camera=True, alternative=alternative)
+      else:
+        self._auto_hold_join(cp, accelerator=not brake_c9, alternative=alternative,
+                             expected_word=0x5487 if brake_c9 else 0x5087)
+        denied = cp.as_reader().as_builder()  # Withdraw the actual already-prepared hold selector.
+        preferences = VehicleStartupPreferences(gm_auto_hold=True, disable_bolt_long=True)
+        preferences.prepare(denied)
+        preferences.finalize(denied)
+        self.assertEqual(denied.safetyConfigs[0].safetyParam, 0x1405 if brake_c9 else 0x1005)
+        self.assertFalse(denied.openpilotLongitudinalControl)
+        self.assertTrue(denied.pcmCruise)
+        self._hold_release_factory(denied, camera=True, alternative=alternative)
+
   def _hold_release_factory(self, cp, *, camera, alternative):
     from types import SimpleNamespace
     from opendbc.car import structs
@@ -78,7 +105,9 @@ class TestVoltAlternateBrake(unittest.TestCase):
         for message in commands:
           self.assertTrue(native("tx", message, now // 1000), message)
       brake_packer = CANPacker(DBC[cp.carFingerprint][Bus.chassis])
-      positive = gmcan.create_friction_brake_command(brake_packer, 0, 80, 1, False, True, False, cp, auto_hold=True)
+      positive = gmcan.create_friction_brake_command(brake_packer, 2 if cp.carFingerprint == CAR.CHEVROLET_VOLT_2019 else 0,
+                                                    100 if cp.carFingerprint == CAR.CHEVROLET_VOLT_2019 else 80,
+                                                    1, False, True, False, cp, auto_hold=True)
       self.assertFalse(native("tx", positive, now // 1000))
       libsafety_py.libsafety.set_alternative_experience(0)
 
@@ -115,6 +144,8 @@ class TestVoltAlternateBrake(unittest.TestCase):
       self.assertEqual(libsafety_py.libsafety.set_safety_hooks(int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam), 0)
       from openpilot.selfdrive.car.car_events import CarEvents, EventName
       events = CarEvents(cp)
+      sdgm = cp.carFingerprint == CAR.CHEVROLET_VOLT_2019
+      seen_retained = seen_normal_credit_withdrawn = False
       seen_hold = seen_near_stop = seen_normal = seen_feedback = False
       last_sent_hold = False
       for tick in range(1570 if camera else 1000):
@@ -132,22 +163,27 @@ class TestVoltAlternateBrake(unittest.TestCase):
         if tick == 540:
           params.put_bool("GMAutoHold", True, block=True)
         normal_long = 881 <= tick < 900
-        _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=2. if moving else 0.,
+        raw_wheel = 28 if sdgm and tick == 348 else 29 if sdgm and tick == 352 else (
+          20 if sdgm and (349 <= tick < 352 or 353 <= tick < 360 or 900 <= tick < 910) else None)
+        speed = raw_wheel * .0311 / 3.6 if raw_wheel is not None else 2. if moving else 0.
+        _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=speed,
                      brake=not moving and not 880 <= tick < 900, gas=gas, regen=regen,
                      camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not camera_missing)
         rx = [message for message in rx if message[0] not in (0xBE, 0xF1, 0x1C4, 0x232, 0x1E1, 0x1F5, 0xC9)]
         brake_name, brake_signal = (("ECMAcceleratorPos", "BrakePedalPos") if accelerator else
                                     ("EBCMBrakePedalPosition", "BrakePedalPosition"))
         rx += [packer.make_can_msg(brake_name, 0, {brake_signal: 20 if not moving and not 880 <= tick < 900 else 0}),
-               packer.make_can_msg("AcceleratorPedal2", 0, {"CruiseState": 2 if moving or 880 <= tick < 910 else 4, "AcceleratorPedal2": 30 if gas else 0}),
+               packer.make_can_msg("AcceleratorPedal2", 0, {"CruiseState": 2 if moving or 880 <= tick < (920 if sdgm else 910) else 4,
+                                                                        "AcceleratorPedal2": 30 if gas else 0}),
                packer.make_can_msg("EBCMFrictionBrakeStatus", 0, {"FrictionBrakeUnavailable": int(unavailable)}),
                packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 3 if tick == 880 else 6 if tick == 900 else 1, "RollingCounter": tick % 4})]
+        nonselected_c9 = cp.carFingerprint in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019) and accelerator
         rx.append(packer.make_can_msg("ECMEngineStatus", 0, {"CruiseMainOn": int(not main_off),
                                                                    "BrakePressed": int(not moving and not 880 <= tick < 900 and
-                                                                                       not (cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM and accelerator))}))
+                                                                                       not nonselected_c9)}))
         rx.append(packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 8 if unknown_gear else 4,
                                                       "ManualMode": int(unknown_gear)}))
-        if not accelerator and cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM:
+        if not accelerator and cp.carFingerprint in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019):
           rx = [message for message in rx if message[0] != 0xF1]
           rx.append(packer.make_can_msg("ECMAcceleratorPos", 0, {"BrakePedalPos": 200}))
         if camera:
@@ -160,6 +196,10 @@ class TestVoltAlternateBrake(unittest.TestCase):
         ci.update([(now - 1_000_000, rx)])
         out = ci.update([(now, rx)])
         self.assertEqual(out.brakePressed, not moving and not 880 <= tick < 900)
+        if raw_wheel is not None:
+          self.assertAlmostEqual(out.wheelSpeeds.rl, speed, places=6)
+          self.assertAlmostEqual(out.wheelSpeeds.rr, speed, places=6)
+          self.assertGreater(out.wheelSpeeds.rl, 0.)
         if not stale_brake_status and not camera_missing:
           self.assertTrue(out.canValid, tick)
           self.assertFalse(out.canTimeout)
@@ -169,7 +209,7 @@ class TestVoltAlternateBrake(unittest.TestCase):
           self.assertTrue(out.accFaulted)
         physical_withdrawal = (moving or regen or unavailable or gas or unknown_gear or main_off or
                                950 <= tick < 960 or camera and 1510 <= tick < 1550)
-        if physical_withdrawal:
+        if physical_withdrawal or not out.standstill:
           self.assertFalse(out.brakeHoldActive)
         elif (last_sent_hold and not normal_long and not 500 <= tick < 540 and out.canValid and
               out.standstill and ci.CS.gm_auto_hold_forward):
@@ -199,15 +239,25 @@ class TestVoltAlternateBrake(unittest.TestCase):
           seen_normal = True
           self.assertTrue(any(message[0] == 0x2CB for message in commands))
           self.assertFalse(ci.CC.gm_auto_hold_state.engaged)
-        if 900 <= tick < 910:
+        if 900 <= tick < 910 and not sdgm or sdgm and 915 <= tick < 920:
           self.assertEqual(mode, 0xB)
           seen_near_stop = True
+        if sdgm and tick == 348:
+          self.assertTrue(hold, (tick, out.vEgo, out.wheelSpeeds.rl, ci.CS.gm_auto_hold_engaged))
+          self.assertFalse(out.brakeHoldActive)
+          seen_retained = True
+        if sdgm and 352 <= tick < 360:
+          self.assertFalse(hold)
+        if sdgm and 900 <= tick < 910:
+          self.assertFalse(hold)
+          seen_normal_credit_withdrawn = True
         if hold:
-          self.assertEqual(brakes[0][2], 0 if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera or
+          self.assertEqual(brakes[0][2], 2 if sdgm else
+                           0 if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera or
                            is_volt_gateway_alternate_brake(cp) else 2)
-          if cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM and not accelerator:
+          if cp.carFingerprint in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019) and not accelerator:
             raw_brake = ((brakes[0][1][0] & 15) << 8) | brakes[0][1][1]
-            self.assertEqual((0x1000 - raw_brake) & 0xFFF, 80)
+            self.assertEqual((0x1000 - raw_brake) & 0xFFF, 100 if sdgm else 80)
           seen_hold = True
           self.assertFalse(any(message[0] == 0x2CB for message in commands))
           self.assertGreaterEqual(tick, 340)
@@ -219,6 +269,8 @@ class TestVoltAlternateBrake(unittest.TestCase):
         if 290 <= tick < 300 or 309 <= tick < 320:
           self.assertFalse(hold)
       self.assertTrue(seen_hold and seen_near_stop and seen_normal and seen_feedback)
+      if sdgm:
+        self.assertTrue(seen_retained and seen_normal_credit_withdrawn)
       libsafety_py.libsafety.set_alternative_experience(0)
       self.assertFalse(ci.CC.gm_auto_hold_state.engaged)
 

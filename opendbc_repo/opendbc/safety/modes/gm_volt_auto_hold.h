@@ -5,6 +5,9 @@ static bool gm_volt_auto_hold = false;
 static bool gm_hold_alt_brake = false;
 static bool gm_hold_c9_brake = false;
 static bool gm_hold_extended_be = false;
+static bool gm_hold_sdgm;
+static bool gm_hold_accepted;
+static bool gm_hold_near_stop;
 static uint8_t gm_hold_tx_bus = 2U;
 static bool gm_hold_seen[7];
 static uint32_t gm_hold_us[7];
@@ -24,12 +27,13 @@ static bool gm_hold_regen_released;
 static bool gm_hold_counter_seen;
 static uint8_t gm_hold_counter;
 
-static void gm_hold_reset(bool enabled, bool alternate, bool c9_brake, bool extended_be, uint8_t tx_bus) {
+static void gm_hold_reset(bool enabled, bool alternate, bool c9_brake, bool extended_be, uint8_t tx_bus, bool sdgm) {
   gm_volt_auto_hold = enabled;
   gm_hold_alt_brake = alternate;
   gm_hold_c9_brake = c9_brake;
   gm_hold_extended_be = extended_be;
   gm_hold_tx_bus = tx_bus;
+  gm_hold_sdgm = sdgm; gm_hold_accepted = false; gm_hold_near_stop = false;
   for (uint8_t i = 0U; i < 7U; i++) { gm_hold_seen[i] = false; gm_hold_us[i] = 0U; }
   gm_hold_brake_unavailable = true;
   gm_hold_main = false; gm_hold_forward = false; gm_hold_gas = false;
@@ -81,6 +85,8 @@ static void gm_hold_rx(const CANPacket_t *msg) {
       const uint16_t left = ((uint16_t)msg->data[0] << 8) | msg->data[1];
       const uint16_t right = ((uint16_t)msg->data[2] << 8) | msg->data[3];
       gm_hold_stopped = (left <= 10U) && (right <= 10U);
+      gm_hold_near_stop = (left <= 28U) && (right <= 28U);
+      if (!gm_hold_near_stop) { gm_hold_accepted = false; }
       gm_hold_moving = (left > 0U) || (right > 0U);
       const uint32_t elapsed = safety_get_ts_elapsed(now, gm_hold_us[4]);
       // Raw wheel units are .0311 km/h; twelve units exceed .1 m/s.
@@ -98,9 +104,10 @@ static void gm_hold_rx(const CANPacket_t *msg) {
       // Unrelated or malformed traffic cannot refresh physical authority.
     }
     if (source >= 0) { gm_hold_seen[source] = true; gm_hold_us[source] = now; }
-    if (!gm_hold_ready(now)) { gm_hold_armed = false; }
+    if (!gm_hold_ready(now)) { gm_hold_armed = false; gm_hold_accepted = false; }
     else if (gm_hold_moving || gm_hold_brake) { gm_hold_armed = true; }
     else { /* Retain a previously armed stopped hold. */ }
+    if (get_longitudinal_allowed()) { gm_hold_accepted = false; }
   }
 }
 
@@ -116,10 +123,15 @@ static bool gm_hold_brake_tx(const CANPacket_t *msg, int brake) {
                             (checksum == expected) && ((msg->data[4] & 0xFCU) == 0U) &&
                             (release || !gm_hold_counter_seen || (counter == ((gm_hold_counter + 1U) & 3U)));
   const bool hold_mode = (((mode == 0xAU) || (mode == 0xBU)) && (gm_hold_acc != 4U)) || ((mode == 0xDU) && (gm_hold_acc == 4U));
-  if (!gm_hold_ready(now)) { gm_hold_armed = false; }
-  const bool hold = gm_hold_armed && gm_hold_ready(now) && gm_hold_stopped &&
-                    (brake >= 80) && (brake <= 240) && hold_mode;
+  if (!gm_hold_ready(now)) { gm_hold_armed = false; gm_hold_accepted = false; }
+  const bool stationary = gm_hold_stopped || (gm_hold_sdgm && gm_hold_accepted && gm_hold_near_stop);
+  const int minimum = gm_hold_sdgm ? 100 : 80;
+  const bool hold = gm_hold_armed && gm_hold_ready(now) && stationary &&
+                    (brake >= minimum) && (brake <= 240) && hold_mode;
   const bool permitted = packet_valid && (release || hold);
-  if (permitted) { gm_hold_counter_seen = true; gm_hold_counter = counter; }
+  if (permitted) {
+    gm_hold_counter_seen = true; gm_hold_counter = counter;
+    gm_hold_accepted = !release;
+  }
   return permitted;
 }

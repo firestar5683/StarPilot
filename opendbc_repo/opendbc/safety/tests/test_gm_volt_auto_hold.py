@@ -23,7 +23,7 @@ class TestVoltAutoHold(unittest.TestCase):
     self.time = 1
     self.counter = 0
     self.packer = CANPacker(DBC[CAR.CHEVROLET_VOLT][Bus.pt])
-    self.c9_brake = word in (0x4687, 0x4E87, 0x4087)
+    self.c9_brake = word in (0x4687, 0x4E87, 0x4087, 0x5487)
     self.tx_bus = 0 if word in (0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087) or alternate else 2
 
   def tearDown(self):

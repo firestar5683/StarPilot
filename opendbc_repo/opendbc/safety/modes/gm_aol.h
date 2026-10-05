@@ -93,6 +93,7 @@ static bool gm_aol_profile_word(uint16_t word) {
     case 0x4207U: case 0x4607U: case 0x4A07U: case 0x4E07U:
     case 0x4007U:
     case 0x4287U: case 0x4687U: case 0x4A87U: case 0x4E87U: case 0x4087U:
+    case 0x5087U: case 0x5487U:
     case 0x5007U: case 0x5407U: case 0xC151U:
 #endif
       supported = true;

@@ -157,13 +157,16 @@ class TestVehicleStartupPreferences(unittest.TestCase):
 
   def test_camera_volt_hold_startup_retains_release_and_disable_longitudinal_owners(self):
     from opendbc.car.gm.values import CAR as GM_CAR, is_volt_auto_hold
-    for candidate in (GM_CAR.CHEVROLET_VOLT_ASCM, GM_CAR.CHEVROLET_VOLT_CAMERA):
+    for candidate in (GM_CAR.CHEVROLET_VOLT_ASCM, GM_CAR.CHEVROLET_VOLT_CAMERA, GM_CAR.CHEVROLET_VOLT_2019):
       for radar in (False, True):
-        for brake_c9 in ((False, True) if candidate == GM_CAR.CHEVROLET_VOLT_ASCM else (True,)):
+        for brake_c9 in ((True,) if candidate == GM_CAR.CHEVROLET_VOLT_CAMERA else (False, True)):
           observed = gen_empty_fingerprint()
           if candidate == GM_CAR.CHEVROLET_VOLT_ASCM:
             observed[0][0x2FF] = 8
             stock_word = 0x205 | (0x400 if brake_c9 else 0) | (0x800 if radar else 0)
+          elif candidate == GM_CAR.CHEVROLET_VOLT_2019:
+            observed[0][0x2FF] = 8
+            stock_word = 0x1005 | (0x400 if brake_c9 else 0)
           else:
             observed[2][0x320] = 6
             stock_word = 5
@@ -171,14 +174,19 @@ class TestVehicleStartupPreferences(unittest.TestCase):
             observed[0][0xBE] = 6
           if radar:
             observed[1][0x460] = 8
-          for release, disable in ((False, False), (True, False), (False, True)):
-            with self.subTest(candidate=candidate, radar=radar, brake_c9=brake_c9, release=release, disable=disable):
+          startup_choices = [(False, False, True), (True, False, True), (False, True, True)]
+          if candidate == GM_CAR.CHEVROLET_VOLT_2019:
+            startup_choices.append((False, False, False))
+          for release, disable, sascm in startup_choices:
+            if not sascm:
+              observed[0].pop(0x2FF)
+            with self.subTest(candidate=candidate, radar=radar, brake_c9=brake_c9, release=release, disable=disable, sascm=sascm):
               self.params.put_bool("IsReleaseBranch", release, block=True)
               self.params.put_bool("AlphaLongitudinalEnabled", True, block=True)
               self.params.put_bool("DisableOpenpilotLongitudinal", disable, block=True)
               host, constructed, published = self.start(candidate, key="GMAutoHold", observed=observed,
                 capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam))
-              admitted = not release and not disable
+              admitted = not release and not disable and sascm
               self.assertEqual(constructed, [stock_word | (0x4082 if admitted else 0)])
               self.assertEqual(published.safetyConfigs[0].safetyParam, constructed[0])
               self.assertEqual(is_volt_auto_hold(published), admitted)

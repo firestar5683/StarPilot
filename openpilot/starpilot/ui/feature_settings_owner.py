@@ -252,9 +252,8 @@ class FeatureSettingsOwner:
     from openpilot.starpilot.vehicle_selection import read_selection
     cp = self.vehicle_params()
     try:
-      identities = ({CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019}
-                    if key == "VoltSNG" else {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA})
-      if cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
+      identities = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019}
+      if key not in ("VoltSNG", "GMAutoHold") or cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
         return None
       selection = read_selection(self.params)
       if not selection.readable or not selection.valid:
