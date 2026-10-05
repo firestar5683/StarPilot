@@ -16,7 +16,7 @@ from openpilot.selfdrive.ui.lib.prime_state import PrimeState
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.usb import cable_connected, get_usb_state, is_chestnut_usb_id
-from openpilot.selfdrive.modeld.helpers import chestnut_compiled
+from openpilot.starpilot.models.manager import ModelManager
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 PARAM_UPDATE_TIME = 1 / 5.0
@@ -140,7 +140,10 @@ class UIState:
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.experimental_mode_confirmed: bool = self.params.get_bool("ExperimentalModeConfirmed")
     self.chestnut_present: bool = False
-    self.chestnut_compiled: bool = chestnut_compiled()
+    self._gpu_artifacts = ModelManager()
+    self._gpu_artifacts_at: float | None = None
+    self.chestnut_compiled: bool = False
+    self.chestnut_checking: bool = False
     self.chestnut_active: bool | None = None
     self.chestnut_loading: bool = False
     self.usb_connected: bool = False
@@ -275,8 +278,9 @@ class UIState:
     detected = self.sm["deviceState"].chestnutPresent
     if not self.started:
       self.chestnut_present = detected
-      self.chestnut_state = (ChestnutState.READY if detected and self.chestnut_compiled else
-                             ChestnutState.UNCOMPILED if detected else ChestnutState.DISCONNECTED)
+      self.chestnut_state = (ChestnutState.DISCONNECTED if not detected else
+                             ChestnutState.LOADING if self.chestnut_checking else
+                             ChestnutState.READY if self.chestnut_compiled else ChestnutState.UNCOMPILED)
       return
 
     model_seen = self.sm.recv_frame["modelV2"] > self.started_frame
@@ -316,6 +320,9 @@ class UIState:
       True if raw_chestnut in (b"1", "1") else False if raw_chestnut in (b"0", "0") else None)
     self.chestnut_loading = self.params.get_bool("ChestnutLoading")
     now = time.monotonic()
+    if not self.started and (self._gpu_artifacts_at is None or now < self._gpu_artifacts_at or now - self._gpu_artifacts_at >= 1.):
+      self.chestnut_compiled, self.chestnut_checking = self._gpu_artifacts.selected_gpu_status()
+      self._gpu_artifacts_at = now
     if cable_connected():
       self.usb_disconnected_ts = None
       if not self.usb_connected:

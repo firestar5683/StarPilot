@@ -101,6 +101,41 @@ class ModelManagerTest(unittest.TestCase):
       time.sleep(0.01)
     self.fail('Artifact verification did not finish')
 
+  def test_selected_gpu_status_verifies_download_without_bundled_model_or_job_writes(self):
+    from openpilot.starpilot.models.manager import artifact_path
+
+    mid = 'cinquev3'
+    entry = {'artifact_sha256': hashlib.sha256(self.data).hexdigest(), 'artifact_size': len(self.data)}
+    path = artifact_path(mid, self.root)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(self.data)
+    atomic_json(self.root / 'preferences.json', {'big': mid})
+    with patch('openpilot.starpilot.models.manager.catalog', return_value={mid: entry}), \
+         patch.object(self.manager, '_job_status', side_effect=AssertionError('Read-only status must not change jobs')):
+      assert self.manager.selected_gpu_status() == (False, True)
+      deadline = time.monotonic() + 3
+      while time.monotonic() < deadline:
+        state = self.manager.selected_gpu_status()
+        if state != (False, True):
+          break
+        time.sleep(.01)
+      assert state == (True, False)
+      path.write_bytes(b'x' * len(self.data))
+      assert self.manager.selected_gpu_status() == (False, True)
+      deadline = time.monotonic() + 3
+      while time.monotonic() < deadline:
+        state = self.manager.selected_gpu_status()
+        if state != (False, True):
+          break
+        time.sleep(.01)
+      assert state == (False, False)
+      atomic_json(self.root / 'preferences.json', {'big': ''})
+      assert self.manager.selected_gpu_status() == (False, False)
+      atomic_json(self.root / 'preferences.json', {'big': mid})
+      path.unlink()
+      assert self.manager.selected_gpu_status() == (False, False)
+    assert not (self.root / '.download-job.json').exists()
+
   def test_chunk_download_verifies_and_selects_next_start(self):
     self.download()
     self.assertEqual(self.manager.progress, 'Downloaded!')
