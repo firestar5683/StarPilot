@@ -118,3 +118,49 @@ class TestGmAol(unittest.TestCase):
       self.assertFalse(fixture.tx(button=3))
       fixture.safety.set_controls_allowed(False)
       self.assertFalse(fixture.tx(button=3))
+
+  def test_base_gateway_typed_axes_and_ordinary_controls(self):
+    from opendbc.safety.tests.test_gm_volt_auto_hold import TestVoltAutoHold
+    for word in (0, 0x80):
+      for alternative in (0, 32):
+        with self.subTest(word=word, alternative=alternative):
+          f = TestVoltAutoHold()
+          f.init(word=word, alternative=alternative)
+          f.observations(regen_source=False)
+          f.safety.set_aol_test_heartbeat(True)
+          f.safety.aol_set_host_request(3)
+          self.assertFalse(f.safety.get_controls_allowed())
+          self.assertEqual(f.safety.aol_get_permission_mask(), 1 if alternative == 32 else 0)
+          steering = gmcan.create_steering_control(f.packer, 0, 1, 0, True)
+          self.assertEqual(f.safety.safety_tx_hook(self.packet(steering)), alternative == 32)
+          self.assertFalse(f.tx(80))
+          f.rx(0x1E1, [0, 0, 0, 0, 0, 0x20, 0])
+          self.assertTrue(f.safety.get_controls_allowed())
+          if alternative == 32:
+            self.assertEqual(f.safety.aol_get_permission_mask(), 3)
+          self.assertTrue(f.safety.safety_tx_hook(self.packet(steering)))
+          self.assertTrue(f.tx(400, 0xA))
+          self.assertFalse(f.tx(401, 0xA))
+          f.observations(brake=True, regen_source=False)
+          self.assertFalse(f.safety.get_controls_allowed())
+          if alternative == 32:
+            self.assertEqual(f.safety.aol_get_permission_mask(), 1)
+          f.observations(main=False, regen_source=False)
+          self.assertFalse(f.safety.safety_tx_hook(self.packet(steering)))
+
+  def test_base_gateway_main_health_and_unknown_neighbors(self):
+    from opendbc.safety.tests.test_gm_volt_auto_hold import TestVoltAutoHold
+    for word in (0, 0x80):
+      f = TestVoltAutoHold()
+      f.init(word=word, alternative=32)
+      f.observations(regen_source=False)
+      f.safety.set_aol_test_heartbeat(True)
+      self.assertEqual(self.request(1), 1)
+      f.safety.set_timer(f.time + 300001)
+      self.assertEqual(self.request(1), 0)
+      f.observations(main=False, regen_source=False)
+      self.assertEqual(self.request(1), 0)
+    for word in (0x40, 0x81, 0x82, 0x84, 0x180):
+      self.reset(word)
+      self.feed()
+      self.assertEqual(self.request(3), 0)

@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
-from opendbc.car.gm.aol import GM_AOL_WORDS, qualified_gm
+from opendbc.car.gm.aol import GM_AOL_WORDS, GM_BASE_GATEWAY_IDS, qualified_gm
+from opendbc.car.gm.lateral import lane_centering_supported
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.tests.test_bolt_cc import params as bolt_params, feed as feed_car, control, native
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -33,7 +34,17 @@ BOLT_IDS = (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
             CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
 
 
-def configurations():
+def _configurations():
+  for identity in GM_BASE_GATEWAY_IDS:
+    cp = ordinary_params(identity, radar=True)
+    yield cp
+    if identity == CAR.BUICK_LACROSSE:
+      disabled = cp.as_reader().as_builder()
+      VehicleStartupPreferences(disable_bolt_long=True).prepare(disabled)
+      yield disabled
+      held = cp.as_reader().as_builder()
+      VehicleStartupPreferences(gm_auto_hold=True).prepare(held)
+      yield held
   for identity in BOLT_IDS:
     for pedal in (False, True):
       for removed in (False, True):
@@ -49,6 +60,7 @@ def configurations():
     yield factory_params(alpha=alpha)
     yield camera_params(alpha=alpha)
     yield removed_params(alpha=alpha)
+    yield removed_params(alpha=alpha, alternate=True)
     for c9 in (False, True):
       yield sdgm_params(alpha=alpha, brake_c9=c9)
     for c9 in (False, True):
@@ -87,6 +99,15 @@ def configurations():
       yield silverado_pedal(removed=removed, disabled=disabled)
 
 
+def configurations():
+  for cp in _configurations():
+    yield cp
+    selected = cp.as_reader().as_builder()
+    VehicleStartupPreferences(gm_auto_hold=True).prepare(selected)
+    if selected.safetyConfigs[0].safetyParam != cp.safetyConfigs[0].safetyParam:
+      yield selected
+
+
 class TestGmAol(unittest.TestCase):
   def test_actual_final_cp_registry_and_isolation(self):
     words = set()
@@ -105,7 +126,29 @@ class TestGmAol(unittest.TestCase):
         denied = cp.as_reader().as_builder()
         denied.alternativeExperience = 33
         self.assertFalse(qualified_gm(denied))
-    self.assertEqual(words, GM_AOL_WORDS)
+    self.assertEqual(words, GM_AOL_WORDS, {"missing": GM_AOL_WORDS - words, "unexpected": words - GM_AOL_WORDS})
+
+  def test_base_gateway_aol_preserves_tuning_and_lane_capability(self):
+    for identity in GM_BASE_GATEWAY_IDS:
+      cp = ordinary_params(identity, radar=True)
+      with self.subTest(identity=identity):
+        self.assertTrue(qualified_gm(cp))
+        self.assertFalse(lane_centering_supported(cp))
+        selected = cp.as_reader().as_builder()
+        selected.alternativeExperience = 32
+        self.assertTrue(qualified_gm(selected))
+        self.assertFalse(lane_centering_supported(selected))
+        for field, value in (('pcmCruise', True), ('radarUnavailable', True), ('alphaLongitudinalAvailable', True),
+                             ('networkLocation', 'fwdCamera'), ('transmissionType', 'direct'), ('flags', 1)):
+          denied = cp.as_reader().as_builder()
+          setattr(denied, field, value)
+          self.assertFalse(qualified_gm(denied))
+        denied = cp.as_reader().as_builder()
+        denied.safetyConfigs[0].safetyParam = 0x80
+        self.assertEqual(qualified_gm(denied), identity == CAR.BUICK_LACROSSE)
+        denied = cp.as_reader().as_builder()
+        denied.openpilotLongitudinalControl = False
+        self.assertEqual(qualified_gm(denied), identity == CAR.BUICK_LACROSSE)
 
   @staticmethod
   def card(cp, settings):
@@ -206,6 +249,121 @@ class TestGmAol(unittest.TestCase):
         self.assertEqual(command.latActive, expected)
         self.assertFalse(command.longActive)
 
+
+  def test_base_gateway_actual_card_controls_parser_and_native_axes(self):
+    cases = [(identity, False, False) for identity in GM_BASE_GATEWAY_IDS]
+    cases += [(CAR.BUICK_LACROSSE, True, False), (CAR.BUICK_LACROSSE, False, True)]
+    safety = libsafety_py.libsafety
+    for identity, held, disabled in cases:
+      with self.subTest(identity=identity, held=held, disabled=disabled), OpenpilotPrefix(), \
+           patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+        settings = Params()
+        settings.put_bool('GMAutoHold', held, block=True)
+        settings.put_bool('DisableOpenpilotLongitudinal', disabled, block=True)
+        factory = ordinary_params(identity, radar=True)
+        default = self.card(factory, settings)
+        self.assertIsNone(default.aol_card_intent)
+        self.assertEqual(default.CP.alternativeExperience, 0)
+        settings.put_bool('AlwaysOnLateral', True, block=True)
+        selected = self.card(factory, settings)
+        self.assertEqual(selected.CP.safetyConfigs[0].safetyParam, default.CP.safetyConfigs[0].safetyParam)
+        self.assertEqual(selected.CP.lateralTuning.to_dict(), default.CP.lateralTuning.to_dict())
+        self.assertEqual(selected.CP.alternativeExperience, 32)
+        self.assertEqual(selected.CP.openpilotLongitudinalControl, not disabled)
+        self.assertFalse(selected.CP.pcmCruise)
+        self.assertEqual(selected.CP.safetyConfigs[0].safetyParam, 0x80 if held else 0)
+        self.assertEqual(selected.CP.lateralTuning.to_dict(), factory.lateralTuning.to_dict())
+        self.assertFalse(lane_centering_supported(selected.CP))
+        controls = Controls()
+        self.assertEqual(controls.CP.lateralTuning.to_dict(), factory.lateralTuning.to_dict())
+        self.assertEqual(controls.CP.lateralTuning.which(), factory.lateralTuning.which())
+        ci = selected.CI
+        packer = CANPacker(DBC[identity][Bus.pt])
+        safety.set_alternative_experience(32)
+        self.assertEqual(safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, selected.CP.safetyConfigs[0].safetyParam), 0)
+        safety.init_tests()
+        seen_lateral = seen_longitudinal = False
+        for tick in range(150):
+          now = 1_000_000_000 + tick * 10_000_000
+          ordinary = 41 <= tick < 60 and not disabled
+          main = not 20 <= tick < 30
+          gas, brake, reverse = 70 <= tick < 80, 80 <= tick < 90, 90 <= tick < 100
+          _, packets = feed_car(SimpleNamespace(update=lambda _: None), packer, now, counter=tick % 4,
+                                active=ordinary, speed=20., camera=False)
+          packets = [packet for packet in packets if packet[0] not in (0xC9, 0x1C4, 0xBE, 0x1E1, 0x1F5, 0xBD)]
+          packets += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 2 if ordinary else 0,
+                                                                  'AcceleratorPedal2': 30 if gas else 0}),
+                      packer.make_can_msg('ECMAcceleratorPos', 0, {'BrakePedalPos': 20 if brake else 0}),
+                      packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 2 if reverse else 4}),
+                      packer.make_can_msg('ASCMSteeringButton', 0, {'ACCButtons': 3 if tick == 40 else 6 if tick == 60 else 1,
+                                                                  'RollingCounter': tick % 4})]
+          if not 100 <= tick < 140:
+            packets.append(packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': int(main)}))
+          ci.update([(now - 1_000_000, packets)])
+          cs = ci.update([(now, packets)])
+          for packet in packets:
+            native('rx', packet, now // 1000)
+          safety.safety_tick()
+          safety.set_aol_test_heartbeat(True)
+          selected.aol_card_intent.update(cs, now_ns=now, standard_enabled=ordinary)
+          intent = IntentState('card', tick + 1, now, now, now + 30_000_000,
+                               selected.aol_card_intent.allowed_latch, False, False, True, True)
+          wanted = decide_axes(standard_lateral=ordinary, standard_longitudinal=ordinary, intent=intent, native=None,
+                               car_state=cs, initialized=True, model_ready=True, no_entry=False,
+                               immediate_disable=False, dm_lockout=False, pause_brake_mps=25.)
+          safety.aol_set_host_request(int(wanted.desired_lateral) | (int(wanted.desired_longitudinal) << 1))
+          safety.set_timer(now // 1000 + 1)
+          mask = safety.aol_get_permission_mask()
+          receipt_state = SafetyState(1, True, now, now + 200_000_000, int(structs.CarParams.SafetyModel.gm),
+                                      selected.CP.safetyConfigs[0].safetyParam,
+                                      bool(mask & 1), bool(mask & 2),
+                                      wanted.desired_lateral, wanted.desired_longitudinal, 'panda', 'gm-gateway-test')
+          decision = decide_axes(standard_lateral=ordinary, standard_longitudinal=ordinary, intent=intent, native=receipt_state,
+                                 car_state=cs, initialized=True, model_ready=True, no_entry=False,
+                                 immediate_disable=False, dm_lockout=False, pause_brake_mps=25.)
+          feed(controls, now, tick, active=ordinary, enabled=ordinary)
+          axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
+          axis.aolAxisState.qualified = True
+          axis.aolAxisState.nativeAcknowledged = True
+          axis.aolAxisState.desiredLateral = decision.desired_lateral
+          axis.aolAxisState.desiredLongitudinal = decision.desired_longitudinal
+          axis.aolAxisState.lateralActive = decision.lateral_active
+          axis.aolAxisState.longitudinalActive = decision.longitudinal_active
+          axis.aolAxisState.sessionId = 'gm-gateway-test'
+          axis.aolAxisState.observedMonoTime = now
+          axis.aolAxisState.validUntilMonoTime = now + 30_000_000
+          receipt = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
+          from dataclasses import replace
+          transport_receipt = receipt_state
+          if tick == 11:
+            transport_receipt = replace(receipt_state, safetyParam=5)
+          elif tick == 12:
+            transport_receipt = replace(receipt_state, axisSessionId='wrong-session')
+          elif tick == 13:
+            transport_receipt = replace(receipt_state, observedMonoTime=now + 1)
+          elif tick == 14:
+            transport_receipt = replace(receipt_state, validUntilMonoTime=now - 1)
+          receipt.aolSafetyWire = encode_safety(transport_receipt)
+          state = messaging.new_message('carState', valid=True, logMonoTime=now)
+          state.carState = cs
+          controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), state.as_reader()])
+          command, _ = controls.state_control()
+          self.assertEqual(command.latActive, decision.lateral_active and tick not in (11, 12, 13, 14))
+          self.assertEqual(command.longActive, ordinary)
+          self.assertEqual(bool(safety.get_controls_allowed()), 41 <= tick < 60)
+          if not main or brake or reverse or 131 <= tick < 140:
+            self.assertFalse(command.latActive)
+          if tick == 10:
+            self.assertTrue(command.latActive)
+          command.actuators.torque = .02 if command.latActive else 0.
+          _, messages = ci.apply(command.as_reader(), now + 2)
+          for message in messages:
+            self.assertTrue(native('tx', message, now // 1000 + 1), (tick, message))
+          seen_lateral |= command.latActive and not command.longActive
+          seen_longitudinal |= command.longActive
+        self.assertTrue(seen_lateral)
+        self.assertEqual(seen_longitudinal, not disabled)
+        safety.set_alternative_experience(0)
 
   def test_actual_card_forwards_shared_disarming_events(self):
     class IntentUpdated(Exception):
