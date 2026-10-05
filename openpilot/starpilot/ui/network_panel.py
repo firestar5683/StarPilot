@@ -5,12 +5,13 @@ from collections.abc import Callable
 import pyray as rl
 
 from openpilot.system.ui.widgets.network import NetworkUI
+from openpilot.system.ui.widgets import Widget
 
 
 class NetworkPanelBridge:
   def __init__(self, panel: NetworkUI, authority: Callable[[], bool]):
     self.panel = panel
-    self.presentation = panel
+    self.presentation: Widget = panel
     self.authority = authority
     self.active = False
     self.generation = 0

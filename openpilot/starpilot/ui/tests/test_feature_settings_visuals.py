@@ -200,7 +200,7 @@ class FeatureVisualTests(unittest.TestCase):
         self.assertGreaterEqual(x + width, rect.x + rect.width + 10)
         self.assertGreaterEqual(y + height, rect.y + rect.height + 10)
 
-      def constellation(nodes, edges, rect, accent, glow):
+      def constellation(nodes, edges, rect, accent, glow, fonts=fonts):
         self.assertEqual((nodes, edges), geometry.constellation("settings-header", rect))
         self.assertIs(rect, header.call_args.args[0])
         self.assertIs(accent, geometry.ACCENT)
