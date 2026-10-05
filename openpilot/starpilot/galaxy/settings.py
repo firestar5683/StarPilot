@@ -278,6 +278,10 @@ class LiveContextSource:
           cp = messaging.log_from_bytes(inspected.payload, car.CarParams)
       except (OSError, RuntimeError, TypeError, ValueError, OverflowError):
         cp = None
+    if parked and self.offroad():
+      from openpilot.starpilot.galaxy.vehicle_configuration import configuration_context
+      cp, cp_raw = configuration_context(self.params, cp, cp_raw if readable else None)
+      readable = True
     units, unit_readable = read_saved(self.params, "IsMetric", 8)
     return AuthorityContext(parked, cp, cp_raw if readable else None, bool(unit_readable and units == b"1"))
 
