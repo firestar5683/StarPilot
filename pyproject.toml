@@ -85,6 +85,7 @@ tools = [
 ]
 
 vendored = [
+  "jetlink",
   "msgq",
   "opendbc",
   "pandacan",
@@ -157,7 +158,7 @@ lint.flake8-implicit-str-concat.allow-multiline = false
 quote-style = "preserve"
 
 [tool.ty.environment]
-extra-paths = ["opendbc_repo", "msgq_repo", "rednose_repo", "tinygrad_repo", "teleoprtc_repo"]
+extra-paths = ["opendbc_repo", "msgq_repo", "rednose_repo", "tinygrad_repo", "teleoprtc_repo", "jetlink_repo"]
 
 [tool.ty.rules]
 unresolved-import = "ignore"  # Cython-compiled modules (.pyx)
@@ -171,6 +172,7 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
+jetlink = { path = "jetlink_repo", editable = true }
 msgq = { path = "msgq_repo", editable = true }
 opendbc = { path = "opendbc_repo", editable = true }
 pandacan = { path = "panda", editable = true }

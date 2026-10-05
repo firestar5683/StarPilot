@@ -5,7 +5,8 @@ import importlib.metadata
 from pathlib import Path
 
 
-DIRECT_LIMITS = {"baseline": 37, "dev": 3, "safety": 5}
+# Jetlink is shipped as pinned source and uses the existing NumPy dependency.
+DIRECT_LIMITS = {"baseline": 38, "dev": 3, "safety": 5}
 TOOLING_PACKAGES = frozenset({
   "colorlog", "cppcheck", "execnet", "gcovr", "iniconfig", "jinja2", "lxml", "markupsafe",
   "pluggy", "pygments", "pytest", "pytest-mock", "pytest-xdist", "tree-sitter", "tree-sitter-c",

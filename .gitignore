@@ -25,6 +25,7 @@ bin/
 /rednose
 /teleoprtc
 /tinygrad
+/jetlink
 
 *.mp4
 *.dylib
@@ -131,3 +132,6 @@ openpilot/selfdrive/modeld/models/*.unchunked
 !openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
 !openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunkmanifest
 !openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunksha256
+
+# Jetlink editable-install metadata.
+/jetlink_repo/jetlink.egg-info/
