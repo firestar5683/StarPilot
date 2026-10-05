@@ -1,8 +1,9 @@
 """What the car shows: a separate StarPilot view or a test pattern.
 
 The car view runs ``current_car_ui`` as a child process and reads its frames from a
-dedicated shared-memory slot. An unavailable renderer sends no stale frames;
-the session displays an unavailable message until it ends.
+dedicated shared-memory slot. An unavailable renderer sends no stale frames; a failed
+renderer is restarted a bounded number of times before the session shows an
+unavailable message until it ends.
 """
 
 from __future__ import annotations
@@ -19,6 +20,10 @@ from openpilot.starpilot.system.android_auto.touch import DEFAULT_TOUCH_SOCKET, 
 CAR_FRAME_PATH = "/dev/shm/starpilot_android_auto_car_frame"
 CAR_STARTUP_TIMEOUT = 25.0   # loading the full UI (fonts, textures, layouts) takes a few seconds on device
 CAR_STALL_TIMEOUT = 5.0
+MAX_RESTARTS = 2
+RESTART_WINDOW = 300.0
+OUTPUT_TAIL_LINES = 40
+OUTPUT_TAIL_BYTES = 8192
 
 
 class UnavailableFrames:
@@ -45,6 +50,7 @@ class ViewSource:
     self.last_frame_at = 0.0
     self.unfocused_since: float | None = None
     self.frames = 0
+    self.restarts: list[float] = []
     if synthetic:
       self.view = "synthetic"
       self.source = SyntheticFrames()
@@ -140,7 +146,41 @@ class ViewSource:
     elif self.frames and now - self.last_frame_at > CAR_STALL_TIMEOUT:
       reason = f"frames stopped for {CAR_STALL_TIMEOUT:.0f} s"
     if reason:
-      self.fallback(reason)
+      self._log_output(reason)
+      self.restarts = [t for t in self.restarts if now - t < RESTART_WINDOW]
+      if len(self.restarts) < MAX_RESTARTS:
+        self.restarts.append(now)
+        self.log("car_view_restart", reason=reason, attempt=len(self.restarts))
+        self._stop_car()
+        self.frames = 0
+        self.unfocused_since = None
+        self._start_car()
+      else:
+        self.fallback(reason)
+
+  def _output_tail(self) -> list[str]:
+    if self.renderer_log is None:
+      return []
+    try:
+      with open(self.renderer_log, "rb") as f:
+        f.seek(max(0, f.seek(0, os.SEEK_END) - OUTPUT_TAIL_BYTES))
+        text = f.read().decode("utf-8", errors="replace")
+    except OSError:
+      return []
+    return [line[:300] for line in text.splitlines()[-OUTPUT_TAIL_LINES:]]
+
+  def _log_output(self, reason: str) -> None:
+    process = self.process
+    if process is not None and process.poll() is None:
+      process.terminate()
+      try:
+        process.wait(timeout=3.0)
+      except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2.0)
+    lines = self._output_tail()
+    if lines:
+      self.log("car_view_output", reason=reason, lines=lines)
 
   def fallback(self, reason: str) -> None:
     self.log("car_view_fallback", reason=reason)
