@@ -39,7 +39,7 @@ jobs:
     - name: Test dependency and packaging tools
       run: |
         python3 -m unittest discover -s tools/vendor/tests -v
-        python3 -m unittest discover -s tools/release/tests -v
+        python3 -m pytest -q tools/release/tests
         python3 -m unittest discover -s tools/ci/tests -v
         python3 -m unittest discover -s openpilot/system/updated/tests -v
     - name: Check setup and release shell syntax
@@ -54,6 +54,7 @@ jobs:
     env:
       STRIPPED_DIR: /tmp/releasepilot
       PYTHONPATH: /tmp/releasepilot
+      STARPILOT_CI_BUILD_MANIFEST: ${{ runner.temp }}/starpilot-release-build-${{ github.run_id }}-${{ github.run_attempt }}.json
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
