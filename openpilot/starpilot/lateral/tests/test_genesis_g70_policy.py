@@ -119,3 +119,28 @@ def test_preconfigured_manual_torque_values_preserved():
   assert controller.torque_params.latAccelOffset == cp.lateralTuning.torque.latAccelOffset
   assert controller.torque_params.friction == cp.lateralTuning.torque.friction
   assert controller.pid.pos_limit == controller.lateral_accel_from_torque(1.0, controller.torque_params)
+
+
+@pytest.mark.parametrize('angle', [-85., 0., 85.])
+@pytest.mark.parametrize('pid_output', [-.125, 0., .125])
+def test_angle_taper_uses_actual_sent_torque_direction(angle, pid_output):
+  outputs = []
+  for taper in (lambda *_: 1., genesis_g70_policy.get_genesis_g70_angle_output_scale):
+    _, controller, vm = controller_for()
+    cs = SimpleNamespace(vEgo=15., steeringAngleDeg=angle, steeringPressed=True)
+    params = log.VehicleParameters.new_message(angleOffsetDeg=0., roll=0.)
+    with patch.object(controller.pid, 'update', return_value=pid_output), \
+         patch.object(controller, 'torque_from_lateral_accel', side_effect=lambda value, *_: value), \
+         patch.object(genesis_g70_policy, 'get_genesis_g70_angle_output_scale', taper):
+      output, _, state = controller.update(True, cs, vm, params, False, 0., False, .2)
+    assert state.active
+    outputs.append(output)
+  baseline, tapered = outputs
+  if pid_output == 0:
+    assert baseline == tapered == 0
+  else:
+    assert baseline * pid_output < 0
+    if baseline * angle > 0:
+      assert 0 < abs(tapered) < abs(baseline)
+    else:
+      assert tapered == pytest.approx(baseline)
