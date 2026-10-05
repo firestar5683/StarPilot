@@ -44,7 +44,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddee", MODE="0666"
 EOF
       udevadm control --reload-rules
       for product in ddcc ddee; do
-        udevadm trigger --settle --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct="$product"
+        udevadm trigger --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct="$product"
       done
     '; then
       echo "Panda USB permission setup failed; continuing startup."

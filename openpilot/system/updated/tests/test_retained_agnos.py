@@ -87,6 +87,7 @@ class TestRetainedAgnos(unittest.TestCase):
     udevadm = self.root / 'udevadm'
     udevadm.write_text('''#!/bin/sh
 echo "$*" >> "$UDEV_TEST_LOG"
+case "$*" in "trigger --settle "*) exit 1;; esac
 if [ "$UDEV_TEST_FAILURE" = hang ]; then sleep 60; fi
 if [ "$UDEV_TEST_FAILURE" = "$1" ]; then exit 1; fi
 ''')
@@ -133,7 +134,7 @@ op_run_command() { echo effect >> "$log"; }
                 'SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddee", MODE="0666"\n')
     self.assertEqual(rules.read_text(), expected)
     commands = ['control --reload-rules', *[
-      f'trigger --settle --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct={product}'
+      f'trigger --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct={product}'
       for product in ('ddcc', 'ddee')]]
     self.assertEqual((self.root / 'udev.log').read_text().splitlines(), commands)
     result = self.run_shell(function, 'agnos_init', '19.8.2', model='comma tici')

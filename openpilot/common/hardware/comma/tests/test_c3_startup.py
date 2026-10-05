@@ -1,7 +1,8 @@
 import ast
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 
@@ -131,34 +132,57 @@ def test_internal_panda_reset_and_recovery_timing(device, reset_hold, recover_ho
 
 
 @pytest.mark.parametrize('device', ['tici', 'tizi', 'mici'])
-@pytest.mark.parametrize('failure', [None, 'missing', 'usb', 'protocol', 'multiple'])
+@pytest.mark.parametrize('failure', [None, 'missing', 'usb', 'protocol', 'multiple', 'dfu', 'wait', 'initial_wait', 'heartbeat'])
 def test_pandad_enumeration_and_recovery(device, failure):
   pandad_path = SOURCE.parents[3] / 'selfdrive/pandad/pandad.py'
   tree = ast.parse(pandad_path.read_text())
-  main_fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
+  functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and
+               node.name in {'wait_for_internal_panda', 'main'}]
   events = Mock()
-  first_discovery = {'missing': [], 'usb': OSError(), 'multiple': ['one', 'two']}.get(failure, ['serial'])
-  events.list.side_effect = [[], first_discovery, *([] if failure == 'multiple' else [['serial']]), KeyboardInterrupt()]
-  events.dfu_list.return_value = []
+  first_discovery = {'missing': [], 'usb': OSError(), 'multiple': ['one', 'two'], 'wait': []}.get(failure, ['serial'])
+  initial_ready = device != 'tici' or failure not in ('wait', 'initial_wait')
+  initial_discovery = ['serial'] if failure == 'heartbeat' else []
+  events.list.side_effect = [*([initial_discovery] if initial_ready else []), first_discovery,
+                             *([] if failure == 'multiple' else [['serial']]), KeyboardInterrupt()]
+  events.health.return_value = {'heartbeat_lost': True}
+  panda = MagicMock(list=events.list)
+  panda.return_value.__enter__.return_value = SimpleNamespace(health=events.health, is_internal=lambda: True)
+  events.dfu_list.return_value = ['dfu'] if failure == 'dfu' else []
+  events.udev.return_value = SimpleNamespace(returncode=1 if failure == 'wait' else 0)
+  if failure == 'initial_wait':
+    events.udev.side_effect = [SimpleNamespace(returncode=1), SimpleNamespace(returncode=0)]
+  dfu = Mock(return_value=SimpleNamespace(recover=events.dfu_recover), list=events.dfu_list)
   flash = Mock(side_effect=[RuntimeError(), None] if failure == 'protocol' else None)
   process = Mock()
   process.wait.side_effect = KeyboardInterrupt()
   launch = Mock(return_value=process)
-  namespace: dict = {'Panda': SimpleNamespace(list=events.list), 'PandaDFU': SimpleNamespace(list=events.dfu_list),
+  namespace: dict = {'Panda': panda, 'PandaDFU': dfu,
                'HARDWARE': SimpleNamespace(get_device_type=lambda: device, reset_internal_panda=events.reset,
                                            recover_internal_panda=events.recover),
                'time': SimpleNamespace(sleep=events.sleep), 'cloudlog': Mock(), 'signal': Mock(),
                'usb1': SimpleNamespace(USBErrorNoDevice=OSError, USBErrorPipe=BrokenPipeError), 'PandaProtocolMismatch': RuntimeError,
-               'flash_panda': flash, 'subprocess': SimpleNamespace(Popen=launch), 'BASEDIR': 'base',
+               'Params': Mock(return_value=SimpleNamespace(put_bool=events.put_bool)),
+               'flash_panda': flash, 'subprocess': SimpleNamespace(Popen=launch, run=events.udev, DEVNULL=subprocess.DEVNULL), 'BASEDIR': 'base',
                'os': SimpleNamespace(environ={}, path=SimpleNamespace(join=lambda *parts: '/'.join(parts)))}
-  exec(compile(ast.Module(body=[main_fn], type_ignores=[]), str(pandad_path), 'exec'), namespace)
+  exec(compile(ast.Module(body=functions, type_ignores=[]), str(pandad_path), 'exec'), namespace)
   with pytest.raises(KeyboardInterrupt):
     namespace['main']()
 
-  expected = [call.list()]  # Initial health inspection.
-  for reset in [call.reset()] if failure is None else [call.reset(), call.recover()]:
-    expected += [reset, *([call.sleep(3)] if device == 'tici' else []), call.dfu_list(), call.list()]
+  wait = [call.udev(['udevadm', 'wait', '--timeout=15', '/sys/bus/usb/devices/1-1.2'], check=False, stderr=None)] if device == 'tici' else []
+  expected = [call.udev(['udevadm', 'wait', '--timeout=0', '/sys/bus/usb/devices/1-1.2'], check=False,
+                        stderr=subprocess.DEVNULL)] if device == 'tici' else []
+  if initial_ready:
+    expected += [call.list()]  # Initial health inspection.
+    if failure == 'heartbeat':
+      expected += [call.health(), call.put_bool('PandaHeartbeatLost', True, block=True)]
+  for reset in [call.reset()] if failure in (None, 'dfu', 'initial_wait', 'heartbeat') else [call.reset(), call.recover()]:
+    expected += [reset, *wait, call.dfu_list()]
+    if failure == 'dfu':
+      expected += [call.dfu_recover(), call.sleep(1), *wait]
+    expected += [call.list()]
   assert events.mock_calls == expected
+  if failure == 'dfu':
+    dfu.assert_called_once_with('dfu')
   if failure == 'multiple':
     flash.assert_not_called()
     launch.assert_not_called()
