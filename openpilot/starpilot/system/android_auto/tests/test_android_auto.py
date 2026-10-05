@@ -322,7 +322,10 @@ def test_frame_reader_bounds():
 # ----------------------------------------------------------------------- hfp
 
 def test_hfp_service_level_connection():
-  assert hfp.respond("AT+BRSF=1015") == ["+BRSF: 0", "OK"]
+  assert hfp.respond("AT+BRSF=767") == ["+BRSF: 995", "OK"]  # a phone's feature set, not "nothing"
+  assert hfp.respond("AT+BAC=1,2") == ["OK"]
+  assert hfp.respond("AT+BCC") == ["ERROR"]  # never start call audio we cannot carry
+  assert hfp.respond("AT+BIA=1,1,1,1,1,1,1,0") == ["OK"]
   assert hfp.respond("AT+CIND=?")[0].startswith("+CIND: (\"call\"")
   assert hfp.respond("AT+CIND?") == ["+CIND: 0,0,1,5,0,5,0", "OK"]
   assert hfp.respond("AT+CMER=3,0,0,1") == ["OK"]
@@ -338,7 +341,7 @@ def test_hfp_serve_over_socket():
   b.sendall(b"AT+BRSF=0\rAT+CIND=?\r")
   time.sleep(0.2)
   data = b.recv(4096)
-  assert b"+BRSF: 0" in data and data.count(b"OK") == 2
+  assert b"+BRSF: 995" in data and data.count(b"OK") == 2
   b.close()
   thread.join(2)
   stop.set()

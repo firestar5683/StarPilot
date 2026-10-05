@@ -214,7 +214,8 @@ class BluezPhone:
     # AutoConnect stays off: BlueZ would otherwise open this link to every
     # device with a hands-free role (headsets, other gadgets) when it connects.
     options = {"Name": ("s", "StarPilot Hands-Free Gateway"), "RequireAuthentication": ("b", True),
-               "RequireAuthorization": ("b", False), "AutoConnect": ("b", False)}
+               "RequireAuthorization": ("b", False), "AutoConnect": ("b", False),
+               "Version": ("q", hfp.HFP_VERSION), "Features": ("q", hfp.SDP_FEATURES)}
     try:
       self._call("/org/bluez", PROFILE_MANAGER_IFACE, "RegisterProfile", "osa{sv}", (HFP_PROFILE_PATH, HFP_AG_UUID, options))
       self._profile_registered = True
