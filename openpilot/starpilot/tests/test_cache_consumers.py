@@ -23,6 +23,28 @@ class TestCacheConsumers(unittest.TestCase):
     self.params = Params(str(self.root / "params"))
     self.namespace = Path(self.params.get_param_path())
 
+  def test_current_factory_recomputes_controls_from_cached_firmware_identity(self):
+    from opendbc.car import car_helpers
+    from opendbc.car.structs import car
+    from opendbc.car.toyota.values import CAR
+
+    cached = car.CarParams.new_message(carFingerprint=str(CAR.TOYOTA_PRIUS), mass=-123.0,
+                                      wheelbase=-456.0, steerActuatorDelay=99.0)
+    cached.lateralTuning.init('pid')
+    cached.lateralTuning.pid.kpBP = [0.0]
+    cached.lateralTuning.pid.kpV = [123.0]
+    # Fingerprinting supplies identity only. The production get_car factory
+    # must rebuild dynamics/control fields rather than return the cached CP.
+    identity = (CAR.TOYOTA_PRIUS, {0: {}, 1: {}, 2: {}}, '00000000000000000', [], car.CarParams.FingerprintSource.fw, True)
+    with patch.object(car_helpers, 'fingerprint', return_value=identity) as fingerprint:
+      interface = car_helpers.get_car(lambda wait_for_one=False: [], lambda messages: None, lambda enabled: None,
+                                      alpha_long_allowed=False, is_release=True, cached_params=cached)
+    self.assertIs(fingerprint.call_args.args[3], cached)
+    self.assertGreater(interface.CP.mass, 0)
+    self.assertGreater(interface.CP.wheelbase, 0)
+    self.assertLess(interface.CP.steerActuatorDelay, 1)
+    self.assertNotEqual(interface.CP.lateralTuning.to_dict(), cached.lateralTuning.to_dict())
+
   def test_athena_not_car_requires_verified_cache(self):
     cp = car.CarParams.new_message(notCar=True)
     with patch.object(athenad, "Params", return_value=self.params):

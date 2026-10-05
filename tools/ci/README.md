@@ -1,7 +1,7 @@
 # Local and release checks
 
 On Linux, use the managed host runtime to run the same source, unit, vehicle and pinned
-recording and process replay checks as GitHub Actions:
+recording checks and process replay as GitHub Actions:
 
 ```sh
 ./dev python tools/ci/run_predeploy.py --output /tmp/starpilot-predeploy --download
@@ -19,9 +19,9 @@ release result.
 
 The replay stage runs the full process suite with its existing coverage and
 reference comparisons. It can download replay logs independently of the pinned
-recording `--download` flag. Missing brand routes and unqualified historical
-schema caches remain failures; see the process replay README for the conversion
-requirements. Passing the pinned recorded vehicle checks does not qualify this
+recording `--download` flag. Unaccounted missing routes and unqualified historical schema caches fail.
+Volvo C1/V40 is explicitly reported as lacking a recording, with its source and
+native suites required separately; see the process replay README for details. Passing the pinned recorded vehicle checks does not qualify this
 separate suite.
 
 The full runner requires Linux: its USB/native transport and executable map
