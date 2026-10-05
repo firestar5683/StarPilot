@@ -77,32 +77,88 @@ class TestRetainedAgnos(unittest.TestCase):
         self.slot.assert_not_called()
         self.updater.set_consistent_flag.assert_called_with(False)
 
-  def run_shell(self, function, tail, current):
+  def run_shell(self, function, tail, current, model='comma tizi', udev_failure=''):
     version = self.root / 'VERSION'
     version.write_text(current)
     marker = self.root / 'AGNOS'
     marker.touch()
+    device_model = self.root / 'model'
+    device_model.write_text(model + '\0')
+    udevadm = self.root / 'udevadm'
+    udevadm.write_text('''#!/bin/sh
+echo "$*" >> "$UDEV_TEST_LOG"
+if [ "$UDEV_TEST_FAILURE" = hang ]; then sleep 60; fi
+if [ "$UDEV_TEST_FAILURE" = "$1" ]; then exit 1; fi
+''')
+    udevadm.chmod(0o755)
     script = self.root / 'test.sh'
     # Replace only device observations in a copy of the actual function. Every
     # effectful command is a test double; no launch manager or device is run.
     function = function.replace('/VERSION', str(version)).replace('/AGNOS', str(marker))
+    function = function.replace('/sys/firmware/devicetree/base/model', str(device_model))
+    function = function.replace('/run/udev/rules.d', str(self.root / 'udev-rules'))
+    function = function.replace('timeout -k 1s 5s', 'timeout -k 0.1s 0.2s')
     script.write_text('''source "$1/launch_env.sh"
 DIR="$1"
 OPENPILOT_ROOT="$1"
 BOLD=''
 log="$1/effects"
 rm() { echo rm >> "$log"; }
-sudo() { echo sudo >> "$log"; }
+sudo() { if [ "$1" = timeout ]; then "$@"; else echo sudo >> "$log"; fi; }
 read() { echo prompt >> "$log"; return 1; }
 op_run_command() { echo effect >> "$log"; }
 ''' + function + '\n' + tail + '\n')
-    return subprocess.run(['bash', str(script), str(self.root)], capture_output=True, text=True, timeout=5)
+    environment = dict(os.environ, PATH=f'{self.root}:{os.environ["PATH"]}',
+                       UDEV_TEST_LOG=str(self.root / 'udev.log'), UDEV_TEST_FAILURE=udev_failure)
+    return subprocess.run(['bash', str(script), str(self.root)], env=environment,
+                          capture_output=True, text=True, timeout=5)
 
   def test_launcher_refuses_mismatched_os_before_any_effect(self):
     result = self.run_shell(shell_function(ROOT / 'launch_chffrplus.sh', 'agnos_init'), 'agnos_init', '19.8')
     self.assertEqual(result.returncode, 1, result.stderr)
     self.assertIn('No OS update was attempted', result.stdout)
     self.assertFalse((self.root / 'effects').exists())
+
+  def test_panda_usb_permissions_are_tici_only_and_repeatable(self):
+    function = shell_function(ROOT / 'launch_chffrplus.sh', 'agnos_init')
+    for model in ('comma tizi', 'comma mici', 'comma tici2', 'unknown', 'comma tici'):
+      with self.subTest(model=model):
+        result = self.run_shell(function, 'agnos_init', '19.8.2', model=model)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        if model != 'comma tici':
+          self.assertFalse((self.root / 'udev-rules').exists())
+          self.assertFalse((self.root / 'udev.log').exists())
+    rules = self.root / 'udev-rules/99-starpilot-panda.rules'
+    expected = ('SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddcc", MODE="0666"\n' +
+                'SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddee", MODE="0666"\n')
+    self.assertEqual(rules.read_text(), expected)
+    commands = ['control --reload-rules', *[
+      f'trigger --settle --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct={product}'
+      for product in ('ddcc', 'ddee')]]
+    self.assertEqual((self.root / 'udev.log').read_text().splitlines(), commands)
+    result = self.run_shell(function, 'agnos_init', '19.8.2', model='comma tici')
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(rules.read_text(), expected)
+    self.assertEqual((self.root / 'udev.log').read_text().splitlines(), commands * 2)
+
+  def test_panda_usb_permission_failure_never_blocks_manager_start(self):
+    function = shell_function(ROOT / 'launch_chffrplus.sh', 'agnos_init')
+    for failure in ('control', 'trigger', 'hang'):
+      with self.subTest(failure=failure):
+        result = self.run_shell(function, 'agnos_init && echo manager-start', '19.8.2',
+                                model='comma tici', udev_failure=failure)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Panda USB permission setup failed; continuing startup.', result.stdout)
+        self.assertIn('manager-start', result.stdout)
+    rules_directory = self.root / 'udev-rules'
+    for child in rules_directory.iterdir():
+      child.unlink()
+    rules_directory.rmdir()
+    rules_directory.write_text('not a directory')
+    result = self.run_shell(function, 'agnos_init && echo manager-start', '19.8.2', model='comma tici')
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertIn('Panda USB permission setup failed; continuing startup.', result.stdout)
+    self.assertIn('manager-start', result.stdout)
 
   def test_developer_helper_retained_match_or_mismatch_never_prompts(self):
     function = shell_function(ROOT / 'tools/op.sh', 'op_check_agnos_update')

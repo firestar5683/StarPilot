@@ -33,6 +33,23 @@ function agnos_init {
       "$DIR/openpilot/common/hardware/comma/updater" "$AGNOS_PY" "$MANIFEST"
     done
   fi
+
+  # Add missing USB rules for C3's internal Panda; C3X/C4 use SPI.
+  if [ "$(tr -d '\0' 2>/dev/null < /sys/firmware/devicetree/base/model)" = "comma tici" ]; then
+    if ! sudo timeout -k 1s 5s sh -ec '
+      mkdir -p /run/udev/rules.d
+      cat > /run/udev/rules.d/99-starpilot-panda.rules <<EOF
+SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddcc", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddee", MODE="0666"
+EOF
+      udevadm control --reload-rules
+      for product in ddcc ddee; do
+        udevadm trigger --settle --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct="$product"
+      done
+    '; then
+      echo "Panda USB permission setup failed; continuing startup."
+    fi
+  fi
 }
 
 function launch {
