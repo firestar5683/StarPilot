@@ -9,6 +9,7 @@ static bool tesla_screen_main = false;
 static bool tesla_screen_cruise = false;
 static bool tesla_screen_drive = false;
 static bool tesla_screen_occupant_ready = false;
+static bool tesla_screen_belt_latched = false;
 static bool tesla_screen_eps_ready = false;
 static bool tesla_screen_session = false;
 static bool tesla_screen_autopark = false;
@@ -27,6 +28,7 @@ static void tesla_screen_reset(void) {
   tesla_screen_cruise = false;
   tesla_screen_drive = false;
   tesla_screen_occupant_ready = false;
+  tesla_screen_belt_latched = false;
   tesla_screen_eps_ready = false;
   tesla_screen_session = false;
   tesla_screen_autopark = false;
@@ -58,7 +60,7 @@ static uint8_t tesla_screen_permission(void) {
     if (lateral && !(tesla_screen_brake_disengage && brake_pressed)) {
       permission = request & 1U;
     }
-    if (tesla_screen_longitudinal && controls_allowed) {
+    if (tesla_screen_longitudinal && tesla_screen_belt_latched && controls_allowed) {
       permission |= request & 2U;
     }
   }
@@ -86,7 +88,8 @@ static void tesla_screen_rx(const CANPacket_t *msg, bool autopark) {
       if (!tesla_screen_drive) { tesla_screen_clear(); }
     }
     if (msg_matches(msg, 0x311U, 0U, 7U)) {
-      tesla_screen_occupant_ready = GET_BIT(msg, 13U) && !GET_BIT(msg, 28U);
+      tesla_screen_belt_latched = GET_BIT(msg, 13U);
+      tesla_screen_occupant_ready = !GET_BIT(msg, 28U);
       if (!tesla_screen_occupant_ready) { tesla_screen_clear(); }
     }
     if (msg_matches(msg, 0x370U, 0U, 8U)) {

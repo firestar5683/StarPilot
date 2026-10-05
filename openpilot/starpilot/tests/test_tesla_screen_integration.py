@@ -168,6 +168,7 @@ class TestTeslaScreenIntegration(unittest.TestCase):
               now = 1_000_000_000 + tick * 10_000_000
               cruise = 2 if 140 <= tick < 160 else 0
               brake = 100 <= tick < 110
+              unbuckled = 40 <= tick < 60 or 150 <= tick < 160
               counts = (3,) if tick < 35 or tick in (40, 60, 90) or tick == 120 and brake_option else (0,)
               if tick == 80:
                 counts = (3, 0, 3, 0)
@@ -182,6 +183,8 @@ class TestTeslaScreenIntegration(unittest.TestCase):
                   values['DI_cruiseState'] = cruise
                 if name == 'ESP_status':
                   values['ESP_driverBrakeApply'] = 2 if brake else 1
+                if name == 'UI_warning':
+                  values['buckleStatus'] = 0 if unbuckled else 1
                 if name == 'EPAS3S_sysStatus':
                   values['EPAS3S_handsOnLevel'] = 3 if 170 <= tick < 190 or 220 <= tick < 230 else 0
                 incoming.append(packer.make_can_msg(name, bus, values))
@@ -257,6 +260,7 @@ class TestTeslaScreenIntegration(unittest.TestCase):
                                 {'permission': mask, 'desired': wanted.desired_lateral, 'events': sd.events.names,
                                  'latch': selected.aol_card_intent.allowed_latch, 'axis_ack': wanted.native_acknowledged,
                                  'native_healthy': bool(safety.safety_config_valid()), 'long_active': command.longActive,
+                                 'unbuckled': cs.seatbeltUnlatched, 'cancel': command.cruiseControl.cancel,
                                  'ordinary_active': sd.active, 'ordinary_enabled': sd.enabled})
             self.assertTrue(all(row[2] for tick, row in observed.items() if tick >= 30))
             self.assertFalse(observed[34][0])
@@ -266,6 +270,9 @@ class TestTeslaScreenIntegration(unittest.TestCase):
             assert isinstance(events, list)
             self.assertIn(EventName.wrongCarMode, events)
             self.assertFalse(observed[45][3]['ordinary_active'] or observed[45][3]['ordinary_enabled'])
+            self.assertTrue(observed[45][3]['unbuckled'])
+            self.assertIn(EventName.seatbeltNotLatched, events)
+            self.assertFalse(observed[45][3]['long_active'])
             for tick in (48, 49, 50, 51, 52, 53):
               self.assertFalse(observed[tick][0], observed[tick])
             self.assertEqual(observed[55][0], not master_off)
@@ -277,6 +284,9 @@ class TestTeslaScreenIntegration(unittest.TestCase):
             self.assertEqual(observed[125][0], not master_off)
             self.assertTrue(observed[145][0])
             self.assertEqual(observed[145][3]['long_active'], cp.openpilotLongitudinalControl)
+            self.assertTrue(observed[155][3]['unbuckled'])
+            self.assertTrue(observed[155][0], observed[155])
+            self.assertFalse(observed[155][3]['long_active'])
             self.assertFalse(observed[165][0])
             self.assertFalse(any(observed[tick][0] for tick in range(170, 205)))
             self.assertEqual(observed[210][0], not master_off)

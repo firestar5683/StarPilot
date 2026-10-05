@@ -13,6 +13,7 @@ static bool tesla_preap_eps_fault = true;
 static bool tesla_preap_eps_temporary = false;
 static bool tesla_preap_belt_seen = false;
 static bool tesla_preap_belt_latched = false;
+static bool tesla_preap_belt_valid = false;
 static uint32_t tesla_preap_belt_ts = 0U;
 static bool tesla_preap_axis = false;
 static bool tesla_preap_requested = false;
@@ -38,6 +39,7 @@ static void tesla_preap_reset(void) {
   tesla_preap_pending_physical = false;
   tesla_preap_belt_seen = false;
   tesla_preap_belt_latched = false;
+  tesla_preap_belt_valid = false;
   tesla_preap_requested = false;
   tesla_preap_stw_seen = false;
   tesla_preap_echo_pending = false;
@@ -59,9 +61,9 @@ static uint8_t tesla_preap_crc(const CANPacket_t *msg) {
 static uint32_t tesla_preap_checksum(const CANPacket_t *msg) { return msg->data[7]; }
 static uint32_t tesla_preap_compute_checksum(const CANPacket_t *msg) { return tesla_preap_crc(msg); }
 
-static bool tesla_preap_sources_ready(void) {
+static bool tesla_preap_sources_ready(bool require_belt) {
   bool ready = tesla_preap_admitted && !safety_rx_checks_invalid && tesla_preap_brake_valid &&
-    !tesla_preap_eps_fault && tesla_preap_belt_seen && tesla_preap_belt_latched &&
+    !tesla_preap_eps_fault && tesla_preap_belt_seen && tesla_preap_belt_valid && (!require_belt || tesla_preap_belt_latched) &&
     (safety_get_ts_elapsed(microsecond_timer_get(), tesla_preap_belt_ts) <= 1000000U) && tesla_preap_stw_seen &&
     (safety_get_ts_elapsed(microsecond_timer_get(), tesla_preap_stw_ts) <= 300000U);
   const uint32_t now = microsecond_timer_get();
@@ -81,7 +83,7 @@ static uint8_t tesla_preap_request_mask(void) {
   uint8_t request = 0U;
   const bool expired = tesla_preap_requested &&
     (safety_get_ts_elapsed(microsecond_timer_get(), aol_host_request_ts) > AOL_HOST_REQUEST_TIMEOUT_US);
-  if (expired || relay_malfunction || !aol_rx_healthy() || !tesla_preap_sources_ready()) {
+  if (expired || relay_malfunction || !aol_rx_healthy() || !tesla_preap_sources_ready(false)) {
     tesla_preap_pending_physical = false;
     tesla_preap_clear();
   } else if (!heartbeat_engaged) {
@@ -108,8 +110,13 @@ static void tesla_preap_optional_rx(const CANPacket_t *msg) {
   if (msg_matches(msg, 0x201U, 0U, 5U)) {
     tesla_preap_belt_seen = true;
     tesla_preap_belt_ts = microsecond_timer_get();
-    tesla_preap_belt_latched = ((msg->data[0] >> 4U) & 3U) == 1U;
-    if (!tesla_preap_belt_latched) { tesla_preap_clear(); controls_allowed = false; }
+    const unsigned int buckle = (msg->data[0] >> 4U) & 3U;
+    tesla_preap_belt_valid = buckle <= 1U;
+    tesla_preap_belt_latched = buckle == 1U;
+    if (!tesla_preap_belt_latched) {
+      controls_allowed = false;
+      if (!tesla_preap_axis || !tesla_preap_belt_valid) { tesla_preap_clear(); }
+    }
   }
 }
 
@@ -170,9 +177,9 @@ static void tesla_preap_rx_hook(const CANPacket_t *msg) {
           tesla_preap_stw_seen = true;
           tesla_preap_stw_ts = microsecond_timer_get();
           const int lever = msg->data[0] & 0x3FU;
-          if (established_counter && (lever == 2) && (tesla_preap_lever_previous == 0) && tesla_preap_sources_ready() &&
+          if (established_counter && (lever == 2) && (tesla_preap_lever_previous == 0) && tesla_preap_sources_ready(!tesla_preap_axis) &&
               (tesla_preap_gear == 4) && !tesla_preap_doors_open && !steering_disengage && (!brake_pressed || tesla_preap_axis)) {
-            pcm_cruise_check(true);
+            if (tesla_preap_belt_latched) { pcm_cruise_check(true); }
             tesla_preap_engage_ts = microsecond_timer_get();
             tesla_preap_engage_seen = !tesla_preap_axis;
             tesla_preap_pending_physical = tesla_preap_axis;
@@ -200,7 +207,7 @@ static bool tesla_preap_tx_hook(const CANPacket_t *msg) {
       ((sum & 255U) == msg->data[2]);
   } else if (msg->addr == 0x45U) {
     const int lever = msg->data[0] & 63U;
-    accepted = tesla_preap_admitted && tesla_preap_stw_seen && tesla_preap_sources_ready() &&
+    accepted = tesla_preap_admitted && tesla_preap_stw_seen && tesla_preap_sources_ready(true) &&
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_preap_stw_ts) <= 300000U) &&
       ((lever == 1) || ((lever == 16) && tesla_preap_engage_seen && !brake_pressed)) &&
       ((msg->data[0] & 192U) == 64U) && (tesla_preap_crc(msg) == msg->data[7]) &&
@@ -220,7 +227,7 @@ static bool tesla_preap_tx_hook(const CANPacket_t *msg) {
     for (int i = 0; i < 3; i++) { checksum += msg->data[i]; }
     bool violation = !tesla_preap_admitted || ((type != 0) && (type != 1)) ||
       ((checksum & 0xFFU) != msg->data[3]);
-    violation |= (type == 1) && (!tesla_preap_sources_ready() || (tesla_preap_gear != 4) ||
+    violation |= (type == 1) && (!tesla_preap_sources_ready(!tesla_preap_axis) || (tesla_preap_gear != 4) ||
       tesla_preap_doors_open || steering_disengage || (brake_pressed && !tesla_preap_axis));
     violation |= steer_angle_cmd_checks_vm(angle, type == 1, limits, vm);
     accepted = !violation;

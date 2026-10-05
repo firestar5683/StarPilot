@@ -538,7 +538,7 @@ class TestGmAol(unittest.TestCase):
   def test_calibration_recovery_requires_new_main_edge_through_actual_callers(self):
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
     from openpilot.selfdrive.selfdrived.state import StateMachine
-    from openpilot.selfdrive.selfdrived.events import Events, EventName
+    from openpilot.selfdrive.selfdrived.events import Events, EventName, ET
     from openpilot.starpilot.aol.runtime import AxisDecision
     from openpilot.starpilot.aol.wire import encode_intent
 
@@ -558,7 +558,7 @@ class TestGmAol(unittest.TestCase):
         sd.sm = messaging.SubMaster(['aolIntentWire', 'aolSafetyWire', 'modelV2',
                                      'extrinsicsCalibration', 'driverMonitoringState'])
         cs = structs.CarState(canValid=True, vEgo=20., gearShifter='drive')
-        for tick, (phase, expected) in enumerate((('healthy', True), ('invalid', False), ('recovered', False),
+        for tick, (phase, expected) in enumerate((('unbuckled', True), ('unbuckled', True), ('healthy', True), ('invalid', False), ('recovered', False),
                                                   ('held', False), ('unmapped_lkas', False), ('unmapped_main', False),
                                                   ('release_lkas', False), ('main_off', False), ('fault_edge', False),
                                                   ('recovered_again', False), ('main_off', False), ('new_main', True),
@@ -566,6 +566,7 @@ class TestGmAol(unittest.TestCase):
                                                   ('healthy', True), ('model_stale', False), ('healthy', True))):
           now = 1_000_000_000 + tick * 10_000_000
           cs.cruiseState.available = phase != 'main_off'
+          cs.seatbeltUnlatched = phase == 'unbuckled'
           cs.buttonEvents = []
           if phase in ('unmapped_lkas', 'unmapped_main', 'release_lkas'):
             cs.buttonEvents = [structs.CarState.ButtonEvent(
@@ -573,6 +574,8 @@ class TestGmAol(unittest.TestCase):
           cs.steerFaultTemporary = phase == 'temporary'
           cs.gearShifter = 'reverse' if phase == 'reverse' else 'drive'
           events = Events()
+          if cs.seatbeltUnlatched:
+            events.add(EventName.seatbeltNotLatched)
           if phase == 'invalid':
             events.add(calibration_event)
           if phase == 'fault_edge':
@@ -602,6 +605,10 @@ class TestGmAol(unittest.TestCase):
                                        calibration.as_reader(), monitoring.as_reader()])
           sd.aol_car_state_log_ns, sd.enabled, sd.active = now, False, False
           sd.events.clear()
+          if cs.seatbeltUnlatched:
+            sd.events.add(EventName.seatbeltNotLatched)
+            self.assertTrue(sd.events.contains(ET.NO_ENTRY))
+            self.assertTrue(sd.events.contains(ET.SOFT_DISABLE))
           with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
                patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
                patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
@@ -624,6 +631,12 @@ class TestGmAol(unittest.TestCase):
           self.assertFalse(command.longActive)
 
   def test_actual_selfdrived_gas_override_keeps_longitudinal_request(self):
+    self.exercise_actual_selfdrived_override()
+
+  def test_sustained_unbuckling_keeps_aol_through_standard_soft_disable(self):
+    self.exercise_actual_selfdrived_override(unlatched=True)
+
+  def exercise_actual_selfdrived_override(self, *, unlatched=False):
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
     from openpilot.selfdrive.selfdrived.state import StateMachine
     from openpilot.selfdrive.selfdrived.events import Events, EventName
@@ -662,18 +675,58 @@ class TestGmAol(unittest.TestCase):
       calibration = messaging.new_message('extrinsicsCalibration', valid=True, logMonoTime=now)
       calibration.extrinsicsCalibration.calStatus = 'calibrated'
       monitoring = messaging.new_message('driverMonitoringState', valid=True, logMonoTime=now)
-      sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
-                                   calibration.as_reader(), monitoring.as_reader()])
-      with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
-           patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
-           patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
-           patch.object(sd, 'publish_selfdriveState'):
-        sd.step()
-      self.assertTrue(sd.enabled)
-      self.assertTrue(sd.aol_axis_decision.desired_longitudinal)
-      self.assertTrue(sd.aol_axis_decision.longitudinal_active)
-      self.assertEqual(sd.state_machine.state, log.SelfdriveState.OpenpilotState.overriding)
-
+      controls = None
+      if unlatched:
+        params = Params()
+        params.put_bool('OpenpilotEnabledToggle', True, block=True)
+        params.put_bool('AlwaysOnLateral', True, block=True)
+        params.put('CarParams', cp.to_bytes(), block=True)
+        controls = Controls()
+      for tick in range(325 if unlatched else 1):
+        now = 1_000_000_000 + tick * 10_000_000
+        cs.gasPressed = not unlatched
+        cs.seatbeltUnlatched = unlatched and tick > 0
+        sd.events.clear()
+        if cs.seatbeltUnlatched:
+          sd.events.add(EventName.seatbeltNotLatched)
+        elif not unlatched:
+          sd.events.add(EventName.gasPressedOverride)
+        intent.aolIntentWire = encode_intent(IntentState('card', tick + 1, now, now, now + 30_000_000,
+                                                       True, False, False, True, True))
+        receipt.aolSafetyWire = encode_safety(SafetyState(1, True, now, now + 200_000_000,
+          int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam,
+          True, not cs.seatbeltUnlatched, True, not cs.seatbeltUnlatched, 'panda', 'gm-test'))
+        for event in (intent, receipt, model, calibration, monitoring):
+          event.logMonoTime = now
+        sd.aol_car_state_log_ns = now
+        sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
+                                     calibration.as_reader(), monitoring.as_reader()])
+        with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
+             patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
+             patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
+             patch.object(sd, 'publish_selfdriveState'):
+          sd.step()
+        self.assertTrue(sd.aol_axis_decision.lateral_active)
+        self.assertEqual(sd.aol_axis_decision.desired_longitudinal, not cs.seatbeltUnlatched)
+        if unlatched:
+          self.assertEqual(sd.enabled, tick <= 300)
+          feed(controls, now, tick, active=sd.active, enabled=sd.enabled)
+          axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
+          axis.aolAxisState.qualified = axis.aolAxisState.nativeAcknowledged = True
+          axis.aolAxisState.desiredLateral = axis.aolAxisState.lateralActive = True
+          axis.aolAxisState.desiredLongitudinal = axis.aolAxisState.longitudinalActive = not cs.seatbeltUnlatched
+          axis.aolAxisState.sessionId = 'gm-test'
+          axis.aolAxisState.observedMonoTime, axis.aolAxisState.validUntilMonoTime = now, now + 30_000_000
+          state = messaging.new_message('carState', valid=True, logMonoTime=now)
+          state.carState = cs
+          controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), state.as_reader()])
+          command, lateral_log = controls.state_control()
+          controls.publish(command, lateral_log)
+          self.assertTrue(command.latActive)
+          self.assertEqual(command.longActive, not cs.seatbeltUnlatched)
+          self.assertEqual(command.cruiseControl.cancel, cs.cruiseState.enabled and (not command.enabled or not cp.pcmCruise))
+        else:
+          self.assertTrue(sd.enabled)
 
   def test_existing_vehicle_factories_preserve_intent_lifecycle(self):
     from opendbc.car import gen_empty_fingerprint

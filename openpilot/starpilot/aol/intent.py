@@ -81,7 +81,7 @@ def disarming_fault(events, CS) -> bool:
     if event.immediateDisable:
       return True
     if event.softDisable:
-      if event.name == log.OnroadEvent.EventName.steerTempUnavailable:
+      if event.name in (log.OnroadEvent.EventName.steerTempUnavailable, log.OnroadEvent.EventName.seatbeltNotLatched):
         continue
       if event.name == log.OnroadEvent.EventName.wrongGear and CS.gearShifter != GearShifter.unknown:
         continue

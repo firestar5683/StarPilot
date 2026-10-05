@@ -96,7 +96,7 @@ class TestTeslaScreenButton(unittest.TestCase):
       self.arm()
       self.feed(brake=True)
       self.assertEqual(self.permission(), 1 if word == 512 else 0)
-    for fault in ({'hands': 3}, {'gear': 2}, {'door': True}, {'belt': False}, {'eps': 3}, {'autopark': 3}):
+    for fault in ({'hands': 3}, {'gear': 2}, {'door': True}, {'eps': 3}, {'autopark': 3}):
       self.start(512)
       self.arm()
       self.feed(**fault)
@@ -104,6 +104,29 @@ class TestTeslaScreenButton(unittest.TestCase):
       self.feed()
       self.assertEqual(self.permission(), 0, fault)
       self.arm()
+
+  def test_unbuckled_screen_lateral_keeps_longitudinal_blocked(self):
+    words = (512, 1536) if os.environ.get('TESLA_SCREEN_NATIVE_RELEASE') == '1' else (512, 1536, 513, 1537)
+    for word in words:
+      self.start(word)
+      self.feed(belt=False)
+      self.arm()
+      self.assertEqual(self.permission(3), 1)
+      steering = self.packer.make_can_msg_safety('DAS_steeringControl', 0,
+                                                {'DAS_steeringAngleRequest': 0, 'DAS_steeringControlType': 1})
+      self.assertTrue(self.lib.safety_tx_hook(steering))
+      self.feed(state=2, belt=False)
+      self.assertEqual(self.permission(3), 1)
+      positive = self.packer.make_can_msg_safety('DAS_control', 0, {'DAS_accelMin': 1, 'DAS_accelMax': 1})
+      self.assertFalse(self.lib.safety_tx_hook(positive))
+      self.feed(state=0, belt=False)
+      self.arm()
+      self.feed(state=0, belt=True)
+      self.assertEqual(self.permission(3), 1)
+      self.assertFalse(self.lib.safety_tx_hook(positive))
+      self.time += 1_100_000
+      self.lib.set_timer(self.time)
+      self.assertEqual(self.permission(3), 0)
 
   def test_expired_request_and_unhealthy_sources_require_new_gesture(self):
     self.arm()

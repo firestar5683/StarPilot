@@ -76,6 +76,39 @@ class TestTeslaPreapStock(unittest.TestCase):
     self.safety.aol_set_host_request(1)
     self.assertEqual(self.safety.aol_get_permission_mask(), 1)
 
+  def test_unbuckled_aol_requires_valid_belt_source_but_denies_stock_resume(self):
+    self.safety.set_aol_test_heartbeat(False)
+    for _ in range(10):
+      self.feed(belt=0)
+    self.feed(lever=2, belt=0)
+    self.safety.set_aol_test_heartbeat(True)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.feed(belt=0)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.assertFalse(self.safety.safety_tx_hook(self.stalk(16, (self.counter + 1) % 16)))
+    self.feed(belt=1)
+    self.assertFalse(self.safety.get_controls_allowed())
+    for unknown in (2, 3):
+      self.feed(belt=unknown)
+      self.safety.aol_set_host_request(1)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.feed(belt=0)
+    self.feed(lever=2, belt=0)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.time += 1_100_000
+    self.safety.set_timer(self.time)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.safety.set_alternative_experience(0)
+    self.safety.set_safety_hooks(39, 0)
+    for _ in range(10):
+      self.feed(belt=0)
+    self.feed(lever=2, belt=0)
+    self.assertFalse(self.safety.get_controls_allowed())
+
   def test_physical_grant_brake_truth_and_fault_rearm(self):
     self.arm()
     self.feed(brake=2)

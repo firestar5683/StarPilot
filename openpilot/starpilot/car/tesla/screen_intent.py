@@ -27,7 +27,7 @@ class TeslaScreenCardIntent(AolCardIntent):
       self.pause_lateral = False
     cancel = any(event.type == ButtonType.cancel and event.pressed for event in CS.buttonEvents)
     fault = bool(not CS.canValid or CS.canTimeout or kwargs.get('fault_active') or CS.accFaulted or CS.steerFaultPermanent or
-                 CS.steeringDisengage or CS.doorOpen or CS.seatbeltUnlatched or CS.gearShifter != structs.CarState.GearShifter.drive)
+                 CS.steeringDisengage or CS.doorOpen or CS.gearShifter != structs.CarState.GearShifter.drive)
     rejection = kwargs.get('native_rejection_ns', 0)
     if rejection and self._last_latch_edge_ns < rejection <= kwargs.get('now_ns', 0):
       self.screen_override = False

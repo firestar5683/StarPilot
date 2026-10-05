@@ -42,7 +42,7 @@ class TeslaPreapCardIntent(AolCardIntent):
     super().update(state.as_reader(), **kwargs)
     healthy = bool(CS.canValid and not CS.canTimeout)
     fault = bool(kwargs.get('fault_active') or CS.accFaulted or CS.steerFaultPermanent or CS.steeringDisengage or
-                 CS.doorOpen or CS.seatbeltUnlatched or CS.gearShifter != structs.CarState.GearShifter.drive)
+                 CS.doorOpen or CS.gearShifter != structs.CarState.GearShifter.drive)
     if not healthy or fault or cancel:
       self.allowed_latch = False
       self.pull_neutral = False

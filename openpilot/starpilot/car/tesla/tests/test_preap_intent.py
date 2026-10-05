@@ -76,3 +76,16 @@ def test_owner_refresh_preserves_physical_contract_without_mutating_saved_settin
   intent.update(state(), now_ns=1)
   pull(intent, 2)
   assert intent.output(state())[0]
+
+
+def test_unbuckled_fresh_pull_arms_without_stock_engagement():
+  intent = owner()
+  intent.update(state(seatbeltUnlatched=True), now_ns=1)
+  source = state(button=structs.CarState.ButtonEvent.Type.setCruise, pressed=True, seatbeltUnlatched=True)
+  intent.update(source, now_ns=2)
+  assert intent.allowed_latch and intent.output(source)[0]
+  assert not source.cruiseState.enabled
+  intent.update(state(seatbeltUnlatched=True), now_ns=3)
+  assert intent.allowed_latch
+  intent.update(state(), now_ns=4)
+  assert intent.allowed_latch and not source.cruiseState.enabled
