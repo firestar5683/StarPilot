@@ -988,6 +988,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gx-crash-row span { flex: 0 0 auto; color: var(--text-muted); font-size: var(--fs-sm); }
 .gx-crash-preview { margin-top: var(--sp-3); }
 .gx-crash-preview__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); overflow-wrap: anywhere; }
+.gx-aa-log { cursor: default; }
+.gx-aa-log > div { display: grid; gap: 2px; min-width: 0; }
+.gx-aa-log > div span { overflow-wrap: anywhere; }
+.gx-aa-log > a { flex: 0 0 auto; }
 .gx-crash-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow-y: auto; font-size: var(--fs-sm); }
 .gx-software-card { margin-top: var(--sp-3); padding: var(--sp-4); }
 .gx-software-card h3 { margin: 0 0 var(--sp-3); }
