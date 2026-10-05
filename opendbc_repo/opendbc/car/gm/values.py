@@ -136,6 +136,43 @@ class GMFlags(IntFlag):
   VOLT_CAMERA_NO_ACCEL_POS = NO_ACCELERATOR_POS_MSG
 
 
+VOLT_ONE_PEDAL_BASE_WORDS = (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487, 0xC1D1, 0xC1D3)
+VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
+                        for index, word in enumerate(VOLT_ONE_PEDAL_BASE_WORDS)}
+
+
+def gm_control_word(cp: CarParams) -> int:
+  word = int(cp.safetyConfigs[0].safetyParam)
+  if word not in VOLT_ONE_PEDAL_WORDS:
+    return word
+  index = word - (0xD110 if word >= 0xD110 else 0xD100)
+  identity = (CAR.CHEVROLET_VOLT if index < 2 else CAR.CHEVROLET_VOLT_ASCM if index < 6 else
+              CAR.CHEVROLET_VOLT_2019 if index in (7, 8) else CAR.CHEVROLET_VOLT_CAMERA)
+  network = CarParams.NetworkLocation.gateway if index < 2 else CarParams.NetworkLocation.fwdCamera
+  if (cp.brand == 'gm' and cp.transmissionType == CarParams.TransmissionType.direct and
+      cp.carFingerprint == identity and cp.networkLocation == network):
+    return VOLT_ONE_PEDAL_WORDS[word]
+  return word
+
+
+def is_volt_one_pedal(cp: CarParams) -> bool:
+  try:
+    return (int(cp.safetyConfigs[0].safetyParam) in VOLT_ONE_PEDAL_WORDS and
+            cp.transmissionType == CarParams.TransmissionType.direct and is_volt_longitudinal(cp) and is_gm_auto_hold(cp))
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False
+
+
+def apply_volt_one_pedal(cp: CarParams, enabled: bool, auto_hold_enabled: bool) -> None:
+  if not is_volt_longitudinal(cp) or cp.transmissionType != CarParams.TransmissionType.direct:
+    return
+  cp.safetyConfigs[0].safetyParam = gm_control_word(cp)
+  apply_gm_auto_hold(cp, enabled or auto_hold_enabled)
+  word = int(cp.safetyConfigs[0].safetyParam)
+  if enabled and word in VOLT_ONE_PEDAL_BASE_WORDS:
+    cp.safetyConfigs[0].safetyParam = (0xD110 if auto_hold_enabled else 0xD100) + VOLT_ONE_PEDAL_BASE_WORDS.index(word)
+
+
 def control_flags(cp: CarParams) -> int:
   """Exclude only the informational BSM bit from exact control-profile admission."""
   return int(cp.flags) & ~int(GMFlags.HAS_BSM)
@@ -175,7 +212,7 @@ def is_volt_gateway_profile(cp: CarParams) -> bool:
             not cp.passive and not cp.dashcamOnly and not cp.notCar and not cp.radarUnavailable and
             control_flags(cp) == 0 and
             len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            int(cp.safetyConfigs[0].safetyParam) in (
+            gm_control_word(cp) in (
               int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG),
               int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE),
               0x4084, 0xC084))
@@ -195,7 +232,7 @@ def is_lacrosse_gateway_profile(cp: CarParams) -> bool:
             cp.transmissionType == CarParams.TransmissionType.automatic and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and not cp.radarUnavailable and control_flags(cp) == 0 and
             len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            cp.safetyConfigs[0].safetyParam in (0, 0x80))
+            gm_control_word(cp) in (0, 0x80))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
@@ -204,7 +241,7 @@ def is_gm_auto_hold(cp: CarParams) -> bool:
   return ((is_volt_gateway_longitudinal(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or
            is_volt_sdgm_profile(cp, longitudinal=True) or is_volt_camera_removed(cp, longitudinal=True) or
            is_lacrosse_gateway_profile(cp) and cp.openpilotLongitudinalControl) and
-          int(cp.safetyConfigs[0].safetyParam) in (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487,
+          gm_control_word(cp) in (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487,
                                                  0xC1D1, 0xC1D3, 0x80))
 
 
@@ -214,7 +251,7 @@ def apply_gm_auto_hold(cp: CarParams, enabled: bool) -> None:
     return
   if (is_volt_gateway_profile(cp) or is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or
       is_volt_sdgm_profile(cp, longitudinal=True) or is_lacrosse_gateway_profile(cp)):
-    word = int(cp.safetyConfigs[0].safetyParam)
+    word = gm_control_word(cp)
     cp.safetyConfigs[0].safetyParam = (word | int(GMSafetyFlags.VOLT_AUTO_HOLD)) if enabled and cp.openpilotLongitudinalControl else (
       word & ~int(GMSafetyFlags.VOLT_AUTO_HOLD))
 
@@ -227,7 +264,7 @@ def is_volt_ascm_longitudinal(cp: CarParams) -> bool:
     optional = int(GMSafetyFlags.ASCM_BRAKE_C9 | GMSafetyFlags.ASCM_RADAR)
     if len(cp.safetyConfigs) != 1:
       return False
-    flags = int(cp.safetyConfigs[0].safetyParam)
+    flags = gm_control_word(cp)
     if flags in (0x4287, 0x4687, 0x4A87, 0x4E87):
       flags &= ~int(GMSafetyFlags.VOLT_AUTO_HOLD)
     return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM and
@@ -253,8 +290,8 @@ def is_volt_camera_removed(cp: CarParams, *, longitudinal=None) -> bool:
             (not is_long or cp.alphaLongitudinalAvailable) and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and len(cp.safetyConfigs) == 1 and
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            (cp.safetyConfigs[0].safetyParam == (0xC151 if is_long else 0xC150) or
-             is_long and cp.safetyConfigs[0].safetyParam == (0xC1D3 if cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG else 0xC1D1)))
+            (gm_control_word(cp) == (0xC151 if is_long else 0xC150) or
+             is_long and gm_control_word(cp) == (0xC1D3 if cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG else 0xC1D1)))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
@@ -266,7 +303,7 @@ def is_volt_camera_stock(cp: CarParams) -> bool:
             cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.pcmCruise and
             not cp.openpilotLongitudinalControl and not cp.passive and not cp.dashcamOnly and
             not cp.notCar and control_flags(cp) == 0 and len(cp.safetyConfigs) == 1 and
-            cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and cp.safetyConfigs[0].safetyParam == 5)
+            cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and gm_control_word(cp) == 5)
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
@@ -279,7 +316,7 @@ def is_volt_camera_longitudinal(cp: CarParams) -> bool:
             cp.openpilotLongitudinalControl and not cp.pcmCruise and not cp.passive and not cp.dashcamOnly and
             not cp.notCar and control_flags(cp) == 0 and len(cp.safetyConfigs) == 1 and
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            cp.safetyConfigs[0].safetyParam in (0x4007, 0x4087))
+            gm_control_word(cp) in (0x4007, 0x4087))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
@@ -292,7 +329,7 @@ def is_volt_sdgm_profile(cp: CarParams, *, longitudinal=False) -> bool:
             not cp.notCar and control_flags(cp) == 0 and cp.openpilotLongitudinalControl == longitudinal and
             cp.pcmCruise != longitudinal and (not longitudinal or cp.alphaLongitudinalAvailable) and
             len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            cp.safetyConfigs[0].safetyParam in words)
+            gm_control_word(cp) in words)
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
@@ -304,7 +341,7 @@ def is_volt_longitudinal(cp: CarParams) -> bool:
 
 def is_volt_gateway_alternate_brake(cp: CarParams) -> bool:
   """The exact gateway Volt profile using EBCM pedal input and PT friction output."""
-  return is_volt_gateway_profile(cp) and bool(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)
+  return is_volt_gateway_profile(cp) and bool(gm_control_word(cp) & GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)
 
 
 class Footnote(Enum):

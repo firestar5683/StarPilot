@@ -22,12 +22,17 @@ static bool gm_hold_regen;
 static bool gm_hold_stopped;
 static bool gm_hold_armed;
 static bool gm_hold_moving;
+static bool gm_hold_one_pedal_moving;
 static uint8_t gm_hold_acc;
 static uint32_t gm_hold_drive_us;
 static uint32_t gm_hold_regen_release_us;
 static bool gm_hold_regen_released;
 static bool gm_hold_counter_seen;
 static uint8_t gm_hold_counter;
+
+static void gm_one_pedal_withdraw(void) {
+  if (!gm_one_pedal_config.paired_auto_hold) { gm_hold_accepted = false; }
+}
 
 typedef struct {
   bool enabled;
@@ -53,7 +58,7 @@ static void gm_hold_reset(const GMHoldConfig *config) {
   for (uint8_t i = 0U; i < 7U; i++) { gm_hold_seen[i] = false; gm_hold_us[i] = 0U; }
   gm_hold_brake_unavailable = true;
   gm_hold_main = false; gm_hold_forward = false; gm_hold_gas = false;
-  gm_hold_brake = false; gm_hold_regen = false; gm_hold_stopped = false; gm_hold_armed = false; gm_hold_moving = false;
+  gm_hold_brake = false; gm_hold_regen = false; gm_hold_stopped = false; gm_hold_armed = false; gm_hold_moving = false; gm_hold_one_pedal_moving = false;
   gm_hold_acc = 0U; gm_hold_drive_us = 0U; gm_hold_regen_release_us = 0U;
   gm_hold_regen_released = false; gm_hold_counter_seen = false; gm_hold_counter = 0U;
 }
@@ -68,13 +73,20 @@ static bool gm_hold_sources_current(uint32_t now) {
   return current;
 }
 
-static bool gm_hold_ready(uint32_t now) {
+static bool gm_hold_physical_ready(uint32_t now) {
   if (gm_hold_regen_released && (safety_get_ts_elapsed(now, gm_hold_regen_release_us) >= 1000000U)) {
     gm_hold_regen_released = false;
   }
-  const bool cooldown = gm_hold_regen_released;
   return !safety_rx_checks_invalid && !relay_malfunction && gm_hold_sources_current(now) && gm_hold_main && gm_hold_forward && !gm_hold_gas &&
-         !gm_hold_regen && !gm_hold_brake_unavailable && !cooldown && (gm_hold_drive_us >= 3000000U);
+         !gm_hold_regen && !gm_hold_brake_unavailable && (gm_hold_drive_us >= 3000000U);
+}
+
+static bool gm_hold_ready(uint32_t now) {
+  return gm_hold_physical_ready(now) && !gm_hold_regen_released;
+}
+
+static bool gm_one_pedal_physical_ready(uint32_t now) {
+  return gm_one_pedal_mode_qualified(now) && !gm_hold_brake && gm_hold_physical_ready(now);
 }
 
 static void gm_hold_rx(const CANPacket_t *msg) {
@@ -106,6 +118,7 @@ static void gm_hold_rx(const CANPacket_t *msg) {
       gm_hold_stopped = (left <= 10U) && (right <= 10U);
       gm_hold_near_stop = (left <= 28U) && (right <= 28U);
       if (!gm_hold_near_stop) { gm_hold_accepted = false; }
+      gm_hold_one_pedal_moving = (left > 10U) && (right > 10U);
       gm_hold_moving = (left > 0U) || (right > 0U);
       const uint32_t elapsed = safety_get_ts_elapsed(now, gm_hold_us[4]);
       // Raw wheel units are .0311 km/h; twelve units exceed .1 m/s.
@@ -123,10 +136,14 @@ static void gm_hold_rx(const CANPacket_t *msg) {
       // Unrelated or malformed traffic cannot refresh physical authority.
     }
     if (source >= 0) { gm_hold_seen[source] = true; gm_hold_us[source] = now; }
-    if (!gm_hold_ready(now)) { gm_hold_armed = false; gm_hold_accepted = false; }
+    if (!gm_hold_ready(now)) {
+      gm_hold_armed = false;
+      if (!gm_one_pedal_physical_ready(now)) { gm_hold_accepted = false; }
+    }
     else if (gm_hold_moving || gm_hold_brake) { gm_hold_armed = true; }
     else { /* Retain a previously armed stopped hold. */ }
-    if (get_longitudinal_allowed()) { gm_hold_accepted = false; }
+    if (get_longitudinal_allowed() || (gm_one_pedal_config.enabled && !gm_one_pedal_config.paired_auto_hold &&
+        (!gm_one_pedal_mode_qualified(now) || gm_hold_brake))) { gm_hold_accepted = false; }
   }
 }
 
@@ -142,15 +159,27 @@ static bool gm_hold_brake_tx(const CANPacket_t *msg, int brake) {
                             (checksum == expected) && ((msg->data[4] & 0xFCU) == 0U) &&
                             (release || !gm_hold_counter_seen || (counter == ((gm_hold_counter + 1U) & 3U)));
   const bool hold_mode = (((mode == 0xAU) || (mode == 0xBU)) && (gm_hold_acc != 4U)) || ((mode == 0xDU) && (gm_hold_acc == 4U));
-  if (!gm_hold_ready(now)) { gm_hold_armed = false; gm_hold_accepted = false; }
-  const bool stationary = gm_hold_stopped || (gm_hold_sdgm && gm_hold_accepted && gm_hold_near_stop);
+  if (!gm_hold_ready(now)) {
+    gm_hold_armed = false;
+    if (!gm_one_pedal_physical_ready(now)) { gm_hold_accepted = false; }
+  }
   const int minimum = gm_hold_sdgm ? 100 : 80;
-  const bool hold = gm_hold_armed && gm_hold_ready(now) && stationary &&
+  const bool one_pedal_mode = gm_one_pedal_mode_qualified(now);
+  if (gm_one_pedal_config.enabled && !gm_one_pedal_config.paired_auto_hold && (!one_pedal_mode || gm_hold_brake)) { gm_hold_accepted = false; }
+  const bool stationary = gm_hold_stopped || (gm_hold_sdgm && gm_hold_accepted && gm_hold_near_stop);
+  const bool auto_hold_owner = (!gm_one_pedal_config.enabled || gm_one_pedal_config.paired_auto_hold) &&
+                               gm_hold_armed && gm_hold_ready(now);
+  const bool one_pedal_owner = gm_one_pedal_config.enabled && one_pedal_mode && !gm_hold_brake && gm_hold_physical_ready(now);
+  const bool hold = auto_hold_owner && stationary &&
                     (brake >= minimum) && (brake <= 240) && hold_mode;
-  const bool permitted = packet_valid && (release || hold);
+  const bool one_pedal_brake = one_pedal_owner && hold_mode && (brake <= 400) &&
+                               ((gm_hold_stopped && (brake >= minimum)) || (gm_hold_one_pedal_moving && (brake >= 0)));
+  const bool permitted = packet_valid && (release || hold || one_pedal_brake);
   if (permitted) {
     gm_hold_counter_seen = true; gm_hold_counter = counter;
-    gm_hold_accepted = !release;
+    if (release || !hold) { gm_hold_accepted = false; }
+    else if (gm_hold_stopped) { gm_hold_accepted = true; }
+    else { /* Retain credit only from an accepted stationary hold. */ }
   }
   return permitted;
 }

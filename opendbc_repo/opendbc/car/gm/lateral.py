@@ -1,3 +1,4 @@
+from opendbc.car.gm.values import gm_control_word
 """Exact finalized GM configurations for shared lateral preferences."""
 import math
 from opendbc.car.structs import CarParams
@@ -35,7 +36,7 @@ def lane_centering_supported(cp) -> bool:
     if (len(cp.safetyConfigs) != 1 or cp.safetyConfigs[0].safetyModel != CarParams.SafetyModel.gm or
         cp.networkLocation != CarParams.NetworkLocation.fwdCamera or control_flags(cp) != 0):
       return False
-    word = int(cp.safetyConfigs[0].safetyParam)
+    word = gm_control_word(cp)
     if cp.carFingerprint == CAR.CHEVROLET_VOLT_CAMERA:
       return ((word == 5 and cp.pcmCruise and not cp.openpilotLongitudinalControl) or
               (word in (0x4007, 0x4087) and not cp.pcmCruise and cp.openpilotLongitudinalControl and cp.alphaLongitudinalAvailable))

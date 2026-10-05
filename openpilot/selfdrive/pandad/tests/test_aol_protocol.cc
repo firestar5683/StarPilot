@@ -180,7 +180,11 @@ int main() {
     forte.safety_mode = HYUNDAI_AOL_PROFILE.mode;
     assert(!aol_capable(forte, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
   }
-  for (const uint16_t word : {0U, 0x80U}) {
+  for (const uint16_t word : {0U, 0x80U,
+                            0xD100U, 0xD101U, 0xD102U, 0xD103U, 0xD104U, 0xD105U,
+                            0xD106U, 0xD107U, 0xD108U, 0xD109U, 0xD10AU,
+                            0xD110U, 0xD111U, 0xD112U, 0xD113U, 0xD114U, 0xD115U,
+                            0xD116U, 0xD117U, 0xD118U, 0xD119U, 0xD11AU}) {
     AolAxisNegotiator negotiator(VEHICLE_REGISTRY);
     FakeTransport transport;
     auto gateway = status();
@@ -190,20 +194,26 @@ int main() {
     queue(transport, gateway, gateway);
     const auto first = run(negotiator, transport, axis("gateway"), NOW, GM_AOL_PROFILE.mode);
     assert(first.plan.capable && first.plan.request_mask == 0U && first.outcome.compatible);
+    assert(first.outcome.status && first.outcome.status->safety_param == word);
     auto active = gateway;
     active.request_mask = 3U;
     active.permission_mask = 1U;
     queue(transport, gateway, active);
     const auto second = run(negotiator, transport, axis("gateway", true, true), NOW, GM_AOL_PROFILE.mode);
     assert(second.plan.capable && second.plan.request_mask == 3U && second.outcome.compatible);
-    assert(second.outcome.status && second.outcome.status->permission_mask == 1U);
+    assert(second.outcome.status && second.outcome.status->permission_mask == 1U && second.outcome.status->safety_param == word);
   }
-  for (const uint16_t word : {0x40U, 0x81U, 0x82U, 0x84U, 0x180U}) {
+  for (const uint16_t word : {0x40U, 0x81U, 0x82U, 0x84U, 0x180U, 0xD0FFU, 0xD10BU, 0xD10FU, 0xD11BU, 0xD11FU, 0xD120U}) {
     assert(!gm_aol_param(word));
     auto unknown = status();
     unknown.safety_mode = GM_AOL_PROFILE.mode;
     unknown.safety_param = word;
     assert(!aol_capable(unknown, GM_AOL_PROFILE.mode, VEHICLE_REGISTRY));
+    AolAxisNegotiator negotiator(VEHICLE_REGISTRY);
+    FakeTransport transport;
+    queue(transport, unknown, unknown);
+    const auto rejected = run(negotiator, transport, axis(), NOW, GM_AOL_PROFILE.mode);
+    assert(!rejected.plan.capable && rejected.plan.request_mask == 0U && !rejected.outcome.compatible);
   }
   for (uint32_t word = 0U; word <= 65535U; word++) {
     auto gm = status();

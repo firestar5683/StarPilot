@@ -43,7 +43,10 @@ class TestGmVoltGatewayMapping(unittest.TestCase):
     expected = [EXACT, EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE),
                 EXACT | int(GMSafetyFlags.VOLT_AUTO_HOLD),
                 EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE | GMSafetyFlags.VOLT_AUTO_HOLD)]
+    expected += [0xD100, 0xD101, 0xD110, 0xD111]
     if not release:
+      expected += [0xD102, 0xD103, 0xD104, 0xD105, 0xD106, 0xD107, 0xD108, 0xD109, 0xD10A,
+                   0xD112, 0xD113, 0xD114, 0xD115, 0xD116, 0xD117, 0xD118, 0xD119, 0xD11A]
       expected += [7, 515, 1539, 2563, 3587, 4099, 5123, 16391, 16903, 17927, 18951, 19975,
                    20487, 21511, 49489, 49520, 49523, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487, 0xC1D1, 0xC1D3]
     self.assertEqual(accepted, sorted(expected))

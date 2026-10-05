@@ -110,10 +110,13 @@ class ResumePlanInputs:
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
-  from opendbc.car.gm.values import is_gm_auto_hold
+  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_one_pedal
   if controller is not None and is_gm_auto_hold(cp) and controller.gm_auto_hold:
     from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
     controller.gm_auto_hold_input = AutoHoldPreference(cp, params)
+  if controller is not None and is_volt_one_pedal(cp) and controller.volt_one_pedal:
+    from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
+    controller.volt_one_pedal_input = AutoHoldPreference(cp, params, "VoltOnePedalMode")
   from opendbc.car.gm.values import is_volt_longitudinal
   if controller is not None and is_volt_longitudinal(cp) and controller.volt_sng:
     try:

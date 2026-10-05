@@ -27,7 +27,7 @@ class TestVehicleStartupPreferences(unittest.TestCase):
 
   def test_gm_stop_preferences_require_strict_saved_opt_in(self):
     from openpilot.common.params import ParamKeyType
-    for key, name in (("VoltSNG", "volt_sng"), ("GMAutoHold", "gm_auto_hold")):
+    for key, name in (("VoltSNG", "volt_sng"), ("GMAutoHold", "gm_auto_hold"), ("VoltOnePedalMode", "volt_one_pedal")):
       self.raw("SafeMode", None)
       self.assertEqual(self.params.get_type(key), ParamKeyType.BOOL)
       self.assertIs(self.params.get_default_value(key), False)
@@ -43,29 +43,31 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
     from opendbc.car.gm.values import CAR as GM_CAR
     from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
-    cp = ordinary_params(GM_CAR.CHEVROLET_VOLT, radar=True)
-    VehicleStartupPreferences(gm_auto_hold=True).prepare(cp)
-    now = 1_000_000_000
-    for key in ("GMAutoHold", "OpenpilotEnabledToggle", "SafeMode", "DisableOpenpilotLongitudinal"):
-      for raw in (b"0", b"1", b"", b"true", None):
-        for clean_key, value in (("GMAutoHold", b"1"), ("OpenpilotEnabledToggle", b"1"),
-                                 ("SafeMode", b"0"), ("DisableOpenpilotLongitudinal", b"0")):
-          self.raw(clean_key, value)
-        owner = AutoHoldPreference(cp, self.params)
-        self.assertTrue(owner.update(now))
-        self.raw(key, raw)
-        now += 250_000_000
-        expected = raw == b"1" if key in ("GMAutoHold", "OpenpilotEnabledToggle") else raw in (None, b"0")
-        self.assertEqual(owner.update(now), expected, (key, raw))
-        self.assertFalse(owner.update(now - 1))
-        cp.passive = True
-        self.assertFalse(owner.update(now))
-        cp.passive = False
-    preferences = VehicleStartupPreferences(gm_auto_hold=True, disable_bolt_long=True)
-    preferences.prepare(cp)
-    preferences.finalize(cp)
-    self.assertFalse(cp.openpilotLongitudinalControl)
-    self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x4004)
+    for preference in ("GMAutoHold", "VoltOnePedalMode"):
+      cp = ordinary_params(GM_CAR.CHEVROLET_VOLT, radar=True)
+      VehicleStartupPreferences(gm_auto_hold=preference == "GMAutoHold",
+                                volt_one_pedal=preference == "VoltOnePedalMode").prepare(cp)
+      now = 1_000_000_000
+      for key in (preference, "OpenpilotEnabledToggle", "SafeMode", "DisableOpenpilotLongitudinal"):
+        for raw in (b"0", b"1", b"", b"true", None):
+          for clean_key, value in ((preference, b"1"), ("OpenpilotEnabledToggle", b"1"),
+                                   ("SafeMode", b"0"), ("DisableOpenpilotLongitudinal", b"0")):
+            self.raw(clean_key, value)
+          owner = AutoHoldPreference(cp, self.params, preference)
+          self.assertTrue(owner.update(now))
+          self.raw(key, raw)
+          now += 250_000_000
+          expected = raw == b"1" if key in (preference, "OpenpilotEnabledToggle") else raw in (None, b"0")
+          self.assertEqual(owner.update(now), expected, (preference, key, raw))
+          self.assertFalse(owner.update(now - 1))
+          cp.passive = True
+          self.assertFalse(owner.update(now))
+          cp.passive = False
+      preferences = VehicleStartupPreferences(gm_auto_hold=True, volt_one_pedal=True, disable_bolt_long=True)
+      preferences.prepare(cp)
+      preferences.finalize(cp)
+      self.assertFalse(cp.openpilotLongitudinalControl)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x4004)
 
   def test_suburban_saved_long_pitch_configures_exact_controller(self):
     from opendbc.car.gm.carcontroller import CarController
@@ -155,6 +157,54 @@ class TestVehicleStartupPreferences(unittest.TestCase):
               self.assertIsNone(host.CI.CC.gm_auto_hold_input)
           else:
             self.assertEqual(published.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+
+  def test_volt_one_pedal_card_retains_exact_owner_and_withdrawal(self):
+    from opendbc.car.gm.values import CAR as GM_CAR, is_volt_one_pedal, gm_control_word
+    profiles = [
+      (GM_CAR.CHEVROLET_VOLT, {0xBE: 6}, {0x460: 8}, {}, 0xD100),
+      (GM_CAR.CHEVROLET_VOLT, {}, {0x460: 8}, {}, 0xD101),
+      (GM_CAR.CHEVROLET_VOLT_ASCM, {0x2FF: 8, 0xBE: 6}, {}, {}, 0xD102),
+      (GM_CAR.CHEVROLET_VOLT_ASCM, {0x2FF: 8}, {}, {}, 0xD103),
+      (GM_CAR.CHEVROLET_VOLT_ASCM, {0x2FF: 8, 0xBE: 6}, {0x460: 8}, {}, 0xD104),
+      (GM_CAR.CHEVROLET_VOLT_ASCM, {0x2FF: 8}, {0x460: 8}, {}, 0xD105),
+      (GM_CAR.CHEVROLET_VOLT_CAMERA, {}, {}, {0x320: 6}, 0xD106),
+      (GM_CAR.CHEVROLET_VOLT_2019, {0x2FF: 8, 0xBE: 6}, {}, {}, 0xD107),
+      (GM_CAR.CHEVROLET_VOLT_2019, {0x2FF: 8}, {}, {}, 0xD108),
+    ]
+    for alternate in (False, True):
+      observed = {0x184: 8, 0x34A: 5, 0x1C4: 8, 0xC9: 8, 0x1E1: 7, 0xF1 if alternate else 0xBE: 6}
+      profiles.append((GM_CAR.CHEVROLET_VOLT_CAMERA, observed, {}, {}, 0xD109 + alternate))
+    for candidate, pt, radar, camera, solo_word in profiles:
+      for paired in (False, True):
+        for state in ('on', 'off', 'live_off', 'master_off', 'safe', 'disable_long', 'release'):
+          with self.subTest(candidate=candidate, word=hex(solo_word), paired=paired, state=state):
+            observed = gen_empty_fingerprint()
+            observed[0], observed[1], observed[2] = dict(pt), dict(radar), dict(camera)
+            self.params.put_bool('AlphaLongitudinalEnabled', True, block=True)
+            self.params.put_bool('GMAutoHold', paired, block=True)
+            self.params.put_bool('SafeMode', state == 'safe', block=True)
+            self.params.put_bool('DisableOpenpilotLongitudinal', state == 'disable_long', block=True)
+            self.params.put_bool('IsReleaseBranch', state == 'release', block=True)
+            host, constructed, published = self.start(candidate, key='VoltOnePedalMode', observed=observed,
+              capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam), enabled=state != 'master_off',
+              requested=state != 'off', change_saved=state == 'live_off')
+            admitted = state in ('on', 'live_off') or state == 'release' and candidate == GM_CAR.CHEVROLET_VOLT
+            self.assertEqual(is_volt_one_pedal(published), admitted)
+            if admitted:
+              self.assertEqual(constructed, [solo_word + (0x10 if paired else 0)])
+              self.assertEqual(published.safetyConfigs[0].safetyParam, constructed[0])
+              self.assertTrue(host.CI.CC.volt_one_pedal)
+              self.assertEqual(host.CI.CC.volt_one_pedal_input.update(1_000_000_000), state != 'live_off')
+              self.assertEqual(host.CI.CC.gm_auto_hold, paired)
+            else:
+              self.assertFalse(host.CI.CC.volt_one_pedal)
+              self.assertIsNone(host.CI.CC.volt_one_pedal_input)
+              self.assertEqual(gm_control_word(host.CI.CP), host.CI.CP.safetyConfigs[0].safetyParam)
+            if state == 'master_off':
+              self.assertEqual(published.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+            if state == 'disable_long':
+              self.assertFalse(published.openpilotLongitudinalControl)
+            self.assertEqual(self.params.get_bool('VoltOnePedalMode'), state not in ('off', 'live_off'))
 
   def test_camera_volt_hold_startup_retains_release_and_disable_longitudinal_owners(self):
     from opendbc.car.gm.values import CAR as GM_CAR, is_gm_auto_hold

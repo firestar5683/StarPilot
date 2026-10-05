@@ -11,7 +11,201 @@ from opendbc.car.gm.tests.test_bolt_volt_configurations import controller_messag
 from opendbc.car.gm.values import CAR, DBC, GMSafetyFlags, is_volt_gateway_alternate_brake
 
 
+def one_pedal_profiles(*, release=False):
+  from opendbc.car.gm.tests.test_ascm_intercept import params as ascm_params
+  from opendbc.car.gm.tests.test_volt_camera_control import camera_params
+  from opendbc.car.gm.tests.test_volt_sdgm_control import sdgm_params
+  from opendbc.car.gm.tests.test_volt_camera_removed import removed_params
+  for be in (True, False):
+    yield f'gateway-{int(be)}', ordinary_params(CAR.CHEVROLET_VOLT, radar=True, accelerator=be), be
+  for be in (True, False):
+    for radar in (False, True):
+      yield (f'ascm-{int(be)}-{int(radar)}', ascm_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True,
+                                                      accelerator=be, radar=radar, release=release), be)
+  yield 'camera', camera_params(release=release), True
+  for c9 in (False, True):
+    yield f'sdgm-{int(c9)}', sdgm_params(brake_c9=c9, radar=True, release=release), True
+  for alternate in (False, True):
+    yield f'removed-{int(alternate)}', removed_params(alternate=alternate, release=release), not alternate
+
+
 class TestVoltAlternateBrake(unittest.TestCase):
+  def test_one_pedal_matches_pinned_original_scalar_histories(self):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+    from opendbc.car.gm.one_pedal import VoltOnePedal, _VoltPid
+    reference = json.loads(Path(__file__).with_name('volt_one_pedal_original_oracle.json').read_text())
+    params = SimpleNamespace(**reference['params'])
+    for history in reference['histories']:
+      cp = SimpleNamespace(carFingerprint=CAR.CHEVROLET_VOLT_CAMERA, longitudinalTuning=SimpleNamespace(
+        kpBP=history['kp'][0], kpV=history['kp'][1], kiBP=history['ki'][0], kiV=history['ki'][1]))
+      controller = VoltOnePedal(cp, params)
+      controller.pid = _VoltPid(history['kp'], history['ki'])
+      controller.lift_frames = history['initial_lift_frames']
+      for tick, step in enumerate(history['steps']):
+        with self.subTest(history=history['name'], tick=tick):
+          result = controller.update(**step['input'])
+          self.assertEqual(result, step['expected']['brake'])
+          self.assertAlmostEqual(controller.pid.i, step['expected']['integral'], places=12)
+          self.assertAlmostEqual(controller.decel, step['expected']['decel'], places=12)
+          self.assertEqual(controller.lift_frames, step['expected']['lift_frames'])
+
+  def test_one_pedal_default_off_preserves_committed_sender_bytes(self):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+    from opendbc.car import structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.tests.test_bolt_cc import feed, control
+    from opendbc.car.gm.values import is_volt_camera_removed
+    reference = json.loads(Path(__file__).with_name('volt_one_pedal_default_off.json').read_text())
+    cases = list(one_pedal_profiles())
+    self.assertEqual(len(cases), len(reference['profiles']))
+    for (name, cp, be), baseline in zip(cases, reference['profiles'], strict=True):
+      with self.subTest(profile=name):
+        self.assertEqual((name, cp.carFingerprint, cp.safetyConfigs[0].safetyParam),
+                         (baseline['name'], baseline['identity'], baseline['word']))
+        ci = CarInterface(cp)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        for tick, expected in enumerate(baseline['tx']):
+          now = 1_000_000_000 + tick * 10_000_000
+          speed = 20. if tick < 40 or tick >= 100 else 0. if tick < 80 else 6.
+          active, brake, gas = tick < 60 or tick >= 90, 60 <= tick < 65, 65 <= tick < 70
+          _, packets = feed(SimpleNamespace(update=lambda _: None), packer, now, counter=tick % 4, speed=speed,
+                            brake=brake, gas=gas, camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and
+                            not is_volt_camera_removed(cp))
+          packets = [packet for packet in packets if packet[0] not in (0xBE, 0xF1, 0x1C4)]
+          packets.append(packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 2 if active else 0,
+                                                                    'AcceleratorPedal2': 30 if gas else 0}))
+          if be:
+            packets.append(packer.make_can_msg('ECMAcceleratorPos', 0, {'BrakePedalPos': 20 if brake else 0}))
+          else:
+            packets.append(packer.make_can_msg('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': 104 if brake else 0}))
+          if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not is_volt_camera_removed(cp):
+            packets.append(packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 3, 'ACCSpeedSetpoint': 60}))
+          ci.update([(now - 1_000_000, packets)])
+          self.assertTrue(ci.update([(now, packets)]).canValid)
+          command = control(enabled=active, long_active=active)
+          command.latActive = active
+          command.actuators.accel = -.5 if tick < 40 else 1.
+          command.actuators.torque = .02
+          _, messages = ci.apply(command.as_reader(), now)
+          self.assertEqual([[address, data.hex(), bus] for address, data, bus in messages], expected, (name, tick))
+
+  def test_one_pedal_actual_parser_controller_all_tx(self):
+    from tempfile import TemporaryDirectory
+    from types import SimpleNamespace
+    from opendbc.car import structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
+    from opendbc.car.gm.values import gm_control_word, is_volt_camera_removed
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from openpilot.common.params import Params
+    from openpilot.starpilot.controller_extensions import configure_controller
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    release = libsafety_py.libsafety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    indexes = {'gateway-1': 0, 'gateway-0': 1, 'ascm-1-0': 2, 'ascm-0-0': 3,
+               'ascm-1-1': 4, 'ascm-0-1': 5, 'camera': 6, 'sdgm-0': 7,
+               'sdgm-1': 8, 'removed-0': 9, 'removed-1': 10}
+    for name, original, be in one_pedal_profiles(release=release):
+      for paired in (False, True):
+        with self.subTest(profile=name, paired=paired), TemporaryDirectory() as directory:
+          cp = original.as_reader().as_builder()
+          params = Params(directory)
+          for key, value in [('OpenpilotEnabledToggle', True), ('VoltOnePedalMode', True), ('GMAutoHold', paired)]:
+            params.put_bool(key, value, block=True)
+          preferences = VehicleStartupPreferences.read(params, enabled=True)
+          preferences.prepare(cp)
+          preferences.finalize(cp)
+          if release and indexes[name] >= 2:
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, original.safetyConfigs[0].safetyParam)
+            self._hold_release_factory(cp, camera=False, alternative=0)
+            continue
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xD100 + indexes[name] + (0x10 if paired else 0))
+          self.assertNotEqual(gm_control_word(cp), cp.safetyConfigs[0].safetyParam)
+          ci = CarInterface(cp)
+          preferences.configure_controller(ci)
+          configure_controller(ci, params)
+          self.assertTrue(ci.CC.volt_one_pedal)
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          setup(cp)
+          self.assertEqual(libsafety_py.libsafety.set_safety_hooks(int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam), 0)
+          removed = is_volt_camera_removed(cp)
+          positive = stopped_positive = immediate_release = False
+          for tick in range(2680 if name == 'gateway-1' and not paired else 940):
+            now = 1_000_000_000 + tick * 10_000_000
+            stopped = 360 <= tick < 410 or 440 <= tick < 490 or 550 <= tick < 660
+            regen = 410 <= tick < 420
+            mode_off = 490 <= tick < 550 or 610 <= tick < 660 or 730 <= tick < 940
+            manual = 760 <= tick < 800
+            fault = 800 <= tick < 820
+            physical_brake = 820 <= tick < 840
+            unknown_gear = 840 <= tick < 860
+            main_off = 860 <= tick < 880
+            stale_status = 880 <= tick < 940
+            live_changes = {1280: ('VoltOnePedalMode', False), 1320: ('VoltOnePedalMode', True),
+                            1720: ('OpenpilotEnabledToggle', False), 1760: ('OpenpilotEnabledToggle', True),
+                            2160: ('SafeMode', True), 2200: ('SafeMode', False),
+                            2600: ('DisableOpenpilotLongitudinal', True)}
+            if tick in live_changes:
+              key, value = live_changes[tick]
+              params.put_bool(key, value, block=True)
+            live_withdrawn = 1305 <= tick < 1320 or 1745 <= tick < 1760 or 2185 <= tick < 2200 or tick >= 2625
+            gas = 310 <= tick < 320
+            speed = 0. if stopped else .15 if 420 <= tick < 440 else .5 if tick >= 310 else 2.
+            _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=speed, gas=gas, regen=regen,
+                         camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not removed)
+            rx = [message for message in rx if message[0] not in (0xBE, 0xF1, 0x1C4, 0xC9, 0x1F5, 0x232)]
+            brake_name, signal = ('ECMAcceleratorPos', 'BrakePedalPos') if be else ('EBCMBrakePedalPosition', 'BrakePedalPosition')
+            rx += [packer.make_can_msg(brake_name, 0, {signal: 20 if physical_brake else 0}),
+                   packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 4 if stopped else 2, 'AcceleratorPedal2': 30 if gas else 0}),
+                   packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': int(not main_off), 'BrakePressed': int(physical_brake)}),
+                   packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 8 if unknown_gear else
+                                      6 if manual or not mode_off and (tick < 660 or tick >= 940) else 4, 'ManualMode': int(manual)}),
+                   packer.make_can_msg('EBCMFrictionBrakeStatus', 0, {'FrictionBrakeUnavailable': int(fault)})]
+            if 660 <= tick < 700:
+              rx.append(packer.make_can_msg('EVDriveMode', 0, {'SinglePedalModeActive': 1}))
+            if stale_status:
+              rx = [message for message in rx if message[0] != 0x232]
+            if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not removed:
+              rx.append(packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 3, 'ACCSpeedSetpoint': 60}))
+            ci.update([(now - 1_000_000, rx)])
+            out = ci.update([(now, rx)])
+            if not stale_status:
+              self.assertTrue(out.canValid, (name, tick))
+            self.assertEqual(ci.CS.volt_one_pedal_mode, not mode_off, tick)
+            for message in rx:
+              native('rx', message, now // 1000)
+            libsafety_py.libsafety.safety_tick()
+            _, commands = ci.apply(structs.CarControl(enabled=False, longActive=False).as_reader(), now)
+            for message in commands:
+              self.assertTrue(native('tx', message, now // 1000), (name, paired, tick, message))
+            brakes = [message for message in commands if message[0] == 0x315]
+            self.assertLessEqual(len(brakes), 1)
+            if not brakes:
+              continue
+            data = brakes[0][1]
+            self.assertEqual(int.from_bytes(data[2:4], 'big'),
+                             (0x10000 - int.from_bytes(data[:2], 'big') - (data[4] & 3)) & 0xFFFF)
+            amount = (0x1000 - (((data[0] & 15) << 8) | data[1])) & 0xFFF
+            if (gas or regen or tick < 300 or mode_off and not paired or fault or physical_brake or
+                unknown_gear or main_off or 910 <= tick < 940 or live_withdrawn):
+              self.assertEqual(amount, 0, (name, paired, tick))
+            if tick in (1260, 1716, 2156, 2596):
+              self.assertGreater(amount, 0, (name, paired, tick))
+            if 330 <= tick < 360 and amount:
+              positive = True
+            if 390 <= tick < 410 and amount:
+              stopped_positive = True
+              self.assertEqual(data[0] >> 4, 0xD)
+              self.assertFalse(any(message[0] == 0x2CB for message in commands))
+            if 420 <= tick < 440 and amount:
+              immediate_release = True
+              if out.vEgo < ci.CC.params.NEAR_STOP_BRAKE_PHASE:
+                self.assertEqual(data[0] >> 4, 0xB)
+          self.assertTrue(positive and stopped_positive and immediate_release, (name, paired))
+
   def test_auto_hold_actual_gateway_parser_controller_native(self):
     from itertools import product
     for accelerator, alternative in product((True, False), (0, 32)):

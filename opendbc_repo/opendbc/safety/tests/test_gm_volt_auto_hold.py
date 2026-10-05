@@ -11,9 +11,10 @@ from opendbc.safety.tests.libsafety import libsafety_py
 
 
 class TestVoltAutoHold(unittest.TestCase):
-  def init(self, alternate=False, extra=0, alternative=0, word=None):
+  def init(self, alternate=False, extra=0, alternative=0, word=None, physical_word=None):
     self.safety = libsafety_py.libsafety
-    self.alternate = alternate or word == 0xC1D3
+    physical_word = word if physical_word is None else physical_word
+    self.alternate = alternate or physical_word in (0xC084, 0xC1D3)
     self.safety.set_alternative_experience(alternative)
     word = int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_AUTO_HOLD) if word is None else word
     if alternate:
@@ -23,8 +24,9 @@ class TestVoltAutoHold(unittest.TestCase):
     self.time = 1
     self.counter = 0
     self.packer = CANPacker(DBC[CAR.CHEVROLET_VOLT][Bus.pt])
-    self.c9_brake = word in (0x4687, 0x4E87, 0x4087, 0x5487, 0xC1D1, 0xC1D3)
-    self.tx_bus = 0 if word in (0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0xC1D1, 0xC1D3) or alternate else 2
+    physical_word = word if physical_word is None else physical_word
+    self.c9_brake = physical_word in (0x4687, 0x4E87, 0x4087, 0x5487, 0xC1D1, 0xC1D3)
+    self.tx_bus = 0 if physical_word in (0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0xC1D1, 0xC1D3) or self.alternate else 2
 
   def tearDown(self):
     libsafety_py.libsafety.set_alternative_experience(0)
