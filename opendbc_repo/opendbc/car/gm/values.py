@@ -147,6 +147,9 @@ def gm_control_word(cp: CarParams) -> int:
     profile = camera_acc_pedal_profile(cp)
     if profile is not None:
       if profile.volt:
+        if profile.topology == "gateway":
+          return (0xC084 if profile.brake_source == BrakeSource.F1 else 0x4084) if (
+            profile.auto_hold or profile.one_pedal) else (0xC004 if profile.brake_source == BrakeSource.F1 else 0x4004)
         if not profile.longitudinal:
           return 0xC150 if profile.removed else 5
         held = profile.auto_hold or profile.one_pedal
@@ -237,6 +240,9 @@ def is_bolt_euv_longitudinal(cp: CarParams) -> bool:
 def is_volt_gateway_profile(cp: CarParams) -> bool:
   """Exact radar-qualified gateway owner, independently of the startup speed choice."""
   try:
+    profile = camera_acc_pedal_profile(cp)
+    if profile is not None and profile.topology == "gateway":
+      return True
     return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_VOLT and
             cp.networkLocation == CarParams.NetworkLocation.gateway and
             not cp.pcmCruise and
@@ -871,7 +877,7 @@ ORDINARY_CAMERA_ALPHA_CAR = frozenset((CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_EQ
 ORDINARY_CAMERA_CAR = ORDINARY_CAMERA_ALPHA_CAR | frozenset((CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA))
 
 
-CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR | frozenset((CAR.CHEVROLET_VOLT_CAMERA,))
+CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR | frozenset((CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT))
 
 
 class BrakeSource(Enum):
@@ -887,9 +893,15 @@ class CameraAccPedalProfile:
   volt: bool = False
   auto_hold: bool = False
   one_pedal: bool = False
+  topology: str = "camera"
 
 
 CAMERA_ACC_PEDAL_PROFILES = MappingProxyType({
+  **{start + index: CameraAccPedalProfile(index >= 2, BrakeSource.F1 if index % 2 else BrakeSource.BE,
+                                       start != 0xE310, True, hold, one, "gateway")
+     for start, hold, one in ((0xE300, False, False), (0xE310, False, False),
+                              (0xE320, True, False), (0xE340, False, True), (0xE360, True, True))
+     for index in range(4)},
   **{start + index: CameraAccPedalProfile(index >= 2, BrakeSource.F1 if index % 2 else BrakeSource.BE,
                                        start != 0xE210, True, hold, one)
      for start, hold, one in ((0xE200, False, False), (0xE210, False, False),
@@ -910,6 +922,8 @@ def volt_camera_pedal_word(profile, auto_hold: bool, one_pedal: bool) -> int:
   start = 0xE260 if auto_hold and one_pedal else 0xE240 if one_pedal else 0xE220 if auto_hold else 0xE200
   if not profile.longitudinal:
     start = 0xE210
+  if profile.topology == "gateway":
+    start += 0x100
   return start + int(profile.removed) * 2 + int(profile.brake_source == BrakeSource.F1)
 
 
@@ -922,12 +936,15 @@ def camera_acc_pedal_profile(cp):
       return None
     flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if profile.removed else 0) |
                 (GMFlags.NO_ACCELERATOR_POS_MSG if profile.brake_source == BrakeSource.F1 else 0))
-    if (cp.brand == 'gm' and cp.carFingerprint in (frozenset((CAR.CHEVROLET_VOLT_CAMERA,)) if profile.volt else ORDINARY_CAMERA_CAR) and
+    identity = CAR.CHEVROLET_VOLT if profile.topology == "gateway" else CAR.CHEVROLET_VOLT_CAMERA
+    if (cp.brand == 'gm' and cp.carFingerprint in (frozenset((identity,)) if profile.volt else ORDINARY_CAMERA_CAR) and
         cp.transmissionType == (CarParams.TransmissionType.direct if profile.volt else CarParams.TransmissionType.automatic) and
         cp.networkLocation == CarParams.NetworkLocation.fwdCamera and (profile.volt or cp.radarUnavailable) and
+        (profile.topology != "gateway" or not cp.radarUnavailable) and
         not cp.passive and not cp.dashcamOnly and not cp.notCar and int(cp.flags) & ~int(GMFlags.HAS_BSM) == flags and
         cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-        bool(cp.openpilotLongitudinalControl) == profile.longitudinal and bool(cp.pcmCruise) != profile.longitudinal and
+        bool(cp.openpilotLongitudinalControl) == profile.longitudinal and
+        bool(cp.pcmCruise) == (not profile.longitudinal and profile.topology != "gateway") and
         (not profile.volt or not profile.longitudinal or cp.alphaLongitudinalAvailable)):
       return profile
   except (AttributeError, IndexError, TypeError, ValueError):

@@ -110,7 +110,8 @@ class CarState(CarStateBase):
                 ("ASCMSteeringButton", "RollingCounter", 100_000_000),
                 ("AcceleratorPedal2", "CruiseState", 300_000_000),
                 ("ECMEngineStatus", "CruiseMainOn", 300_000_000),
-                (*analog, 300_000_000), ("ECMPRDNL2", "PRNDL2", 100_000_000))
+                (*analog, 300_000_000), ("ECMPRDNL2", "PRNDL2",
+                                       1_000_000_000 if self.camera_pedal_profile.topology == "gateway" else 100_000_000))
       self.camera_pedal_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in fields)
       if self.camera_pedal_profile.volt:
         self.camera_pedal_sources += ((pt_cp.ts_nanos["EBCMRegenPaddle"]["RegenPaddle"], 100_000_000),)
@@ -152,7 +153,8 @@ class CarState(CarStateBase):
                ("ASCMSteeringButton", "RollingCounter"), ("ECMPRDNL2", "PRNDL2"))
       self.ordinary_removed_sources = tuple(pt_cp.ts_nanos[name][field] for name, field in names)
 
-    if is_volt_camera_removed(self.CP):
+    if (is_volt_camera_removed(self.CP) or self.camera_pedal_profile is not None and
+        self.camera_pedal_profile.topology == "gateway" and not self.camera_pedal_profile.longitudinal):
       names = (("PSCMStatus", "LKATorqueDelivered"), ("EBCMWheelSpdRear", "RLWheelSpd"),
                ("AcceleratorPedal2", "CruiseState"), ("ECMEngineStatus", "CruiseMainOn"),
                ("ASCMSteeringButton", "RollingCounter"), ("EBCMRegenPaddle", "RegenPaddle"))
@@ -515,7 +517,8 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     bolt_pedal_profile = is_bolt_pedal_profile(CP) or is_bolt_pedal_profile(CP, stock_only=True)
     pt_messages = []
-    if is_volt_gateway_profile(CP) and not CP.openpilotLongitudinalControl:
+    if (is_volt_gateway_profile(CP) and not CP.openpilotLongitudinalControl and
+        camera_acc_pedal_profile(CP) is None):
       pt_messages += [("PSCMStatus", 10), ("EBCMWheelSpdRear", 10), ("ASCMSteeringButton", 10),
                       ("AcceleratorPedal2", 10), ("ECMEngineStatus", 10), ("EBCMRegenPaddle", 40)]
       if not is_volt_gateway_alternate_brake(CP):
@@ -619,7 +622,7 @@ class CarState(CarStateBase):
         excluded.add("ASCMLKASteeringCmd")
       pt_messages = [(name, frequency) for name, frequency in pt_messages if name not in excluded]
       pt_messages += [("ECMAcceleratorPos" if profile.brake_source == BrakeSource.BE else "EBCMBrakePedalPosition", 100),
-                      ("ECMPRDNL2", 40 if profile.longitudinal else float("nan"))]
+                      ("ECMPRDNL2", (10 if profile.topology == "gateway" else 40) if profile.longitudinal else float("nan"))]
       if profile.longitudinal:
         pt_messages.append(("GAS_SENSOR", 50))
 

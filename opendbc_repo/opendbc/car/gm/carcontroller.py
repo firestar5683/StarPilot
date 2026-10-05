@@ -720,7 +720,8 @@ class CarController(CarControllerBase):
                     CS.out.cruiseState.standstill and
                     (not self.camera_pedal_profile.volt or CS.out.standstill or
                      math.isfinite(CS.out.vEgo) and
-                     CS.out.vEgo < (2. if self.longitudinal_maneuver_mode else .3)) and
+                     CS.out.vEgo < (2. if self.longitudinal_maneuver_mode else
+                                   .75 if self.camera_pedal_profile.topology == "gateway" else .3)) and
                     all(math.isfinite(speed) and 0 <= speed <=
                       (231 if self.camera_pedal_profile.volt and self.longitudinal_maneuver_mode else 34) * .0311
                       for speed in CS.camera_pedal_rear))
@@ -781,7 +782,9 @@ class CarController(CarControllerBase):
 
       # Radar needs to know current speed and yaw rate (50hz),
       # and that ADAS is alive (10hz)
-      if (not self.CP.radarUnavailable and not self.volt_ascm_long and not self.volt_camera_long and not self.volt_sdgm_long
+      if (not self.CP.radarUnavailable and not (self.camera_pedal_profile is not None and
+                                              self.camera_pedal_profile.topology == "gateway") and
+          not self.volt_ascm_long and not self.volt_camera_long and not self.volt_sdgm_long
           and not self.ordinary_ascm_long and not self.ordinary_sdgm_long):
         tt = self.frame * DT_CTRL
         time_and_headlights_step = 10
@@ -797,6 +800,8 @@ class CarController(CarControllerBase):
           can_sends.append(gmcan.create_adas_accelerometer_speed_status(CanBus.OBSTACLE, abs(CS.out.vEgo), idx))
 
       if (self.CP.networkLocation == NetworkLocation.gateway or self.volt_camera_removed_long or
+          self.camera_pedal_profile is not None and
+          self.camera_pedal_profile.topology == "gateway" and self.camera_pedal_profile.removed or
           self.ordinary_camera_long and self.ordinary_camera_removed) and \
           self.frame % self.params.ADAS_KEEPALIVE_STEP == 0:
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
@@ -810,6 +815,20 @@ class CarController(CarControllerBase):
         self.last_button_frame = self.frame
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.CANCEL))
+    elif (self.camera_pedal_profile is not None and self.camera_pedal_profile.topology == "gateway" and
+          not self.camera_pedal_profile.longitudinal):
+      self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
+      credit = CS.volt_removed_credit_ns
+      sources = CS.camera_pedal_sources
+      physical_current = (len(sources) >= 5 and all(stamp > 0 and 0 <= now_nanos - stamp <= 300_000_000
+                                                   for stamp, _ in sources[3:5]))
+      if (self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and (self.frame - self.last_button_frame) * DT_CTRL > .04 and
+          physical_current and CS.out.canValid and not CS.out.canTimeout and
+          CS.out.cruiseState.available and CS.out.cruiseState.enabled and
+          credit > self.volt_removed_cancel_credit_used and 0 <= now_nanos - credit <= 100_000_000):
+        self.last_button_frame = self.frame
+        self.volt_removed_cancel_credit_used = credit
+        can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
     elif (not self.volt_cc_profile and not self.ordinary_cc_profile and not self.bolt_cc_profile and
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
