@@ -18,6 +18,34 @@ PROFILES = (
 )
 
 
+@pytest.mark.parametrize('identity,base_word', PROFILES)
+@pytest.mark.parametrize('alpha', (False, True))
+def test_unmarked_profiles_keep_actual_ordinary_controls(identity, base_word, alpha, monkeypatch):
+  from openpilot.common.params import Params
+  from openpilot.common.prefix import OpenpilotPrefix
+  from openpilot.selfdrive.controls.controlsd import Controls
+  from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
+  from opendbc.car.ford.tests.test_three_ports import params
+
+  monkeypatch.setenv('REPLAY', '1')
+  monkeypatch.setenv('AOL_REPLAY_RUNTIME', '0')
+  cp = params(identity, alpha, False)
+  assert cp.alternativeExperience == 0
+  assert cp.safetyConfigs[0].safetyParam == base_word | int(alpha)
+  with OpenpilotPrefix():
+    saved = Params()
+    saved.put_bool('AlwaysOnLateral', False, block=True)
+    saved.put('CarParams', cp.to_bytes(), block=True)
+    controls = Controls()
+    for tick, (enabled, fault) in enumerate(((True, False), (True, True), (False, False))):
+      feed(controls, 1_000_000_000 + tick * 10_000_000, tick, active=enabled, enabled=enabled, fault=fault)
+      command, _ = controls.state_control()
+      assert command.enabled == enabled
+      assert command.latActive == (enabled and not fault)
+    assert not controls.aol_replay and not controls.ordinary_axis_ack_required
+    assert 'aolAxisState' not in controls.sm.services
+
+
 def run_startup(identity, base_word, alpha, release, topology, monkeypatch):
   from opendbc.car import car_helpers
   from opendbc.car.ford.aol import qualified
@@ -110,11 +138,35 @@ def run_startup(identity, base_word, alpha, release, topology, monkeypatch):
       assert event is not None and event.valid and event.carParams.to_dict() == expected
       controls = Controls()
       assert controls.CP.to_dict() == expected
+      assert controls.ordinary_axis_ack_required == admitted
       feed(controls, 1_000_000_000, 0, active=False, enabled=False, can_valid=True, can_timeout=False)
       command, lateral_log = controls.state_control()
       assert not command.enabled and not command.latActive and not command.longActive
       controls.publish(command, lateral_log)
       ci.apply(command.as_reader(), 1_000_000_000)
+      if admitted:
+        from openpilot.starpilot.aol.wire import SAFETY_SERVICE, SafetyState, encode_safety
+
+        for tick, (acknowledged, stale) in enumerate(((False, False), (True, False), (True, True)), 1):
+          now = 1_000_000_000 + tick * 10_000_000
+          feed(controls, now, tick, active=True, enabled=True, can_valid=True, can_timeout=False)
+          axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
+          axis.aolAxisState.qualified = True
+          axis.aolAxisState.sessionId = 'ford-current'
+          axis.aolAxisState.observedMonoTime = now
+          axis.aolAxisState.validUntilMonoTime = now - 1 if stale else now + 30_000_000
+          axis.aolAxisState.desiredLateral = True
+          axis.aolAxisState.lateralActive = acknowledged
+          axis.aolAxisState.nativeAcknowledged = acknowledged
+          native = messaging.new_message(SAFETY_SERVICE, 0, valid=True, logMonoTime=now)
+          native.aolSafetyWire = encode_safety(SafetyState(
+            1, True, now, now + 200_000_000, int(card.CP.safetyConfigs[0].safetyModel.raw),
+            card.CP.safetyConfigs[0].safetyParam, acknowledged, False, True, False, 'fixture-panda', 'ford-current'))
+          controls.sm.update_msgs(now / 1e9, [axis.as_reader(), native.as_reader()])
+          active_command, _ = controls.state_control()
+          assert active_command.enabled
+          assert active_command.latActive == (acknowledged and not stale)
+          assert not active_command.longActive
       if base_word in (18, 32, 66):
         assert not owner.human_turn_enabled
     finally:

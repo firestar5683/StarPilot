@@ -8,7 +8,8 @@ from openpilot.starpilot.aol.policy import AolVehiclePolicy
 def policy_for(cp):
   if qualified(cp):
     return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
-                            normal_runtime_supported=True, ordinary_axis_ack_required=True, explicit_latch=True, alternative_experience_addition=32)
+                            normal_runtime_supported=True, ordinary_axis_ack_required=qualified(cp, marked_only=True),
+                            explicit_latch=True, alternative_experience_addition=32)
   return AolVehiclePolicy()
 
 
