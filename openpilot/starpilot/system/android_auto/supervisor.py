@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import socket
 import threading
 import time
@@ -109,21 +108,13 @@ class EventLog:
     self.recent: deque[dict] = deque(maxlen=40)
     self.lock = threading.Lock()
 
-  @staticmethod
-  def _order(path: Path) -> tuple[int, str]:
-    # Files are numbered, because the clock can read a date from months ago until it syncs;
-    # pruning by the timestamp in the name deleted the newest session first.
-    # Unnumbered files are from before numbering, so they are the oldest.
-    match = re.fullmatch(r"session-(\d{6})-.*\.jsonl", path.name)
-    return (int(match[1]), path.name) if match else (-1, path.name)
-
   def open(self) -> None:
     try:
       self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-      logs = sorted(self.directory.glob("session-*.jsonl"), key=self._order)
+      logs = sorted(self.directory.glob("session-*.jsonl"), key=identity_store.session_log_order)
       for old in logs[:max(0, len(logs) - MAX_LOG_FILES + 1)]:
         old.unlink(missing_ok=True)
-      number = max([0, *(self._order(log)[0] for log in logs)]) + 1
+      number = max([0, *(identity_store.session_log_order(log)[0] for log in logs)]) + 1
       path = self.directory / f"session-{number:06d}-{identity_store.timestamp()}.jsonl"
       fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
       self.handle = os.fdopen(fd, "a")

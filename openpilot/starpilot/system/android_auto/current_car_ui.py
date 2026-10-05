@@ -93,22 +93,41 @@ def run(frames_path: str) -> int:
     resources.callback(rl.unload_render_texture, output)
     readback = FrameReadback(frame_bytes(request.width, request.height, 0), asynchronous=False)
     resources.callback(readback.close)
+    from openpilot.starpilot.system.android_auto import identity as identity_store
+    from openpilot.starpilot.system.android_auto.render_profile import RenderSampler, RenderSummary
+    config = identity_store.load_config()
+    sampler = None
+    if config["render_profile"]:
+      sampler = RenderSampler(identity_store.LOG_DIR / "render_profile.txt", max_bytes=config["render_profile_kb"] * 1024)
+      sampler.start()
+      resources.callback(sampler.close)
+    summary = RenderSummary(time.monotonic())
     while not stopped and os.getppid() == parent:
       now = time.monotonic()
       pending = producer.pending_request(now)
       if pending is None:
+        if sampler is not None:
+          sampler.rendering = False
         context.pause()
         time.sleep(0.05)
+        summary.reset(time.monotonic())
         continue
       if pending != request:
         return 3  # supervisor starts a new renderer for the new geometry
       captured_ns = time.monotonic_ns()
       delay = producer.capture_delay(request, captured_ns)
       if delay > 0:
+        if sampler is not None:
+          sampler.rendering = False
         time.sleep(min(delay, 0.05))
         continue
+      if sampler is not None:
+        sampler.rendering = True
+      frame_began = time.monotonic()
       context.begin_frame(now)
       ui_state.update()
+      if sampler is not None:
+        sampler.onroad = ui_state.started
       rl.begin_texture_mode(content)
       try:
         rl.clear_background(rl.BLACK)
@@ -121,6 +140,9 @@ def run(frames_path: str) -> int:
         producer.publish(request, readback.finish(), captured_ns)
       finally:
         readback.release()
+      report = summary.frame_done(frame_began, time.monotonic())
+      if report is not None and sampler is not None:
+        sampler.summary = report
       gui_app._frame += 1
   return 0
 

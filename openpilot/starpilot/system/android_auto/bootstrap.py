@@ -33,7 +33,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field as dataclass_field
 
-from openpilot.starpilot.system.android_auto.wire import field, one, parse_fields, signed, text
+from openpilot.starpilot.system.android_auto.wire import describe, field, one, parse_fields, signed, text
 
 WIFI_START_REQUEST = 1
 WIFI_INFO_REQUEST = 2
@@ -205,6 +205,17 @@ class FrameReader:
     return frames
 
 
+def describe_version_request(payload: bytes):
+  """The whole WifiVersionRequest for diagnostics, without the vehicle identifier some receivers include."""
+  described = describe(payload)
+  if isinstance(described, dict):
+    for number in (4, 5):
+      for info in described.get(number, []):
+        if isinstance(info, dict) and isinstance((info.get(4) or [None])[0], str):
+          info[4] = ["redacted"]  # HeadUnitInfo.vehicle_id; the endpoint's field 4 is a number
+  return described
+
+
 class WirelessBootstrap:
   """Runs the phone side of the handshake on a connected RFCOMM socket."""
 
@@ -318,7 +329,7 @@ class WirelessBootstrap:
         major, minor, version_endpoint, info = parse_version_request(payload)
         version, head_unit = (major, minor), {**head_unit, **info}
         self.log("bootstrap_version", major=major, minor=minor, head_unit=info,
-                 endpoint=version_endpoint.__dict__ if version_endpoint else None)
+                 endpoint=version_endpoint.__dict__ if version_endpoint else None, message=describe_version_request(payload))
         self.send(WIFI_VERSION_RESPONSE, field(1, major) + field(2, minor) + field(3, self.device_serial) +
                   field(4, self.version_status))
         hinted = version_endpoint or hinted

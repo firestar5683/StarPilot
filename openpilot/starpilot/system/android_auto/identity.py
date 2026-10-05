@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import stat
 import tempfile
@@ -103,7 +104,7 @@ DEFAULT_CONFIG = {
   "rate_control": "cbr",       # hardware encoder: "cbr" holds the bitrate (easier on the car's Wi-Fi); "vbr" as before
   "gpu_nv12": False,           # current car view publishes RGBA
   "async_readback": False,     # current car view uses synchronous readback
-  "render_profile": False,     # current car view has no persistent profile writer
+  "render_profile": True,      # car view: always-on sampling profile in logs/render_profile.txt (and .1.txt)
   "render_profile_kb": 256,    # size cap per render_profile file
   "wifi_interface": "wlan0",
   "device_name": "StarPilot",
@@ -163,6 +164,17 @@ def expiry_warning(identity: Identity) -> str:
   if 0 <= identity.days_left <= EXPIRY_WARNING_DAYS:
     return f"Android Auto identity expires in {identity.days_left} days ({identity.expires[:10]}); renew it in The Galaxy"
   return ""
+
+
+def session_log_order(path: Path) -> tuple[int, str]:
+  """Sort key for session logs, oldest first.
+
+  Files are numbered, because the clock can read a date from months ago until it syncs;
+  ordering by the timestamp in the name put the newest session first. Unnumbered files
+  are from before numbering, so they are the oldest.
+  """
+  match = re.fullmatch(r"session-(\d{6})-.*\.jsonl", path.name)
+  return (int(match[1]), path.name) if match else (-1, path.name)
 
 
 def timestamp() -> str:

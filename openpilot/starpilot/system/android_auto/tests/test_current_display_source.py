@@ -18,7 +18,7 @@ class TestCurrentDisplaySource(unittest.TestCase):
     self.assertEqual(DEFAULT_CONFIG['view'], 'car')
     self.assertFalse(DEFAULT_CONFIG['gpu_nv12'])
     self.assertFalse(DEFAULT_CONFIG['async_readback'])
-    self.assertFalse(DEFAULT_CONFIG['render_profile'])
+    self.assertTrue(DEFAULT_CONFIG['render_profile'])  # render_profile.RenderSampler, started by current_car_ui
 
   def test_visible_geometry_never_crops_current_ui(self):
     for width, height, margin_w, margin_h in ((1280, 720, 0, 0), (1920, 1080, 160, 80), (1280, 720, 0, 240), (800, 600, 0, 0)):

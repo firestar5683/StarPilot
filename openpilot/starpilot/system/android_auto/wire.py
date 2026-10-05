@@ -98,3 +98,46 @@ def json_fields(fields: dict) -> dict:
   """Keep unknown protobuf bytes inspectable without guessing their schema."""
   return {number: [{"hex": value.hex()} if isinstance(value, bytes) else value for value in values]
           for number, values in fields.items()}
+
+
+DESCRIBE_DEPTH = 4
+DESCRIBE_REPEATED = 32  # values kept per field; a head unit lists at most a few dozen keycodes or sensors
+DESCRIBE_HEX = 64       # bytes of an opaque value kept as hex
+
+
+def _describe_value(value, depth: int):
+  if not isinstance(value, bytes):
+    return value
+  try:
+    decoded = value.decode("utf-8")
+    if decoded and decoded.isprintable():
+      return decoded
+  except UnicodeDecodeError:
+    pass
+  if depth > 0 and value:
+    try:
+      return describe_fields(parse_fields(value), depth - 1)
+    except ValueError:
+      pass
+  described = {"hex": value[:DESCRIBE_HEX].hex()}
+  if len(value) > DESCRIBE_HEX:
+    described["bytes"] = len(value)
+  return described
+
+
+def describe_fields(fields: dict, depth: int = DESCRIBE_DEPTH) -> dict:
+  """A bounded, readable view of a message whose schema we may not know, for diagnostics.
+
+  Text stays text and nested messages are decoded, so a head unit's make, model and
+  capabilities read directly in a log; anything else is a short hex prefix.
+  """
+  return {number: [_describe_value(value, depth) for value in values[:DESCRIBE_REPEATED]]
+          for number, values in fields.items()}
+
+
+def describe(data: bytes, depth: int = DESCRIBE_DEPTH):
+  """``describe_fields`` of raw bytes, or their hex prefix when they are not protobuf."""
+  try:
+    return describe_fields(parse_fields(data), depth)
+  except ValueError:
+    return _describe_value(data, 0)
