@@ -10,7 +10,7 @@ from opendbc.car.gm.tests.test_bolt_pedal import params
 from opendbc.car.gm.values import CAR, DBC, GMSafetyFlags, PEDAL_BOLT_CAR
 from opendbc.car.structs import CarParams
 from opendbc.safety.tests.libsafety import libsafety_py
-from opendbc.safety.tests.libsafety.libsafety_py import ffi, new_CANPacket
+from opendbc.safety.tests.libsafety.libsafety_py import new_CANPacket
 
 
 class TestGmBoltPedalSafety(unittest.TestCase):
@@ -31,14 +31,14 @@ class TestGmBoltPedalSafety(unittest.TestCase):
   def packet(msg):
     return libsafety_py.make_CANPacket(msg[0], msg[2], msg[1])
 
-  def sensor(self, counter, state=0, gas=0., pair_error=False, bad_crc=False):
+  def sensor(self, counter, state=0, gas=0., bad_adc=False, bad_crc=False):
     msg = self.packer.make_can_msg("GAS_SENSOR", 0, {
       "INTERCEPTOR_GAS": gas, "INTERCEPTOR_GAS2": gas,
       "STATE": state, "COUNTER_PEDAL": counter,
     })
     data = bytearray(msg[1])
-    if pair_error:
-      data[2] += 8
+    if bad_adc:
+      data[0], data[1] = 0x10, 0
     data[5] = pedal_crc(data) ^ int(bad_crc)
     return self.packet((msg[0], bytes(data), 0))
 
@@ -56,14 +56,14 @@ class TestGmBoltPedalSafety(unittest.TestCase):
       result.append((packet.addr, packet.bus, bytes(packet.data[0:7 if packet.addr == 0xBD else 8])))
     return result
 
-  def test_paired_sensor_fault_checksum_counter_and_timeout(self):
+  def test_adc_sensor_fault_checksum_counter_and_timeout(self):
     self.safety.safety_rx_hook(self.low_gear())
     self.safety.set_controls_allowed(True)
     self.assertTrue(self.safety.safety_rx_hook(self.sensor(1)))
     self.assertTrue(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 1))))
     self.assertFalse(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 1))))
 
-    for counter, bad in enumerate((self.sensor(2, state=1), self.sensor(3, pair_error=True),
+    for counter, bad in enumerate((self.sensor(2, state=1), self.sensor(3, bad_adc=True),
                                    self.sensor(4, bad_crc=True), self.sensor(4)), start=2):
       self.safety.set_controls_allowed(True)
       self.safety.safety_rx_hook(bad)
@@ -400,3 +400,48 @@ class TestGmBoltPedalSafety(unittest.TestCase):
         self.safety.safety_rx_hook(self.packet(packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 6})))
         self.safety.safety_rx_hook(self.packet(packer.make_can_msg("EBCMRegenPaddle", 0, {"RegenPaddle": 0})))
         self.assertEqual(self.recorded(), [(0x1F5, 0, released[1][1]), (0xBD, 0, released[2][1])])
+
+  def test_recorded_independent_adc_keeps_set_lateral_and_driver_override(self):
+    for sample in ('053502ba0164', '04e30286048f', '046c024108e3', '0279012a06f6'):
+      with self.subTest(sample=sample):
+        self.init_mode(GMSafetyFlags.NO_ACC)
+        self.safety.set_timer(10_000)
+        for name, values in (('PSCMStatus', {}), ('EBCMWheelSpdRear', {}),
+                             ('ECMEngineStatus', {}), ('AcceleratorPedal2', {}),
+                             ('EBCMRegenPaddle', {}), ('ECMPRDNL2', {'PRNDL2': 6})):
+          self.assertTrue(self.safety.safety_rx_hook(self.stock(name, values)))
+        self.assertTrue(self.safety.safety_rx_hook(self.sensor(0)))
+        for button in (3, 1):
+          self.safety.safety_rx_hook(self.stock('ASCMSteeringButton', {'ACCButtons': button}))
+        self.safety.safety_tick()
+        self.assertTrue(self.safety.get_controls_allowed())
+        raw = bytes.fromhex(sample)
+        self.assertEqual(pedal_crc(raw), raw[5])
+        self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x201, 0, raw)))
+        self.assertTrue(self.safety.safety_config_valid())
+        self.assertTrue(self.safety.get_controls_allowed())
+        steer = create_steering_control(self.packer, 0, 1, 0, True)
+        self.assertTrue(self.safety.safety_tx_hook(self.packet(steer)))
+        self.assertEqual(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 1))),
+                         sample == '0279012a06f6')
+
+  def test_adc_overflow_fault_does_not_weaken_synthetic_tx_pair(self):
+    self.safety.safety_rx_hook(self.low_gear())
+    self.safety.safety_rx_hook(self.sensor(0))
+    for button in (3, 1):
+      self.safety.safety_rx_hook(self.stock('ASCMSteeringButton', {'ACCButtons': button}))
+    command = create_pedal_command(self.packer, .2, 1)
+    bad_pair = bytearray(command[1])
+    bad_pair[2:4] = (int.from_bytes(bad_pair[2:4], "big") + 12).to_bytes(2, "big")
+    bad_pair[5] = pedal_crc(bad_pair)
+    self.assertFalse(self.safety.safety_tx_hook(self.packet((command[0], bytes(bad_pair), command[2]))))
+    self.assertTrue(self.safety.safety_tx_hook(self.packet(command)))
+    for track in (0, 2):
+      for button in (3, 1):
+        self.safety.safety_rx_hook(self.stock('ASCMSteeringButton', {'ACCButtons': button}))
+      self.assertTrue(self.safety.get_controls_allowed())
+      data = bytearray(self.sensor(track + 2).data[0:6])
+      data[track], data[track + 1] = 0x10, 0
+      data[5] = pedal_crc(data)
+      self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x201, 0, data))
+      self.assertFalse(self.safety.get_controls_allowed())

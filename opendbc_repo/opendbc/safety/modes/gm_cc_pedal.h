@@ -87,14 +87,13 @@ static void gm_cc_pedal_rx(const CANPacket_t *msg) {
       }
     }
     if ((msg->addr == 0x201U) && (GET_LEN(msg) == 6U)) {
+      // Incoming tracks are independent 12-bit ADC samples, not synthesized command pairs.
       const int track1 = (msg->data[0] << 8) | msg->data[1];
       const int track2 = (msg->data[2] << 8) | msg->data[3];
-      const int pair_delta = track1 - (2 * track2);
       const uint8_t counter = msg->data[4] & 0xFU;
       gm_cc_pedal_sensor_valid = ((msg->data[4] >> 4) == 0U) && (gm_pedal_crc(msg) == msg->data[5]) &&
         (!gm_cc_pedal_sensor_seen || (counter != gm_cc_pedal_sensor_counter)) &&
-        (track1 >= 500) && (track1 <= 2800) && (track2 >= 250) && (track2 <= 1400) &&
-        (pair_delta >= -16) && (pair_delta <= 16);
+        (track1 <= 4095) && (track2 <= 4095);
       gm_cc_pedal_sensor_seen = true;
       gm_cc_pedal_sensor_counter = counter;
       gm_cc_pedal_sensor_us = now;

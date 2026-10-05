@@ -11,6 +11,7 @@ from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.selfdrive.selfdrived.events import EventName
 from opendbc.car import structs
 from opendbc.car.gm.bolt_cc import button_bytes
+from opendbc.car.gm.gmcan import pedal_crc
 from opendbc.car.gm.tests.test_bolt_cc import feed, fixture, native, setup
 from opendbc.car.gm.values import CAR
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -18,27 +19,32 @@ from opendbc.safety.tests.libsafety import libsafety_py
 
 class TestBoltCcControlsLow(unittest.TestCase):
   def test_final_params_real_controls_low_drive_override_and_cancel(self):
-    for removed in (False, True):
-      with self.subTest(removed=removed), tempfile.TemporaryDirectory() as params_root, \
+    for removed, pedal in ((False, False), (True, False), (False, True)):
+      with self.subTest(removed=removed, pedal=pedal), tempfile.TemporaryDirectory() as params_root, \
            patch.dict(os.environ, {'PARAMS_ROOT': params_root, 'SIMULATION': '1', 'REPLAY': '1'}), OpenpilotPrefix():
         params = Params()
         for key in ('OpenpilotEnabledToggle',):
           params.put_bool(key, True, block=True)
         for key in ('AlwaysOnLateral', 'SafeMode', 'AdvancedLateralTune'):
           params.put_bool(key, False, block=True)
-        cp, ci, packer = fixture(CAR.CHEVROLET_BOLT_CC_2018_2021, removed=removed)
+        cp, ci, packer = fixture(CAR.CHEVROLET_BOLT_CC_2018_2021, removed=removed, present=pedal)
         cp.fingerprintSource = structs.CarParams.FingerprintSource.can
         cp.carFw = []
         params.put('CarParams', cp.to_bytes(), block=True)
         controls = Controls()
         self.assertEqual(controls.CP.to_dict(), cp.to_dict())
-        self.assertEqual(controls.CP.safetyConfigs[0].safetyParam, 0xC121 if removed else 0xC120)
+        self.assertEqual(controls.CP.safetyConfigs[0].safetyParam, 0x9D if pedal else 0xC121 if removed else 0xC120)
         _, template = feed(ci, packer, 900_000_000, active=False, camera=not removed)
         setup(cp)
         with patch("openpilot.selfdrive.selfdrived.selfdrived.REPLAY", False):
           sd = SelfdriveD(CP=cp)
         previous_control = structs.CarControl()
         active_frames = gas_frames = cancelled_frames = 0
+        last_feeds = {}
+        internal_frames = 0
+        from opendbc.safety.tests.test_gm_bolt_pedal import TestGmBoltPedalSafety
+        recorder = TestGmBoltPedalSafety()
+        recorder.safety = libsafety_py.libsafety
         for tick in range(360):
           now = 1_000_000_000 + tick * 10_000_000
           gas = 120 <= tick < 150
@@ -49,11 +55,22 @@ class TestBoltCcControlsLow(unittest.TestCase):
             packer.make_can_msg('AcceleratorPedal2', 0, {'AcceleratorPedal2': 30 if gas else 0}),
             (0x1E1, button_bytes(button, tick % 4), 0),
           ]
+          if pedal and tick % 2 == 0:
+            raw = bytearray.fromhex('053502ba0000' if gas else '0279012a0000')
+            raw[4] = (tick // 2) % 16
+            raw[5] = pedal_crc(raw)
+            replacement.append((0x201, bytes(raw), 0))
           replaced = {frame[0] for frame in replacement}
           frames = [frame for frame in template if frame[0] not in replaced] + replacement
-          for frame in sorted(frames, key=lambda frame: frame[0] == 0x3D1):
-            if frame[0] in (0x184, 0x3D1, 0x1E1, 0xC9, 0x1C4, 0x1F5, 0x34A):
+          libsafety_py.libsafety.reset_recorded_can()
+          for frame in sorted(frames, key=lambda frame: frame[0] in (0x3D1, 0xBD, 0x1F5)):
+            if frame[0] in (0x184, 0x3D1, 0x1E1, 0xC9, 0x1C4, 0x1F5, 0x34A, 0x201, 0xBD):
               self.assertTrue(native('rx', frame, now // 1000))
+          if pedal:
+            for address, bus, payload in recorder.recorded():
+              self.assertEqual(bus, 0)
+              self.assertEqual(payload, last_feeds[address])
+              internal_frames += 1
           libsafety_py.libsafety.safety_tick()
           cs = ci.update([(now, frames)])
           self.assertTrue(cs.canValid)
@@ -123,7 +140,12 @@ class TestBoltCcControlsLow(unittest.TestCase):
           self.assertEqual(cc.cruiseControl.cancel, cs.cruiseState.enabled and (not cc.enabled or not cp.pcmCruise))
           _, commands = ci.apply(cc.as_reader(), now + 1_000_000)
           for frame in commands:
-            self.assertTrue(native('tx', frame, (now + 1_000_000) // 1000), (tick, hex(frame[0])))
+            allowed = native('tx', frame, (now + 1_000_000) // 1000)
+            if pedal and frame[0] in (0xBD, 0x1F5):
+              self.assertFalse(allowed)
+              last_feeds[frame[0]] = frame[1]
+            else:
+              self.assertTrue(allowed, (tick, hex(frame[0])))
           if 45 <= tick < 320:
             self.assertTrue(cc.enabled)
             self.assertTrue(cc.latActive)
@@ -141,6 +163,26 @@ class TestBoltCcControlsLow(unittest.TestCase):
         self.assertEqual(gas_frames, 30)
         self.assertEqual(cancelled_frames, 38)
 
+        if pedal:
+          self.assertGreater(internal_frames, 0)
+          for index, button in enumerate((3, 1)):
+            rearm = [frame for frame in frames if frame[0] not in (0x1E1, 0x201)]
+            raw = bytearray.fromhex('0279012a0000')
+            raw[4] = (4 + index) % 16
+            raw[5] = pedal_crc(raw)
+            rearm += [(0x1E1, button_bytes(button, index), 0), (0x201, bytes(raw), 0)]
+            for frame in rearm:
+              if frame[0] in (0x184, 0x1E1, 0xC9, 0x1C4, 0x1F5, 0x34A, 0x201, 0xBD):
+                self.assertTrue(native('rx', frame, 4_650_000 + index * 20_000))
+          self.assertTrue(libsafety_py.libsafety.get_controls_allowed())
+          raw = bytearray.fromhex('0279012a0600')
+          raw[5] = pedal_crc(raw) ^ 1
+          self.assertTrue(native('rx', (0x201, bytes(raw), 0), 4_700_000))
+          self.assertFalse(libsafety_py.libsafety.get_controls_allowed())
+          ci.update([(4_700_000_000, [(0x201, bytes(raw), 0)])])
+          self.assertFalse(ci.CS.pedal_sensor_healthy)
+          continue
+
         maximum_mismatch = 0
         mismatch_observed = False
         for tick in range(225):
@@ -154,7 +196,7 @@ class TestBoltCcControlsLow(unittest.TestCase):
           replaced = {frame[0] for frame in replacement}
           frames = [frame for frame in template if frame[0] not in replaced] + replacement
           for frame in sorted(frames, key=lambda frame: frame[0] == 0x3D1):
-            if frame[0] in (0x184, 0x3D1, 0x1E1, 0xC9, 0x1C4, 0x1F5, 0x34A):
+            if frame[0] in (0x184, 0x3D1, 0x1E1, 0xC9, 0x1C4, 0x1F5, 0x34A, 0x201, 0xBD):
               self.assertTrue(native('rx', frame, now // 1000))
           libsafety_py.libsafety.safety_tick()
           cs = ci.update([(now, frames)])
