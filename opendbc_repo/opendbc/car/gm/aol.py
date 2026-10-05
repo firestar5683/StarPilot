@@ -12,7 +12,10 @@ from opendbc.car.gm.values import (control_flags,
 from opendbc.car.gm.lateral import lane_centering_supported
 
 GM_AOL_ALTERNATIVE_EXPERIENCE = 32
+GM_BASE_GATEWAY_IDS = frozenset((CAR.GMC_ACADIA, CAR.BUICK_LACROSSE, CAR.CADILLAC_ESCALADE,
+                                 CAR.CADILLAC_ESCALADE_ESV, CAR.CADILLAC_ESCALADE_ESV_2019, CAR.CHEVROLET_SUBURBAN))
 GM_AOL_WORDS = frozenset((
+  0, 0x80,
   0x1001, 0x1401, 0x3001, 0x3401, 0x1003, 0x1403,
   0x201, 0x601, 0xA01, 0xE01, 0x203, 0x603, 0xA03, 0xE03,
   5, 7, 20, 0xBD, 0x9D, 0x19D, 0x1CD,
@@ -44,6 +47,15 @@ def qualified_gm(cp) -> bool:
       tune = cp.lateralTuning.pid
       if not all(math.isfinite(value) for value in (*tune.kpBP, *tune.kpV, *tune.kiBP, *tune.kiV, tune.kf)):
         return False
+    if cp.carFingerprint in GM_BASE_GATEWAY_IDS:
+      return (cp.networkLocation == CarParams.NetworkLocation.gateway and
+              cp.transmissionType == CarParams.TransmissionType.automatic and
+              not cp.pcmCruise and not cp.alphaLongitudinalAvailable and
+              not cp.radarUnavailable and control_flags(cp) == 0 and
+              (int(cp.safetyConfigs[0].safetyParam) == 0 and
+               (cp.openpilotLongitudinalControl or cp.carFingerprint == CAR.BUICK_LACROSSE) or
+               int(cp.safetyConfigs[0].safetyParam) == 0x80 and
+               cp.carFingerprint == CAR.BUICK_LACROSSE and cp.openpilotLongitudinalControl))
     if is_ordinary_camera_profile(cp, longitudinal=cp.openpilotLongitudinalControl):
       return True
     if is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp):

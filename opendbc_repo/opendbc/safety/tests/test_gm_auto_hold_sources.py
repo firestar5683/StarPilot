@@ -142,7 +142,7 @@ class TestGmAutoHoldSources(unittest.TestCase):
         f.safety.set_aol_test_heartbeat(True)
         f.safety.aol_set_host_request(1)
         steering = gmcan.create_steering_control(f.packer, 0, 1, 0, True)
-        self.assertEqual(f.safety.safety_tx_hook(libsafety_py.make_CANPacket(steering[0], steering[2], steering[1])), alternative == 32 and word != 0x80)
+        self.assertEqual(f.safety.safety_tx_hook(libsafety_py.make_CANPacket(steering[0], steering[2], steering[1])), alternative == 32)
         f.observations(speed=100, regen_source=word != 0x80)
         f.rx(0x1E1, [0, 0, 0, 0, 0, 0x20, 0])
         self.assertTrue(f.safety.get_controls_allowed())

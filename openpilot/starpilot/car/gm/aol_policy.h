@@ -4,6 +4,7 @@
 
 inline bool gm_aol_param(uint16_t param) {
   switch (param) {
+    case 0U: case 0x80U:
     case 0x201U: case 0x601U: case 0xA01U: case 0xE01U:
     case 0x203U: case 0x603U: case 0xA03U: case 0xE03U:
     case 0xC172U: case 0xC173U: case 0xC171U: case 5U: case 7U: case 20U:
