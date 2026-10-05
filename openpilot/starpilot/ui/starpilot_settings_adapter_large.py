@@ -139,10 +139,6 @@ class StarPilotSettingsAdapterLarge(Widget):
 
   def _handle_mouse_event(self, mouse_event: MouseEvent):
     self.input.move(*self._position(mouse_event.pos), self.snapshot())
-    if self.input.held is not None:
-      x, y = self._position(mouse_event.pos)
-      if abs(x - self.input.held[0]) > 36 or abs(y - self.input.held[1]) > 36:
-        self.input.cancel()
 
   def _handle_mouse_release(self, pos):
     self.input.release(*self._position(pos), self.snapshot())

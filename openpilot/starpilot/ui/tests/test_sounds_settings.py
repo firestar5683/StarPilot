@@ -136,7 +136,7 @@ class SoundsSettingsTests(unittest.TestCase):
     self.assertEqual(effective_volume("WarningImmediateVolume", sound.saved_volumes["WarningImmediateVolume"], 0.14,
                                       immediate_ramp=0.14), 0.14)
 
-  def test_large_tile_press_cancel_and_sound_row_request(self):
+  def test_large_tile_swipe_and_sound_row_request(self):
     actions = []
     settings_input = SettingsInput(Profile.LARGE, actions.append)
     x, y, width, height = tile_rects(SettingsState())[0]
@@ -149,7 +149,8 @@ class SoundsSettingsTests(unittest.TestCase):
     native.press(1980, feature_row_top(state) + 112, state)
     native.move(1800, feature_row_top(state) + 112, state)
     native.release(1800, feature_row_top(state) + 112, state)
-    self.assertFalse(received)
+    self.assertEqual(received, [FeatureUiAction("scroll")])
+    received.clear()
     native.press(1980, feature_row_top(state) + 112, state)
     native.release(1980, feature_row_top(state) + 112, state)
     self.assertEqual(row_change(received[0].row).key, "WarningImmediateVolume")

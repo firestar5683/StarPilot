@@ -114,6 +114,29 @@ class NativeSettingsPageTests(unittest.TestCase):
       self.assertEqual(pane.scroll, 0)
       wheel.assert_not_called()
 
+  def test_widget_swipes_use_rendered_origin_and_never_activate_rows(self):
+    for width, left in ((1560, 550), (2060, 50)):
+      with self.subTest(width=width):
+        rows = [item(str(index), button_action()) for index in range(13)]
+        rows[5].action_item.enabled = False
+        pane = self.panel(rows)
+        bounds = rl.Rectangle(left + 40, 55, width, 1030)
+        with (patch.object(pane, '_render'), patch.object(gui_app, '_show_touches', False),
+              patch('openpilot.system.ui.widgets.device', NS(awake=True)),
+              patch.object(gui_app, '_mouse_events', []), patch.object(gui_app, 'push_widget') as dialog):
+          pane.render(bounds)
+          for start, end, index, expected in ((2000, 1700, 0, 5), (2000, 1700, 0, 10), (2000, 1700, 4, 10),
+                                            (1800, 2100, 4, 5), (1800, 2100, 0, 0), (1800, 2100, 0, 0)):
+            y = FEATURE_ROW_TOP + (index + .5) * FEATURE_ROW_HEIGHT + pane.origin[1]
+            for x, pressed, released in ((start, True, False), (end, False, False), (end, False, True)):
+              event = MouseEvent(MousePos(x + pane.origin[0], y), 0, pressed, released, not released, 1)
+              with patch.object(gui_app, '_mouse_events', [event]):
+                pane.render(bounds)
+            self.assertEqual(pane.scroll, expected)
+          dialog.assert_not_called()
+        for row in rows:
+          row.callback.assert_not_called()
+
   def test_toggle_calls_its_native_callback_once_and_respects_displayed_value(self):
     action = ToggleAction(callback=Mock())
     row = item("Automatic updates", action)
