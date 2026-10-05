@@ -6,7 +6,7 @@ import pytest
 from opendbc.car import structs
 from opendbc.car.ford.classic_lateral import CLASSIC_EXTENDED_CARS
 from opendbc.car.ford.tests.test_three_ports import params
-from opendbc.car.ford.values import CAR
+from opendbc.car.ford.values import CAR, CarControllerParams
 
 
 @pytest.mark.parametrize('identity', sorted(CLASSIC_EXTENDED_CARS | {CAR.FORD_MUSTANG_MACH_E_MK1}))
@@ -27,6 +27,7 @@ def test_actual_card_publication_reaches_ford_extensions(identity, alpha, releas
 
   monkeypatch.setenv('SIMULATION', '1')
   monkeypatch.setenv('REPLAY', '1')
+  monkeypatch.setenv('AOL_REPLAY_RUNTIME', '0')
   with OpenpilotPrefix():
     saved = Params()
     saved.put_bool('OpenpilotEnabledToggle', True, block=True)
@@ -73,6 +74,7 @@ def test_actual_card_publication_reaches_ford_extensions(identity, alpha, releas
       assert event is not None and event.valid and event.carParams.to_dict() == expected
       controls = Controls()
       assert controls.CP.to_dict() == expected
+      assert not controls.aol_replay and not controls.ordinary_axis_ack_required
       feed(controls, 1_000_000_000, 0, active=False, enabled=False, can_valid=False, can_timeout=True)
       command, lateral_log = controls.state_control()
       assert not command.enabled and not command.latActive and not command.longActive
@@ -81,6 +83,38 @@ def test_actual_card_publication_reaches_ford_extensions(identity, alpha, releas
       assert packets
       assert ci.CC.mache_extended_announced if identity == CAR.FORD_MUSTANG_MACH_E_MK1 else ci.CC.classic_extended_announced
       assert not owner.human_turn_enabled
+      feed(controls, 1_010_000_000, 1, active=True, enabled=True, can_valid=True, can_timeout=False)
+      command, _ = controls.state_control()
+      assert command.enabled and command.latActive
+      if identity == CAR.FORD_BRONCO_SPORT_MK1 and not release and not disable:
+        from opendbc.safety.tests.test_ford_explorer_extended import TestFordExplorerExtended
+        from opendbc.safety.tests.libsafety import libsafety_py
+
+        native = TestFordExplorerExtended()
+        native.setUp()
+        try:
+          native.select(card.CP.safetyConfigs[-1].safetyParam, card.CP.alternativeExperience)
+          for address, data, bus in packets:
+            if address == 0x3CA:
+              assert native.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data))
+          native._reset_curvature_measurement(0., 20.)
+          assert native._rx(native._pcm_status_msg(True))
+          assert native.safety.get_controls_allowed()
+          ci.CS.out = controls.sm['carState']
+          active_packets = 0
+          for frame in range(CarControllerParams.STEER_STEP):
+            _, outgoing = ci.apply(command.as_reader(), 1_020_000_000 + frame * 10_000_000)
+            for address, data, bus in outgoing:
+              if address == 0x3D3:
+                active_packets += 1
+                packet = libsafety_py.make_CANPacket(address, bus, data)
+                assert native.safety.safety_tx_hook(packet)
+                assert native._rx(native._pcm_status_msg(False))
+                assert not native.safety.get_controls_allowed()
+                assert not native.safety.safety_tx_hook(packet)
+          assert active_packets > 0
+        finally:
+          native.tearDown()
     finally:
       del controls, card, ci, subscriber
       gc.collect()
