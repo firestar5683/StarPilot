@@ -715,6 +715,9 @@ class Supervisor:
     deadline = time.monotonic() + delay
     while (remaining := deadline - time.monotonic()) > 0:
       if self._hfp_link.is_set():
+        # One early retry per connection from the car: if that attempt also fails fast,
+        # the next backoff must not end at once just because the link is still fresh.
+        self._hfp_link.clear()
         self.log("retry_early", reason="car opened hands-free", skipped_s=round(remaining, 1))
         return
       self._wait(min(0.1, remaining))

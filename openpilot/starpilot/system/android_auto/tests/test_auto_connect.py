@@ -290,6 +290,22 @@ def test_car_opening_hands_free_ends_the_backoff_early(identity, tmp_path, monke
   assert starts[1] - starts[0] < 6  # retried when the car connected, not after the 30 s backoff
 
 
+def test_one_hands_free_connection_ends_only_one_backoff(identity, tmp_path, monkeypatch):
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: socket.socketpair()[0])
+  sup.select_receiver(CAR, "Civic")
+  sup._hfp_connected(CAR)
+  started = time.monotonic()
+  sup._wait_backoff(0.3, car_can_wake=True)
+  assert time.monotonic() - started < 0.1   # the car reached out: retry now
+  started = time.monotonic()
+  sup._wait_backoff(0.3, car_can_wake=True)  # the link is still fresh, but that connection was used
+  assert time.monotonic() - started >= 0.25
+  sup._hfp_connected(CAR)                    # a new connection from the car ends the next one early again
+  started = time.monotonic()
+  sup._wait_backoff(0.3, car_can_wake=True)
+  assert time.monotonic() - started < 0.1
+
+
 def test_car_ending_projection_still_gets_its_full_pause(identity, tmp_path, monkeypatch):
   from openpilot.starpilot.system.android_auto import supervisor
   from openpilot.starpilot.system.android_auto.session import PeerRequestedStop
