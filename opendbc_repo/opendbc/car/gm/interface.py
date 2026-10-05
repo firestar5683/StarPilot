@@ -110,7 +110,7 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     profile = camera_acc_pedal_profile(CP)
-    if profile is not None and profile.longitudinal and profile.topology == "gateway":
+    if profile is not None and profile.longitudinal and profile.topology in ("gateway", "ascm"):
       return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
     if profile is not None and profile.longitudinal:
       return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
@@ -611,6 +611,24 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
       ret.longitudinalTuning.kiV = [.09, .13, .19, .28]
       ret.stopAccel = -.25
+
+    if candidate == CAR.CHEVROLET_VOLT_ASCM and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
+      pt = fingerprint.get(CanBus.POWERTRAIN, {})
+      be = pt.get(0xBE) in (6, 7, 8)
+      f1 = 0xBE not in pt and pt.get(0xF1) == 6
+      required = {0x184: 8, 0x34A: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7}
+      sources = all(pt.get(address) == length for address, length in required.items()) and (be or f1)
+      camera = fingerprint.get(CanBus.CAMERA, {})
+      ret.flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_ACCELERATOR_POS_MSG if f1 else 0)) | (int(ret.flags) & int(GMFlags.HAS_BSM))
+      ret.dashcamOnly = not sources or camera.get(0x180) != 4 or camera.get(0x370) != 6
+      ret.alphaLongitudinalAvailable = has_sascm
+      ret.openpilotLongitudinalControl = not ret.dashcamOnly and not is_release and pt.get(0x1F5) == 8
+      ret.pcmCruise = False
+      index = int(not ret.radarUnavailable) * 2 + int(f1)
+      ret.safetyConfigs[0].safetyParam = (0xE400 if ret.openpilotLongitudinalControl else 0xE410) + index
+      ret.minEnableSpeed = -1.
+      ret.autoResumeSng = ret.openpilotLongitudinalControl
+      ret.longitudinalTuning.kiBP, ret.longitudinalTuning.kiV = [5., 35.], [.5, .5]
 
     if candidate == CAR.CHEVROLET_VOLT and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
       pt = fingerprint.get(CanBus.POWERTRAIN, {})

@@ -771,7 +771,9 @@ class CarController(CarControllerBase):
         dashboard_state = 2 if (self.ordinary_camera_long or self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_camera_long or
                                 self.volt_sdgm_long or self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN) else None
         if self.camera_pedal_profile is None or runtime_allowed:
-          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+          dashboard_enabled = CC.enabled and not (self.camera_pedal_profile is not None and
+                                                  self.camera_pedal_profile.topology == "ascm" and not ready)
+          can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, dashboard_enabled,
                                                              hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw,
                                                              cruise_state=dashboard_state,
                                                              fcw_alert=camera_fcw,
@@ -815,7 +817,7 @@ class CarController(CarControllerBase):
         self.last_button_frame = self.frame
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.CANCEL))
-    elif (self.camera_pedal_profile is not None and self.camera_pedal_profile.topology == "gateway" and
+    elif (self.camera_pedal_profile is not None and self.camera_pedal_profile.topology in ("gateway", "ascm") and
           not self.camera_pedal_profile.longitudinal):
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
       credit = CS.volt_removed_credit_ns
