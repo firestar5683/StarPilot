@@ -233,6 +233,9 @@ class CarController(CarControllerBase):
     self.gm_auto_hold_input = None
     self.gm_auto_hold_state = AutoHold(config=auto_hold_config_for(CP))
     self.regen_paddle_pressed = False
+    self.maneuver_paddle_mode = "auto"
+    self.maneuver_paddle_input = None
+    self.bolt_paddle_switched = False
     self.bolt_regen_hold = False
     self.regen_press_count = 0
     self.regen_release_count = 0
@@ -305,6 +308,7 @@ class CarController(CarControllerBase):
     return active, owner_clear, in_regen_gear
 
   def update_bolt_paddle(self, commanded_accel, measured_accel, speed, active):
+    self.bolt_paddle_switched = False
     if not active:
       self.bolt_regen_hold = False
       self.regen_paddle_pressed = False
@@ -339,6 +343,7 @@ class CarController(CarControllerBase):
       self.regen_press_count = max(self.regen_press_count, press_frames)
     self.regen_min_on_frames = max(self.regen_min_on_frames - 1, 0)
     self.regen_min_off_frames = max(self.regen_min_off_frames - 1, 0)
+    selected_before = self.regen_paddle_pressed
     if self.regen_paddle_pressed:
       if self.regen_min_on_frames == 0 and self.regen_release_count >= release_frames:
         self.regen_paddle_pressed = False
@@ -348,9 +353,17 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed = True
       self.regen_min_on_frames = min_on
       self.regen_press_count = 0
+    self.bolt_paddle_switched = self.regen_paddle_pressed != selected_before
+    if self.maneuver_paddle_mode == "off":
+      self.regen_paddle_pressed = False
+      self.regen_press_count = self.regen_release_count = self.regen_min_on_frames = 0
+    elif self.maneuver_paddle_mode == "force":
+      self.regen_paddle_pressed = commanded_accel < -.02
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos):
+    if self.maneuver_paddle_input is not None and self.frame % 25 == 0:
+      self.maneuver_paddle_mode = self.maneuver_paddle_input.update(now_nanos)
     # Sample physical hold dwell at parser/controller cadence, before current brake demands.
     hold_brake = None
     one_pedal_enabled = (self.volt_one_pedal and is_volt_one_pedal(self.CP) and self.volt_one_pedal_input is not None and
@@ -521,8 +534,10 @@ class CarController(CarControllerBase):
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 4))
     elif self.CP.flags & GMFlags.PEDAL_LONG.value and self.CP.openpilotLongitudinalControl:
       active, stock_ownership_clear, in_regen_gear = self.bolt_pedal_admission(CC, CS, now_nanos)
-      if not active:
+      if not active or self.maneuver_paddle_mode == "off":
         self.bolt_regen_hold = False
+      elif self.maneuver_paddle_mode == "force":
+        self.bolt_regen_hold = actuators.accel < -.02
       else:
         press = np.interp(CS.out.vEgo, [0., 4., 12., 25.], [-0.95, -0.82, -0.70, -0.62])
         release = np.interp(CS.out.vEgo, [0., 4., 12., 25.], [-0.14, -0.22, -0.30, -0.36])
@@ -542,9 +557,8 @@ class CarController(CarControllerBase):
           else:
             self.apply_brake = 0
             self.bolt_acc_pedal_friction_low_speed_active = False
-        prior_paddle_pressed = self.regen_paddle_pressed
         paddle_pressed = self.update_bolt_paddle(actuators.accel, CS.out.aEgo, CS.out.vEgo, active)
-        paddle_switched = paddle_pressed != prior_paddle_pressed
+        paddle_switched = self.bolt_paddle_switched
         if active:
           target = bolt_pedal_fraction(actuators.accel, CS.out.vEgo, paddle_pressed)
           if self.pedal_active_last and not (paddle_switched and CS.out.vEgo > 1.0):
