@@ -185,7 +185,8 @@ class PiPOwner:
     rows.append(FeatureRow("", "Camera availability", "Live cabin frames" if live else "No fresh cabin frame",
                            reason="" if live else "Open the live crop preview while parked to check the camera."))
     return FeatureSettingsState(page="pip", title="Blind Spot Camera and Preview",
-                                subtitle="Choose when to show the camera and adjust its crop from the live preview. Resolution follows the camera automatically.",
+                                subtitle="Choose when to show the camera and adjust its crop from the live preview. " +
+                                         "Resolution follows the camera automatically.",
                                 rows=tuple(rows), parked=parked)
 
   def editor_with_source(self) -> tuple[dict | None, tuple[tuple[str, bytes | None], ...]]:

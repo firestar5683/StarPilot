@@ -115,10 +115,10 @@ def test_startup_and_wake_write_model_registers(model, path_name):
 def test_internal_panda_reset_and_recovery_timing(device, reset_hold, recover_hold):
   tree = ast.parse(SOURCE.read_text())
   cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'HardwareComma')
-  methods = [node for node in cls.body if isinstance(node, ast.FunctionDef) and
+  methods: list[ast.stmt] = [node for node in cls.body if isinstance(node, ast.FunctionDef) and
              node.name in {'reset_internal_panda', 'recover_internal_panda'}]
   events = Mock()
-  namespace = {'gpio_init': Mock(), 'gpio_set': events.gpio, 'time': SimpleNamespace(sleep=events.sleep),
+  namespace: dict = {'gpio_init': Mock(), 'gpio_set': events.gpio, 'time': SimpleNamespace(sleep=events.sleep),
                'GPIO': SimpleNamespace(STM_RST_N='reset', STM_BOOT0='boot0')}
   exec(compile(ast.Module(body=methods, type_ignores=[]), str(SOURCE), 'exec'), namespace)
   hardware = SimpleNamespace(get_device_type=lambda: device)
@@ -144,7 +144,7 @@ def test_pandad_enumeration_and_recovery(device, failure):
   process = Mock()
   process.wait.side_effect = KeyboardInterrupt()
   launch = Mock(return_value=process)
-  namespace = {'Panda': SimpleNamespace(list=events.list), 'PandaDFU': SimpleNamespace(list=events.dfu_list),
+  namespace: dict = {'Panda': SimpleNamespace(list=events.list), 'PandaDFU': SimpleNamespace(list=events.dfu_list),
                'HARDWARE': SimpleNamespace(get_device_type=lambda: device, reset_internal_panda=events.reset,
                                            recover_internal_panda=events.recover),
                'time': SimpleNamespace(sleep=events.sleep), 'cloudlog': Mock(), 'signal': Mock(),
