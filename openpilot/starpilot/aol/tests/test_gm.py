@@ -100,7 +100,7 @@ def _configurations():
       for disabled in (False, True):
         yield conventional_pedal(identity, removed=removed, disabled=disabled)
   from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint as pedal_fingerprint
-  from opendbc.car.gm.tests.test_volt_transitions import volt_ascm_pedal_params, volt_gateway_pedal_params
+  from opendbc.car.gm.tests.test_volt_transitions import volt_ascm_pedal_params, volt_gateway_pedal_params, volt_sdgm_pedal_params
   for camera in (False, True):
     for be in (False, True):
       observed = pedal_fingerprint(camera=camera, be=be)
@@ -112,6 +112,7 @@ def _configurations():
     for radar in (False, True):
       for release in (False, True):
         yield volt_ascm_pedal_params(be=be, radar=radar, release=release)
+        yield volt_sdgm_pedal_params(be=be, radar=radar, release=release)
   for removed in (False, True):
     for disabled in (False, True):
       yield silverado_pedal(removed=removed, disabled=disabled)

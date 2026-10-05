@@ -17,6 +17,7 @@ static bool gm_camera_pedal_long = false;
 static bool gm_camera_volt = false;
 static bool gm_camera_gateway = false;
 static bool gm_camera_ascm = false;
+static bool gm_camera_sdgm = false;
 static bool gm_camera_gateway_removed = false;
 static bool gm_camera_regen = false;
 static bool gm_camera_pedal_f1 = false;
@@ -48,6 +49,7 @@ static uint16_t gm_camera_pedal_reset(uint16_t raw) {
   gm_camera_volt = false;
   gm_camera_gateway = false;
   gm_camera_ascm = false;
+  gm_camera_sdgm = false;
   gm_camera_gateway_removed = false;
   gm_camera_regen = false;
   gm_camera_pedal_f1 = false;
@@ -84,7 +86,27 @@ static uint16_t gm_camera_pedal_reset(uint16_t raw) {
     case 0xE411U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_ascm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = false; canonical = 0x0605U; break;
     case 0xE412U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_ascm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = false; canonical = 0x0A05U; break;
     case 0xE413U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_ascm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = false; canonical = 0x0E05U; break;
+    case 0xE510U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = false; canonical = 0x1005U; break;
+    case 0xE511U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = false; canonical = 0x1405U; break;
+    case 0xE512U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = false; canonical = 0x1005U; break;
+    case 0xE513U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = false; canonical = 0x1405U; break;
 #ifdef ALLOW_DEBUG
+    case 0xE500U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0x5007U; break;
+    case 0xE501U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0x5407U; break;
+    case 0xE502U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0x5007U; break;
+    case 0xE503U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0x5407U; break;
+    case 0xE520U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0x5087U; break;
+    case 0xE521U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0x5487U; break;
+    case 0xE522U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0x5087U; break;
+    case 0xE523U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0x5487U; break;
+    case 0xE540U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0xD107U; break;
+    case 0xE541U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0xD108U; break;
+    case 0xE542U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0xD107U; break;
+    case 0xE543U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0xD108U; break;
+    case 0xE560U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0xD117U; break;
+    case 0xE561U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0xD118U; break;
+    case 0xE562U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0xD117U; break;
+    case 0xE563U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_sdgm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0xD118U; break;
     case 0xE400U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_ascm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0x4207U; break;
     case 0xE401U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_ascm = true; gm_camera_pedal_f1 = true; gm_camera_pedal_long = true; canonical = 0x4607U; break;
     case 0xE402U: gm_camera_pedal = true; gm_camera_volt = true; gm_camera_ascm = true; gm_camera_pedal_f1 = false; gm_camera_pedal_long = true; canonical = 0x4A07U; break;
@@ -141,7 +163,7 @@ static uint16_t gm_camera_pedal_reset(uint16_t raw) {
     case 0xE100U: case 0xE101U: case 0xE102U: case 0xE103U: gm_camera_pedal_rejected = true; break;
 #endif
     default:
-      if (((raw & 0xFF00U) == 0xE200U) || ((raw & 0xFF00U) == 0xE300U) || ((raw & 0xFF00U) == 0xE400U)) { gm_camera_pedal_rejected = true; }
+      if (((raw & 0xFF00U) == 0xE200U) || ((raw & 0xFF00U) == 0xE300U) || ((raw & 0xFF00U) == 0xE400U) || ((raw & 0xFF00U) == 0xE500U)) { gm_camera_pedal_rejected = true; }
       break;
   }
   return canonical;
@@ -152,7 +174,7 @@ static bool gm_camera_sources_current(void) {
   bool current = true;
   const uint32_t now = microsecond_timer_get();
   for (uint8_t i = 0U; i < (gm_camera_volt ? 9U : 8U); i++) {
-    const uint32_t age_limit = ((gm_camera_gateway || gm_camera_ascm) && (i == 7U)) ? 1000000U : limits[i];
+    const uint32_t age_limit = ((gm_camera_gateway || gm_camera_ascm || gm_camera_sdgm) && (i == 7U)) ? 1000000U : limits[i];
     if (gm_camera_seen[i] && (safety_get_ts_elapsed(now, gm_camera_us[i]) > age_limit)) { gm_camera_seen[i] = false; }
     current &= gm_camera_seen[i];
   }
@@ -186,10 +208,10 @@ static void gm_camera_pedal_rx(const CANPacket_t *msg) {
                             ((((uint32_t)msg->data[2] << 8) | msg->data[3]) <= (gm_camera_volt ? 231U : 34U));
     }
     if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) { source = 2; }
-    if ((msg->addr == (gm_camera_pedal_f1 ? 0xF1U : 0xBEU)) && ((GET_LEN(msg) == 6U) || (gm_camera_ascm && !gm_camera_pedal_f1 && ((GET_LEN(msg) == 7U) || (GET_LEN(msg) == 8U))))) {
+    if ((msg->addr == (gm_camera_pedal_f1 ? 0xF1U : 0xBEU)) && ((GET_LEN(msg) == 6U) || ((gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_f1 && ((GET_LEN(msg) == 7U) || (GET_LEN(msg) == 8U))))) {
       source = 3;
       if (gm_camera_gateway && gm_camera_pedal_f1) { gm_camera_driver_brake = msg->data[1] >= 6U; }
-      if (gm_camera_ascm && !gm_camera_pedal_f1) { gm_camera_driver_brake = msg->data[1] >= 8U; }
+      if ((gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_f1) { gm_camera_driver_brake = msg->data[1] >= 8U; }
     }
     if ((msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
       source = 4;
@@ -198,7 +220,7 @@ static void gm_camera_pedal_rx(const CANPacket_t *msg) {
     if ((msg->addr == 0xC9U) && (GET_LEN(msg) == 8U)) {
       source = 5;
       gm_camera_main = GET_BIT(msg, 29U);
-      if ((!gm_camera_gateway && !gm_camera_ascm) || (gm_camera_gateway && !gm_camera_pedal_f1) || (gm_camera_ascm && gm_camera_pedal_f1)) { gm_camera_driver_brake = GET_BIT(msg, 40U); }
+      if ((!gm_camera_gateway && !gm_camera_ascm && !gm_camera_sdgm) || (gm_camera_gateway && !gm_camera_pedal_f1) || ((gm_camera_ascm || gm_camera_sdgm) && gm_camera_pedal_f1)) { gm_camera_driver_brake = GET_BIT(msg, 40U); }
     }
     if (gm_camera_volt && (msg->addr == 0xBDU) && (GET_LEN(msg) == 7U)) {
       source = 8; gm_camera_regen = (msg->data[0] >> 4U) != 0U;

@@ -57,6 +57,23 @@ def volt_ascm_pedal_params(*, be=True, radar=True, sascm=False, alpha=False, rel
   return CarInterface.get_params(CAR.CHEVROLET_VOLT_ASCM, fingerprint, [], alpha, release, False)
 
 
+def volt_sdgm_pedal_params(*, be=True, radar=True, sascm=False, alpha=False, release=False, pedal=True, gear=True, be_length=6):
+  from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7, 0x232: 8})
+  fingerprint[0][0xBE if be else 0xF1] = be_length if be else 6
+  if pedal:
+    fingerprint[0][0x201] = 6
+  if gear:
+    fingerprint[0][0x1F5] = 8
+  if sascm:
+    fingerprint[0][0x2FF] = 8
+  fingerprint[2].update({0x320: 6, 0x180: 4, 0x370: 6})
+  if radar:
+    fingerprint[1][RADAR_HEADER_MSG] = 8
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_2019, fingerprint, [], alpha, release, False)
+
+
 @dataclass(frozen=True)
 class Phase:
   name: str
@@ -599,3 +616,66 @@ class TestVoltCameraLaunchCurrentSchema(unittest.TestCase):
           self.assertGreater(state.vEgo, .3)
           self.assertEqual(state.standstill, tick == 52)
           self.assertEqual(ci.CC.camera_pedal_launch, tick == 52)
+
+
+class TestVoltSdgmPedalProfiles(unittest.TestCase):
+  def test_actual_parser_uses_be_threshold_and_f1_c9_pressed(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    for be in (True, False):
+      cp = volt_sdgm_pedal_params(be=be)
+      ci = CarInterface(cp)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      for tick in range(64):
+        pressed = tick >= 48
+        frames = [frame for frame in pt_frames(packer, counter=tick % 4, acc_cruise=2)
+                  if frame[0] not in (0xBE, 0xF1, 0xC9)]
+        frames += [packer.make_can_msg('ECMEngineStatus', 0,
+                   {'CruiseMainOn': 1, 'BrakePressed': not pressed if be else pressed}),
+                   packer.make_can_msg('ECMAcceleratorPos' if be else 'EBCMBrakePedalPosition', 0,
+                   {'BrakePedalPos': 8 if pressed else 0} if be else {'BrakePedalPosition': 0 if pressed else 30}),
+                   packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                   packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                   packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {})]
+        state = ci.update([(1_000_000_000 + tick * 10_000_000, frames)])
+        if tick >= 40:
+          self.assertEqual(state.brakePressed, pressed)
+
+  def test_actual_factory_preserves_sdgm_topology_and_composition(self):
+    from opendbc.car.gm.values import camera_acc_pedal_profile, apply_gm_auto_hold, apply_volt_one_pedal
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    for be in (True, False):
+      for radar in (False, True):
+        for sascm in (False, True):
+          for alpha in (False, True):
+            cp = volt_sdgm_pedal_params(be=be, radar=radar, sascm=sascm, alpha=alpha)
+            self.assertEqual(cp.alphaLongitudinalAvailable, sascm)
+            self.assertTrue(cp.openpilotLongitudinalControl)
+            self.assertFalse(cp.pcmCruise)
+            self.assertEqual(cp.radarUnavailable, not radar)
+            for hold, one, base in ((False, False, 0xE500), (True, False, 0xE520),
+                                    (False, True, 0xE540), (True, True, 0xE560)):
+              choice = cp.as_reader().as_builder()
+              apply_gm_auto_hold(choice, hold)
+              apply_volt_one_pedal(choice, one, hold)
+              self.assertEqual(choice.safetyConfigs[0].safetyParam, base + 2 * int(radar) + int(not be))
+              self.assertIsNotNone(camera_acc_pedal_profile(choice))
+              prepare_disable_longitudinal(choice, True)
+              self.assertFalse(choice.openpilotLongitudinalControl)
+              self.assertFalse(choice.pcmCruise)
+              self.assertEqual(choice.safetyConfigs[0].safetyParam, 0xE510 + 2 * int(radar) + int(not be))
+
+  def test_retention_requires_explicit_auto_hold_owner(self):
+    from opendbc.car.gm.values import apply_gm_auto_hold, apply_volt_one_pedal
+    from opendbc.car.gm.auto_hold import config_for, stopped_for_hold
+    state = SimpleNamespace(standstill=False, vEgo=.2, wheelSpeeds=SimpleNamespace(rl=.2, rr=.2))
+    for hold, one in ((True, False), (False, True), (True, True)):
+      cp = volt_sdgm_pedal_params()
+      apply_gm_auto_hold(cp, hold)
+      apply_volt_one_pedal(cp, one, hold)
+      config = config_for(cp)
+      self.assertEqual(config.minimum_brake, 100)
+      self.assertEqual(config.continued_stop_speed, .25 if hold else .02)
+      self.assertEqual(stopped_for_hold(state, config, True), hold)
+      self.assertFalse(stopped_for_hold(state, config, False))

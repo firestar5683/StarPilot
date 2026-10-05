@@ -20,7 +20,7 @@ def prepare_disable_longitudinal(cp, requested: bool) -> None:
   if requested and profile is not None:
     stock_words = {0xE100: 0xE110, 0xE101: 0xE111, 0xE102: 0xE112, 0xE103: 0xE113}
     if profile.volt:
-      base = {"camera": 0xE210, "gateway": 0xE310, "ascm": 0xE410}[profile.topology]
+      base = {"camera": 0xE210, "gateway": 0xE310, "ascm": 0xE410, "sdgm": 0xE510}[profile.topology]
       starts = (base - 0x10, base + 0x10, base + 0x30, base + 0x50)
       stock_words.update({start + index: base + index for start in starts for index in range(4)})
     cp.safetyConfigs[0].safetyParam = stock_words.get(int(cp.safetyConfigs[0].safetyParam), int(cp.safetyConfigs[0].safetyParam))

@@ -41,12 +41,14 @@ class TestGmCameraAccPedal(unittest.TestCase):
                     (speed if right is None else right) & 255, 0])
     self.rx(0x1E1, bytes(7))
     if analog:
-      alternate = self.word in (0xE101, 0xE103, 0xE111, 0xE113,
+      alternate = self.word in tuple(base + i for base in (0xE500, 0xE510, 0xE520, 0xE540, 0xE560) for i in (1, 3)) or self.word in (
+        0xE101, 0xE103, 0xE111, 0xE113,
                                 0xE401, 0xE403, 0xE411, 0xE413, 0xE421, 0xE423, 0xE441, 0xE443, 0xE461, 0xE463,
                                 0xE301, 0xE303, 0xE311, 0xE313, 0xE321, 0xE323, 0xE341, 0xE343, 0xE361, 0xE363,
                                 0xC171, 0xE201, 0xE203, 0xE211, 0xE213, 0xE221, 0xE223, 0xE241, 0xE243, 0xE261, 0xE263)
       gateway_f1 = self.word in (0xE301, 0xE303, 0xE321, 0xE323, 0xE341, 0xE343, 0xE361, 0xE363)
-      ascm_be = self.word in (0xE400, 0xE402, 0xE410, 0xE412, 0xE420, 0xE422, 0xE440, 0xE442, 0xE460, 0xE462)
+      ascm_be = self.word in tuple(base + i for base in (0xE500, 0xE510, 0xE520, 0xE540, 0xE560) for i in (0, 2)) or self.word in (
+        0xE400, 0xE402, 0xE410, 0xE412, 0xE420, 0xE422, 0xE440, 0xE442, 0xE460, 0xE462)
       analog_brake = 6 if brake and gateway_f1 else (8 if brake and ascm_be else 0)
       self.rx(0xF1 if alternate else 0xBE, bytes([0, analog_brake]) + bytes(4))
     engine = bytearray(8)
@@ -85,7 +87,8 @@ class TestGmCameraAccPedal(unittest.TestCase):
     return self.packet(gmcan.create_gas_regen_command(self.packer, 0, demand, idx, enabled, False))
 
   def brake(self, demand=0, idx=0):
-    return self.packet(gmcan.create_friction_brake_command(self.packer, 0, demand, idx, True, False, False, self.cp))
+    bus = 2 if self.word in tuple(base + i for base in (0xE500, 0xE510, 0xE520, 0xE540, 0xE560) for i in range(4)) else 0
+    return self.packet(gmcan.create_friction_brake_command(self.packer, bus, demand, idx, True, False, False, self.cp))
 
   def pedal(self, fraction=18 / 255, idx=0):
     return self.packet(gmcan.create_pedal_command(self.packer, fraction, idx))
@@ -98,6 +101,88 @@ class TestGmCameraAccPedal(unittest.TestCase):
     self.init(word)
     self.observations()
     self.engage()
+
+  def sdgm_hold(self, demand, idx=0, mode=0xD):
+    raw = (0x1000 - demand) & 0xFFF
+    checksum = (0x10000 - (mode << 12) - raw - idx) & 0xFFFF
+    return libsafety_py.make_CANPacket(0x315, 2, bytes([(mode << 4) | (raw >> 8), raw & 255,
+                                                     checksum >> 8, checksum & 255, idx]))
+
+  def test_volt_sdgm_exact_compositions_and_cam_brake_credit(self):
+    for base in (0xE500, 0xE520, 0xE540, 0xE560):
+      for index in range(4):
+        with self.subTest(word=hex(base + index)):
+          self.ready(base + index)
+          if self.release:
+            self.assertFalse(self.safety.safety_tx_hook(self.pedal(.16)))
+            self.assertFalse(self.safety.safety_tx_hook(self.gas(100)))
+            continue
+          self.assertFalse(self.safety.safety_tx_hook(self.gas(-650)))
+          self.assertTrue(self.safety.safety_tx_hook(self.brake()))
+          self.assertFalse(self.safety.safety_tx_hook(self.pedal(.16)))
+          wrong_bus = gmcan.create_friction_brake_command(self.packer, 0, 0, 0, True, False, False, self.cp)
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(wrong_bus)))
+          self.neutral_pair()
+          self.assertTrue(self.safety.safety_tx_hook(self.pedal(.16)))
+          self.assertFalse(self.safety.safety_tx_hook(self.brake(100, idx=1)))
+          self.assertTrue(self.safety.safety_tx_hook(self.pedal(0, idx=1)))
+          self.assertTrue(self.safety.safety_tx_hook(self.gas(2698, idx=1)))
+          self.assertFalse(self.safety.safety_tx_hook(self.gas(2699, idx=2)))
+    for word in (0xE504, 0xE514, 0xE524, 0xE544, 0xE564, 0xE53F, 0xE55F):
+      self.ready(word)
+      self.assertFalse(self.safety.safety_tx_hook(self.pedal()))
+
+  def test_volt_sdgm_inactive_owner_retention_is_not_solo_one_pedal(self):
+    if self.release:
+      self.skipTest("Active Volt interceptor profiles are DEBUG-only")
+    for index in range(4):
+      for base in (0xE520, 0xE540, 0xE560):
+        with self.subTest(word=hex(base + index)):
+          self.init(base + index)
+          for _ in range(320):
+            self.observations(speed=100, gear=6)
+          self.observations(speed=0, gear=6)
+          self.assertFalse(self.safety.get_controls_allowed())
+          self.assertFalse(self.safety.safety_tx_hook(self.sdgm_hold(99)))
+          self.assertTrue(self.safety.safety_tx_hook(self.sdgm_hold(100)))
+          self.observations(speed=28, right=10, gear=6)
+          self.assertEqual(self.safety.safety_tx_hook(self.sdgm_hold(200, idx=1)), base != 0xE540)
+          self.observations(speed=29, right=10, gear=6)
+          self.assertFalse(self.safety.safety_tx_hook(self.sdgm_hold(200, idx=2)))
+          self.observations(speed=0, gear=6)
+          self.assertEqual(self.safety.safety_tx_hook(self.sdgm_hold(400, idx=1 if base == 0xE540 else 2)), base != 0xE520)
+          self.assertTrue(self.safety.safety_tx_hook(self.sdgm_hold(0, mode=1)))
+          self.observations(speed=20, right=10, gear=6)
+          self.assertFalse(self.safety.safety_tx_hook(self.sdgm_hold(200, idx=1)))
+          # Ordinary long ownership consumes previously accepted inactive hold credit.
+          self.observations(speed=0, gear=6)
+          self.assertTrue(self.safety.safety_tx_hook(self.sdgm_hold(100, idx=1)))
+          self.engage()
+          self.assertTrue(self.safety.safety_tx_hook(self.gas(100)))
+          self.observations(speed=20, right=10, gear=6, brake=True)
+          self.assertFalse(self.safety.safety_tx_hook(self.sdgm_hold(200, idx=2)))
+
+  def test_volt_sdgm_shared_health_resets_to_stock_and_previous_owners(self):
+    if self.release:
+      self.skipTest("Active Volt interceptor profiles are DEBUG-only")
+    for index in range(4):
+      self.ready(0xE500 + index)
+      self.assertTrue(self.safety.safety_config_valid())
+      self.init(0xE520 + index)
+      self.observations(sensor=False, friction_source=False)
+      self.assertFalse(self.safety.safety_config_valid())
+      self.observations()
+      self.assertTrue(self.safety.safety_config_valid())
+      self.init(0xE510 + index)
+      self.observations(sensor=False, gear_source=False, friction_source=False)
+      self.assertTrue(self.safety.safety_config_valid())
+      self.ready(0xE400 + index)
+      self.assertTrue(self.safety.safety_config_valid())
+      self.init(0xE100 + (index & 1))
+      self.observations(sensor=False, gear_source=False)
+      self.assertFalse(self.safety.safety_config_valid())
+      self.observations()
+      self.assertTrue(self.safety.safety_config_valid())
 
   def test_volt_gateway_exact_compositions_and_neutral_codec(self):
     words = tuple(base + i for base in (0xE300, 0xE320, 0xE340, 0xE360, 0xE400, 0xE420, 0xE440, 0xE460) for i in range(4))
@@ -192,7 +277,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
   def test_volt_gateway_gear_cadence_and_expiry(self):
     if self.release:
       self.skipTest("Active Volt interceptor profiles are DEBUG-only")
-    for word in (0xE300, 0xE301, 0xE302, 0xE303, 0xE400, 0xE401, 0xE402, 0xE403):
+    for word in (0xE300, 0xE301, 0xE302, 0xE303, 0xE400, 0xE401, 0xE402, 0xE403, 0xE500, 0xE501, 0xE502, 0xE503):
       self.ready(word)
       for tick in range(220):
         self.observations(gear_source=tick % 11 == 0)
@@ -210,7 +295,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
       self.assertTrue(self.safety.safety_tx_hook(self.gas(100)))
 
   def test_volt_gateway_stock_no_pedal_or_gear_authority(self):
-    for word in (0xE310, 0xE311, 0xE312, 0xE313, 0xE410, 0xE411, 0xE412, 0xE413):
+    for word in (0xE310, 0xE311, 0xE312, 0xE313, 0xE410, 0xE411, 0xE412, 0xE413, 0xE510, 0xE511, 0xE512, 0xE513):
       self.init(word)
       self.observations(sensor=False, gear_source=False)
       self.engage()
@@ -219,7 +304,7 @@ class TestGmCameraAccPedal(unittest.TestCase):
         self.assertFalse(self.safety.safety_tx_hook(frame))
 
   def test_volt_gateway_stock_cancel_physical_credit(self):
-    for word in (0xE310, 0xE311, 0xE312, 0xE313, 0xE410, 0xE411, 0xE412, 0xE413):
+    for word in (0xE310, 0xE311, 0xE312, 0xE313, 0xE410, 0xE411, 0xE412, 0xE413, 0xE510, 0xE511, 0xE512, 0xE513):
       self.init(word)
       self.observations(sensor=False, gear_source=False)
       neutral = gmcan.create_buttons(self.packer, 0, 1, 1)
@@ -256,7 +341,8 @@ class TestGmCameraAccPedal(unittest.TestCase):
       self.skipTest("Active Volt interceptor profiles are DEBUG-only")
     for word in (0xE220, 0xE221, 0xE222, 0xE223, 0xE260, 0xE261, 0xE262, 0xE263,
                  0xE320, 0xE321, 0xE322, 0xE323, 0xE360, 0xE361, 0xE362, 0xE363,
-                 0xE420, 0xE421, 0xE422, 0xE423, 0xE460, 0xE461, 0xE462, 0xE463):
+                 0xE420, 0xE421, 0xE422, 0xE423, 0xE460, 0xE461, 0xE462, 0xE463,
+                 0xE520, 0xE521, 0xE522, 0xE523, 0xE560, 0xE561, 0xE562, 0xE563):
       for fault in ('gas', 'adc', 'stale'):
         self.init(word)
         for _ in range(320):
@@ -266,10 +352,10 @@ class TestGmCameraAccPedal(unittest.TestCase):
         brake = 100
         raw = 0x1000 - brake
         checksum = (0x10000 - (0xD << 12) - raw) & 0xFFFF
-        hold = libsafety_py.make_CANPacket(0x315, 0, bytes([0xD0 | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, 0]))
+        hold = libsafety_py.make_CANPacket(0x315, 2 if 0xE500 <= word <= 0xE563 else 0, bytes([0xD0 | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, 0]))
         self.assertTrue(self.safety.safety_tx_hook(hold))
         checksum = (0x10000 - (0xD << 12) - raw - 1) & 0xFFFF
-        hold = libsafety_py.make_CANPacket(0x315, 0, bytes([0xD0 | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, 1]))
+        hold = libsafety_py.make_CANPacket(0x315, 2 if 0xE500 <= word <= 0xE563 else 0, bytes([0xD0 | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, 1]))
         data = bytearray.fromhex('053502ba0164' if fault == 'gas' else '0279012a06f6')
         if fault == 'adc':
           data[:2] = (4096).to_bytes(2, 'big')

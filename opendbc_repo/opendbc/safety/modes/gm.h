@@ -234,7 +234,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       if (!gm_volt_cc_main || !gm_volt_cc_active) { controls_allowed = false; }
     }
 
-    if (gm_volt_camera_removed || ((gm_camera_gateway || gm_camera_ascm) && !gm_camera_pedal_long)) {
+    if (gm_volt_camera_removed || ((gm_camera_gateway || gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_long)) {
       const uint32_t now = microsecond_timer_get();
       if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) {
         const uint8_t counter = msg->data[4] & 0x3U;
@@ -664,7 +664,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if ((gm_volt_camera_removed || ((gm_camera_gateway || gm_camera_ascm) && !gm_camera_pedal_long)) && (msg->addr == 0x1E1U)) {
+  if ((gm_volt_camera_removed || ((gm_camera_gateway || gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_long)) && (msg->addr == 0x1E1U)) {
     const uint32_t now = microsecond_timer_get();
     const uint8_t counter = msg->data[4] & 0x3U;
     const uint16_t checksum = 0xFFU + (counter * 0x4EFU) - (5U << 4U);
@@ -763,10 +763,10 @@ static safety_config gm_init(uint16_t safety_param) {
 #ifdef ALLOW_DEBUG
   if (gm_camera_volt && gm_camera_pedal_long && hold_config.enabled) {
     hold_config.c9_brake = !gm_camera_gateway || !gm_camera_pedal_f1;
-    if (gm_camera_ascm) { hold_config.c9_brake = gm_camera_pedal_f1; }
+    if (gm_camera_ascm || gm_camera_sdgm) { hold_config.c9_brake = gm_camera_pedal_f1; }
     hold_config.alternate = gm_camera_pedal_f1;
     hold_config.analog_required = true;
-    hold_config.extended_be = gm_camera_ascm && !gm_camera_pedal_f1;
+    hold_config.extended_be = (gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_f1;
     if (gm_camera_gateway || gm_camera_ascm) { hold_config.tx_bus = 0U; }
   }
 #endif
@@ -1469,7 +1469,7 @@ static safety_config gm_init(uint16_t safety_param) {
     for (uint8_t i = 0U; i < 10U; i++) { gm_extended_rx_checks[i] = (RxCheck){0}; }
     for (uint8_t i = 0U; i < 6U; i++) { gm_extended_rx_checks[i] = gm_ordinary_camera_rx_template[i]; }
     gm_extended_rx_checks[3].msg[0].addr = gm_camera_pedal_f1 ? 0xF1U : 0xBEU;
-    if (gm_camera_ascm && !gm_camera_pedal_f1) {
+    if ((gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_f1) {
       gm_extended_rx_checks[3].msg[1] = gm_extended_rx_checks[3].msg[0];
       gm_extended_rx_checks[3].msg[1].len = 7U;
       gm_extended_rx_checks[3].msg[2] = gm_extended_rx_checks[3].msg[0];
@@ -1485,8 +1485,8 @@ static safety_config gm_init(uint16_t safety_param) {
     for (uint8_t i = 0U; i < 10U; i++) { gm_extended_rx_checks[i] = (RxCheck){0}; }
     for (uint8_t i = 0U; i < 8U; i++) { gm_extended_rx_checks[i] = gm_camera_extended_rx_template[i]; }
     gm_extended_rx_checks[3].msg[0].addr = gm_camera_pedal_f1 ? 0xF1U : 0xBEU;
-    if (gm_camera_gateway || gm_camera_ascm) { gm_extended_rx_checks[7].msg[0].frequency = 10U; }
-    if (gm_camera_ascm && !gm_camera_pedal_f1) {
+    if (gm_camera_gateway || gm_camera_ascm || gm_camera_sdgm) { gm_extended_rx_checks[7].msg[0].frequency = 10U; }
+    if ((gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_f1) {
       gm_extended_rx_checks[3].msg[1] = gm_extended_rx_checks[3].msg[0];
       gm_extended_rx_checks[3].msg[1].len = 7U;
       gm_extended_rx_checks[3].msg[2] = gm_extended_rx_checks[3].msg[0];
@@ -1514,7 +1514,14 @@ static safety_config gm_init(uint16_t safety_param) {
       {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},
       {0x184, 2, 8, .check_relay = false}, {0x200, 0, 6, .check_relay = false},
     };
-    if (gm_ordinary_camera_removed || gm_volt_camera_removed || gm_camera_gateway_removed) { SET_TX_MSGS(GM_CAMERA_PEDAL_REMOVED_TX, ret); }
+    static const CanMsg GM_SDGM_PEDAL_TX[] = {
+      {0x180, 0, 4, .check_relay = true}, {0x315, 2, 5, .check_relay = false},
+      {0x2CB, 0, 8, .check_relay = true}, {0x370, 0, 6, .check_relay = true},
+      {0x2CD, 0, 5, .check_relay = true}, {0x184, 2, 8, .check_relay = false},
+      {0x200, 0, 6, .check_relay = false},
+    };
+    if (gm_camera_sdgm) { SET_TX_MSGS(GM_SDGM_PEDAL_TX, ret); }
+    else if (gm_ordinary_camera_removed || gm_volt_camera_removed || gm_camera_gateway_removed) { SET_TX_MSGS(GM_CAMERA_PEDAL_REMOVED_TX, ret); }
     else { SET_TX_MSGS(GM_CAMERA_PEDAL_PRESENT_TX, ret); }
   }
 #endif
@@ -1547,6 +1554,15 @@ static safety_config gm_init(uint16_t safety_param) {
       {0x184, 2, 8, .check_relay = true}, {0x1E1, 2, 7, .check_relay = false},
     };
     SET_TX_MSGS(GM_ASCM_PEDAL_STOCK_TX, ret);
+    gm_pcm_cruise = false;
+  }
+
+  if (gm_camera_sdgm && !gm_camera_pedal_long) {
+    static const CanMsg GM_SDGM_PEDAL_STOCK_TX[] = {
+      {0x180, 0, 4, .check_relay = true}, {0x370, 0, 6, .check_relay = true},
+      {0x184, 2, 8, .check_relay = false}, {0x1E1, 2, 7, .check_relay = false},
+    };
+    SET_TX_MSGS(GM_SDGM_PEDAL_STOCK_TX, ret);
     gm_pcm_cruise = false;
   }
 

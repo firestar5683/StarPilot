@@ -111,7 +111,7 @@ class CarState(CarStateBase):
                 ("AcceleratorPedal2", "CruiseState", 300_000_000),
                 ("ECMEngineStatus", "CruiseMainOn", 300_000_000),
                 (*analog, 300_000_000), ("ECMPRDNL2", "PRNDL2",
-                                       1_000_000_000 if self.camera_pedal_profile.topology in ("gateway", "ascm") else 100_000_000))
+                                       1_000_000_000 if self.camera_pedal_profile.topology in ("gateway", "ascm", "sdgm") else 100_000_000))
       self.camera_pedal_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in fields)
       if self.camera_pedal_profile.volt:
         self.camera_pedal_sources += ((pt_cp.ts_nanos["EBCMRegenPaddle"]["RegenPaddle"], 100_000_000),)
@@ -154,7 +154,7 @@ class CarState(CarStateBase):
       self.ordinary_removed_sources = tuple(pt_cp.ts_nanos[name][field] for name, field in names)
 
     if (is_volt_camera_removed(self.CP) or self.camera_pedal_profile is not None and
-        self.camera_pedal_profile.topology in ("gateway", "ascm") and not self.camera_pedal_profile.longitudinal):
+        self.camera_pedal_profile.topology in ("gateway", "ascm", "sdgm") and not self.camera_pedal_profile.longitudinal):
       names = (("PSCMStatus", "LKATorqueDelivered"), ("EBCMWheelSpdRear", "RLWheelSpd"),
                ("AcceleratorPedal2", "CruiseState"), ("ECMEngineStatus", "CruiseMainOn"),
                ("ASCMSteeringButton", "RollingCounter"), ("EBCMRegenPaddle", "RegenPaddle"))
@@ -622,7 +622,7 @@ class CarState(CarStateBase):
         excluded.add("ASCMLKASteeringCmd")
       pt_messages = [(name, frequency) for name, frequency in pt_messages if name not in excluded]
       pt_messages += [("ECMAcceleratorPos" if profile.brake_source == BrakeSource.BE else "EBCMBrakePedalPosition", 100),
-                      ("ECMPRDNL2", (10 if profile.topology in ("gateway", "ascm") else 40) if profile.longitudinal else float("nan"))]
+                      ("ECMPRDNL2", (10 if profile.topology in ("gateway", "ascm", "sdgm") else 40) if profile.longitudinal else float("nan"))]
       if profile.longitudinal:
         pt_messages.append(("GAS_SENSOR", 50))
 
@@ -662,7 +662,7 @@ class CarState(CarStateBase):
     if profile is not None:
       cam_messages = [] if profile.removed else [
         ("ASCMLKASteeringCmd", 10), ("ASCMActiveCruiseControlStatus", 25),
-        ("AEBCmd", float("nan") if profile.topology == "ascm" else 10),
+        *(([("AEBCmd", float("nan") if profile.topology == "ascm" else 10)]) if profile.topology != "sdgm" else []),
       ]
 
     return {
