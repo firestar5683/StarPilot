@@ -992,10 +992,6 @@ class SafetyTest(SafetyTestBase):
             if attr.startswith(volkswagen_shared) and current_test.startswith(volkswagen_shared):
               continue
 
-            # overlapping TX addrs, but they're not actuating messages for either car
-            if attr == 'TestHyundaiCanfdLKASteeringLongEV' and current_test.startswith('TestToyota'):
-              tx = list(filter(lambda m: m[0] not in [0x160, ], tx))
-
             # Volkswagen MQB longitudinal actuating message overlaps with the Subaru lateral actuating message
             if attr == 'TestVolkswagenMqbLongSafety' and current_test.startswith('TestSubaru'):
               tx = list(filter(lambda m: m[0] not in [0x122, ], tx))
@@ -1036,6 +1032,11 @@ class SafetyTest(SafetyTestBase):
         # CCNC display frames are 32 bytes. An eight-byte probe aliases the
         # unrelated Subaru 0x161 command and falsely reports cross-mode TX.
         size = 32 if test_name.startswith('TestHyundaiCanfdCCNC') and bus == 0 and addr in (0x161, 0x162) else 8
+        # HDA2 LONG's ADRV warning is 16 bytes. An eight-byte probe instead
+        # constructs Toyota's legitimate 0x160/bus1 display frame. Keep the
+        # foreign command in this test with its actual shape, for both layouts.
+        if test_name in ('TestHyundaiCanfdLKASteeringLongEV', 'TestHyundaiCanfdLKASteeringAltLongEV') and (addr, bus) == (0x160, 1):
+          size = 16
         msg = make_msg(bus, addr, size)
         self.safety.set_controls_allowed(1)
         # TODO: this should be blocked
