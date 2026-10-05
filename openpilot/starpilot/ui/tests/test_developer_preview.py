@@ -65,6 +65,8 @@ class DeveloperPreviewTests(unittest.TestCase):
     session._visual_preview_start_ns = 1_000_000_000
     with patch.object(runtime_app.time, "monotonic_ns", return_value=4_000_000_000):
       self.assertIs(session.snapshot(ShellMode.ONROAD), baseline)
+      self.assertIs(session.snapshot(ShellMode.ONROAD), baseline)
+      adapter.build.assert_called_once()
       session._visual_preview_flags = frozenset(("cem", "csc"))
       session._snapshot_cache = None
       observed = session.snapshot(ShellMode.ONROAD)
@@ -72,6 +74,13 @@ class DeveloperPreviewTests(unittest.TestCase):
       self.assertEqual(observed.onroad.visual_preview.curve_curvature, .008)
       self.assertEqual(replace(observed, onroad=baseline.onroad), baseline)
       self.assertIsNone(baseline.onroad.visual_preview)
+      self.assertIs(session.snapshot(ShellMode.ONROAD), observed)
+      session._onroad_width = 1560.0
+      session._snapshot_cache = None
+      resized = session.snapshot(ShellMode.ONROAD)
+      self.assertEqual(resized.onroad.viewport_width, 1560.0)
+      self.assertEqual(replace(resized.onroad, viewport_width=baseline.onroad.viewport_width), observed.onroad)
+      self.assertEqual(baseline.onroad.viewport_width, 1860.0)
 
 
 if __name__ == "__main__":

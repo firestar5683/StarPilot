@@ -1002,7 +1002,9 @@ class StarShellSession:
                                   compact_scroll_x=self.compact_scroll_x, sidebar_expanded=self.sidebar_expanded,
                                   menu_only=self.profile == Profile.COMPACT and mode == ShellMode.SETTINGS)
     if mode == ShellMode.ONROAD and self.profile == Profile.LARGE:
-      snapshot = replace(snapshot, onroad=replace(snapshot.onroad, viewport_width=getattr(self, '_onroad_width', 1860.0)))
+      width = getattr(self, '_onroad_width', 1860.0)
+      if snapshot.onroad.viewport_width != width:
+        snapshot = replace(snapshot, onroad=replace(snapshot.onroad, viewport_width=width))
     if mode == ShellMode.HOME:
       now = time.monotonic()
       previous = getattr(self, "_home_model", None)
