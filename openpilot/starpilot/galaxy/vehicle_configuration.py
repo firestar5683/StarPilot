@@ -4,7 +4,7 @@ from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.vehicle_selection import read_selection
 
 
-STARTUP_KEYS = ('AlphaLongitudinalEnabled', 'IsReleaseBranch', 'StarPilotEnabled', 'SafeMode',
+STARTUP_KEYS = ('AlphaLongitudinalEnabled', 'IsReleaseBranch', 'OpenpilotEnabledToggle', 'SafeMode',
                 'DisableOpenpilotLongitudinal', 'ToyotaAutoHold', 'TurnAssist', 'LongPitch',
                 'HondaBoschARadar', 'NAPPedalEnabled', 'NAPRadarEnabled', 'NAPRadarBehindNosecone')
 
@@ -29,7 +29,7 @@ def configuration_context(params, physical_cp, physical_raw):
     release = values['IsReleaseBranch'] == (b'1', True)
     alpha = not release and values['AlphaLongitudinalEnabled'] == (b'1', True)
     cp = interfaces[selection.platform].get_params(selection.platform, gen_empty_fingerprint(), [], alpha, release, False)
-    VehicleStartupPreferences.read(params, enabled=values['StarPilotEnabled'] != (b'0', True)).prepare(cp)
+    VehicleStartupPreferences.read(params, enabled=values['OpenpilotEnabledToggle'] == (b'1', True)).prepare(cp)
     if read_selection(params) != selection or tuple((key, *read_saved(params, key, 512)) for key in STARTUP_KEYS) != saved:
       return None, None
     raw = cp.to_bytes()
