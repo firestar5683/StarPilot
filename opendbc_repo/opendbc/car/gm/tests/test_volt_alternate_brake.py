@@ -13,6 +13,76 @@ from opendbc.car.gm.values import CAR, DBC, GMSafetyFlags, is_volt_gateway_alter
 
 class TestVoltAlternateBrake(unittest.TestCase):
   def test_auto_hold_actual_gateway_parser_controller_native(self):
+    from itertools import product
+    for accelerator, alternative in product((True, False), (0, 32)):
+      cp = ordinary_params(CAR.CHEVROLET_VOLT, radar=True, accelerator=accelerator)
+      self._auto_hold_join(cp, accelerator=accelerator, alternative=alternative,
+                           expected_word=0x4084 if accelerator else 0xC084)
+
+  def test_auto_hold_actual_ascm_camera_parser_controller_native(self):
+    from itertools import product
+    from opendbc.car.gm.tests.test_ascm_intercept import params as ascm_params
+    from opendbc.car.gm.tests.test_volt_camera_control import camera_params
+    from opendbc.car import structs
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    release = libsafety_py.libsafety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    cases = [(ascm_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, accelerator=accelerator,
+                          radar=radar, release=release), accelerator, False)
+             for accelerator, radar in product((True, False), (False, True))]
+    cases += [(camera_params(radar=radar, release=release), True, True) for radar in (False, True)]
+    for cp, accelerator, camera in cases:
+      for alternative in (0, 32):
+        candidate = cp.as_reader().as_builder()
+        expected_word = int(cp.safetyConfigs[0].safetyParam) | 0x80
+        if release:
+          VehicleStartupPreferences(gm_auto_hold=True).prepare(candidate)
+          self.assertFalse(candidate.openpilotLongitudinalControl)
+          self.assertEqual(candidate.safetyConfigs[0].safetyParam, cp.safetyConfigs[0].safetyParam)
+          self._hold_release_factory(candidate, camera=camera, alternative=alternative)
+        else:
+          self._auto_hold_join(candidate, accelerator=accelerator, alternative=alternative,
+                               expected_word=expected_word, camera=camera)
+
+  def _hold_release_factory(self, cp, *, camera, alternative):
+    from types import SimpleNamespace
+    from opendbc.car import structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm import gmcan
+    from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    with self.subTest(identity=cp.carFingerprint, word=cp.safetyConfigs[0].safetyParam, alternative=alternative):
+      cp.alternativeExperience = alternative
+      ci = CarInterface(cp)
+      VehicleStartupPreferences(gm_auto_hold=True).configure_controller(ci)
+      self.assertFalse(ci.CC.gm_auto_hold)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      setup(cp)
+      libsafety_py.libsafety.set_alternative_experience(alternative)
+      libsafety_py.libsafety.set_safety_hooks(int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam)
+      for tick in range(40):
+        now = 1_000_000_000 + tick * 10_000_000
+        _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=0., camera=True)
+        rx.append(packer.make_can_msg("ASCMActiveCruiseControlStatus", 2, {"ACCCruiseState": 3}))
+        ci.update([(now - 1_000_000, rx)])
+        self.assertTrue(ci.update([(now, rx)]).canValid)
+        for message in rx:
+          native("rx", message, now // 1000)
+        libsafety_py.libsafety.safety_tick()
+        if alternative:
+          libsafety_py.libsafety.set_aol_test_heartbeat(True)
+          libsafety_py.libsafety.aol_set_host_request(1)
+        _, commands = ci.apply(structs.CarControl(enabled=True, longActive=True).as_reader(), now)
+        self.assertFalse(any(message[0] in (0x315, 0x2CB) for message in commands))
+        for message in commands:
+          self.assertTrue(native("tx", message, now // 1000), message)
+      brake_packer = CANPacker(DBC[cp.carFingerprint][Bus.chassis])
+      positive = gmcan.create_friction_brake_command(brake_packer, 0, 80, 1, False, True, False, cp, auto_hold=True)
+      self.assertFalse(native("tx", positive, now // 1000))
+      libsafety_py.libsafety.set_alternative_experience(0)
+
+  def _auto_hold_join(self, cp, *, accelerator, alternative, expected_word, camera=False):
     from tempfile import TemporaryDirectory
     from types import SimpleNamespace
     from opendbc.car import structs
@@ -23,97 +93,134 @@ class TestVoltAlternateBrake(unittest.TestCase):
     from openpilot.starpilot.controller_extensions import configure_controller
     from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
 
-    from itertools import product
-    for accelerator, alternative in product((True, False), (0, 32)):
-      with self.subTest(accelerator=accelerator, alternative=alternative), TemporaryDirectory() as directory:
-        params = Params(directory)
-        params.put_bool("OpenpilotEnabledToggle", True, block=True)
-        params.put_bool("GMAutoHold", True, block=True)
-        preferences = VehicleStartupPreferences.read(params, enabled=True)
-        cp = ordinary_params(CAR.CHEVROLET_VOLT, radar=True, accelerator=accelerator)
-        preferences.prepare(cp)
-        preferences.finalize(cp)
-        self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x4084 if accelerator else 0xC084)
-        ci = CarInterface(cp)
-        preferences.configure_controller(ci)
-        configure_controller(ci, params)
-        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
-        setup(cp)
-        libsafety_py.libsafety.set_alternative_experience(alternative)
-        self.assertEqual(libsafety_py.libsafety.set_safety_hooks(int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam), 0)
-        seen_hold = seen_near_stop = seen_normal = False
-        for tick in range(1000):
-          now = 1_000_000_000 + tick * 10_000_000
-          moving = (tick < 309 and not 290 <= tick < 300) or 320 <= tick < 340 or 540 <= tick < 870
-          regen = 360 <= tick < 370
-          unavailable = 490 <= tick < 500
-          gas = 470 <= tick < 480
-          unknown_gear = 480 <= tick < 490
-          stale_brake_status = 920 <= tick < 960
-          main_off = 910 <= tick < 915
-          if tick == 500:
-            params.put_bool("GMAutoHold", False, block=True)
-          if tick == 540:
-            params.put_bool("GMAutoHold", True, block=True)
-          normal_long = 881 <= tick < 900
-          _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=2. if moving else 0.,
-                       brake=not moving and not 880 <= tick < 900, gas=gas, regen=regen, camera=False)
-          rx = [message for message in rx if message[0] not in (0xBE, 0xF1, 0x1C4, 0x232, 0x1E1, 0x1F5, 0xC9)]
-          brake_name, brake_signal = (("ECMAcceleratorPos", "BrakePedalPos") if accelerator else
-                                      ("EBCMBrakePedalPosition", "BrakePedalPosition"))
-          rx += [packer.make_can_msg(brake_name, 0, {brake_signal: 20 if not moving and not 880 <= tick < 900 else 0}),
-                 packer.make_can_msg("AcceleratorPedal2", 0, {"CruiseState": 2 if moving or 880 <= tick < 910 else 4, "AcceleratorPedal2": 30 if gas else 0}),
-                 packer.make_can_msg("EBCMFrictionBrakeStatus", 0, {"FrictionBrakeUnavailable": int(unavailable)}),
-                 packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 3 if tick == 880 else 6 if tick == 900 else 1, "RollingCounter": tick % 4})]
-          rx.append(packer.make_can_msg("ECMEngineStatus", 0, {"CruiseMainOn": int(not main_off)}))
-          rx.append(packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 8 if unknown_gear else 4,
-                                                        "ManualMode": int(unknown_gear)}))
-          if stale_brake_status:
-            rx = [message for message in rx if message[0] != 0x232]
-          ci.update([(now - 1_000_000, rx)])
-          out = ci.update([(now, rx)])
-          if not stale_brake_status:
-            self.assertTrue(out.canValid)
-            self.assertFalse(out.canTimeout)
-          if unavailable:
-            self.assertTrue(out.accFaulted)
-          for message in rx:
-            native("rx", message, now // 1000)
-          libsafety_py.libsafety.safety_tick()
-          if alternative:
-            libsafety_py.libsafety.set_aol_test_heartbeat(True)
-            libsafety_py.libsafety.aol_set_host_request(3 if normal_long else 1)
-          self.assertEqual(bool(libsafety_py.libsafety.get_controls_allowed()), normal_long)
-          cc = structs.CarControl(enabled=normal_long, longActive=normal_long)
-          _, commands = ci.apply(cc.as_reader(), now)
-          for message in commands:
-            self.assertTrue(native("tx", message, now // 1000), (tick, message))
-          brakes = [message for message in commands if message[0] == 0x315]
-          self.assertLessEqual(len(brakes), 1)
-          if not brakes:
-            continue
-          mode = brakes[0][1][0] >> 4
-          hold = mode in (0xA, 0xB, 0xD) and not normal_long
-          if normal_long:
-            seen_normal = True
-            self.assertTrue(any(message[0] == 0x2CB for message in commands))
-            self.assertFalse(ci.CC.gm_auto_hold_state.engaged)
-          if 900 <= tick < 910:
-            self.assertEqual(mode, 0xB)
-            seen_near_stop = True
-          if hold:
-            seen_hold = True
-            self.assertFalse(any(message[0] == 0x2CB for message in commands))
-            self.assertGreaterEqual(tick, 340)
-            self.assertFalse(regen or unavailable or gas or unknown_gear or main_off)
-            self.assertFalse(370 <= tick < 470)
-          if moving or regen or unavailable or gas or unknown_gear or main_off or 370 <= tick < 470 or 525 <= tick < 540 or 951 <= tick < 960:
-            self.assertFalse(hold)
-          if 290 <= tick < 300 or 309 <= tick < 320:
-            self.assertFalse(hold)
-        self.assertTrue(seen_hold and seen_near_stop and seen_normal)
-        libsafety_py.libsafety.set_alternative_experience(0)
-        self.assertFalse(ci.CC.gm_auto_hold_state.engaged)
+    with self.subTest(identity=cp.carFingerprint, word=expected_word, alternative=alternative), TemporaryDirectory() as directory:
+      params = Params(directory)
+      params.put_bool("OpenpilotEnabledToggle", True, block=True)
+      params.put_bool("GMAutoHold", True, block=True)
+      preferences = VehicleStartupPreferences.read(params, enabled=True)
+      cp.alternativeExperience = alternative
+      preferences.prepare(cp)
+      preferences.finalize(cp)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, expected_word)
+      from opendbc.car.gm.aol import qualified_gm
+      from opendbc.car.gm.lateral import lane_centering_supported
+      self.assertTrue(qualified_gm(cp))
+      self.assertTrue(lane_centering_supported(cp))
+      ci = CarInterface(cp)
+      preferences.configure_controller(ci)
+      configure_controller(ci, params)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      setup(cp)
+      libsafety_py.libsafety.set_alternative_experience(alternative)
+      self.assertEqual(libsafety_py.libsafety.set_safety_hooks(int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam), 0)
+      from openpilot.selfdrive.car.car_events import CarEvents, EventName
+      events = CarEvents(cp)
+      seen_hold = seen_near_stop = seen_normal = seen_feedback = False
+      last_sent_hold = False
+      for tick in range(1570 if camera else 1000):
+        now = 1_000_000_000 + tick * 10_000_000
+        moving = (tick < 309 and not 290 <= tick < 300) or 320 <= tick < 340 or 540 <= tick < 870 or 1000 <= tick < 1350
+        regen = 360 <= tick < 370
+        unavailable = 490 <= tick < 500
+        gas = 470 <= tick < 480
+        unknown_gear = 480 <= tick < 490
+        stale_brake_status = 920 <= tick < 960
+        main_off = 910 <= tick < 915
+        camera_missing = camera and 1400 <= tick < 1550
+        if tick == 500:
+          params.put_bool("GMAutoHold", False, block=True)
+        if tick == 540:
+          params.put_bool("GMAutoHold", True, block=True)
+        normal_long = 881 <= tick < 900
+        _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=2. if moving else 0.,
+                     brake=not moving and not 880 <= tick < 900, gas=gas, regen=regen,
+                     camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not camera_missing)
+        rx = [message for message in rx if message[0] not in (0xBE, 0xF1, 0x1C4, 0x232, 0x1E1, 0x1F5, 0xC9)]
+        brake_name, brake_signal = (("ECMAcceleratorPos", "BrakePedalPos") if accelerator else
+                                    ("EBCMBrakePedalPosition", "BrakePedalPosition"))
+        rx += [packer.make_can_msg(brake_name, 0, {brake_signal: 20 if not moving and not 880 <= tick < 900 else 0}),
+               packer.make_can_msg("AcceleratorPedal2", 0, {"CruiseState": 2 if moving or 880 <= tick < 910 else 4, "AcceleratorPedal2": 30 if gas else 0}),
+               packer.make_can_msg("EBCMFrictionBrakeStatus", 0, {"FrictionBrakeUnavailable": int(unavailable)}),
+               packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 3 if tick == 880 else 6 if tick == 900 else 1, "RollingCounter": tick % 4})]
+        rx.append(packer.make_can_msg("ECMEngineStatus", 0, {"CruiseMainOn": int(not main_off),
+                                                                   "BrakePressed": int(not moving and not 880 <= tick < 900 and
+                                                                                       not (cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM and accelerator))}))
+        rx.append(packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 8 if unknown_gear else 4,
+                                                      "ManualMode": int(unknown_gear)}))
+        if not accelerator and cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM:
+          rx = [message for message in rx if message[0] != 0xF1]
+          rx.append(packer.make_can_msg("ECMAcceleratorPos", 0, {"BrakePedalPos": 200}))
+        if camera:
+          rx = [message for message in rx if message[0] != 0xBE]
+          rx.append(packer.make_can_msg("ECMAcceleratorPos", 0, {"BrakePedalPos": 20 if not moving else 0}))
+        if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and not camera_missing:
+          rx.append(packer.make_can_msg("ASCMActiveCruiseControlStatus", 2, {"ACCCruiseState": 3, "ACCSpeedSetpoint": 60}))
+        if stale_brake_status:
+          rx = [message for message in rx if message[0] != 0x232]
+        ci.update([(now - 1_000_000, rx)])
+        out = ci.update([(now, rx)])
+        self.assertEqual(out.brakePressed, not moving and not 880 <= tick < 900)
+        if not stale_brake_status and not camera_missing:
+          self.assertTrue(out.canValid, tick)
+          self.assertFalse(out.canTimeout)
+        if camera and 1510 <= tick < 1550:
+          self.assertFalse(out.canValid)
+        if unavailable:
+          self.assertTrue(out.accFaulted)
+        physical_withdrawal = (moving or regen or unavailable or gas or unknown_gear or main_off or
+                               950 <= tick < 960 or camera and 1510 <= tick < 1550)
+        if physical_withdrawal:
+          self.assertFalse(out.brakeHoldActive)
+        elif (last_sent_hold and not normal_long and not 500 <= tick < 540 and out.canValid and
+              out.standstill and ci.CS.gm_auto_hold_forward):
+          self.assertTrue(out.brakeHoldActive, (tick, ci.CS.gm_auto_hold_engaged, out.cruiseState.available, ci.CS.gm_auto_hold_sources))
+          seen_feedback = True
+        common = events.create_common_events(out, out)
+        self.assertEqual(EventName.brakeHold in common.names, out.brakeHoldActive)
+        for message in rx:
+          native("rx", message, now // 1000)
+        libsafety_py.libsafety.safety_tick()
+        if alternative:
+          libsafety_py.libsafety.set_aol_test_heartbeat(True)
+          libsafety_py.libsafety.aol_set_host_request(3 if normal_long else 1)
+        self.assertEqual(bool(libsafety_py.libsafety.get_controls_allowed()), normal_long)
+        cc = structs.CarControl(enabled=normal_long, longActive=normal_long)
+        _, commands = ci.apply(cc.as_reader(), now)
+        for message in commands:
+          self.assertTrue(native("tx", message, now // 1000), (tick, message))
+        brakes = [message for message in commands if message[0] == 0x315]
+        self.assertLessEqual(len(brakes), 1)
+        if not brakes:
+          continue
+        mode = brakes[0][1][0] >> 4
+        hold = mode in (0xA, 0xB, 0xD) and not normal_long
+        last_sent_hold = hold
+        if normal_long:
+          seen_normal = True
+          self.assertTrue(any(message[0] == 0x2CB for message in commands))
+          self.assertFalse(ci.CC.gm_auto_hold_state.engaged)
+        if 900 <= tick < 910:
+          self.assertEqual(mode, 0xB)
+          seen_near_stop = True
+        if hold:
+          self.assertEqual(brakes[0][2], 0 if cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera or
+                           is_volt_gateway_alternate_brake(cp) else 2)
+          if cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM and not accelerator:
+            raw_brake = ((brakes[0][1][0] & 15) << 8) | brakes[0][1][1]
+            self.assertEqual((0x1000 - raw_brake) & 0xFFF, 80)
+          seen_hold = True
+          self.assertFalse(any(message[0] == 0x2CB for message in commands))
+          self.assertGreaterEqual(tick, 340)
+          self.assertFalse(regen or unavailable or gas or unknown_gear or main_off)
+          self.assertFalse(370 <= tick < 470)
+        if (moving or regen or unavailable or gas or unknown_gear or main_off or 370 <= tick < 470 or
+            525 <= tick < 540 or 950 <= tick < 960 or camera and 1510 <= tick < 1550):
+          self.assertFalse(hold)
+        if 290 <= tick < 300 or 309 <= tick < 320:
+          self.assertFalse(hold)
+      self.assertTrue(seen_hold and seen_near_stop and seen_normal and seen_feedback)
+      libsafety_py.libsafety.set_alternative_experience(0)
+      self.assertFalse(ci.CC.gm_auto_hold_state.engaged)
 
   def test_final_configuration_selection_both_alpha_modes(self):
     for alpha in (False, True):

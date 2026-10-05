@@ -11,11 +11,11 @@ from opendbc.safety.tests.libsafety import libsafety_py
 
 
 class TestVoltAutoHold(unittest.TestCase):
-  def init(self, alternate=False, extra=0, alternative=0):
+  def init(self, alternate=False, extra=0, alternative=0, word=None):
     self.safety = libsafety_py.libsafety
     self.alternate = alternate
     self.safety.set_alternative_experience(alternative)
-    word = int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_AUTO_HOLD)
+    word = int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_AUTO_HOLD) if word is None else word
     if alternate:
       word |= int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)
     self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word | extra), 0)
@@ -23,6 +23,8 @@ class TestVoltAutoHold(unittest.TestCase):
     self.time = 1
     self.counter = 0
     self.packer = CANPacker(DBC[CAR.CHEVROLET_VOLT][Bus.pt])
+    self.c9_brake = word in (0x4687, 0x4E87, 0x4087)
+    self.tx_bus = 0 if word in (0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087) or alternate else 2
 
   def tearDown(self):
     libsafety_py.libsafety.set_alternative_experience(0)
@@ -31,16 +33,17 @@ class TestVoltAutoHold(unittest.TestCase):
     return self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, bytes(data)))
 
   def observations(self, *, speed=100, gear=4, main=True, brake=False, gas=False, regen=False, acc=0, manual=False,
-                   brake_unavailable=False, status=True):
+                   brake_unavailable=False, status=True, healthy=True, c9_brake=None, be_brake=None, be_length=6):
     self.time += 100000
     self.safety.set_timer(self.time)
     c9 = bytearray(8)
     c9[3] = 0x20 if main else 0
+    c9[5] = int(brake if c9_brake is None else c9_brake)
     prndl = bytearray(8)
     prndl[3] = gear
     prndl[5] = 2 if manual else 0
-    pedal = bytearray(6)
-    pedal[1] = 10 if brake else 0
+    pedal = bytearray(be_length)
+    pedal[1] = 10 if (brake if be_brake is None else be_brake) else 0
     engine = bytearray(8)
     engine[1] = acc << 5
     engine[5] = int(gas)
@@ -55,7 +58,8 @@ class TestVoltAutoHold(unittest.TestCase):
                           (0x1C4, engine), (0xBD, [0x10 if regen else 0, 0, 0, 0, 0, 0, 0]), (0x34A, wheels)):
       self.assertTrue(self.rx(address, data), hex(address))
     self.safety.safety_tick()
-    self.assertTrue(self.safety.safety_config_valid())
+    if healthy:
+      self.assertTrue(self.safety.safety_config_valid())
 
   def dwell(self):
     for _ in range(32):
@@ -68,7 +72,7 @@ class TestVoltAutoHold(unittest.TestCase):
     raw = (0x1000 - brake) & 0xFFF
     checksum = (0x10000 - (mode << 12) - raw - counter) & 0xFFFF
     data = bytes([(mode << 4) | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, counter])
-    return libsafety_py.make_CANPacket(0x315, (0 if self.alternate else 2) if bus is None else bus, data)
+    return libsafety_py.make_CANPacket(0x315, self.tx_bus if bus is None else bus, data)
 
   def tx(self, brake=100, mode=0xB):
     accepted = self.safety.safety_tx_hook(self.frame(brake, mode))

@@ -1,8 +1,11 @@
 #pragma once
 
-// Exact gateway Volt inactive friction owner. This never grants controls_allowed.
+// Exact admitted Volt inactive friction owner. This never grants controls_allowed.
 static bool gm_volt_auto_hold = false;
 static bool gm_hold_alt_brake = false;
+static bool gm_hold_c9_brake = false;
+static bool gm_hold_extended_be = false;
+static uint8_t gm_hold_tx_bus = 2U;
 static bool gm_hold_seen[7];
 static uint32_t gm_hold_us[7];
 static bool gm_hold_brake_unavailable;
@@ -21,9 +24,12 @@ static bool gm_hold_regen_released;
 static bool gm_hold_counter_seen;
 static uint8_t gm_hold_counter;
 
-static void gm_hold_reset(bool enabled, bool alternate) {
+static void gm_hold_reset(bool enabled, bool alternate, bool c9_brake, bool extended_be, uint8_t tx_bus) {
   gm_volt_auto_hold = enabled;
   gm_hold_alt_brake = alternate;
+  gm_hold_c9_brake = c9_brake;
+  gm_hold_extended_be = extended_be;
+  gm_hold_tx_bus = tx_bus;
   for (uint8_t i = 0U; i < 7U; i++) { gm_hold_seen[i] = false; gm_hold_us[i] = 0U; }
   gm_hold_brake_unavailable = true;
   gm_hold_main = false; gm_hold_forward = false; gm_hold_gas = false;
@@ -55,13 +61,18 @@ static void gm_hold_rx(const CANPacket_t *msg) {
     int source = -1;
     if ((msg->addr == 0xC9U) && (GET_LEN(msg) == 8U)) {
       source = 0; gm_hold_main = GET_BIT(msg, 29U);
+      if (gm_hold_c9_brake) {
+        gm_hold_brake = GET_BIT(msg, 40U);
+        gm_hold_seen[2] = true; gm_hold_us[2] = now;
+      }
     } else if ((msg->addr == 0x1F5U) && (GET_LEN(msg) == 8U)) {
       source = 1;
       const uint8_t gear = msg->data[3] & 0xFU;
       // Physical forward gear remains valid in manumatic; never synthesize PRNDL.
       gm_hold_forward = (gear == 4U) || (gear == 6U) || ((gear >= 4U) && (gear <= 7U) && GET_BIT(msg, 41U));
       if (!gm_hold_forward) { gm_hold_drive_us = 0U; }
-    } else if ((msg->addr == (gm_hold_alt_brake ? 0xF1U : 0xBEU)) && (GET_LEN(msg) == 6U)) {
+    } else if (!gm_hold_c9_brake && (msg->addr == (gm_hold_alt_brake ? 0xF1U : 0xBEU)) &&
+               ((GET_LEN(msg) == 6U) || (gm_hold_extended_be && ((GET_LEN(msg) == 7U) || (GET_LEN(msg) == 8U))))) {
       source = 2; gm_hold_brake = msg->data[1] >= (gm_hold_alt_brake ? 6U : 8U);
     } else if ((msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
       source = 3; gm_hold_gas = msg->data[5] != 0U; gm_hold_acc = msg->data[1] >> 5;
@@ -101,7 +112,7 @@ static bool gm_hold_brake_tx(const CANPacket_t *msg, int brake) {
   const uint16_t expected = (uint16_t)(0x10000U - ((uint32_t)mode << 12) - raw_brake - counter);
   const uint16_t checksum = ((uint16_t)msg->data[2] << 8) | msg->data[3];
   const bool release = (brake == 0) && (mode == 1U);
-  const bool packet_valid = (msg->bus == (gm_hold_alt_brake ? 0U : 2U)) && (GET_LEN(msg) == 5U) &&
+  const bool packet_valid = (msg->bus == gm_hold_tx_bus) && (GET_LEN(msg) == 5U) &&
                             (checksum == expected) && ((msg->data[4] & 0xFCU) == 0U) &&
                             (release || !gm_hold_counter_seen || (counter == ((gm_hold_counter + 1U) & 3U)));
   const bool hold_mode = (((mode == 0xAU) || (mode == 0xBU)) && (gm_hold_acc != 4U)) || ((mode == 0xDU) && (gm_hold_acc == 4U));

@@ -3,7 +3,7 @@
 import math
 
 from opendbc.car.structs import CarParams
-from opendbc.car.gm.values import (control_flags, 
+from opendbc.car.gm.values import (control_flags,
   CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_pedal_profile,
   is_ordinary_ascm_profile, is_ordinary_camera_profile, is_ordinary_sdgm_profile, is_bolt_euv_longitudinal, is_volt_gateway_profile, is_volt_cc_profile,
   is_volt_ascm_longitudinal, is_volt_camera_stock, is_volt_camera_longitudinal,
@@ -18,6 +18,7 @@ GM_AOL_WORDS = frozenset((
   5, 7, 20, 0xBD, 0x9D, 0x19D, 0x1CD,
   0x205, 0x605, 0xA05, 0xE05, 0x4207, 0x4607, 0x4A07, 0x4E07,
   0x4004, 0xC004, 0x4084, 0xC084, 0x4007, 0x1005, 0x1405, 0x5007, 0x5407,
+  0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087,
   0xC110, 0xC111, 0xC120, 0xC121, 0xC130, 0xC131, 0xC140, 0xC141,
   0xC150, 0xC151, 0xC160, 0xC170, 0xC171, 0xC172, 0xC173, 0xC180, 0xC181, 0xC182, 0xC183, 0xC184, 0xC185, 0xC186, 0xC187,
 ))
@@ -65,7 +66,6 @@ def qualified_gm(cp) -> bool:
             int(cp.safetyConfigs[0].safetyParam) == int(GMSafetyFlags.HW_CAM | GMSafetyFlags.EV))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
-
 
 
 def lateral_request(cp, cc) -> bool:
