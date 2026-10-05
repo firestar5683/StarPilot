@@ -487,7 +487,7 @@ class ProjectionSession(Session):
     self.send(mode.channel, AV_SETUP_REQUEST, field(1, CODEC_H264_BP))
     setup = parse_fields(self.wait_for(mode.channel, AV_SETUP_RESPONSE))
     window = int(one(setup, 2, 0) or 0)
-    if one(setup, 1) != SETUP_STATUS_READY or not 1 <= window <= 32:
+    if one(setup, 1) != SETUP_STATUS_READY or window < 1:  # the window is capped to MAX_WINDOW below; MIB3 offers 100
       raise ValueError(f"Unsupported video setup response: {json_fields(setup)}")
     configs = setup.get(3, [])
     if configs and mode.config_index not in configs:

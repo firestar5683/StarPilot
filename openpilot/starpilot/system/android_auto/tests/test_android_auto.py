@@ -616,6 +616,13 @@ def test_car_that_stops_acking_times_out_at_the_new_limit(identity):
   end_session(session, hu)
 
 
+def test_session_accepts_a_large_video_window_and_caps_it(identity):
+  hu = FakeHeadUnit(identity, window=100)  # VW MIB3 offers 100
+  session = streaming_session(hu, identity)
+  assert session.window == ProjectionSession.MAX_WINDOW
+  end_session(session, hu)
+
+
 def test_session_authentication_rejected(identity):
   hu = FakeHeadUnit(identity, reject_auth=True)
   session = connect(hu, identity)
