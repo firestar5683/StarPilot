@@ -1485,8 +1485,10 @@ class StarMainLayout(MainLayout):
       self._native_onroad.close()
       raise
     self.page = StarShellPage(self.star, ShellMode.HOME, on_background_tap=self._on_background_tap)
-    self._large_panels[Destination.DEVICE]._scroller.add_widget(
+    device_scroller = self._large_panels[Destination.DEVICE]._scroller
+    device_scroller.add_widget(
       button_item("Galaxy", "OPEN", callback=self.star.galaxy_flow.open_large))
+    device_scroller._items.insert(0, device_scroller._items.pop())
     self.star.set_navigation(on_settings=lambda: self._set_current_layout(MainState.SETTINGS),
                              on_home=self._set_mode_for_state,
                              on_pairing=self._show_pairing,
