@@ -84,3 +84,38 @@ class TestLaneFeedback(unittest.TestCase):
           self.assertEqual(colors[index][3], int(renderer._lane_line_probs[index] * 255))
         for index in (0, 3):
           self.assertEqual(colors[index][3], int(renderer._lane_line_probs[index] * 255))
+
+
+class TestSteeringLimitFeedback(unittest.TestCase):
+  def test_actual_publish_tracks_aol_lateral_and_clears_inactive_feedback(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.cereal import log
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.selfdrive.controls.controlsd import Controls
+
+    for mode in ('angle', 'torque'):
+      with self.subTest(mode=mode), OpenpilotPrefix():
+        cp = interfaces[CAR.GENESIS_G70_2020].get_non_essential_params(CAR.GENESIS_G70_2020)
+        cp.steerControlType = mode
+        Params().put('CarParams', cp.to_bytes(), block=True)
+        controls = Controls()
+        command = messaging.new_message('carControl').carControl
+        command.actuators.steeringAngleDeg = 10.
+        command.actuators.torque = .5
+        lateral_log = (log.ControlsState.LateralAngleState if mode == 'angle' else log.ControlsState.LateralTorqueState).new_message()
+        for frame, (standard, lateral, limited) in enumerate(((False, True, True), (False, True, False), (True, False, True),
+                                                             (False, True, True), (False, False, True))):
+          messages = []
+          for service in ('carState', 'carOutput', 'selfdriveState'):
+            message = messaging.new_message(service, valid=True, logMonoTime=1_000_000_000 + frame * 10_000_000)
+            messages.append(message)
+          messages[0].carState.canValid = True
+          messages[1].carOutput.actuatorsOutput.steeringAngleDeg = 0. if limited else 10.
+          messages[1].carOutput.actuatorsOutput.torque = 0. if limited else .5
+          messages[2].selfdriveState.active = standard
+          controls.sm.update_msgs(1. + frame * .01, [message.as_reader() for message in messages])
+          command.latActive = lateral
+          controls.publish(command, lateral_log)
+          self.assertEqual(controls.steer_limited_by_safety, lateral and limited)
