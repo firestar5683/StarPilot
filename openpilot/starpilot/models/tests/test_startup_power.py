@@ -132,3 +132,31 @@ def test_paired_clocks_preserve_distinct_domains(monkeypatch):
   monkeypatch.setattr(startup.time, 'monotonic_ns', lambda: 20 * NS)
   monkeypatch.setattr(startup.time, 'clock_gettime_ns', lambda clock: 80 * NS)
   assert startup.paired_clocks_ns() == (20 * NS, 80 * NS)
+
+
+def test_load_timeout_reports_the_blocked_loader_without_restarting_it(monkeypatch):
+  import threading
+  from unittest.mock import Mock
+  from openpilot.starpilot.models import startup
+
+  entered, release = threading.Event(), threading.Event()
+  def blocked_gpu_load():
+    entered.set()
+    release.wait(5)
+
+  report = Mock()
+  monkeypatch.setattr(startup.cloudlog, 'event', report)
+  loader = threading.Thread(target=blocked_gpu_load)
+  loader.start()
+  try:
+    assert entered.wait(2)
+    startup.report_load_timeout(loader, 60.)
+    assert loader.is_alive()
+    args, kwargs = report.call_args
+    assert args == ('chestnut.load_timeout',)
+    assert kwargs['error'] and kwargs['timeout_s'] == 60.
+    assert 'blocked_gpu_load' in kwargs['loader_stack']
+  finally:
+    release.set()
+    loader.join(2)
+  assert not loader.is_alive()
