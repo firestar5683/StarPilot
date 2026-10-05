@@ -167,14 +167,14 @@ class TestLargeTouchDrift(unittest.TestCase):
     handler = features.FeatureInput(actions.append)
     row = features.FeatureRow('sample', 'Sample', 'Off', b'0', available=True)
     state = features.FeatureSettingsState(rows=(row, row), parked=True)
-    handler.press(1770, 310, state)
-    handler.move(1790, 333, state)
-    handler.release(1790, 333, state)
+    handler.press(1770, features.feature_row_top(state) + 102, state)
+    handler.move(1790, features.feature_row_top(state) + 125, state)
+    handler.release(1790, features.feature_row_top(state) + 125, state)
     self.assertEqual(len(actions), 1)
     actions.clear()
-    handler.press(1910, 310, state)
-    handler.move(1940, 333, state)
-    handler.release(1910, 310, state)
+    handler.press(1910, features.feature_row_top(state) + 102, state)
+    handler.move(1940, features.feature_row_top(state) + 125, state)
+    handler.release(1910, features.feature_row_top(state) + 102, state)
     self.assertEqual(actions, [])
 
   def test_feature_scroll_page_and_source_changes_cancel(self):
@@ -184,8 +184,8 @@ class TestLargeTouchDrift(unittest.TestCase):
                     replace(state, rows=(replace(row, source=b'1'), row))):
       actions = []
       handler = features.FeatureInput(actions.append)
-      handler.press(1770, 310, state)
-      handler.release(1790, 333, changed)
+      handler.press(1770, features.feature_row_top(state) + 102, state)
+      handler.release(1790, features.feature_row_top(state) + 125, changed)
       self.assertEqual(actions, [])
 
 

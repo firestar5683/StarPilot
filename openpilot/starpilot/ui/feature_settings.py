@@ -5,8 +5,9 @@ import pyray as rl
 from openpilot.starpilot.ui import clip
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureRow, FeatureSettingsState, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, boolean_value as _boolean_value,
-  FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
+  FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
   FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN, FEATURE_HEADER_HEIGHT,
+  feature_action_left, feature_row_top,
 )
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.settings_geometry import (
@@ -31,6 +32,7 @@ class FeatureSettingsView:
 
   def render(self, state: FeatureSettingsState) -> None:
     left = 520 if state.sidebar_expanded else 20
+    row_top = feature_row_top(state)
     shell = rl.Rectangle(left - 10, 10, 2160 - left, 1060)
     draw_rounded_fill(shell, PANEL_BG, radius_px=32)
     draw_rounded_stroke(shell, PANEL_BORDER, radius_px=32)
@@ -44,22 +46,22 @@ class FeatureSettingsView:
     if subtitle:
       top, _ = self.fonts.vertical_ink(subtitle, FontRole.NORMAL, DETAIL_SIZE)
       self.fonts.draw(subtitle, FontRole.NORMAL, DETAIL_SIZE, left + 55, 116 - top, TEXT_SECONDARY)
-    clip.begin_scissor_mode(left + 25, FEATURE_ROW_TOP, 2100 - left, FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT)
+    clip.begin_scissor_mode(left + 25, row_top, 2100 - left, FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT)
     try:
       for visible, row in enumerate(state.rows[state.scroll:state.scroll + FEATURE_VISIBLE_ROWS]):
-        y = FEATURE_ROW_TOP + visible * FEATURE_ROW_HEIGHT
+        y = row_top + visible * FEATURE_ROW_HEIGHT
         value = _boolean_value(row)
         heading = (bool(row.label) and not (row.key or row.page or row.value or row.reason or
-                                           row.choices or row.step or row.repair_value))
+                                           row.choices or row.step or row.repair_value or row.actions))
         if value is True and row.available:
           bounds = rl.Rectangle(left + 28, y + 2, 2098 - left, FEATURE_ROW_HEIGHT - 8)
           draw_rounded_fill(bounds, ACTIVE_ROW_BG, radius_px=12)
           draw_rounded_stroke(bounds, ACTIVE_ROW_BORDER, radius_px=12)
         rl.draw_line(left + 55, y + FEATURE_ROW_HEIGHT - 3, 2094, y + FEATURE_ROW_HEIGHT - 3, ROW_SEPARATOR)
-        has_control = bool(row.page or _confirmation(row) or row.available or value is not None)
-        width = (FEATURE_CONTROL_LEFT - 24 if has_control else 2094) - (left + 55)
+        has_control = bool(row.actions or row.page or _confirmation(row) or row.available or value is not None)
+        width = (feature_action_left(row) - 24 if has_control else 2094) - (left + 55)
         detail = row.value + (" " + row.unit if row.unit and row.value != "Auto" else "")
-        if value is not None or (row.available and not row.page and not _confirmation(row) and not row.repair_value):
+        if value is not None or (row.available and not row.actions and not row.page and not _confirmation(row) and not row.repair_value):
           detail = ""
         if row.page and detail in ("Saved settings", "Saved preferences", "Saved profiles"):
           detail = ""
@@ -78,7 +80,14 @@ class FeatureSettingsView:
           continue
         action = rl.Rectangle(FEATURE_CONTROL_LEFT, y + FEATURE_ACTION_MARGIN, FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT,
                               FEATURE_ROW_HEIGHT - 2 * FEATURE_ACTION_MARGIN)
-        if row.page:
+        if row.actions:
+          for index, (text, enabled) in enumerate(row.actions):
+            button = rl.Rectangle(feature_action_left(row) + index * (action.width + 16), action.y, action.width, action.height)
+            draw_rounded_fill(button, CONTROL_BG)
+            draw_rounded_stroke(button, CONTROL_BORDER)
+            self._center(self._elide(text, FontRole.MEDIUM, DETAIL_SIZE, button.width - 24), DETAIL_SIZE, button,
+                         TEXT_PRIMARY if row.available and enabled else TEXT_MUTED)
+        elif row.page:
           self._center("Open >", DETAIL_SIZE, action, TEXT_PRIMARY if row.available else TEXT_MUTED)
         elif _confirmation(row):
           if row.key in ("torque_adopt", "slc_adopt"):

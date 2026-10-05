@@ -223,6 +223,7 @@ class TogglesLayout(Widget):
         if result == DialogResult.CONFIRM:
           self._params.put_bool("ExperimentalMode", True, block=True)
           self._params.put_bool("ExperimentalModeConfirmed", True, block=True)
+          self._toggles["ExperimentalMode"].action_item.set_state(True)
         else:
           self._toggles["ExperimentalMode"].action_item.set_state(False)
         self._update_experimental_mode_icon()
@@ -233,8 +234,9 @@ class TogglesLayout(Widget):
       dlg = ConfirmDialog(content, tr("Enable"), rich=True, callback=confirm_callback)
       gui_app.push_widget(dlg)
     else:
-      self._update_experimental_mode_icon()
       self._params.put_bool("ExperimentalMode", state, block=True)
+      self._toggles["ExperimentalMode"].action_item.set_state(state)
+      self._update_experimental_mode_icon()
 
   def _toggle_callback(self, state: bool, param: str):
     if param == "IsMetric":
@@ -247,6 +249,7 @@ class TogglesLayout(Widget):
       return True
 
     self._params.put_bool(param, state, block=True)
+    self._toggles[param].action_item.set_state(state)
     if self._toggle_defs[param][3]:
       self._params.put_bool("OnroadCycleRequested", True, block=True)
     return True
@@ -274,3 +277,4 @@ class TogglesLayout(Widget):
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index, block=True)
+    self._long_personality_setting.action_item.set_selected_button(button_index)

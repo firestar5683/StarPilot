@@ -72,11 +72,13 @@ class BluetoothLarge(Widget):
     self._scroller.hide_event()
     super().hide_event()
 
-  def _render(self, rect):
+  def _update_state(self):
     for event in gui_app.mouse_events:
       if event.slot == 0:
         self._touch_held = event.left_down
     self._rebuild()
+
+  def _render(self, rect):
     self._scroller.render(rect)
 
   def _ready(self) -> bool:

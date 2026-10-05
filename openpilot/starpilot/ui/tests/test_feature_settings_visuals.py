@@ -10,7 +10,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui import clip, feature_settings as view, settings_geometry as geometry
 from openpilot.starpilot.ui.feature_settings_state import (
-  FeatureInput, FeatureRow, FeatureSettingsState, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, feature_scroll,
+  FeatureInput, FeatureRow, FeatureSettingsState, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, feature_scroll, feature_row_top,
 )
 from openpilot.starpilot.ui.presentation import FontRole, Profile
 
@@ -22,6 +22,34 @@ def fake_fonts():
 
 
 class FeatureVisualTests(unittest.TestCase):
+  def test_description_space_and_row_hit_targets_share_the_rendered_layout(self):
+    self.drawing()
+    rows = tuple(FeatureRow(str(index), "Setting", "", available=True, actions=(("OPEN", True),)) for index in range(5))
+    for expanded in (True, False):
+      for subtitle, expected_top in (("", 112), ("Panel description", 164)):
+        with self.subTest(expanded=expanded, subtitle=subtitle):
+          state = FeatureSettingsState(subtitle=subtitle, rows=rows, sidebar_expanded=expanded)
+          fonts = fake_fonts()
+          rl.begin_scissor_mode.reset_mock()
+          rl.draw_line.reset_mock()
+          view.FeatureSettingsView(fonts).render(state)
+          self.assertEqual(feature_row_top(state), expected_top)
+          self.assertEqual(rl.begin_scissor_mode.call_args.args[1], expected_top)
+          separators = [call for call in rl.draw_line.call_args_list if call.args[-1] == geometry.ROW_SEPARATOR]
+          for index, row in enumerate(rows):
+            y = expected_top + (index + .5) * FEATURE_ROW_HEIGHT
+            action = FeatureInput.target(1930, y, state)
+            self.assertEqual((action.kind, action.row), ("action", row))
+            self.assertEqual(separators[index].args[1], expected_top + (index + 1) * FEATURE_ROW_HEIGHT - 3)
+          self.assertIsNone(FeatureInput.target(1930, expected_top + 5 * FEATURE_ROW_HEIGHT, state))
+          gap = FeatureInput.target(1930, 108, state)
+          self.assertEqual(gap.kind if gap else None, "details" if subtitle else None)
+          self.assertEqual(FeatureInput.target(1930, 1015, state).kind, "scroll")
+          descriptions = [call for call in fonts.draw.call_args_list if call.args[0] == subtitle]
+          self.assertEqual(len(descriptions), int(bool(subtitle)))
+          if descriptions:
+            self.assertLess(descriptions[0].args[4] + 33, expected_top)
+
   def drawing(self):
     stack = ExitStack()
     self.addCleanup(stack.close)
@@ -121,7 +149,7 @@ class FeatureVisualTests(unittest.TestCase):
     label = next(call for call in fonts.draw.call_args_list if call.args[0].startswith("Long label"))
     self.assertLessEqual(fonts.measure(*label.args[:3]).width, 1149)
     subtitle = next(call for call in fonts.draw.call_args_list if call.args[0] == state.subtitle)
-    self.assertLess(subtitle.args[4] + 33, FEATURE_ROW_TOP)
+    self.assertLess(subtitle.args[4] + 33, feature_row_top(state))
     self.assertEqual(renderer._elide("Fits", FontRole.NORMAL, 27, 100), "Fits")
     renderer.render(FeatureSettingsState(rows=(FeatureRow("choice", "Choice", "Long value", available=True),)))
     selector = next(call for call in fonts.draw.call_args_list if call.args[0] == "Long value")

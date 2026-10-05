@@ -27,7 +27,9 @@ from openpilot.starpilot.lateral.torque_runtime import read_settings as read_tor
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, parse_document
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource, TorqueTuning
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, row_change, row_default
+from openpilot.starpilot.ui.feature_settings_state import (
+  FEATURE_ROW_TOP, FeatureInput, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, row_change, row_default,
+)
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui import feature_settings as large
 from openpilot.starpilot.ui.presentation import Profile
@@ -496,7 +498,7 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     source = Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes()
     self.assertEqual(parse_document(source)[str(self.cp.carFingerprint)].factor.mode, "custom")
     row = self.row("torque", "torque:factor:reset")
-    action = FeatureInput.target(1900, 285, FeatureSettingsState(page="torque", rows=(row,)))
+    action = FeatureInput.target(1900, FEATURE_ROW_TOP + 77, FeatureSettingsState(page="torque", rows=(row,)))
     self.assertIsNotNone(action)
     assert action is not None
     self.assertEqual(action.kind, "change")

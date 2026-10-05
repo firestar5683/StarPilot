@@ -11,7 +11,9 @@ from openpilot.common.params import Params
 from openpilot.starpilot.longitudinal.profile_document import migrate_profile_document
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, row_change
+from openpilot.starpilot.ui.feature_settings_state import (
+  FEATURE_ROW_TOP, feature_row_top, FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, row_change,
+)
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
 from opendbc.car.honda.interface import CarInterface as HondaCarInterface
@@ -57,16 +59,16 @@ class FeatureNavigationTests(unittest.TestCase):
     controller = FeatureInput(actions.append)
     source = FeatureRow("LaneCentering", "Enable Lane Centering", "Off", b"0", ("Off", "On"), available=True)
     state = FeatureSettingsState(page="lane", rows=(source,))
-    controller.press(1990, 300, state)
-    controller.move(1800, 300, state)
-    controller.release(1800, 300, state)
+    controller.press(1990, feature_row_top(state) + 92, state)
+    controller.move(1800, feature_row_top(state) + 92, state)
+    controller.release(1800, feature_row_top(state) + 92, state)
     self.assertFalse(actions)
-    controller.press(1990, 300, state)
+    controller.press(1990, feature_row_top(state) + 92, state)
     changed = FeatureSettingsState(page="lane", rows=(FeatureRow("LaneCentering", "Enable Lane Centering", "On", b"1", ("Off", "On"), available=True),))
-    controller.release(1990, 300, changed)
+    controller.release(1990, feature_row_top(state) + 92, changed)
     self.assertFalse(actions)
-    controller.press(1990, 300, state)
-    controller.release(1990, 300, state)
+    controller.press(1990, feature_row_top(state) + 92, state)
+    controller.release(1990, feature_row_top(state) + 92, state)
     self.assertEqual(row_change(actions[0].row).expected, b"0")
 
   def test_boolean_both_action_halves_preserve_requests_and_source_evidence(self):
@@ -79,8 +81,8 @@ class FeatureNavigationTests(unittest.TestCase):
           state = FeatureSettingsState(page="lane", rows=(row,))
           actions = []
           controller = FeatureInput(actions.append)
-          controller.press(x, 300, state)
-          controller.release(x, 300, state)
+          controller.press(x, feature_row_top(state) + 92, state)
+          controller.release(x, feature_row_top(state) + 92, state)
           self.assertEqual(len(actions), 1)
           request = row_change(actions[0].row, actions[0].direction)
           self.assertIsNotNone(request)
@@ -88,8 +90,8 @@ class FeatureNavigationTests(unittest.TestCase):
           actions.clear()
           unavailable = replace(row, available=False)
           state = replace(state, rows=(unavailable,))
-          controller.press(x, 300, state)
-          controller.release(x, 300, state)
+          controller.press(x, feature_row_top(state) + 92, state)
+          controller.release(x, feature_row_top(state) + 92, state)
           self.assertFalse(actions)
           self.assertIsNone(row_change(unavailable))
 
@@ -245,7 +247,7 @@ class FeatureNavigationTests(unittest.TestCase):
       owner = FeatureSettingsOwner(params, lambda _group: True, vehicle_fingerprint=lambda: "TOYOTA COROLLA TSS2")
       row = next(row for row in owner.snapshot("curve", parked=True, system_long=True,
                      lateral_context=True, metric=False).rows if row.key == "curve_reset")
-      self.assertEqual(FeatureInput.target(1900, 285, FeatureSettingsState(page="curve", rows=(row,))).kind, "reset")
+      self.assertEqual(FeatureInput.target(1900, FEATURE_ROW_TOP + 77, FeatureSettingsState(page="curve", rows=(row,))).kind, "reset")
       large = StarShellSession.__new__(StarShellSession)
       self.enterContext(patch.object(large, "feature_request", owner.apply))
       pushed = []

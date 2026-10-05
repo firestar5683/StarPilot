@@ -10,6 +10,7 @@ from openpilot.system.ui.widgets.network import NetworkUI
 class NetworkPanelBridge:
   def __init__(self, panel: NetworkUI, authority: Callable[[], bool]):
     self.panel = panel
+    self.presentation = panel
     self.authority = authority
     self.active = False
     self.generation = 0
@@ -37,7 +38,7 @@ class NetworkPanelBridge:
     token = self.generation
     self.panel.set_action_guard(lambda: self._allowed(token))
     try:
-      self.panel.show_event()
+      self.presentation.show_event()
     except Exception:
       self.leave()
       return False
@@ -51,14 +52,14 @@ class NetworkPanelBridge:
       return
     self.active = False
     self.generation += 1
-    self.panel.hide_event()
+    self.presentation.hide_event()
 
   def render(self, rect: rl.Rectangle) -> bool:
     if not self.active or not self._allowed(self.generation):
       self.leave()
       return False
     try:
-      self.panel.render(rect)
+      self.presentation.render(rect)
     except Exception:
       self.leave()
       return False

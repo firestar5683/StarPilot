@@ -204,9 +204,11 @@ class NativeSettingsTests(unittest.TestCase):
     self.pushed.assert_called_once_with('camera')
 
   def test_layout_reuses_native_panels_and_preserves_galaxy_entry(self):
+    toggles = NS(_scroller=NS(_items=[NS(title=str(index)) for index in range(9)]))
     panels = {PanelType.DEVICE: NS(instance=self.device), PanelType.SOFTWARE: NS(instance=self.software),
-              PanelType.DEVELOPER: NS(instance=Mock()), PanelType.NETWORK: NS(instance=Mock())}
+              PanelType.DEVELOPER: NS(instance=Mock()), PanelType.NETWORK: NS(instance=Mock()), PanelType.TOGGLES: NS(instance=toggles)}
     session = Mock()
+    session.fonts.profile = Profile.LARGE
 
     def parent_init(layout):
       layout._layouts = {runtime_app.MainState.SETTINGS: NS(_panels=panels), runtime_app.MainState.ONROAD: Mock()}
@@ -215,8 +217,13 @@ class NativeSettingsTests(unittest.TestCase):
          patch.object(runtime_app, 'validate_runtime_fonts'), patch.object(runtime_app, 'validate_runtime_assets'), \
          patch.object(runtime_app, 'StarShellSession', return_value=session):
       layout = runtime_app.StarMainLayout()
-    self.assertIs(layout._large_panels[Destination.DEVICE], self.device)
-    self.assertIs(layout._large_panels[Destination.SOFTWARE], self.software)
+    self.assertIs(layout._large_panels[Destination.DEVICE].panel, self.device)
+    self.assertIs(layout._large_panels[Destination.SOFTWARE].panel, self.software)
+    self.assertIs(layout._large_panels[Destination.TOGGLES].panel, toggles)
+    self.assertEqual(toggles._scroller._items[2].title, 'Safe Mode')
+    self.assertEqual(toggles._scroller._items[7].title, 'Right Hand Driving')
+    self.assertEqual(self.device._scroller._items[0].title, 'Galaxy')
+    self.assertIs(self.device._scroller._items[-1], self.device._power_off_btn)
     galaxy = next(item for item in self.device._scroller._items if item.title == 'Galaxy')
     galaxy.callback()
     session.galaxy_flow.open_large.assert_called_once_with()
