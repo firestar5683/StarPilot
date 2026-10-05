@@ -117,7 +117,7 @@ class _LocalHTTPServer(ThreadingHTTPServer):
     return request, address
 
   def process_request(self, request, client_address):
-    if not self._slots.acquire(blocking=False):
+    if not self._slots.acquire(timeout=self.REQUEST_TIMEOUT):
       self.shutdown_request(request)
       return
     try:
