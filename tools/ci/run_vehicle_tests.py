@@ -30,6 +30,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/car/ford/tests/test_aol_startup.py",
   "openpilot/starpilot/tests/test_ford_aol_intent.py",
   "opendbc_repo/opendbc/safety/tests/test_ford_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_ford_mach_e_extended.py",
   "opendbc_repo/opendbc/car/ford/tests/test_added_firmware_identity.py",
   "opendbc_repo/opendbc/car/ford/tests/test_required_source_health.py",
   "opendbc_repo/opendbc/car/ford/tests/test_blend_settings.py",

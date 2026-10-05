@@ -430,7 +430,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
         const float curvature = SAFETY_ABS(desired_curvature) / 50000.0F;
         const float path_angle = SAFETY_ABS(desired_path_angle) / 2000.0F;
         const float combined_accel = (curvature + (path_angle / SAFETY_MAX(speed, 1.0F))) * speed * speed;
-        violation |= !steer_control_enabled || !lateral_controls_allowed();
+        violation |= !steer_control_enabled || !controls_allowed;
         violation |= (speed < 3.0F) || (speed >= 8.8F);
         violation |= (SAFETY_ABS(desired_curvature) < 975) || (SAFETY_ABS(desired_path_angle) > 320);
         violation |= ((desired_curvature * desired_path_angle) <= 0) || (combined_accel > 2.5F);

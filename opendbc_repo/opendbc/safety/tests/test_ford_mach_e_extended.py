@@ -4,6 +4,7 @@ import unittest
 from opendbc.safety.tests import test_ford as ford
 from opendbc.car.structs import CarParams
 from opendbc.safety.tests.libsafety import libsafety_py
+from opendbc.safety.tests import test_ford_aol
 
 
 class TestFordMachEExtended(unittest.TestCase):
@@ -28,7 +29,6 @@ class TestFordMachEExtended(unittest.TestCase):
       raise AttributeError(name)
     return getattr(fixture, name)
 
-
   def announce(self, active=True, forbidden=False):
     msg = self._lkas_command_msg(0)
     msg[0].data[4] = (2 if active else 0) | int(forbidden)
@@ -39,8 +39,8 @@ class TestFordMachEExtended(unittest.TestCase):
     self._set_prev_desired_angle(curvature)
     self.safety.set_controls_allowed(True)
 
-  def command(self, enabled=True, curvature=0.0195, rate=0.0, angle=0.02, offset=0.0):
-    return self._lat_ctl_msg(enabled, offset, angle, curvature, rate)
+  def command(self, enabled=True, curvature=0.0195, rate=0.0, angle=0.02, offset=0.0, *, increment_timer=True):
+    return self._lat_ctl_msg(enabled, offset, angle, curvature, rate, increment_timer=increment_timer)
 
   def test_accepted_announcement_required_rejected_frame_cannot_grant(self):
     self.prepare()
@@ -110,6 +110,59 @@ class TestFordMachEExtended(unittest.TestCase):
         self.prepare()
         self.assertFalse(self._tx(self.command()))
 
+  def test_typed_aol_retains_curvature_without_path_angle(self):
+    for sign in (-1, 1):
+      with self.subTest(sign=sign):
+        self.setUp()
+        intent = test_ford_aol.TestFordAolDriverIntent()
+        intent.setUp()
+        intent.reset(self.SAFETY_PARAM)
+        intent.arm()
+        intent.pump(12, mask=1, speed=7.5, curvature=sign * .02)
+        self.assertTrue(self.safety.safety_config_valid())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertTrue(self.announce())
+        self._set_prev_desired_angle(sign * .02)
+        self.assertFalse(self._tx(self.command(curvature=sign * .02, angle=sign * .055, increment_timer=False)))
+        self._set_prev_desired_angle(sign * .02)
+        self.assertTrue(self._tx(self.command(curvature=sign * .02, angle=0., increment_timer=False)))
+
+  def test_accelerator_assist_requires_retained_full_engagement(self):
+    for sign in (-1, 1):
+      with self.subTest(sign=sign):
+        self.setUp()
+        intent = test_ford_aol.TestFordAolDriverIntent()
+        intent.setUp()
+        intent.reset(self.SAFETY_PARAM)
+        intent.arm()
+        intent.pump(12, mask=1, speed=7.5, curvature=sign * .02)
+        self.assertTrue(self.safety.safety_config_valid())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self._set_prev_desired_angle(sign * .02)
+        self._rx(self._pcm_status_msg(True))
+        self.assertTrue(self.announce())
+        for gas in (0., 25., 0.):
+          self._rx(self._user_gas_msg(gas))
+          self.assertTrue(self.safety.get_controls_allowed())
+          self.assertTrue(self._tx(self.command(curvature=sign * .02, angle=sign * .055, increment_timer=False)))
+
+        # Cruise returning to available revokes full engagement, while typed AOL keeps the lateral axis.
+        intent.rx('EngBrakeData', {'BpedDrvAppl_D_Actl': 1, 'CcStat_D_Actl': 3})
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.assertFalse(self._tx(self.command(curvature=sign * .02, angle=sign * .055, increment_timer=False)))
+        self._set_prev_desired_angle(sign * .02)
+        self.assertTrue(self._tx(self.command(curvature=sign * .02, angle=0., increment_timer=False)))
+
+        self._rx(self._pcm_status_msg(True))
+        self._rx(self._user_brake_msg(True))
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.assertFalse(self._tx(self.command(curvature=sign * .02, angle=sign * .055, increment_timer=False)))
+        self._set_prev_desired_angle(sign * .02)
+        self.assertTrue(self._tx(self.command(curvature=sign * .02, angle=0., increment_timer=False)))
+
 
 class TestFordMachEDebugLongExtended(TestFordMachEExtended):
   SAFETY_PARAM = 19
@@ -136,7 +189,6 @@ class TestFordMachELongReleaseDenied(unittest.TestCase):
     if fixture is None:
       raise AttributeError(name)
     return getattr(fixture, name)
-
 
   def test_long_profile_no_transmit_authority_in_release(self):
     self.safety.set_controls_allowed(True)

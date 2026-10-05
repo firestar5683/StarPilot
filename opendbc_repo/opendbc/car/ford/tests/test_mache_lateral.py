@@ -4,7 +4,7 @@ import pytest
 from opendbc.car import Bus, structs
 from opendbc.car.lateral import MAX_LATERAL_JERK
 from opendbc.can import CANParser
-from opendbc.car.ford.values import CAR, DBC, FordFlags
+from opendbc.car.ford.values import CAR, DBC, FordFlags, FordSafetyFlags
 from opendbc.car.ford.mache_lateral import MachELateralController, FordLateralResult, bounded_command, STEER_DT, MAX_LATERAL_ACCEL, qualified
 from opendbc.car.ford import mache_can as fordcan
 from opendbc.car.ford.tests.test_three_ports import params
@@ -22,10 +22,12 @@ def controller():
 
 
 def car_state(speed=15.0, accel=0.0, curvature=0.0, steering_pressed=False, steering_angle=0.0,
-              steering_torque=0.0, left_blinker=False, right_blinker=False):
+              steering_torque=0.0, left_blinker=False, right_blinker=False, gas_pressed=False, brake_pressed=False,
+              cruise_enabled=False):
   return SimpleNamespace(out=SimpleNamespace(vEgoRaw=speed, aEgo=accel, yawRate=-curvature*speed,
     steeringPressed=steering_pressed, steeringAngleDeg=steering_angle, steeringTorque=steering_torque,
-    leftBlinker=left_blinker, rightBlinker=right_blinker))
+    leftBlinker=left_blinker, rightBlinker=right_blinker, gasPressed=gas_pressed, brakePressed=brake_pressed,
+    cruiseState=SimpleNamespace(enabled=cruise_enabled)))
 
 
 @pytest.mark.parametrize("sign", (-1, 1))
@@ -91,7 +93,7 @@ def test_mach_e_driver_assistance_handoff_and_takeover(controller, monkeypatch, 
   controller.CP.flags = FordFlags.CANFD
   controller.curvature_last = sign * 0.020
   monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.030)
-  CC = SimpleNamespace(latActive=True)
+  CC = SimpleNamespace(latActive=True, enabled=True)
   actuators = SimpleNamespace(curvature=sign * 0.022)
   helping = car_state(speed=7.0, curvature=sign * 0.008, steering_pressed=True,
                       steering_angle=-sign * 50.0, steering_torque=-sign * 2.0,
@@ -145,10 +147,11 @@ def test_mach_e_driver_assistance_handoff_and_takeover(controller, monkeypatch, 
   (9.0, 1.60),
   (10.5, 1.60),
   (11.0, 1.60),
-  (12.0, 4.0 / 3.0),
-  (13.0, 16.0 / 15.0),
-  (14.0, 0.80),
+  (12.0, 1.60),
+  (13.0, 4.0 / 3.0),
+  (14.0, 16.0 / 15.0),
   (15.0, 0.80),
+  (16.0, 0.80),
 ))
 def test_mach_e_turn_in_lookahead_extra_fades_by_speed(controller, speed, expected):
   assert controller._turn_in_lookahead_extra(speed) == pytest.approx(expected)
@@ -303,3 +306,94 @@ def test_real_offset_cp_keeps_owner_and_invalid_extended_cp_never_falls_back_act
   frame = next(data for addr, data, _ in frames if addr == 0x3d6)
   assert frame[0] >> 4 & 7 == 0
   assert actual.curvature == 0
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_real_controller_gas_permission_loss_withdraws_path_only(sign):
+  cp = params(CAR.FORD_MUSTANG_MACH_E_MK1)
+  owner = CarController(DBC[cp.carFingerprint], cp)
+  state = CarState(cp)
+  state.update(state.get_can_parsers(cp))
+  control = structs.CarControl(latActive=True, enabled=True)
+  control.actuators.curvature = sign * .03
+  states, healthy = [SimpleNamespace(safetyModel=structs.CarParams.SafetyModel.ford, controlsAllowed=True,
+                                    safetyParam=FordSafetyFlags.CANFD | FordSafetyFlags.MACH_E_EXTENDED)], True
+  model = SimpleNamespace(orientationRate=SimpleNamespace(z=[sign * .28] * 33),
+                          meta=SimpleNamespace(laneChangeState=0, laneChangeDirection=0))
+  owner.manual_turn_inputs = SimpleNamespace(update=lambda: None, apply_blend_settings=lambda _: None, enabled=True,
+    lateral_snapshot=lambda _: (model, tuple(i*.1 for i in range(33)), .2, True),
+    assist_permission=lambda: (states, healthy))
+  parser = CANParser(DBC[cp.carFingerprint][Bus.pt], [('LateralMotionControl2', 20)], owner.CAN.main)
+  out = structs.CarState(vEgoRaw=7., yawRate=-sign * .049)
+  out.cruiseState.enabled = True
+  state.out = out.as_reader()
+  # First production frame announces the extension; subsequent commands run the actual demand and envelope.
+  owner.update(control.as_reader(), state, 0)
+  owner.mache_lateral.curvature_last = sign * .02
+  for tick, (gas, allowed, valid, enabled, brake, cruise) in enumerate((
+    (False, True, True, True, False, True), (True, True, True, True, False, True),
+    (False, True, True, True, False, True), (True, False, True, True, False, True),
+    (True, True, True, True, False, True), (True, True, False, True, False, True),
+    (True, True, True, True, False, False),
+    (False, True, True, False, False, True), (False, True, True, True, True, True),
+  ), 1):
+    out.gasPressed, out.brakePressed = gas, brake
+    out.cruiseState.enabled = cruise
+    state.out = out.as_reader()
+    control.enabled = enabled
+    states[0].controlsAllowed, healthy = allowed, valid
+    owner.frame = tick * 5
+    _, frames = owner.update(control.as_reader(), state, tick * 50_000_000)
+    parser.update([(tick * 50_000_000, frames)])
+    fields = parser.vl['LateralMotionControl2']
+    permitted = enabled and not brake and (not gas or (cruise and allowed and valid))
+    assert fields['LatCtl_D2_Rq'] == 1
+    assert fields['LatCtlCurv_No_Actl'] == pytest.approx(-sign * .02, abs=1.01e-5)
+    assert (fields['LatCtlPath_An_Actl'] != 0.) == permitted
+    assert (owner.mache_lateral.path_angle_last != 0.) == permitted
+  owner.manual_turn_inputs = None
+  out.gasPressed, out.brakePressed, control.enabled = True, False, True
+  state.out = out.as_reader()
+  owner.frame = 50
+  owner.update(control.as_reader(), state, 500_000_000)
+  assert not owner.mache_lateral.assist_engagement_retained
+  assert owner.mache_lateral.path_angle_last == 0.
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_real_controller_recovers_opposite_curve_after_continuous_agreement(sign):
+  cp = params(CAR.FORD_MUSTANG_MACH_E_MK1)
+  owner = CarController(DBC[cp.carFingerprint], cp)
+  state = CarState(cp)
+  state.update(state.get_can_parsers(cp))
+  control = structs.CarControl(latActive=True, enabled=True)
+  control.actuators.curvature = sign * .006
+  model = SimpleNamespace(orientationRate=SimpleNamespace(z=[0.] * 33),
+                          meta=SimpleNamespace(laneChangeState=0, laneChangeDirection=0))
+  owner.manual_turn_inputs = SimpleNamespace(update=lambda: None, apply_blend_settings=lambda _: None, enabled=True,
+    lateral_snapshot=lambda _: (model, tuple(i*.1 for i in range(33)), .2, True))
+  out = structs.CarState(vEgoRaw=9.5, yawRate=-sign * .038, steeringPressed=True,
+                         steeringAngleDeg=-sign * 30., steeringTorque=-sign * 2.,
+                         leftBlinker=sign < 0, rightBlinker=sign > 0)
+  state.out = out.as_reader()
+  owner.update(control.as_reader(), state, 0)
+  owner.frame = 5
+  owner.update(control.as_reader(), state, 50_000_000)
+  assert owner.mache_lateral.manual_turn_latched
+  out.yawRate, out.steeringAngleDeg, out.steeringTorque = sign * .038, sign * 20., sign * 2.
+  out.leftBlinker = out.rightBlinker = False
+  state.out = out.as_reader()
+  control.actuators.curvature = -sign * .006
+  model.orientationRate.z = [-sign * .095] * 33
+  # An opposing driver torque after four agreeing frames must restart the full dwell.
+  for tick, (torque, recovered) in enumerate([(2., False)] * 4 + [(-2., False)] + [(2., False)] * 4 + [(2., True)], 1):
+    out.steeringTorque = sign * torque
+    state.out = out.as_reader()
+    owner.frame = (tick + 1) * 5
+    actual, frames = owner.update(control.as_reader(), state, (tick + 1) * 50_000_000)
+    active = next(data for address, data, _ in frames if address == 0x3d6)[0] >> 4 & 7
+    assert bool(active) == recovered
+    assert owner.mache_lateral.path_angle_last == 0.
+    if recovered:
+      assert -sign * actual.curvature > 0.
+      assert not owner.mache_lateral.manual_turn_latched

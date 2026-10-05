@@ -51,7 +51,7 @@ class TestFordAolDriverIntent(unittest.TestCase):
     address, data, bus = self.packer.make_can_msg(name, 0, values)
     self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data)))
 
-  def pump(self, count, *, main=3, tja=False, gear=3, eps=0, mask=0, heartbeat=True):
+  def pump(self, count, *, main=3, tja=False, gear=3, eps=0, mask=0, heartbeat=True, speed=10., curvature=0.):
     gear_name, gear_signal = ('TransGearData', 'GearLvrPos_D_Actl') if self.word == 8 else (
       ('Gear_Shift_by_Wire_FD1', 'TrnRng_D_RqGsm') if self.word == 10 else ('PowertrainData_10', 'TrnRng_D_Rq'))
     for _ in range(count):
@@ -59,9 +59,9 @@ class TestFordAolDriverIntent(unittest.TestCase):
       self.safety.set_timer(1_000_000 + self.tick * 10_000)
       self.safety.set_aol_test_heartbeat(heartbeat)
       values = (
-        ('BrakeSysFeatures', 50, {'Veh_V_ActlBrk': 36, 'VehVActlBrk_D_Qf': 3, 'VehVActlBrk_No_Cnt': (self.tick // 2) % 16}),
-        ('EngVehicleSpThrottle2', 50, {'Veh_V_ActlEng': 36, 'VehVActlEng_D_Qf': 3}),
-        ('Yaw_Data_FD1', 100, {'VehYaw_W_Actl': 0, 'VehYawWActl_D_Qf': 3, 'VehRollYaw_No_Cnt': self.tick % 256}),
+        ('BrakeSysFeatures', 50, {'Veh_V_ActlBrk': speed * 3.6, 'VehVActlBrk_D_Qf': 3, 'VehVActlBrk_No_Cnt': (self.tick // 2) % 16}),
+        ('EngVehicleSpThrottle2', 50, {'Veh_V_ActlEng': speed * 3.6, 'VehVActlEng_D_Qf': 3}),
+        ('Yaw_Data_FD1', 100, {'VehYaw_W_Actl': curvature * speed, 'VehYawWActl_D_Qf': 3, 'VehRollYaw_No_Cnt': self.tick % 256}),
         ('EngBrakeData', 10, {'BpedDrvAppl_D_Actl': 1, 'CcStat_D_Actl': main}),
         ('EngVehicleSpThrottle', 100, {'ApedPos_Pc_ActlArb': 0}),
         ('DesiredTorqBrk', 50, {'VehStop_D_Stat': 0}),
@@ -72,7 +72,7 @@ class TestFordAolDriverIntent(unittest.TestCase):
       for name, hz, fields in values:
         if self.tick * hz // 100 != (self.tick - 1) * hz // 100:
           self.rx(name, fields)
-      if self.word in (10, 12, 18, 66) and self.tick * 30 // 100 != (self.tick - 1) * 30 // 100:
+      if (self.word & ~1) in (10, 12, 18, 66) and self.tick * 30 // 100 != (self.tick - 1) * 30 // 100:
         self.rx('Lane_Assist_Data3_FD1', {'LatCtlSte_D_Stat': 1, 'LaActAvail_D_Actl': 3, 'LaActDeny_B_Actl': 0})
       self.safety.aol_set_host_request(mask)
       self.safety.aol_get_permission_mask()
