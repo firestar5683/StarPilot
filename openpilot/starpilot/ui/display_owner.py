@@ -1,9 +1,10 @@
 """Parked, source-bound editor for the opt-in native display preferences."""
 
 from collections.abc import Callable
+from dataclasses import replace
 import math
 
-from openpilot.starpilot.ui.display_preferences import AUTO, BRIGHTNESS, KEYS, MASTER, read_choice
+from openpilot.starpilot.ui.display_preferences import AUTO, BRIGHTNESS, KEYS, MASTER, default_value, read_choice
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, FeatureSettingsState
 from openpilot.starpilot.ui.presentation import Profile
 
@@ -78,6 +79,8 @@ class DisplayOwner:
         rows.append(FeatureRow(AUTO_PREFIX + key, "Use Auto " + LABELS[key], "Fixed level saved",
                                source=choice.raw, available=editable,
                                repair_value="Auto", dependencies=((MASTER, master.raw),)))
+    defaults = {key: ('Off' if key == MASTER else 'Auto' if key in BRIGHTNESS else str(default_value(key, large=large))) for key in KEYS}
+    rows = tuple(replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows)
     return FeatureSettingsState(page="display", title="Display", subtitle="Saved brightness and interaction timing.",
                                 rows=tuple(rows), parked=parked)
 

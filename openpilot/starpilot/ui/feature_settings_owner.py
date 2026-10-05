@@ -113,7 +113,9 @@ class FeatureSettingsOwner:
   def __init__(self, params, authority: Callable[[str], bool], *, vehicle_fingerprint: Callable[[], str | None],
                vehicle_params: Callable[[], object | None] | None = None,
                vision_development: Callable[[], bool] | None = None,
-               show_cruise_intervals: bool = False):
+               show_cruise_intervals: bool = False,
+               configuration_longitudinal: Callable[[], bool] = lambda: False,
+               configuration_vehicle: Callable[[], bool] = lambda: False):
     self.params = params
     self._snapshot_reads: ContextVar[dict[tuple[str, int], tuple[bytes | None, bool]] | None] = ContextVar(
       "feature_snapshot_reads", default=None)
@@ -123,16 +125,32 @@ class FeatureSettingsOwner:
     self._snapshot_vehicle: ContextVar[tuple[Any] | None] = ContextVar("feature_snapshot_vehicle", default=None)
     self.vision_development = vision_development or (lambda: False)
     self.show_cruise_intervals = show_cruise_intervals
+    self.configuration_longitudinal = configuration_longitudinal
+    self.configuration_vehicle = configuration_vehicle
     self.torque = TorqueFeature(self)
     self.controller = ControllerFeature(self)
     self.slc_offsets = SlcOffsetOwner(params, lambda: self.authority("slc"), self.vehicle_params,
-                                      repair_parked=lambda: self.authority("parked_preferences"))
+                                      repair_parked=lambda: self.authority("parked_preferences"),
+                                      configuration_longitudinal=self.configuration_longitudinal)
     self.long_profiles = LongProfileFeature(self)
     self.output_maximum = OutputMaximumFeature(self)
     self.traffic_profiles = TrafficFeature(self)
-    self.lane_changes = LaneChangeFeature(params, authority, vehicle_fingerprint, self.vehicle_params)
+    self.lane_changes = LaneChangeFeature(params, authority, vehicle_fingerprint, self.vehicle_params,
+                                          configuration_longitudinal=self.configuration_longitudinal)
     self.conditional = ConditionalFeature(self)
     self.wheel = WheelFeature(self)
+
+  def longitudinal_available(self) -> bool:
+    cp = self.vehicle_params()
+    return bool(cp is not None and (cp.openpilotLongitudinalControl or self.configuration_longitudinal()))
+
+  def aol_settings_policy(self, cp):
+    if self.configuration_vehicle():
+      from openpilot.starpilot.car.hyundai.settings import configuration_wheel_policy
+      configured = configuration_wheel_policy(cp)
+      if configured is not None:
+        return configured
+    return aol_policy_for(cp)
 
   def _capability(self, group: str) -> tuple | None:
     cp = self.vehicle_params()
@@ -145,7 +163,7 @@ class FeatureSettingsOwner:
         return (str(cp.carFingerprint), str(cp.brand), str(cp.steerControlType), str(cp.lateralTuning.which()),
                 bool(cp.dashcamOnly), float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction),
                 str(cp.carVin) if getattr(cp, "carVin", None) else None)
-      if (group in ("aol", "aol_wheel") and aol_policy_for(cp).settings_supported and
+      if (group in ("aol", "aol_wheel") and self.aol_settings_policy(cp).settings_supported and
           not cp.passive and not cp.dashcamOnly and not cp.notCar):
         return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
                 tuple((str(config.safetyModel), int(config.safetyParam)) for config in cp.safetyConfigs))
@@ -255,10 +273,10 @@ class FeatureSettingsOwner:
   def _cruise_capability(self) -> tuple | None:
     cp = self.vehicle_params()
     try:
-      if (cp is None or not cp.carFingerprint or not cp.openpilotLongitudinalControl or cp.pcmCruise or
+      if (cp is None or not cp.carFingerprint or not self.longitudinal_available() or (cp.pcmCruise and not self.configuration_longitudinal()) or
           cp.notCar or cp.passive or cp.dashcamOnly):
         return None
-      return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
+      return (str(cp.carFingerprint), self.longitudinal_available(), bool(cp.pcmCruise and not self.configuration_longitudinal()),
               bool(cp.notCar), bool(cp.passive), bool(cp.dashcamOnly))
     except (AttributeError, TypeError, ValueError):
       return None
@@ -307,7 +325,7 @@ class FeatureSettingsOwner:
                              reason="Invalid saved value or units" if not valid or not unit_valid else
                                     "Used when StarPilot controls cruise speed" if allowed else reason,
                              capability=capability, dependencies=(("IsMetric", unit_raw),),
-                             display_unit=unit if unit_valid else ""))
+                             display_unit=unit if unit_valid else "", default_value=str(default)))
     return rows
 
   def _apply_cruise(self, request: FeatureSettingsRequest) -> bool:
@@ -427,6 +445,7 @@ class FeatureSettingsOwner:
     value, raw, valid = self._value(key)
     return FeatureRow(key, label, value if value not in ("0", "1") else ("On" if value == "1" else "Off"), raw,
                       ("Off", "On") if valid and value in ("0", "1") else (), available=allowed and valid and value in ("0", "1"),
+                      default_value="On" if self._default(key) == "1" else "Off",
                       reason="Invalid saved value" if not valid or value not in ("0", "1") else
                       reason if allowed else "Unavailable with the current vehicle or feature settings")
 
@@ -439,10 +458,33 @@ class FeatureSettingsOwner:
     except ValueError:
       valid = False
       number = 0.0
+    try:
+      default = float(self._default(key))
+      default_value = str(round(default * scale, 3)) if math.isfinite(default) and low <= default <= high else None
+    except (ValueError, TypeError, UnknownKeyName):
+      default_value = None
     return FeatureRow(key, label, str(round(number * scale, 3)) if valid else f"Saved {value}", raw,
                       step=step * scale if valid else 0.0, minimum=low * scale, maximum=high * scale,
                       unit=unit or stored_unit, available=allowed and valid,
+                      default_value=default_value,
                       reason="Invalid saved value" if not valid else "" if allowed else "Unavailable with the current vehicle or feature settings")
+
+  def _with_default(self, row: FeatureRow) -> FeatureRow:
+    if row.default_value is not None or not row.key or not (row.choices or row.step):
+      return row
+    try:
+      value = self._default(row.key)
+      if row.key in (SLC_PRIORITY, SLC_SECONDARY) and value not in (("Dashboard", "Vision") if self.vision_development() else ("Dashboard",)):
+        return row
+      if value in ("0", "1") and row.choices == ("Off", "On"):
+        value = "On" if value == "1" else "Off"
+      if row.choices and value not in row.choices or not value:
+        return row
+      if row.step and not row.minimum <= float(value) <= row.maximum:
+        return row
+      return replace(row, default_value=value)
+    except (ValueError, TypeError, UnknownKeyName):
+      return row
 
   def _document(self) -> tuple[dict | None, bytes | None, bool]:
     saved = read_document_value(self.params)
@@ -541,7 +583,7 @@ class FeatureSettingsOwner:
                              "Compensates acceleration and braking for road grade. Applies after the next startup")
         rows.append(replace(row, available=row.available and self._readable("LongPitch"), capability=pitch_capability))
       cp = self.vehicle_params()
-      policy = aol_policy_for(cp)
+      policy = self.aol_settings_policy(cp)
       capability = self._capability("aol")
       if policy.paddle_pause:
         nostalgia, source, valid = self._value("NostalgiaMode")
@@ -625,7 +667,7 @@ class FeatureSettingsOwner:
       title = "Always On Lateral"
       capability = self._capability("aol")
       vehicle_cp = self.vehicle_params()
-      policy = aol_policy_for(vehicle_cp)
+      policy = self.aol_settings_policy(vehicle_cp)
       pending = policy.fixed_cruise_buttons and not policy.runtime_supported
       threshold, threshold_valid, canonical, legacy = self._aol_threshold()
       units, _, unit_valid = self._value("IsMetric")
@@ -654,7 +696,7 @@ class FeatureSettingsOwner:
                              capability=capability,
                              dependencies=(("IsMetric", unit_raw), (AOL_LEGACY_THRESHOLD, legacy),
                                            ("AlwaysOnLateral", self._raw("AlwaysOnLateral"))), display_unit=unit if unit_valid else "",
-                             repair_value="0" if not threshold_valid and unit_valid else ""))
+                             repair_value="0" if not threshold_valid and unit_valid else "", default_value="0"))
     elif page == FeaturePage.WHEEL:
       title = "Wheel Controls"
       rows.extend(self.wheel.rows())
@@ -700,7 +742,8 @@ class FeatureSettingsOwner:
       fallback, raw, valid = self._value(SLC_FALLBACK)
       rows.append(FeatureRow(SLC_FALLBACK, "Previous accepted limit", "On" if fallback == "2" else
                              "Off (saved mode 0 or 1)" if fallback in ("0", "1") else "Invalid saved value", raw,
-                             ("Off", "On") if valid and fallback in ("0", "1", "2") else (), available=allowed and valid and fallback in ("0", "1", "2")))
+                             ("Off", "On") if valid and fallback in ("0", "1", "2") else (),
+                             available=allowed and valid and fallback in ("0", "1", "2"), default_value="On"))
       rows.extend(offset_rows)
       title = "Speed Limit Controller"
     elif page == FeaturePage.LANE:
@@ -755,7 +798,8 @@ class FeatureSettingsOwner:
                                preset_label(selected) if valid else 'Invalid document', raw,
                                tuple(preset_label(choice) for choice in choices) if valid else (),
                                available=allowed and valid,
-                               reason='Personalities set to Selected Profile follow this choice; explicit overrides stay unchanged.'))
+                               reason='Personalities set to Selected Profile follow this choice; explicit overrides stay unchanged.',
+                               default_value=preset_label('dom_default' if category == 'acceleration' else DEFAULT_DECELERATION_PROFILE)))
       health = read_profile_health(self.params)
       master = health.values["CustomPersonalities"]
       master_row = self._bool_row("CustomPersonalities", "Custom Following and Jerk",
@@ -821,9 +865,25 @@ class FeatureSettingsOwner:
                    if seed_from_named_acceleration and capability is None else PRESETS[category])
         rows.append(FeatureRow(f"{LONG_PREFIX}{name}:{category}", "Preset", preset_label(config["preset"]) if valid else "Invalid document",
                                raw, tuple(preset_label(choice) for choice in choices) if valid else (),
-                               available=allowed, capability=capability, dependencies=traffic_dependencies, reason=CATEGORY_HELP[category]))
+                               available=allowed, capability=capability, dependencies=traffic_dependencies, reason=CATEGORY_HELP[category],
+                               default_value=preset_label(default_personality_profiles(False, False)[name][category]["preset"])))
         if config["preset"] == "custom" and valid:
           curve = config["curve"]
+          cp = self.vehicle_params()
+          ev = cp is not None and cp.transmissionType == car.CarParams.TransmissionType.direct
+          truck = is_truck_fingerprint(self.vehicle_fingerprint() or "") and not ev
+          if name != "traffic":
+            default_curve = personality_reference_curves(ev, truck)[name][category]
+          elif category == "acceleration":
+            default_curve = [interpolate_accel_profile(speed * MPH_TO_MPS, A_CRUISE_MAX_VALS_TRAFFIC_ALL)
+                             for speed in ACCELERATION_SPEEDS_MPH]
+          elif category == "braking":
+            default_curve = [TRAFFIC_CRUISE_BRAKE_MAGNITUDE] * len(ACCELERATION_SPEEDS_MPH)
+          else:
+            low = float(self.params.get_default_value("TrafficFollow"))
+            high = float(self.params.get_default_value("RelaxedFollow"))
+            default_curve = [low + (high - low) * min(speed * MPH_TO_MPS / 25.0, 1.0)
+                             for speed in FOLLOWING_SPEEDS_MPH]
           for index, speed in enumerate(range(0, 91, 10)):
             low, high = ((0.35, CURVE_BOUNDS[category][1]) if name == "traffic" and category == "braking" else
                          CURVE_BOUNDS[category])
@@ -835,7 +895,8 @@ class FeatureSettingsOwner:
                                    reason="Following time; higher values leave more space" if category == "following" else
                                           "Acceleration limit; higher values allow stronger acceleration" if category == "acceleration" else
                                           "Braking magnitude; higher values allow stronger braking",
-                                   capability=capability, dependencies=traffic_dependencies))
+                                   capability=capability, dependencies=traffic_dependencies,
+                                   default_value=str(round(max(low, min(high, default_curve[index])), 4))))
     fingerprint = self.vehicle_fingerprint()
     rows = [replace(row, vehicle_fingerprint=None if row.key in (PLANNER_SELECTION_KEY, LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY,
                                                               "ShowSpeedLimits", "AlwaysAllowUploads") or
@@ -855,7 +916,7 @@ class FeatureSettingsOwner:
         if page == FeaturePage.LANE_CHANGE else
         "Saved preferences. Some changes take effect after the next restart."
     )
-    return FeatureSettingsState(page, title, subtitle, tuple(rows), parked)
+    return FeatureSettingsState(page, title, subtitle, tuple(self._with_default(row) for row in rows), parked)
 
   def apply(self, request: FeatureSettingsRequest) -> bool:
     # A request may arrive through a callback during assembly. Its compare and
@@ -875,7 +936,7 @@ class FeatureSettingsOwner:
     if key == OUTPUT_MAX_KEY:
       return self.output_maximum.apply(request)
     if key == "ReverseCruise":
-      return self._apply_reverse_cruise(request)
+      return self._apply_reverse_cruise(replace(request, confirmation=False) if request.confirmation and request.value == "Off" else request)
     if key == "TurnAssist":
       return self._apply_turn_assist(request)
     if key == 'LateralControllerSelection':
@@ -1033,7 +1094,7 @@ class FeatureSettingsOwner:
             return False
         elif key == "NostalgiaMode":
           cp = self.vehicle_params()
-          if not aol_policy_for(cp).paddle_pause:
+          if not self.aol_settings_policy(cp).paddle_pause:
             return False
         elif request.value == "On" and not self._aol_threshold()[1]:
           return False
@@ -1049,7 +1110,7 @@ class FeatureSettingsOwner:
         encoded = mps
       elif key in AOL_BUTTONS:
         cp = self.vehicle_params()
-        policy = aol_policy_for(cp)
+        policy = self.aol_settings_policy(cp)
         if (request.value not in AOL_ACTIONS or
             policy.fixed_cruise_buttons and key not in AOL_DISTANCE_BUTTONS or
             policy.distance_pause_only and request.value not in AOL_PAUSE_ACTIONS or
@@ -1176,7 +1237,7 @@ class FeatureSettingsOwner:
         if source_key in AOL_DISTANCE_BUTTONS:
           def authorized_distance() -> bool:
             cp = self.vehicle_params()
-            policy = aol_policy_for(cp)
+            policy = self.aol_settings_policy(cp)
             return (self.vehicle_fingerprint() == request.vehicle_fingerprint and self.authority("aol_wheel") and
                     request.capability is not None and request.capability == self._capability("aol") and
                     policy.settings_supported and

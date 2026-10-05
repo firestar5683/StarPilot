@@ -111,6 +111,7 @@ class TorqueFeature:
       rows.append(FeatureRow(f"torque:{field}:value", "Lat Accel" if field == "factor" else "Friction", displayed, raw,
                              step=0.05 if field == "factor" else 0.01, minimum=low, maximum=high,
                              available=allowed, capability=capability, dependencies=dependencies,
+                             default_value="Vehicle/learned", default_key=f"torque:{field}:mode",
                              reason="Supplied tune; edits saved for the next drive" if active is None else "Custom value; saved for the next drive"))
       rows.append(FeatureRow(f"torque:{field}:reset", label + " — Reset to Default", "", raw,
                              available=allowed and active is not None, repair_value="Reset",

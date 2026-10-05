@@ -173,6 +173,17 @@ export class SettingsFeed {
     }
   }
 
+  async resetDefault(row) {
+    if (!this.active || !this.data?.view || !this.data.rows?.[row]?.resetAvailable ||
+        this.pending || (this.request && !this.polling)) return
+    const data = await this.run((signal) => post(this.fetcher, "./api/settings/reset-default",
+      { view: this.data.view, row }, signal))
+    if (data) {
+      this.pending = data
+      this.publish({ status: "ready", data: this.data, pending: data, error: "" })
+    }
+  }
+
   async previewValue(row, value) {
     if (!this.active || !this.data?.view || this.pending || (this.request && !this.polling)) return
     this.publish({ status: "updating", data: this.data, pending: null, error: "" })
@@ -368,7 +379,7 @@ export const SettingsPage = {
             <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
             <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
               :disabled="busy || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
-              @open="open" @review="(index, direction) => feed.preview(index, direction)" />
+              @open="open" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
             <div v-if="!visibleRows.length" class="gx-empty">No matching settings.</div>
           </section>
           <SoundPacks v-if="state.data.page === 'sounds'" :unauthorized="unauthorized" :disabled="busy" @installed="refreshSoundChoices" />

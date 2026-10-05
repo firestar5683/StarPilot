@@ -1364,6 +1364,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.connection.settimeout(old_timeout)
         return
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+                      '/api/settings/reset-default',
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
@@ -2281,7 +2282,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(401, {'error': 'Sign in to Galaxy'})
           return
         try:
-          if path == '/api/settings/preview':
+          if path == '/api/settings/reset-default':
+            if not isinstance(payload, dict) or set(payload) != {'view', 'row'} or \
+               not isinstance(payload['view'], str) or len(payload['view']) > 64 or type(payload['row']) is not int:
+              raise ValueError('Invalid default reset request')
+            result = feature_settings().preview(payload['view'], payload['row'], 0, *identity, reset_default=True)
+          elif path == '/api/settings/preview':
             if not isinstance(payload, dict) or set(payload) not in ({'view', 'row', 'direction'},
                                                                        {'view', 'row', 'direction', 'draft'}, {'view', 'row', 'value'}) or \
                not isinstance(payload['view'], str) or len(payload['view']) > 64 or \

@@ -210,7 +210,7 @@ export const PipPage = {
             <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.view + ':' + index" :row="row" :index="index"
               :disabled="!state.data.parked || state.status !== 'ready' || state.reviewing || !!state.pending"
               :save-value="(index, value) => feed.previewValue(index, value)"
-              @review="(index, direction) => feed.preview(index, direction)" />
+              @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           </section>
           <section class="gx-card gx-vasm__editor" aria-label="Blind Spot Camera crop editor">
             <h3>Live Camera Crop</h3>

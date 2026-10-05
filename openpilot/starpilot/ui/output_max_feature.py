@@ -22,7 +22,7 @@ class OutputMaximumFeature:
                       available=allowed, reason="Updates within one second; vehicle limits still apply" if saved.valid else
                       "Restore 4.0 to replace the invalid saved value" if saved.readable else "Saved value cannot be read",
                       vehicle_fingerprint=None if parked else owner.vehicle_fingerprint(), capability=capable,
-                      repair_value="" if saved.valid else str(DEFAULT))
+                      repair_value="" if saved.valid else str(DEFAULT), default_value=str(DEFAULT))
 
   def apply(self, request) -> bool:
     if (request.key != KEY or request.dependencies or request.related_source is not None or request.display_unit or

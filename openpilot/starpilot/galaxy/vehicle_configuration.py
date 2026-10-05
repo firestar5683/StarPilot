@@ -73,8 +73,7 @@ def saved_torque_context(params):
     identities = _saved_torque_identities(params)
     saved = _startup_snapshot(params)
     cp, raw = _factory_context(params, identities[0], saved)
-    from openpilot.starpilot.lateral.torque_runtime import production_supported_cp
-    if cp is None or not production_supported_cp(cp):
+    if cp is None:
       return None, None
     if read_selection(params) != selection or _startup_snapshot(params) != saved or _saved_torque_identities(params) != identities:
       return None, None
@@ -82,3 +81,24 @@ def saved_torque_context(params):
     return cp, b'saved-torque-configuration:' + revision + raw
   except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, OverflowError):
     return None, None
+
+
+def settings_configuration(params, physical_cp, physical_raw):
+  saved = _startup_snapshot(params)
+  cp, token = configuration_context(params, physical_cp, physical_raw)
+  editing_saved = False
+  if cp is None:
+    cp, token = saved_torque_context(params)
+    editing_saved = cp is not None
+  if cp is None or _startup_snapshot(params) != saved:
+    return None, token, False, False
+  values = {key: (raw, readable) for key, raw, readable in saved}
+  requested_long = (values['AlphaLongitudinalEnabled'] == (b'1', True) and
+                    values['IsReleaseBranch'] in ((None, True), (b'0', True)) and
+                    values['OpenpilotEnabledToggle'] == (b'1', True) and
+                    values['SafeMode'] in ((None, True), (b'0', True)) and
+                    values['DisableOpenpilotLongitudinal'] in ((None, True), (b'0', True)))
+  from openpilot.starpilot.car.hyundai.settings import supports_long_configuration
+  configurable_long = bool(supports_long_configuration(cp) and requested_long)
+  revision = hashlib.sha256(repr(saved).encode()).digest()
+  return cp, b'settings-configuration:' + revision + (token or b''), editing_saved, configurable_long

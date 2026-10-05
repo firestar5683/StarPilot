@@ -1,6 +1,7 @@
 """Parked, source-bound edits for supported onroad visibility controls."""
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.ui.appearance_preferences import (CAMERA_LABELS, DEFAULTS, LEAD_INFO_LABELS, MAX_RAW_BYTES,
@@ -81,6 +82,10 @@ class AppearanceOwner:
       repair = ("On" if default_displayed else "Off") if saved.readable and not valid else ""
       rows.append(FeatureRow(key, LABELS[key], value, source=saved.raw, choices=("Off", "On"),
                              available=parked and saved.readable, reason=reason, repair_value=repair))
+    defaults = {key: ('On' if (not value if key in ('HideLeadMarker', 'StockConfidenceBallWidget') else value) else 'Off')
+                for key, value in DEFAULTS.items()}
+    defaults.update(CameraView='Standard', LeadInfo='Off')
+    rows = tuple(replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows)
     return FeatureSettingsState(page="appearance", title="Onroad HUD" if profile == Profile.LARGE else "Visuals",
                                 subtitle="Display preferences; border highlights apply to C4 only.",
                                 rows=tuple(rows), parked=parked)

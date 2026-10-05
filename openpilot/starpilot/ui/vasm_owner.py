@@ -65,6 +65,9 @@ class VASMOwner:
       if saved.raw is not None:
         rows.append(FeatureRow(RESET, "Clear saved spot-monitor settings", "Off and unconfigured", saved.raw,
                                available=allowed, reason="Clear saved regions and choices"))
+    initial = Preferences()
+    defaults = {ENABLED: 'Off', CONFIDENCE: f'{initial.confidence:.2f}', SMOOTH: f'{initial.smooth_seconds:.2f}'}
+    rows = [replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows]
     return FeatureSettingsState(page="vasm", title="V-ASM spot monitoring",
                                 subtitle="Saved visual settings only; no live camera or warning status is shown here.",
                                 rows=tuple(rows), parked=parked)

@@ -27,7 +27,7 @@ from openpilot.starpilot.lateral.torque_runtime import read_settings as read_tor
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, parse_document
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource, TorqueTuning
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, row_change, row_default
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui import feature_settings as large
 from openpilot.starpilot.ui.presentation import Profile
@@ -53,6 +53,25 @@ class LateralFeatureSettingsTests(unittest.TestCase):
   def row(self, page, key):
     state = self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     return next(item for item in state.rows if item.key == key)
+
+  def test_default_clears_only_selected_torque_override_and_rejects_stale_source(self):
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:value"))))
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:friction:value"))))
+    row = self.row("torque", "torque:factor:value")
+    request = row_default(row)
+    assert request is not None
+    self.assertEqual(request.key, "torque:factor:mode")
+    self.assertEqual(request.value, "Vehicle/learned")
+    tune = self.cp.lateralTuning.torque
+    vehicle = TorqueTuning(TorqueSource.VEHICLE, str(self.cp.carFingerprint), tune.latAccelFactor,
+                           tune.latAccelOffset, tune.friction)
+    before = read_torque_settings(self.params, vehicle)
+    self.assertTrue(self.owner.apply(request))
+    after = read_torque_settings(self.params, vehicle)
+    self.assertIsNone(after.user_factor)
+    self.assertEqual(after.user_friction, before.user_friction)
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(self.row("torque", "torque:factor:value").reason, "Supplied tune; edits saved for the next drive")
 
   def test_torque_custom_values_and_learning_preference_are_independent(self):
     rows = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False).rows

@@ -77,7 +77,7 @@ export const LongitudinalCurvesPage = {
           <p v-if="!state.data.parked" class="gx-note">Editing requires fresh parked vehicle evidence.</p>
           <GalaxySettingRow v-if="preset" :key="state.data.view + ':preset'" :row="preset" :index="0"
             :disabled="!state.data.parked || state.status !== 'ready' || !!state.pending"
-            :save-value="(index, value) => feed.previewValue(index, value)" @review="(index, direction) => feed.preview(index, direction)" />
+            :save-value="(index, value) => feed.previewValue(index, value)" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           <template v-if="points && graph">
             <svg class="gx-long-curves__graph" viewBox="0 0 370 155" role="img" :aria-label="state.data.title + ' saved curve, 0 to 90 miles per hour'">
               <line x1="44" y1="28" x2="44" y2="116" class="gx-long-curves__axis"/><line x1="44" y1="116" x2="332" y2="116" class="gx-long-curves__axis"/>

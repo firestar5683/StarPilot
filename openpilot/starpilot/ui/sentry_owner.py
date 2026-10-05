@@ -50,6 +50,9 @@ class SentryOwner:
                    FeatureRow(WARNING, "Warning persistence", f"{settings.warning_time_seconds:.1f}", saved.raw,
                               step=0.1, minimum=0.1, maximum=10.0, unit="s", available=allowed,
                               reason="Controls how much motion is needed before a warning" if allowed else reason)))
+    initial = Preferences()
+    defaults = {ENABLED: 'Off', SENSITIVITY: f'{initial.settings.sensitivity:.3f}', WARNING: f'{initial.settings.warning_time_seconds:.1f}'}
+    rows = [replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows]
     return FeatureSettingsState(page="sentry", title="Sentry motion settings",
                                 subtitle=monitor,
                                 rows=tuple(rows), parked=parked)
