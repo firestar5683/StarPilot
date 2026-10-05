@@ -68,6 +68,47 @@ class TestBoltPedalMessages(unittest.TestCase):
     data[5] = pedal_crc(data) ^ int(bad_crc)
     return msg[0], bytes(data), msg[2]
 
+  def test_physical_route_channels_are_independent_adc_observations(self):
+    cp = params(CAR.CHEVROLET_BOLT_CC_2018_2021, True, True)
+    state = CarState(cp)
+    parsers = state.get_can_parsers(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    route_frames = ("053502ba0164", "04e30286048f", "046c024108e3", "0279012a06f6")
+    for index, payload in enumerate(route_frames):
+      with self.subTest(payload=payload):
+        raw = bytes.fromhex(payload)
+        self.assertEqual(pedal_crc(raw), raw[5])
+        parsers[Bus.pt].update([(1_000_000_000 + index * 20_000_000, [(0x201, raw, 0)])])
+        out = state.update(parsers)
+        self.assertTrue(state.pedal_sensor_healthy)
+        sensor = parsers[Bus.pt].vl["GAS_SENSOR"]
+        encoded = packer.make_can_msg("GAS_SENSOR", 0, sensor)[1]
+        self.assertEqual(encoded, raw)
+        first, second = int.from_bytes(raw[:2], "big"), int.from_bytes(raw[2:4], "big")
+        self.assertEqual(out.gasPressed, first + second > 1190)
+    self.assertLess(sensor["INTERCEPTOR_GAS2"], 0.)
+    gear = packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 6, "ManualMode": 0})
+    parsers[Bus.pt].update([(1_080_000_000, [gear])])
+    state.out = state.update(parsers).as_reader()
+    command = structs.CarControl(longActive=True)
+    controller = CarController(DBC[cp.carFingerprint], cp)
+    sensor_time = state.pedal_sensor_ts_nanos
+    self.assertTrue(controller.bolt_pedal_admission(command, state, sensor_time + 100_000_000)[0])
+    self.assertFalse(controller.bolt_pedal_admission(command, state, sensor_time + 100_000_001)[0])
+    self.assertFalse(controller.bolt_pedal_admission(command, state, sensor_time - 1)[0])
+
+    last = bytes.fromhex(route_frames[-1])
+    parsers[Bus.pt].update([(1_100_000_000, [(0x201, last, 0)])])
+    state.update(parsers)
+    self.assertFalse(state.pedal_sensor_healthy)
+    for index, (first, second, status, corrupt_crc) in enumerate(
+        ((633, 298, 1, False), (633, 298, 0, True), (4096, 298, 0, False), (633, 4096, 0, False))):
+      raw = bytearray(first.to_bytes(2, "big") + second.to_bytes(2, "big") + bytes([(status << 4) | (index + 7), 0]))
+      raw[5] = pedal_crc(raw) ^ int(corrupt_crc)
+      parsers[Bus.pt].update([(1_120_000_000 + index * 20_000_000, [(0x201, bytes(raw), 0)])])
+      state.update(parsers)
+      self.assertFalse(state.pedal_sensor_healthy)
+
   def test_real_parser_sensor_curve_and_fault_recovery(self):
     for candidate in PEDAL_BOLT_CAR:
       with self.subTest(candidate=candidate):
@@ -83,7 +124,7 @@ class TestBoltPedalMessages(unittest.TestCase):
           self.assertTrue(state.pedal_sensor_healthy, gas)
           self.assertEqual(out.gasPressed, gas > 23., gas)
 
-        for counter, kwargs in ((9, {"state": 1}), (10, {"other_track": 40.}), (11, {"bad_crc": True})):
+        for counter, kwargs in ((9, {"state": 1}), (10, {"other_track": 1000.}), (11, {"bad_crc": True})):
           parsers[Bus.pt].update([(1_000_000_000 + counter * 20_000_000,
                                    [self.sensor(packer, 30., counter, **kwargs)])])
           state.update(parsers)

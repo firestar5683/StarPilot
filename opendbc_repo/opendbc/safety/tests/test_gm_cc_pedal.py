@@ -186,3 +186,32 @@ class TestGmCcPedal(unittest.TestCase):
       self.safety.aol_set_host_request(3)
       self.assertTrue(self.safety.safety_tx_hook(self.command(0)))
     self.safety.set_alternative_experience(0)
+
+  def test_recorded_adc_tracks_and_overflow_keep_command_pair_contract(self):
+    for sample in ('053502ba0164', '04e30286048f', '046c024108e3', '0279012a06f6'):
+      with self.subTest(sample=sample):
+        self.init(0xC180)
+        self.feed()
+        self.engage()
+        self.assertTrue(self.safety.get_controls_allowed())
+        data = bytes.fromhex(sample)
+        self.assertEqual(crc(data), data[5])
+        self.assertTrue(self.rx(0x201, data))
+        self.assertTrue(self.safety.get_controls_allowed())
+        self.assertEqual(self.safety.safety_tx_hook(self.command(1)), sample == '0279012a06f6')
+    self.init(0xC180)
+    self.feed()
+    self.engage()
+    command = create_pedal_command(self.packer, .2, 1)
+    bad_pair = bytearray(command[1])
+    bad_pair[2:4] = (int.from_bytes(bad_pair[2:4], "big") + 12).to_bytes(2, "big")
+    bad_pair[5] = crc(bad_pair)
+    self.assertFalse(self.safety.safety_tx_hook(self.packet((command[0], bytes(bad_pair), command[2]))))
+    self.assertTrue(self.safety.safety_tx_hook(self.packet(command)))
+    for track1, track2 in ((4096, 304), (604, 4096)):
+      self.feed(counter=8 if track1 == 4096 else 9)
+      self.safety.safety_rx_hook(self.buttons(1))
+      self.engage()
+      self.assertTrue(self.safety.get_controls_allowed())
+      self.rx(0x201, self.sensor(2 if track1 == 4096 else 3, track1=track1, track2=track2))
+      self.assertFalse(self.safety.get_controls_allowed())

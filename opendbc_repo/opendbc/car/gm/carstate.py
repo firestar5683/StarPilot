@@ -2,7 +2,6 @@ from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal
 from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
 from opendbc.car.gm.auto_hold import config_for as auto_hold_config_for, stopped_for_hold
 import copy
-from math import isfinite
 from opendbc.can import CANDefine, CANParser, CANPacker
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
@@ -332,12 +331,14 @@ class CarState(CarStateBase):
       new_sample = sensor_ts > self.pedal_sensor_ts_nanos
       counter_changed = self.pedal_sensor_counter is None or counter != self.pedal_sensor_counter
       tracks = (sensor["INTERCEPTOR_GAS"], sensor["INTERCEPTOR_GAS2"])
-      # Half of the coarser track's 0.251976 step permits encoded zero/full quantization.
-      tracks_valid = all(isfinite(x) and -0.126 <= x <= 255.126 for x in tracks) and abs(tracks[0] - tracks[1]) <= 2.0
       sensor_bytes = self.pedal_packer.make_can_msg("GAS_SENSOR", 0, {
         "INTERCEPTOR_GAS": tracks[0], "INTERCEPTOR_GAS2": tracks[1],
         "STATE": sensor["STATE"], "COUNTER_PEDAL": counter,
       })[1]
+      # The physical pedal reports independent 12-bit ADC channels.
+      first = int.from_bytes(sensor_bytes[:2], "big")
+      second = int.from_bytes(sensor_bytes[2:4], "big")
+      tracks_valid = 0 <= first <= 4095 and 0 <= second <= 4095
       checksum_valid = int(sensor["CHECKSUM_PEDAL"]) == pedal_crc(sensor_bytes)
       if new_sample:
         self.pedal_sensor_ts_nanos = sensor_ts
@@ -348,7 +349,10 @@ class CarState(CarStateBase):
         self.pedal_sensor_ts_nanos = 0
         self.pedal_sensor_counter = None
       if self.pedal_sensor_healthy:
-        ret.gasPressed = sum(tracks) / 2. > 23.0
+        if is_bolt_pedal_profile(self.CP):
+          ret.gasPressed = first + second > 1190
+        else:
+          ret.gasPressed = sum(tracks) / 2. > 23.0
 
     ret.steeringAngleDeg = pt_cp.vl["PSCMSteeringAngle"]["SteeringWheelAngle"]
     ret.steeringRateDeg = pt_cp.vl["PSCMSteeringAngle"]["SteeringWheelRate"]
