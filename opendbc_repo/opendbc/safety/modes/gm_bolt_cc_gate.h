@@ -101,7 +101,8 @@ static bool gm_bolt_cc_receive(GmBoltCcGate *gate, uint32_t addr, unsigned int b
           }
         }
         if (addr == 0x1F5U) {
-          gate->drive = ((data[3] & 15U) == 4U) && ((data[5] & 2U) == 0U);
+          const unsigned int gear = data[3] & 15U;
+          gate->drive = ((gear == 4U) || (gear == 6U)) && ((data[5] & 2U) == 0U);
           if (!gate->drive) {
             gate->credit = false;
             gate->armed = false;
