@@ -20,6 +20,7 @@ from tools.ci.run_predeploy import commands, run
 QUICK_TARGETS = (
   'openpilot/common/tests/test_params.py',
   'openpilot/common/tests/test_params_registry_usage.py',
+  'openpilot/selfdrive/selfdrived/tests/test_big_model_status.py',
   'openpilot/starpilot/tests',
   'openpilot/starpilot/aol/tests',
   'openpilot/starpilot/controllers/tests',

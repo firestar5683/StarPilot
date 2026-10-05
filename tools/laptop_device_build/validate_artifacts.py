@@ -203,6 +203,10 @@ def validate(root: Path) -> None:
     raise ValueError(f"camera warp set differs from current camera configs: {sorted(actual_warps)}")
   for name in (*MODELS, *WARPS):
     require_qcom_pickle(model_dir / name)
+  from tools.laptop_device_build.jetlink_artifacts import warp_names
+  from tools.laptop_device_build.jetlink_pickle import require_jetlink_qcom_pickle
+  for name in warp_names():
+    require_jetlink_qcom_pickle(model_dir / name)
   shipped = materialize_file_chunked(model_dir / f"{DEFAULT_SMALL}_driving_tinygrad.pkl", DEFAULT_SMALL_SHA256)
   if shipped.stat().st_size != DEFAULT_SMALL_SIZE:
     raise ValueError("Shipped default model size differs from the published artifact")

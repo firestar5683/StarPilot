@@ -18,6 +18,7 @@ if arch not in ('comma_arm64', 'Darwin') and ctypes.util.find_library('LLVM') is
 
 lenv = env.Clone()
 lenv.PrependENVPath('PYTHONPATH', Dir('#tinygrad_repo').abspath)
+lenv.PrependENVPath('PYTHONPATH', Dir('#jetlink_repo').abspath)
 
 tinygrad_root = env.Dir("#").abspath
 tinygrad_files = ["#"+x for x in glob.glob(env.Dir("#tinygrad_repo").relpath + "/**", recursive=True, root_dir=tinygrad_root)
@@ -82,6 +83,28 @@ for cam_w, cam_h in camera_configs:
   node = lenv.Command(warp_pkl_path, tinygrad_files + warp_deps + [Value(cmd)], warp_action(cmd))
   if laptop_qcom_import:
     lenv.AlwaysBuild(node)
+
+# External inference uses a paired current-frame warp, independently of the
+# historical ordinary driving capture. Keep its QCOM package separate.
+from tools.laptop_device_build.jetlink_artifacts import CAMERAS, MODEL_SIZES, import_artifact as import_jetlink_artifact
+jetlink_package = Path(Dir('#.cache/jetlink-qcom-artifact-package').abspath)
+jetlink_sources = [File('#' + path) for path in ('openpilot/starpilot/models/jetlink_warp.py',
+                   'jetlink_repo/jetlink/openpilot/warp.py', 'jetlink_repo/jetlink/openpilot/interface.py')]
+for cam_w, cam_h in CAMERAS:
+  for model_w, model_h in MODEL_SIZES:
+    jetlink_path = File(f'models/jetlink_warp_{cam_w}x{cam_h}_{model_w}x{model_h}.pkl').abspath
+    cmd = (f'{tg_flags} {mac_brew_string} {taskset}python3 -m jetlink.openpilot.warp '
+           f'--adapter openpilot.starpilot.models.jetlink_warp --camera {cam_w}x{cam_h} '
+           f'--model {model_w}x{model_h} --output {jetlink_path}')
+    if laptop_qcom_import:
+      def import_jetlink(target, source, env):
+        import_jetlink_artifact(jetlink_package, Path(Dir('#').abspath), Path(str(target[0])))
+      action = Action(import_jetlink, '  [JETLINK QCOM IMPORT] $TARGET')
+    else:
+      action = Action(cmd, '  [JETLINK WARP] $TARGET')
+    node = lenv.Command(jetlink_path, tinygrad_files + warp_deps + jetlink_sources + [Value(cmd)], action)
+    if laptop_qcom_import:
+      lenv.AlwaysBuild(node)
 
 dm_w, dm_h = DM_INPUT_SIZE
 for cam_w, cam_h in camera_configs:

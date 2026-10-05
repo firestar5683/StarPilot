@@ -315,5 +315,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UptimeOnroad", {PERSISTENT, FLOAT, "0.0"}},
     {"ChestnutActive", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"ChestnutLoading", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
+    {"JetlinkMode", {PERSISTENT, INT, "0"}},
+    {"JetlinkChargePhone", {PERSISTENT, BOOL, "0"}},
+    {"JetlinkBigModel", {PERSISTENT | DONT_LOG, JSON}},
+    {"JetlinkCatalog", {PERSISTENT | DONT_LOG, JSON}},
+    {"JetlinkSpec", {PERSISTENT | DONT_LOG, JSON}},
+    {"JetlinkPointers", {PERSISTENT | DONT_LOG, JSON}},
+    {"JetlinkProgress", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},
+    {"JetlinkRuntime", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | DONT_LOG, JSON}},
     {"Version", {PERSISTENT, STRING}},
 };

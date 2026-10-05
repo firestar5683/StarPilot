@@ -257,8 +257,9 @@ def resolve_runtime(chestnut_available: bool, *, root: Path = ROOT, randomize: b
 
 class ModelManager:
   def __init__(self, *, root: Path = ROOT, parked: Callable[[], bool] | None = None,
-               gpu_present: Callable[[], bool] | None = None, opener=urlopen):
+               gpu_present: Callable[[], bool] | None = None, opener=urlopen, jetlink=None):
     self.root, self.opener = root, opener
+    self.jetlink = jetlink
     self.parked = parked or (lambda: False)
     if gpu_present is None:
       from openpilot.selfdrive.modeld.helpers import chestnut_present
@@ -424,6 +425,12 @@ class ModelManager:
         return False, False
       return self._snapshot_installed(mid, catalog(self.root).get(mid, {}))
 
+  def jetlink_owner(self):
+    if self.jetlink is None:
+      from openpilot.starpilot.models.jetlink_settings import JetlinkSettings
+      self.jetlink = JetlinkSettings()
+    return self.jetlink
+
   def snapshot(self) -> dict:
     with self.lock:
       entries, prefs = catalog(self.root), preferences(self.root)
@@ -452,9 +459,9 @@ class ModelManager:
               "downloadVariant": job.get("variant", "standard"),
               "modelToDownload": job.get("model", ""), "downloadAll": job.get("downloadAll", False),
               "downloading": job["downloading"], "progress": job.get("progress", ""),
-              "isOnroad": not parked, "gpuAvailable": gpu,
+              "isOnroad": not parked, "gpuAvailable": gpu, "jetlink": self.jetlink_owner().snapshot(),
               "capabilities": {"select": parked, "download": parked, "downloadAll": parked, "cancel": True,
-                               "refresh": parked, "favorites": True, "delete": parked, "randomizer": parked, "exclusions": parked}}
+                               "jetlink": parked, "refresh": parked, "favorites": True, "delete": parked, "randomizer": parked, "exclusions": parked}}
 
   def _require_parked(self) -> None:
     if not self.parked():
@@ -464,6 +471,9 @@ class ModelManager:
     if not isinstance(payload, dict):
       raise ModelError("Invalid model request")
     with self.lock:
+      if action == "jetlink":
+        self._require_parked()
+        return self.jetlink_owner().configure(payload)
       if action == "cancel":
         if set(payload) - {"jobId"} or ("jobId" in payload and not isinstance(payload["jobId"], str)):
           raise ModelError("Invalid cancel request")
