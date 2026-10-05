@@ -90,21 +90,46 @@ class CarController(CarControllerBase):
     self.secoc_prev_reset_counter = 0
     self.brake_hold_active = False
     self._brake_hold_counter = 0
+    self._auto_hold_rearm_blocked = False
 
-  def update_auto_hold_state(self, CS, cancel_requested=False, activation_frames=TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES):
+  def update_auto_hold_state(self, CS, cancel_requested=False, activation_frames=TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES, *,
+                             long_active=False, stopping=False):
+    aeb_hold = self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS
     allowed = (not cancel_requested and CS.out.standstill and CS.out.cruiseState.available and
-               not CS.out.gasPressed and not CS.out.cruiseState.enabled and
+               not CS.out.gasPressed and (not CS.out.cruiseState.enabled or (long_active and not aeb_hold)) and
                CS.out.gearShifter not in (structs.CarState.GearShifter.park, structs.CarState.GearShifter.reverse))
-    if allowed and not self.brake_hold_active and CS.out.brakePressed:
-      self._brake_hold_counter += 1
-      self.brake_hold_active = self._brake_hold_counter > activation_frames
+    if aeb_hold:
+      # Camry retains its separate manual AEB hold behavior.
+      if allowed and not self.brake_hold_active and CS.out.brakePressed:
+        self._brake_hold_counter += 1
+        self.brake_hold_active = self._brake_hold_counter > activation_frames
+      elif not allowed:
+        self.reset_auto_hold_state()
     elif not allowed:
+      # A gas tap releases this stop, even if lifted before the wheels move.
+      # Re-arm once moving or after another brake press.
+      rearm_blocked = CS.out.standstill and (self._auto_hold_rearm_blocked or CS.out.gasPressed)
       self.reset_auto_hold_state()
+      self._auto_hold_rearm_blocked = rearm_blocked
+    elif not self.brake_hold_active:
+      if CS.out.brakePressed:
+        self._auto_hold_rearm_blocked = False
+      if long_active and stopping and CS.out.cruiseState.enabled and not self._auto_hold_rearm_blocked:
+        # Planner resume requests cannot release a cruise stop without driver gas.
+        self.brake_hold_active = True
+      elif CS.out.brakePressed and not CS.out.cruiseState.enabled:
+        self._brake_hold_counter += 1
+        self.brake_hold_active = self._brake_hold_counter > activation_frames
+      else:
+        self._brake_hold_counter = 0
     return self.brake_hold_active
 
   def reset_auto_hold_state(self):
+    if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
+      self.standstill_req = False
     self._brake_hold_counter = 0
     self.brake_hold_active = False
+    self._auto_hold_rearm_blocked = False
 
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
@@ -203,7 +228,8 @@ class CarController(CarControllerBase):
 
     # *** gas and brake ***
     if supports_toyota_auto_hold(self.CP):
-      self.update_auto_hold_state(CS, pcm_cancel_cmd if self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS else False)
+      self.update_auto_hold_state(CS, pcm_cancel_cmd if self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS else False,
+                                  long_active=CC.longActive, stopping=stopping)
       if (self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS and self.frame % 2 == 0 and
           CS.out.standstill and CS.out.cruiseState.available and not CS.out.gasPressed):
         can_sends.append(toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active))
@@ -221,6 +247,9 @@ class CarController(CarControllerBase):
 
         if not should_resume and CS.out.cruiseState.standstill:
           self.standstill_req = True
+
+      if self._auto_hold_rearm_blocked:
+        self.standstill_req = False
 
       if self.frame % 3 == 0:
         # Press distance button until we are at the correct bar length. Only change while enabled to avoid skipping startup popup

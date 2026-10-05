@@ -4,7 +4,7 @@ from opendbc.can import CANPacker
 from opendbc.car import structs
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CAR, ToyotaSafetyFlags
-from opendbc.car.toyota.tests.test_auto_hold import setup_hold, step_hold
+from opendbc.car.toyota.tests.test_auto_hold import decode, setup_cruise_hold, setup_hold, step_hold
 from opendbc.safety import ALTERNATIVE_EXPERIENCE as AE
 from opendbc.safety.tests.libsafety import libsafety_py
 
@@ -175,3 +175,61 @@ class TestToyotaAutoHoldSafety(unittest.TestCase):
         self.assertFalse(any(frame[0] == 0x344 for frame in sends))
       self.assertEqual(self.safety.safety_fwd_hook(2, 0x344), 0)
       self.assertFalse(self.safety.safety_tx_hook(self.acc()))
+
+  def test_actual_cruise_hold_resume_gas_tap_and_rearm(self):
+    cp, controller, command, state = setup_cruise_hold()
+    self.arm(cp.alternativeExperience, cp.safetyConfigs[0].safetyParam)
+    self.send_rx('BRAKE_MODULE', {'BRAKE_PRESSED': False})
+
+    def tick():
+      frames = [frame for _ in range(3) for frame in step_hold(controller, command, state) if frame[0] == 0x343]
+      self.assertEqual(len(frames), 1)
+      self.assertTrue(self.safety.safety_tx_hook(self.packet(frames[0])))
+      return decode(cp, frames[0], 'ACC_CONTROL')
+
+    # The stopped permission admits the actual controller's exact hold even
+    # before controls_allowed is raised by cruise engagement.
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertEqual(tick()['ACCEL_CMD'], -1)
+    command.actuators.accel = 1.5
+    command.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+    command.cruiseControl.resume = True
+    for _ in range(10):
+      values = tick()
+      self.assertEqual(values['ACCEL_CMD'], -1)
+      self.assertEqual(values['RELEASE_STANDSTILL'], 0)
+
+    state.out.gasPressed = True
+    command.longActive = False
+    command.actuators.accel = 0
+    self.send_rx('PCM_CRUISE', {'GAS_RELEASED': False, 'CRUISE_ACTIVE': False})
+    values = tick()
+    self.assertEqual(values['ACCEL_CMD'], 0)
+    self.assertEqual(values['RELEASE_STANDSTILL'], 1)
+    self.assertFalse(self.safety.safety_tx_hook(self.acc()))
+
+    state.out.gasPressed = False
+    command.longActive = True
+    command.actuators.accel = -0.7
+    command.actuators.longControlState = structs.CarControl.Actuators.LongControlState.stopping
+    self.send_rx('PCM_CRUISE', {'GAS_RELEASED': True, 'CRUISE_ACTIVE': True})
+    for _ in range(10):
+      self.assertEqual(tick()['RELEASE_STANDSTILL'], 1)
+      self.assertFalse(controller.brake_hold_active)
+
+    state.out.standstill = state.out.cruiseState.standstill = False
+    state.out.vEgo = state.out.vEgoRaw = 1
+    self.send_rx('WHEEL_SPEEDS', {f'WHEEL_SPEED_{n}': 3.6 for n in ('FL', 'FR', 'RL', 'RR')})
+    tick()
+    state.out.standstill = state.out.cruiseState.standstill = True
+    state.out.vEgo = state.out.vEgoRaw = 0
+    self.send_rx('WHEEL_SPEEDS', {f'WHEEL_SPEED_{n}': 0 for n in ('FL', 'FR', 'RL', 'RR')})
+    values = tick()
+    self.assertEqual(values['ACCEL_CMD'], -1)
+    self.assertEqual(values['RELEASE_STANDSTILL'], 0)
+    self.assertTrue(controller.brake_hold_active)
+    self.send_rx('PCM_CRUISE', {'GAS_RELEASED': True, 'CRUISE_ACTIVE': False})
+    self.safety.set_timer(2_000_001)
+    self.safety.safety_tick()
+    sends = [frame for _ in range(3) for frame in step_hold(controller, command, state) if frame[0] == 0x343]
+    self.assertFalse(self.safety.safety_tx_hook(self.packet(sends[0])))
