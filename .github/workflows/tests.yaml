@@ -325,7 +325,7 @@ jobs:
         else
           unset RELEASE
         fi
-        scons --verbose panda/board/obj/panda.bin.signed panda/board/obj/bootstub.panda.bin panda/board/obj/panda_h7.bin.signed panda/board/obj/bootstub.panda_h7.bin 2>&1 | tee ci-results/firmware/build.log
+        scons --verbose panda/board/obj/version panda/board/obj/panda.bin.signed panda/board/obj/bootstub.panda.bin panda/board/obj/panda_h7.bin.signed panda/board/obj/bootstub.panda_h7.bin 2>&1 | tee ci-results/firmware/build.log
         python3 tools/ci/record_firmware.py --variant "${{ matrix.variant }}" --build-log ci-results/firmware/build.log --output ci-results/firmware/provenance.json
     - name: Save compile evidence
       if: always()
