@@ -18,7 +18,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 from openpilot.starpilot.navigation.intent import cruise_ceiling as navigation_ceiling
-from openpilot.starpilot.longitudinal.vehicle_policy import forecast_should_stop, planner_cost_owner
+from openpilot.starpilot.longitudinal.vehicle_policy import forecast_should_stop, planner_cost_owner, far_follow_owner
 from openpilot.starpilot.longitudinal.cruise_ceiling import CruiseCeiling, CurveCeiling, select_cruise_ceiling, select_curve_ceiling
 from openpilot.starpilot.longitudinal.profile_runtime import (AppliedProfile, ProfileSmoother, ProfileTuning, SelectedProfileTuning,
                                                              TRAFFIC_CRUISE_BRAKE_MAGNITUDE)
@@ -115,6 +115,7 @@ class LongitudinalPlanner:
     self.follow_jerk = FollowJerk(CP)
     self.vehicle_cost_owner = planner_cost_owner(CP)
     self.lead_takeoff = LeadTakeoff()
+    self.vehicle_far_follow = far_follow_owner(CP, dt)
 
   def update(self, sm, *, cruise_ceiling: CruiseCeiling | None = None,
              profile_tuning: ProfileTuning | None = None, curve_ceiling: CurveCeiling | None = None,
@@ -410,6 +411,12 @@ class LongitudinalPlanner:
         True, takeoff_frame, output_a_target, self.output_should_stop)
     else:
       self.lead_takeoff.reset()
+    if self.vehicle_far_follow is not None:
+      output_a_target = self.vehicle_far_follow.sample(
+        sm, now_ns=sample_now_ns, drive_id=drive_id, active=profile_eligible and not reset_state,
+        target=float(output_a_target), previous_target=float(a_prev), follow_seconds=float(self.mpc.params[0, 4]),
+        blocked=bool(self.output_should_stop or self.fcw or self.force_stop_plan.forcing or
+                     self.force_stop_plan.approach_distance_m > 0 or self.mpc.solution_status != 0))
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0

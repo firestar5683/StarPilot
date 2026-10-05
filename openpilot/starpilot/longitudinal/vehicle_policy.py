@@ -59,3 +59,8 @@ def planner_cost_owner(cp):
     return None
   from openpilot.starpilot.longitudinal.gv70_cost_context import GV70CostContext
   return GV70CostContext()
+
+
+def far_follow_owner(cp, dt):
+  from openpilot.starpilot.longitudinal.niro_follow import eligible, NiroFarFollow
+  return NiroFarFollow(dt) if eligible(cp) else None
