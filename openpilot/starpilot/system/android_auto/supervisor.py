@@ -1089,15 +1089,21 @@ class Supervisor:
       from openpilot.common.basedir import BASEDIR
 
       base = Path(BASEDIR)
-      logo_path = base / "starpilot" / "system" / "the_galaxy" / "assets" / "images" / "main_logo.png"
-      font_path = base / "selfdrive" / "assets" / "fonts" / "como-heavy.otf"
+      logo_path = base / "selfdrive" / "assets" / "images" / "starpilot_logo.png"
+      brand_font_path = base / "starpilot" / "ui" / "assets" / "fonts" / "Sora[wght].ttf"  # the logo wordmark's font
+      fallback_font_path = base / "selfdrive" / "assets" / "fonts" / "Inter-Black.ttf"  # if Sora cannot be set to weight 800
 
       bg_color = (10, 10, 22, 255)  # Cosmic void #0a0a16
       canvas = Image.new("RGBA", (request.width, request.height), bg_color)
 
       font_size = max(18, min(64, int(request.height * 0.06)))
       try:
-        font = ImageFont.truetype(str(font_path), font_size) if font_path.exists() else ImageFont.load_default()
+        font = ImageFont.truetype(str(brand_font_path), font_size)
+        font.set_variation_by_axes([800])
+      except Exception:
+        font = None
+      try:
+        font = font or (ImageFont.truetype(str(fallback_font_path), font_size) if fallback_font_path.exists() else ImageFont.load_default())
       except Exception:
         font = ImageFont.load_default()
 
