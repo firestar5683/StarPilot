@@ -20,7 +20,7 @@ def supports_ioniq6_configuration(cp) -> bool:
 
 def supports_long_configuration(cp) -> bool:
   return bool(cp is not None and not cp.notCar and not cp.passive and not cp.dashcamOnly and
-              (supports_ioniq6_configuration(cp) or cp.alphaLongitudinalAvailable))
+              (supports_ioniq6_configuration(cp) or cp.alphaLongitudinalAvailable or cp.openpilotLongitudinalControl))
 
 
 def configuration_wheel_policy(cp) -> WheelSettingsPolicy | None:

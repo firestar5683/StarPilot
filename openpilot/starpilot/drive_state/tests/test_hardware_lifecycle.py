@@ -152,6 +152,41 @@ def test_default_auto_clock_and_explicit_startup_gates_remain_stock():
   clock.assert_not_called()
 
 
+def test_forced_offroad_uses_the_ignition_off_process_set(tmp_path):
+  from contextlib import ExitStack
+  from opendbc.car.structs import car
+  from openpilot.common.params import Params
+  from openpilot.starpilot.drive_state.resolver import should_start
+  from openpilot.system.manager.process import ensure_running
+  from openpilot.system.manager.process_config import managed_processes
+
+  params = Params(str(tmp_path / 'params'))
+  cp = car.CarParams.new_message()
+  conditions = {'ignition': True, 'device_temp_good': True}
+  with ExitStack() as stack:
+    stops = {}
+    for name, proc in managed_processes.items():
+      stack.enter_context(patch.object(proc, 'start'))
+      stops[name] = stack.enter_context(patch.object(proc, 'stop'))
+      if hasattr(proc, 'recover'):
+        stack.enter_context(patch.object(proc, 'recover', return_value=True))
+    started = should_start(Mode.AUTO, conditions, {}, already_started=True)
+    driving = {p.name for p in ensure_running(managed_processes.values(), started, params, cp)}
+    assert {'card', 'controlsd', 'selfdrived', 'modeld', 'plannerd'} <= driving
+    started = should_start(Mode.OFFROAD, conditions, {}, already_started=True)
+    assert not started
+    forced = {p.name for p in ensure_running(managed_processes.values(), started, params, cp)}
+    for name in ('card', 'controlsd', 'selfdrived', 'modeld', 'plannerd', 'radard', 'encoderd', 'loggerd',
+                 'dmonitoringd', 'dmonitoringmodeld', 'calibrationd', 'paramsd', 'lagd', 'torqued'):
+      assert name not in forced
+      stops[name].assert_called_with(block=False)
+    conditions['ignition'] = False
+    started = should_start(Mode.AUTO, conditions, {}, already_started=False)
+    ordinary = {p.name for p in ensure_running(managed_processes.values(), started, params, cp)}
+    assert forced == ordinary
+    assert {'hardwared', 'ui', 'galaxy', 'pandad'} <= forced
+
+
 def test_manager_missing_native_key_registry_fails_closed_without_aborting_normal_startup():
   from openpilot.common.params import UnknownKeyName
 

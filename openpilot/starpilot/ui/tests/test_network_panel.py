@@ -62,7 +62,7 @@ class NetworkPanelTests(unittest.TestCase):
     object.__setattr__(layout, 'star', NS(selected=Destination.NETWORK,
                                        connectivity_allowed=fixture.adapter.connectivity_allowed))
     bridge = NetworkPanelBridge(self.panel, layout._network_authority)
-    self.assertFalse(fixture.adapter.confirmed_offroad())
+    self.assertTrue(fixture.adapter.confirmed_offroad())
     self.assertTrue(bridge.enter())
     self.wifi.forget_network(NETWORK)
     self.manager.forget_connection.assert_called_once_with('fixture')

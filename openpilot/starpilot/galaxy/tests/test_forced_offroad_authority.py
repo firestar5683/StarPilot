@@ -1,12 +1,14 @@
-"""Powered-offroad connectivity authority and existing Park boundaries."""
+"""Effective offroad authority for configuration and operations."""
 
 from pathlib import Path
+import json
 
 import pytest
 
 from openpilot.common.params import Params
-from openpilot.starpilot.galaxy.settings import LiveContextSource
+from openpilot.starpilot.galaxy.settings import LiveContextSource, PAGES, SettingsGateway
 from openpilot.starpilot.galaxy.tests.test_borrowed_authority import Messages
+from openpilot.starpilot.vehicle_selection import encode
 
 
 @pytest.fixture
@@ -62,9 +64,9 @@ def test_powered_offroad_rejects_future_and_stale_publisher_stamps(powered, serv
   assert not authority.configuration_allowed()
 
 
-def test_powered_offroad_resume_requires_new_evidence_and_preserves_strict_park(powered):
+def test_powered_offroad_resume_requires_new_evidence(powered):
   authority, _, messages, clocks = powered
-  assert not authority.parked()
+  assert authority.parked()
   clocks['offset'] += 1_000_000_000
   assert not authority.configuration_allowed()
   clocks['mono'] += 100_000_000
@@ -72,6 +74,32 @@ def test_powered_offroad_resume_requires_new_evidence_and_preserves_strict_park(
     messages.logMonoTime[service] = clocks['mono'] - 10_000_000 + (clocks['offset'] if service == 'pandaStates' else 0)
     messages.recv_time[service] = (clocks['mono'] - 10_000_000) / 1e9
   assert authority.configuration_allowed()
-  assert not authority.parked()
+  assert authority.parked()
   authority.close()
   assert not authority.configuration_allowed()
+
+
+@pytest.mark.parametrize('vehicle', ['HYUNDAI_IONIQ_6', 'TOYOTA_HIGHLANDER_TSS2'])
+def test_all_settings_match_ignition_off_in_forced_offroad(powered, vehicle, request):
+  authority, params, messages, _ = powered
+  params.put_bool('OpenpilotEnabledToggle', True, block=True)
+  params.put_bool('AlphaLongitudinalEnabled', False, block=True)
+  params.put('VehicleSelection', json.loads(encode(vehicle)), block=True)
+  gateway = SettingsGateway(params, authority)
+  request.addfinalizer(gateway.close)
+
+  def rows(page):
+    return [(row['label'], row['available'], row['choices'], row['resetAvailable'])
+            for row in gateway.page(page, 'session', b'generation')['rows']]
+
+  for page in sorted(PAGES):
+    messages.data['pandaStates'][0].ignitionLine = False
+    ordinary = rows(page)
+    messages.data['pandaStates'][0].ignitionLine = True
+    assert rows(page) == ordinary, page
+  assert next(row for row in rows('aol') if row[0] == 'Enable Always On Lateral')[1]
+  page = gateway.page('slc', 'session', b'generation')
+  index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Adopt fixed offsets')
+  intent = gateway.preview(page['view'], index, 0, 'session', b'generation')
+  assert gateway.confirm(intent['intent'], 'session', b'generation')
+  assert next(row for row in rows('slc') if row[0] == 'Speed Limit Controller')[1]

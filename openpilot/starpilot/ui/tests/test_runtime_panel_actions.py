@@ -33,6 +33,24 @@ from pathlib import Path
 
 
 class TestRuntimePanelActions(unittest.TestCase):
+  def test_live_slc_action_source_accepts_pcm_long_owner_and_rejects_stock_and_stale(self):
+    ui = ui_fake()
+    ui.CP = NS(carFingerprint="TOYOTA_HIGHLANDER_TSS2", openpilotLongitudinalControl=True, pcmCruise=True)
+    ui.sm.messages["carState"].canValid = True
+    ui.sm.messages["carState"].canTimeout = False
+    ui.sm.messages["carControl"].longActive = True
+    ui.sm.messages["selfdriveState"].enabled = True
+    ui.sm.put("controlsState", NS(longControlState="pid"))
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.adapter = runtime_app.RuntimeSnapshotAdapter(ui)
+    with patch("openpilot.starpilot.ui.runtime_snapshot._clock_pair", return_value=(NOW, NOW + BOOT_OFFSET_NS, BOOT_OFFSET_NS)):
+      self.assertIs(session._live_slc_message(NOW), ui.sm["slcState"])
+      ui.CP.openpilotLongitudinalControl = False
+      self.assertIsNone(session._live_slc_message(NOW))
+      ui.CP.openpilotLongitudinalControl = True
+      ui.sm.logMonoTime["slcState"] = NOW - 1_000_000_000
+      self.assertIsNone(session._live_slc_message(NOW))
+
   def _vehicle_session(self, sidebar_expanded=True):
     from opendbc.car import gen_empty_fingerprint
     from opendbc.car.gm.interface import CarInterface
@@ -105,7 +123,7 @@ class TestRuntimePanelActions(unittest.TestCase):
       self.assertIsNone(startup_candidate(self.ui.params))
       self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.rows[1].value, "Auto detection")
 
-  def test_large_vehicle_selection_offroad_without_parked_telemetry(self):
+  def test_large_vehicle_selection_offroad_with_available_telemetry(self):
     from opendbc.car.hyundai.values import CAR
     from openpilot.starpilot.vehicle_selection import choices, startup_candidate
     from openpilot.system.ui.widgets import DialogResult
@@ -126,7 +144,7 @@ class TestRuntimePanelActions(unittest.TestCase):
         else:
           self.ui.sm["pandaStates"][0].ignitionLine = True
         self.assertTrue(self.ui.is_offroad())
-        self.assertFalse(session.confirmed_offroad())
+        self.assertEqual(session.confirmed_offroad(), evidence == "ignition")
         with patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
              patch.object(runtime_app.gui_app, "push_widget") as pushed, patch.object(session, "_unavailable") as alert:
           make = self._open_vehicle_picker(session, pushed)
@@ -438,9 +456,10 @@ class TestRuntimePanelActions(unittest.TestCase):
       dialog.callback(native_device.DialogResult.CANCEL)
       self.device._params.remove.assert_not_called()
       self.ui.sm["pandaStates"][0].ignitionLine = True
+      self.ui.sm["deviceState"].started = True
       dialog.callback(native_device.DialogResult.CONFIRM)
       self.device._params.remove.assert_not_called()
-      self.ui.sm["pandaStates"][0].ignitionLine = False
+      self.ui.sm["deviceState"].started = False
       dialog.callback(native_device.DialogResult.CONFIRM)
       self.assertEqual(self.device._params.remove.call_count, 4)
       self.device._params.put_bool.assert_called_once_with("OnroadCycleRequested", True, block=True)
@@ -752,9 +771,10 @@ class TestRuntimePanelActions(unittest.TestCase):
       branch_dialog = pushed.call_args.args[0]
       self.ui.params.put.assert_not_called()
       self.ui.sm["pandaStates"][0].ignitionLine = True
+      self.ui.sm["deviceState"].started = True
       branch_dialog.callback(native_software.DialogResult.CONFIRM)
       self.ui.params.put.assert_not_called()
-      self.ui.sm["pandaStates"][0].ignitionLine = False
+      self.ui.sm["deviceState"].started = False
       self.assertTrue(self.layout._deliver_settings_request(SoftwareAction(SoftwareRequest.OPEN_BRANCH_CHOOSER)))
       branch_dialog = pushed.call_args.args[0]
       branch_dialog.callback(native_software.DialogResult.CONFIRM)

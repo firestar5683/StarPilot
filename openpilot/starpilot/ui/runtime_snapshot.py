@@ -22,7 +22,7 @@ from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.longitudinal.profile_runtime import read_traffic_settings
-from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad, fresh_parked
+from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad
 from openpilot.starpilot.ui.conditional_status import ConditionalDisplayProjector, ConditionalPerceptionProjector, configured_choice
 from openpilot.starpilot.ui.traffic_status import TrafficDisplayProjector
 from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner
@@ -275,7 +275,7 @@ class RuntimeSnapshotAdapter:
     self._last_pair_offset_ns: int | None = None
     self._pair_failed = False
 
-  def _parked(self, ui: Any, pair: tuple[int, int, int] | None, *, connectivity: bool = False) -> bool:
+  def _parked(self, ui: Any, pair: tuple[int, int, int] | None) -> bool:
     if pair is None:
       self._device_offset_ns = None
       self._pair_failed = True
@@ -302,8 +302,7 @@ class RuntimeSnapshotAdapter:
         int(sm.logMonoTime["pandaStates"]), int(sm.recv_time["pandaStates"] * 1e9),
         tuple(bool(p.ignitionLine or p.ignitionCan) for p in pandas),
       )
-      check = fresh_offroad if connectivity else fresh_parked
-      return check(evidence, now_mono_ns=mono_now, now_boot_ns=boot_now)
+      return fresh_offroad(evidence, now_mono_ns=mono_now, now_boot_ns=boot_now)
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError, OSError, RuntimeError):
       return False
 
@@ -316,7 +315,7 @@ class RuntimeSnapshotAdapter:
 
   def connectivity_allowed(self) -> bool:
     """Fresh effective offroad admission for connectivity setup, regardless of ignition."""
-    return self._parked(self.ui_state, _clock_pair(self._mono_clock, self._boot_clock), connectivity=True)
+    return self.confirmed_offroad()
 
   def build(self, mode: ShellMode, selected: Destination = Destination.STAR, *, compact_y: float = 0,
             compact_scroll_x: float = 0, sidebar_expanded: bool = True, now_ns: int | None = None,
@@ -377,7 +376,7 @@ class RuntimeSnapshotAdapter:
     system_long = bool(long_active and controls is not None and str(controls.longControlState) != "off" and
                        selfdrive is not None and selfdrive.enabled and car is not None and
                        bool(getattr(car, "canValid", False)) and not getattr(car, "canTimeout", True) and ui.CP is not None and
-                       ui.CP.openpilotLongitudinalControl and not ui.CP.pcmCruise)
+                       ui.CP.openpilotLongitudinalControl)
     raw_speed = None if display_car is None else _finite(display_car.vEgoCluster)
     if raw_speed is None or raw_speed == 0:
       raw_speed = None if display_car is None else _finite(display_car.vEgo)

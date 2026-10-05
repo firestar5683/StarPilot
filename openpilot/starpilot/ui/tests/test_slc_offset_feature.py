@@ -12,7 +12,7 @@ from openpilot.starpilot.speed_limits import offset_document as od
 from openpilot.starpilot.speed_limits.runtime_settings import read_params
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest, row_change
-from openpilot.starpilot.ui.slc_offset_feature import DOCUMENT_KEY, SlcOffsetOwner
+from openpilot.starpilot.ui.slc_offset_feature import DOCUMENT_KEY, SlcOffsetOwner, native_parked
 
 
 class SlcOffsetFeatureTests(unittest.TestCase):
@@ -41,6 +41,30 @@ class SlcOffsetFeatureTests(unittest.TestCase):
     return FeatureSettingsRequest(row.key, row.source, "confirm", confirmation=True,
                                   related_source=row.related_source, vehicle_fingerprint=row.vehicle_fingerprint,
                                   capability=row.capability, dependencies=row.dependencies)
+
+  def test_native_offroad_uses_retained_fresh_authority_adapter(self):
+    ui = NS()
+    with patch("openpilot.starpilot.ui.runtime_snapshot.RuntimeSnapshotAdapter") as factory:
+      factory.return_value.confirmed_offroad.side_effect = [True, False]
+      self.assertTrue(native_parked(ui))
+      self.assertFalse(native_parked(ui))
+      factory.assert_called_once_with(ui)
+
+  def test_pcm_cruise_longitudinal_can_adopt_and_enable_slc(self):
+    assert self.cp is not None
+    self.cp.carFingerprint = "TOYOTA_HIGHLANDER_TSS2"
+    self.cp.pcmCruise = True
+    state = self.owner.snapshot("slc", parked=True, system_long=False, lateral_context=True, metric=False)
+    adopt = next(row for row in state.rows if row.key == "slc_adopt")
+    self.assertTrue(adopt.available)
+    self.assertTrue(self.owner.apply(self.confirm(adopt)))
+    row = self.row("SpeedLimitController")
+    self.assertTrue(row.available)
+    request = row_change(row)
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
+    self.cp.openpilotLongitudinalControl = False
+    self.assertFalse(self.row("SpeedLimitController").available)
 
   def test_explicit_adopt_edit_and_global_units_preserve_exact_si(self):
     self.params.put_bool("IsMetric", False, block=True)

@@ -26,7 +26,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
 )
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
-from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad, fresh_parked
+from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad
 from openpilot.starpilot.ui.pip_owner import EDITOR as PIP_EDITOR, FORMAT_PREFIX as PIP_FORMAT_PREFIX, RESET as PIP_RESET, PiPOwner, validated_editor_draft
 from openpilot.starpilot.ui.pip_preferences import read_pip
 from openpilot.starpilot.ui.sentry_owner import RESET as SENTRY_RESET, SentryOwner
@@ -94,7 +94,10 @@ def _qualified(ctx: AuthorityContext, group: str) -> bool:
       return bool(ioniq6_media_eligible(cp) and not cp.notCar and not cp.passive and not cp.dashcamOnly)
     if group in ("conditional", "conditional_wheel", "long_output"):
       return bool((cp.openpilotLongitudinalControl or ctx.configuration_longitudinal) and not cp.notCar and not cp.dashcamOnly and not cp.passive)
-    if group in ("slc", "long"):
+    if group == "slc":
+      return bool((cp.openpilotLongitudinalControl or ctx.configuration_longitudinal) and
+                  not cp.notCar and not cp.dashcamOnly and not cp.passive)
+    if group == "long":
       return bool(((cp.openpilotLongitudinalControl and not cp.pcmCruise) or ctx.configuration_longitudinal) and
                   not cp.notCar and not cp.dashcamOnly and not cp.passive)
     if group in ("torque", "aol", "aol_wheel"):
@@ -188,14 +191,11 @@ class LiveContextSource:
         self.device_offset_ns = offset
 
   def parked(self) -> bool:
-    """Fresh offroad authority with ignition off."""
-    return self._offroad(ignition_off=True)
+    """Settings and offroad operations follow the effective drive state."""
+    return self.offroad()
 
   def offroad(self) -> bool:
     """Effective offroad mode also permits setup with the car powered on."""
-    return self._offroad(ignition_off=False)
-
-  def _offroad(self, *, ignition_off: bool) -> bool:
     offroad, readable = read_saved(self.params, "IsOffroad", 8)
     if not readable or offroad != b"1":
       return False
@@ -227,8 +227,7 @@ class LiveContextSource:
           if sm.updated["deviceState"] and int(sm.logMonoTime["deviceState"]) > self.device_after_mono_ns:
             self.device_offset_ns = pair_offset
           pandas = sm["pandaStates"]
-          if ((sm.seen["deviceState"] and sm["deviceState"].started) or
-              (ignition_off and sm.seen["pandaStates"] and any(p.ignitionLine or p.ignitionCan for p in pandas))):
+          if sm.seen["deviceState"] and sm["deviceState"].started:
             return False
           evidence = ParkedEvidence(
             True, bool(sm.seen["deviceState"]), bool(sm.alive["deviceState"]), bool(sm.valid["deviceState"]),
@@ -238,8 +237,7 @@ class LiveContextSource:
             int(sm.logMonoTime["pandaStates"]), int(sm.recv_time["pandaStates"] * 1e9),
             tuple(bool(p.ignitionLine or p.ignitionCan) for p in pandas),
           )
-          check = fresh_parked if ignition_off else fresh_offroad
-          if check(evidence, now_mono_ns=mono_now, now_boot_ns=boot_now):
+          if fresh_offroad(evidence, now_mono_ns=mono_now, now_boot_ns=boot_now):
             offroad, readable = read_saved(self.params, "IsOffroad", 8)
             return bool(readable and offroad == b"1")
           remaining_ms = int((deadline - self.wait_clock()) * 1000)

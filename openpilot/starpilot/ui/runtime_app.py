@@ -521,7 +521,7 @@ class StarShellSession:
       if group == "switchback_wheel":
         from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
         return bool(ioniq6_media_eligible(cp) and not cp.notCar and not cp.passive and not cp.dashcamOnly)
-      if group in ("conditional", "conditional_wheel", "long_output"):
+      if group in ("conditional", "conditional_wheel", "long_output", "slc"):
         return bool(cp.openpilotLongitudinalControl and not cp.notCar and not cp.passive and not cp.dashcamOnly)
       if group in ("aol_wheel", "lane", "torque", "aol"):
         return not cp.notCar and not cp.passive and not cp.dashcamOnly
@@ -989,7 +989,7 @@ class StarShellSession:
     if (car is None or not getattr(car, "canValid", False) or getattr(car, "canTimeout", True) or
         control is None or not control.longActive or
         controls is None or str(controls.longControlState) == "off" or selfdrive is None or not selfdrive.enabled or
-        cp is None or not cp.openpilotLongitudinalControl or cp.pcmCruise):
+        cp is None or not cp.openpilotLongitudinalControl):
       return None
     return current_message(ui.sm, "slcState", now_ns, after_frame=ui.started_frame)
 

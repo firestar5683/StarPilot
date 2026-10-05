@@ -55,6 +55,22 @@ class TestOffroadConfigurationPages(unittest.TestCase):
             self.assertEqual(saved[name], self.editable_inventory(self.page(name)))
         self.assert_no_car_cache()
 
+  def test_stock_ioniq_configuration_can_save_slc_without_enabling_longitudinal(self):
+    self.params.put_bool('AlphaLongitudinalEnabled', False, block=True)
+    self.params.put('VehicleSelection', json.loads(encode('HYUNDAI_IONIQ_6')), block=True)
+    context = self.context.sample()
+    self.assertFalse(context.cp.openpilotLongitudinalControl)
+    self.assertTrue(context.configuration_longitudinal)
+    page = self.page('slc')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Adopt fixed offsets')
+    self.assertTrue(page['rows'][index]['available'])
+    intent = self.gateway.preview(page['view'], index, 0, 'session', b'generation')
+    self.assertTrue(self.gateway.confirm(intent['intent'], 'session', b'generation'))
+    self.assertTrue(next(row for row in self.page('slc')['rows'] if row['label'] == 'Speed Limit Controller')['available'])
+    self.assertFalse(self.params.get_bool('AlphaLongitudinalEnabled'))
+    self.assertFalse(self.context.sample().cp.openpilotLongitudinalControl)
+    self.assert_no_car_cache()
+
   def test_saved_and_manual_contexts_expose_expected_core_settings(self):
     offsets = self.page('slc')
     index = next(i for i, row in enumerate(offsets['rows']) if row['label'] == 'Adopt fixed offsets')
@@ -132,11 +148,13 @@ class TestOffroadConfigurationPages(unittest.TestCase):
     self.assertEqual(self.params.get('VehicleSelection'), selection)
     self.assert_no_car_cache()
 
-  def test_alpha_off_does_not_advertise_longitudinal_controls(self):
+  def test_alpha_off_allows_saved_long_preferences_without_runtime_activation(self):
     self.params.put_bool('AlphaLongitudinalEnabled', False, block=True)
     rows = {row['label']: row for row in self.page('profiles')['rows']}
     for label in ('Short press', 'Hold', 'Force Stop'):
-      self.assertFalse(rows[label]['available'], label)
+      self.assertTrue(rows[label]['available'], label)
+    self.assertFalse(self.context.sample().cp.openpilotLongitudinalControl)
+    self.assertFalse(self.params.get_bool('AlphaLongitudinalEnabled'))
     self.assert_no_car_cache()
 
   def test_saved_configuration_edit_is_revoked_by_onroad_or_selection_change(self):

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import threading
-import time
 
 from openpilot.starpilot.speed_limits import offset_document as od
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest
@@ -17,13 +16,12 @@ _LOCK = threading.RLock()
 
 
 def native_parked(ui) -> bool:
-  """Use fresh device and panda evidence, not only UIState.started."""
-  from openpilot.starpilot.ui.runtime_snapshot import current_message
-  now_ns = time.monotonic_ns()
-  device = current_message(ui.sm, "deviceState", now_ns)
-  pandas = current_message(ui.sm, "pandaStates", now_ns)
-  return bool(not ui.started and device is not None and not device.started and pandas is not None and
-              not any(p.ignitionLine or p.ignitionCan for p in pandas))
+  from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter
+  adapter = getattr(ui, '_slc_offroad_adapter', None)
+  if adapter is None:
+    adapter = RuntimeSnapshotAdapter(ui)
+    ui._slc_offroad_adapter = adapter
+  return adapter.confirmed_offroad()
 
 
 @dataclass(frozen=True)
@@ -66,7 +64,6 @@ def _display(value: float) -> str:
 def _capability(cp, configuration_longitudinal=False) -> tuple | None:
   try:
     if cp is None or not cp.carFingerprint or not (cp.openpilotLongitudinalControl or configuration_longitudinal) or \
-       (cp.pcmCruise and not configuration_longitudinal) or \
        cp.notCar or cp.dashcamOnly or cp.passive:
       return None
     return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl or configuration_longitudinal), bool(cp.pcmCruise and not configuration_longitudinal),
