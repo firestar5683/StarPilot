@@ -3,7 +3,7 @@ import pytest
 from opendbc.car import gen_empty_fingerprint, structs
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.stock_aol import CLASSIC_BOSCH, NIDEC, RADARLESS, qualified, temporary_restriction
-from opendbc.car.honda.values import CAR
+from opendbc.car.honda.values import CAR, HondaFlags
 from openpilot.starpilot.aol.intent import AolSettings, AOL_TOGGLE
 from openpilot.starpilot.car.honda.aol import policy_for, create_intent, native_accepts_cp
 
@@ -46,6 +46,19 @@ def test_actual_factory_admission_and_marker(identity, alpha, release):
   cp.alternativeExperience = 0
   assert not qualified(cp, marked_only=True)
   assert not native_accepts_cp(cp, cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam)
+
+
+
+@pytest.mark.parametrize("identity", IDENTITIES)
+def test_detected_hybrid_powertrain_admitted(identity):
+  fingerprint = gen_empty_fingerprint()
+  pt = 1 if identity in CLASSIC_BOSCH else 0
+  address, length = (0x188, 6) if identity in AUTO_188 else (0x1A3, 8)
+  fingerprint[pt][address] = length
+  fingerprint[pt][0x184] = 8
+  cp = CarInterface.get_params(identity, fingerprint, [], False, False, False)
+  assert cp.flags & HondaFlags.HYBRID
+  assert qualified(cp)
 
 
 @pytest.mark.parametrize("identity", IDENTITIES)

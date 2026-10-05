@@ -40,7 +40,8 @@ def qualified(cp, *, marked_only=False):
   identity = next((candidate for candidate in CLASSIC_BOSCH | NIDEC | RADARLESS if candidate == cp.carFingerprint), None)
   if identity is None:
     return False
-  detected = int(HondaFlags.BOSCH_EXT_HUD | HondaFlags.BOSCH_ALT_BRAKE | HondaFlags.HAS_BSM | HondaFlags.EPS_MODIFIED)
+  detected = int(HondaFlags.BOSCH_EXT_HUD | HondaFlags.BOSCH_ALT_BRAKE | HondaFlags.HAS_BSM | HondaFlags.EPS_MODIFIED |
+                 HondaFlags.HYBRID)
   if int(cp.flags) & ~(int(identity.config.flags) | detected):
     return False
   flags = HondaFlags(cp.flags)
