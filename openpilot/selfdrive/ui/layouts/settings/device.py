@@ -37,7 +37,6 @@ class DeviceLayout(Widget):
     self._params = Params()
     self._select_language_dialog: MultiOptionDialog | None = None
     self._fcc_dialog: HtmlModal | None = None
-    self._training_guide: TrainingGuide | None = None
 
     items = self._initialize_items()
     self._scroller = self._child(Scroller(items, line_separator=True, spacing=0))
@@ -204,6 +203,4 @@ class DeviceLayout(Widget):
     gui_app.push_widget(self._fcc_dialog)
 
   def _on_review_training_guide(self):
-    if not self._training_guide:
-      self._training_guide = TrainingGuide()
-    gui_app.push_widget(self._training_guide)
+    gui_app.push_widget(TrainingGuide())
