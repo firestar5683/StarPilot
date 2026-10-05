@@ -105,3 +105,9 @@ class TestVehicleConfiguration(unittest.TestCase):
       self.assertIsNotNone(self.params.get(DOCUMENT_KEY))
       for key in ('CarParams', 'CarParamsPersistent', 'CarParamsCache'):
         self.assertFalse(Path(self.params.get_param_path(key)).exists())
+
+  def test_all_configuration_dependencies_are_registered(self):
+    from openpilot.starpilot.galaxy.vehicle_configuration import STARTUP_KEYS
+    for key in STARTUP_KEYS:
+      with self.subTest(key=key):
+        self.params.get_type(key)
