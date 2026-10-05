@@ -374,3 +374,28 @@ def progress_function(node):
 
 Progress(progress_function, interval=progress_interval)
 AddPostAction(BUILD_TARGETS or [Dir('.')], prune_cache_dir)
+
+# Release CI rebuilds tracked device outputs for the host architecture.
+if manifest_path := os.environ.get("STARPILOT_CI_BUILD_MANIFEST"):
+  from tools.release.build_manifest import capture
+  manifest_nodes = env.arg2nodes(BUILD_TARGETS or [Dir('.')], env.fs.Entry)
+  manifest_seen = set()
+  manifest_outputs = set()
+  while manifest_nodes:
+    manifest_node = manifest_nodes.pop().disambiguate()
+    if manifest_node in manifest_seen:
+      continue
+    manifest_seen.add(manifest_node)
+    manifest_executor = manifest_node.get_executor()
+    if manifest_executor is not None:
+      manifest_nodes += manifest_executor.get_all_prerequisites() + manifest_executor.get_all_children()
+      for target in manifest_executor.get_all_targets():
+        if target.is_derived() and hasattr(target, 'abspath'):
+          relative = os.path.relpath(target.abspath, Dir('#').abspath)
+          if not relative.startswith('../'):
+            manifest_outputs.add(relative)
+  capture(Dir('#').abspath, manifest_path, manifest_outputs,
+          {'arch': arch, 'targets': list(BUILD_TARGETS), 'extras': GetOption('extras'),
+           'ccflags': GetOption('ccflags'), 'release': release, 'arguments': dict(ARGUMENTS),
+           'toolchain': {key: str(env.get(key, '')) for key in
+                         ('CC', 'CXX', 'CCFLAGS', 'CFLAGS', 'CXXFLAGS', 'LINKFLAGS')}})

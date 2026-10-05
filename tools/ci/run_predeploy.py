@@ -22,7 +22,8 @@ def commands(output, cache, download=False):
             ('schemas', [python, 'tools/ci/schema_policy.py'])]
   for name, path in (('vendor', 'tools/vendor/tests'), ('packaging', 'tools/release/tests'),
                      ('ci-tools', 'tools/ci/tests'), ('updater', 'openpilot/system/updated/tests')):
-    source.append((name, [python, '-m', 'unittest', 'discover', '-s', path, '-v']))
+    command = [python, '-m', 'pytest', '-q', path] if name == 'packaging' else [python, '-m', 'unittest', 'discover', '-s', path, '-v']
+    source.append((name, command))
   host = [('unittest', [python, 'tools/ci/run_host_tests.py', '--json-output', str(output / 'host.json')]),
           ('pytest', [python, 'tools/ci/run_host_tests.py', '--pytest'])]
   vehicles = [(suite, [python, 'tools/ci/run_vehicle_tests.py', '--suite', suite, '--output', str(output / suite)])
