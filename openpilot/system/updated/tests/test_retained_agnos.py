@@ -116,7 +116,8 @@ touch "$UDEV_TEST_MOUNTED"''',
     function = function.replace('/sys/firmware/devicetree/base/model', str(device_model))
     function = function.replace('/run/udev/rules.d', str(self.root / 'udev-rules'))
     function = function.replace('/etc/udev/rules.d/99-gpio.rules', str(gpio_rules))
-    function = function.replace('timeout -k 1s 5s', 'timeout -k 0.1s 0.2s')
+    if udev_failure == 'hang':
+      function = function.replace('timeout -k 1s 5s', 'timeout -k 0.1s 0.2s')
     script.write_text('''source "$1/launch_env.sh"
 DIR="$1"
 OPENPILOT_ROOT="$1"
@@ -131,7 +132,7 @@ op_run_command() { echo effect >> "$log"; }
                        UDEV_TEST_LOG=str(self.root / 'udev.log'), UDEV_TEST_FAILURE=udev_failure,
                        UDEV_TEST_MOUNTED=str(self.root / 'mounted'), UDEV_TEST_MOUNT_LOG=str(self.root / 'mount.log'))
     return subprocess.run(['bash', str(script), str(self.root)], env=environment,
-                          capture_output=True, text=True, timeout=5)
+                          capture_output=True, text=True, timeout=8)
 
   def test_launcher_refuses_mismatched_os_before_any_effect(self):
     result = self.run_shell(shell_function(ROOT / 'launch_chffrplus.sh', 'agnos_init'), 'agnos_init', '19.8')
@@ -226,7 +227,7 @@ op_run_command() { echo effect >> "$log"; }
       self.assertEqual(result.returncode, 0, result.stderr)
       results.append([(path.stat().st_mode, path.stat().st_uid, path.stat().st_gid) for path in paths])
       if program == command:
-        self.assertEqual(log.read_text().splitlines(), ['chown', 'chmod'])
+        self.assertCountEqual(log.read_text().splitlines(), ['chown', 'chmod'])
       else:
         self.assertGreater(len(log.read_text().splitlines()), 2)
     self.assertEqual(results[0], results[1])

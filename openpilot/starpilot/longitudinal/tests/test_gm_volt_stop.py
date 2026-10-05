@@ -192,6 +192,10 @@ class TestVoltStop(unittest.TestCase):
   def test_card_resume_provider_remains_fresh_at_actual_gas_sender_cadence(self):
     import time
     from openpilot.starpilot.controller_extensions import ResumePlanInputs
+    def clock_pair():
+      now = time.monotonic_ns()
+      return now, now
+    self.enterContext(patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', side_effect=clock_pair))
     provider = ResumePlanInputs()
     pm = messaging.PubMaster(['deviceState', 'carState', 'longitudinalPlan'])
     drive = time.monotonic_ns() - 1_000_000_000

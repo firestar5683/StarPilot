@@ -20,6 +20,8 @@ cache. The UI remains the custom large and compact Raylib UI.
 | `./dev pytest <arguments>` | pytest, including its xdist and mock plugins |
 | `./dev shell` | Shell with host imports and private settings |
 | `./dev sync [shared\|cabana]` | Refresh source and dependencies without launching a tool |
+| `./test` | Run lint, packaging, startup, control, model, UI and selected vehicle regressions |
+| `./test --full` | Run the complete Linux pre-deployment suite, including recorded routes and replay |
 
 `./tool` and `./tools/host` are aliases for `./dev`. The `c3`, `c4`, and
 `onroad` commands can also be written as `./dev c3`, etc. Run `./dev help`,
@@ -28,6 +30,23 @@ building anything. Scripts resolve paths relative to the checkout, so invoking
 an absolute launcher path from another directory also works.
 
 ## Setup and build separation
+
+Run `./test` before pushing local changes. It checks the current files, including
+uncommitted edits, in the existing shared host cache. Native dependencies are
+built incrementally there; device binaries and the source checkout are preserved.
+Each run prints its report directory, saves individual logs and test results,
+and returns a nonzero status on failure. First-time dependency setup takes longer
+than subsequent runs. Run `./test --help` without preparing an environment.
+The updater shell checks require GNU timeout; on macOS install it with
+`brew install coreutils`. Standard Homebrew locations are detected automatically.
+
+The default is a focused regression check, not every CI job. `./test --full`
+uses the existing Linux pre-deployment runner for the full host build, unit,
+vehicle, native protocol, recorded-route and process-replay checks. It requires
+the [CI prerequisites](ci/README.md); `--download` permits pinned route downloads,
+and process replay may fetch its own logs. Neither command replaces the device
+build or physical vehicle validation. Logs default to a new temporary directory;
+use `--output /path/to/new-directory` to choose a persistent location.
 
 Desktop tools require macOS or Linux, Git, uv, and a working native C/C++
 compiler. Run `tools/setup_dependencies.sh` in this checkout for prerequisites. The first

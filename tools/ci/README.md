@@ -1,5 +1,10 @@
 # Local and release checks
 
+Run `./test` from the checkout for the focused pre-push checks. It uses the
+isolated developer runtime, retains failure logs, and leaves device artifacts
+unchanged. `./test --full` wraps the complete Linux pre-deployment command below.
+Use `./test --help` for scope and reporting options.
+
 On Linux, use the managed host runtime to run the same source, unit, vehicle and pinned
 recording checks and process replay as GitHub Actions:
 

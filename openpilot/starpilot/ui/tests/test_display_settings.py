@@ -12,7 +12,10 @@ from openpilot.common.params import Params
 from openpilot.starpilot.ui import display_compact
 from openpilot.starpilot.ui.display_owner import DisplayOwner
 from openpilot.starpilot.ui.display_preferences import MASTER, read_choice, read_preferences
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, row_change
+from openpilot.starpilot.ui.feature_settings_state import (
+  FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
+  FeatureInput, FeatureSettingsRequest, feature_row_top, row_change,
+)
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, tile_rects
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode
@@ -150,12 +153,16 @@ class DisplaySettingsTests(unittest.TestCase):
     changed = []
     input_owner = FeatureInput(changed.append)
     state = self.owner.snapshot(Profile.LARGE)
-    input_owner.press(1980, 320, state)
-    input_owner.release(1980, 320, state)
+    visible_row = next(index for index, row in enumerate(state.rows) if row.key == MASTER) - state.scroll
+    self.assertTrue(0 <= visible_row < FEATURE_VISIBLE_ROWS)
+    x = (FEATURE_CONTROL_LEFT + FEATURE_CONTROL_RIGHT) / 2
+    y = feature_row_top(state) + (visible_row + .5) * FEATURE_ROW_HEIGHT
+    input_owner.press(x, y, state)
+    input_owner.release(x, y, state)
     self.assertEqual(changed[0].row.key, MASTER)
-    input_owner.press(1980, 320, state)
+    input_owner.press(x, y, state)
     input_owner.cancel()
-    input_owner.release(1980, 320, state)
+    input_owner.release(x, y, state)
     self.assertEqual(len(changed), 1)
     class Button:
       def __init__(self, label, value):
