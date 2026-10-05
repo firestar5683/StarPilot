@@ -136,8 +136,8 @@ def test_internal_panda_reset_and_recovery_timing(device, reset_hold, recover_ho
 def test_pandad_enumeration_and_recovery(device, failure):
   pandad_path = SOURCE.parents[3] / 'selfdrive/pandad/pandad.py'
   tree = ast.parse(pandad_path.read_text())
-  functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and
-               node.name in {'wait_for_internal_panda', 'main'}]
+  functions: list[ast.stmt] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and
+                              node.name in {'wait_for_internal_panda', 'main'}]
   events = Mock()
   first_discovery = {'missing': [], 'usb': OSError(), 'multiple': ['one', 'two'], 'wait': []}.get(failure, ['serial'])
   initial_ready = device != 'tici' or failure not in ('wait', 'initial_wait')
