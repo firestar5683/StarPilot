@@ -146,6 +146,11 @@ def gm_control_word(cp: CarParams) -> int:
   if word in CAMERA_ACC_PEDAL_PROFILES:
     profile = camera_acc_pedal_profile(cp)
     if profile is not None:
+      if profile.volt:
+        if not profile.longitudinal:
+          return 0xC150 if profile.removed else 5
+        held = profile.auto_hold or profile.one_pedal
+        return ((0xC1D3 if profile.brake_source == BrakeSource.F1 else 0xC1D1) if held else 0xC151) if profile.removed else (0x4087 if held else 0x4007)
       return ((0xC173 if profile.longitudinal else 0xC172) if profile.removed else
               (0xC170 if profile.longitudinal else 0xC171))
     return word
@@ -163,6 +168,9 @@ def gm_control_word(cp: CarParams) -> int:
 
 def is_volt_one_pedal(cp: CarParams) -> bool:
   try:
+    profile = camera_acc_pedal_profile(cp)
+    if profile is not None and profile.volt:
+      return profile.longitudinal and profile.one_pedal
     return (int(cp.safetyConfigs[0].safetyParam) in VOLT_ONE_PEDAL_WORDS and
             cp.transmissionType == CarParams.TransmissionType.direct and is_volt_longitudinal(cp) and is_gm_auto_hold(cp))
   except (AttributeError, IndexError, TypeError, ValueError):
@@ -170,6 +178,11 @@ def is_volt_one_pedal(cp: CarParams) -> bool:
 
 
 def apply_volt_one_pedal(cp: CarParams, enabled: bool, auto_hold_enabled: bool) -> None:
+  profile = camera_acc_pedal_profile(cp)
+  if profile is not None and profile.volt:
+    if profile.longitudinal:
+      cp.safetyConfigs[0].safetyParam = volt_camera_pedal_word(profile, auto_hold_enabled, enabled)
+    return
   if not is_volt_longitudinal(cp) or cp.transmissionType != CarParams.TransmissionType.direct:
     return
   cp.safetyConfigs[0].safetyParam = gm_control_word(cp)
@@ -181,7 +194,13 @@ def apply_volt_one_pedal(cp: CarParams, enabled: bool, auto_hold_enabled: bool) 
 
 def control_flags(cp: CarParams) -> int:
   """Exclude only the informational BSM bit from exact control-profile admission."""
-  return int(cp.flags) & ~int(GMFlags.HAS_BSM)
+  flags = int(cp.flags) & ~int(GMFlags.HAS_BSM)
+  profile = camera_acc_pedal_profile(cp)
+  if profile is not None and profile.volt:
+    flags &= ~int(GMFlags.PEDAL_LONG)
+    if not profile.removed:
+      flags &= ~int(GMFlags.NO_ACCELERATOR_POS_MSG)
+  return flags
 
 
 def uses_camera_stock_controls(cp: CarParams) -> bool:
@@ -258,6 +277,11 @@ def is_gm_auto_hold(cp: CarParams) -> bool:
 
 
 def apply_gm_auto_hold(cp: CarParams, enabled: bool) -> None:
+  profile = camera_acc_pedal_profile(cp)
+  if profile is not None and profile.volt:
+    if profile.longitudinal:
+      cp.safetyConfigs[0].safetyParam = volt_camera_pedal_word(profile, enabled, profile.one_pedal)
+    return
   if is_volt_camera_removed(cp, longitudinal=True):
     cp.safetyConfigs[0].safetyParam = (0xC1D3 if cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG else 0xC1D1) if enabled else 0xC151
     return
@@ -847,7 +871,7 @@ ORDINARY_CAMERA_ALPHA_CAR = frozenset((CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_EQ
 ORDINARY_CAMERA_CAR = ORDINARY_CAMERA_ALPHA_CAR | frozenset((CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA))
 
 
-CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR
+CAMERA_ACC_PEDAL_CAR = ORDINARY_CAMERA_CAR | frozenset((CAR.CHEVROLET_VOLT_CAMERA,))
 
 
 class BrakeSource(Enum):
@@ -860,9 +884,17 @@ class CameraAccPedalProfile:
   removed: bool
   brake_source: BrakeSource
   longitudinal: bool
+  volt: bool = False
+  auto_hold: bool = False
+  one_pedal: bool = False
 
 
 CAMERA_ACC_PEDAL_PROFILES = MappingProxyType({
+  **{start + index: CameraAccPedalProfile(index >= 2, BrakeSource.F1 if index % 2 else BrakeSource.BE,
+                                       start != 0xE210, True, hold, one)
+     for start, hold, one in ((0xE200, False, False), (0xE210, False, False),
+                              (0xE220, True, False), (0xE240, False, True), (0xE260, True, True))
+     for index in range(4)},
   0xE100: CameraAccPedalProfile(False, BrakeSource.BE, True),
   0xE101: CameraAccPedalProfile(False, BrakeSource.F1, True),
   0xE102: CameraAccPedalProfile(True, BrakeSource.BE, True),
@@ -874,6 +906,13 @@ CAMERA_ACC_PEDAL_PROFILES = MappingProxyType({
 })
 
 
+def volt_camera_pedal_word(profile, auto_hold: bool, one_pedal: bool) -> int:
+  start = 0xE260 if auto_hold and one_pedal else 0xE240 if one_pedal else 0xE220 if auto_hold else 0xE200
+  if not profile.longitudinal:
+    start = 0xE210
+  return start + int(profile.removed) * 2 + int(profile.brake_source == BrakeSource.F1)
+
+
 def camera_acc_pedal_profile(cp):
   try:
     if len(cp.safetyConfigs) != 1:
@@ -883,12 +922,13 @@ def camera_acc_pedal_profile(cp):
       return None
     flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if profile.removed else 0) |
                 (GMFlags.NO_ACCELERATOR_POS_MSG if profile.brake_source == BrakeSource.F1 else 0))
-    if (cp.brand == 'gm' and cp.carFingerprint in CAMERA_ACC_PEDAL_CAR and
-        cp.transmissionType == CarParams.TransmissionType.automatic and
-        cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.radarUnavailable and
-        not cp.passive and not cp.dashcamOnly and not cp.notCar and control_flags(cp) == flags and
+    if (cp.brand == 'gm' and cp.carFingerprint in (frozenset((CAR.CHEVROLET_VOLT_CAMERA,)) if profile.volt else ORDINARY_CAMERA_CAR) and
+        cp.transmissionType == (CarParams.TransmissionType.direct if profile.volt else CarParams.TransmissionType.automatic) and
+        cp.networkLocation == CarParams.NetworkLocation.fwdCamera and (profile.volt or cp.radarUnavailable) and
+        not cp.passive and not cp.dashcamOnly and not cp.notCar and int(cp.flags) & ~int(GMFlags.HAS_BSM) == flags and
         cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-        bool(cp.openpilotLongitudinalControl) == profile.longitudinal and bool(cp.pcmCruise) != profile.longitudinal):
+        bool(cp.openpilotLongitudinalControl) == profile.longitudinal and bool(cp.pcmCruise) != profile.longitudinal and
+        (not profile.volt or not profile.longitudinal or cp.alphaLongitudinalAvailable)):
       return profile
   except (AttributeError, IndexError, TypeError, ValueError):
     pass

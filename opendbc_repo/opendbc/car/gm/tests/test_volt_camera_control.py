@@ -37,13 +37,25 @@ def feed_camera(ci, packer, now, *, counter=0, speed=20., gas=False, brake=False
 
 
 class TestVoltCameraControl(unittest.TestCase):
+  def test_incomplete_interceptor_graph_cannot_admit_active_owner(self):
+    from opendbc.car.gm.aol import qualified_gm
+    from opendbc.car.gm.values import camera_acc_pedal_profile
+    for length in (None, 5, 6):
+      for release in (False, True):
+        cp = camera_params(True, release, length, pedal=True)
+        self.assertTrue(cp.dashcamOnly)
+        self.assertFalse(cp.openpilotLongitudinalControl)
+        self.assertTrue(cp.pcmCruise)
+        self.assertIsNone(camera_acc_pedal_profile(cp))
+        self.assertFalse(qualified_gm(cp))
+
   def test_actual_startup_matrix_and_receive_only_radar(self):
     for alpha in (False, True):
       for release in (False, True):
         for radar in (False, True):
           for sascm in (False, True):
             for length in (None, 5, 6):
-              cp = camera_params(alpha, release, length, radar, sascm, pedal=True)
+              cp = camera_params(alpha, release, length, radar, sascm, pedal=False)
               present = length == 6
               active = present and alpha and not release
               self.assertEqual(cp.dashcamOnly, not present)

@@ -99,6 +99,13 @@ def _configurations():
     for removed in (False, True):
       for disabled in (False, True):
         yield conventional_pedal(identity, removed=removed, disabled=disabled)
+  from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint as pedal_fingerprint
+  for camera in (False, True):
+    for be in (False, True):
+      observed = pedal_fingerprint(camera=camera, be=be)
+      observed[0].update({0xBD: 7, 0x232: 8})
+      for release in (False, True):
+        yield CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, observed, [], False, release, False)
   for removed in (False, True):
     for disabled in (False, True):
       yield silverado_pedal(removed=removed, disabled=disabled)

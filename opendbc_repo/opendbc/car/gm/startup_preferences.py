@@ -19,11 +19,13 @@ def prepare_disable_longitudinal(cp, requested: bool) -> None:
   profile = camera_acc_pedal_profile(cp)
   if requested and profile is not None:
     stock_words = {0xE100: 0xE110, 0xE101: 0xE111, 0xE102: 0xE112, 0xE103: 0xE113}
+    if profile.volt:
+      stock_words.update({start + index: 0xE210 + index for start in (0xE200, 0xE220, 0xE240, 0xE260) for index in range(4)})
     cp.safetyConfigs[0].safetyParam = stock_words.get(int(cp.safetyConfigs[0].safetyParam), int(cp.safetyConfigs[0].safetyParam))
     cp.openpilotLongitudinalControl = False
     cp.pcmCruise = True
     cp.autoResumeSng = False
-    cp.minEnableSpeed = -1. if cp.carFingerprint in ALT_ACCS else 5. / 3.6
+    cp.minEnableSpeed = -1. if profile.volt or cp.carFingerprint in ALT_ACCS else 5. / 3.6
     return
   if requested and is_volt_one_pedal(cp):
     cp.safetyConfigs[0].safetyParam = gm_control_word(cp)

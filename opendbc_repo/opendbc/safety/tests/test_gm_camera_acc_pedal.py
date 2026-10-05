@@ -32,7 +32,8 @@ class TestGmCameraAccPedal(unittest.TestCase):
   def rx(self, addr, data):
     return self.safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, 0, bytes(data)))
 
-  def observations(self, *, speed=0, right=None, acc=4, main=True, brake=False, gas=False, gear=4, analog=True, sensor=True, gear_source=True):
+  def observations(self, *, speed=0, right=None, acc=4, main=True, brake=False, gas=False, gear=4, analog=True, sensor=True, gear_source=True,
+                   regen=False, regen_source=True, friction_source=True):
     self.now += 10_000
     self.safety.set_timer(self.now)
     self.rx(0x184, bytes(8))
@@ -40,7 +41,9 @@ class TestGmCameraAccPedal(unittest.TestCase):
                     (speed if right is None else right) & 255, 0])
     self.rx(0x1E1, bytes(7))
     if analog:
-      self.rx(0xF1 if self.word in (0xE101, 0xE103, 0xE111, 0xE113, 0xC171) else 0xBE, bytes(6))
+      alternate = self.word in (0xE101, 0xE103, 0xE111, 0xE113,
+                                0xC171, 0xE201, 0xE203, 0xE211, 0xE213, 0xE221, 0xE223, 0xE241, 0xE243, 0xE261, 0xE263)
+      self.rx(0xF1 if alternate else 0xBE, bytes(6))
     engine = bytearray(8)
     engine[1] = acc << 5
     engine[5] = int(gas)
@@ -58,6 +61,10 @@ class TestGmCameraAccPedal(unittest.TestCase):
     prndl[3] = gear
     if gear_source:
       self.rx(0x1F5, prndl)
+    if regen_source:
+      self.rx(0xBD, [0x10 if regen else 0, 0, 0, 0, 0, 0, 0])
+    if friction_source:
+      self.rx(0x232, bytes(8))
     self.safety.safety_tick()
 
   def engage(self):
@@ -82,6 +89,69 @@ class TestGmCameraAccPedal(unittest.TestCase):
     self.init(word)
     self.observations()
     self.engage()
+
+  def test_volt_interceptor_gas_withdraws_inactive_hold_and_rearm_credit(self):
+    if self.release:
+      self.skipTest("Active Volt interceptor profiles are DEBUG-only")
+    for word in (0xE220, 0xE221, 0xE222, 0xE223, 0xE260, 0xE261, 0xE262, 0xE263):
+      for fault in ('gas', 'adc', 'stale'):
+        self.init(word)
+        for _ in range(320):
+          self.observations(speed=100)
+        self.observations(speed=0, brake=True)
+        self.assertFalse(self.safety.get_controls_allowed())
+        brake = 100
+        raw = 0x1000 - brake
+        checksum = (0x10000 - (0xD << 12) - raw) & 0xFFFF
+        hold = libsafety_py.make_CANPacket(0x315, 0, bytes([0xD0 | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, 0]))
+        self.assertTrue(self.safety.safety_tx_hook(hold))
+        checksum = (0x10000 - (0xD << 12) - raw - 1) & 0xFFFF
+        hold = libsafety_py.make_CANPacket(0x315, 0, bytes([0xD0 | (raw >> 8), raw & 255, checksum >> 8, checksum & 255, 1]))
+        data = bytearray.fromhex('053502ba0164' if fault == 'gas' else '0279012a06f6')
+        if fault == 'adc':
+          data[:2] = (4096).to_bytes(2, 'big')
+        data[4] = self.sensor_counter & 15
+        data[5] = gmcan.pedal_crc(data)
+        self.sensor_counter += 1
+        self.rx(0x201, data)
+        if fault == 'stale':
+          self.now += 100001
+          self.safety.set_timer(self.now)
+        self.assertFalse(self.safety.safety_tx_hook(hold))
+        self.observations(speed=0, brake=False)
+        self.assertFalse(self.safety.safety_tx_hook(hold))
+
+  def test_volt_camera_exact_compositions_and_maneuver_bounds(self):
+    active = (0xE200, 0xE201, 0xE202, 0xE203, 0xE220, 0xE221, 0xE222, 0xE223,
+              0xE240, 0xE241, 0xE242, 0xE243, 0xE260, 0xE261, 0xE262, 0xE263)
+    for word in active:
+      with self.subTest(word=hex(word)):
+        self.ready(word)
+        if self.release:
+          self.assertFalse(self.safety.safety_tx_hook(self.gas(1)))
+          self.assertFalse(self.safety.safety_tx_hook(self.pedal(.16)))
+          continue
+        self.assertTrue(self.safety.safety_config_valid())
+        self.observations(speed=231)
+        self.neutral_pair()
+        self.assertFalse(self.safety.safety_tx_hook(self.pedal(.161)))
+        self.assertTrue(self.safety.safety_tx_hook(self.pedal(.16)))
+        self.assertTrue(self.safety.safety_tx_hook(self.pedal(0, 1)))
+        self.observations(speed=232)
+        self.neutral_pair(2)
+        self.assertFalse(self.safety.safety_tx_hook(self.pedal(.16, 2)))
+        self.observations(speed=0, regen=True)
+        self.assertFalse(self.safety.safety_tx_hook(self.pedal(idx=2)))
+    for word in (0xE210, 0xE211, 0xE212, 0xE213):
+      self.init(word)
+      self.observations(sensor=False, gear_source=False)
+      self.assertTrue(self.safety.safety_config_valid())
+      self.assertFalse(self.safety.safety_tx_hook(self.pedal(.16)))
+      self.assertFalse(self.safety.safety_tx_hook(self.gas(1)))
+    for word in (0xE204, 0xE214, 0xE224, 0xE244, 0xE264, 0xE2FF):
+      self.ready(word)
+      self.assertFalse(self.safety.safety_tx_hook(self.pedal(.16)))
+      self.assertFalse(self.safety.safety_tx_hook(self.gas(1)))
 
   def test_exact_profiles_and_stock_without_pedal_or_gear(self):
     for word in (0xE110, 0xE111, 0xE112, 0xE113):

@@ -10,6 +10,19 @@ from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.values import CAR, DBC, GMSafetyFlags
 
 
+def volt_camera_pedal_params(*, camera=True, be=True, pedal=True, gear=True, release=False, alpha=False):
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7, 0x232: 8})
+  fingerprint[0][0xBE if be else 0xF1] = 6
+  if pedal:
+    fingerprint[0][0x201] = 6
+  if gear:
+    fingerprint[0][0x1F5] = 8
+  if camera:
+    fingerprint[2].update({0x320: 6, 0x180: 4, 0x370: 6})
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
+
+
 @dataclass(frozen=True)
 class Phase:
   name: str
@@ -260,3 +273,82 @@ class TestVoltTransitions(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+class TestVoltCameraPedalProfiles(unittest.TestCase):
+  def test_actual_factory_composes_hold_and_one_pedal_without_losing_interceptor(self):
+    from opendbc.car.gm.values import (camera_acc_pedal_profile, apply_gm_auto_hold, apply_volt_one_pedal,
+                                      is_gm_auto_hold, is_volt_one_pedal, is_volt_longitudinal)
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    for camera in (True, False):
+      for be in (True, False):
+        index = int(not camera) * 2 + int(not be)
+        for hold, one, start in ((False, False, 0xE200), (True, False, 0xE220),
+                                 (False, True, 0xE240), (True, True, 0xE260)):
+          with self.subTest(camera=camera, be=be, hold=hold, one=one):
+            cp = volt_camera_pedal_params(camera=camera, be=be)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE200 + index)
+            apply_gm_auto_hold(cp, hold)
+            apply_volt_one_pedal(cp, one, hold)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, start + index)
+            profile = camera_acc_pedal_profile(cp)
+            self.assertTrue(profile.volt and profile.longitudinal and is_volt_longitudinal(cp))
+            self.assertEqual((profile.auto_hold, profile.one_pedal), (hold, one))
+            self.assertEqual(is_volt_one_pedal(cp), one)
+            self.assertEqual(is_gm_auto_hold(cp), hold or one)
+            prepare_disable_longitudinal(cp, True)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE210 + index)
+            self.assertFalse(cp.openpilotLongitudinalControl or cp.autoResumeSng)
+            self.assertTrue(cp.pcmCruise)
+            apply_gm_auto_hold(cp, True)
+            apply_volt_one_pedal(cp, True, True)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE210 + index)
+        self.assertEqual(volt_camera_pedal_params(camera=camera, be=be, release=True).safetyConfigs[0].safetyParam,
+                         0xE210 + index)
+        self.assertEqual(volt_camera_pedal_params(camera=camera, be=be, gear=False).safetyConfigs[0].safetyParam,
+                         0xE210 + index)
+
+
+class TestVoltCameraLaunchCurrentSchema(unittest.TestCase):
+  def test_actual_parser_launch_preserves_physical_standstill_bypass(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    from opendbc.car.gm import gmcan
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.starpilot.controller_extensions import configure_controller
+    with OpenpilotPrefix():
+      settings = Params()
+      settings.put_bool('OpenpilotEnabledToggle', True, block=True)
+      cp = volt_camera_pedal_params(alpha=True)
+      ci = CarInterface(cp)
+      configure_controller(ci, settings)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      command = structs.CarControl(enabled=True, longActive=True)
+      command.cruiseControl.resume = True
+      command.actuators.accel = .5
+      for tick in range(64):
+        now = 1_000_000_000 + tick * 10_000_000
+        raw = 200 if tick < 44 else 34 if tick < 50 else 0
+        frames = pt_frames(packer, counter=tick % 4, acc_cruise=4)
+        frames = [frame for frame in frames if frame[0] not in (0x34A, 0x348)]
+        frames += [packer.make_can_msg('EBCMWheelSpdRear', 0, {'RLWheelSpd': raw * .0311, 'RRWheelSpd': raw * .0311}),
+                   packer.make_can_msg('EBCMWheelSpdFront', 0, {'FLWheelSpd': (200 if 50 <= tick < 55 else raw) * .0311,
+                                                                     'FRWheelSpd': (200 if 50 <= tick < 55 else raw) * .0311}),
+                   packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                   packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                   packer.make_can_msg('AEBCmd', 2, {}),
+                   packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 4})]
+        if tick % 2 == 0:
+          sensor = bytearray.fromhex('0279012a0000')
+          sensor[4] = tick // 2 % 16
+          sensor[5] = gmcan.pedal_crc(sensor)
+          frames.append((0x201, bytes(sensor), 0))
+        state = ci.update([(now, frames)])
+        ci.apply(command.as_reader(), now)
+        if tick in (44, 52):
+          self.assertTrue(state.canValid)
+          self.assertGreater(state.vEgo, .3)
+          self.assertEqual(state.standstill, tick == 52)
+          self.assertEqual(ci.CC.camera_pedal_launch, tick == 52)

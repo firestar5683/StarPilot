@@ -51,12 +51,12 @@ class TestVehicleConfiguration(unittest.TestCase):
 
   def test_camera_interceptor_manual_choice_does_not_invent_hardware(self):
     from opendbc.car.gm.tests.test_camera_acc_pedal import CAMERA_IDS
-    from opendbc.car.gm.values import GMFlags, camera_acc_pedal_profile
+    from opendbc.car.gm.values import CAR, GMFlags, camera_acc_pedal_profile
     from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
     from openpilot.starpilot.ui.feature_settings_state import row_change
     from dataclasses import replace
     self.params.put_bool('OpenpilotEnabledToggle', True, block=True)
-    for identity in CAMERA_IDS:
+    for identity in (*CAMERA_IDS, CAR.CHEVROLET_VOLT_CAMERA):
       self.select(str(identity))
       cp, token = configuration_context(self.params, None, None)
       self.assertEqual(cp.carFingerprint, identity)
