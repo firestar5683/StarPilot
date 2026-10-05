@@ -75,7 +75,10 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     from opendbc.car.gm.interface import CarInterface
     from openpilot.starpilot.vehicle_selection import encode
     from openpilot.starpilot.ui.feature_settings_state import FeaturePage, row_change, row_default
-    settings = (("VoltSNG", "volt_sng", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
+    from openpilot.starpilot.ui.vehicle_bool import confirmation_question
+    settings = (("VoltOnePedalMode", "volt_one_pedal", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
+                                                     CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)),
+                ("VoltSNG", "volt_sng", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
                                         CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)),
                 ("GMAutoHold", "gm_auto_hold", (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM,
                                               CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019, CAR.BUICK_LACROSSE)))
@@ -95,11 +98,16 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
             self.assertEqual("regen paddle" in row().reason, identity != CAR.BUICK_LACROSSE)
           change = row_change(row())
           assert change is not None
+          question = confirmation_question(change)
+          if key == "GMAutoHold":
+            self.assertEqual("regen paddle" in question, identity != CAR.BUICK_LACROSSE)
+          elif key == "VoltOnePedalMode":
+            self.assertIn("Lifting off the accelerator can apply the brakes", question)
           self.assertTrue(owner.apply(replace(change, confirmation=True)))
           self.assertEqual(self.saved.get_bool(key), change.value == 'On')
           self.assertTrue(owner.apply(row_default(row())))
           self.assertFalse(self.saved.get_bool(key))
-          controller = SimpleNamespace(volt_sng=False, gm_auto_hold=False, long_pitch=True)
+          controller = SimpleNamespace(volt_sng=False, gm_auto_hold=False, volt_one_pedal=False, long_pitch=True)
           VehicleStartupPreferences(**{preference: True}).configure_controller(SimpleNamespace(CP=cp, CC=controller))
           self.assertFalse(getattr(controller, preference))
           fresh = row()

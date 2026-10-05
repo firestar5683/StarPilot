@@ -16,7 +16,7 @@ from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
 from opendbc.car.gm.tests.test_volt_camera_control import camera_params
 from opendbc.car.gm.tests.test_volt_camera_removed import removed_params
 from opendbc.car.gm.tests.test_volt_sdgm_control import sdgm_params
-from opendbc.car.gm.values import CAR, DBC, ORDINARY_ASCM_CAR, ORDINARY_SDGM_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CC_CAR
+from opendbc.car.gm.values import CAR, DBC, ORDINARY_ASCM_CAR, ORDINARY_SDGM_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CC_CAR, is_volt_one_pedal
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
@@ -106,6 +106,11 @@ def configurations():
     VehicleStartupPreferences(gm_auto_hold=True).prepare(selected)
     if selected.safetyConfigs[0].safetyParam != cp.safetyConfigs[0].safetyParam:
       yield selected
+    for paired in (False, True):
+      selected = cp.as_reader().as_builder()
+      VehicleStartupPreferences(volt_one_pedal=True, gm_auto_hold=paired).prepare(selected)
+      if is_volt_one_pedal(selected):
+        yield selected
 
 
 class TestGmAol(unittest.TestCase):

@@ -211,6 +211,7 @@ static void gm_bolt_cc_rx(const CANPacket_t *msg) {
 }
 
 static void gm_bolt_cc_optional_rx(const CANPacket_t *msg) {
+  gm_one_pedal_observe(msg);
   if (gm_bolt_cc_selected && (msg->addr == 0xBDU) && (msg->bus == 0U) && (GET_LEN(msg) == 7U)) {
     gm_bolt_cc_profile_rx(msg);
   }

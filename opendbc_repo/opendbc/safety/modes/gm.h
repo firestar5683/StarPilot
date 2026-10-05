@@ -3,6 +3,7 @@
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/can_tx.h"
 #include "gm_aol.h"
+#include "gm_volt_one_pedal.h"
 #include "gm_bolt_cc.h"
 #include "gm_cc_pedal.h"
 #include "gm_volt_auto_hold.h"
@@ -405,6 +406,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
   }
 
   gm_cc_pedal_rx(msg);
+  gm_one_pedal_observe(msg);
   gm_hold_rx(msg);
 }
 
@@ -714,7 +716,7 @@ static bool gm_fwd_hook(int bus_num, int addr) {
 }
 
 static safety_config gm_init(uint16_t safety_param) {
-  uint16_t param = safety_param;
+  uint16_t param = gm_one_pedal_reset(safety_param);
   gm_cc_pedal_silverado = (safety_param == 0xC182U) || (safety_param == 0xC183U) ||
                           (safety_param == 0xC184U) || (safety_param == 0xC185U);
   gm_cc_pedal_ordinary_stock = (safety_param == 0xC186U) || (safety_param == 0xC187U);

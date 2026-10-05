@@ -65,7 +65,8 @@ from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_c
 
 BOOL_DEFAULTS = {
   "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
-  "ReverseCruise": False, "ToyotaAutoHold": False, "VoltSNG": False, "GMAutoHold": False, "LongPitch": True, "DisableOpenpilotLongitudinal": False,
+  "ReverseCruise": False, "ToyotaAutoHold": False, "VoltSNG": False, "GMAutoHold": False, "VoltOnePedalMode": False,
+  "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": False,
   "SLCConfirmation": False, "SLCConfirmationHigher": False, "SLCConfirmationLower": False,
   "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
@@ -255,7 +256,7 @@ class FeatureSettingsOwner:
       identities = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019}
       if key == "GMAutoHold":
         identities.add(CAR.BUICK_LACROSSE)
-      if key not in ("VoltSNG", "GMAutoHold") or cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
+      if key not in ("VoltSNG", "GMAutoHold", "VoltOnePedalMode") or cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
         return None
       selection = read_selection(self.params)
       if not selection.readable or not selection.valid:
@@ -613,6 +614,12 @@ class FeatureSettingsOwner:
         row = self._bool_row("VoltSNG", "Volt Stop-and-Go Assistance", parked and self.authority("parked_preferences"),
                              "Assists automatic resume from a cruise-controlled stop. Requires StarPilot speed control; applies after the next startup")
         rows.append(replace(row, available=row.available and self._readable("VoltSNG"), capability=sng_capability))
+      one_pedal_capability = self._gm_stop_capability("VoltOnePedalMode")
+      if one_pedal_capability is not None:
+        row = self._bool_row("VoltOnePedalMode", "Volt One-Pedal Driving", parked and self.authority("parked_preferences"),
+                             "With cruise main on and cruise disengaged, slows and holds when you lift off the accelerator in Low or single-pedal mode. " +
+                             "Requires StarPilot speed control; applies after the next startup")
+        rows.append(replace(row, available=row.available and self._readable("VoltOnePedalMode"), capability=one_pedal_capability))
       gm_hold_capability = self._gm_stop_capability("GMAutoHold")
       if gm_hold_capability is not None:
         from opendbc.car.gm.values import CAR
@@ -993,7 +1000,7 @@ class FeatureSettingsOwner:
       return self._apply_pedal_setup(request)
     if key == "DisableOpenpilotLongitudinal":
       return self._apply_bolt_disable(request)
-    if key in ("VoltSNG", "GMAutoHold"):
+    if key in ("VoltSNG", "GMAutoHold", "VoltOnePedalMode"):
       return self._apply_gm_stop(request)
     if key == "LongPitch":
       return self._apply_long_pitch(request)

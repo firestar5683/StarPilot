@@ -1,15 +1,18 @@
-from opendbc.car.gm.values import is_gm_auto_hold
+from opendbc.car.gm.values import is_gm_auto_hold, is_volt_one_pedal
 from openpilot.starpilot.saved_source import read_saved
 
 
 class AutoHoldPreference:
-  def __init__(self, cp, params):
-    self.cp, self.params = cp, params
+  def __init__(self, cp, params, key="GMAutoHold"):
+    if key not in ("GMAutoHold", "VoltOnePedalMode"):
+      raise ValueError("Unsupported GM stop preference")
+    self.cp, self.params, self.key = cp, params, key
+    self.supported = is_volt_one_pedal if key == "VoltOnePedalMode" else is_gm_auto_hold
     self.read_ns = 0
     self.enabled = False
 
   def update(self, now_ns):
-    if type(now_ns) is not int or now_ns <= 0 or not is_gm_auto_hold(self.cp):
+    if type(now_ns) is not int or now_ns <= 0 or not self.supported(self.cp):
       self.enabled = False
       return False
     if now_ns < self.read_ns:
@@ -19,7 +22,7 @@ class AutoHoldPreference:
     if self.read_ns == 0 or now_ns - self.read_ns >= 250_000_000:
       self.read_ns = now_ns
       try:
-        choice = read_saved(self.params, "GMAutoHold", 8)
+        choice = read_saved(self.params, self.key, 8)
         safe, safe_valid = read_saved(self.params, "SafeMode", 8)
         longitudinal, long_valid = read_saved(self.params, "DisableOpenpilotLongitudinal", 8)
         master = read_saved(self.params, "OpenpilotEnabledToggle", 8)

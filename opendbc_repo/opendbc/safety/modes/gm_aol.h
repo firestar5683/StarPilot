@@ -72,6 +72,7 @@ static void gm_aol_initialize(bool profile_supported) {
 static bool gm_aol_profile_word(uint16_t word) {
   bool supported = false;
   switch (word) {
+    case 0xD100U: case 0xD101U: case 0xD110U: case 0xD111U:
     case 0U: case 0x80U:
     case 0x201U: case 0x601U: case 0xA01U: case 0xE01U:
     case 0xC171U: case 0xC172U: case 5U:
@@ -87,6 +88,11 @@ static bool gm_aol_profile_word(uint16_t word) {
     case 0xC130U: case 0xC131U: case 0xC140U: case 0xC141U:
     case 0xC150U:
 #ifdef ALLOW_DEBUG
+    case 0xD102U: case 0xD103U: case 0xD104U: case 0xD105U:
+    case 0xD106U: case 0xD107U: case 0xD108U: case 0xD109U:
+    case 0xD10AU: case 0xD112U: case 0xD113U: case 0xD114U:
+    case 0xD115U: case 0xD116U: case 0xD117U: case 0xD118U:
+    case 0xD119U: case 0xD11AU:
     case 0x1003U: case 0x1403U:
     case 0x203U: case 0x603U: case 0xA03U: case 0xE03U:
     case 0xC170U: case 0xC173U:

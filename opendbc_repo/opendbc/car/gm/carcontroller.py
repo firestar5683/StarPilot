@@ -1,5 +1,7 @@
+from opendbc.car.gm.one_pedal import VoltOnePedal
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal
 from opendbc.car.gm.longitudinal import volt_sng_release
-from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for
+from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for, hold_brake as estimate_hold_brake
 from opendbc.car.gm.values import is_gm_auto_hold
 from opendbc.car.gm.ordinary import demands as ascm_demands
 import math
@@ -225,6 +227,8 @@ class CarController(CarControllerBase):
     self.pedal_active_last = False
     self.volt_sng = False
     self.volt_sng_plan_input = None
+    self.volt_one_pedal = False
+    self.volt_one_pedal_input = None
     self.gm_auto_hold = False
     self.gm_auto_hold_input = None
     self.gm_auto_hold_state = AutoHold(config=auto_hold_config_for(CP))
@@ -242,6 +246,7 @@ class CarController(CarControllerBase):
     self.lka_icon_status_last = (False, False)
 
     self.params = CarControllerParams(self.CP)
+    self.volt_one_pedal_state = VoltOnePedal(CP, self.params) if is_volt_one_pedal(CP) else None
     self.volt_gateway_profile = is_volt_gateway_profile(self.CP)
     self.volt_gateway_long = is_volt_gateway_longitudinal(self.CP)
     self.volt_ascm_long = is_volt_ascm_longitudinal(self.CP)
@@ -348,16 +353,36 @@ class CarController(CarControllerBase):
   def update(self, CC, CS, now_nanos):
     # Sample physical hold dwell at parser/controller cadence, before current brake demands.
     hold_brake = None
+    one_pedal_enabled = (self.volt_one_pedal and is_volt_one_pedal(self.CP) and self.volt_one_pedal_input is not None and
+                         self.volt_one_pedal_input.update(now_nanos))
+    one_pedal_active = False
     if is_gm_auto_hold(self.CP):
       hold_enabled = self.gm_auto_hold and self.gm_auto_hold_input is not None and self.gm_auto_hold_input.update(now_nanos)
+      physical_current = (bool(CS.gm_auto_hold_sources) and
+                          all(0 < stamp <= now_nanos and now_nanos - stamp <= limit for stamp, limit in CS.gm_auto_hold_sources) and
+                          not CS.gm_auto_hold_unavailable)
+      one_pedal_ready = (one_pedal_enabled and physical_current and CS.volt_one_pedal_mode and
+                         0 < CS.volt_one_pedal_mode_ns <= now_nanos and now_nanos - CS.volt_one_pedal_mode_ns <= 300_000_000 and
+                         CS.out.cruiseState.available and CS.gm_auto_hold_forward and
+                         not CS.out.gasPressed and not CS.out.brakePressed and not CS.out.regenBraking)
       hold_brake = self.gm_auto_hold_state.update(
-        CS.out, enabled=hold_enabled, sources_current=all(0 < stamp <= now_nanos and now_nanos - stamp <= limit
+        CS.out, enabled=hold_enabled or one_pedal_enabled, sources_current=all(0 < stamp <= now_nanos and now_nanos - stamp <= limit
                                                          for stamp, limit in CS.gm_auto_hold_sources) and bool(CS.gm_auto_hold_sources) and
         not CS.gm_auto_hold_unavailable, long_active=CC.longActive, driver_brake=CS.gm_auto_hold_brake,
         controller_brake=self.apply_brake, wheel_ns=CS.gm_auto_hold_wheel_ns, now_ns=now_nanos,
         physical_forward=CS.gm_auto_hold_forward, moving=CS.gm_auto_hold_moving, sent_hold=CS.gm_auto_hold_engaged)
-      if hold_brake is None:
+      if not hold_enabled:
+        hold_brake = None
+      one_pedal_active = (one_pedal_ready and self.gm_auto_hold_state.drive_ns >= 3_000_000_000 and
+                          CS.out.canValid and not CS.out.canTimeout and not CC.longActive and
+                          (CS.volt_one_pedal_moving or CS.volt_one_pedal_stopped))
+      if hold_brake is None and not (one_pedal_active and CS.volt_one_pedal_stopped and
+                                     (CS.out.standstill or CS.out.vEgo < .02)):
         CS.gm_auto_hold_engaged = False
+      if self.volt_one_pedal_state is not None:
+        self.volt_one_pedal_state.observe(eligible=one_pedal_ready and self.gm_auto_hold_state.drive_ns >= 3_000_000_000 and
+                                          not CC.longActive, gas_pressed=CS.out.gasPressed,
+                                          speed=CS.out.vEgo)
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
@@ -630,6 +655,25 @@ class CarController(CarControllerBase):
             self.ordinary_camera_long and not self.ordinary_camera_removed):
           can_sends.append(gmcan.create_acc_2cd_command(CanBus.POWERTRAIN, idx))
 
+        if self.volt_one_pedal_state is not None:
+          one_pedal_brake = self.volt_one_pedal_state.update(
+            eligible=one_pedal_active, speed=CS.out.vEgo, acceleration=CS.out.aEgo,
+            steering_angle=CS.out.steeringAngleDeg, orientation=CC.orientationNED)
+          if one_pedal_active:
+            one_pedal_stop = CS.volt_one_pedal_stopped and (CS.out.standstill or CS.out.vEgo < .02)
+            if hold_brake is None and one_pedal_stop and one_pedal_brake > 0:
+              hold_brake = max(one_pedal_brake, self.gm_auto_hold_state.brake or estimate_hold_brake(
+                0., one_pedal_brake, self.gm_auto_hold_state.config.minimum_brake))
+            elif hold_brake is not None:
+              hold_brake = max(hold_brake, one_pedal_brake)
+            self.apply_gas = self.params.INACTIVE_REGEN
+            self.apply_brake = max(self.apply_brake, one_pedal_brake)
+
+        one_pedal_braking = one_pedal_active and self.volt_one_pedal_state is not None and self.volt_one_pedal_state.brake > 0
+        if one_pedal_braking:
+          at_full_stop = at_full_stop or CS.out.cruiseState.standstill
+          near_stop = near_stop or CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
+
         # Resume releases only the gas/regen ACC-state bit; friction remains separately owned.
         acc_engaged = CC.enabled and not volt_sng_release(
           self.CP, self.volt_sng, CC, CS, now_nanos,
@@ -641,7 +685,8 @@ class CarController(CarControllerBase):
           at_full_stop = CS.out.cruiseState.standstill
           near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
-                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP, auto_hold=hold_brake is not None))
+                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP,
+                                                             auto_hold=hold_brake is not None or one_pedal_braking))
         CS.gm_auto_hold_engaged = hold_brake is not None
 
         if self.bolt_euv_long:
@@ -708,7 +753,7 @@ class CarController(CarControllerBase):
         if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and (not cc_gateway or
             (button_fresh and stock_cruise_fresh and CS.out.cruiseState.available and CS.out.cruiseState.enabled)):
           self.last_button_frame = self.frame
-          cancel_bus = (CanBus.POWERTRAIN if cc_gateway or self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.SDGM_CANCEL_PT.value
+          cancel_bus = (CanBus.POWERTRAIN if cc_gateway or gm_control_word(self.CP) & GMSafetyFlags.SDGM_CANCEL_PT.value
                         else CanBus.CAMERA)
           can_sends.append(gmcan.create_buttons(self.packer_pt, cancel_bus, CS.buttons_counter, CruiseButtons.CANCEL))
 

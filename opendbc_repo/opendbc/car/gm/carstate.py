@@ -1,3 +1,4 @@
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal
 from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
 from opendbc.car.gm.auto_hold import config_for as auto_hold_config_for, stopped_for_hold
 import copy
@@ -66,6 +67,10 @@ class CarState(CarStateBase):
     self.gm_auto_hold_wheel_ns = 0
     self.gm_auto_hold_unavailable = True
     self.gm_auto_hold_engaged = False
+    self.volt_one_pedal_mode = False
+    self.volt_one_pedal_mode_ns = 0
+    self.volt_one_pedal_moving = False
+    self.volt_one_pedal_stopped = False
     self.cc_gateway_cruise_ts_nanos = 0
     self.cc_gateway_buttons_ts_nanos = 0
     self.camera_stock_status_ts_nanos = 0
@@ -200,8 +205,8 @@ class CarState(CarStateBase):
       alternate = is_volt_gateway_alternate_brake(self.CP) or (
         is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG))
       c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and not (
-        self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) and
-        not self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9)
+        gm_control_word(self.CP) & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) and
+        not gm_control_word(self.CP) & GMSafetyFlags.BRAKE_C9)
       brake = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else
                ("ECMEngineStatus", "BrakePressed") if c9 else ("ECMAcceleratorPos", "BrakePedalPos"))
       names = (("AcceleratorPedal2", "CruiseState", 100_000_000),
@@ -219,8 +224,8 @@ class CarState(CarStateBase):
       alternate = is_volt_gateway_alternate_brake(self.CP)
       alternate_force = alternate or (is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG))
       c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and (
-        not self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) or
-        bool(self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9))
+        not gm_control_word(self.CP) & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) or
+        bool(gm_control_word(self.CP) & GMSafetyFlags.BRAKE_C9))
       brake_name, brake_signal = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else
                                   ("ECMEngineStatus", "BrakePressed") if c9 else ("ECMAcceleratorPos", "BrakePedalPos"))
       names = (("ECMEngineStatus", "CruiseMainOn"), ("ECMPRDNL2", "PRNDL2"), (brake_name, brake_signal),
@@ -232,7 +237,7 @@ class CarState(CarStateBase):
         pt_cp.vl[name]
       self.gm_auto_hold_sources = tuple((pt_cp.ts_nanos[name][signal], 300_000_000) for name, signal in names)
       # C9 is pressed authority, never analog force; missing-BE profiles retain minimum hold.
-      absent_be = c9 and bool(self.CP.safetyConfigs[0].safetyParam & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM))
+      absent_be = c9 and bool(gm_control_word(self.CP) & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM))
       if alternate_force:
         self.gm_auto_hold_brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 208.
         if c9:
@@ -247,6 +252,16 @@ class CarState(CarStateBase):
       self.gm_auto_hold_moving = wheels["RLWheelSpd"] >= 12 * .0311 and wheels["RRWheelSpd"] >= 12 * .0311
       self.gm_auto_hold_wheel_ns = pt_cp.ts_nanos["EBCMWheelSpdRear"]["RLWheelSpd"]
       self.gm_auto_hold_unavailable = bool(pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"])
+    if is_volt_one_pedal(self.CP):
+      gear = pt_cp.vl["ECMPRDNL2"]
+      low = gear["PRNDL2"] == 6 and not gear["ManualMode"]
+      mode_ns = pt_cp.ts_nanos["EVDriveMode"]["SinglePedalModeActive"]
+      mode_current = 0 < mode_ns <= pt_cp._last_update_nanos and pt_cp._last_update_nanos - mode_ns <= 300_000_000
+      self.volt_one_pedal_mode_ns = pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"] if low else mode_ns
+      self.volt_one_pedal_mode = low or (mode_current and bool(pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"]))
+      rear = pt_cp.vl["EBCMWheelSpdRear"]
+      self.volt_one_pedal_moving = rear["RLWheelSpd"] > 10 * .0311 and rear["RRWheelSpd"] > 10 * .0311
+      self.volt_one_pedal_stopped = rear["RLWheelSpd"] <= 10 * .0311 and rear["RRWheelSpd"] <= 10 * .0311
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
 
     # Variables used for avoiding LKAS faults
@@ -283,9 +298,9 @@ class CarState(CarStateBase):
     else:
       ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
 
-    source_be_brake = (self.CP.safetyConfigs[0].safetyParam &
+    source_be_brake = (gm_control_word(self.CP) &
                        (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM).value and
-                       not self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9.value)
+                       not gm_control_word(self.CP) & GMSafetyFlags.BRAKE_C9.value)
     if is_conventional_cc_pedal_profile(self.CP) and self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_CC:
       ret.brakePressed = (pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xD0 >= .10
                           if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG else
@@ -451,6 +466,8 @@ class CarState(CarStateBase):
                     hold_sources_current and not self.gm_auto_hold_unavailable and self.gm_auto_hold_forward and
                     ret.cruiseState.available and hold_stopped and
                     not ret.gasPressed and not ret.regenBraking)
+    if is_volt_one_pedal(self.CP) and int(self.CP.safetyConfigs[0].safetyParam) < 0xD110:
+      hold_current = hold_current and self.volt_one_pedal_mode and self.volt_one_pedal_stopped and not ret.brakePressed
     if not hold_current:
       self.gm_auto_hold_engaged = False
     ret.brakeHoldActive = bool(hold_current and self.gm_auto_hold_engaged and ret.standstill)
@@ -468,6 +485,8 @@ class CarState(CarStateBase):
         pt_messages.append(("ECMAcceleratorPos", 10))
     if is_volt_gateway_alternate_brake(CP):
       pt_messages.append(("EBCMBrakePedalPosition", 100))
+    if is_volt_one_pedal(CP):
+      pt_messages.append(("EVDriveMode", float('nan')))
     if CP.carFingerprint in VOLT_BSM_CAR and CP.flags & GMFlags.HAS_BSM.value:
       pt_messages.append(("BCMBlindSpotMonitor", float('nan')))
     if CP.flags & GMFlags.PEDAL_LONG.value:
@@ -490,7 +509,7 @@ class CarState(CarStateBase):
         ("BCMDoorBeltStatus", 10), ("BCMGeneralPlatformStatus", 10),
         ("ASCMSteeringButton", 33),
       ]
-      if not CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9.value:
+      if not gm_control_word(CP) & GMSafetyFlags.BRAKE_C9.value:
         pt_messages.append(("ECMAcceleratorPos", 80))
     if (CP.carFingerprint in CC_GATEWAY_STOCK_CAR or CP.carFingerprint == CAR.CHEVROLET_VOLT_CC):
       # No camera or ACC status dependency on this gateway conventional-cruise path.
@@ -538,7 +557,7 @@ class CarState(CarStateBase):
                       ("ECMEngineStatus", 100), ("AcceleratorPedal2", 33), ("ECMPRDNL2", 10),
                       ("EBCMWheelSpdRear", 20), ("EBCMRegenPaddle", 40)]
 
-    if CP.carFingerprint == CAR.CHEVROLET_VOLT_2019 and CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9.value:
+    if CP.carFingerprint == CAR.CHEVROLET_VOLT_2019 and gm_control_word(CP) & GMSafetyFlags.BRAKE_C9.value:
       pt_messages = [(name, frequency) for name, frequency in pt_messages if name != "ECMAcceleratorPos"]
 
     if is_conventional_cc_pedal_profile(CP):
