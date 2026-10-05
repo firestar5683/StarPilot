@@ -67,6 +67,31 @@ class CardIntentTests(unittest.TestCase):
           dm_lockout=False, pause_brake_mps=0)
         self.assertTrue(decision.lateral_active)
 
+  def test_calibration_rearm_follows_live_mapping_without_arming_on_change(self):
+    from dataclasses import replace
+    from openpilot.starpilot.aol.intent import AOL_TOGGLE
+    owner = AolCardIntent(AolSettings(True, 0., 0, 0, (0, 0, 0), (0, 0, 0)))
+    state = car_state()
+    state.cruiseState.available = True
+    owner.update(state)
+    owner.observe_calibration(state, events=[])
+    self.assertTrue(owner.allowed_latch)
+    invalid = Events()
+    invalid.add(log.OnroadEvent.EventName.calibrationInvalid)
+    owner.observe_calibration(state, events=invalid.to_msg())
+    self.assertFalse(owner.allowed_latch)
+    owner.settings = replace(owner.settings, lkas_action=AOL_TOGGLE)
+    owner.update(state)
+    owner.observe_calibration(state, events=invalid.to_msg())
+    self.assertFalse(owner.allowed_latch)
+    owner.update(state)
+    owner.observe_calibration(state, events=[])
+    self.assertFalse(owner.allowed_latch)  # The mapping change is not an arming gesture.
+    state.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
+    owner.update(state)
+    owner.observe_calibration(state, events=[])
+    self.assertTrue(owner.allowed_latch)
+
   def test_low_speed_brake_suppresses_output_without_destroying_explicit_latch(self):
     owner = AolCardIntent(AolSettings(True, 5.0, 0, 0, (0, 0, 0), (0, 0, 0)), explicit_latch=True)
     state = car_state()
