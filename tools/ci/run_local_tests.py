@@ -23,6 +23,7 @@ QUICK_TARGETS = (
   'openpilot/selfdrive/selfdrived/tests/test_big_model_status.py',
   'openpilot/starpilot/tests',
   'openpilot/starpilot/aol/tests',
+  'openpilot/starpilot/analytics/tests',
   'openpilot/starpilot/controllers/tests',
   'openpilot/starpilot/lateral/tests',
   'openpilot/starpilot/longitudinal/tests',
