@@ -142,6 +142,38 @@ class DriveHistoryTest(unittest.TestCase):
     with self.assertRaises(drive_history.DriveHistoryUnavailable):
       drive_history.DriveHistory(link).snapshot()
 
+  def test_delete_videos_keeps_logs_and_refuses_open_or_foreign_segments(self):
+    name = '0000021e--371eaf116b--0'
+    path = self.segment(name, 'rlog.zst', 'qlog.zst', 'fcamera.hevc', 'ecamera.hevc', 'qcamera.ts')
+    result = self.reader.delete_videos(name)
+    self.assertEqual(result, {'segmentName': name, 'deleted': ['fcamera', 'ecamera', 'qcamera'], 'freedBytes': 3})
+    self.assertEqual(sorted(p.name for p in path.iterdir()), ['qlog.zst', 'rlog.zst'])
+    self.assertEqual(self.reader.delete_videos(name)['deleted'], [])
+
+    open_segment = self.segment('0000021e--371eaf116b--1', 'rlog.lock', 'fcamera.hevc')
+    with self.assertRaises(drive_history.SegmentInUse):
+      self.reader.delete_videos(open_segment.name)
+    self.assertTrue((open_segment / 'fcamera.hevc').exists())
+
+    with self.assertRaises(drive_history.SegmentMissing):
+      self.reader.delete_videos('0000021e--371eaf116b--9')
+    for bad in ('../logs', '0000021e--371eaf116b', 'x/0000021e--371eaf116b--0', None):
+      with self.assertRaises(ValueError):
+        self.reader.delete_videos(bad)
+
+    outside = Path(self.temp.name) / 'outside'
+    outside.mkdir()
+    (outside / 'fcamera.hevc').write_bytes(b'x')
+    os.symlink(outside, self.root / '0000021e--371eaf116b--2')
+    with self.assertRaises(OSError):
+      self.reader.delete_videos('0000021e--371eaf116b--2')
+    self.assertTrue((outside / 'fcamera.hevc').exists())
+
+    linked = self.segment('0000021e--371eaf116b--3', 'rlog.zst')
+    os.symlink(outside / 'fcamera.hevc', linked / 'qcamera.ts')
+    self.assertEqual(self.reader.delete_videos(linked.name)['deleted'], [])
+    self.assertTrue((outside / 'fcamera.hevc').exists())
+
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { LocalHistoryFeed, LocalRecordingsPage, availableFiles, validLocalHistory, quickRoadUrl,
+import { LocalHistoryFeed, LocalRecordingsPage, availableFiles, hasVideo, validLocalHistory, quickRoadUrl,
   segmentSummaryUrl, validSegmentSummary, routeFiles, firstQuickVideo, routeDate, connectRouteUrl, routeMatchesSearch } from '../web/js/record-history.js'
 
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
@@ -26,6 +26,9 @@ assert.equal(validSegmentSummary(summary, `${current}--0`), true)
 assert.equal(validSegmentSummary({ ...summary, observedLongActiveSeconds: -1 }, `${current}--0`), false)
 assert.equal(validSegmentSummary(summary, `${current}--2`), false)
 assert.match(LocalRecordingsPage.template, /Local recordings/)
+assert.equal(hasVideo(history.routes[0].segments[0].files), true)
+assert.equal(hasVideo({ rlog: true, qlog: true, fcamera: false, dcamera: false, ecamera: false, qcamera: false }), false)
+assert.match(LocalRecordingsPage.template, /v-if="hasVideo\(segment\.files\)"[^>]*@click="deleteVideos\(segment\)"/)
 assert.match(LocalRecordingsPage.template, /scan was incomplete/)
 assert.doesNotMatch(LocalRecordingsPage.template, /v-html|deleteRoute/)
 assert.match(LocalRecordingsPage.template, /aria-label="Video segment"/)
