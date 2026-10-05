@@ -91,7 +91,18 @@ class LocalModelManagerHttpTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmp:
       root = Path(tmp)
       parked = [True]
-      manager = ModelManager(root=root / 'models', parked=lambda: parked[0], gpu_present=lambda: False)
+      class LinkSettings:
+        mode = "off"
+
+        def snapshot(self):
+          return {"mode": self.mode}
+
+        def configure(self, payload):
+          self.mode = payload["mode"]
+          return {"message": "Saved"}
+
+      link = LinkSettings()
+      manager = ModelManager(root=root / 'models', parked=lambda: parked[0], gpu_present=lambda: False, jetlink=link)
       server = make_server(port=0, owner=GalaxyAccessOwner(root / 'access'), model_manager=manager)
       thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
       thread.start()
@@ -119,6 +130,8 @@ class LocalModelManagerHttpTest(unittest.TestCase):
         status, snapshot = request('/api/models/manager')
         self.assertEqual(status, 200)
         self.assertFalse(snapshot['randomizer'])
+        self.assertEqual(request('/api/models/jetlink', {'mode': 'usb'})[0], 200)
+        self.assertEqual(link.mode, 'usb')
         status, laboratory = request('/api/models/laboratory')
         self.assertEqual(status, 200)
         self.assertFalse(laboratory['runtimeSupported'])
@@ -133,11 +146,15 @@ class LocalModelManagerHttpTest(unittest.TestCase):
         self.assertEqual(preferences(manager.root)['blacklistedModels'], ['gwm8223'])
         self.assertEqual(request('/api/models/active', {'profile': 'small', 'model': 'bundled-current'})[0], 409)
         parked[0] = False
+        self.assertEqual(request('/api/models/jetlink', {'mode': 'off'})[0], 409)
+        self.assertEqual(link.mode, 'usb')
         self.assertEqual(request('/api/models/laboratory', pair)[0], 409)
         self.assertEqual(request('/api/models/laboratory/delete', {'model': 'gwm8223'})[0], 409)
         self.assertEqual(request('/api/models/preferences', {'randomizer': False})[0], 409)
         self.assertTrue(preferences(manager.root)['randomizer'])
         self.assertEqual(request('/api/models/preferences', {'userFavorites': ['pop223']})[0], 200)
+        self.assertEqual(request('/api/models/jetlink', {'mode': 'off'}, forwarded=True)[0], 503)
+        self.assertEqual(link.mode, 'usb')
         self.assertEqual(request('/api/models/manager', forwarded=True)[0], 503)
         self.assertEqual(request('/api/models/laboratory', forwarded=True)[0], 503)
       finally:

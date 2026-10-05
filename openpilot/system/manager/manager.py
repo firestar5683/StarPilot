@@ -224,6 +224,11 @@ def main() -> None:
     traceback.print_exc()
     cloudlog.exception("crash")
   finally:
+    try:
+      from openpilot.starpilot.system.jetlink.lifecycle import shutdown as shutdown_jetlink
+      shutdown_jetlink(Params())
+    except Exception:
+      cloudlog.exception("Jetlink shutdown handoff failed")
     manager_cleanup()
 
   params = Params()

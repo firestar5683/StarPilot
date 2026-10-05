@@ -374,6 +374,16 @@ class ArtifactCheckTest(unittest.TestCase):
     chunks.parent.mkdir(parents=True)
     (self.root / "openpilot/__init__.py").touch()
     shutil.copy2(SOURCE.parent / "openpilot/common/file_chunker.py", chunks)
+    for name in ("tools/laptop_device_build/jetlink_artifacts.py", "tools/laptop_device_build/jetlink_pickle.py",
+                 "openpilot/system/camerad/cameras/nv12_info.py", "tinygrad_repo/tinygrad/uop/__init__.py"):
+      target = self.root / name
+      target.parent.mkdir(parents=True, exist_ok=True)
+      shutil.copy2(SOURCE.parent / name, target)
+    from tools.laptop_device_build.jetlink_artifacts import MODEL_DIR, warp_names
+    for name in warp_names():
+      target = self.root / MODEL_DIR / name
+      target.parent.mkdir(parents=True, exist_ok=True)
+      shutil.copy2(SOURCE.parent / MODEL_DIR / name, target)
     shipped = b"verified RDF artifact fixture"
     self.write("openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl", shipped)
     self.write("openpilot/starpilot/models/catalog.py",

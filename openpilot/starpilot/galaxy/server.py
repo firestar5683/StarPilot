@@ -1371,7 +1371,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
                       '/api/maps/start', '/api/maps/cancel', '/api/flm/start', '/api/flm/cancel', '/api/bluetooth/action', '/api/controllers/action',
                       '/api/models/active', '/api/models/preferences', '/api/models/download', '/api/models/download_all',
-                      '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest',
+                      '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest', '/api/models/jetlink',
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
                       '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore', '/api/sentry/notifications',
                       '/api/navigation/search', '/api/navigation/action', '/api/drive-state/action',

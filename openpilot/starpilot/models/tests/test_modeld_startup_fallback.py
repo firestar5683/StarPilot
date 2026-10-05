@@ -3,11 +3,12 @@
 import ast
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from openpilot.starpilot.models.status import ModelVariant
+from openpilot.starpilot.models.jetlink_adapter import JetlinkModel, attach as attach_jetlink
 
 
 MODEL_SOURCE = Path(__file__).resolve().parents[3] / "selfdrive/modeld/modeld.py"
@@ -45,7 +46,7 @@ def test_inference_failure_uses_runner_identity(runner_chestnut, stored_active):
   env: dict = {"model": failed_model, "small_model": small_model, "params": params, "receipt_owner": receipt,
              "chestnut_state": chestnut_state, "run_count": 1, "ModelConstants": SimpleNamespace(MODEL_RUN_FREQ=20),
              "SERVICE_LIST": {"chestnutGpuState": SimpleNamespace(frequency=1)}, "bufs": {}, "transforms": {}, "inputs": {},
-             "small_prepared": object(), "ModelVariant": ModelVariant, "cloudlog": Mock()}
+             "small_prepared": object(), "ModelVariant": ModelVariant, "JetlinkModel": JetlinkModel, "cloudlog": Mock()}
   code = compile(ast.fix_missing_locations(ast.Module(body=[fallback], type_ignores=[])), str(MODEL_SOURCE), "exec")
   if runner_chestnut:
     exec(code, env)
@@ -62,6 +63,28 @@ def test_inference_failure_uses_runner_identity(runner_chestnut, stored_active):
     params.put_bool.assert_not_called()
     receipt.loaded.assert_not_called()
   params.get_bool.assert_not_called()
+
+
+def test_remote_inference_failure_does_not_change_chestnut_status():
+  fallback = next(node for statement in main_body() for node in ast.walk(statement)
+                  if isinstance(node, ast.Try) and any(isinstance(child, ast.Call) and ast.unparse(child.func) == "model.run"
+                                                       for child in ast.walk(node)))
+  failed_model = object.__new__(JetlinkModel)
+  failed_model.joined = SimpleNamespace(chestnut=True, run=Mock(side_effect=RuntimeError("remote inference failed")))
+  failed_model.close = Mock()
+  small_model = SimpleNamespace(chestnut=False, model_id="fallback-small")
+  params, receipt = Mock(), Mock()
+  env = {"model": failed_model, "small_model": small_model, "params": params, "receipt_owner": receipt,
+         "chestnut_state": None, "run_count": 1, "bufs": {}, "transforms": {}, "inputs": {},
+         "small_prepared": object(), "ModelVariant": ModelVariant, "JetlinkModel": JetlinkModel, "cloudlog": Mock()}
+  execute([fallback], env)
+  failed_model.close.assert_called_once_with()
+  assert env["model"] is small_model
+  assert env["model_output"] is None
+  assert env["run_count"] == 0
+  params.put_bool.assert_not_called()
+  assert receipt.loaded.call_args.args == (env["small_prepared"], ModelVariant.SMALL, None)
+  assert receipt.loaded.call_args.kwargs["model_id"] == "fallback-small"
 
 
 def execute(statements, env):
@@ -157,11 +180,13 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
          "receipt_owner": receipt, "threading": SimpleNamespace(Thread=Thread), "BIG_MODEL_TIMEOUT": 30,
          "params": params, "requested_model_id": "big", "ModelVariant": ModelVariant,
          "CP": SimpleNamespace(brand="mock"), "demo": False,
-         "wait_for_chestnut_power": lambda CP, timeout: events.append("power")}
+         "wait_for_chestnut_power": lambda CP, timeout: events.append("power"), "attach_jetlink": attach_jetlink}
   wrapper = ast.parse("def startup():\n  pass").body[0]
   wrapper.body = body[start:end] + [ast.Return(value=ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]))]
   execute([wrapper], env)
-  env.update(env["startup"]())
+  with patch("openpilot.starpilot.models.jetlink_adapter.get_jetlink") as get_link:
+    env.update(env["startup"]())
+    get_link.assert_not_called()
   assert events[0] == ("small" if custom else "wait")
   assert events.count("small") == 1
   assert ("big" in events) is not timeout

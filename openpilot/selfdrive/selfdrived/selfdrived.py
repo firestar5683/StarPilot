@@ -119,6 +119,7 @@ class SelfdriveD:
     self.excessive_actuation = self.params.get("Offroad_ExcessiveActuation") is not None
     self.big_model_loading = False
     self.big_model_active = False
+    self.big_model_chestnut = False
     self.big_model_failed = False
     self.big_model_ready_t = 0.
 
@@ -213,6 +214,30 @@ class SelfdriveD:
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 
+  def update_big_model_status(self) -> bool:
+    big_active = self.params.get("ChestnutActive")
+    fresh = self.sm.seen['modelV2'] and self.sm.alive['modelV2'] and self.sm.valid['modelV2']
+    published_big = fresh and self.sm['modelV2'].big
+    if big_active is True:
+      self.big_model_chestnut = True
+    remote_big = (published_big and big_active is not True and not self.big_model_chestnut and
+                  not self.sm['deviceState'].chestnutPresent)
+    model_unavailable = (big_active is True or self.big_model_active) and self.sm.seen['modelV2'] and not fresh
+    demoted = self.big_model_active and fresh and not published_big
+    chestnut_lost = self.big_model_active and self.big_model_chestnut and not self.sm['deviceState'].chestnutPresent
+    big_failed = (big_active is False and not remote_big) or model_unavailable or demoted or chestnut_lost
+    if big_failed and not self.big_model_failed:
+      self.events.add(EventName.bigModelFailed)
+    self.big_model_failed = big_failed
+    if published_big or big_active is True:
+      self.big_model_active = True
+    control_current = self.sm.seen['carControl'] and self.sm.alive['carControl'] and self.sm.valid['carControl']
+    axis_active = control_current and (self.sm['carControl'].latActive or self.sm['carControl'].longActive)
+    if not self.enabled and not axis_active and not model_unavailable:
+      self.big_model_active = False
+      self.big_model_chestnut = False
+    return big_failed
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
@@ -240,19 +265,7 @@ class SelfdriveD:
     if self.big_model_loading:
       self.events.add(EventName.bigModelLoading)
 
-    big_active = self.params.get("ChestnutActive")
-    chestnut_present = self.sm['deviceState'].chestnutPresent
-    model_unavailable = big_active is True and self.sm.seen['modelV2'] and not self.sm.alive['modelV2']
-    big_failed = big_active is False or model_unavailable or (self.big_model_active and not chestnut_present)
-    if big_failed and not self.big_model_failed:
-      self.events.add(EventName.bigModelFailed)
-    self.big_model_failed = big_failed
-
-    # soft disable if the big model fails
-    if big_active:
-      self.big_model_active = True
-    if not self.enabled and not model_unavailable:
-      self.big_model_active = False
+    big_failed = self.update_big_model_status()
 
     if self.sm.recv_frame['lateralManeuverPlan'] > 0:
       self.events.add(EventName.lateralManeuver)
