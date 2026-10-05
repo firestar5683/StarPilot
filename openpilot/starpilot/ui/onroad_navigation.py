@@ -40,7 +40,8 @@ class NavigationCard:
       self._key, self.collapsed = state.navigation.key, False
     if self.fonts.profile == Profile.COMPACT:
       return rl.Rectangle(244, 18, 72, 72) if self.collapsed else rl.Rectangle(96, 16, 368, 142)
-    return rl.Rectangle(1678, 415, 112, 112) if self.collapsed else rl.Rectangle(1230, 415, 560, 195)
+    shift = state.viewport_width - 1860
+    return rl.Rectangle(1678 + shift, 415, 112, 112) if self.collapsed else rl.Rectangle(1230 + shift, 415, 560, 195)
 
   def press(self, x, y, state):
     self.cancel()

@@ -52,6 +52,8 @@ class OnroadFavorites:
     return max(0.35, min(self.rect[2] / 2160, self.rect[3] / 1080))
 
   def update(self, state, data, now):
+    if self.profile == Profile.LARGE:
+      self.rect = (30, 30, state.viewport_width - 60, 1020)
     changed = data.get("revision") != self.data.get("revision")
     self.data = data
     camera = state.appearance.camera_view

@@ -28,6 +28,7 @@ from openpilot.starpilot.ui.traffic_status import TrafficDisplayProjector
 from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner
 from openpilot.starpilot.ui.wheel_feedback import observe_wheel_feedback
 from openpilot.starpilot.ui.torque_feedback import observe_torque_feedback
+from openpilot.starpilot.ui.live_developer_sidebar import DeveloperMetrics
 
 from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
@@ -265,6 +266,7 @@ class RuntimeSnapshotAdapter:
     self._traffic_profile_valid = False
     self._personality_notice = PersonalityNotice()
     self._stopped_timer = StoppedTimer()
+    self._developer_metrics = DeveloperMetrics()
     self._reverse_driver_camera = ReverseDriverCamera()
     self._slc_sign_cache: tuple[int, tuple[int, int], str, SpeedLimitObservation] | None = None
     self._mono_clock, self._boot_clock = mono_clock, boot_clock
@@ -520,7 +522,14 @@ class RuntimeSnapshotAdapter:
       display_selfdrive is not None and getattr(display_selfdrive, 'enabled', False) and
       str(getattr(display_selfdrive, 'state', '')) == 'overriding' and
       cp is not None and cp.openpilotLongitudinalControl)
-    onroad = OnroadState(engaged=display_lat_active or display_long_active or longitudinal_overridden, camera_available=started,
+    developer_metrics = self._developer_metrics.observe(
+      drive=after if started else None, car=display_car if display_car_valid else None,
+      delay=display_message(sm, 'lateralDelay', now_ns, after_frame=after) if started else None,
+      torque=display_message(sm, 'lateralTorqueParameters', now_ns, after_frame=after) if started else None,
+      parameters=display_message(sm, 'vehicleParameters', now_ns, after_frame=after) if started else None,
+      metric=bool(ui.is_metric), cp=cp)
+    onroad = OnroadState(developer_metrics=developer_metrics,
+                         engaged=display_lat_active or display_long_active or longitudinal_overridden, camera_available=started,
                          speed_mps=raw_speed, cruise_kph=cruise, speed_limit=observation,
                          appearance=self._appearance_value, customization=self._customization_value,
                          alert=alert, metric=bool(ui.is_metric),
