@@ -62,6 +62,7 @@ class AuthorityContext:
   cp: object | None
   cp_raw: bytes | None
   metric: bool = False
+  editing_saved_tune: bool = False
 
 
 class ContextSource(Protocol):
@@ -70,6 +71,8 @@ class ContextSource(Protocol):
 
 def _qualified(ctx: AuthorityContext, group: str) -> bool:
   cp = ctx.cp
+  if ctx.editing_saved_tune and group not in ("preferences", "parked_preferences", "torque"):
+    return False
   if group == "preferences":
     return True
   if group == "parked_preferences":
@@ -436,17 +439,29 @@ class SettingsGateway:
               "snapshot": [{"label": "Units", "value": "Metric" if ctx.metric else "Imperial"}],
               "note": "Saved configuration is shown here. It does not confirm that a feature is active while driving. Change settings in Toggles."}
 
+  def _context(self, page: str) -> AuthorityContext:
+    ctx = self.context.sample()
+    if page == "torque" and ctx.cp is None and ctx.parked and getattr(self.context, "offroad", lambda: False)():
+      from openpilot.starpilot.galaxy.vehicle_configuration import saved_torque_context
+      cp, token = saved_torque_context(self.params)
+      if cp is not None:
+        return replace(ctx, cp=cp, cp_raw=token, editing_saved_tune=True)
+    return ctx
+
+  def _fresh_context(self, ctx: AuthorityContext) -> AuthorityContext:
+    return self._context("torque") if ctx.editing_saved_tune else self.context.sample()
+
   def _owner(self, ctx: AuthorityContext, *, live: bool = False,
              session_valid: Callable[[], bool] = lambda: True) -> FeatureSettingsOwner:
     def current() -> AuthorityContext:
       if not session_valid():
         return AuthorityContext(False, None, None)
-      fresh = self.context.sample() if live else ctx
+      fresh = self._fresh_context(ctx) if live else ctx
       return fresh if fresh.cp_raw == ctx.cp_raw else AuthorityContext(False, None, fresh.cp_raw)
     def authorized(group: str) -> bool:
       if not session_valid():
         return False
-      fresh = self.context.sample() if live else ctx
+      fresh = self._fresh_context(ctx) if live else ctx
       return fresh.cp_raw == ctx.cp_raw and _qualified(fresh, group)
     return FeatureSettingsOwner(self.params, authorized,
                                 vehicle_fingerprint=lambda: getattr(current().cp, "carFingerprint", None),
@@ -521,10 +536,16 @@ class SettingsGateway:
       return self._sentry_owner(ctx).snapshot()
     if page == "vasm":
       return self._vasm_owner(ctx).snapshot()
-    return self._owner(ctx).snapshot(page, parked=ctx.parked,
-                                     system_long=_qualified(ctx, "long"),
-                                     lateral_context=_qualified(ctx, "lane") or (page == "lane" and _qualified(ctx, "lane_live")),
-                                     metric=ctx.metric, configure_while_driving=True)
+    state = self._owner(ctx).snapshot(page, parked=ctx.parked,
+                                      system_long=_qualified(ctx, "long"),
+                                      lateral_context=_qualified(ctx, "lane") or (page == "lane" and _qualified(ctx, "lane_live")),
+                                      metric=ctx.metric, configure_while_driving=True)
+    if ctx.editing_saved_tune:
+      from opendbc.car.values import PLATFORMS
+      platform = PLATFORMS[ctx.cp.carFingerprint]
+      label = platform.config.car_docs[0].name if platform.config.car_docs else str(ctx.cp.carFingerprint).replace("_", " ").title()
+      return replace(state, subtitle=f"{label} · Saved steering settings")
+    return state
 
   def _clean(self) -> None:
     now = self.clock()
@@ -534,7 +555,7 @@ class SettingsGateway:
   def page(self, page: str, token: str, generation: bytes) -> dict:
     if page not in PAGES:
       raise SettingsUnavailable("Unknown page")
-    ctx = self.context.sample()
+    ctx = self._context(page)
     state = self._state(page, ctx)
     editor = None
     if page == "vasm":
@@ -574,7 +595,7 @@ class SettingsGateway:
     if view is None or view.session != _session_key(token) or view.generation != generation or \
        type(index) is not int or not 0 <= index < len(view.rows) or type(direction) is not int or direction not in (-1, 0, 1):
       raise SettingsChanged("Refresh settings")
-    ctx = self.context.sample()
+    ctx = self._context(view.page)
     if ctx.cp_raw != view.cp_raw:
       raise SettingsChanged("Vehicle context changed")
     state = self._state(view.page, ctx)
@@ -661,7 +682,7 @@ class SettingsGateway:
       if intent is None or intent.session != _session_key(token) or intent.generation != generation:
         raise SettingsChanged("Confirmation expired")
       del self.intents[intent_id]
-    ctx = self.context.sample()
+    ctx = self._context(intent.page)
     if not session_valid() or not (ctx.parked or _onroad_preference(intent.page, intent.request.key)) or ctx.cp_raw != intent.cp_raw:
       raise SettingsChanged("Vehicle changed or this operation requires offroad mode")
     if intent.page == "pip":
