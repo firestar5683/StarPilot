@@ -11,7 +11,9 @@ from opendbc.car.ford import mache_can
 from opendbc.car.ford.extended_classic_can import create_extended_classic_lat_ctl_msg
 from opendbc.car.ford.classic_lateral import create_controller as create_classic_controller, bounded_command as classic_bounded_command
 from opendbc.car.ford.generic_canfd_can import create_extended_canfd_msg
-from opendbc.car.ford.generic_canfd_lateral import GenericCanfdLateralController, qualified as generic_canfd_qualified, bounded_command as generic_canfd_bounded_command
+from opendbc.car.ford.generic_canfd_lateral import (
+  GenericCanfdLateralController, qualified as generic_canfd_qualified, bounded_command as generic_canfd_bounded_command,
+)
 from opendbc.car.ford.mache_lateral import MachELateralController, FordLateralResult, bounded_command, qualified as mache_qualified
 from opendbc.car.ford.values import CarControllerParams, FordFlags, FordSafetyFlags, CAR
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
@@ -119,6 +121,8 @@ class CarController(CarControllerBase):
       can_sends.append(fordcan.create_lat_ctl_msg(self.packer, self.CAN, False, 0., 0., 0., 0.,
                                                   stock_lmc=CS.lateral_motion_control))
     elif (self.frame % CarControllerParams.STEER_STEP) == 0 and self.mache_lateral is not None:
+      permission = getattr(self.manual_turn_inputs, "assist_permission", None)
+      self.mache_lateral.set_assist_permission(*(permission() if permission is not None else ((), False)))
       inputs = self.manual_turn_inputs.lateral_snapshot(CS.out.vEgoRaw) if self.manual_turn_inputs is not None else None
       if inputs is not None:
         self.mache_lateral.set_inputs(*inputs)

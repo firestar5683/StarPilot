@@ -76,6 +76,33 @@ class TestControllerExtensions(unittest.TestCase):
       model.modelV2.orientationRate.z = [float('nan')] * 33
       self.assertIsNone(inputs.preview_curvature(20.))
 
+  def test_assist_permission_tracks_panda_health_without_affecting_preview(self):
+    import openpilot.cereal.messaging as messaging
+    from openpilot.common.params import Params
+
+    class Reader(dict):
+      def __init__(self):
+        super().__init__(pandaStates=[SimpleNamespace(controlsAllowed=True)])
+        self.alive = self.valid = self.freq_ok = True
+
+      def all_checks(self, services):
+        self.asserted_services = services
+        return self.alive and self.valid and self.freq_ok
+
+    reader = Reader()
+    with patch.object(messaging, 'SubMaster', return_value=reader) as factory, patch.object(Params, 'get', return_value=True):
+      inputs = ManualTurnInputs(Params())
+      self.assertNotIn('pandaStates', factory.call_args.args[0])
+      self.assertEqual(inputs.assist_permission(), ((), False))
+      inputs = ManualTurnInputs(Params(), track_assist_permission=True)
+      self.assertIn('pandaStates', factory.call_args.args[0])
+      self.assertEqual(inputs.assist_permission(), (reader['pandaStates'], True))
+      for health in ('alive', 'valid', 'freq_ok'):
+        setattr(reader, health, False)
+        self.assertEqual(inputs.assist_permission(), (reader['pandaStates'], False))
+        setattr(reader, health, True)
+      self.assertEqual(reader.asserted_services, ['pandaStates'])
+
   def test_real_card_finalizes_then_binds_only_admitted_controller(self):
     harness = preferences_tests.TestVehicleStartupPreferences(methodName='test_only_exact_saved_opt_in_is_loaded')
     harness.setUp()
@@ -85,6 +112,7 @@ class TestControllerExtensions(unittest.TestCase):
       self.assertFalse(published.passive)
       self.assertIsInstance(host.CI.CC.manual_turn_inputs, ManualTurnInputs)
       self.assertIs(host.CI.CC.manual_turn_inputs.params, harness.params)
+      self.assertTrue(host.CI.CC.manual_turn_inputs.track_assist_permission)
       host, _, published = harness.start(CAR.FORD_MUSTANG_MACH_E_MK1, enabled=False)
       self.assertTrue(published.passive)
       self.assertIsNone(host.CI.CC.manual_turn_inputs)

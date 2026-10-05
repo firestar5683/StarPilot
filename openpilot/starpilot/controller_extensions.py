@@ -13,9 +13,10 @@ from opendbc.car.ford.values import CAR, FordFlags
 
 
 class ManualTurnInputs:
-  def __init__(self, params):
+  def __init__(self, params, *, track_assist_permission: bool = False):
     self.params = params
-    self.sm = messaging.SubMaster(["modelV2", "lateralDelay"])
+    self.track_assist_permission = track_assist_permission
+    self.sm = messaging.SubMaster(["modelV2", "lateralDelay"] + (["pandaStates"] if track_assist_permission else []))
     self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
     self.frames = 0
     self.blend_settings = self._read_blend_settings()
@@ -87,6 +88,11 @@ class ManualTurnInputs:
         delay = float(np.clip(value, 0.2, 0.4))
     return self.sm["modelV2"], ModelConstants.T_IDXS, delay, self.enabled
 
+  def assist_permission(self):
+    if not self.track_assist_permission:
+      return (), False
+    return self.sm["pandaStates"], self.sm.all_checks(["pandaStates"])
+
 
 def configure_controller(CI, params):
   cp = CI.CP
@@ -96,7 +102,7 @@ def configure_controller(CI, params):
   if (controller is not None and cp.brand == "ford" and cp.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and
       not cp.flags & FordFlags.LKA_STEERING and not cp.passive and not cp.dashcamOnly and not cp.notCar and
       getattr(controller, "manual_turn", None) is not None):
-    controller.manual_turn_inputs = ManualTurnInputs(params)
+    controller.manual_turn_inputs = ManualTurnInputs(params, track_assist_permission=bool(cp.flags & FordFlags.CANFD))
 
   from opendbc.car.ford.classic_lateral import qualified as classic_qualified
   from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
