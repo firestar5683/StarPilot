@@ -173,7 +173,8 @@ class SelfdriveD:
 
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
-    self.events = Events()
+    from openpilot.starpilot.car.events import event_rules
+    self.events = Events(event_rules(self.CP))
 
     self.initialized = False
     self.enabled = False
