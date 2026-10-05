@@ -12,7 +12,7 @@ on:
     inputs:
       run_number:
         default: '1'
-        required: true
+        required: false
         type: string
 
 concurrency:
@@ -54,7 +54,7 @@ jobs:
     env:
       STRIPPED_DIR: /tmp/releasepilot
       PYTHONPATH: /tmp/releasepilot
-      STARPILOT_CI_BUILD_MANIFEST: ${{ runner.temp }}/starpilot-release-build-${{ github.run_id }}-${{ github.run_attempt }}.json
+      STARPILOT_CI_BUILD_MANIFEST: /tmp/starpilot-release-build-${{ github.run_id }}-${{ github.run_attempt }}.json
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7

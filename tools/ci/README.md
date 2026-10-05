@@ -1,7 +1,7 @@
 # Local and release checks
 
 On Linux, use the managed host runtime to run the same source, unit, vehicle and pinned
-recording checks as GitHub Actions:
+recording and process replay checks as GitHub Actions:
 
 ```sh
 ./dev python tools/ci/run_predeploy.py --output /tmp/starpilot-predeploy --download
@@ -13,9 +13,16 @@ Use a new output directory per run. `--download` permits only the pinned public
 recordings; omit it when they are already cached. Node.js 24 must be on PATH (or
 set `STARPILOT_NODE`), and the pinned Go toolchain/dependencies are needed for map
 provider checks. A failure stops the run with a named log and preserves its exit
-status in `results.json`. `--stage build`, `source`, `host`, `native`, `vehicles`, or `recorded` can
+status in `results.json`. `--stage build`, `source`, `host`, `native`, `vehicles`, `recorded`, or `replay` can
 select a stage while diagnosing a failure; a selected-stage pass is not a full
 release result.
+
+The replay stage runs the full process suite with its existing coverage and
+reference comparisons. It can download replay logs independently of the pinned
+recording `--download` flag. Missing brand routes and unqualified historical
+schema caches remain failures; see the process replay README for the conversion
+requirements. Passing the pinned recorded vehicle checks does not qualify this
+separate suite.
 
 The full runner requires Linux: its USB/native transport and executable map
 IPC tests use Linux facilities. Run `tools/setup_dependencies.sh` first, provide

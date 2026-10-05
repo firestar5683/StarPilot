@@ -12,7 +12,7 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
-STAGES = ('build', 'source', 'host', 'native', 'vehicles', 'recorded')
+STAGES = ('build', 'source', 'host', 'native', 'vehicles', 'recorded', 'replay')
 
 
 def commands(output, cache, download=False):
@@ -40,7 +40,9 @@ def commands(output, cache, download=False):
   native.append(('map-ipc', ['go', '-C', str(ROOT / 'mapd_repo'), 'test', '-mod=readonly', '-race',
                             '-run', '^Test(MsgqNativeLayout|Shadow(GoPythonIPC|ExecutableHostGpsIPC))$', '-count=1', '-v']))
   return {'build': [('native-build', [python, '-m', 'SCons', '-j4'])],
-          'source': source, 'host': host, 'native': native, 'vehicles': vehicles, 'recorded': recorded}
+          'source': source, 'host': host, 'native': native, 'vehicles': vehicles, 'recorded': recorded,
+          'replay': [('process-replay', [python, 'openpilot/selfdrive/test/process_replay/test_processes.py',
+                                        '-j', str(os.cpu_count() or 1)])]}
 
 
 def run(plan, output, *, environment=None):

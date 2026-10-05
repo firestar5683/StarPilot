@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools.ci.run_predeploy import commands, run, main
+from tools.ci.run_predeploy import STAGES, commands, run, main
 
 
 class TestPredeploy(unittest.TestCase):
@@ -33,6 +33,21 @@ class TestPredeploy(unittest.TestCase):
     self.assertEqual([name for name, _ in plan['native']], [
       'test_panda_usb', 'test_pandad_canprotocol', 'test_aol_protocol', 'test_aol_wire', 'map-ipc'])
     self.assertIn('-race', plan['native'][-1][1])
+
+  def test_full_plan_requires_unfiltered_process_replay(self):
+    with patch('tools.ci.run_predeploy.os.cpu_count', return_value=8):
+      plan = commands(Path('/results'), Path('/cache'))
+    self.assertIn('replay', STAGES)
+    self.assertEqual(plan['replay'], [('process-replay', [sys.executable,
+      'openpilot/selfdrive/test/process_replay/test_processes.py', '-j', '8'])])
+
+  def test_default_run_includes_process_replay(self):
+    with tempfile.TemporaryDirectory() as temporary, \
+         patch.object(sys, 'argv', ['run_predeploy.py', '--output', str(Path(temporary) / 'results')]), \
+         patch('tools.ci.run_predeploy.platform.system', return_value='Linux'), \
+         patch('tools.ci.run_predeploy.run', return_value=0) as invoke:
+      self.assertEqual(main(), 0)
+      self.assertIn('process-replay', [name for name, _ in invoke.call_args.args[0]])
 
   def test_reports_cannot_be_overwritten(self):
     with tempfile.TemporaryDirectory() as temporary:
