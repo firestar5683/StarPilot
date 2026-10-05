@@ -65,7 +65,7 @@ from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_c
 
 BOOL_DEFAULTS = {
   "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
-  "ReverseCruise": False, "ToyotaAutoHold": False, "LongPitch": True, "DisableOpenpilotLongitudinal": False,
+  "ReverseCruise": False, "ToyotaAutoHold": False, "VoltSNG": False, "GMAutoHold": False, "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": False,
   "SLCConfirmation": False, "SLCConfirmationHigher": False, "SLCConfirmationLower": False,
   "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
@@ -246,6 +246,32 @@ class FeatureSettingsOwner:
               self.authority("parked_preferences") and request.expected in (None, b"0", b"1"))
     return commit_exact(self.params, key="LongPitch", max_bytes=128, raw=b"1" if request.value == "On" else b"0",
                         expected=request.expected, authorized=authorized, temp_prefix=".gm-long-pitch-").verified
+
+  def _gm_stop_capability(self, key: str) -> tuple | None:
+    from opendbc.car.gm.values import CAR
+    from openpilot.starpilot.vehicle_selection import read_selection
+    cp = self.vehicle_params()
+    try:
+      identities = ({CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019}
+                    if key == "VoltSNG" else {CAR.CHEVROLET_VOLT})
+      if cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
+        return None
+      selection = read_selection(self.params)
+      if not selection.readable or not selection.valid:
+        return None
+      return (str(cp.carFingerprint), str(cp.brand), selection.raw)
+    except (AttributeError, TypeError, ValueError):
+      return None
+
+  def _apply_gm_stop(self, request: FeatureSettingsRequest) -> bool:
+    if not request.confirmation or request.value not in ("Off", "On") or request.dependencies:
+      return False
+    def authorized() -> bool:
+      return (bool(request.vehicle_fingerprint) and self.vehicle_fingerprint() == request.vehicle_fingerprint and
+              request.capability is not None and request.capability == self._gm_stop_capability(request.key) and
+              self.authority("parked_preferences") and request.expected in (None, b"0", b"1"))
+    return commit_exact(self.params, key=request.key, max_bytes=128, raw=b"1" if request.value == "On" else b"0",
+                        expected=request.expected, authorized=authorized, temp_prefix=".gm-stop-").verified
 
   def _auto_hold_capability(self) -> tuple | None:
     from opendbc.car.toyota.interface import toyota_auto_hold_supported
@@ -551,7 +577,7 @@ class FeatureSettingsOwner:
               FeatureRow("", "Always On Lateral", "Saved settings", page=FeaturePage.AOL, available=True),
               FeatureRow("", "Wheel Controls", "Button assignments", page=FeaturePage.WHEEL, available=True)]
       if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
-          self._pedal_setup_capability() is not None):
+          self._pedal_setup_capability() is not None or self._gm_stop_capability("VoltSNG") is not None):
         rows.append(FeatureRow("", "Vehicle Settings", "Saved preferences", page=FeaturePage.VEHICLE, available=True))
       rows.extend(FeatureRow("", name.title() + " Personality", "", page=name, available=True)
                   for name in (*PROFILE_NAMES, "traffic"))
@@ -580,6 +606,17 @@ class FeatureSettingsOwner:
           row = replace(row, reason="Factory camera not detected. Turn this setting off and restart to restore StarPilot speed control.")
         rows.append(replace(row, available=row.available and self._readable("DisableOpenpilotLongitudinal"),
                             capability=bolt_capability))
+      sng_capability = self._gm_stop_capability("VoltSNG")
+      if sng_capability is not None:
+        row = self._bool_row("VoltSNG", "Volt Stop-and-Go Assistance", parked and self.authority("parked_preferences"),
+                             "Assists automatic resume from a cruise-controlled stop. Requires StarPilot speed control; applies after the next startup")
+        rows.append(replace(row, available=row.available and self._readable("VoltSNG"), capability=sng_capability))
+      gm_hold_capability = self._gm_stop_capability("GMAutoHold")
+      if gm_hold_capability is not None:
+        row = self._bool_row("GMAutoHold", "Automatic Brake Hold", parked and self.authority("parked_preferences"),
+                             "Holds the brakes at a stop with cruise main on. Press the gas or regen paddle to release. " +
+                             "Requires StarPilot speed control and applies after the next startup")
+        rows.append(replace(row, available=row.available and self._readable("GMAutoHold"), capability=gm_hold_capability))
       pitch_capability = self._long_pitch_capability()
       if pitch_capability is not None:
         row = self._bool_row("LongPitch", "Grade Compensation", parked and self.authority("parked_preferences"),
@@ -952,6 +989,8 @@ class FeatureSettingsOwner:
       return self._apply_pedal_setup(request)
     if key == "DisableOpenpilotLongitudinal":
       return self._apply_bolt_disable(request)
+    if key in ("VoltSNG", "GMAutoHold"):
+      return self._apply_gm_stop(request)
     if key == "LongPitch":
       return self._apply_long_pitch(request)
     if key == "ToyotaAutoHold":

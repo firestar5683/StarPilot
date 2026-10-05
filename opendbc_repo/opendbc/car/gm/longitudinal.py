@@ -384,3 +384,19 @@ class GMSdgmLongitudinalPolicy(GMOrdinaryLongitudinalPolicy):
 
 def sdgm_policy_for(cp):
   return GMSdgmLongitudinalPolicy(cp.carFingerprint == CAR.CHEVROLET_BLAZER) if is_ordinary_sdgm_profile(cp, longitudinal=True) else None
+
+
+def volt_sng_release(cp, requested, cc, cs, now_ns, *, plan_current=False):
+  sources = getattr(cs, "volt_sng_sources", ())
+  current = bool(sources) and all(source > 0 and 0 <= now_ns - source <= limit for source, limit in sources)
+  return bool(requested and plan_current and is_volt_longitudinal(cp) and cc.enabled and cc.longActive and
+              cc.cruiseControl.resume and cs.out.cruiseState.standstill and
+              cs.out.canValid and not cs.out.canTimeout and not cs.out.gasPressed and not cs.out.brakePressed and
+              not cs.out.regenBraking and cs.out.gearShifter in (car.CarState.GearShifter.drive, car.CarState.GearShifter.low) and
+              current)
+
+
+def volt_sng_resume_policy_for(cp):
+  if not is_volt_longitudinal(cp):
+    return None
+  return lambda default, requested, fresh: default if not requested else bool(default and fresh)

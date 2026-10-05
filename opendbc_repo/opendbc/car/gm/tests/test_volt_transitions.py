@@ -83,6 +83,129 @@ def wire_at_counter(row, counter):
 
 
 class TestVoltTransitions(unittest.TestCase):
+  def test_opt_in_stock_stop_resume_keeps_numeric_and_friction_owners(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm.tests.test_ascm_intercept import params
+    from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
+    from opendbc.car.gm.tests.test_volt_camera_control import camera_params
+    from opendbc.car.gm.tests.test_volt_camera_removed import removed_params
+    from opendbc.car.gm.tests.test_volt_sdgm_control import sdgm_params
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    from openpilot.starpilot.controller_extensions import configure_controller
+    from openpilot.starpilot.longitudinal.tests.test_gm_volt_long_policy import SubMasterFixture
+    from unittest.mock import patch
+    release = libsafety_py.libsafety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    profiles = [params(CAR.CHEVROLET_VOLT, radar=True, accelerator=source) for source in (False, True)]
+    profiles += [params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, accelerator=source, radar=radar)
+                 for source in (False, True) for radar in (False, True)]
+    profiles += [camera_params(radar=radar) for radar in (False, True)]
+    profiles += [removed_params(alternate=source) for source in (False, True)]
+    profiles += [sdgm_params(brake_c9=source) for source in (False, True)]
+    if release:
+      # Only gateway longitudinal profiles are admitted by actual release startup.
+      profiles = [cp for cp in profiles if cp.networkLocation == structs.CarParams.NetworkLocation.gateway]
+    for cp in profiles:
+      with self.subTest(identity=cp.carFingerprint, word=cp.safetyConfigs[0].safetyParam):
+        ci, baseline = CarInterface(cp), CarInterface(cp)
+        VehicleStartupPreferences(volt_sng=True).configure_controller(ci)
+        producer = SubMasterFixture(1_000_000_000)
+        producer.update = lambda _: None
+        with patch('openpilot.starpilot.controller_extensions.messaging.SubMaster', return_value=producer) as subscribe:
+          configure_controller(ci, None)
+          configure_controller(baseline, None)
+        subscribe.assert_called_once_with(['deviceState', 'carState', 'longitudinalPlan'], frequency=25)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        setup(cp)
+        for tick in range(24):
+          now = 1_000_000_000 + tick * 40_000_000
+          stop, resume = tick < 10 or tick >= 20, 10 <= tick < 15
+          _, rx = feed(SimpleNamespace(update=lambda _: None), packer, now, speed=0. if stop or resume else 2., camera=True)
+          rx = [m for m in rx if m[0] not in (0xBE, 0x1E1, 0x1A1)]
+          rx += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 4 if stop or resume else 2}),
+                 packer.make_can_msg('ASCMSteeringButton', 0, {'ACCButtons': 3 if tick == 0 else 1, 'RollingCounter': tick % 4}),
+                 packer.make_can_msg('ECMAcceleratorPos', 0, {}),
+                 packer.make_can_msg('EBCMBrakePedalPosition', 0, {}),
+                 packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 3})]
+          for instance in (ci, baseline):
+            instance.update([(now - 1_000_000, rx)])
+            out = instance.update([(now, rx)])
+            self.assertTrue(out.canValid)
+            self.assertEqual(out.cruiseState.standstill, stop or resume)
+          for message in rx:
+            native('rx', message, now // 1000)
+          libsafety_py.libsafety.safety_tick()
+          if tick == 0:  # Native enters on actual falling SET edge at the next source frame.
+            continue
+          self.assertTrue(libsafety_py.libsafety.get_controls_allowed())
+          cc = structs.CarControl(enabled=True, longActive=True)
+          cc.cruiseControl.resume = resume
+          cc.cruiseControl.cancel = True  # Actual non-pcm Volt Controls stock-cancel publication.
+          cc.actuators.accel = .5 if resume or not stop else -2.
+          cc.actuators.longControlState = (structs.CarControl.Actuators.LongControlState.starting if resume else
+                                           structs.CarControl.Actuators.LongControlState.stopping if stop else
+                                           structs.CarControl.Actuators.LongControlState.pid)
+          for instance in (ci, baseline):
+            instance.CC.frame = tick * 4
+          producer.data['carState'] = ci.CS.out
+          producer['longitudinalPlan'].shouldStop = stop and not resume
+          for name in ('deviceState', 'carState', 'longitudinalPlan'):
+            producer.logMonoTime[name] = now - 1_000_000
+            producer.recv_time[name] = (now - 500_000) / 1e9
+          with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now)), \
+               patch('openpilot.starpilot.controller_extensions.time.monotonic_ns', return_value=now):
+            _, actual = ci.apply(cc.as_reader(), now)
+          _, expected = baseline.apply(cc.as_reader(), now)
+          self.assertEqual([(a,b,d) for a,b,d in actual if a != 0x2CB],
+                           [(a,b,d) for a,b,d in expected if a != 0x2CB])
+          gas = next(data for address,data,_ in actual if address == 0x2CB)
+          gas_default = next(data for address,data,_ in expected if address == 0x2CB)
+          self.assertEqual(bool(gas[0] & 1), not resume)
+          self.assertEqual(gas[1:4], gas_default[1:4])
+          for message in actual:
+            self.assertTrue(native('tx', message, now // 1000), message)
+        from opendbc.car.gm.longitudinal import volt_sng_release
+        cc.cruiseControl.resume = True
+        cc.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+        # Each exclusion starts from packed, valid stock-STANDSTILL state.
+        for name, fields in (('AcceleratorPedal2', {'CruiseState': 4, 'AcceleratorPedal2': 30}),
+                             ('ECMEngineStatus', {'CruiseMainOn': 1, 'BrakePressed': 1}),
+                             ('EBCMRegenPaddle', {'RegenPaddle': 2}), ('ECMPRDNL2', {'PRNDL2': 3})):
+          selected = [m for m in rx if m[0] not in (0x1A1, 0xC9, 0xBD, 0x1F5)]
+          selected += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 4}),
+                       packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': 1}),
+                       packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                       packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 4}), packer.make_can_msg(name, 0, fields)]
+          # The selected physical pedal must also match the finalized gateway/ASCM brake source.
+          if name == 'ECMEngineStatus':
+            selected = [m for m in selected if m[0] not in (0xBE, 0xF1)]
+            selected += [packer.make_can_msg('ECMAcceleratorPos', 0, {'BrakePedalPos': 10}),
+                         packer.make_can_msg('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': 20})]
+          stamp = now + 10_000_000
+          ci.update([(stamp, selected)])
+          self.assertTrue(ci.CS.out.canValid)
+          self.assertTrue(ci.CS.out.cruiseState.standstill)
+          self.assertFalse(volt_sng_release(cp, True, cc, ci.CS, stamp, plan_current=True))
+        # Re-prime with real packed neutral sources, then independently expire/future-date the observation.
+        selected = [m for m in rx if m[0] != 0x1A1] + [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 4})]
+        stamp = now + 20_000_000
+        ci.update([(stamp, selected)])
+        self.assertTrue(ci.CS.out.canValid)
+        self.assertTrue(volt_sng_release(cp, True, cc, ci.CS, stamp, plan_current=True))
+        self.assertFalse(volt_sng_release(cp, True, cc, ci.CS, stamp - 1, plan_current=True))
+        self.assertFalse(volt_sng_release(cp, True, cc, ci.CS, stamp + 101_000_000, plan_current=True))
+        # Releasing the ACC-state bit never bypasses numeric gas limits or confers brake permission.
+        from opendbc.car.gm import gmcan
+        for demand, allowed in ((ci.CC.params.MAX_GAS, True), (ci.CC.params.MAX_GAS + .125, False)):
+          command = gmcan.create_gas_regen_command(packer, 0, demand, 1, False, False)
+          self.assertEqual(bool(native('tx', command, now // 1000)), allowed)
+        native('rx', packer.make_can_msg('ASCMSteeringButton', 0, {'ACCButtons': 6}), stamp // 1000)
+        self.assertFalse(libsafety_py.libsafety.get_controls_allowed())
+        for demand, allowed in ((ci.CC.params.INACTIVE_REGEN, True), (0., False)):
+          command = gmcan.create_gas_regen_command(packer, 0, demand, 1, False, False)
+          self.assertEqual(bool(native('tx', command, stamp // 1000)), allowed)
+
   def test_continuous_controller_transitions(self):
     for alpha in (False, True):
       for alignment in range(4):

@@ -103,7 +103,7 @@ def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
   return packer.make_can_msg("ASCMGasRegenCmd", bus, values)
 
 
-def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_stop, at_full_stop, CP):
+def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_stop, at_full_stop, CP, *, auto_hold=False):
   mode = 0x1
 
   # TODO: Understand this better. Volts and ICE Camera ACC cars are 0x1 when enabled with no brake
@@ -114,6 +114,8 @@ def create_friction_brake_command(packer, bus, apply_brake, idx, enabled, near_s
     mode = 0xa
     if at_full_stop:
       mode = 0xd
+    elif auto_hold and near_stop:
+      mode = 0xb
 
     # TODO: this is to have GM bringing the car to complete stop,
     # but currently it conflicts with OP controls, so turned off. Not set by all cars

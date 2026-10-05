@@ -22,6 +22,39 @@ from openpilot.starpilot.longitudinal.profile_runtime import ProfileHost, active
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
 
 
+class ResumeFreshness:
+  """Current drive and producer/receipt clock qualification for resume evidence."""
+  def __init__(self):
+    self.offset_ns = None
+    self.floor_ns = 0
+
+  def current(self, sm):
+    pair = clock_pair_ns()
+    if pair is None:
+      self.offset_ns = None
+      return False
+    now_ns, boot_ns = pair
+    offset = boot_ns - now_ns
+    if self.offset_ns is None or abs(offset - self.offset_ns) > CLOCK_PAIR_MAX_SKEW_NS:
+      self.offset_ns = offset
+      self.floor_ns = now_ns
+      return False
+    if not all(sm.seen[name] and sm.alive[name] and sm.valid[name] for name in ('deviceState',)):
+      return False
+    drive_id = int(sm['deviceState'].startedMonoTime)
+    device_ns = int(sm.logMonoTime['deviceState'])
+    if (not sm['deviceState'].started or not 0 < drive_id < device_ns <= now_ns or
+        device_ns <= self.floor_ns or now_ns - device_ns > 2_000_000_000 or
+        not 0 <= now_ns - int(sm.recv_time['deviceState'] * 1e9) <= 2_000_000_000):
+      return False
+    for name in ('carState', 'longitudinalPlan'):
+      source_ns, receipt_ns = int(sm.logMonoTime[name]), int(sm.recv_time[name] * 1e9)
+      if (not sm.all_checks([name]) or not max(self.floor_ns, drive_id) < source_ns <= receipt_ns <= now_ns or
+          now_ns - source_ns > 150_000_000 or now_ns - receipt_ns > 150_000_000):
+        return False
+    return True
+
+
 class LongitudinalInputs:
   def __init__(self, cp, params, messages):
     self.CP = cp
@@ -39,6 +72,7 @@ class LongitudinalInputs:
     gm_policy = gm_pedal_policy_for(self.CP)
     self.gm_start_enabled = gm_policy is not None and gm_policy.friction_variant
     self.gm_volt_enabled = volt_policy_for(self.CP) is not None
+    self.resume_freshness = ResumeFreshness()
     self.gm_cc_enabled = (conventional_pedal_policy_for(self.CP) or ordinary_cc_policy_for(self.CP) or volt_cc_policy_for(self.CP)) is not None
     if self.gm_cc_enabled:
       self.gm_cc_evidence = None
@@ -115,6 +149,9 @@ class LongitudinalInputs:
         if self.gm_euv_enabled and active else self._gm_volt_stop_from_observation(volt_observation),
     )
 
+
+  def resume_sources_current(self):
+    return self.resume_freshness.current(self.sm)
 
   def _ev9_context(self, active):
     unavailable = LongitudinalContext()

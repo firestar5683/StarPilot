@@ -94,9 +94,33 @@ class ManualTurnInputs:
     return self.sm["pandaStates"], self.sm.all_checks(["pandaStates"])
 
 
+class ResumePlanInputs:
+  """Card-owned fresh plan evidence, independent of Controls' saved preference snapshot."""
+  def __init__(self):
+    from openpilot.starpilot.longitudinal.inputs import ResumeFreshness
+    self.sm = messaging.SubMaster(["deviceState", "carState", "longitudinalPlan"], frequency=25)
+    self.freshness = ResumeFreshness()
+
+  def update(self, now_ns):
+    self.sm.update(0)
+    return (type(now_ns) is int and abs(time.monotonic_ns() - now_ns) <= 150_000_000 and
+            self.freshness.current(self.sm) and not self.sm['longitudinalPlan'].shouldStop)
+
+
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
+  from opendbc.car.gm.values import is_volt_auto_hold
+  if controller is not None and is_volt_auto_hold(cp) and controller.gm_auto_hold:
+    from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
+    controller.gm_auto_hold_input = AutoHoldPreference(cp, params)
+  from opendbc.car.gm.values import is_volt_longitudinal
+  if controller is not None and is_volt_longitudinal(cp) and controller.volt_sng:
+    try:
+      controller.volt_sng_plan_input = ResumePlanInputs()
+    except OSError:
+      controller.volt_sng_plan_input = None
+      cloudlog.exception('Optional Volt resume input transport unavailable')
   if controller is not None and toyota_cruise_capability(cp) is not None:
     controller.reverse_cruise_input = ToyotaCruisePreference(cp, params)
   if (controller is not None and cp.brand == "ford" and cp.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and

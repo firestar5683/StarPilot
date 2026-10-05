@@ -5,6 +5,7 @@
 #include "gm_aol.h"
 #include "gm_bolt_cc.h"
 #include "gm_cc_pedal.h"
+#include "gm_volt_auto_hold.h"
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
 #define GM_COMMON_RX_CHECKS \
@@ -404,6 +405,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
   }
 
   gm_cc_pedal_rx(msg);
+  gm_hold_rx(msg);
 }
 
 static bool gm_tx_hook(const CANPacket_t *msg) {
@@ -432,9 +434,15 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
   if (msg->addr == 0x315U) {
     int brake = ((msg->data[0] & 0xFU) << 8) + msg->data[1];
     brake = (0x1000 - brake) & 0xFFF;
-    if (longitudinal_brake_checks(brake, *gm_long_limits)) {
+    const bool ordinary_brake_violation = longitudinal_brake_checks(brake, *gm_long_limits);
+    if (gm_volt_auto_hold && !get_longitudinal_allowed()) {
+      tx &= gm_hold_brake_tx(msg, brake);
+    } else if (ordinary_brake_violation) {
       tx = false;
+    } else {
+      // Preserve ordinary longitudinal brake authority.
     }
+    if (gm_volt_auto_hold && get_longitudinal_allowed()) { gm_hold_counter_seen = false; }
     if (gm_pedal_acc) {
       const uint8_t mode = msg->data[0] >> 4;
       const uint8_t counter = msg->data[4] & 0x3U;
@@ -731,6 +739,10 @@ static safety_config gm_init(uint16_t safety_param) {
   const uint16_t GM_PARAM_VOLT_LONG = 16384;
   const uint16_t GM_PARAM_VOLT_GATEWAY_ALT_BRAKE = 32768U;
   const uint16_t GM_PARAM_HW_CAM_LONG = 2;
+  const bool volt_hold_standard = param == (GM_PARAM_EV | GM_PARAM_VOLT_LONG | GM_PARAM_PADDLE_SCHED);
+  const bool volt_hold_alternate = param == (GM_PARAM_EV | GM_PARAM_VOLT_LONG | GM_PARAM_PADDLE_SCHED | GM_PARAM_VOLT_GATEWAY_ALT_BRAKE);
+  gm_hold_reset(volt_hold_standard || volt_hold_alternate, volt_hold_alternate);
+  if (gm_volt_auto_hold) { param &= (uint16_t)(~GM_PARAM_PADDLE_SCHED); }
 
   if (gm_cc_pedal) { param = GM_PARAM_HW_CAM; }
   gm_volt_camera_removed = param == 0xC150U;
@@ -927,6 +939,14 @@ static safety_config gm_init(uint16_t safety_param) {
     GM_ASCM_INTERCEPT_C9_CHECK
     GM_ASCM_INTERCEPT_EV_CHECK
     {.msg = {{0xF1, 0, 6, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+  static RxCheck gm_volt_hold_rx_checks[] = {
+    GM_ASCM_INTERCEPT_RX_CHECKS
+    GM_ASCM_INTERCEPT_C9_CHECK
+    GM_ASCM_INTERCEPT_EV_CHECK
+    {.msg = {{0x1F5, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x232, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0xBE, 0, 6, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
   static RxCheck gm_volt_cc_rx_checks[] = {
@@ -1217,6 +1237,10 @@ static safety_config gm_init(uint16_t safety_param) {
     SET_RX_CHECKS(gm_volt_alt_brake_rx_checks, ret);
     SET_TX_MSGS(GM_VOLT_GATEWAY_ALT_BRAKE_TX_MSGS, ret);
   }
+  if (gm_volt_auto_hold) {
+    gm_volt_hold_rx_checks[8].msg[0].addr = gm_hold_alt_brake ? 0xF1U : 0xBEU;
+    SET_RX_CHECKS(gm_volt_hold_rx_checks, ret);
+  }
 
   if (gm_volt_cc_long || gm_ordinary_cc_long) {
     if (gm_ordinary_cc_long) { SET_RX_CHECKS(gm_ordinary_cc_rx_checks, ret); }
@@ -1353,7 +1377,7 @@ static safety_config gm_init(uint16_t safety_param) {
   const bool gm_aol_be_main = ((unsigned int)alternative_experience == GM_ALT_EXP_ALWAYS_ON_LATERAL) &&
     gm_aol_profile_word(param) && !gm_volt_invalid && !gm_sdgm_invalid && !gm_cc_gateway_invalid &&
     ((gm_ascm_intercept && !gm_ascm_brake_c9) || (gm_sdgm && !gm_sdgm_brake_c9));
-  if (gm_aol_be_main) {
+  if (gm_aol_be_main && !gm_volt_auto_hold) {
     if (gm_ev) {
       SET_RX_CHECKS(gm_aol_be_ev_rx_checks, ret);
     } else {

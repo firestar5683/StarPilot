@@ -320,6 +320,9 @@ class Controls:
     CC.cruiseControl.override = CC.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl
     CC.cruiseControl.cancel = CS.cruiseState.enabled and (not CC.enabled or not self.CP.pcmCruise)
     CC.cruiseControl.resume = CC.enabled and CS.cruiseState.standstill and not self.sm['longitudinalPlan'].shouldStop
+    if self.LoC.extension is not None:
+      CC.cruiseControl.resume = self.LoC.extension.qualify_resume(
+        CC.cruiseControl.resume, preferences=self.vehicle_startup_preferences, inputs=self.longitudinal_inputs)
 
     hudControl = CC.hudControl
     hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)

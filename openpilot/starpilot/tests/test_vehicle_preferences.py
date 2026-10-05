@@ -25,6 +25,48 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     else:
       path.write_bytes(value)
 
+  def test_gm_stop_preferences_require_strict_saved_opt_in(self):
+    from openpilot.common.params import ParamKeyType
+    for key, name in (("VoltSNG", "volt_sng"), ("GMAutoHold", "gm_auto_hold")):
+      self.raw("SafeMode", None)
+      self.assertEqual(self.params.get_type(key), ParamKeyType.BOOL)
+      self.assertIs(self.params.get_default_value(key), False)
+      for raw in (None, b"0", b"", b"true", b"1\n", b"1" * 20, b"1"):
+        self.raw(key, raw)
+        self.assertEqual(getattr(VehicleStartupPreferences.read(self.params, enabled=True), name), raw == b"1")
+      self.assertFalse(getattr(VehicleStartupPreferences.read(self.params, enabled=False), name))
+      self.raw("SafeMode", b"1")
+      self.assertFalse(getattr(VehicleStartupPreferences.read(self.params, enabled=True), name))
+    self.assertTrue(VehicleStartupPreferences(True, True).turn_assist)
+
+  def test_gm_hold_runtime_withdraws_for_disabled_or_malformed_preferences(self):
+    from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
+    from opendbc.car.gm.values import CAR as GM_CAR
+    from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
+    cp = ordinary_params(GM_CAR.CHEVROLET_VOLT, radar=True)
+    VehicleStartupPreferences(gm_auto_hold=True).prepare(cp)
+    now = 1_000_000_000
+    for key in ("GMAutoHold", "OpenpilotEnabledToggle", "SafeMode", "DisableOpenpilotLongitudinal"):
+      for raw in (b"0", b"1", b"", b"true", None):
+        for clean_key, value in (("GMAutoHold", b"1"), ("OpenpilotEnabledToggle", b"1"),
+                                 ("SafeMode", b"0"), ("DisableOpenpilotLongitudinal", b"0")):
+          self.raw(clean_key, value)
+        owner = AutoHoldPreference(cp, self.params)
+        self.assertTrue(owner.update(now))
+        self.raw(key, raw)
+        now += 250_000_000
+        expected = raw == b"1" if key in ("GMAutoHold", "OpenpilotEnabledToggle") else raw in (None, b"0")
+        self.assertEqual(owner.update(now), expected, (key, raw))
+        self.assertFalse(owner.update(now - 1))
+        cp.passive = True
+        self.assertFalse(owner.update(now))
+        cp.passive = False
+    preferences = VehicleStartupPreferences(gm_auto_hold=True, disable_bolt_long=True)
+    preferences.prepare(cp)
+    preferences.finalize(cp)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x4004)
+
   def test_suburban_saved_long_pitch_configures_exact_controller(self):
     from opendbc.car.gm.carcontroller import CarController
     from opendbc.car.gm.interface import CarInterface
@@ -56,19 +98,19 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     path.symlink_to("SafeMode")
     self.assertFalse(VehicleStartupPreferences.read(self.params, enabled=True).toyota_auto_hold)
 
-  def start(self, candidate, *, enabled=True, requested=True, change_saved=False):
-    self.raw("ToyotaAutoHold", b"1" if requested else b"0")
+  def start(self, candidate, *, enabled=True, requested=True, change_saved=False, key="ToyotaAutoHold", observed=None, capture=None):
+    self.raw(key, b"1" if requested else b"0")
     self.params.put_bool("OpenpilotEnabledToggle", enabled, block=True)
     snapshots = []
 
     def fingerprint(*args, **kwargs):
-      return candidate, gen_empty_fingerprint(), "0" * 17, [], structs.CarParams.FingerprintSource.can, True
+      return candidate, observed if observed is not None else gen_empty_fingerprint(), "0" * 17, [], structs.CarParams.FingerprintSource.can, True
 
     def create(*args, **kwargs):
       ci = car_helpers.get_car(*args, **kwargs)
-      snapshots.append((bool(ci.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD), int(ci.CP.alternativeExperience)))
+      snapshots.append(capture(ci) if capture is not None else (bool(ci.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD), int(ci.CP.alternativeExperience)))
       if change_saved:
-        self.raw("ToyotaAutoHold", b"0")
+        self.raw(key, b"0")
       return ci
 
     with patch.object(card, "Params", return_value=self.params), \
@@ -86,6 +128,32 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     with structs.CarParams.from_bytes(self.params.get("CarParams")) as cp:
       published = cp.as_builder()
     return host, snapshots, published
+
+  def test_gm_hold_card_publishes_admitted_configuration_and_honors_live_opt_out(self):
+    from opendbc.car.gm.values import CAR as GM_CAR, is_volt_auto_hold
+    for accelerator in (False, True):
+      observed = gen_empty_fingerprint()
+      observed[1][0x460] = 8
+      if accelerator:
+        observed[0][0xBE] = 6
+      base = 0x4004 if accelerator else 0xC004
+      for enabled, requested, change_saved in ((True, True, False), (True, True, True), (True, False, False), (False, True, False)):
+        with self.subTest(accelerator=accelerator, enabled=enabled, requested=requested, change_saved=change_saved):
+          host, constructed, published = self.start(GM_CAR.CHEVROLET_VOLT, key="GMAutoHold", observed=observed,
+            capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam), enabled=enabled,
+            requested=requested, change_saved=change_saved)
+          admitted = enabled and requested
+          self.assertEqual(constructed, [base | (0x80 if admitted else 0)])
+          self.assertEqual(is_volt_auto_hold(published), admitted)
+          if enabled:
+            self.assertEqual(published.safetyConfigs[0].safetyParam, constructed[0])
+            self.assertEqual(host.CI.CC.gm_auto_hold, requested)
+            if requested:
+              self.assertEqual(host.CI.CC.gm_auto_hold_input.update(1_000_000_000), not change_saved)
+            else:
+              self.assertIsNone(host.CI.CC.gm_auto_hold_input)
+          else:
+            self.assertEqual(published.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
 
   def test_real_card_admits_before_construction_and_publishes_final_permission(self):
     for candidate, permission in ((CAR.TOYOTA_COROLLA_TSS2, ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD),

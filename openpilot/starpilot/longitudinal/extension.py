@@ -6,7 +6,7 @@ from opendbc.car.structs import car
 from openpilot.starpilot.longitudinal.toyota_output_policy import ToyotaOutputPolicy, development_enabled
 from openpilot.starpilot.longitudinal.ioniq6_start import Ioniq6StartPolicy, StartEvidence, eligible as ioniq6_start_eligible
 from openpilot.starpilot.longitudinal.vehicle_policy import policy_for as vehicle_policy_for, stopping_decel_rate, stopping_policy_for
-from opendbc.car.gm.longitudinal import GMPedalStartPolicy
+from opendbc.car.gm.longitudinal import GMPedalStartPolicy, volt_sng_resume_policy_for
 from opendbc.car.gm.bolt_mode import policy_for as bolt_mode_policy_for
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
@@ -27,6 +27,7 @@ class LongitudinalContext:
 
 class LongitudinalExtension:
   def __init__(self, CP):
+    self.resume_policy = volt_sng_resume_policy_for(CP)
     self.bolt_mode = bolt_mode_policy_for(CP)
     self.vehicle_policy = vehicle_policy_for(CP)
     self.stopping_policy = stopping_policy_for(CP, DT_CTRL)
@@ -38,6 +39,11 @@ class LongitudinalExtension:
     self.ioniq6_start = Ioniq6StartPolicy() if ioniq6_start_eligible(CP) else None
     self.vehicle_target = getattr(self.vehicle_policy, "target", None)
     self.kp = self.vehicle_policy.kp if self.vehicle_policy is not None else 0.0
+
+  def qualify_resume(self, default, *, preferences, inputs):
+    if self.resume_policy is None or not preferences.volt_sng:
+      return default
+    return self.resume_policy(default, True, inputs.resume_sources_current())
 
   def reset(self, *, reset_start=True):
     if self.vehicle_policy is not None:

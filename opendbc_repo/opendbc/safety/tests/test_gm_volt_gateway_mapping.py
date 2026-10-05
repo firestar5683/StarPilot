@@ -40,7 +40,9 @@ class TestGmVoltGatewayMapping(unittest.TestCase):
       if self.safety.safety_tx_hook(frame):
         accepted.append(param)
     release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
-    expected = [EXACT, EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)]
+    expected = [EXACT, EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE),
+                EXACT | int(GMSafetyFlags.VOLT_AUTO_HOLD),
+                EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE | GMSafetyFlags.VOLT_AUTO_HOLD)]
     if not release:
       expected += [7, 515, 1539, 2563, 3587, 4099, 5123, 16391, 16903, 17927, 18951, 19975,
                    20487, 21511, 49489, 49520, 49523]

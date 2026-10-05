@@ -1,3 +1,6 @@
+from opendbc.car.gm.longitudinal import volt_sng_release
+from opendbc.car.gm.auto_hold import AutoHold
+from opendbc.car.gm.values import is_volt_auto_hold
 from opendbc.car.gm.ordinary import demands as ascm_demands
 import math
 import numpy as np
@@ -220,6 +223,11 @@ class CarController(CarControllerBase):
     self.cancel_counter = 0
     self.pedal_steady = 0.0
     self.pedal_active_last = False
+    self.volt_sng = False
+    self.volt_sng_plan_input = None
+    self.gm_auto_hold = False
+    self.gm_auto_hold_input = None
+    self.gm_auto_hold_state = AutoHold()
     self.regen_paddle_pressed = False
     self.bolt_regen_hold = False
     self.regen_press_count = 0
@@ -338,6 +346,16 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos):
+    # Sample physical hold dwell at parser/controller cadence, before current brake demands.
+    hold_brake = None
+    if is_volt_auto_hold(self.CP):
+      hold_enabled = self.gm_auto_hold and self.gm_auto_hold_input is not None and self.gm_auto_hold_input.update(now_nanos)
+      hold_brake = self.gm_auto_hold_state.update(
+        CS.out, enabled=hold_enabled, sources_current=all(0 < stamp <= now_nanos and now_nanos - stamp <= limit
+                                                         for stamp, limit in CS.gm_auto_hold_sources) and bool(CS.gm_auto_hold_sources) and
+        not CS.gm_auto_hold_unavailable, long_active=CC.longActive, driver_brake=CS.gm_auto_hold_brake,
+        controller_brake=self.apply_brake, wheel_ns=CS.gm_auto_hold_wheel_ns, now_ns=now_nanos,
+        physical_forward=CS.gm_auto_hold_forward, moving=CS.gm_auto_hold_moving)
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
@@ -610,10 +628,18 @@ class CarController(CarControllerBase):
             self.ordinary_camera_long and not self.ordinary_camera_removed):
           can_sends.append(gmcan.create_acc_2cd_command(CanBus.POWERTRAIN, idx))
 
-        # GasRegenCmdActive needs to be 1 to avoid cruise faults. It describes the ACC state, not actuation
-        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, CC.enabled, at_full_stop))
+        # Resume releases only the gas/regen ACC-state bit; friction remains separately owned.
+        acc_engaged = CC.enabled and not volt_sng_release(
+          self.CP, self.volt_sng, CC, CS, now_nanos,
+          plan_current=self.volt_sng_plan_input.update(now_nanos) if self.volt_sng and self.volt_sng_plan_input is not None else False)
+        if hold_brake is None:
+          can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
+        else:
+          self.apply_brake = hold_brake
+          at_full_stop = CS.out.cruiseState.standstill
+          near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
-                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP))
+                                                             idx, CC.enabled, near_stop, at_full_stop, self.CP, auto_hold=hold_brake is not None))
 
         if self.bolt_euv_long:
           can_sends.append(gmcan.create_acc_2cd_command(CanBus.POWERTRAIN, idx))
