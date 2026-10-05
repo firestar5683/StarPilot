@@ -12,6 +12,11 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / 'tools/test_runner.py'
+UI_PYTEST_FILES = (
+  'openpilot/system/ui/lib/tests/test_text_caches.py',
+  'openpilot/system/ui/widgets/tests/test_label_cache.py',
+  'openpilot/selfdrive/ui/tests/test_onboarding_textures.py',
+)
 
 
 def pytest_files(root=ROOT):
@@ -23,7 +28,7 @@ def pytest_files(root=ROOT):
            (isinstance(node, ast.ClassDef) and node.name.startswith('Test') and not node.bases)
            for node in module.body):
       files.append(path.relative_to(root).as_posix())
-  return files
+  return files + [path for path in UI_PYTEST_FILES if (root / path).is_file()]
 
 
 def main(arguments=None):
