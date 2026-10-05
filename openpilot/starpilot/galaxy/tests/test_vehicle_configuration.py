@@ -49,6 +49,34 @@ class TestVehicleConfiguration(unittest.TestCase):
     self.assertIs(returned, cp)
     self.assertTrue(token.endswith(b'physical-cache'))
 
+  def test_camera_interceptor_manual_choice_does_not_invent_hardware(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import CAMERA_IDS
+    from opendbc.car.gm.values import GMFlags, camera_acc_pedal_profile
+    from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
+    from openpilot.starpilot.ui.feature_settings_state import row_change
+    from dataclasses import replace
+    self.params.put_bool('OpenpilotEnabledToggle', True, block=True)
+    for identity in CAMERA_IDS:
+      self.select(str(identity))
+      cp, token = configuration_context(self.params, None, None)
+      self.assertEqual(cp.carFingerprint, identity)
+      self.assertIsNotNone(token)
+      self.assertIsNone(camera_acc_pedal_profile(cp))
+      self.assertFalse(cp.flags & GMFlags.PEDAL_LONG)
+      owner = FeatureSettingsOwner(self.params, lambda _: True, vehicle_fingerprint=lambda identity=identity: identity,
+                                   vehicle_params=lambda cp=cp: cp, configuration_vehicle=lambda: True)
+      page = owner.snapshot('vehicle', parked=True, system_long=False, lateral_context=True, metric=False)
+      pedal = next(row for row in page.rows if row.key == 'GMPedalLongitudinal')
+      self.assertEqual(pedal.value, 'Not detected')
+      self.assertFalse(pedal.available)
+      pitch = next(row for row in page.rows if row.key == 'LongPitch')
+      request = row_change(pitch)
+      assert request is not None
+      self.assertTrue(owner.apply(replace(request, confirmation=True)))
+      self.assertIsNone(camera_acc_pedal_profile(cp))
+      for key in ('CarParams', 'CarParamsPersistent', 'CarParamsCache'):
+        self.assertFalse(Path(self.params.get_param_path(key)).exists())
+
   def test_auto_preserves_physical_and_malformed_fails_closed(self):
     self.select(None)
     physical = object()

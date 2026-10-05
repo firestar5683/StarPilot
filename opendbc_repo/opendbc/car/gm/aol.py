@@ -4,7 +4,7 @@ import math
 
 from opendbc.car.structs import CarParams
 from opendbc.car.gm.values import (control_flags,
-  CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_pedal_profile,
+  camera_acc_pedal_profile, CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_pedal_profile,
   is_ordinary_ascm_profile, is_ordinary_camera_profile, is_ordinary_sdgm_profile, is_bolt_euv_longitudinal, is_volt_gateway_profile, is_volt_cc_profile,
   is_volt_ascm_longitudinal, is_volt_camera_stock, is_volt_camera_longitudinal,
   is_volt_camera_removed, is_volt_sdgm_profile, is_ordinary_cc_profile, is_conventional_cc_pedal_profile,
@@ -15,7 +15,7 @@ GM_AOL_ALTERNATIVE_EXPERIENCE = 32
 GM_BASE_GATEWAY_IDS = frozenset((CAR.GMC_ACADIA, CAR.BUICK_LACROSSE, CAR.CADILLAC_ESCALADE,
                                  CAR.CADILLAC_ESCALADE_ESV, CAR.CADILLAC_ESCALADE_ESV_2019, CAR.CHEVROLET_SUBURBAN))
 GM_AOL_WORDS = frozenset((
-  0, 0x80,
+  0, 0x80, 0xE100, 0xE101, 0xE102, 0xE103, 0xE110, 0xE111, 0xE112, 0xE113,
   0xD100, 0xD101, 0xD102, 0xD103, 0xD104, 0xD105, 0xD106, 0xD107, 0xD108, 0xD109, 0xD10A,
   0xD110, 0xD111, 0xD112, 0xD113, 0xD114, 0xD115, 0xD116, 0xD117, 0xD118, 0xD119, 0xD11A,
   0x1001, 0x1401, 0x3001, 0x3401, 0x1003, 0x1403,
@@ -49,6 +49,8 @@ def qualified_gm(cp) -> bool:
       tune = cp.lateralTuning.pid
       if not all(math.isfinite(value) for value in (*tune.kpBP, *tune.kpV, *tune.kiBP, *tune.kiV, tune.kf)):
         return False
+    if camera_acc_pedal_profile(cp) is not None:
+      return True
     if cp.carFingerprint in GM_BASE_GATEWAY_IDS:
       return (cp.networkLocation == CarParams.NetworkLocation.gateway and
               cp.transmissionType == CarParams.TransmissionType.automatic and

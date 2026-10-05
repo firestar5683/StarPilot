@@ -7,6 +7,7 @@
 #include "gm_bolt_cc.h"
 #include "gm_cc_pedal.h"
 #include "gm_volt_auto_hold.h"
+#include "gm_camera_acc_pedal.h"
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
 #define GM_COMMON_RX_CHECKS \
@@ -128,16 +129,6 @@ typedef struct {
 static GmPaddleFeed gm_bd_feed = {0};
 static GmPaddleFeed gm_gear_feed = {0};
 
-static uint8_t gm_pedal_crc(const CANPacket_t *msg) {
-  uint8_t crc = 0xFFU;
-  for (int i = 4; i >= 0; i--) {
-    crc ^= msg->data[i];
-    for (uint8_t bit = 0U; bit < 8U; bit++) {
-      crc = (crc & 0x80U) ? (uint8_t)((crc << 1) ^ 0xD5U) : (uint8_t)(crc << 1);
-    }
-  }
-  return crc;
-}
 
 static bool gm_pedal_sensor_current(void) {
   return gm_pedal_sensor_good && safety_get_ts_elapsed(microsecond_timer_get(), gm_pedal_sensor_last_us) <= 100000U;
@@ -182,6 +173,7 @@ static void gm_emit_paddle_after_stock(uint32_t now_us, uint32_t addr, uint8_t d
 static void gm_rx_hook(const CANPacket_t *msg) {
   const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
 
+  gm_camera_pedal_rx(msg);
   if (msg->bus == 0U) {
     if (gm_volt_cc_long || gm_ordinary_cc_long) {
       int source = -1;
@@ -695,7 +687,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     for (uint8_t i = 0U; i < 7U; i++) { tx &= msg->data[i] == 0U; }
   }
 
-  return tx;
+  return gm_camera_pedal_tx(msg, tx);
 }
 
 static bool gm_fwd_hook(int bus_num, int addr) {
@@ -715,7 +707,8 @@ static bool gm_fwd_hook(int bus_num, int addr) {
 }
 
 static safety_config gm_init(uint16_t safety_param) {
-  uint16_t param = gm_one_pedal_reset(safety_param);
+  const uint16_t camera_param = gm_camera_pedal_reset(safety_param);
+  uint16_t param = gm_one_pedal_reset(camera_param);
   gm_cc_pedal_silverado = (safety_param == 0xC182U) || (safety_param == 0xC183U) ||
                           (safety_param == 0xC184U) || (safety_param == 0xC185U);
   gm_cc_pedal_ordinary_stock = (safety_param == 0xC186U) || (safety_param == 0xC187U);
@@ -798,20 +791,20 @@ static safety_config gm_init(uint16_t safety_param) {
 
   gm_ordinary_cc_long = safety_param == 0xC160U;
   if (gm_ordinary_cc_long) { param = GM_PARAM_NO_ACC; }
-  gm_ordinary_camera_removed = safety_param == 0xC172U;
+  gm_ordinary_camera_removed = camera_param == 0xC172U;
   gm_ordinary_camera_removed_long = false;
 #ifdef ALLOW_DEBUG
-  gm_ordinary_camera_removed_long = safety_param == 0xC173U;
+  gm_ordinary_camera_removed_long = camera_param == 0xC173U;
   gm_ordinary_camera_removed |= gm_ordinary_camera_removed_long;
 #endif
   if (gm_ordinary_camera_removed) { param = GM_PARAM_HW_CAM; }
 #ifdef ALLOW_DEBUG
   if (gm_ordinary_camera_removed_long) { param |= GM_PARAM_HW_CAM_LONG; }
 #endif
-  const bool gm_ordinary_camera_stock = safety_param == 0xC171U;
+  const bool gm_ordinary_camera_stock = camera_param == 0xC171U;
   if (gm_ordinary_camera_stock) { param = GM_PARAM_HW_CAM; }
 #ifdef ALLOW_DEBUG
-  const bool gm_ordinary_camera_long = safety_param == 0xC170U;
+  const bool gm_ordinary_camera_long = camera_param == 0xC170U;
   if (gm_ordinary_camera_long) { param = GM_PARAM_HW_CAM | GM_PARAM_HW_CAM_LONG; }
 #endif
 
@@ -924,6 +917,21 @@ static safety_config gm_init(uint16_t safety_param) {
     {.msg = {{0xC9, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
+#ifdef ALLOW_DEBUG
+  static const RxCheck gm_camera_extended_rx_template[] = {
+    {.msg = {{0x184, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x34A, 0, 5, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x1E1, 0, 7, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0xF1, 0, 6, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x1C4, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0xC9, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x201, 0, 6, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x1F5, 0, 8, 40U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+
+#endif
+  gm_ordinary_camera_rx_checks[3].msg[0].addr = (gm_camera_pedal && !gm_camera_pedal_f1) ? 0xBEU : 0xF1U;
+
   static RxCheck gm_rx_checks[] = {
     GM_COMMON_RX_CHECKS
   };
@@ -966,7 +974,7 @@ static safety_config gm_init(uint16_t safety_param) {
     GM_ASCM_INTERCEPT_EV_CHECK
     {.msg = {{0xF1, 0, 6, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
-  static RxCheck gm_volt_hold_rx_checks[] = {
+  static const RxCheck gm_hold_extended_rx_template[] = {
     GM_ASCM_INTERCEPT_RX_CHECKS
     GM_ASCM_INTERCEPT_C9_CHECK
     GM_ASCM_INTERCEPT_EV_CHECK
@@ -974,6 +982,9 @@ static safety_config gm_init(uint16_t safety_param) {
     {.msg = {{0x232, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
     {.msg = {{0xBE, 0, 6, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
+
+  // These mutually exclusive owners share RAM; every init copies complete flash metadata and clears status.
+  static RxCheck gm_extended_rx_checks[9];
 
   static RxCheck gm_volt_cc_rx_checks[] = {
     {.msg = {{0x184, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
@@ -1294,6 +1305,7 @@ static safety_config gm_init(uint16_t safety_param) {
       {0x184, 2, 8, .check_relay = false},
     };
     SET_RX_CHECKS(gm_ordinary_camera_rx_checks, ret);
+    if (!gm_camera_pedal_long) { ret.rx_checks_len = 6; }
     SET_TX_MSGS(GM_ORDINARY_CAMERA_REMOVED_STOCK_TX_MSGS, ret);
 #ifdef ALLOW_DEBUG
     if (gm_ordinary_camera_removed_long) {
@@ -1393,50 +1405,70 @@ static safety_config gm_init(uint16_t safety_param) {
 #endif
   if (gm_ordinary_camera) {
     SET_RX_CHECKS(gm_ordinary_camera_rx_checks, ret);
+    if (!gm_camera_pedal_long) { ret.rx_checks_len = 6; }
   }
 
   if (gm_auto_hold) {
-    // Restore the shared table after a prior ICE init moved regen to the unused tail.
-    if (gm_volt_hold_rx_checks[8].msg[0].addr == 0xBD) {
-      RxCheck analog = {0};
-      analog = gm_volt_hold_rx_checks[5];
-      gm_volt_hold_rx_checks[5] = gm_volt_hold_rx_checks[8];
-      gm_volt_hold_rx_checks[8] = analog;
-    }
-    for (uint8_t i = 0U; i < 9U; i++) { gm_volt_hold_rx_checks[i].msg[0].frequency = 10U; }
-    gm_volt_hold_rx_checks[5].msg[0].frequency = 40U;
-    gm_volt_hold_rx_checks[8].msg[0].addr = gm_hold_alt_brake ? 0xF1U : 0xBEU;
-    gm_volt_hold_rx_checks[8].msg[1] = (CanMsgCheck){0};
-    gm_volt_hold_rx_checks[8].msg[2] = (CanMsgCheck){0};
+    for (uint8_t i = 0U; i < 9U; i++) { gm_extended_rx_checks[i] = gm_hold_extended_rx_template[i]; }
+    for (uint8_t i = 0U; i < 9U; i++) { gm_extended_rx_checks[i].msg[0].frequency = 10U; }
+    gm_extended_rx_checks[5].msg[0].frequency = 40U;
+    gm_extended_rx_checks[8].msg[0].addr = gm_hold_alt_brake ? 0xF1U : 0xBEU;
+    gm_extended_rx_checks[8].msg[1] = (CanMsgCheck){0};
+    gm_extended_rx_checks[8].msg[2] = (CanMsgCheck){0};
     if (gm_hold_extended_be) {
-      gm_volt_hold_rx_checks[8].msg[1] = gm_volt_hold_rx_checks[8].msg[0];
-      gm_volt_hold_rx_checks[8].msg[1].len = 7U;
-      gm_volt_hold_rx_checks[8].msg[2] = gm_volt_hold_rx_checks[8].msg[0];
-      gm_volt_hold_rx_checks[8].msg[2].len = 8U;
+      gm_extended_rx_checks[8].msg[1] = gm_extended_rx_checks[8].msg[0];
+      gm_extended_rx_checks[8].msg[1].len = 7U;
+      gm_extended_rx_checks[8].msg[2] = gm_extended_rx_checks[8].msg[0];
+      gm_extended_rx_checks[8].msg[2].len = 8U;
     }
 #ifdef ALLOW_DEBUG
     if (hold_removed) {
-      gm_volt_hold_rx_checks[1].msg[0].frequency = 20U;
-      gm_volt_hold_rx_checks[2].msg[0].frequency = 33U;
-      gm_volt_hold_rx_checks[3].msg[0].frequency = 33U;
-      gm_volt_hold_rx_checks[4].msg[0].frequency = 100U;
-      gm_volt_hold_rx_checks[5].msg[0].frequency = 50U;
-      gm_volt_hold_rx_checks[8].msg[0].frequency = gm_hold_alt_brake ? 100U : 80U;
+      gm_extended_rx_checks[1].msg[0].frequency = 20U;
+      gm_extended_rx_checks[2].msg[0].frequency = 33U;
+      gm_extended_rx_checks[3].msg[0].frequency = 33U;
+      gm_extended_rx_checks[4].msg[0].frequency = 100U;
+      gm_extended_rx_checks[5].msg[0].frequency = 50U;
+      gm_extended_rx_checks[8].msg[0].frequency = gm_hold_alt_brake ? 100U : 80U;
     }
 #endif
     if (hold_ice) {
       RxCheck regen = {0};
-      regen = gm_volt_hold_rx_checks[5];
-      gm_volt_hold_rx_checks[5] = gm_volt_hold_rx_checks[8];
-      gm_volt_hold_rx_checks[8] = regen;
+      regen = gm_extended_rx_checks[5];
+      gm_extended_rx_checks[5] = gm_extended_rx_checks[8];
+      gm_extended_rx_checks[8] = regen;
     }
-    SET_RX_CHECKS(gm_volt_hold_rx_checks, ret);
+    SET_RX_CHECKS(gm_extended_rx_checks, ret);
     if (hold_ice) { ret.rx_checks_len -= 1; }
 #ifdef ALLOW_DEBUG
     // C9-only ASCM/SDGM has no analog requirement; removed C9 requires both sources.
     if ((volt_hold_ascm || volt_hold_sdgm) && gm_hold_c9_brake) { ret.rx_checks_len -= 1; }
 #endif
   }
+
+#ifdef ALLOW_DEBUG
+  if (gm_camera_pedal_long) {
+    for (uint8_t i = 0U; i < 9U; i++) { gm_extended_rx_checks[i] = (RxCheck){0}; }
+    for (uint8_t i = 0U; i < 8U; i++) { gm_extended_rx_checks[i] = gm_camera_extended_rx_template[i]; }
+    gm_extended_rx_checks[3].msg[0].addr = gm_camera_pedal_f1 ? 0xF1U : 0xBEU;
+    SET_RX_CHECKS(gm_extended_rx_checks, ret);
+    ret.rx_checks_len -= 1;
+    static const CanMsg GM_CAMERA_PEDAL_PRESENT_TX[] = {
+      {0x180, 0, 4, .check_relay = true}, {0x315, 0, 5, .check_relay = true},
+      {0x2CB, 0, 8, .check_relay = true}, {0x370, 0, 6, .check_relay = true},
+      {0x2CD, 0, 5, .check_relay = true}, {0x184, 2, 8, .check_relay = true},
+      {0x200, 0, 6, .check_relay = false},
+    };
+    static const CanMsg GM_CAMERA_PEDAL_REMOVED_TX[] = {
+      {0x180, 0, 4, .check_relay = false}, {0x315, 0, 5, .check_relay = false},
+      {0x2CB, 0, 8, .check_relay = false}, {0x370, 0, 6, .check_relay = false},
+      {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},
+      {0x184, 2, 8, .check_relay = false}, {0x200, 0, 6, .check_relay = false},
+    };
+    if (gm_ordinary_camera_removed) { SET_TX_MSGS(GM_CAMERA_PEDAL_REMOVED_TX, ret); }
+    else { SET_TX_MSGS(GM_CAMERA_PEDAL_PRESENT_TX, ret); }
+  }
+#endif
+  gm_volt_invalid |= gm_camera_pedal_rejected;
 
   // Independent lateral authority also needs the physical main source on BE-selected rows.
   const bool gm_aol_be_main = ((unsigned int)alternative_experience == GM_ALT_EXP_ALWAYS_ON_LATERAL) &&

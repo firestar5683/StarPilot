@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, BrakeSource
 from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
 from opendbc.car.gm.auto_hold import config_for as auto_hold_config_for, stopped_for_hold
 import copy
@@ -32,6 +32,10 @@ class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
     self.gm_auto_hold_config = auto_hold_config_for(CP)
+    self.camera_pedal_profile = camera_acc_pedal_profile(CP)
+    self.camera_pedal_sources = ()
+    self.camera_pedal_rear = (0., 0.)
+    self.camera_pedal_forward = False
     self.stock_fcw_alert = 0
     self.ordinary_removed_sources = ()
     self.volt_removed_sources = ()
@@ -97,6 +101,21 @@ class CarState(CarStateBase):
 
     ret = structs.CarState()
     pedal_stock_no_acc = self.CP.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_profile(self.CP, stock_only=True)
+
+    if self.camera_pedal_profile is not None:
+      analog = (("ECMAcceleratorPos", "BrakePedalPos") if self.camera_pedal_profile.brake_source == BrakeSource.BE else
+                ("EBCMBrakePedalPosition", "BrakePedalPosition"))
+      fields = (("PSCMStatus", "LKATorqueDelivered", 300_000_000),
+                ("EBCMWheelSpdRear", "RLWheelSpd", 100_000_000),
+                ("ASCMSteeringButton", "RollingCounter", 100_000_000),
+                ("AcceleratorPedal2", "CruiseState", 300_000_000),
+                ("ECMEngineStatus", "CruiseMainOn", 300_000_000),
+                (*analog, 300_000_000), ("ECMPRDNL2", "PRNDL2", 100_000_000))
+      self.camera_pedal_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in fields)
+      rear = pt_cp.vl["EBCMWheelSpdRear"]
+      self.camera_pedal_rear = (rear["RLWheelSpd"], rear["RRWheelSpd"])
+      gear = pt_cp.vl["ECMPRDNL2"]
+      self.camera_pedal_forward = gear["PRNDL2"] in (4, 6) or gear["ManualMode"] == 1 and 4 <= gear["PRNDL2"] <= 7
 
     if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP):
       source_fields = (("PSCMStatus", "LKATorqueDelivered"), ("EBCMBrakePedalPosition", "BrakePedalPosition"),
@@ -267,7 +286,9 @@ class CarState(CarStateBase):
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
     if self.loopback_lka_steering_cmd_updated:
       self.loopback_lka_steering_cmd_ts_nanos = loopback_cp.ts_nanos["ASCMLKASteeringCmd"]["RollingCounter"]
-    if self.CP.networkLocation == NetworkLocation.fwdCamera and not (is_conventional_cc_pedal_profile(self.CP) and self.CP.flags & GMFlags.NO_CAMERA):
+    if (self.CP.networkLocation == NetworkLocation.fwdCamera and
+        not (is_conventional_cc_pedal_profile(self.CP) and self.CP.flags & GMFlags.NO_CAMERA) and
+        not (self.camera_pedal_profile is not None and self.camera_pedal_profile.removed)):
       if not is_conventional_cc_pedal_profile(self.CP):
         self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       if not self.bolt_cc_removed and not is_volt_camera_removed(self.CP) and not is_ordinary_camera_removed(self.CP):
@@ -324,7 +345,7 @@ class CarState(CarStateBase):
 
     ret.gasPressed = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254. > 1e-5
 
-    if self.CP.flags & GMFlags.PEDAL_LONG.value:
+    if self.CP.flags & GMFlags.PEDAL_LONG.value and (self.camera_pedal_profile is None or self.camera_pedal_profile.longitudinal):
       sensor = pt_cp.vl["GAS_SENSOR"]
       sensor_ts = pt_cp.ts_nanos["GAS_SENSOR"]["COUNTER_PEDAL"]
       counter = int(sensor["COUNTER_PEDAL"])
@@ -351,6 +372,8 @@ class CarState(CarStateBase):
       if self.pedal_sensor_healthy:
         if is_bolt_pedal_profile(self.CP):
           ret.gasPressed = first + second > 1190
+        elif self.camera_pedal_profile is not None and self.camera_pedal_profile.longitudinal:
+          ret.gasPressed = ret.gasPressed or first + second > 1190
         else:
           ret.gasPressed = sum(tracks) / 2. > 23.0
 
@@ -399,8 +422,9 @@ class CarState(CarStateBase):
       ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0 if pedal_stock_no_acc else False
       ret.cruiseState.standstill = False
     if (self.CP.networkLocation == NetworkLocation.fwdCamera and not is_volt_camera_removed(self.CP)
-        and not is_conventional_cc_pedal_profile(self.CP) and not is_ordinary_camera_removed(self.CP)):
-      if (self.CP.carFingerprint not in ALT_ACCS or is_ordinary_camera_profile(self.CP) or
+        and not is_conventional_cc_pedal_profile(self.CP) and not is_ordinary_camera_removed(self.CP)
+        and not (self.camera_pedal_profile is not None and self.camera_pedal_profile.removed)):
+      if (self.CP.carFingerprint not in ALT_ACCS or self.camera_pedal_profile is not None or is_ordinary_camera_profile(self.CP) or
           is_ordinary_camera_profile(self.CP, longitudinal=True)) and not self.bolt_cc_profile and self.CP.carFingerprint not in NO_ACC_BOLT_CAR:
         ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
         # This FCW signal only works for SDGM cars. CAM cars send FCW on GMLAN but this bit is always 0 for them
@@ -408,7 +432,7 @@ class CarState(CarStateBase):
       else:
         ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
       if (self.CP.pcmCruise and self.CP.carFingerprint not in NO_ACC_BOLT_CAR and self.CP.carFingerprint not in ASCM_INTERCEPT_CAR and
-          (self.CP.carFingerprint not in ALT_ACCS or is_ordinary_camera_profile(self.CP) or
+          (self.CP.carFingerprint not in ALT_ACCS or self.camera_pedal_profile is not None or is_ordinary_camera_profile(self.CP) or
                self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN_CAMERA)):
         # The alternate set-speed source still uses camera ACC state.
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
@@ -527,7 +551,8 @@ class CarState(CarStateBase):
         ("ASCMSteeringButton", 33), ("ECMAcceleratorPos", 80),
         ("ECMCruiseControl", 10),
       ]
-    if (requires_camera_state_sources(CP) or is_volt_camera_removed(CP) or bolt_pedal_profile) and CP.carFingerprint not in ORDINARY_SDGM_CAR:
+    if (requires_camera_state_sources(CP) or is_volt_camera_removed(CP) or camera_acc_pedal_profile(CP) is not None or
+        bolt_pedal_profile) and CP.carFingerprint not in ORDINARY_SDGM_CAR:
       # Required stock signals are checked on their observed PT bus; the
       # camera command on PT is only a counter source and remains optional.
       pt_messages += [
@@ -578,6 +603,17 @@ class CarState(CarStateBase):
     if is_ordinary_camera_removed(CP):
       pt_messages = [(name, frequency) for name, frequency in pt_messages if name != "ECMCruiseControl"]
 
+    profile = camera_acc_pedal_profile(CP)
+    if profile is not None:
+      excluded = {"ECMAcceleratorPos", "EBCMBrakePedalPosition", "ECMCruiseControl", "ECMPRDNL2", "GAS_SENSOR"}
+      if profile.removed:
+        excluded.add("ASCMLKASteeringCmd")
+      pt_messages = [(name, frequency) for name, frequency in pt_messages if name not in excluded]
+      pt_messages += [("ECMAcceleratorPos" if profile.brake_source == BrakeSource.BE else "EBCMBrakePedalPosition", 100),
+                      ("ECMPRDNL2", 40 if profile.longitudinal else float("nan"))]
+      if profile.longitudinal:
+        pt_messages.append(("GAS_SENSOR", 50))
+
     loopback_messages = [
       ("ASCMLKASteeringCmd", float('nan')),
     ]
@@ -610,6 +646,9 @@ class CarState(CarStateBase):
 
     if is_ordinary_camera_removed(CP):
       cam_messages = []
+
+    if profile is not None:
+      cam_messages = [] if profile.removed else [("ASCMLKASteeringCmd", 10), ("ASCMActiveCruiseControlStatus", 25), ("AEBCmd", 10)]
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),

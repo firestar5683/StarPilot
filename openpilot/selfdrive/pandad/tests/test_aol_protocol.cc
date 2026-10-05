@@ -207,6 +207,8 @@ int main() {
     assert(!aol_capable(forte, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
   }
   for (const uint16_t word : {0U, 0x80U,
+                            0xE100U, 0xE101U, 0xE102U, 0xE103U,
+                            0xE110U, 0xE111U, 0xE112U, 0xE113U,
                             0xD100U, 0xD101U, 0xD102U, 0xD103U, 0xD104U, 0xD105U,
                             0xD106U, 0xD107U, 0xD108U, 0xD109U, 0xD10AU,
                             0xD110U, 0xD111U, 0xD112U, 0xD113U, 0xD114U, 0xD115U,
@@ -229,7 +231,8 @@ int main() {
     assert(second.plan.capable && second.plan.request_mask == 3U && second.outcome.compatible);
     assert(second.outcome.status && second.outcome.status->permission_mask == 1U && second.outcome.status->safety_param == word);
   }
-  for (const uint16_t word : {0x40U, 0x81U, 0x82U, 0x84U, 0x180U, 0xD0FFU, 0xD10BU, 0xD10FU, 0xD11BU, 0xD11FU, 0xD120U}) {
+  for (const uint16_t word : {0x40U, 0x81U, 0x82U, 0x84U, 0x180U, 0xD0FFU, 0xD10BU, 0xD10FU, 0xD11BU, 0xD11FU, 0xD120U,
+                            0xE0FFU, 0xE104U, 0xE10FU, 0xE114U, 0xE11FU}) {
     assert(!gm_aol_param(word));
     auto unknown = status();
     unknown.safety_mode = GM_AOL_PROFILE.mode;

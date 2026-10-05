@@ -13,7 +13,7 @@ from opendbc.car.gm.values import (CAR, CarControllerParams, EV_CAR, CAMERA_ACC_
                                    CanBus, GMSafetyFlags, GMFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, ASCM_INTERCEPT_CAR,
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
                                    ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS, is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
-                                   CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR,
+                                   CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, CAMERA_ACC_PEDAL_CAR, camera_acc_pedal_profile,
                                        VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
@@ -109,6 +109,10 @@ class CarInterface(CarInterfaceBase):
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
+    profile = camera_acc_pedal_profile(CP)
+    if profile is not None and profile.longitudinal:
+      return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
+              float(np.interp(current_speed, [0., 1.5, 4., 8., 15.], [.60, .85, 1.15, 1.60, 2.])))
     if is_silverado_cc_pedal_profile(CP):
       return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
               float(np.interp(current_speed, [0., 1.5, 4., 8., 15.], [.60, .85, 1.15, 1.60, 2.])))
@@ -582,6 +586,30 @@ class CarInterface(CarInterfaceBase):
         ret.longitudinalTuning.kiBP = [0., 5., 15., 35.]
         ret.longitudinalTuning.kiV = [.20, .18, .13, .08]
 
+    if candidate in CAMERA_ACC_PEDAL_CAR and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
+      pt = fingerprint.get(CanBus.POWERTRAIN, {})
+      camera_length = fingerprint.get(CanBus.CAMERA, {}).get(0x320)
+      removed = camera_length is None
+      be = pt.get(0xBE) == 6
+      f1 = 0xBE not in pt and pt.get(0xF1) == 6
+      required = {0x184: 8, 0x34A: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8}
+      sources = all(pt.get(address) == length for address, length in required.items()) and (be or f1)
+      ret.flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if removed else 0) |
+                      (GMFlags.NO_ACCELERATOR_POS_MSG if f1 else 0))
+      ret.dashcamOnly = not sources or camera_length not in (None, 6)
+      ret.radarUnavailable = True
+      ret.alphaLongitudinalAvailable = not ret.dashcamOnly and not is_release and pt.get(0x1F5) == 8
+      ret.openpilotLongitudinalControl = ret.alphaLongitudinalAvailable
+      ret.pcmCruise = not ret.openpilotLongitudinalControl
+      words = {(False, False): (0xE100, 0xE110), (False, True): (0xE101, 0xE111),
+               (True, False): (0xE102, 0xE112), (True, True): (0xE103, 0xE113)}
+      ret.safetyConfigs[0].safetyParam = words[removed, f1][not ret.openpilotLongitudinalControl]
+      ret.minEnableSpeed = -1. if ret.openpilotLongitudinalControl else (-1. if candidate in ALT_ACCS else 5 * CV.KPH_TO_MS)
+      ret.autoResumeSng = ret.openpilotLongitudinalControl
+      ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
+      ret.longitudinalTuning.kiV = [.09, .13, .19, .28]
+      ret.stopAccel = -.25
+
     if candidate in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA,
                      CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT_2019):
       ret.minSteerSpeed = 7 * CV.MPH_TO_MS
@@ -606,7 +634,7 @@ class CarInterface(CarInterfaceBase):
         removed = camera_length is None
         be_length = fingerprint.get(CanBus.POWERTRAIN, {}).get(0xBE)
         sources = (fingerprint.get(CanBus.POWERTRAIN, {}).get(0xF1) == 6 and
-                   (be_length is None or be_length in (6, 7, 8)) )
+                   (be_length is None or be_length in (6, 7, 8)))
         if candidate == CAR.CHEVROLET_SILVERADO_CC:
           pt = fingerprint.get(CanBus.POWERTRAIN, {})
           required = {0x184: 8, 0x34A: 5, 0xC9: 8, 0x3D1: 8, 0x1E1: 7, 0x1C4: 8, 0x1F5: 8}

@@ -79,6 +79,7 @@ def _configurations():
   from opendbc.car.gm.tests.test_ordinary_camera_removed import params as ordinary_removed
   from opendbc.car.gm.tests.test_conventional_pedal import params as conventional_pedal
   from opendbc.car.gm.tests.test_silverado_cc_pedal import params as silverado_pedal
+  from opendbc.car.gm.tests.test_camera_acc_pedal import params as camera_pedal
   for identity in ORDINARY_ASCM_CAR | ORDINARY_SDGM_CAR:
     for alpha in (False, True):
       for c9 in (False, True):
@@ -89,6 +90,10 @@ def _configurations():
       for analog in (False, True):
         yield ordinary_camera(identity, alpha=alpha, be=analog)
         yield ordinary_removed(identity, alpha=alpha, analog=analog)
+    for camera in (False, True):
+      for be in (False, True):
+        for release in (False, True):
+          yield camera_pedal(identity, camera=camera, be=be, release=release)
   for identity in ORDINARY_CC_CAR:
     yield intercept_params(identity)
     for removed in (False, True):
@@ -369,6 +374,84 @@ class TestGmAol(unittest.TestCase):
         self.assertTrue(seen_lateral)
         self.assertEqual(seen_longitudinal, not disabled)
         safety.set_alternative_experience(0)
+
+  def test_camera_interceptor_actual_controls_and_native_axis_ownership(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import params
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    from opendbc.car.gm import gmcan
+    safety = libsafety_py.libsafety
+    release = safety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    for camera in (False, True):
+      for be in (False, True):
+        with self.subTest(camera=camera, be=be), OpenpilotPrefix(), \
+             patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+          settings = Params()
+          settings.put_bool('AlwaysOnLateral', True, block=True)
+          settings.put_bool('IsReleaseBranch', release, block=True)
+          factory = params(camera=camera, be=be, release=release)
+          selected = self.card(factory, settings)
+          cp, ci = selected.CP, selected.CI
+          self.assertEqual(cp.alternativeExperience, 32)
+          controls = Controls()
+          self.assertEqual(controls.CP.to_dict(), cp.to_dict())
+          safety.set_alternative_experience(32)
+          self.assertEqual(safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, cp.safetyConfigs[0].safetyParam), 0)
+          safety.init_tests()
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          loopback = []
+          for tick in range(70):
+            now = 1_000_000_000 + tick * 10_000_000
+            ordinary = tick >= 42 and not release
+            packets = pt_frames(packer, counter=tick % 4, acc_cruise=2 if ordinary else 0)
+            packets = [packet for packet in packets if packet[0] not in (0xBE, 0xF1, 0x1E1)]
+            packets += [packer.make_can_msg('ECMAcceleratorPos' if be else 'EBCMBrakePedalPosition', 0, {}),
+                        packer.make_can_msg('ASCMSteeringButton', 0, {'ACCButtons': 3 if tick == 40 else 1, 'RollingCounter': tick % 4})]
+            sensor = bytearray.fromhex('0279012a0000')
+            sensor[4] = tick % 16
+            sensor[5] = gmcan.pedal_crc(sensor)
+            packets.append((0x201, bytes(sensor), 0))
+            if camera:
+              packets += [packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                          packer.make_can_msg('AEBCmd', 2, {}),
+                          packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 2 if ordinary else 0})]
+            safety.set_timer(now // 1000)
+            for packet in packets:
+              self.assertTrue(native('rx', packet, now // 1000))
+            safety.safety_tick()
+            state = ci.update([(now, packets + loopback)])
+            selected.aol_card_intent.update(state, now_ns=now, standard_enabled=ordinary)
+            requested = (1 if selected.aol_card_intent.allowed_latch else 0) | (2 if ordinary else 0)
+            safety.set_aol_test_heartbeat(True)
+            safety.aol_set_host_request(requested)
+            safety.set_timer(now // 1000 + 1)
+            mask = safety.aol_get_permission_mask()
+            feed(controls, now, tick, active=ordinary, enabled=ordinary)
+            axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
+            axis.aolAxisState.qualified = axis.aolAxisState.nativeAcknowledged = True
+            axis.aolAxisState.desiredLateral = bool(requested & 1)
+            axis.aolAxisState.desiredLongitudinal = bool(requested & 2)
+            axis.aolAxisState.lateralActive = bool(mask & 1)
+            axis.aolAxisState.longitudinalActive = bool(mask & 2)
+            axis.aolAxisState.sessionId = 'camera-interceptor'
+            axis.aolAxisState.observedMonoTime, axis.aolAxisState.validUntilMonoTime = now, now + 30_000_000
+            receipt = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
+            receipt.aolSafetyWire = encode_safety(SafetyState(1, True, now, now + 200_000_000,
+              int(structs.CarParams.SafetyModel.gm), cp.safetyConfigs[0].safetyParam,
+              bool(mask & 1), bool(mask & 2), bool(requested & 1), bool(requested & 2), 'panda', 'camera-interceptor'))
+            actual = messaging.new_message('carState', valid=True, logMonoTime=now)
+            actual.carState = state
+            controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), actual.as_reader()])
+            command, lateral_log = controls.state_control()
+            controls.publish(command, lateral_log)
+            if tick >= 42:
+              self.assertTrue(command.latActive,
+                              (tick, mask, requested, state.canValid, safety.safety_config_valid(), selected.CP.safetyConfigs[0].safetyParam))
+              self.assertEqual(command.longActive, not release)
+            _, commands = ci.apply(command.as_reader(), now + 2)
+            loopback = [(addr, data, 128) for addr, data, _ in commands if addr == 0x180]
+            for packet in commands:
+              self.assertTrue(native('tx', packet, now // 1000 + 1), (tick, packet))
+          safety.set_alternative_experience(0)
 
   def test_actual_card_forwards_shared_disarming_events(self):
     class IntentUpdated(Exception):

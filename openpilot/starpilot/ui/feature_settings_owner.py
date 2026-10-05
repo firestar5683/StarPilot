@@ -187,12 +187,14 @@ class FeatureSettingsOwner:
     self._vehicle_params_source = provider
 
   def _pedal_setup_capability(self) -> tuple | None:
-    from opendbc.car.gm.values import CAR, ORDINARY_CC_CAR, PEDAL_BOLT_CAR
+    from opendbc.car.gm.values import CAR, ORDINARY_CC_CAR, PEDAL_BOLT_CAR, CAMERA_ACC_PEDAL_CAR
     cp = self.vehicle_params()
     try:
-      if cp is None or cp.brand != "gm" or cp.notCar or cp.carFingerprint not in ORDINARY_CC_CAR | PEDAL_BOLT_CAR | {CAR.CHEVROLET_SILVERADO_CC}:
+      if (cp is None or cp.brand != "gm" or cp.notCar or
+          cp.carFingerprint not in ORDINARY_CC_CAR | PEDAL_BOLT_CAR | CAMERA_ACC_PEDAL_CAR | {CAR.CHEVROLET_SILVERADO_CC}):
         return None
       return (str(cp.carFingerprint), str(cp.brand), int(cp.flags), bool(cp.passive), bool(cp.dashcamOnly),
+              bool(cp.openpilotLongitudinalControl),
               tuple((str(c.safetyModel), int(c.safetyParam)) for c in cp.safetyConfigs))
     except (AttributeError, TypeError, ValueError, OverflowError):
       return None
@@ -226,12 +228,17 @@ class FeatureSettingsOwner:
 
   def _long_pitch_capability(self) -> tuple | None:
     from opendbc.car.gm.suburban import stopping_decel_rate as suburban_stopping_decel_rate
-    from opendbc.car.gm.values import is_bolt_euv_longitudinal, is_volt_longitudinal
+    from opendbc.car.gm.values import is_bolt_euv_longitudinal, is_volt_longitudinal, camera_acc_pedal_profile, CAMERA_ACC_PEDAL_CAR
     cp = self.vehicle_params()
     try:
-      if cp is None or cp.passive or cp.dashcamOnly or cp.notCar:
+      if cp is None or cp.notCar:
         return None
-      if not (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or suburban_stopping_decel_rate(cp) is not None):
+      configurable_pedal = bool(self.configuration_vehicle() and cp.brand == "gm" and cp.carFingerprint in CAMERA_ACC_PEDAL_CAR)
+      if (cp.passive or cp.dashcamOnly) and not configurable_pedal:
+        return None
+      pedal = camera_acc_pedal_profile(cp)
+      if not (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or suburban_stopping_decel_rate(cp) is not None or
+              pedal is not None and pedal.longitudinal or configurable_pedal):
         return None
       return (str(cp.carFingerprint), str(cp.brand), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
               int(cp.flags), int(cp.alternativeExperience),
@@ -602,9 +609,13 @@ class FeatureSettingsOwner:
       pedal_capability = self._pedal_setup_capability()
       if pedal_capability is not None:
         from opendbc.car.gm.values import GMFlags
-        active = bool(pedal_capability[2] & GMFlags.PEDAL_LONG)
-        rows.append(FeatureRow("GMPedalLongitudinal", "Pedal Speed Control", "Automatic" if active else "Not detected",
-                               available=False, reason="Activates automatically with a supported connected interceptor",
+        detected = bool(pedal_capability[2] & GMFlags.PEDAL_LONG)
+        active = detected and pedal_capability[5] and not (pedal_capability[3] or pedal_capability[4])
+        value = "Automatic" if active else "Detected, inactive" if detected else "Not detected"
+        reason = ("StarPilot speed control is off in this configuration" if detected and not active else
+                  "Activates automatically with a supported connected interceptor")
+        rows.append(FeatureRow("GMPedalLongitudinal", "Pedal Speed Control", value,
+                               available=False, reason=reason,
                                capability=pedal_capability))
       bolt_capability = self._bolt_disable_capability()
       if bolt_capability is not None:

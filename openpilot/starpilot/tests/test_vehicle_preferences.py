@@ -39,6 +39,74 @@ class TestVehicleStartupPreferences(unittest.TestCase):
       self.assertFalse(getattr(VehicleStartupPreferences.read(self.params, enabled=True), name))
     self.assertTrue(VehicleStartupPreferences(True, True).turn_assist)
 
+  def test_camera_interceptor_card_defaults_and_stock_reductions(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint
+    from opendbc.car.gm.values import CAR as GM_CAR, camera_acc_pedal_profile
+    for camera, be, word in ((True, True, 0xE100), (True, False, 0xE101),
+                             (False, True, 0xE102), (False, False, 0xE103)):
+      for state in ('fresh', 'legacy_off', 'master_off', 'safe', 'invalid_safe', 'disable_long', 'release'):
+        with self.subTest(camera=camera, be=be, state=state):
+          self.raw('GMPedalLongitudinal', b'0' if state == 'legacy_off' else None)
+          self.raw('SafeMode', b'bad' if state == 'invalid_safe' else b'1' if state == 'safe' else None)
+          self.raw('DisableOpenpilotLongitudinal', b'1' if state == 'disable_long' else None)
+          self.params.put_bool('IsReleaseBranch', state == 'release', block=True)
+          self.params.put_bool('AlphaLongitudinalEnabled', False, block=True)
+          host, constructed, published = self.start(
+            GM_CAR.CHEVROLET_SILVERADO, observed=fingerprint(camera=camera, be=be),
+            key='LongPitch', requested=False, enabled=state != 'master_off',
+            capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam))
+          active = state in ('fresh', 'legacy_off')
+          expected = word if active else word + 0x10
+          self.assertEqual(constructed, [expected])
+          if state == 'master_off':
+            self.assertEqual(published.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+            self.assertIsNone(camera_acc_pedal_profile(published))
+          else:
+            self.assertEqual(published.safetyConfigs[0].safetyParam, expected)
+            self.assertEqual(camera_acc_pedal_profile(published).longitudinal, active)
+            self.assertEqual(published.pcmCruise, not active)
+            self.assertEqual(published.openpilotLongitudinalControl, active)
+            self.assertEqual(published.autoResumeSng, active)
+            self.assertEqual(host.CI.CC.camera_pedal_profile.longitudinal, active)
+            if active:
+              self.assertFalse(host.CI.CC.long_pitch)
+              self.assertTrue(host.CI.CC.camera_pedal_input.update(1_000_000_000))
+            else:
+              self.assertIsNone(host.CI.CC.camera_pedal_input)
+          self.assertEqual(Path(self.params.get_param_path('GMPedalLongitudinal')).exists(), state == 'legacy_off')
+
+  def test_camera_interceptor_unreadable_preference_reduces_without_promotion(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import params
+    from opendbc.car.gm.values import camera_acc_pedal_profile
+    for key in ('SafeMode', 'DisableOpenpilotLongitudinal'):
+      self.raw(key, None)
+      path = Path(self.params.get_param_path(key))
+      path.symlink_to('missing-setting')
+      cp = params()
+      preferences = VehicleStartupPreferences.read(self.params, enabled=True)
+      self.assertFalse(preferences.gm_camera_pedal)
+      preferences.prepare(cp)
+      self.assertFalse(camera_acc_pedal_profile(cp).longitudinal)
+      path.unlink()
+      VehicleStartupPreferences.read(self.params, enabled=True).finalize(cp)
+      self.assertFalse(camera_acc_pedal_profile(cp).longitudinal)
+
+  def test_camera_interceptor_live_preferences_withdraw_without_mutating_owner(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import params
+    from openpilot.starpilot.car.gm.camera import CameraPedalPreference
+    cp = params()
+    for key in ('SafeMode', 'DisableOpenpilotLongitudinal', 'OpenpilotEnabledToggle'):
+      for raw in (None, b'0', b'1', b'bad'):
+        for clean_key, clean in (('SafeMode', b'0'), ('DisableOpenpilotLongitudinal', b'0'), ('OpenpilotEnabledToggle', b'1')):
+          self.raw(clean_key, clean)
+        owner = CameraPedalPreference(cp, self.params)
+        self.assertTrue(owner.update(1_000_000_000))
+        self.raw(key, raw)
+        expected = raw == b'1' if key == 'OpenpilotEnabledToggle' else raw in (None, b'0')
+        self.assertEqual(owner.update(1_250_000_000), expected)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE100)
+        self.assertFalse(owner.update(1_200_000_000))
+
   def test_gm_hold_runtime_withdraws_for_disabled_or_malformed_preferences(self):
     from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
     from opendbc.car.gm.values import CAR as GM_CAR

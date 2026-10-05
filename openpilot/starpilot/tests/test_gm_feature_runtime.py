@@ -7,6 +7,7 @@ from opendbc.car import gen_empty_fingerprint
 from opendbc.car.gm.feature_capabilities import display_supported, longitudinal_supported
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.values import CAR
+from opendbc.car.gm.tests.test_camera_acc_pedal import CAMERA_IDS, fingerprint as camera_pedal_fingerprint
 from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.starpilot.feature_runtime import enabled, slc_runtime_settings
@@ -34,6 +35,8 @@ def configured(params, identity, *, alpha=False, release=False, removed=False, a
     fp[2][0x180] = 4
   if pedal:
     fp[0][0x201] = 6
+    if identity in CAMERA_IDS:
+      fp = camera_pedal_fingerprint(camera=not removed, be=not alternate)
   cp = CarInterface.get_params(identity, fp, [], alpha, release, False)
   if disable:
     VehicleStartupPreferences(disable_bolt_long=True).prepare(cp)
@@ -50,6 +53,7 @@ LONG_CASES = (
   (CAR.CHEVROLET_BOLT_CC_2017, {}), (CAR.CHEVROLET_BOLT_CC_2018_2021, {'removed': True}),
   (CAR.CHEVROLET_BOLT_CC_2022_2023, {}), (CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, {}),
   (CAR.CHEVROLET_BOLT_CC_2017, {'pedal': True}),
+  *((identity, {'pedal': True}) for identity in CAMERA_IDS),
 )
 STOCK_CASES = (
   (CAR.CHEVROLET_VOLT, {'disable': True}), (CAR.CHEVROLET_VOLT, {'disable': True, 'alternate': True}),
@@ -58,6 +62,8 @@ STOCK_CASES = (
   (CAR.CHEVROLET_VOLT_ASCM, {}), (CAR.CHEVROLET_BOLT_EUV, {}),
   (CAR.CHEVROLET_BOLT_ACC_2022_2023, {'release': True, 'alpha': True}),
   (CAR.CHEVROLET_BOLT_CC_2022_2023, {'disable': True}),
+  *((identity, {'pedal': True, 'disable': True}) for identity in CAMERA_IDS),
+  *((identity, {'pedal': True, 'release': True}) for identity in CAMERA_IDS),
 )
 
 

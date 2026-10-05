@@ -27,6 +27,7 @@ class VehicleStartupPreferences:
   volt_one_pedal: bool = False
   tesla_screen: bool = False
   tesla_screen_brake: bool = False
+  gm_camera_pedal: bool = True
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -53,7 +54,8 @@ class VehicleStartupPreferences:
       volt_one_pedal = bool(enabled and not disable_bolt and read_saved(params, "VoltOnePedalMode", 8) == (b"1", True) and
                             readable and safe in (None, b"0"))
     except (OSError, TypeError, ValueError):
-      return cls(disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock)
+      return cls(disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock,
+                 gm_camera_pedal=False)
     try:
       pitch, pitch_readable = read_saved(params, "LongPitch", 8)
       pitch_enabled = not (enabled and pitch_readable and pitch == b"0" and readable and safe in (None, b"0"))
@@ -70,6 +72,7 @@ class VehicleStartupPreferences:
     screen_brake = read_saved(params, 'TeslaAOLDisengageOnBrake', 8) == (b'1', True)
     return cls(tesla_screen=screen, tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
                volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
+               gm_camera_pedal=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
                gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock)
 
@@ -106,6 +109,11 @@ class VehicleStartupPreferences:
             cp.passive = True
             cp.dashcamOnly = True
 
+  def _prepare_camera_pedal(self, cp) -> None:
+    from opendbc.car.gm.values import camera_acc_pedal_profile
+    if not self.gm_camera_pedal and camera_acc_pedal_profile(cp) is not None:
+      prepare_disable_longitudinal(cp, True)
+
   def prepare(self, cp, *, fingerprints=None):
     from opendbc.car.gm.values import apply_gm_auto_hold, apply_volt_one_pedal
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
@@ -115,6 +123,7 @@ class VehicleStartupPreferences:
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp, fingerprints)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
+    self._prepare_camera_pedal(cp)
     apply_gm_auto_hold(cp, self.gm_auto_hold)
     apply_volt_one_pedal(cp, self.volt_one_pedal and not self.disable_bolt_long, self.gm_auto_hold)
     if cp.brand == "toyota":
@@ -132,6 +141,7 @@ class VehicleStartupPreferences:
     self._prepare_honda_radar(cp)
     self._prepare_bolt(cp)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
+    self._prepare_camera_pedal(cp)
     apply_gm_auto_hold(cp, self.gm_auto_hold and admitted_hold)
     apply_volt_one_pedal(cp, self.volt_one_pedal and admitted_one_pedal and not self.disable_bolt_long, self.gm_auto_hold and admitted_hold)
     if cp.brand == "toyota":
@@ -139,12 +149,15 @@ class VehicleStartupPreferences:
       apply_toyota_auto_hold(cp, self.toyota_auto_hold and admitted)
 
   def configure_controller(self, ci) -> None:
-    from opendbc.car.gm.values import CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_gm_auto_hold, is_volt_one_pedal
+    from opendbc.car.gm.values import (CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_gm_auto_hold,
+                                     is_volt_one_pedal, camera_acc_pedal_profile)
     cp = ci.CP
     if ci.CC is not None and is_volt_longitudinal(cp):
       ci.CC.volt_sng = self.volt_sng
     if ci.CC is not None and cp.brand == "gm":
       ci.CC.gm_auto_hold = self.gm_auto_hold and is_gm_auto_hold(cp)
       ci.CC.volt_one_pedal = self.volt_one_pedal and is_volt_one_pedal(cp)
-    if ci.CC is not None and (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or cp.carFingerprint == CAR.CHEVROLET_SUBURBAN):
+    pedal = camera_acc_pedal_profile(cp)
+    if ci.CC is not None and (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or cp.carFingerprint == CAR.CHEVROLET_SUBURBAN or
+                             pedal is not None and pedal.longitudinal):
       ci.CC.long_pitch = self.gm_long_pitch

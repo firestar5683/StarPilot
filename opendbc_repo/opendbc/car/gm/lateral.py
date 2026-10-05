@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import gm_control_word
+from opendbc.car.gm.values import gm_control_word, camera_acc_pedal_profile
 """Exact finalized GM configurations for shared lateral preferences."""
 import math
 from opendbc.car.structs import CarParams
@@ -22,7 +22,7 @@ def lane_centering_supported(cp) -> bool:
       tune = cp.lateralTuning.pid
       if not all(math.isfinite(value) for value in (*tune.kpBP, *tune.kpV, *tune.kiBP, *tune.kiV, tune.kf)):
         return False
-    if is_ordinary_camera_profile(cp, longitudinal=cp.openpilotLongitudinalControl):
+    if camera_acc_pedal_profile(cp) is not None or is_ordinary_camera_profile(cp, longitudinal=cp.openpilotLongitudinalControl):
       return True
     if is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp):
       return True
