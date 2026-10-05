@@ -8,7 +8,7 @@ from opendbc.car.hyundai.tests.test_ioniq5pe_stock import params
 from opendbc.car.hyundai.values import CAR, DBC
 
 
-def packets(packer, tick, *, fault=0, moving=True, gear=5, cruise=True):
+def packets(packer, tick, *, fault=0, moving=True, gear=5, cruise=True, advance_counter=False, cruise_button=0):
   values = {
     'ACCELERATOR': (100, {'GEAR': gear, 'ACCELERATOR_PEDAL': 0}),
     'TCS': (50, {'ACCEnable': 0, 'ACC_REQ': int(cruise), 'DriverBraking': 0}),
@@ -17,9 +17,11 @@ def packets(packer, tick, *, fault=0, moving=True, gear=5, cruise=True):
     'STEERING_SENSORS': (100, {}),
     'DOORS_SEATBELTS': (10, {'DRIVER_SEATBELT': 1}),
     'BLINKERS': (10, {}),
-    'CRUISE_BUTTONS': (50, {}),
+    'CRUISE_BUTTONS': (50, {'CRUISE_BUTTONS': cruise_button}),
   }
-  frames = [packer.make_can_msg(name, 1, fields) for name, (hz, fields) in values.items()
+  frames = [packer.make_can_msg(name, 1, {**fields, **(
+              {"COUNTER": tick // (100 // hz)} if advance_counter and name not in ("DOORS_SEATBELTS", "BLINKERS") else {})})
+            for name, (hz, fields) in values.items()
             if tick % (100 // hz) == 0]
   # Optional stock camera receive frames remain available on CAM2; no active
   # steering source is inserted on ACAN0 where relay detection checks ownership.
@@ -78,7 +80,7 @@ class TestEV9LongController(unittest.TestCase):
     cc.actuators.accel = 1.0
     cc.actuators.longControlState = LongCtrlState.pid
     cc.hudControl.setSpeed = 20.0
-    for frame in range(0, 101):
+    for frame in range(101):
       _, packets = ci.apply(cc.as_reader(), 1_000_000_000 + frame * 10_000_000)
       ids = [p[0] for p in packets]
       self.assertNotIn(0x110, ids)
@@ -109,7 +111,6 @@ class TestEV9LongController(unittest.TestCase):
     self.assertEqual((cb[1][3] >> 4) & 0xf, 1)
     self.assertEqual(cb[1][6], 0)
     self.assertEqual(ci.CC.accel_last, 2.2)
-
 
   def test_exact_ev9_pid_ceiling_and_sibling_limits_unchanged(self):
     stock = params(candidate=CAR.KIA_EV9)
@@ -155,7 +156,6 @@ class TestEV9LongController(unittest.TestCase):
     self.assertEqual((cb[1][3] >> 4) & 0xf, 1)
     self.assertEqual(cb[1][6], 0)
     self.assertNotIn(0x362, [packet[0] for packet in packets])
-
 
   def test_advertised_stock_availability_still_requires_startup_choice(self):
     for alpha in (False, True):

@@ -68,6 +68,56 @@ class TestEv9LongDebugContract(Ev9LongFixture, unittest.TestCase):
     self.safety.set_controls_allowed(True)
     self.assertFalse(self.safety.safety_tx_hook(self.angle()))
 
+  def test_actual_controller_target_cap_inactive_measurement_and_reentry(self):
+    from opendbc.car import structs
+    from opendbc.car.hyundai.interface import CarInterface
+    from opendbc.car.hyundai.ev9_longitudinal import candidate
+    from opendbc.car.hyundai.tests.test_ioniq5pe_stock import params
+    from opendbc.car.hyundai.tests.test_ev9_long_controller import packets
+    from opendbc.car.hyundai.values import CAR
+
+    for sign in (-1, 1):
+      self.setUp()
+      cp = candidate(params(candidate=CAR.KIA_EV9), enabled=True, is_release=False)
+      ci = CarInterface(cp)
+      cc = structs.CarControl(enabled=True, latActive=True, longActive=True)
+      cc.actuators.steeringAngleDeg = sign * 360.0
+      ci.update([])
+      for tick in range(1, 701):
+        self.now = tick * 10_000
+        self.safety.set_timer(self.now)
+        frames = packets(self.packer, tick, moving=False, advance_counter=True, cruise_button=2 if tick == 12 else 0)
+        # Low physical speed permits the target cap to be observed directly.
+        wheel_addr = self.packer.make_can_msg('WHEEL_SPEEDS', 1, {})[0]
+        frames = [f for f in frames if f[0] != wheel_addr]
+        frames.append(self.packer.make_can_msg('WHEEL_SPEEDS', 1,
+                      {'COUNTER': tick, **dict.fromkeys(('WHL_SpdFLVal', 'WHL_SpdFRVal', 'WHL_SpdRLVal', 'WHL_SpdRRVal'), 7.2)}))
+        measured = sign * 170.0 if 550 <= tick < 570 else 0.0
+        mdps_addr = self.packer.make_can_msg('MDPS', 1, {})[0]
+        frames = [f for f in frames if f[0] != mdps_addr]
+        frames.append(self.packer.make_can_msg('MDPS', 1, {'COUNTER': tick, 'MDPS_EstStrAnglVal': measured}))
+        for address, data, bus in frames:
+          self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data)), (tick, hex(address), bus))
+        ci.update([(tick * 10_000_000, frames)])
+        cc.enabled = tick >= 14
+        cc.latActive = tick >= 14 and not 550 <= tick < 570
+        _, sends = ci.apply(cc.as_reader(), tick * 10_000_000)
+        angle = next((f for f in sends if f[0] == 0xcb), None)
+        if angle is None or tick < 14:
+          continue
+        for address, data, bus in sends:
+          self.assertTrue(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data)),
+                          (sign, tick, hex(address), bus))
+        if tick == 549:
+          self.assertAlmostEqual(ci.CC.ev9_angle_filter.x, sign * 140.0, delta=0.1)
+          self.assertLessEqual(abs(ci.CC.apply_angle_last), 140.1)
+        if 550 <= tick < 570:
+          self.assertAlmostEqual(ci.CC.apply_angle_last, measured, delta=0.1)
+          self.assertEqual((angle[1][3] >> 4) & 0xf, 1)
+        if tick == 700:
+          self.assertEqual((angle[1][3] >> 4) & 0xf, 2)
+          self.assertLessEqual(abs(ci.CC.ev9_angle_filter.x), 140.1)
+
   def test_mdps_uses_byte16_and_exact_long_fault_bit(self):
     self.ready()
     self.safety.set_controls_allowed(False)
@@ -97,6 +147,7 @@ class TestEv9LongDebugContract(Ev9LongFixture, unittest.TestCase):
 
   def test_ev9_effective_accel_limit_and_ten_accepted_inactive_frames(self):
     self.ready()
+
     def scc(mode, accel):
       return self.packet('SCC_CONTROL', 1, {'ACCMode': mode, 'aReqRaw': accel, 'aReqValue': accel})
     self.assertTrue(self.safety.safety_tx_hook(scc(1, 2.0)))

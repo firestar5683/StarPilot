@@ -31,6 +31,8 @@ from opendbc.car.hyundai.values import is_blended, HyundaiFlags, HyundaiSafetyFl
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.vehicle_model import VehicleModel
 
+EV9_OP_LONG_ANGLE_TARGET_MAX = 140.0
+
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
@@ -371,7 +373,8 @@ class CarController(CarControllerBase):
       ev9_lateral_allowed = lateral_request_allowed(CC, CS.out, CS.angle_steering_fault)
       active = bool(ev9_lateral_allowed and CC.latActive and abs(measured) <= bound and abs(self.apply_angle_last) <= bound)
       self.ev9_angle_filter.update_alpha(float(np.interp(CS.out.vEgo, [5.0, 10.0, 20.0], [0.2, 0.1, 0.0])))
-      desired = self.ev9_angle_filter.update(float(np.clip(CC.actuators.steeringAngleDeg, -360.0, 360.0)))
+      desired = self.ev9_angle_filter.update(float(np.clip(CC.actuators.steeringAngleDeg,
+                                                         -EV9_OP_LONG_ANGLE_TARGET_MAX, EV9_OP_LONG_ANGLE_TARGET_MAX)))
       # Preserve the original two VM passes and its final tolerance-envelope delta.
       angle = apply_steer_angle_limits_vm(desired, self.apply_angle_last, CS.out.vEgoRaw, measured,
                                          active, self.params, self.angle_vm)
