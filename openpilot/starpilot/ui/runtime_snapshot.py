@@ -524,8 +524,8 @@ class RuntimeSnapshotAdapter:
       cp is not None and cp.openpilotLongitudinalControl)
     developer_metrics = self._developer_metrics.observe(
       drive=after if started else None, car=display_car if display_car_valid else None,
-      delay=display_message(sm, 'lateralDelay', now_ns, after_frame=after) if started else None,
-      torque=display_message(sm, 'lateralTorqueParameters', now_ns, after_frame=after) if started else None,
+      delay=current_message(sm, 'lateralDelay', now_ns, after_frame=after) if started else None,
+      torque=current_message(sm, 'lateralTorqueParameters', now_ns, after_frame=after) if started else None,
       parameters=display_message(sm, 'vehicleParameters', now_ns, after_frame=after) if started else None,
       metric=bool(ui.is_metric), cp=cp)
     onroad = OnroadState(developer_metrics=developer_metrics,

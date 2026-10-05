@@ -66,8 +66,13 @@ class TestLiveDeveloperSidebar(unittest.TestCase):
     rows = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.developer_metrics
     self.assertEqual(rows[0].value, '4.92 ft/s²')
     self.assertEqual(rows[3].value, '0.15000')
-    for service in ('carState', 'lateralDelay', 'lateralTorqueParameters', 'vehicleParameters'):
+    for service in ('lateralDelay', 'lateralTorqueParameters'):
       ui.sm.logMonoTime[service] = NOW - 300_000_000
+    rows = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.developer_metrics
+    self.assertEqual(rows[2].value, '0.12000')
+    self.assertEqual(rows[3].value, '0.15000')
+    for service in ('carState', 'lateralDelay', 'lateralTorqueParameters', 'vehicleParameters'):
+      ui.sm.logMonoTime[service] = NOW - 600_000_000
     rows = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.developer_metrics
     self.assertTrue(all(row.value == '—' for row in rows))
     for service in ('carState', 'lateralDelay', 'lateralTorqueParameters', 'vehicleParameters'):
