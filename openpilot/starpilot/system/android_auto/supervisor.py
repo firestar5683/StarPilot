@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import socket
 import threading
 import time
@@ -46,6 +47,7 @@ UNAVAILABLE_AFTER = 1.0      # focused but no fresh UI frame for this long -> "u
 SDP_SETTLE = (1.5, 2.2, 3.0)
 TCP_ATTEMPTS = 6
 MAX_LOG_FILES = 20
+LOG_QUEUE_MAX = 1000          # session log records waiting for the writer; past this they are dropped and counted
 ENCODER_RECOVERIES = 3       # hardware encoder reopens allowed per window before the session is torn down
 ENCODER_RECOVERY_WINDOW = 10.0
 CAR_LINK_HOLD = 10.0         # a hands-free connection from the car counts as "car present" this long
@@ -101,13 +103,20 @@ class UsbLease:
 
 
 class EventLog:
-  """Sanitized JSONL session log under /data/android_auto/logs, plus the recent tail in memory."""
+  """Sanitized JSONL session log under /data/android_auto/logs, plus the recent tail in memory.
+
+  The streaming loop logs too, so records are queued and a background thread writes them: a slow
+  or full disk never stalls projection. If the writer falls behind, records are dropped and the
+  next one that fits is preceded by a ``log_dropped`` count.
+  """
 
   def __init__(self, directory: Path | None = None):
     self.directory = directory or identity_store.LOG_DIR
-    self.handle = None
     self.recent: deque[dict] = deque(maxlen=40)
     self.lock = threading.Lock()
+    self._queue: queue.Queue = queue.Queue(maxsize=LOG_QUEUE_MAX)
+    self._writer: threading.Thread | None = None
+    self._dropped = 0
 
   def open(self) -> None:
     try:
@@ -118,26 +127,54 @@ class EventLog:
       number = max([0, *(identity_store.session_log_order(log)[0] for log in logs)]) + 1
       path = self.directory / f"session-{number:06d}-{identity_store.timestamp()}.jsonl"
       fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-      self.handle = os.fdopen(fd, "a")
+      handle = os.fdopen(fd, "a")
     except OSError:
-      self.handle = None
+      return
+    with self.lock:
+      self._queue = queue.Queue(maxsize=LOG_QUEUE_MAX)
+      self._dropped = 0
+      self._writer = threading.Thread(target=self._write, args=(handle, self._queue), name="aa_session_log", daemon=True)
+      self._writer.start()
+
+  @staticmethod
+  def _write(handle, records: queue.Queue) -> None:
+    with handle:
+      while (line := records.get()) is not None:
+        try:
+          handle.write(line)
+          if records.empty():
+            handle.flush()
+        except OSError:
+          pass
 
   def close(self) -> None:
+    """Write what is queued, then stop the writer (bounded: a stuck disk is left to the daemon thread)."""
     with self.lock:
-      if self.handle is not None:
-        self.handle.close()
-        self.handle = None
+      writer, records, self._writer = self._writer, self._queue, None
+    if writer is None:
+      return
+    try:
+      records.put(None, timeout=2.0)
+    except queue.Full:
+      return
+    writer.join(timeout=2.0)
+
+  def _line(self, record: dict) -> str:
+    return json.dumps(record, default=str) + "\n"
 
   def __call__(self, name: str, **values) -> None:
     record = {"t": datetime.now(UTC).isoformat(timespec="milliseconds"), "event": name, **values}
     with self.lock:
       self.recent.append(record)
-      if self.handle is not None:
-        try:
-          self.handle.write(json.dumps(record, default=str) + "\n")
-          self.handle.flush()
-        except OSError:
-          pass
+      if self._writer is None:
+        return
+      try:
+        if self._dropped:
+          self._queue.put_nowait(self._line({"t": record["t"], "event": "log_dropped", "count": self._dropped}))
+          self._dropped = 0
+        self._queue.put_nowait(self._line(record))
+      except queue.Full:
+        self._dropped += 1
 
 
 class Supervisor:

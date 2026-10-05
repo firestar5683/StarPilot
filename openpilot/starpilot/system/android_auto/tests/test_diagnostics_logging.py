@@ -300,3 +300,63 @@ def test_render_summary_reports_frame_rate_and_time_per_window():
     assert summary.frame_done(began, began + 0.05) is None
   assert summary.frame_done(0.95, 1.0) == {"event": "render_stats", "fps": 5.0, "frame_ms": 50.0}
   assert summary.frames == 0 and summary.started == 1.0  # the next window starts where this one ended
+
+
+# ------------------------------------------------------------- session log writer
+
+def _read_records(directory):
+  (path,) = directory.glob("session-*.jsonl")
+  return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_session_log_writes_in_order_off_the_caller_thread(tmp_path):
+  from openpilot.starpilot.system.android_auto.supervisor import EventLog
+  log = EventLog(tmp_path)
+  log.open()
+  for index in range(50):
+    log("stats", index=index)
+  log.close()
+  records = _read_records(tmp_path)
+  assert [record["index"] for record in records] == list(range(50))
+  assert len(log.recent) == 40 and log.recent[-1]["index"] == 49
+
+
+def test_session_log_never_blocks_on_a_stalled_disk(tmp_path, monkeypatch):
+  import threading
+  import time
+  from openpilot.starpilot.system.android_auto import supervisor
+  monkeypatch.setattr(supervisor, "LOG_QUEUE_MAX", 5)
+  release = threading.Event()
+  original = supervisor.EventLog._write
+
+  def stalled(handle, records):
+    release.wait(5)  # the disk is stuck until the test lets it go
+    original(handle, records)
+
+  monkeypatch.setattr(supervisor.EventLog, "_write", staticmethod(stalled))
+  log = supervisor.EventLog(tmp_path)
+  log.open()
+  started = time.monotonic()
+  for index in range(20):
+    log("stats", index=index)
+  assert time.monotonic() - started < 0.5  # the caller never waited for the disk
+  release.set()
+  deadline = time.monotonic() + 2
+  while not log._queue.empty() and time.monotonic() < deadline:
+    time.sleep(0.01)  # the disk catches up
+  log("after", index=20)
+  log.close()
+  records = _read_records(tmp_path)
+  dropped = [record for record in records if record["event"] == "log_dropped"]
+  assert dropped and dropped[0]["count"] == 15
+  assert [record["index"] for record in records if record["event"] != "log_dropped"] == [0, 1, 2, 3, 4, 20]
+
+
+def test_session_log_without_a_file_keeps_the_recent_tail(tmp_path):
+  from openpilot.starpilot.system.android_auto.supervisor import EventLog
+  (tmp_path / "file").write_text("")
+  log = EventLog(tmp_path / "file" / "logs")  # cannot be created: a file is in the way
+  log.open()
+  log("stage", stage="rfcomm")
+  log.close()
+  assert log.recent[-1]["event"] == "stage"
