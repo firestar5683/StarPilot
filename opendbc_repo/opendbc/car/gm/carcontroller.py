@@ -356,6 +356,8 @@ class CarController(CarControllerBase):
         not CS.gm_auto_hold_unavailable, long_active=CC.longActive, driver_brake=CS.gm_auto_hold_brake,
         controller_brake=self.apply_brake, wheel_ns=CS.gm_auto_hold_wheel_ns, now_ns=now_nanos,
         physical_forward=CS.gm_auto_hold_forward, moving=CS.gm_auto_hold_moving)
+      if hold_brake is None:
+        CS.gm_auto_hold_engaged = False
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
@@ -640,6 +642,7 @@ class CarController(CarControllerBase):
           near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                              idx, CC.enabled, near_stop, at_full_stop, self.CP, auto_hold=hold_brake is not None))
+        CS.gm_auto_hold_engaged = hold_brake is not None
 
         if self.bolt_euv_long:
           can_sends.append(gmcan.create_acc_2cd_command(CanBus.POWERTRAIN, idx))

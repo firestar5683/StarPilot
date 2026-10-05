@@ -63,6 +63,7 @@ class CarState(CarStateBase):
     self.gm_auto_hold_forward = self.gm_auto_hold_moving = False
     self.gm_auto_hold_wheel_ns = 0
     self.gm_auto_hold_unavailable = True
+    self.gm_auto_hold_engaged = False
     self.cc_gateway_cruise_ts_nanos = 0
     self.cc_gateway_buttons_ts_nanos = 0
     self.camera_stock_status_ts_nanos = 0
@@ -214,14 +215,26 @@ class CarState(CarStateBase):
         self.volt_sng_sources += ((cam_cp.ts_nanos["ASCMActiveCruiseControlStatus"]["ACCCruiseState"], 100_000_000),)
     if is_volt_auto_hold(self.CP):
       alternate = is_volt_gateway_alternate_brake(self.CP)
-      brake_name, brake_signal = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else ("ECMAcceleratorPos", "BrakePedalPos"))
+      c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and (
+        not self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.ASCM_INTERCEPT or
+        bool(self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.BRAKE_C9))
+      brake_name, brake_signal = (("EBCMBrakePedalPosition", "BrakePedalPosition") if alternate else
+                                  ("ECMEngineStatus", "BrakePressed") if c9 else ("ECMAcceleratorPos", "BrakePedalPos"))
       names = (("ECMEngineStatus", "CruiseMainOn"), ("ECMPRDNL2", "PRNDL2"), (brake_name, brake_signal),
                ("AcceleratorPedal2", "CruiseState"), ("EBCMWheelSpdRear", "RLWheelSpd"),
                ("EBCMRegenPaddle", "RegenPaddle"), ("EBCMFrictionBrakeStatus", "FrictionBrakeUnavailable"))
       for name, _ in names:
         pt_cp.vl[name]
       self.gm_auto_hold_sources = tuple((pt_cp.ts_nanos[name][signal], 300_000_000) for name, signal in names)
-      self.gm_auto_hold_brake = pt_cp.vl[brake_name][brake_signal] / (208. if alternate else 1.)
+      # C9 is the pressed authority, never an analog force estimate. The absent-BE
+      # SASCM factory branch retains the original zero estimate (minimum hold80).
+      absent_be = c9 and bool(self.CP.safetyConfigs[0].safetyParam & GMSafetyFlags.ASCM_INTERCEPT)
+      if alternate:
+        self.gm_auto_hold_brake = pt_cp.vl[brake_name][brake_signal] / 208.
+      else:
+        self.gm_auto_hold_brake = 0. if absent_be else pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
+        if c9 and not absent_be:
+          self.gm_auto_hold_sources += ((pt_cp.ts_nanos["ECMAcceleratorPos"]["BrakePedalPos"], 300_000_000),)
       gear = pt_cp.vl["ECMPRDNL2"]["PRNDL2"]
       self.gm_auto_hold_forward = gear in (4, 6) or (4 <= gear <= 7 and pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1)
       wheels = pt_cp.vl["EBCMWheelSpdRear"]
@@ -416,6 +429,17 @@ class CarState(CarStateBase):
 
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True
+
+    hold_sources_current = (bool(self.gm_auto_hold_sources) and
+                            all(0 < stamp <= pt_cp._last_update_nanos and pt_cp._last_update_nanos - stamp <= limit
+                                for stamp, limit in self.gm_auto_hold_sources))
+    hold_current = (is_volt_auto_hold(self.CP) and pt_cp.can_valid and not pt_cp.bus_timeout and
+                    (not requires_camera_state_sources(self.CP) or cam_cp.can_valid and not cam_cp.bus_timeout) and
+                    hold_sources_current and not self.gm_auto_hold_unavailable and self.gm_auto_hold_forward and
+                    ret.cruiseState.available and ret.standstill and not ret.gasPressed and not ret.regenBraking)
+    if not hold_current:
+      self.gm_auto_hold_engaged = False
+    ret.brakeHoldActive = bool(hold_current and self.gm_auto_hold_engaged)
 
     return ret
 

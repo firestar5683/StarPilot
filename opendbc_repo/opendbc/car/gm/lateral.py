@@ -38,7 +38,7 @@ def lane_centering_supported(cp) -> bool:
     word = int(cp.safetyConfigs[0].safetyParam)
     if cp.carFingerprint == CAR.CHEVROLET_VOLT_CAMERA:
       return ((word == 5 and cp.pcmCruise and not cp.openpilotLongitudinalControl) or
-              (word == 0x4007 and not cp.pcmCruise and cp.openpilotLongitudinalControl and cp.alphaLongitudinalAvailable))
+              (word in (0x4007, 0x4087) and not cp.pcmCruise and cp.openpilotLongitudinalControl and cp.alphaLongitudinalAvailable))
     if cp.carFingerprint == CAR.CHEVROLET_VOLT_ASCM and cp.pcmCruise and not cp.openpilotLongitudinalControl:
       required = int(GMSafetyFlags.EV | GMSafetyFlags.HW_CAM | GMSafetyFlags.ASCM_INTERCEPT)
       optional = int(GMSafetyFlags.ASCM_BRAKE_C9 | GMSafetyFlags.ASCM_RADAR)

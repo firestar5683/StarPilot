@@ -3,13 +3,21 @@
 from opendbc.car.gm.values import (is_volt_gateway_profile, is_volt_cc_profile, is_ordinary_cc_profile,
                                   is_conventional_cc_pedal_profile, is_silverado_cc_pedal_profile, SILVERADO_CC_PEDAL_WORDS,
                                   CONVENTIONAL_CC_PEDAL_STOCK_WORDS, GMFlags)
+from opendbc.car.gm.values import is_volt_ascm_longitudinal, is_volt_camera_longitudinal, GMSafetyFlags
 
 
 def disable_long_supported(cp) -> bool:
-  return is_conventional_cc_pedal_profile(cp) or is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp)
+  return (is_conventional_cc_pedal_profile(cp) or is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
+          is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp))
 
 
 def prepare_disable_longitudinal(cp, requested: bool) -> None:
+  if requested and (is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp)):
+    # Withdraw into the corresponding existing camera stock owner before CI construction.
+    cp.safetyConfigs[0].safetyParam &= ~int(GMSafetyFlags.HW_CAM_LONG | GMSafetyFlags.VOLT_LONG | GMSafetyFlags.VOLT_AUTO_HOLD)
+    cp.openpilotLongitudinalControl = False
+    cp.pcmCruise = True
+    return
   if requested and disable_long_supported(cp):
     silverado = is_silverado_cc_pedal_profile(cp)
     ordinary_pedal = is_conventional_cc_pedal_profile(cp) and not silverado

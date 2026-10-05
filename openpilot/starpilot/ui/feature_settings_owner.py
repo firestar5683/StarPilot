@@ -253,7 +253,7 @@ class FeatureSettingsOwner:
     cp = self.vehicle_params()
     try:
       identities = ({CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019}
-                    if key == "VoltSNG" else {CAR.CHEVROLET_VOLT})
+                    if key == "VoltSNG" else {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA})
       if cp is None or cp.brand != "gm" or cp.carFingerprint not in identities:
         return None
       selection = read_selection(self.params)
