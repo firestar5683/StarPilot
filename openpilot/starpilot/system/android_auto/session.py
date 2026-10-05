@@ -434,7 +434,11 @@ def json_fields_list(configs: list[dict]) -> list[dict]:
 class ProjectionSession(Session):
   """Video projection with focus epochs, bounded ACK window and mandatory resume keyframes."""
 
-  ACK_TIMEOUT = 1.5  # Wi-Fi adds jitter compared to the donor's USB 500 ms budget.
+  # Wi-Fi jitter, plus bursts where this loop itself stalls: the dashcam encoders and the model starting at onroad
+  # held it ~1 s on 2026-10-01 while the car kept acking in 27-219 ms. Stays under the 3 s after which a Honda takes
+  # its screen back without video.
+  ACK_TIMEOUT = 2.5
+  ACK_DRAIN_SECONDS = 0.1  # before calling an ACK late, read what already arrived, for at most this long
   MAX_WINDOW = 2
 
   def __init__(self, *args, **kwargs):
@@ -626,10 +630,22 @@ class ProjectionSession(Session):
   def can_send(self) -> bool:
     return self.focused and self.unacked < self.window
 
+  def _ack_overdue(self, now: float) -> bool:
+    return bool(self.focused and self.pending and now - self.pending[0] > self.ACK_TIMEOUT)
+
   def check_progress(self, now: float | None = None) -> None:
-    now = time.monotonic() if now is None else now
-    if self.focused and self.pending and now - self.pending[0] > self.ACK_TIMEOUT:
-      raise TimeoutError(f"Video acknowledgement older than {self.ACK_TIMEOUT:.1f} s")
+    measured = now is None
+    now = time.monotonic() if measured else now
+    if self._ack_overdue(now):
+      # ACKs that arrived while this loop was busy (a slow encode, a CPU burst) still sit in the socket; the
+      # streaming loop drains only a bounded batch per pass, so read what is there before calling the car silent.
+      deadline = time.monotonic() + self.ACK_DRAIN_SECONDS
+      while time.monotonic() < deadline and self.pump(0.0):
+        pass
+      if measured:
+        now = time.monotonic()
+      if self._ack_overdue(now):
+        raise TimeoutError(f"Video acknowledgement older than {self.ACK_TIMEOUT:.1f} s")
     # Only a receiver known to answer pings can be declared dead by silence; for
     # others a lost link surfaces as a socket error or a dropped Wi-Fi lease.
     if self.ping_responses and now - self.last_rx > 15.0:

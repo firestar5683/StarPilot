@@ -103,7 +103,7 @@ def test_sdp_channel_encodings():
 
 # ----------------------------------------------------------------- bootstrap
 
-def run_bootstrap(start_request_delay=5.0, **hu_options):
+def run_bootstrap(start_request_delay=5.0, initial_kick_delay=bs.INITIAL_KICK_SECONDS, **hu_options):
   phone, car = socket.socketpair()
   joined = []
   result_holder = {}
@@ -118,7 +118,7 @@ def run_bootstrap(start_request_delay=5.0, **hu_options):
   thread.start()
   events = []
   boot = bs.WirelessBootstrap(phone, lambda name, **values: events.append((name, values)), stage_timeout=5.0,
-                              start_request_delay=start_request_delay)
+                              start_request_delay=start_request_delay, initial_kick_delay=initial_kick_delay)
 
   def join(credentials):
     time.sleep(0.3)  # the car pings while we join
@@ -153,6 +153,117 @@ def test_bootstrap_asks_car_to_start_projection():
   result, joined, seen, events = run_bootstrap(start_request_delay=0.2, version_first=True, wait_for_phone_start=True)
   assert seen["phone_start_request"] == b"" and joined[0].ssid == "HondaAA"
   assert ("bootstrap_tx", {"message": "WifiStartRequest", "bytes": 0}) in events
+
+
+def test_bootstrap_takes_endpoint_from_start_response():
+  # 2025 Honda (session 25): version exchange, phone asks, car answers with a StartResponse.
+  result, joined, seen, events = run_bootstrap(start_request_delay=0.1, version_first=True, wait_for_phone_start=True,
+                                               answer_start=True)
+  assert (result.endpoint.ip, result.endpoint.port) == ("192.168.50.1", 5288) and joined[0].ssid == "HondaAA"
+  assert seen["messages"].count(bs.WIFI_START_REQUEST) == 1
+  assert not any(name == "bootstrap_ignored" for name, _ in events)
+
+
+def test_bootstrap_waits_out_a_busy_start_response():
+  # The car says "not ready" (status alone), then sends the endpoint on its own.
+  result, joined, _, events = run_bootstrap(start_request_delay=0.1, version_first=True, wait_for_phone_start=True,
+                                            answer_start=True, busy_replies=1, busy_follow_up=True)
+  assert result.endpoint.port == 5288 and joined[0].ssid == "HondaAA"
+  assert ("bootstrap_start_refused", {"status": -1, "endpoint": False}) in events
+
+
+def test_bootstrap_asks_again_after_a_busy_start_response():
+  result, joined, seen, _ = run_bootstrap(start_request_delay=0.1, version_first=True, wait_for_phone_start=True,
+                                          answer_start=True, busy_replies=2)
+  assert result.endpoint.port == 5288 and joined[0].ssid == "HondaAA"
+  assert seen["messages"].count(bs.WIFI_START_REQUEST) == 3
+
+
+def test_bootstrap_start_response_without_endpoint_is_not_an_endpoint(monkeypatch):
+  now = [0.0]
+  monkeypatch.setattr(bs.time, "monotonic", lambda: now[0])
+  boot = bs.WirelessBootstrap(None, lambda *a, **k: None, stage_timeout=1, start_request_delay=0.3)
+  sent = []
+  monkeypatch.setattr(boot, "send", lambda message, payload=b"": sent.append(message))
+  replies = [(bs.WIFI_START_RESPONSE, field(3, 0)), (bs.WIFI_START_RESPONSE, field(1, "10.0.0.1") + field(2, 5288) + field(3, -3))]
+
+  def receive(timeout):
+    now[0] += 0.2
+    if replies:
+      return replies.pop(0)
+    raise bs.BootstrapTimeout("wifi_start", "head unit did not answer in time")
+
+  monkeypatch.setattr(boot, "next_frame", receive)
+  with pytest.raises(bs.BootstrapTimeout):
+    boot.run(lambda _: pytest.fail("Unexpected join"))
+  assert bs.WIFI_START_REQUEST in sent, "a refused start is asked again"
+
+
+def test_bootstrap_silent_peer_receives_one_prompt():
+  _, joined, seen, events = run_bootstrap(initial_kick_delay=0.05, wait_for_phone_start=True, pings=False)
+  assert joined[0].ssid == "HondaAA"
+  assert seen["messages"].count(bs.WIFI_START_REQUEST) == 1
+  assert sum(name == "bootstrap_initial_kick" for name, _ in events) == 1
+
+
+def test_bootstrap_version_prompt_does_not_get_an_extra_initial_prompt():
+  _, _, seen, events = run_bootstrap(initial_kick_delay=0.05, start_request_delay=0.1,
+                                     version_first=True, wait_for_phone_start=True)
+  assert seen["messages"].count(bs.WIFI_START_REQUEST) == 1
+  assert not any(name == "bootstrap_initial_kick" for name, _ in events)
+
+
+@pytest.mark.parametrize("stage", ["wifi_start", "wifi_info"])
+def test_bootstrap_stage_deadline_survives_continuous_pings(monkeypatch, stage):
+  now = [0.0]
+  monkeypatch.setattr(bs.time, "monotonic", lambda: now[0])
+  boot = bs.WirelessBootstrap(None, lambda *a, **k: None, stage_timeout=1)
+  sent = []
+  monkeypatch.setattr(boot, "send", lambda message, payload=b"": sent.append(message))
+  first = [True]
+
+  def receive(timeout):
+    now[0] += 0.2
+    if first[0] and stage == "wifi_info":
+      first[0] = False
+      return bs.WIFI_START_REQUEST, field(1, "10.0.0.1") + field(2, 5288)
+    return bs.WIFI_PING_REQUEST, b""
+
+  monkeypatch.setattr(boot, "next_frame", receive)
+  with pytest.raises(bs.BootstrapTimeout) as error:
+    boot.run(lambda _: pytest.fail("Unexpected join"))
+  assert error.value.stage == stage and now[0] < 1.5
+  assert bs.WIFI_PING_RESPONSE in sent and bs.WIFI_START_REQUEST not in sent
+
+
+def test_bootstrap_hint_cannot_hide_disconnect():
+  phone, car = socket.socketpair()
+  try:
+    car.sendall(bs.encode_frame(bs.WIFI_SETUP_INFO, field(4, field(1, "10.0.0.1") + field(2, 5288))))
+    car.close()
+    with pytest.raises(bs.BootstrapError, match="closed"):
+      bs.WirelessBootstrap(phone, lambda *a, **k: None).run(lambda _: pytest.fail("Unexpected join"))
+  finally:
+    phone.close()
+    car.close()
+
+
+def test_bootstrap_hint_grace_is_not_extended_by_pings(monkeypatch):
+  now = [0.0]
+  monkeypatch.setattr(bs.time, "monotonic", lambda: now[0])
+  boot = bs.WirelessBootstrap(None, lambda *a, **k: None, stage_timeout=10)
+  monkeypatch.setattr(boot, "send", lambda *a: None)
+  payload = field(4, field(1, "10.0.0.1") + field(2, 5288)) + field(5, field(1, "test") + field(3, "secret-key") + field(4, 8))
+
+  def receive(timeout):
+    now[0] += 0.25
+    return (bs.WIFI_SETUP_INFO, payload) if now[0] == 0.25 else (bs.WIFI_PING_REQUEST, b"")
+
+  monkeypatch.setattr(boot, "next_frame", receive)
+  joined = []
+  result = boot.run(joined.append)
+  assert result.endpoint.ip == "10.0.0.1" and joined[0].ssid == "test"
+  assert 3 <= now[0] < 5
 
 
 def test_bootstrap_detects_alternate_info_layout():
@@ -443,6 +554,66 @@ def test_session_keeps_unsolicited_focus_grant(identity):
   session.peer.close()
   hu.thread.join(5)
   assert hu.error is None and hu.start_indications == [1]
+
+
+HONDA_SCREEN_TAKEBACK_S = 3.0  # the Civic gives its screen back after this long without video
+
+
+def streaming_session(hu: FakeHeadUnit, identity) -> ProjectionSession:
+  session = connect(hu, identity)
+  session.authenticate()
+  session.start("StarPilot", "comma.ai")
+  pump_until(session, lambda: session.focused)
+  session.send_frame(keyframe_au(1), 1, keyframe=True)
+  pump_until(session, lambda: session.acked == 1 and not session.pending)
+  # ACKs are counts, not frame ids: read everything the car sent (the codec config's ACK too) so a late one is not
+  # credited to the next frame.
+  deadline = time.monotonic() + 5
+  while session.pump(0.2):
+    assert time.monotonic() < deadline, "the car kept talking"
+  return session
+
+
+def sent_frame(hu: FakeHeadUnit, session: ProjectionSession) -> float:
+  """Send one frame and wait until the car has it; its ACK, if any, is left unread in the socket."""
+  received = len(hu.frames)
+  session.send_frame(delta_au(2), 2, keyframe=False)
+  deadline = time.monotonic() + 5
+  while len(hu.frames) == received:
+    assert time.monotonic() < deadline, "the car never received the frame"
+    time.sleep(0.01)
+  time.sleep(0.1)
+  return session.pending[0]
+
+
+def end_session(session: ProjectionSession, hu: FakeHeadUnit) -> None:
+  hu.close()
+  session.peer.close()
+
+
+def test_ack_timeout_leaves_room_for_a_stall_but_beats_the_car_taking_its_screen_back():
+  assert 1.5 < ProjectionSession.ACK_TIMEOUT < HONDA_SCREEN_TAKEBACK_S
+
+
+def test_ack_already_received_during_a_loop_stall_keeps_the_session(identity):
+  # 2026-10-01: the dashcam and model starting at onroad stalled the comma's loop while the car kept acking.
+  hu = FakeHeadUnit(identity)
+  session = streaming_session(hu, identity)
+  sent = sent_frame(hu, session)
+  session.check_progress(now=sent + ProjectionSession.ACK_TIMEOUT + 0.5)  # the waiting ACK is read, not timed out
+  assert session.acked == 2 and not session.pending
+  end_session(session, hu)
+
+
+def test_car_that_stops_acking_times_out_at_the_new_limit(identity):
+  hu = FakeHeadUnit(identity)
+  session = streaming_session(hu, identity)
+  hu.hold_acks.set()
+  sent = sent_frame(hu, session)
+  session.check_progress(now=sent + 1.6)  # past the old 1.5 s limit: no longer fatal
+  with pytest.raises(TimeoutError, match="2.5 s"):
+    session.check_progress(now=sent + ProjectionSession.ACK_TIMEOUT + 0.05)
+  end_session(session, hu)
 
 
 def test_session_authentication_rejected(identity):
@@ -795,6 +966,22 @@ def test_network_lease_retries_without_bssid_and_restores_previous():
   assert "bssid" in nm.added[0]["802-11-wireless"] and "bssid" not in nm.added[1]["802-11-wireless"]
   lease.release(restore=True)
   assert nm.calls[-1] == "ActivateConnection"  # home Wi-Fi comes back
+
+
+def test_network_lease_waits_for_a_slow_honda_access_point(monkeypatch):
+  from openpilot.starpilot.system.android_auto import network
+  lease = network.NetworkLease(lambda *a, **k: None)
+  budgets = []
+
+  def attempt(credentials, timeout, cancelled):
+    budgets.append((credentials.bssid, timeout))
+    raise network.NetworkError("not up yet")
+
+  monkeypatch.setattr(lease, "_acquire_once", attempt)
+  monkeypatch.setattr(lease, "_drop_attempt", lambda: None)
+  with pytest.raises(network.NetworkError):
+    lease.acquire(credentials())
+  assert budgets == [("AA:BB:CC:DD:EE:FF", 90.0), ("", 30.0)]
 
 
 def test_network_lease_does_not_undo_user_network_change():

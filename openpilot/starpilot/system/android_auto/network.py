@@ -34,6 +34,12 @@ NM_IP4_CONFIG_IFACE = "org.freedesktop.NetworkManager.IP4Config"
 DEVICE_TYPE_WIFI = 2
 ACTIVE_STATE_ACTIVATED = 2
 ACTIVE_STATE_DEACTIVATED = 4
+# The car sends its Wi-Fi details ~4 s after ignition, but a Honda's access point took ~55 s from ignition to appear
+# (2026-09-30 drives). After a reported failed join that car stopped auto-launching projection until the driver tapped
+# Android Auto, so wait for a slow access point rather than give up. The car's reported BSSID gets most of the time;
+# the SSID-only retry covers head units that report the wrong radio.
+JOIN_TIMEOUT_S = 120.0
+BSSID_SHARE = 0.75
 CONNECTION_ID = "starpilot-android-auto"
 SECURITY_WPA3 = (32,)
 
@@ -121,7 +127,7 @@ class NetworkLease:
     self.interface = self._get(fallback, NM_DEVICE_IFACE, "Interface")
     return fallback
 
-  def acquire(self, credentials: WifiCredentials, timeout: float = 40.0, cancelled: Callable[[], bool] = lambda: False) -> str:
+  def acquire(self, credentials: WifiCredentials, timeout: float = JOIN_TIMEOUT_S, cancelled: Callable[[], bool] = lambda: False) -> str:
     """Join the projection network and return the comma's IPv4 address on it.
 
     The BSSID the car reports is tried first (fast, unambiguous); if that
@@ -134,7 +140,8 @@ class NetworkLease:
     last_error: NetworkError | None = None
     for index, attempt in enumerate(attempts):
       try:
-        return self._acquire_once(attempt, timeout / len(attempts), cancelled)
+        share = 1.0 if len(attempts) == 1 else (BSSID_SHARE if index == 0 else 1.0 - BSSID_SHARE)
+        return self._acquire_once(attempt, timeout * share, cancelled)
       except NetworkError as error:
         last_error = error
         if cancelled() or index == len(attempts) - 1:
