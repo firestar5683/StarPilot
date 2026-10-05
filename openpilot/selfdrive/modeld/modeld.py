@@ -42,7 +42,7 @@ from openpilot.starpilot.lateral.lane_change_status_wire import (
 )
 from openpilot.starpilot.models.receipt import ModelReceiptOwner
 from openpilot.starpilot.models.status import ModelVariant
-from openpilot.starpilot.models.startup import wait_for_chestnut_power
+from openpilot.starpilot.models.startup import report_load_timeout, wait_for_chestnut_power
 from openpilot.starpilot.navigation.intent import TurnIntent, matching_turn_signal
 from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID, DEFAULT_SMALL, DEFAULT_SMALL_SHA256
 from openpilot.starpilot.models.runner import CatalogModelState, action_from_outputs, load_verified_model
@@ -348,6 +348,8 @@ def main(demo=False):
     loader = threading.Thread(target=load_big, daemon=True)
     loader.start()
     loader.join(BIG_MODEL_TIMEOUT)
+    if loader.is_alive():
+      report_load_timeout(loader, BIG_MODEL_TIMEOUT)
     model = big_model
     params.put_bool("ChestnutActive", model is not None)
 

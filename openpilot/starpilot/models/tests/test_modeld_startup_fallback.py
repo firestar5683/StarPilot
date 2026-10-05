@@ -129,6 +129,9 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
     def join(self, duration):
       events.append(("join", duration))
 
+    def is_alive(self):
+      return False
+
   def wait():
     assert worker
     events.append("wait")
