@@ -78,6 +78,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_gm_bolt_pedal.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_bolt_cc.py",
   "opendbc_repo/opendbc/car/gm/tests/test_bolt_cc_low.py",
+  "openpilot/starpilot/tests/test_bolt_cc_controls_low.py",
   "openpilot/starpilot/tests/test_bolt_disable_active_pedal.py::TestBoltDisableActivePedal",
   "opendbc_repo/opendbc/car/gm/tests/test_bolt_acc_cc.py",
   "opendbc_repo/opendbc/car/gm/tests/test_bolt_factory_acc.py",

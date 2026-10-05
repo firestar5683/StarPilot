@@ -55,6 +55,39 @@ class TestBoltCcLow(unittest.TestCase):
       _, commands = ci.apply(control().as_reader(), now + 1_000_000)
       self.assertFalse(any(frame[0] == 0x1E1 for frame in commands))
 
+  def test_acc_low_gear_preserves_camera_and_powertrain_ownership(self):
+    from opendbc.car.gm.tests.test_bolt_acc_cc import ID, observe
+
+    for removed in (False, True):
+      for pt_active, camera_active in ((True, True), (False, True), (True, False)):
+        with self.subTest(removed=removed, powertrain=pt_active, camera=camera_active):
+          cp, ci, packer = fixture(ID, removed=removed)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC141 if removed else 0xC140)
+          now = 1_000_000_000
+          if removed:
+            _, frames = feed(ci, packer, now, active=pt_active, camera=False)
+          else:
+            _, frames = observe(ci, packer, now, active=pt_active, camera_active=camera_active)
+          frames = [frame for frame in frames if frame[0] != 0x1F5]
+          frames.append(packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 6}))
+          state = ci.update([(now + 100_000, frames)])
+          self.assertTrue(state.canValid)
+          self.assertEqual(state.gearShifter, structs.CarState.GearShifter.low)
+          self.assertEqual(state.cruiseState.enabled, pt_active if removed else camera_active)
+          setup(cp)
+          for frame in sorted(frames, key=lambda frame: frame[0] == 0x3D1):
+            native('rx', frame, now // 1000)
+          self.assertEqual(libsafety_py.libsafety.get_controls_allowed(), pt_active)
+          ci.CC.frame = 104
+          cc = control()
+          cc.cruiseControl.cancel = state.cruiseState.enabled and (not cc.enabled or not cp.pcmCruise)
+          _, commands = ci.apply(cc.as_reader(), now + 1_000_000)
+          buttons = [frame for frame in commands if frame[0] == 0x1E1]
+          self.assertEqual(bool(buttons), pt_active and (removed or camera_active))
+          self.assertTrue(all(frame[2] == 0 for frame in buttons))
+          for frame in commands:
+            self.assertTrue(native('tx', frame, (now + 1_000_000) // 1000), hex(frame[0]))
+
   def test_low_physical_set_release_host_state_remains_native_admitted(self):
     from openpilot.selfdrive.car.car_events import CarEvents
     from openpilot.selfdrive.selfdrived.events import ET
