@@ -8,7 +8,7 @@ from unittest import mock
 
 from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID
 from openpilot.starpilot.models.status import ModelHealth, ModelStatus, ModelVariant
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput
+from openpilot.starpilot.ui.feature_settings_state import feature_row_top, FeatureInput
 from openpilot.starpilot.ui.models_compact import ModelsCompact, _ModelsPage, _display_text
 from openpilot.starpilot.ui.models_state import (model_page, model_action_allowed, model_catalog_rows, model_profile_choices, model_profile_request,
                                                 home_model_label)
@@ -150,7 +150,7 @@ class TestModelManager(unittest.TestCase):
     state = model_page(ModelStatus(BUNDLED_CURRENT, None, None, ModelHealth.UNAVAILABLE, False, None, None), self.data)
     self.assertEqual(state.rows[1].value, "Small")
     self.assertEqual(state.rows[1].source, b"small")
-    action = FeatureInput.target(1000, 496, state)
+    action = FeatureInput.target(1000, feature_row_top(state) + 288, state)
     self.assertEqual((action.kind, action.row.page), ("open", "models:small"))
     self.assertTrue(all(not row.available for row in state.rows[3:]))
 

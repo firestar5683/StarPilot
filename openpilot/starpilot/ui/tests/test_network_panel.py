@@ -244,7 +244,8 @@ class NetworkPanelTests(unittest.TestCase):
     layout._network_bridge = Mock()
     layout._large_panels = {}
     layout._large_destination = None
-    object.__setattr__(layout, 'star', NS(selected=Destination.BLUETOOTH, connectivity_allowed=Mock(return_value=False)))
+    object.__setattr__(layout, 'star', NS(selected=Destination.BLUETOOTH, connectivity_allowed=Mock(return_value=False),
+                                         fonts=NS(profile=runtime_app.Profile.LARGE)))
     object.__setattr__(layout, 'page', NS(render=Mock()))
     with patch('openpilot.starpilot.ui.bluetooth_large.BluetoothLarge') as factory:
       layout._network_destination(Destination.BLUETOOTH)
@@ -283,7 +284,13 @@ class NetworkPanelTests(unittest.TestCase):
       session.render(ShellMode.SETTINGS, rl.Rectangle(10, 20, 2160, 1080))
     rect = session.network_layer.call_args.args[0]
     self.assertEqual((rect.x, rect.y, rect.width, rect.height), (560, 45, 1560, 1030))
-    session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.CLOSE)))
+    def back_from_network(_rect):
+      session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.CLOSE)))
+      return False  # the bridge revokes authority when Back changes the destination
+    session.network_layer.side_effect = back_from_network
+    with patch.object(runtime_app, "placed_at", return_value=nullcontext()):
+      session.render(ShellMode.SETTINGS, rl.Rectangle(10, 20, 2160, 1080))
+    self.assertEqual(session.notice, "")
     self.assertEqual(session.selected, Destination.STAR)
     self.assertEqual(session._on_destination_change.call_args.args[0], Destination.STAR)
 

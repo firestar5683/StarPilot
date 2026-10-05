@@ -11,7 +11,7 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.ui.soundd import ALERT_VOLUME_KEYS, CRITICAL_MAX, AudibleAlert, Soundd, sound_list
 from openpilot.starpilot.audio.alert_volume import AUTO, VOLUMES, effective_volume, read_volume
 from openpilot.starpilot.ui import sounds_compact
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureUiAction, row_change
+from openpilot.starpilot.ui.feature_settings_state import feature_row_top, FeatureInput, FeatureSettingsRequest, FeatureUiAction, row_change
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
 from openpilot.starpilot.ui.sounds_owner import SoundsOwner
@@ -146,12 +146,12 @@ class SoundsSettingsTests(unittest.TestCase):
     received = []
     native = FeatureInput(received.append)
     state = self.owner.snapshot()
-    native.press(1980, 320, state)
-    native.move(1800, 320, state)
-    native.release(1800, 320, state)
+    native.press(1980, feature_row_top(state) + 112, state)
+    native.move(1800, feature_row_top(state) + 112, state)
+    native.release(1800, feature_row_top(state) + 112, state)
     self.assertFalse(received)
-    native.press(1980, 320, state)
-    native.release(1980, 320, state)
+    native.press(1980, feature_row_top(state) + 112, state)
+    native.release(1980, feature_row_top(state) + 112, state)
     self.assertEqual(row_change(received[0].row).key, "WarningImmediateVolume")
 
   def test_large_session_routes_saved_edit_and_back(self):

@@ -11,7 +11,7 @@ from openpilot.common.params import Params
 from openpilot.starpilot.longitudinal.profile_preferences import SCALARS, read_profile_health
 from openpilot.starpilot.longitudinal.profile_runtime import read_settings
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, row_change
+from openpilot.starpilot.ui.feature_settings_state import feature_row_top, FeatureInput, FeatureSettingsRequest, row_change
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui.long_profile_feature import long_confirm_question
 from openpilot.starpilot.ui.runtime_app import StarShellSession
@@ -212,7 +212,7 @@ class LongProfileFeatureTests(unittest.TestCase):
     state = self.owner.snapshot("aggressive", parked=True, system_long=True, lateral_context=True, metric=False)
     index = next(i for i, row in enumerate(state.rows) if row.key == "long_repair:AggressiveFollow")
     state = replace(state, scroll=index)
-    self.assertEqual(FeatureInput.target(1900, 285, state).kind, "reset")
+    self.assertEqual(FeatureInput.target(1900, feature_row_top(state) + 77, state).kind, "reset")
 
   def test_compact_native_confirmation_routes_captured_request(self):
     self.path("AggressiveFollow").write_bytes(b"broken")

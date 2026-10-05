@@ -209,6 +209,19 @@ class TestBluetoothLarge(unittest.TestCase):
     self.panel._rebuild()
     self.assertIs(self.panel._scroller.scroll_panel, scroll)
 
+  def test_paginated_host_can_refresh_rows_without_rendering_the_native_scroller(self):
+    self.panel.status = {'available': True, 'powered': True, 'parked': True, 'devices': []}
+    self.panel._update_state()
+    self.assertEqual(len(self.panel._scroller.rows), 2)
+    self.panel._touch_held = True
+    self.app.mouse_events = [type('Event', (), {'slot': 0, 'left_down': False})()]
+    self.panel._update_state()
+    self.assertFalse(self.panel._touch_held)
+    self.app.mouse_events = []
+    self.panel.status['powered'] = False
+    self.panel._update_state()
+    self.assertEqual(len(self.panel._scroller.rows), 1)
+
   def test_unnamed_unpaired_devices_not_presented(self):
     self.panel.status = {'available': True, 'powered': True, 'parked': True, 'devices': [
       {'address': 'AA:BB:CC:DD:EE:FF', 'name': 'AA:BB:CC:DD:EE:FF', 'paired': False},

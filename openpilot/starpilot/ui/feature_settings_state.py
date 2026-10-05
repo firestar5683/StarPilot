@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 FEATURE_HEADER_HEIGHT = 88
 FEATURE_BACK_WIDTH = 190
-FEATURE_ROW_TOP = 208
+FEATURE_ROW_TOP = 112
 FEATURE_ROW_HEIGHT = 154
 FEATURE_VISIBLE_ROWS = 5
 FEATURE_CONTROL_LEFT = 1748
@@ -72,6 +72,7 @@ class FeatureRow:
   repair_value: str = ""
   default_value: str | None = None
   default_key: str = ""
+  actions: tuple[tuple[str, bool], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,10 @@ class FeatureSettingsState:
   scroll: int = 0
   sidebar_expanded: bool = True
   parent_title: str = "StarPilot"
+
+
+def feature_row_top(state: FeatureSettingsState) -> int:
+  return FEATURE_ROW_TOP + (52 if state.subtitle else 0)
 
 
 def feature_parent_page(page: str) -> str | None:
@@ -103,7 +108,7 @@ def feature_parent_title(page: str) -> str:
 
 
 def boolean_value(row: FeatureRow) -> bool | None:
-  if (not row.key or row.page or row.repair_value or row.step or row.key in FEATURE_CONFIRM_ACTIONS or
+  if (not row.key or row.page or row.actions or row.repair_value or row.step or row.key in FEATURE_CONFIRM_ACTIONS or
       row.key.startswith("pip:format:") or is_long_confirm_action(row.key) or row.choices != ("Off", "On")):
     return None
   if row.value in ("Off", "On"):
@@ -111,6 +116,10 @@ def boolean_value(row: FeatureRow) -> bool | None:
   if row.key == "SLCFallback" and row.value == "Off (saved mode 0 or 1)":
     return False
   return None
+
+
+def feature_action_left(row: FeatureRow) -> int:
+  return FEATURE_CONTROL_LEFT - max(0, len(row.actions) - 1) * (FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT + 16)
 
 
 def feature_scroll(scroll: int, direction: int, row_count: int) -> int:
@@ -149,26 +158,36 @@ class FeatureInput:
   @staticmethod
   def target(x: float, y: float, state: FeatureSettingsState) -> FeatureUiAction | None:
     left = 520 if state.sidebar_expanded else 20
+    row_top = feature_row_top(state)
     if not left <= x <= 2140:
       return None
     if 12 <= y <= 12 + FEATURE_HEADER_HEIGHT:
       return FeatureUiAction("back" if x < left + FEATURE_BACK_WIDTH else "details")
-    if 12 + FEATURE_HEADER_HEIGHT < y < FEATURE_ROW_TOP:
+    if 12 + FEATURE_HEADER_HEIGHT < y < row_top:
       return FeatureUiAction("details") if state.subtitle else None
     if 980 <= y <= 1050:
       return FeatureUiAction("scroll", direction=-1 if x < 1320 else 1)
-    if not FEATURE_ROW_TOP <= y < FEATURE_ROW_TOP + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT:
+    if not row_top <= y < row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT:
       return None
-    visible = int((y - FEATURE_ROW_TOP) // FEATURE_ROW_HEIGHT)
+    visible = int((y - row_top) // FEATURE_ROW_HEIGHT)
     index = state.scroll + visible
     if 0 <= index < len(state.rows):
       row = state.rows[index]
+      if row.actions:
+        local_y = y - row_top - visible * FEATURE_ROW_HEIGHT
+        if FEATURE_ACTION_MARGIN <= local_y <= FEATURE_ROW_HEIGHT - FEATURE_ACTION_MARGIN:
+          width = FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT
+          for action, (_, enabled) in enumerate(row.actions):
+            left = feature_action_left(row) + action * (width + 16)
+            if left <= x <= left + width:
+              return FeatureUiAction("action", row, action) if row.available and enabled else None
+        return FeatureUiAction("details", row) if x < feature_action_left(row) else None
       if row.page and row.available:
         return FeatureUiAction("open", row)
       if FEATURE_CONTROL_LEFT <= x <= FEATURE_CONTROL_RIGHT:
         if not row.available:
           return None
-        local_y = y - FEATURE_ROW_TOP - visible * FEATURE_ROW_HEIGHT
+        local_y = y - row_top - visible * FEATURE_ROW_HEIGHT
         if row.key in FEATURE_CONFIRM_ACTIONS or row.key.startswith("pip:format:") or is_long_confirm_action(row.key):
           return FeatureUiAction("reset", row) if FEATURE_ACTION_MARGIN <= local_y <= FEATURE_ROW_HEIGHT - FEATURE_ACTION_MARGIN else None
         if row.repair_value:

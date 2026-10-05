@@ -77,16 +77,16 @@ from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.conditional_mode.preferences import PreferenceError, SavedPreferences, decode_preferences
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.ui_action import ConditionalUiActionOwner
-from openpilot.starpilot.ui.settings_state import compact_menu, Destination, SettingsActionKind, SettingsState
+from openpilot.starpilot.ui.settings_state import compact_menu, Destination, SettingsAction, SettingsActionKind, SettingsState
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellRequest, ShellSnapshot, ShellView
 from openpilot.starpilot.ui.software_state import DownloadLabel, SoftwareAction, SoftwareRequest
 from openpilot.starpilot.ui.toggles_state import Personality, ToggleKey, ToggleRequest
 from openpilot.system.ui.lib.application import MouseEvent, MousePos, gui_app
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import button_item
+from openpilot.system.ui.widgets.list_view import button_item, text_item
 from openpilot.system.ui.widgets.nav_widget import NavWidget
 
-NATIVE_SETTINGS_PANELS = (Destination.DEVICE, Destination.SOFTWARE, Destination.BLUETOOTH, Destination.DEVELOPER)
+NATIVE_SETTINGS_PANELS = (Destination.DEVICE, Destination.SOFTWARE, Destination.BLUETOOTH, Destination.TOGGLES, Destination.DEVELOPER)
 
 
 def validate_runtime_fonts(profile: Profile) -> None:
@@ -1096,7 +1096,7 @@ class StarShellSession:
       rail_width = 500 if snapshot.settings.sidebar_expanded else 0
       content = rl.Rectangle(rect.x + rail_width + 50, rect.y + 25,
                              rect.width - rail_width - 100, rect.height - 50)
-      if not self.network_layer(content):
+      if not self.network_layer(content) and self.selected == Destination.NETWORK:
         self.input.cancel()
         self.selected = Destination.STAR
         self._snapshot_cache = None
@@ -1476,7 +1476,7 @@ class StarMainLayout(MainLayout):
     self._large_panels = {
       destination: self._layouts[MainState.SETTINGS]._panels[panel].instance
       for destination, panel in ((Destination.DEVICE, PanelType.DEVICE), (Destination.SOFTWARE, PanelType.SOFTWARE),
-                                  (Destination.DEVELOPER, PanelType.DEVELOPER))
+                                  (Destination.TOGGLES, PanelType.TOGGLES), (Destination.DEVELOPER, PanelType.DEVELOPER))
     }
     self._large_destination = None
     try:
@@ -1489,6 +1489,13 @@ class StarMainLayout(MainLayout):
     device_scroller.add_widget(
       button_item("Galaxy", "OPEN", callback=self.star.galaxy_flow.open_large))
     device_scroller._items.insert(0, device_scroller._items.pop())
+    toggle_items = self._large_panels[Destination.TOGGLES]._scroller._items
+    toggle_items.insert(2, text_item("Safe Mode", "N/A"))
+    toggle_items.insert(7, text_item("Right Hand Driving", "N/A"))
+    from openpilot.starpilot.ui.starpilot_settings_adapter_large import StarPilotSettingsAdapterLarge
+    for destination, owner in self._large_panels.items():
+      self._large_panels[destination] = StarPilotSettingsAdapterLarge(owner, self.star.fonts, destination.value.title(), self._settings_back)
+    self._network_bridge.presentation = StarPilotSettingsAdapterLarge(native_network, self.star.fonts, "Network", self._settings_back)
     self.star.set_navigation(on_settings=lambda: self._set_current_layout(MainState.SETTINGS),
                              on_home=self._set_mode_for_state,
                              on_pairing=self._show_pairing,
@@ -1522,6 +1529,9 @@ class StarMainLayout(MainLayout):
     if panel is not None and self._large_destination == destination:
       panel.render(rect)
 
+  def _settings_back(self) -> None:
+    self.star._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.CLOSE)))
+
   def _leave_large_panel(self) -> None:
     if self._large_destination is not None:
       self._large_panels[self._large_destination].hide_event()
@@ -1533,7 +1543,9 @@ class StarMainLayout(MainLayout):
       if destination == Destination.BLUETOOTH:
         if destination not in self._large_panels:
           from openpilot.starpilot.ui.bluetooth_large import BluetoothLarge
-          self._large_panels[destination] = BluetoothLarge(self.star.connectivity_allowed)
+          from openpilot.starpilot.ui.starpilot_settings_adapter_large import StarPilotSettingsAdapterLarge
+          self._large_panels[destination] = StarPilotSettingsAdapterLarge(
+            BluetoothLarge(self.star.connectivity_allowed), self.star.fonts, "Bluetooth", self._settings_back)
       if destination in self._large_panels:
         self._large_destination = destination
         self._large_panels[destination].show_event()
