@@ -55,6 +55,14 @@ def flash_panda(panda_serial: str):
   panda.close()
 
 
+def wait_for_internal_panda(timeout: int = 15) -> bool:
+  if HARDWARE.get_device_type() == "tici":
+    # C3's internal USB port needs udev permissions in application and DFU modes.
+    return subprocess.run(["udevadm", "wait", f"--timeout={timeout}", "/sys/bus/usb/devices/1-1.2"], check=False,
+                          stderr=subprocess.DEVNULL if timeout == 0 else None).returncode == 0
+  return True
+
+
 def main() -> None:
   # signal pandad to close the relay and exit
   def signal_handler(signum, frame):
@@ -70,12 +78,13 @@ def main() -> None:
 
   # check health for lost heartbeat
   try:
-    for s in Panda.list():
-      with Panda(s) as p:
-        health = p.health()
-        if p.is_internal() and health["heartbeat_lost"]:
-          Params().put_bool("PandaHeartbeatLost", True, block=True)
-          cloudlog.event("heartbeat lost", deviceState=health)
+    if wait_for_internal_panda(timeout=0):
+      for s in Panda.list():
+        with Panda(s) as p:
+          health = p.health()
+          if p.is_internal() and health["heartbeat_lost"]:
+            Params().put_bool("PandaHeartbeatLost", True, block=True)
+            cloudlog.event("heartbeat lost", deviceState=health)
   except Exception:
     cloudlog.exception("pandad.uncaught_exception")
 
@@ -88,14 +97,14 @@ def main() -> None:
       else:
         HARDWARE.recover_internal_panda()
       count += 1
-      if HARDWARE.get_device_type() == "tici":
-        time.sleep(3)  # allow USB enumeration after GPIO reset/recovery
+      wait_for_internal_panda()
 
       # Flash all Pandas in DFU mode
       for serial in PandaDFU.list():
         cloudlog.info(f"Panda in DFU mode found, flashing recovery {serial}")
         PandaDFU(serial).recover()
         time.sleep(1)
+        wait_for_internal_panda()
 
       panda_serials = Panda.list()
       if len(panda_serials):
