@@ -81,6 +81,7 @@ class SelfdriveD:
 
     self.aol_replay = feature_enabled(self.params, self.CP, 'aol', os.environ)
     self.ordinary_axis_ack_required = axis_policy_for(self.CP).ordinary_axis_ack_required
+    self.aol_cruise_main_required = axis_policy_for(self.CP).cruise_main_required
     self.axis_transport_required = self.aol_replay or self.ordinary_axis_ack_required
     self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
     self.nostalgia_paddle_cancel = False
@@ -823,14 +824,15 @@ class SelfdriveD:
         intent=intent, native=native, car_state=CS, initialized=self.initialized,
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
-        no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel),
+        no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
+                             cruise_main_required=getattr(self, 'aol_cruise_main_required', True)),
         immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
         dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
                         self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
                         self.sm['driverMonitoringState'].alertLevel == AlertLevel.three),
         pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
         lateral_inhibit=self.aol_dm_lateral_inhibit)
-    if getattr(self, 'ordinary_axis_ack_required', False):
+    elif getattr(self, 'ordinary_axis_ack_required', False):
       self.aol_axis_decision = decide_ordinary_axis(
         requested=bool(self.initialized and self.conditional_car_state_valid and
                        CS.canValid and not CS.canTimeout and

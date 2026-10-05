@@ -318,9 +318,14 @@ class Car:
 
     self.is_metric = self.params.get_bool("IsMetric")
     aol_policy = aol_policy_for(self.CP)
+    if aol_policy.full_axis_runtime_required and not self.aol_replay:
+      self.aol_replay = True
+      subscribed_services.append('aolSafetyWire')
+      self.sm = messaging.SubMaster(subscribed_services)
+      self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
     self.aol_qualified = bool(self.aol_settings is not None and
-                              (aol_policy.physical_stalk_owner or independent_axis_requested(self.aol_settings,
+                              (aol_policy.full_axis_runtime_required or aol_policy.physical_stalk_owner or independent_axis_requested(self.aol_settings,
                                 include_auxiliary=aol_policy.intent_supported and not aol_policy.explicit_latch)) and
                               aol_policy.intent_supported and not self.CP.passive)
     self.aol_card_intent = (create_aol_intent(self.CP, self.aol_settings, aol_policy)
