@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.ci.run_predeploy import commands, run
+from tools.ci.run_host_tests import UI_PYTEST_FILES
 
 
 QUICK_TARGETS = (
@@ -30,6 +31,9 @@ QUICK_TARGETS = (
   'openpilot/starpilot/longitudinal/tests',
   'openpilot/starpilot/drive_state/tests',
   'openpilot/starpilot/models/tests',
+  'openpilot/starpilot/software/tests/test_fast_update.py',
+  'openpilot/starpilot/software/tests/test_update_process.py',
+  'openpilot/starpilot/software/tests/test_history.py',
   'openpilot/starpilot/ui/tests',
   'openpilot/starpilot/galaxy/tests/test_access.py',
   'openpilot/starpilot/galaxy/tests/test_pairing_migration.py',
@@ -43,7 +47,7 @@ QUICK_TARGETS = (
   'opendbc_repo/opendbc/car/hyundai/tests/test_ioniq6_stock_parser.py',
   'opendbc_repo/opendbc/car/hyundai/tests/test_ioniq6_engagement_messages.py',
   'opendbc_repo/opendbc/safety/tests/test_hyundai_ioniq6_long.py',
-)
+) + UI_PYTEST_FILES
 
 
 def main(arguments=None):
