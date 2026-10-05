@@ -87,6 +87,13 @@ from openpilot.system.ui.widgets.list_view import button_item, text_item
 from openpilot.system.ui.widgets.nav_widget import NavWidget
 
 NATIVE_SETTINGS_PANELS = (Destination.DEVICE, Destination.SOFTWARE, Destination.BLUETOOTH, Destination.TOGGLES, Destination.DEVELOPER)
+_FEATURE_SETTINGS_PANES = {
+  Destination.DRIVING_CONTROLS: ("features", "feature"),
+  Destination.SOUNDS: ("sounds", "sounds"),
+  Destination.APPEARANCE: ("appearance", "appearance"),
+  Destination.SYSTEM: ("display", "display"),
+  Destination.DRIVING_MODEL: ("models", "model"),
+}
 
 
 def validate_runtime_fonts(profile: Profile) -> None:
@@ -1276,6 +1283,13 @@ class StarShellSession:
     if snapshot is None or snapshot.selected != self.selected:
       self.cancel()
       return None
+    if (pane := _FEATURE_SETTINGS_PANES.get(self.selected)) and self.profile == Profile.LARGE:
+      state = getattr(snapshot, pane[0])
+      if (state.scroll != getattr(self, pane[1] + "_scroll") or
+          state.page != getattr(self, pane[1] + "_page", state.page) or
+          state.sidebar_expanded != self.sidebar_expanded):
+        self.cancel()
+        return None
     if snapshot.device.offroad and not self.confirmed_offroad():
       self.cancel()
       return None

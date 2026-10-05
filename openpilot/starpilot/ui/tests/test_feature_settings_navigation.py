@@ -12,7 +12,7 @@ from openpilot.starpilot.longitudinal.profile_document import migrate_profile_do
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import (
-  FEATURE_ROW_TOP, feature_row_top, FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, row_change,
+  FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, feature_row_top, FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, row_change,
 )
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
@@ -70,6 +70,100 @@ class FeatureNavigationTests(unittest.TestCase):
     controller.press(1990, feature_row_top(state) + 92, state)
     controller.release(1990, feature_row_top(state) + 92, state)
     self.assertEqual(row_change(actions[0].row).expected, b"0")
+
+  def test_swipes_page_from_controls_disabled_rows_and_blank_space(self):
+    controls = (FeatureRow("switch", "Switch", "Off", choices=("Off", "On"), available=True),
+                FeatureRow("number", "Number", "50", step=5, available=True),
+                FeatureRow("", "Child", "", page="child", available=True),
+                FeatureRow("pip:reset", "Reset", "", available=True),
+                FeatureRow("action", "Action", "", actions=(("OPEN", True),), available=True),
+                FeatureRow("disabled", "Disabled", "", actions=(("OPEN", False),)))
+    for expanded in (True, False):
+      for subtitle in ("", "Description"):
+        for row in controls:
+          for scroll, start, end, direction in ((0, 2000, 1700, 1), (5, 1800, 2100, -1)):
+            with self.subTest(expanded=expanded, subtitle=subtitle, row=row.key, direction=direction):
+              state = FeatureSettingsState(rows=(row,) * 7, scroll=scroll, sidebar_expanded=expanded, subtitle=subtitle)
+              actions = []
+              controller = FeatureInput(actions.append)
+              y = feature_row_top(state) + 102
+              controller.press(start, y, state)
+              controller.move(end, y, state)
+              self.assertFalse(actions)
+              controller.release(end, y, state)
+              controller.release(end, y, state)
+              self.assertEqual(actions, [FeatureUiAction("scroll", direction=direction)])
+        state = FeatureSettingsState(rows=(controls[0],) * 7, scroll=5, sidebar_expanded=expanded, subtitle=subtitle)
+        actions = []
+        controller = FeatureInput(actions.append)
+        y = feature_row_top(state) + 3.5 * FEATURE_ROW_HEIGHT
+        controller.press(1500, y, state)
+        controller.release(1800, y, state)
+        self.assertEqual(actions, [FeatureUiAction("scroll", direction=-1)])
+
+  def test_swipe_rejections_never_restore_a_canceled_tap(self):
+    row = FeatureRow("", "Child", "", page="child", available=True)
+    for expanded in (True, False):
+      state = FeatureSettingsState(rows=(row,) * 7, sidebar_expanded=expanded)
+      cases = (((1500, 200), [(1619, 200)]),  # short drag
+               ((1500, 200), [(1620, 261)]),  # diagonal
+               ((1500, 200), [(1500, 280), (1800, 280)]),  # vertical first
+               ((1500, 200), [(1800, 200), (1500, 200)]),  # return to origin
+               ((1500, 200), [(10, 200), (1800, 200)]),  # leave and reenter
+               ((700, 50), [(1000, 50)]),  # header
+               ((1000, 1015), [(1300, 1015)]),  # footer
+               ((30, 580), [(330, 580)]),  # collapse handle
+               ((200, 200), [(1000, 200)]) if expanded else ((10, 200), [(1000, 200)]))
+      for start, moves in cases:
+        with self.subTest(expanded=expanded, start=start, moves=moves):
+          actions = []
+          controller = FeatureInput(actions.append)
+          controller.press(*start, state)
+          for position in moves:
+            controller.move(*position, state)
+          controller.release(*moves[-1], state)
+          self.assertFalse(actions)
+      for scroll, count, end in ((0, 7, 1800), (5, 7, 1200), (0, 5, 1200)):
+        actions = []
+        controller = FeatureInput(actions.append)
+        boundary = replace(state, scroll=scroll, rows=(row,) * count)
+        controller.press(1500, 200, boundary)
+        controller.release(end, 200, boundary)
+        self.assertFalse(actions)
+
+  def test_swipe_context_changes_cancel_but_row_value_refresh_does_not(self):
+    row = FeatureRow("switch", "Switch", "Off", b"0", ("Off", "On"), available=True)
+    state = FeatureSettingsState(rows=(row,) * 7)
+    for changed in (replace(state, page="child"), replace(state, scroll=5), replace(state, sidebar_expanded=False)):
+      actions = []
+      controller = FeatureInput(actions.append)
+      controller.press(2000, 204, state)
+      controller.move(1850, 204, changed)
+      controller.release(1700, 204, state)
+      self.assertFalse(actions)
+    actions = []
+    controller = FeatureInput(actions.append)
+    changed = replace(state, rows=(replace(row, value="On", source=b"1"),) * 7)
+    controller.press(2000, 204, state)
+    controller.move(1850, 204, changed)
+    controller.release(1700, 204, changed)
+    self.assertEqual(actions, [FeatureUiAction("scroll")])
+    actions.clear()
+    controller.press(2000, 204, state)
+    controller.cancel()
+    controller.release(1700, 204, state)
+    self.assertFalse(actions)
+
+  def test_swipe_clears_touch_before_dispatch(self):
+    state = FeatureSettingsState(rows=(FeatureRow("", "Child", "", page="child", available=True),) * 7)
+    actions = []
+    def emit(action):
+      self.assertIsNone(controller.held)
+      actions.append(action)
+    controller = FeatureInput(emit)
+    controller.press(1500, 200, state)
+    controller.release(1380, 260, state)
+    self.assertEqual(actions, [FeatureUiAction("scroll")])
 
   def test_boolean_both_action_halves_preserve_requests_and_source_evidence(self):
     for value, source, desired in (("Off", b"0", "On"), ("On", b"1", "Off"),

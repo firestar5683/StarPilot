@@ -15,6 +15,8 @@ FEATURE_CONTROL_RIGHT = 2118
 FEATURE_BUTTON_TOP = 64
 FEATURE_BUTTON_HEIGHT = 80
 FEATURE_ACTION_MARGIN = 36
+FEATURE_TAP_SLOP = 36
+FEATURE_SWIPE_DISTANCE = 120
 
 
 def is_long_confirm_action(key: str) -> bool:
@@ -149,11 +151,16 @@ class FeatureUiAction:
 
 
 class FeatureInput:
-  """Large pane controls; a drag or changed source cancels the held row."""
+  """One touch: movement cancels its tap; a horizontal body swipe pages on release."""
 
   def __init__(self, emit: Callable[[FeatureUiAction], None]):
     self.emit = emit
-    self.held: tuple[float, float, FeatureUiAction, int, str, bool] | None = None
+    self.held: tuple[float, float, FeatureUiAction | None, int, str, bool] | None = None
+
+  @staticmethod
+  def _in_body(x: float, y: float, state: FeatureSettingsState) -> bool:
+    left = 520 if state.sidebar_expanded else 20
+    return left + 25 <= x <= 2125 and feature_row_top(state) <= y < feature_row_top(state) + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT
 
   @staticmethod
   def target(x: float, y: float, state: FeatureSettingsState) -> FeatureUiAction | None:
@@ -203,19 +210,36 @@ class FeatureInput:
 
   def press(self, x: float, y: float, state: FeatureSettingsState) -> None:
     target = self.target(x, y, state)
-    self.held = (x, y, target, state.scroll, state.page, state.sidebar_expanded) if target is not None else None
+    self.held = (x, y, target, state.scroll, state.page, state.sidebar_expanded) if target is not None or self._in_body(x, y, state) else None
 
   def move(self, x: float, y: float, state: FeatureSettingsState) -> None:
     if self.held is not None:
-      _, _, action, scroll, page, sidebar = self.held
-      if state.scroll != scroll or state.page != page or state.sidebar_expanded != sidebar or self.target(x, y, state) != action:
+      px, py, action, scroll, page, sidebar = self.held
+      if state.scroll != scroll or state.page != page or state.sidebar_expanded != sidebar:
         self.cancel()
+        return
+      dx, dy = abs(x - px), abs(y - py)
+      moved = max(dx, dy) > FEATURE_TAP_SLOP
+      body = self._in_body(px, py, state)
+      if body and (not self._in_body(x, y, state) or (moved and dy > dx)):
+        self.cancel()
+        return
+      if action is not None and (moved or self.target(x, y, state) != action):
+        self.held = (px, py, None, scroll, page, sidebar) if body else None
 
   def release(self, x: float, y: float, state: FeatureSettingsState) -> None:
     self.move(x, y, state)
+    action = None
     if self.held is not None:
-      self.emit(self.held[2])
+      px, py, action, *_ = self.held
+      dx, dy = x - px, abs(y - py)
+      direction = 1 if dx < 0 else -1
+      if (self._in_body(px, py, state) and abs(dx) >= FEATURE_SWIPE_DISTANCE and abs(dx) >= 2 * dy and
+          feature_scroll(state.scroll, direction, len(state.rows)) != state.scroll):
+        action = FeatureUiAction("scroll", direction=direction)
     self.cancel()
+    if action is not None:
+      self.emit(action)
 
   def cancel(self) -> None:
     self.held = None

@@ -16,7 +16,7 @@ from openpilot.starpilot.ui import appearance_compact, onroad
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner
 from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance, onroad_appearance, read_visibility
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureSettingsState, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureSettingsState, FeatureUiAction, row_change
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadInput, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
@@ -432,7 +432,8 @@ class AppearanceSettingsTests(unittest.TestCase):
     large.press(1980, 300, state)
     large.move(1800, 300, state)
     large.release(1800, 300, state)
-    self.assertFalse(changed)
+    self.assertEqual(changed, [FeatureUiAction("scroll")])
+    changed.clear()
     large.press(1980, 300, state)
     large.release(1980, 300, state)
     self.assertEqual(changed[0].row.key, "HideSpeed")

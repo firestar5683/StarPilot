@@ -380,6 +380,58 @@ class TestRuntimePanelActions(unittest.TestCase):
         self.assertEqual(getattr(session.snapshot(ShellMode.SETTINGS), field).scroll, 0)
         self.assertEqual(getattr(session, offset), 0)
 
+  def test_large_feature_swipes_route_once_and_cancel_when_context_changes(self):
+    from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
+    pages = ((Destination.DRIVING_CONTROLS, "feature", "feature_snapshot", "hub"),
+             (Destination.SOUNDS, "sounds", "sounds_snapshot", "sounds"),
+             (Destination.APPEARANCE, "appearance", "appearance_snapshot", "appearance"),
+             (Destination.SYSTEM, "display", "system_snapshot", "display"),
+             (Destination.DRIVING_MODEL, "model", "model_snapshot", "models"))
+    rows = tuple(FeatureRow(str(i), str(i), "", available=True, page="child") for i in range(13))
+    for destination, prefix, source, page in pages:
+      for expanded in (True, False):
+        with self.subTest(destination=destination, expanded=expanded):
+          session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+          session.profile = runtime_app.Profile.LARGE
+          session.adapter = self._adapter()
+          session._mode, session.selected = ShellMode.SETTINGS, destination
+          session.compact_y = session.compact_scroll_x = 0
+          session.sidebar_expanded = expanded
+          session.feature_page = session.feature_root_page = FeaturePage.HUB
+          session.appearance_page = "appearance"
+          session._snapshot_cache = None
+          session.confirmed_offroad = Mock(return_value=True)
+          session.favorites = session.view = Mock()
+          session.pip_warning = Mock()
+          session.settings_layer = None
+          session.notice = ""
+          offset = prefix + "_scroll"
+          setattr(session, offset, 0)
+          setattr(session, source, Mock(return_value=FeatureSettingsState(page=page, rows=rows)))
+          emit = Mock(wraps=session._emit)
+          session.input = ShellInput(session.profile, emit)
+          for start, end, expected in ((2000, 1700, 5), (2000, 1700, 10), (1800, 2100, 5), (1800, 2100, 0)):
+            before = getattr(session, offset)
+            session.press(ShellMode.SETTINGS, start, 200)
+            session.move(ShellMode.SETTINGS, end, 200)
+            self.assertEqual(getattr(session, offset), before)
+            self.assertTrue(session.release(ShellMode.SETTINGS, end, 200))
+            self.assertEqual(getattr(session, offset), expected)
+          self.assertEqual([call.args[0].action.kind for call in emit.call_args_list], ["scroll"] * 4)
+          changes = [("sidebar_expanded", not expanded), (offset, 5)]
+          if prefix in ("feature", "appearance"):
+            changes.append((prefix + "_page", "other"))
+          for attribute, changed in changes:
+            before = getattr(session, attribute)
+            session.press(ShellMode.SETTINGS, 2000, 200)
+            setattr(session, attribute, changed)
+            with patch.object(session, "snapshot") as build:
+              session.move(ShellMode.SETTINGS, 1700, 200)
+              self.assertFalse(session.release(ShellMode.SETTINGS, 1700, 200))
+              build.assert_not_called()
+            self.assertEqual(emit.call_count, 4)
+            setattr(session, attribute, before)
+
   def _adapter(self, owner=None):
     self._mono_now = NOW - 100_000_000
     adapter = runtime_app.RuntimeSnapshotAdapter(
