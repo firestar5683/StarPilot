@@ -1,6 +1,7 @@
 #pragma once
 
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/modes/toyota_aol.h"
 
 // Stock longitudinal
 #define TOYOTA_BASE_TX_MSGS \
@@ -128,6 +129,14 @@ static bool toyota_get_quality_flag_valid(const CANPacket_t *msg) {
 }
 
 static void toyota_optional_rx_hook(const CANPacket_t *msg) {
+  const bool aol_checksum_source = (msg->addr == 0x1D3U) || (msg->addr == 0x262U);
+  if (!aol_checksum_source || ((GET_LEN(msg) == 8U) && (toyota_get_checksum(msg) == toyota_compute_checksum(msg)))) {
+    toyota_aol_observe(msg);
+  } else if (toyota_aol_enabled && (msg->bus == 0U)) {
+    const unsigned int index = (msg->addr == 0x1D3U) ? 0U : 3U;
+    toyota_aol_seen[index] = false;
+  } else {
+  }
   if ((msg->bus == 2U) && (msg->addr == 0x344U) && (GET_LEN(msg) == 8U) &&
       (toyota_get_checksum(msg) == toyota_compute_checksum(msg))) {
     toyota_hold_camera_seen = true;
@@ -434,6 +443,7 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config toyota_init(uint16_t param) {
+  toyota_aol_configure(param);
   toyota_hold_main_on = false;
   toyota_hold_host_seen = false;
   toyota_hold_host_ts = 0U;

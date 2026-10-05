@@ -47,6 +47,7 @@ QUICK_TARGETS = (
   'opendbc_repo/opendbc/safety/tests/test_gm_camera_acc_pedal.py',
   'opendbc_repo/opendbc/car/tesla/tests/test_screen_button.py',
   'opendbc_repo/opendbc/safety/tests/test_tesla_screen_button.py',
+  'opendbc_repo/opendbc/safety/tests/test_toyota.py',
   'opendbc_repo/opendbc/car/hyundai/tests/test_ioniq6_stock_parser.py',
   'opendbc_repo/opendbc/car/hyundai/tests/test_ioniq6_engagement_messages.py',
   'opendbc_repo/opendbc/safety/tests/test_hyundai_ioniq6_long.py',
