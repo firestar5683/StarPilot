@@ -415,3 +415,136 @@ class TestToyotaSecOcSafety(TestToyotaSecOcSafetyBase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TestToyotaHighlanderAol(unittest.TestCase):
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.packer = common.CANPackerSafety("toyota_nodsu_pt_generated")
+
+  def tearDown(self):
+    self.safety.set_alternative_experience(0)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)
+
+  def init(self, word=73, ae=32):
+    self.safety.init_tests()
+    self.safety.set_alternative_experience(ae)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.toyota, word)
+    self.safety.set_timer(1_000_000)
+    self.safety.set_aol_test_heartbeat(True)
+
+  def rx(self, address, data, checksum=False):
+    data = bytearray(data)
+    if checksum:
+      data[-1] = ((address & 255) + (address >> 8) + len(data) + sum(data[:-1])) & 255
+    self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, 0, bytes(data))))
+
+  def physical(self, *, cruise=False, belt=True, main=True, gear=0, door=False, eps=1, brake=False, gas=False):
+    self.rx(0xAA, bytes([0x1A, 0x6F] * 4))
+    self.rx(0x260, bytes(8), True)
+    self.rx(0x1D2, bytes([(0 if gas else 16) | (32 if cruise else 0)]) + bytes(7), True)
+    self.rx(0x226, bytes(4) + bytes([32 if brake else 0]) + bytes(3))
+    self.rx(0x1D3, bytes([0, 128 if main else 0]) + bytes(6), True)
+    self.rx(0x3BC, bytes([0, gear]) + bytes(6))
+    self.rx(0x620, bytes(5) + bytes([4 if door else 0, 0, 0 if belt else 64]))
+    self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety("EPS_STATUS", 0, {"LKA_STATE": eps})))
+    self.safety.aol_set_host_request(3)
+
+  def test_main_lateral_independent_of_cruise_and_belt(self):
+    for ae in (32, 160):
+      self.init(ae=ae)
+      self.physical(belt=False)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+      self.physical(cruise=True, belt=False)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+      self.physical(cruise=True, belt=True)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+
+  def test_brake_and_gas_preserve_lateral_only(self):
+    for changes in ({"brake": True}, {"gas": True}):
+      self.init()
+      self.physical(cruise=True)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+      self.physical(cruise=True, **changes)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+
+  def test_physical_withdrawal_and_freshness(self):
+    for changes in ({'main': False}, {'gear': 32}, {'door': True}, {'eps': 17}, {'eps': 3}, {'eps': 9}):
+      with self.subTest(changes=changes):
+        self.init()
+        self.physical()
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.physical(**changes)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.init()
+    self.physical()
+    self.safety.set_timer(1_400_001)
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_supplemental_checksum_faults(self):
+    for address in (0x1D3, 0x262):
+      self.init()
+      self.physical()
+      self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, 0, bytes(8)))
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+      self.physical()
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+
+  def test_observed_slow_source_cadence_and_expiry(self):
+    self.init()
+    for tick in range(1201):
+      self.safety.set_timer(1_000_000 + tick * 10000)
+      self.safety.set_aol_test_heartbeat(True)
+      self.rx(0xAA, bytes([0x1A, 0x6F] * 4))
+      self.rx(0x260, bytes(8), True)
+      self.rx(0x1D2, bytes([16]) + bytes(7), True)
+      self.rx(0x226, bytes(8))
+      if tick % 3 == 0:
+        self.rx(0x1D3, bytes([0, 128]) + bytes(6), True)
+      if tick % 102 == 0:
+        self.rx(0x3BC, bytes(8))
+      if tick % 30 == 0:
+        self.rx(0x620, bytes(8))
+      if tick % 4 == 0:
+        self.rx(0x262, bytes(3) + bytes([2]) + bytes(4), True)
+      self.safety.aol_set_host_request(1)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    for address, expiry in ((0x1D3, 303031), (0x3BC, 10000000), (0x620, 3333334), (0x262, 400000)):
+      self.init()
+      self.physical()
+      for delta in (expiry, expiry + 1):
+        self.safety.set_timer(1_000_000 + delta)
+        self.safety.set_aol_test_heartbeat(True)
+        # Refresh every source except the source under test.
+        for other, data, crc in ((0xAA, bytes([0x1A, 0x6F] * 4), False), (0x260, bytes(8), True),
+                                 (0x1D2, bytes([16]) + bytes(7), True), (0x226, bytes(8), False),
+                                 (0x1D3, bytes([0, 128]) + bytes(6), True), (0x3BC, bytes(8), False),
+                                 (0x620, bytes(8), False), (0x262, bytes(3) + bytes([2]) + bytes(4), True)):
+          if other != address:
+            self.rx(other, data, crc)
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), int(delta == expiry))
+      self.physical()
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+
+  def test_selected_bus_and_malformed_source(self):
+    for address in (0x1D3, 0x3BC, 0x620, 0x262):
+      self.init()
+      self.physical()
+      self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, 1, bytes(7)))
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+      self.safety.safety_rx_hook(libsafety_py.make_CANPacket(address, 0, bytes(7)))
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_exact_profile_admission_and_reset(self):
+    for word, ae in ((585, 32), (72, 32), (329, 32), (1097, 32), (73, 33), (73, 288)):
+      self.init(word, ae)
+      self.physical()
+      self.assertEqual(self.safety.aol_get_request_mask(), 0)
+    self.init()
+    self.physical()
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.init()
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
