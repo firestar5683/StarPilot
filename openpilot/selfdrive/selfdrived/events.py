@@ -50,10 +50,11 @@ EVENT_NAME = {v: k for k, v in EventName.schema.enumerants.items()}
 
 
 class Events:
-  def __init__(self):
+  def __init__(self, event_rules: dict | None = None):
+    self.event_rules = EVENTS | event_rules if event_rules else EVENTS
     self.events: list[int] = []
     self.static_events: list[int] = []
-    self.event_counters = dict.fromkeys(EVENTS.keys(), 0)
+    self.event_counters = dict.fromkeys(self.event_rules.keys(), 0)
 
   @property
   def names(self) -> list[int]:
@@ -72,7 +73,7 @@ class Events:
     self.events = self.static_events.copy()
 
   def contains(self, event_type: str) -> bool:
-    return any(event_type in EVENTS.get(e, {}) for e in self.events)
+    return any(event_type in self.event_rules.get(e, {}) for e in self.events)
 
   def create_alerts(self, event_types: list[str], callback_args=None):
     if callback_args is None:
@@ -80,10 +81,10 @@ class Events:
 
     ret = []
     for e in self.events:
-      types = EVENTS[e].keys()
+      types = self.event_rules[e].keys()
       for et in event_types:
         if et in types:
-          alert = EVENTS[e][et]
+          alert = self.event_rules[e][et]
           if not isinstance(alert, Alert):
             alert = alert(*callback_args)
 
@@ -102,7 +103,7 @@ class Events:
     for event_name in self.events:
       event = log.OnroadEvent.new_message()
       event.name = event_name
-      for event_type in EVENTS.get(event_name, {}):
+      for event_type in self.event_rules.get(event_name, {}):
         setattr(event, event_type, True)
       ret.append(event)
     return ret
