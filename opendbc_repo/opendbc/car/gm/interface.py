@@ -13,7 +13,7 @@ from opendbc.car.gm.values import (CAR, CarControllerParams, EV_CAR, CAMERA_ACC_
                                    CanBus, GMSafetyFlags, GMFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, ASCM_INTERCEPT_CAR,
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
                                    ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS, is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
-                                   CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, CAMERA_ACC_PEDAL_CAR, camera_acc_pedal_profile,
+                                   CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
                                        VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
@@ -586,7 +586,7 @@ class CarInterface(CarInterfaceBase):
         ret.longitudinalTuning.kiBP = [0., 5., 15., 35.]
         ret.longitudinalTuning.kiV = [.20, .18, .13, .08]
 
-    if candidate in CAMERA_ACC_PEDAL_CAR and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
+    if candidate in ORDINARY_CAMERA_CAR and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
       pt = fingerprint.get(CanBus.POWERTRAIN, {})
       camera_length = fingerprint.get(CanBus.CAMERA, {}).get(0x320)
       removed = camera_length is None
@@ -605,6 +605,28 @@ class CarInterface(CarInterfaceBase):
                (True, False): (0xE102, 0xE112), (True, True): (0xE103, 0xE113)}
       ret.safetyConfigs[0].safetyParam = words[removed, f1][not ret.openpilotLongitudinalControl]
       ret.minEnableSpeed = -1. if ret.openpilotLongitudinalControl else (-1. if candidate in ALT_ACCS else 5 * CV.KPH_TO_MS)
+      ret.autoResumeSng = ret.openpilotLongitudinalControl
+      ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
+      ret.longitudinalTuning.kiV = [.09, .13, .19, .28]
+      ret.stopAccel = -.25
+
+    if candidate == CAR.CHEVROLET_VOLT_CAMERA and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
+      pt = fingerprint.get(CanBus.POWERTRAIN, {})
+      camera_length = fingerprint.get(CanBus.CAMERA, {}).get(0x320)
+      removed = camera_length is None
+      be = pt.get(0xBE) == 6
+      f1 = 0xBE not in pt and pt.get(0xF1) == 6
+      required = {0x184: 8, 0x34A: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7}
+      sources = all(pt.get(address) == length for address, length in required.items()) and (be or f1)
+      ret.flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if removed else 0) |
+                      (GMFlags.NO_ACCELERATOR_POS_MSG if f1 else 0))
+      ret.dashcamOnly = not sources or camera_length not in (None, 6)
+      ret.alphaLongitudinalAvailable = not ret.dashcamOnly and not is_release and pt.get(0x1F5) == 8
+      ret.openpilotLongitudinalControl = ret.alphaLongitudinalAvailable
+      ret.pcmCruise = not ret.openpilotLongitudinalControl
+      index = int(removed) * 2 + int(f1)
+      ret.safetyConfigs[0].safetyParam = (0xE200 if ret.openpilotLongitudinalControl else 0xE210) + index
+      ret.minEnableSpeed = -1.
       ret.autoResumeSng = ret.openpilotLongitudinalControl
       ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
       ret.longitudinalTuning.kiV = [.09, .13, .19, .28]

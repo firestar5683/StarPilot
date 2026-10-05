@@ -3,14 +3,16 @@ from openpilot.starpilot.saved_source import read_saved
 
 
 class CameraPedalPreference:
-  def __init__(self, cp, params):
+  def __init__(self, cp, params, *, maneuver=False):
     self.cp, self.params = cp, params
+    self.maneuver = maneuver
     self.read_ns = 0
     self.enabled = False
 
   def update(self, now_ns):
     profile = camera_acc_pedal_profile(self.cp)
-    if type(now_ns) is not int or now_ns <= 0 or profile is None or not profile.longitudinal:
+    if (type(now_ns) is not int or now_ns <= 0 or profile is None or not profile.longitudinal or
+        self.maneuver and not profile.volt):
       self.enabled = False
       return False
     if now_ns < self.read_ns:
@@ -25,6 +27,8 @@ class CameraPedalPreference:
         disabled, disable_valid = read_saved(self.params, 'DisableOpenpilotLongitudinal', 8)
         self.enabled = bool(master == (b'1', True) and safe_valid and safe in (None, b'0') and
                             disable_valid and disabled in (None, b'0'))
+        if self.maneuver:
+          self.enabled = self.enabled and read_saved(self.params, 'LongitudinalManeuverMode', 8) == (b'1', True)
       except (OSError, RuntimeError, TypeError, ValueError):
         self.enabled = False
     return self.enabled

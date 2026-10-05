@@ -367,7 +367,7 @@ class TestVoltAlternateBrake(unittest.TestCase):
       self.assertEqual(cp.safetyConfigs[0].safetyParam, expected_word)
       from opendbc.car.gm.aol import qualified_gm
       from opendbc.car.gm.lateral import lane_centering_supported
-      self.assertEqual(qualified_gm(cp), cp.carFingerprint != CAR.BUICK_LACROSSE)
+      self.assertTrue(qualified_gm(cp))
       self.assertEqual(lane_centering_supported(cp), cp.carFingerprint != CAR.BUICK_LACROSSE)
       ci = CarInterface(cp)
       preferences.configure_controller(ci)

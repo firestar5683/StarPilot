@@ -115,6 +115,8 @@ def configure_controller(CI, params):
   if controller is not None and camera_pedal is not None and camera_pedal.longitudinal:
     from openpilot.starpilot.car.gm.camera import CameraPedalPreference
     controller.camera_pedal_input = CameraPedalPreference(cp, params)
+    if camera_pedal.volt:
+      controller.longitudinal_maneuver_input = CameraPedalPreference(cp, params, maneuver=True)
   if controller is not None and is_bolt_pedal_profile(cp):
     from openpilot.starpilot.car.gm.paddle import PADDLE_IDS, PaddlePreference
     if cp.carFingerprint in PADDLE_IDS:

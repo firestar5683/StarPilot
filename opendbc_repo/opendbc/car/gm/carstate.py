@@ -112,6 +112,8 @@ class CarState(CarStateBase):
                 ("ECMEngineStatus", "CruiseMainOn", 300_000_000),
                 (*analog, 300_000_000), ("ECMPRDNL2", "PRNDL2", 100_000_000))
       self.camera_pedal_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in fields)
+      if self.camera_pedal_profile.volt:
+        self.camera_pedal_sources += ((pt_cp.ts_nanos["EBCMRegenPaddle"]["RegenPaddle"], 100_000_000),)
       rear = pt_cp.vl["EBCMWheelSpdRear"]
       self.camera_pedal_rear = (rear["RLWheelSpd"], rear["RRWheelSpd"])
       gear = pt_cp.vl["ECMPRDNL2"]
@@ -240,7 +242,9 @@ class CarState(CarStateBase):
         self.volt_sng_sources += ((cam_cp.ts_nanos["ASCMActiveCruiseControlStatus"]["ACCCruiseState"], 100_000_000),)
     if is_gm_auto_hold(self.CP):
       alternate = is_volt_gateway_alternate_brake(self.CP)
-      alternate_force = alternate or (is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG))
+      alternate_force = alternate or (is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG)) or (
+        self.camera_pedal_profile is not None and self.camera_pedal_profile.volt and
+        self.camera_pedal_profile.brake_source == BrakeSource.F1)
       c9 = self.CP.networkLocation == NetworkLocation.fwdCamera and (
         not gm_control_word(self.CP) & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM) or
         bool(gm_control_word(self.CP) & GMSafetyFlags.BRAKE_C9))
@@ -254,6 +258,8 @@ class CarState(CarStateBase):
       for name, _ in names:
         pt_cp.vl[name]
       self.gm_auto_hold_sources = tuple((pt_cp.ts_nanos[name][signal], 300_000_000) for name, signal in names)
+      if self.camera_pedal_profile is not None and self.camera_pedal_profile.volt:
+        self.gm_auto_hold_sources += ((pt_cp.ts_nanos["GAS_SENSOR"]["COUNTER_PEDAL"], 100_000_000),)
       # C9 is pressed authority, never analog force; missing-BE profiles retain minimum hold.
       absent_be = c9 and bool(gm_control_word(self.CP) & (GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.SDGM))
       if alternate_force:
@@ -483,7 +489,8 @@ class CarState(CarStateBase):
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True
 
-    hold_sources_current = (bool(self.gm_auto_hold_sources) and
+    hold_sources_current = ((self.camera_pedal_profile is None or not self.camera_pedal_profile.volt or self.pedal_sensor_healthy) and
+                            bool(self.gm_auto_hold_sources) and
                             all(0 < stamp <= pt_cp._last_update_nanos and pt_cp._last_update_nanos - stamp <= limit
                                 for stamp, limit in self.gm_auto_hold_sources))
     hold_config = self.gm_auto_hold_config
@@ -494,7 +501,9 @@ class CarState(CarStateBase):
                     hold_sources_current and not self.gm_auto_hold_unavailable and self.gm_auto_hold_forward and
                     ret.cruiseState.available and hold_stopped and
                     not ret.gasPressed and not ret.regenBraking)
-    if is_volt_one_pedal(self.CP) and int(self.CP.safetyConfigs[0].safetyParam) < 0xD110:
+    if is_volt_one_pedal(self.CP) and (
+        self.camera_pedal_profile is not None and self.camera_pedal_profile.volt and not self.camera_pedal_profile.auto_hold or
+        self.camera_pedal_profile is None and int(self.CP.safetyConfigs[0].safetyParam) < 0xD110):
       hold_current = hold_current and self.volt_one_pedal_mode and self.volt_one_pedal_stopped and not ret.brakePressed
     if not hold_current:
       self.gm_auto_hold_engaged = False

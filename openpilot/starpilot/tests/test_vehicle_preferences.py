@@ -91,6 +91,58 @@ class TestVehicleStartupPreferences(unittest.TestCase):
       VehicleStartupPreferences.read(self.params, enabled=True).finalize(cp)
       self.assertFalse(camera_acc_pedal_profile(cp).longitudinal)
 
+  def test_volt_interceptor_card_preserves_stop_preferences(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint
+    from opendbc.car.gm.values import CAR as GM_CAR, camera_acc_pedal_profile, is_gm_auto_hold, is_volt_one_pedal
+    self.params.put_bool('AlphaLongitudinalEnabled', False, block=True)
+    for camera, be, offset in ((True, True, 0), (True, False, 1), (False, True, 2), (False, False, 3)):
+      observed = fingerprint(camera=camera, be=be)
+      observed[0].update({0xBD: 7, 0x232: 8})
+      for hold, one_pedal, base in ((False, False, 0xE200), (True, False, 0xE220),
+                                   (False, True, 0xE240), (True, True, 0xE260)):
+        with self.subTest(camera=camera, be=be, hold=hold, one_pedal=one_pedal):
+          self.params.put_bool('GMAutoHold', hold, block=True)
+          self.params.put_bool('VoltOnePedalMode', one_pedal, block=True)
+          host, constructed, cp = self.start(GM_CAR.CHEVROLET_VOLT_CAMERA, observed=observed, key='LongPitch', requested=False,
+                                              capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam))
+          self.assertEqual(constructed, [base + offset])
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, base + offset)
+          self.assertTrue(camera_acc_pedal_profile(cp).volt)
+          self.assertEqual(is_gm_auto_hold(cp), hold or one_pedal)
+          self.assertEqual(is_volt_one_pedal(cp), one_pedal)
+          self.assertEqual(host.CI.CC.gm_auto_hold, hold)
+          self.assertEqual(host.CI.CC.volt_one_pedal, one_pedal)
+          self.assertFalse(host.CI.CC.longitudinal_maneuver_input.update(1_000_000_000))
+          self.assertTrue(host.CI.CC.camera_pedal_input.update(1_000_000_000))
+
+  def test_volt_interceptor_maneuver_is_live_opt_in_without_owner_rewrite(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint, params
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import CAR as GM_CAR
+    from openpilot.starpilot.car.gm.camera import CameraPedalPreference
+    observed = fingerprint()
+    observed[0].update({0xBD: 7, 0x232: 8})
+    cp = CarInterface.get_params(GM_CAR.CHEVROLET_VOLT_CAMERA, observed, [], False, False, False)
+    self.params.put_bool('OpenpilotEnabledToggle', True, block=True)
+    owner = CameraPedalPreference(cp, self.params, maneuver=True)
+    self.assertFalse(owner.update(1_000_000_000))
+    self.raw('LongitudinalManeuverMode', b'1')
+    self.assertFalse(owner.update(1_249_999_999))
+    self.assertTrue(owner.update(1_250_000_000))
+    self.raw('LongitudinalManeuverMode', b'0')
+    self.assertFalse(owner.update(1_500_000_000))
+    for index, raw in enumerate((b'', b'bad', b'1\n', None)):
+      self.raw('LongitudinalManeuverMode', raw)
+      self.assertFalse(owner.update(2_000_000_000 + index * 250_000_000))
+    self.raw('LongitudinalManeuverMode', b'1')
+    self.assertTrue(owner.update(3_000_000_000))
+    self.params.put_bool('DisableOpenpilotLongitudinal', True, block=True)
+    self.assertFalse(owner.update(3_250_000_000))
+    self.assertFalse(owner.update(3_200_000_000))
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE200)
+    self.params.put_bool('DisableOpenpilotLongitudinal', False, block=True)
+    self.assertFalse(CameraPedalPreference(params(), self.params, maneuver=True).update(4_000_000_000))
+
   def test_camera_interceptor_live_preferences_withdraw_without_mutating_owner(self):
     from opendbc.car.gm.tests.test_camera_acc_pedal import params
     from openpilot.starpilot.car.gm.camera import CameraPedalPreference

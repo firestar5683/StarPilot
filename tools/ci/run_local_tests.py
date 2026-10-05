@@ -42,6 +42,7 @@ QUICK_TARGETS = (
   'openpilot/starpilot/galaxy/tests/test_tesla_screen_settings.py',
   'opendbc_repo/opendbc/car/gm/tests/test_bolt_pedal.py',
   'opendbc_repo/opendbc/car/gm/tests/test_camera_acc_pedal.py',
+  'opendbc_repo/opendbc/car/gm/tests/test_volt_transitions.py',
   'opendbc_repo/opendbc/safety/tests/test_gm_bolt_pedal.py',
   'opendbc_repo/opendbc/safety/tests/test_gm_camera_acc_pedal.py',
   'opendbc_repo/opendbc/car/tesla/tests/test_screen_button.py',
