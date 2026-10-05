@@ -10,7 +10,7 @@ from openpilot.starpilot.lateral.torque_settings import (
   DOCUMENT_KEY, LEGACY_KEYS, FieldChoice, LegacyMode, PlatformProfile, bounds as torque_bounds,
   interpret_legacy, parse_document, replace_field, resolve_document, serialize_document,
 )
-from openpilot.starpilot.ui.feature_settings_state import FeaturePage, FeatureRow, FeatureSettingsRequest, TORQUE_CONFIRM_ACTIONS
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, TORQUE_CONFIRM_ACTIONS
 
 TORQUE_NUMBERS = LEGACY_KEYS
 
@@ -57,8 +57,7 @@ class TorqueFeature:
     bolt = capability is not None and capability[0] in BOLT_VEHICLES
     try:
       if capability is None:
-        return False, (FeatureRow("", "Torque profile", "Select a supported vehicle in Vehicle settings",
-                                  page=FeaturePage.VEHICLE, available=True),)
+        return False, (FeatureRow("", "Vehicle", "Select your vehicle in Vehicle settings to configure steering"),)
       fingerprint = capability[0]
       basis = (capability[5], capability[6], capability[7])
       if raw is None:
