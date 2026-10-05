@@ -1,7 +1,7 @@
 """Actual loopback HTTP auth with disposable credentials and injected time."""
 
 import http.client
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import json
 from pathlib import Path
 import socket
@@ -278,13 +278,27 @@ class AuthRuntimeTest(unittest.TestCase):
           held.append(socket.create_connection(('127.0.0.1', self.server.server_port), timeout=2))
         with condition:
           self.assertTrue(condition.wait_for(lambda: accepted == self.server.MAX_CONNECTIONS, timeout=2))
-        with socket.create_connection(('127.0.0.1', self.server.server_port), timeout=2) as overflow:
-          self.assertEqual(overflow.recv(1), b'')
+        admission_started = threading.Event()
+        process_request = self.server.process_request
+
+        def waiting_request(request, address):
+          admission_started.set()
+          process_request(request, address)
+
+        with mock.patch.object(self.server, 'process_request', side_effect=waiting_request), ThreadPoolExecutor(max_workers=1) as executor:
+          opening = executor.submit(self.request, '/js/boot.js')
+          self.assertTrue(admission_started.wait(timeout=2))
+          with self.assertRaises(FutureTimeoutError):
+            opening.result(timeout=0.05)
+          held.pop().close()
+          status, body, _ = opening.result(timeout=2)
+          self.assertEqual(status, 200)
+          self.assertIn(b'import("./app.js")', body)
       finally:
         for connection in held:
           connection.close()
       with condition:
-        self.assertTrue(condition.wait_for(lambda: finished == self.server.MAX_CONNECTIONS, timeout=2))
+        self.assertTrue(condition.wait_for(lambda: finished >= self.server.MAX_CONNECTIONS, timeout=2))
     self.assertEqual(self.request('/api/auth/session')[0], 200)
     with mock.patch.object(_LocalHTTPServer, 'REQUEST_TIMEOUT', 0.05):
       with socket.create_connection(('127.0.0.1', self.server.server_port), timeout=2) as idle:
