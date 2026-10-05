@@ -1039,21 +1039,31 @@ class StarShellSession:
       snapshot = replace(snapshot, settings=replace(snapshot.settings, availability=availability, nav_bar_alpha=0,
                                                    force_drive_label=label))
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.DRIVING_CONTROLS:
-      feature = replace(self.feature_snapshot(), scroll=self.feature_scroll, sidebar_expanded=self.sidebar_expanded,
+      feature = self.feature_snapshot()
+      self.feature_scroll = feature_scroll(self.feature_scroll, 0, len(feature.rows))
+      feature = replace(feature, scroll=self.feature_scroll, sidebar_expanded=self.sidebar_expanded,
                         parent_title="StarPilot" if self.feature_page == self.feature_root_page else feature_parent_title(self.feature_page))
       snapshot = replace(snapshot, features=feature)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SOUNDS:
-      sounds = replace(self.sounds_snapshot(), scroll=self.sounds_scroll, sidebar_expanded=self.sidebar_expanded)
+      sounds = self.sounds_snapshot()
+      self.sounds_scroll = feature_scroll(self.sounds_scroll, 0, len(sounds.rows))
+      sounds = replace(sounds, scroll=self.sounds_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, sounds=sounds)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.APPEARANCE:
-      appearance = replace(self.appearance_snapshot(), scroll=self.appearance_scroll, sidebar_expanded=self.sidebar_expanded,
+      appearance = self.appearance_snapshot()
+      self.appearance_scroll = feature_scroll(self.appearance_scroll, 0, len(appearance.rows))
+      appearance = replace(appearance, scroll=self.appearance_scroll, sidebar_expanded=self.sidebar_expanded,
                            parent_title="Appearance" if getattr(self, "appearance_page", "appearance") == "pip" else "StarPilot")
       snapshot = replace(snapshot, appearance=appearance)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SYSTEM:
-      display = replace(self.system_snapshot(), scroll=self.display_scroll, sidebar_expanded=self.sidebar_expanded)
+      display = self.system_snapshot()
+      self.display_scroll = feature_scroll(self.display_scroll, 0, len(display.rows))
+      display = replace(display, scroll=self.display_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, display=display)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.DRIVING_MODEL:
-      models = replace(self.model_snapshot(), scroll=self.model_scroll, sidebar_expanded=self.sidebar_expanded)
+      models = self.model_snapshot()
+      self.model_scroll = feature_scroll(self.model_scroll, 0, len(models.rows))
+      models = replace(models, scroll=self.model_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, models=models)
     self._snapshot_cache = (key, snapshot)
     return snapshot

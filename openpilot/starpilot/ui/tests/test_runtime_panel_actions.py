@@ -325,6 +325,43 @@ class TestRuntimePanelActions(unittest.TestCase):
       session._feature_details("features", FeatureUiAction("details", row))
       push.assert_not_called()
 
+  def test_large_feature_pages_clamp_saved_offset_when_rows_shrink(self):
+    from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
+    pages = ((Destination.DRIVING_CONTROLS, "features", "feature_scroll", "feature_snapshot", "_feature_ui"),
+             (Destination.SOUNDS, "sounds", "sounds_scroll", "sounds_snapshot", "_sounds_ui"),
+             (Destination.APPEARANCE, "appearance", "appearance_scroll", "appearance_snapshot", "_appearance_ui"),
+             (Destination.SYSTEM, "display", "display_scroll", "system_snapshot", "_display_ui"),
+             (Destination.DRIVING_MODEL, "models", "model_scroll", "model_snapshot", "_models_ui"))
+    rows = tuple(FeatureRow(str(i), str(i), "") for i in range(15))
+    for destination, field, offset, source, handler in pages:
+      with self.subTest(destination=destination):
+        session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+        session.profile = runtime_app.Profile.LARGE
+        session.adapter = self._adapter()
+        session._mode, session.selected = ShellMode.SETTINGS, destination
+        session.compact_y = session.compact_scroll_x = 0
+        session.sidebar_expanded = True
+        session.feature_page = session.feature_root_page = FeaturePage.HUB
+        session._snapshot_cache = None
+        setattr(session, offset, 10)
+        state = Mock()
+        setattr(session, source, state)
+        for row_count, expected in ((15, 10), (11, 10), (8, 5)):
+          state.return_value = FeatureSettingsState(rows=rows[:row_count])
+          self.ui.sm.frame += 1
+          shown = getattr(session.snapshot(ShellMode.SETTINGS), field)
+          self.assertEqual(shown.scroll, expected)
+          self.assertEqual(getattr(session, offset), expected)
+          self.assertTrue(shown.rows[shown.scroll:shown.scroll + 5])
+        getattr(session, handler)(FeatureUiAction("scroll", direction=-1))
+        self.assertEqual(getattr(session.snapshot(ShellMode.SETTINGS), field).scroll, 0)
+        getattr(session, handler)(FeatureUiAction("scroll", direction=1))
+        self.assertEqual(getattr(session.snapshot(ShellMode.SETTINGS), field).scroll, 5)
+        state.return_value = FeatureSettingsState()
+        self.ui.sm.frame += 1
+        self.assertEqual(getattr(session.snapshot(ShellMode.SETTINGS), field).scroll, 0)
+        self.assertEqual(getattr(session, offset), 0)
+
   def _adapter(self, owner=None):
     self._mono_now = NOW - 100_000_000
     adapter = runtime_app.RuntimeSnapshotAdapter(
