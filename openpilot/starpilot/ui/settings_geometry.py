@@ -123,6 +123,8 @@ def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str 
   left = 520 if sidebar_expanded else 20
   rect = rl.Rectangle(left, 12, 2140 - left, FEATURE_HEADER_HEIGHT)
   draw_hud_background(rect, ACCENT)
+  nodes, edges = constellation("settings-header", rect)
+  draw_constellation_nodes(nodes, edges, rect, ACCENT, 1.0)
   role, size = FontRole.MEDIUM, 35
   x = left + 34
   segments = []
