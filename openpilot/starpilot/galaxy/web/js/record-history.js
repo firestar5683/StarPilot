@@ -39,6 +39,8 @@ export function validLocalHistory(value) {
   })
 }
 
+const VIDEOS = ["fcamera", "dcamera", "ecamera", "qcamera"]
+export const hasVideo = (files) => VIDEOS.some((key) => files?.[key])
 export const availableFiles = (files) => FILES.filter((key) => files?.[key]).map((key) => LABELS[key])
 export const routeFiles = (route) => availableFiles(Object.fromEntries(FILES.map((key) =>
   [key, route.segments.some((segment) => segment.files[key])])))
@@ -107,7 +109,8 @@ export const LocalRecordingsPage = {
   components: { GxIconButton, GxNotice, RecordingActions, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ sortOrder: "newest", logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
-    details: null, detailsName: null, detailsStatus: "idle", detailsError: "", detailsGeneration: 0 }),
+    details: null, detailsName: null, detailsStatus: "idle", detailsError: "", detailsGeneration: 0,
+    deleting: null, deleteError: "" }),
   computed: {
     stats() { const routes = this.data?.routes || []; return { count: routes.length, minutes: routes.reduce((sum, route) => sum + route.segmentCount, 0), preserved: routes.filter(route => route.preserved).length } },
     playerCameras() { return ["fcamera", "ecamera", "dcamera", "qcamera"].filter(camera =>
@@ -132,6 +135,7 @@ export const LocalRecordingsPage = {
   watch: { mode(value) { if (value !== "local") { this.closePlayer(); this.closeDetails() } } },
   methods: {
     availableFiles,
+    hasVideo,
     quickRoadUrl,
     recordingUrl,
     driveVideoUrl: (routeId, camera) => LOCAL.test(routeId) && ["qcamera", "fcamera", "dcamera", "ecamera"].includes(camera) ?
@@ -149,6 +153,33 @@ export const LocalRecordingsPage = {
     logArchiveUrl(routeId) { return LOCAL.test(routeId) ? `./api/recordings/logs/${encodeURIComponent(routeId)}` : null },
     formatDuration(minutes) { return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} min` },
     formatBytes(bytes) { return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${((bytes || 0) / 1e6).toFixed(1)} MB` },
+    async deleteVideos(segment) {
+      if (this.mode !== "local" || this.status !== "ready" || this.deleting !== null || !hasVideo(segment?.files)) return
+      if (!window.confirm(`Delete the videos for segment ${segment.number}? Its logs stay on the device. This cannot be undone.`)) return
+      if (this.playing?.segments.some((item) => item.segmentName === segment.segmentName)) this.closePlayer()
+      this.deleting = segment.segmentName
+      this.deleteError = ""
+      const controller = new AbortController()
+      const deadline = setTimeout(() => controller.abort(), 10000)
+      try {
+        const response = await fetch("./api/recordings/delete-videos", { method: "POST", credentials: "same-origin", cache: "no-store",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segmentName: segment.segmentName }), signal: controller.signal })
+        if (response.status === 401) { this.feed.stop(); this.unauthorized(); return }
+        if (!response.ok && response.status !== 404) {
+          const body = await response.json().catch(() => null)
+          throw new Error(typeof body?.error === "string" ? body.error : "Videos could not be deleted.")
+        }
+      } catch (error) {
+        this.deleteError = controller.signal.aborted ? "Deleting videos timed out. Refresh to check what remains." :
+          error instanceof Error ? error.message : "Videos could not be deleted."
+      } finally {
+        clearTimeout(deadline)
+        this.deleting = null
+      }
+      if (this.deleteError) return
+      await this.feed.load()
+      if (this.logsRoute) this.logsRoute = this.routeCards.find(route => route.routeId === this.logsRoute.routeId) || null
+    },
     closeDetails() {
       this.detailsRequest?.abort()
       if (this.detailsTimer !== undefined) clearTimeout(this.detailsTimer)
@@ -286,7 +317,7 @@ export const LocalRecordingsPage = {
             <div class="gx-recordings__tabs" aria-label="Filter recordings"><button class="gx-btn gx-btn--tonal" :aria-pressed="!preservedOnly" @click="preservedOnly=false">All</button><button class="gx-btn gx-btn--tonal" :aria-pressed="preservedOnly" @click="preservedOnly=true">Preserved · {{ stats.preserved }}</button></div>
           </div>
         </section>
-        <p v-if="status === 'loading'" role="status" class="gx-card gx-message">Finding local drives…</p><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
+        <p v-if="status === 'loading'" role="status" class="gx-card gx-message">Finding local drives…</p><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice><GxNotice tone="danger" v-if="deleteError">{{ deleteError }}</GxNotice>
         <template v-if="status === 'ready' && data">
           <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local segments may exist.</p>
           <section class="gx-card gx-recordings__list">
@@ -308,6 +339,7 @@ export const LocalRecordingsPage = {
               <div class="gx-recordings__actions"><a v-for="filename in segment.logFiles || []" :key="filename" class="gx-btn gx-btn--tonal" :href="logUrl(segment.segmentName, filename)" :download="segment.segmentName + '-' + filename">{{ filename }}<span v-if="segment.logBytes?.[filename]"> · {{ formatBytes(segment.logBytes[filename]) }}</span><i class="bi bi-download"></i></a>
                 <button v-if="segment.files.rlog" class="gx-btn gx-btn--tonal" @click="openDetails(segment)">Details</button>
                 <button v-for="camera in ['fcamera', 'ecamera', 'dcamera', 'qcamera'].filter(camera => segment.files[camera])" :key="camera" class="gx-btn gx-btn--tonal" @click="openPlayer(logsRoute, segment, camera)">Play {{ cameraLabel(camera) }}</button>
+                <button v-if="hasVideo(segment.files)" type="button" class="gx-btn gx-btn--tonal gx-recordings__danger" :disabled="deleting !== null" @click="deleteVideos(segment)"><i aria-hidden="true" class="bi bi-trash"></i> {{ deleting === segment.segmentName ? 'Deleting…' : 'Delete videos' }}</button>
               </div>
             </li></ul>
           </section>

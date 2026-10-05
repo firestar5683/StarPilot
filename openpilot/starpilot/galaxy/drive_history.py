@@ -105,6 +105,9 @@ class DriveHistory:
     self.max_segments_per_route = max_segments_per_route
     self.max_segments = max_segments
 
+  def delete_videos(self, name: str) -> dict:
+    return delete_segment_videos(self.root, name)
+
   def snapshot(self) -> dict:
     result: dict = {'schemaVersion': 1, 'source': 'local', 'partialHistory': True,
                     'scanIncomplete': False, 'routes': []}
@@ -165,6 +168,58 @@ class DriveHistory:
       raise DriveHistoryUnavailable from None
     finally:
       os.close(root_fd)
+
+
+VIDEO_FILES = ('fcamera.hevc', 'dcamera.hevc', 'ecamera.hevc', 'qcamera.ts')
+
+
+class SegmentInUse(Exception):
+  pass
+
+
+class SegmentMissing(Exception):
+  pass
+
+
+def delete_segment_videos(root: Path, name: str) -> dict:
+  if type(name) is not str or '/' in name or SEGMENT_NAME.fullmatch(name) is None:
+    raise ValueError('Invalid segment identity')
+  try:
+    root_fd = os.open(root, DIR_FLAGS)
+  except FileNotFoundError:
+    raise SegmentMissing from None
+  try:
+    try:
+      fd = os.open(name, DIR_FLAGS, dir_fd=root_fd)
+    except FileNotFoundError:
+      raise SegmentMissing from None
+    try:
+      if not _same_directory(root_fd, None, root) or not _same_directory(fd, root_fd, name):
+        raise SegmentMissing
+      with os.scandir(fd) as entries:
+        names = []
+        for count, entry in enumerate(entries, 1):
+          if count > MAX_SEGMENT_ENTRIES or entry.name.endswith('.lock'):
+            raise SegmentInUse
+          names.append(entry.name)
+      deleted, freed = [], 0
+      for filename in VIDEO_FILES:
+        if filename not in names:
+          continue
+        try:
+          info = os.stat(filename, dir_fd=fd, follow_symlinks=False)
+          if not stat.S_ISREG(info.st_mode):
+            continue
+          os.unlink(filename, dir_fd=fd)
+        except FileNotFoundError:
+          continue
+        deleted.append(FILES[filename])
+        freed += info.st_size
+      return {'segmentName': name, 'deleted': deleted, 'freedBytes': freed}
+    finally:
+      os.close(fd)
+  finally:
+    os.close(root_fd)
 
 
 def recording_details(inventory: dict, dates: dict, dongle_id: str | None, *, device_ids=None) -> dict:
