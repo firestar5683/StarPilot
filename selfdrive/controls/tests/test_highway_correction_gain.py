@@ -3,15 +3,24 @@ import math
 import numpy as np
 
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.controls.lib.highway_correction_gain import HighwayCorrectionGain
+from openpilot.selfdrive.controls.lib.highway_correction_gain import HighwayCorrectionGain, predicted_lateral_accels
 
 
 _V_HWY = 31.0  # ~70 mph
 
 
-def _run(hcg, curvature, gain=0.7, v_ego=_V_HWY, lat_active=True, bypass=None):
+def _run(hcg, curvature, gain=0.7, v_ego=_V_HWY, lat_active=True, bypass=None, predicted=None):
   bypass = np.zeros(len(curvature), bool) if bypass is None else bypass
-  return np.array([hcg.update(float(c), v_ego, lat_active, gain, bool(b)) for c, b in zip(curvature, bypass, strict=True)])
+  predicted = [None] * len(curvature) if predicted is None else [tuple(p) for p in predicted]
+  return np.array([hcg.update(float(c), v_ego, lat_active, gain, bool(b), predicted=p)
+                   for c, b, p in zip(curvature, bypass, predicted, strict=True)])
+
+
+def _lead(lat, seconds):
+  # prediction of the lateral accel profile `seconds` ahead, at both horizons
+  n = int(seconds / DT_CTRL)
+  ahead = np.concatenate([lat[n:], np.full(n, lat[-1])])
+  return np.c_[ahead, ahead]
 
 
 def _weave(seconds=30.0, freq=0.6, lat_accel_amp=0.08, v_ego=_V_HWY, bias=0.0):
@@ -138,3 +147,56 @@ def test_gain_is_clamped():
   low = _run(HighwayCorrectionGain(), raw, gain=0.0)
   floor = _run(HighwayCorrectionGain(), raw, gain=0.1)
   np.testing.assert_allclose(low, floor, rtol=0, atol=1e-15)
+
+
+def test_predicted_lateral_accels():
+  t = 10.0 * (np.arange(33) / 32) ** 2
+  assert predicted_lateral_accels(t, np.full(33, 30.0), np.full(33, 0.02)) == (0.6, 0.6)
+  assert predicted_lateral_accels(t[:10], np.full(10, 30.0), np.full(10, 0.02)) is None  # horizon too short
+  assert predicted_lateral_accels(t, np.full(32, 30.0), np.full(33, 0.02)) is None
+
+
+def test_prediction_smooths_wobbly_curve_more():
+  # wobble big enough that the request-only gate backs off; the predicted path holds the curve level
+  raw = _weave(seconds=40.0, lat_accel_amp=0.2, bias=1.0 / _V_HWY ** 2)
+  pred = np.full((len(raw), 2), 1.0)
+  tail = slice(len(raw) // 2, None)
+  amp_in, _ = _fit_sine(raw[tail], 0.6)
+  without = _fit_sine(_run(HighwayCorrectionGain(), raw, gain=0.5)[tail], 0.6)[0] / amp_in
+  with_pred = _fit_sine(_run(HighwayCorrectionGain(), raw, gain=0.5, predicted=pred)[tail], 0.6)[0] / amp_in
+  assert 0.45 < with_pred < 0.62
+  assert with_pred < without - 0.1
+
+
+def test_prediction_releases_before_curve_exit():
+  t = np.arange(0.0, 30.0, DT_CTRL)
+  lat = np.interp(t, [0, 20, 22, 30], [1.2, 1.2, 0, 0])
+  raw = lat / _V_HWY ** 2
+  def excess(predicted):
+    hcg = HighwayCorrectionGain(); hcg.reset(raw[0])
+    out = _run(hcg, raw, gain=0.5, predicted=predicted)
+    return np.max(np.abs((out - raw)[t > 19.0])) * _V_HWY ** 2
+  with_pred = excess(_lead(lat, 1.5))
+  assert with_pred < 0.02
+  assert with_pred < excess(None)
+
+
+def test_prediction_releases_before_curve_entry():
+  t = np.arange(0.0, 20.0, DT_CTRL)
+  lat = np.interp(t, [0, 5, 7, 20], [0, 0, 1.2, 1.2])
+  raw = lat / _V_HWY ** 2
+  def shortfall(predicted):
+    out = _run(HighwayCorrectionGain(), raw, gain=0.5, predicted=predicted)
+    return np.max(np.abs(raw - out)) * _V_HWY ** 2
+  with_pred = shortfall(_lead(lat, 1.5))
+  assert with_pred < 0.02
+  assert with_pred < shortfall(None)
+
+
+def test_straights_smooth_the_same_with_prediction():
+  raw = _weave()
+  pred = np.zeros((len(raw), 2))
+  tail = slice(len(raw) // 2, None)
+  a = _fit_sine(_run(HighwayCorrectionGain(), raw, gain=0.7)[tail], 0.6)[0]
+  b = _fit_sine(_run(HighwayCorrectionGain(), raw, gain=0.7, predicted=pred)[tail], 0.6)[0]
+  assert math.isclose(a, b, rel_tol=0.02)

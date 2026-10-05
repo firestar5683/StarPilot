@@ -25,7 +25,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import (
   get_lateral_active,
   update_lateral_fault_latch,
 )
-from openpilot.selfdrive.controls.lib.highway_correction_gain import HighwayCorrectionGain
+from openpilot.selfdrive.controls.lib.highway_correction_gain import HighwayCorrectionGain, predicted_lateral_accels
 from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
@@ -762,10 +762,14 @@ class Controls:
       new_desired_curvature = self.gv70_highway_stabilizer.update(
         new_desired_curvature, CS.vEgo, stabilize_gv70, DT_CTRL)
 
+    predicted_lat_accels = None
+    if self.sm.all_checks(['modelV2']):
+      predicted_lat_accels = predicted_lateral_accels(model_v2.position.t, model_v2.velocity.x, model_v2.orientationRate.z)
     new_desired_curvature = self.highway_correction_gain.update(
       new_desired_curvature, CS.vEgo, CC.latActive, getattr(self.starpilot_toggles, "highway_correction_gain", 1.0),
       bypass=bool(CS.leftBlinker or CS.rightBlinker or CS.steeringPressed or self.turn_hold_curvature != 0.0 or
-                  model_v2.meta.laneChangeState != LaneChangeState.off or self.sm.valid['lateralManeuverPlan']))
+                  model_v2.meta.laneChangeState != LaneChangeState.off or self.sm.valid['lateralManeuverPlan']),
+      predicted=predicted_lat_accels)
 
     jerk_factor = 1.0
     if self.starpilot_toggles.lane_change_pace < 10:
