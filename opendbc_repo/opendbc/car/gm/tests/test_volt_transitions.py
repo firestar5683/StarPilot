@@ -23,6 +23,22 @@ def volt_camera_pedal_params(*, camera=True, be=True, pedal=True, gear=True, rel
   return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
 
 
+def volt_gateway_pedal_params(*, camera=True, be=True, pedal=True, gear=True, release=False, alpha=False, radar=True):
+  from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7, 0x232: 8})
+  fingerprint[0][0xBE if be else 0xF1] = 6
+  if pedal:
+    fingerprint[0][0x201] = 6
+  if gear:
+    fingerprint[0][0x1F5] = 8
+  if camera:
+    fingerprint[2].update({0x320: 6, 0x180: 4, 0x370: 6})
+  if radar:
+    fingerprint[1][RADAR_HEADER_MSG] = 8
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT, fingerprint, [], alpha, release, False)
+
+
 @dataclass(frozen=True)
 class Phase:
   name: str
@@ -307,6 +323,131 @@ class TestVoltCameraPedalProfiles(unittest.TestCase):
                          0xE210 + index)
         self.assertEqual(volt_camera_pedal_params(camera=camera, be=be, gear=False).safetyConfigs[0].safetyParam,
                          0xE210 + index)
+
+
+class TestVoltGatewayPedalProfiles(unittest.TestCase):
+  def test_actual_factory_preserves_gateway_tune_and_composed_owners(self):
+    from opendbc.car.gm.values import (camera_acc_pedal_profile, apply_gm_auto_hold, apply_volt_one_pedal,
+                                      is_gm_auto_hold, is_volt_one_pedal, is_volt_gateway_longitudinal, CarControllerParams)
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.camera import policy_for
+    for camera in (True, False):
+      for be in (True, False):
+        index = int(not camera) * 2 + int(not be)
+        for hold, one, start in ((False, False, 0xE300), (True, False, 0xE320),
+                                 (False, True, 0xE340), (True, True, 0xE360)):
+          with self.subTest(camera=camera, be=be, hold=hold, one=one):
+            cp = volt_gateway_pedal_params(camera=camera, be=be)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE300 + index)
+            apply_gm_auto_hold(cp, hold)
+            apply_volt_one_pedal(cp, one, hold)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, start + index)
+            profile = camera_acc_pedal_profile(cp)
+            self.assertEqual(profile.topology, "gateway")
+            self.assertTrue(is_volt_gateway_longitudinal(cp))
+            self.assertEqual(is_gm_auto_hold(cp), hold or one)
+            self.assertEqual(is_volt_one_pedal(cp), one)
+            self.assertEqual(list(cp.longitudinalTuning.kiBP), [5., 35.])
+            self.assertEqual(list(cp.longitudinalTuning.kiV), [.5, .5])
+            policy = policy_for(cp)
+            self.assertEqual((policy.kp, policy.starting_speed, policy.stopping_decel_rate), (0., .75, 3.))
+            self.assertEqual(policy.feedforward(1., 12., 0.), 1.)
+            self.assertEqual(CarInterface.get_pid_accel_limits(cp, 0., 0.),
+                             (CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+            params = CarControllerParams(cp)
+            self.assertEqual((params.MAX_GAS, params.INACTIVE_REGEN), (2041., -650.))
+            prepare_disable_longitudinal(cp, True)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE310 + index)
+            self.assertFalse(cp.openpilotLongitudinalControl or cp.pcmCruise or cp.autoResumeSng)
+            apply_gm_auto_hold(cp, True)
+            apply_volt_one_pedal(cp, True, True)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE310 + index)
+        for options in ({"release": True}, {"gear": False}):
+          cp = volt_gateway_pedal_params(camera=camera, be=be, **options)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE310 + index)
+        self.assertTrue(volt_gateway_pedal_params(camera=camera, be=be, radar=False).dashcamOnly)
+
+
+  def test_actual_parser_preserves_final_gateway_brake_sources(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm import gmcan
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    for camera in (True, False):
+      for be in (True, False):
+        with self.subTest(camera=camera, be=be):
+          from opendbc.car.gm.values import apply_gm_auto_hold
+          cp = volt_gateway_pedal_params(camera=camera, be=be)
+          apply_gm_auto_hold(cp, True)
+          ci = CarInterface(cp)
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          for tick in range(64):
+            pressed = tick >= 48
+            frames = [frame for frame in pt_frames(packer, counter=tick % 4, acc_cruise=2)
+                      if frame[0] not in (0xBE, 0xF1, 0xC9)]
+            analog = 0 if pressed else 8
+            if not be:
+              analog = 6 if pressed else 5
+            frames += [packer.make_can_msg('ECMEngineStatus', 0,
+                       {'CruiseMainOn': 1, 'BrakePressed': pressed if be else not pressed}),
+                       packer.make_can_msg('ECMAcceleratorPos' if be else 'EBCMBrakePedalPosition', 0,
+                       {'BrakePedalPos': analog} if be else {'BrakePedalPosition': analog}),
+                       packer.make_can_msg('EBCMRegenPaddle', 0, {})]
+            if camera:
+              frames += [packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                         packer.make_can_msg('AEBCmd', 2, {}),
+                         packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {})]
+            if tick % 2 == 0:
+              sensor = bytearray.fromhex('0279012a0000')
+              sensor[4] = tick // 2 % 16
+              sensor[5] = gmcan.pedal_crc(sensor)
+              frames.append((0x201, bytes(sensor), 0))
+            state = ci.update([(1_000_000_000 + tick * 10_000_000, frames)])
+            if tick >= 40:
+              self.assertTrue(state.canValid)
+              self.assertTrue(state.cruiseState.available)
+              self.assertEqual(state.brakePressed, pressed)
+              self.assertAlmostEqual(ci.CS.gm_auto_hold_brake, analog if be else analog / 208, places=6)
+
+
+  def test_actual_stock_parser_and_cancel_use_fresh_neutral_counter(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm import gmcan
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    from opendbc.car.gm.values import CruiseButtons
+    for camera in (True, False):
+      for be in (True, False):
+        with self.subTest(camera=camera, be=be):
+          cp = volt_gateway_pedal_params(camera=camera, be=be, release=True)
+          ci = CarInterface(cp)
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          command = structs.CarControl()
+          command.cruiseControl.cancel = True
+          cancellations = []
+          for tick in range(72):
+            now = 1_000_000_000 + tick * 10_000_000
+            counter = tick % 4 if tick < 52 or tick >= 64 else 3
+            frames = [frame for frame in pt_frames(packer, counter=counter, acc_cruise=2 if tick < 64 else 0)
+                      if frame[0] not in (0xBE, 0xF1, 0x1E1)]
+            frames += [gmcan.create_buttons(packer, 0, counter, CruiseButtons.UNPRESS),
+                       packer.make_can_msg('ECMAcceleratorPos' if be else 'EBCMBrakePedalPosition', 0,
+                                           {'BrakePedalPos': 0} if be else {'BrakePedalPosition': 0}),
+                       packer.make_can_msg('EBCMRegenPaddle', 0, {})]
+            if camera:
+              frames += [packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                         packer.make_can_msg('AEBCmd', 2, {}),
+                         packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {})]
+            state = ci.update([(now, frames)])
+            _, sends = ci.apply(command.as_reader(), now)
+            buttons = [frame for frame in sends if frame[0] == 0x1E1]
+            if tick >= 40:
+              self.assertTrue(state.canValid)
+              self.assertTrue(all(frame[2] == 2 for frame in buttons))
+              if tick >= 62:
+                self.assertEqual(buttons, [])
+              cancellations.extend(buttons)
+          self.assertTrue(cancellations)
 
 
 class TestVoltCameraLaunchCurrentSchema(unittest.TestCase):

@@ -20,10 +20,12 @@ def prepare_disable_longitudinal(cp, requested: bool) -> None:
   if requested and profile is not None:
     stock_words = {0xE100: 0xE110, 0xE101: 0xE111, 0xE102: 0xE112, 0xE103: 0xE113}
     if profile.volt:
-      stock_words.update({start + index: 0xE210 + index for start in (0xE200, 0xE220, 0xE240, 0xE260) for index in range(4)})
+      base = 0xE310 if profile.topology == "gateway" else 0xE210
+      starts = (0xE300, 0xE320, 0xE340, 0xE360) if profile.topology == "gateway" else (0xE200, 0xE220, 0xE240, 0xE260)
+      stock_words.update({start + index: base + index for start in starts for index in range(4)})
     cp.safetyConfigs[0].safetyParam = stock_words.get(int(cp.safetyConfigs[0].safetyParam), int(cp.safetyConfigs[0].safetyParam))
     cp.openpilotLongitudinalControl = False
-    cp.pcmCruise = True
+    cp.pcmCruise = profile.topology != "gateway"
     cp.autoResumeSng = False
     cp.minEnableSpeed = -1. if profile.volt or cp.carFingerprint in ALT_ACCS else 5. / 3.6
     return

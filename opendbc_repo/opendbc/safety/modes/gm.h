@@ -234,9 +234,9 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       if (!gm_volt_cc_main || !gm_volt_cc_active) { controls_allowed = false; }
     }
 
-    if (gm_volt_camera_removed) {
+    if (gm_volt_camera_removed || (gm_camera_gateway && !gm_camera_pedal_long)) {
       const uint32_t now = microsecond_timer_get();
-      if (msg->addr == 0x1E1U) {
+      if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) {
         const uint8_t counter = msg->data[4] & 0x3U;
         const uint16_t neutral_checksum = 0xFFU + (counter * 0x4EFU);
         const bool neutral = (((msg->data[5] >> 4) & 0x7U) == 1U) &&
@@ -256,10 +256,10 @@ static void gm_rx_hook(const CANPacket_t *msg) {
         }
         gm_volt_removed_counter = counter;
         gm_volt_removed_button_seen = true;
-      } else if (msg_matches(msg, 0xC9U, 0U)) {
+      } else if (msg_matches(msg, 0xC9U, 0U, 8U)) {
         gm_volt_removed_main = GET_BIT(msg, 29U);
         gm_volt_removed_main_us = now;
-      } else if (msg->addr == 0x1C4U) {
+      } else if ((msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
         gm_volt_removed_pcm = (msg->data[1] >> 5) != 0U;
         gm_volt_removed_pcm_us = now;
         if (!gm_volt_removed_pcm) { gm_volt_removed_credit = false; }
@@ -310,7 +310,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
 
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
-    if ((msg_matches(msg, 0xBEU, 0U)) && (((gm_hw == GM_ASCM) && !gm_volt_gateway_alt_brake) || (gm_ascm_intercept && !gm_ascm_brake_c9) ||
+    if ((msg_matches(msg, 0xBEU, 0U)) && !gm_camera_gateway && (((gm_hw == GM_ASCM) && !gm_volt_gateway_alt_brake) || (gm_ascm_intercept && !gm_ascm_brake_c9) ||
                                    (gm_sdgm && !gm_sdgm_brake_c9))) {
       brake_pressed = msg->data[1] >= 8U;
     }
@@ -319,7 +319,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       brake_pressed = msg->data[1] >= 6U;
     }
 
-    if ((msg_matches(msg, 0xC9U, 0U)) && (gm_hw == GM_CAM) && (!gm_ascm_intercept || gm_ascm_brake_c9) &&
+    if ((msg_matches(msg, 0xC9U, 0U)) && (((gm_hw == GM_CAM) && !gm_camera_gateway) || (gm_camera_gateway && !gm_camera_pedal_f1)) && (!gm_ascm_intercept || gm_ascm_brake_c9) &&
         (!gm_sdgm || gm_sdgm_brake_c9)) {
       brake_pressed = GET_BIT(msg, 40U);
       if (gm_pedal_acc) {
@@ -664,7 +664,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (gm_volt_camera_removed && (msg->addr == 0x1E1U)) {
+  if ((gm_volt_camera_removed || (gm_camera_gateway && !gm_camera_pedal_long)) && (msg->addr == 0x1E1U)) {
     const uint32_t now = microsecond_timer_get();
     const uint8_t counter = msg->data[4] & 0x3U;
     const uint16_t checksum = 0xFFU + (counter * 0x4EFU) - (5U << 4U);
@@ -695,7 +695,9 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
 static bool gm_fwd_hook(int bus_num, int addr) {
   // SDGM replaces the PT PSCM status at the camera. Frozen SDGM topology
   // blocks this direction without treating camera PSCM traffic as a relay fault.
-  return (gm_cc_pedal_silverado && (bus_num == 0) && ((addr == 0x184) || (addr == 0x3D1))) ||
+  return (gm_camera_gateway && gm_camera_gateway_removed && (bus_num == 0) && (addr == 0x184)) ||
+         (gm_camera_gateway && gm_camera_pedal_long && (bus_num == 2) && ((addr == 0x180) || (addr == 0x315) || (addr == 0x2CB) || (addr == 0x370) || (addr == 0x2CD))) ||
+         (gm_cc_pedal_silverado && (bus_num == 0) && ((addr == 0x184) || (addr == 0x3D1))) ||
          (gm_cc_pedal_silverado && (bus_num == 2) && ((addr == 0x180) || (addr == 0x370))) ||
          (gm_ordinary_camera_removed && (bus_num == 0) && (addr == 0x184)) ||
          (gm_ordinary_camera_removed && (bus_num == 2) && ((addr == 0x180) ||
@@ -760,10 +762,11 @@ static safety_config gm_init(uint16_t safety_param) {
 #endif
 #ifdef ALLOW_DEBUG
   if (gm_camera_volt && gm_camera_pedal_long && hold_config.enabled) {
-    hold_config.c9_brake = true;
+    hold_config.c9_brake = !gm_camera_gateway || !gm_camera_pedal_f1;
     hold_config.alternate = gm_camera_pedal_f1;
     hold_config.analog_required = true;
     hold_config.extended_be = false;
+    if (gm_camera_gateway) { hold_config.tx_bus = 0U; }
   }
 #endif
   gm_hold_reset(&hold_config);
@@ -1475,6 +1478,7 @@ static safety_config gm_init(uint16_t safety_param) {
     for (uint8_t i = 0U; i < 10U; i++) { gm_extended_rx_checks[i] = (RxCheck){0}; }
     for (uint8_t i = 0U; i < 8U; i++) { gm_extended_rx_checks[i] = gm_camera_extended_rx_template[i]; }
     gm_extended_rx_checks[3].msg[0].addr = gm_camera_pedal_f1 ? 0xF1U : 0xBEU;
+    if (gm_camera_gateway) { gm_extended_rx_checks[7].msg[0].frequency = 10U; }
     SET_RX_CHECKS(gm_extended_rx_checks, ret);
     ret.rx_checks_len -= 2;
     if (gm_camera_volt) {
@@ -1497,7 +1501,7 @@ static safety_config gm_init(uint16_t safety_param) {
       {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},
       {0x184, 2, 8, .check_relay = false}, {0x200, 0, 6, .check_relay = false},
     };
-    if (gm_ordinary_camera_removed || gm_volt_camera_removed) { SET_TX_MSGS(GM_CAMERA_PEDAL_REMOVED_TX, ret); }
+    if (gm_ordinary_camera_removed || gm_volt_camera_removed || gm_camera_gateway_removed) { SET_TX_MSGS(GM_CAMERA_PEDAL_REMOVED_TX, ret); }
     else { SET_TX_MSGS(GM_CAMERA_PEDAL_PRESENT_TX, ret); }
   }
 #endif
@@ -1515,8 +1519,17 @@ static safety_config gm_init(uint16_t safety_param) {
     }
   }
 
+  if (gm_camera_gateway && !gm_camera_pedal_long) {
+    static const CanMsg GM_GATEWAY_PEDAL_STOCK_TX[] = {
+      {0x180, 0, 4, .check_relay = true}, {0x370, 0, 6, .check_relay = true},
+      {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},
+      {0x184, 2, 8, .check_relay = true}, {0x1E1, 2, 7, .check_relay = false},
+    };
+    SET_TX_MSGS(GM_GATEWAY_PEDAL_STOCK_TX, ret);
+  }
+
   // ASCM does not forward any messages
-  if (gm_hw == GM_ASCM) {
+  if ((gm_hw == GM_ASCM) && !gm_camera_gateway) {
     ret.disable_forwarding = true;
   }
   return ret;

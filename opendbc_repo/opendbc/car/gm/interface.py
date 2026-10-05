@@ -110,6 +110,8 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     profile = camera_acc_pedal_profile(CP)
+    if profile is not None and profile.longitudinal and profile.topology == "gateway":
+      return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
     if profile is not None and profile.longitudinal:
       return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
               float(np.interp(current_speed, [0., 1.5, 4., 8., 15.], [.60, .85, 1.15, 1.60, 2.])))
@@ -609,6 +611,27 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
       ret.longitudinalTuning.kiV = [.09, .13, .19, .28]
       ret.stopAccel = -.25
+
+    if candidate == CAR.CHEVROLET_VOLT and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
+      pt = fingerprint.get(CanBus.POWERTRAIN, {})
+      camera_length = fingerprint.get(CanBus.CAMERA, {}).get(0x320)
+      removed = camera_length is None
+      be = pt.get(0xBE) == 6
+      f1 = 0xBE not in pt and pt.get(0xF1) == 6
+      required = {0x184: 8, 0x34A: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7}
+      sources = all(pt.get(address) == length for address, length in required.items()) and (be or f1)
+      ret.flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if removed else 0) |
+                      (GMFlags.NO_ACCELERATOR_POS_MSG if f1 else 0)) | (int(ret.flags) & int(GMFlags.HAS_BSM))
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.dashcamOnly = ret.dashcamOnly or not sources or camera_length not in (None, 6)
+      ret.alphaLongitudinalAvailable = not ret.dashcamOnly and not is_release and pt.get(0x1F5) == 8
+      ret.openpilotLongitudinalControl = ret.alphaLongitudinalAvailable
+      ret.pcmCruise = False
+      index = int(removed) * 2 + int(f1)
+      ret.safetyConfigs[0].safetyParam = (0xE300 if ret.openpilotLongitudinalControl else 0xE310) + index
+      ret.minEnableSpeed = -1.
+      ret.autoResumeSng = ret.openpilotLongitudinalControl
+      ret.longitudinalTuning.kiBP, ret.longitudinalTuning.kiV = [5., 35.], [.5, .5]
 
     if candidate == CAR.CHEVROLET_VOLT_CAMERA and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
       pt = fingerprint.get(CanBus.POWERTRAIN, {})
