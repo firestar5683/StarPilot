@@ -42,6 +42,11 @@ function agnos_init {
 SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddcc", MODE="0666"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddee", MODE="0666"
 EOF
+      # Batch AGNOS GPIO permissions so coldplug does not block Panda USB events.
+      if [ -f /etc/udev/rules.d/99-gpio.rules ] && ! mountpoint -q /etc/udev/rules.d/99-gpio.rules; then
+        sed "s/{} \\\\;/{} +/g" /etc/udev/rules.d/99-gpio.rules > /run/udev/rules.d/99-gpio.rules
+        mount --bind /run/udev/rules.d/99-gpio.rules /etc/udev/rules.d/99-gpio.rules
+      fi
       udevadm control --reload-rules
       for product in ddcc ddee; do
         udevadm trigger --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct="$product"
