@@ -388,7 +388,7 @@ class CarController(CarControllerBase):
     if self.bolt_cc_profile:
       stock_steer_ready = (bolt_sources_fresh and CS.out.canValid and not CS.out.canTimeout and
                           CS.out.cruiseState.available and (aol_lateral or bool(bolt_sources[1][1][4] & 128)) and
-                          CS.out.gearShifter == structs.CarState.GearShifter.drive and
+                          CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low) and
                           (aol_lateral or not CS.out.brakePressed and not CS.out.regenBraking))
     if self.ordinary_camera_removed:
       stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(CS.ordinary_removed_sources) == 6 and
@@ -474,8 +474,6 @@ class CarController(CarControllerBase):
         self.pedal_steady = self.conventional_pedal_command.steady
         self.pedal_active_last = self.conventional_pedal_command.active_last
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 4))
-
-
     elif self.CP.flags & GMFlags.PEDAL_LONG.value and self.CP.openpilotLongitudinalControl:
       active, stock_ownership_clear, in_regen_gear = self.bolt_pedal_admission(CC, CS, now_nanos)
       if not active:
@@ -740,7 +738,7 @@ class CarController(CarControllerBase):
         if self.CP.openpilotLongitudinalControl:
           request = owner.update(now_nanos, CS.out.vEgo, CS.out.cruiseState.speed, actuators.accel,
                                  enabled=CC.enabled, long_active=CC.longActive,
-                                 drive=CS.out.gearShifter == structs.CarState.GearShifter.drive,
+                                 drive=CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low),
                                  brake=CS.out.brakePressed or CS.out.regenBraking, gas=CS.out.gasPressed,
                                  sources_current=bolt_sources_fresh and CS.out.canValid and not CS.out.canTimeout,
                                  metric=self.bolt_cc_metric, hud_speed=hud_v_cruise)

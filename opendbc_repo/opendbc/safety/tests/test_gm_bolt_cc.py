@@ -21,11 +21,11 @@ def packet(address, data, us=1_000_000, *, transmit=False, bus=0):
   return safety.safety_tx_hook(msg) if transmit else safety.safety_rx_hook(msg)
 
 
-def ready(word, *, gas=False):
+def ready(word, *, gas=False, gear=4, manual=False):
   setup(word)
   wheel = int(20 * 3.6 / 0.0311)
   frames = [
-    (0x1F5, bytes((0, 0, 0, 4, 0, 0, 0, 0))),
+    (0x1F5, bytes((0, 0, 0, gear, 0, 2 * int(manual), 0, 0))),
     (0xC9, bytes(8)),
     (0xBD, bytes(7)),
     (0x1C4, bytes((0, 0, 0, 0, 0, int(gas), 0, 0))),
@@ -40,6 +40,60 @@ def ready(word, *, gas=False):
 
 
 class TestGmBoltCcSafety(unittest.TestCase):
+  def test_forward_gear_transitions_retain_permission_but_revocation_requires_button_edge(self):
+    for word in (*WORDS, 0xC140, 0xC141):
+      for denied_gear, manual in ((0, False), (1, False), (2, False), (3, False),
+                                  (5, False), (7, False), (4, True), (6, True)):
+        with self.subTest(word=word, denied_gear=denied_gear, manual=manual):
+          ready(word, gear=6)
+          safety = libsafety_py.libsafety
+          self.assertTrue(safety.get_controls_allowed())
+          for step, gear in enumerate((4, 6), start=1):
+            packet(0x1F5, bytes((0, 0, 0, gear, 0, 0, 0, 0)), 1_000_000 + step * 1000)
+            self.assertTrue(safety.get_controls_allowed())
+          packet(0x1F5, bytes((0, 0, 0, denied_gear, 0, 2 * int(manual), 0, 0)), 1_003_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1F5, bytes((0, 0, 0, 6, 0, 0, 0, 0)), 1_004_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1E1, button_bytes(1, 1), 1_005_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1E1, button_bytes(3, 2), 1_006_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1E1, button_bytes(1, 3), 1_007_000)
+          self.assertTrue(safety.get_controls_allowed())
+
+  def test_low_gear_physical_cruise_and_set_rearm_for_every_bolt_profile(self):
+    for word in (*WORDS, 0xC140, 0xC141):
+      for gear in (4, 6):
+        with self.subTest(word=word, gear=gear):
+          ready(word, gear=gear)
+          safety = libsafety_py.libsafety
+          self.assertTrue(safety.get_controls_allowed())
+          self.assertTrue(packet(0x180, bytes((8, 1, 0, 0)), 1_001_000, transmit=True))
+          packet(0xC9, bytes((0, 0, 0, 0, 0, 1, 0, 0)), 1_002_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0xC9, bytes(8), 1_003_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1E1, button_bytes(3, 1), 1_004_000)
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1E1, button_bytes(1, 2), 1_005_000)
+          self.assertTrue(safety.get_controls_allowed())
+          packet(0x1F5, bytes((0, 0, 0, 2, 0, 0, 0, 0)), 1_006_000)
+          self.assertFalse(safety.get_controls_allowed())
+
+  def test_non_forward_and_manual_gears_cannot_grant_bolt_permission(self):
+    for word in (*WORDS, 0xC140, 0xC141):
+      for gear, manual in ((0, False), (1, False), (2, False), (3, False),
+                           (5, False), (7, False), (4, True), (6, True)):
+        with self.subTest(word=word, gear=gear, manual=manual):
+          ready(word, gear=gear, manual=manual)
+          safety = libsafety_py.libsafety
+          self.assertFalse(safety.get_controls_allowed())
+          packet(0x1E1, button_bytes(3, 1), 1_001_000)
+          packet(0x1E1, button_bytes(1, 2), 1_002_000)
+          self.assertFalse(safety.get_controls_allowed())
+          self.assertFalse(packet(0x180, bytes((8, 1, 0, 0)), 1_003_000, transmit=True))
+
   def test_pcm_rising_cannot_override_held_park_brake_or_paddle(self):
     for word in WORDS:
       for source, blocked, clear in (
