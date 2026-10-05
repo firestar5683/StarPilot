@@ -62,3 +62,67 @@ def test_catalog_gpu_fallback_or_stale_output_stays_failed(big, valid, alive, ag
   with patch('openpilot.selfdrive.ui.ui_state.time.monotonic_ns', return_value=1_000_000_000 + age):
     UIState._update_chestnut_state(state)
   assert state.chestnut_state == ChestnutState.FAILED
+
+
+@pytest.mark.parametrize('detected,installed,checking,expected', [
+  (True, True, False, ChestnutState.READY),
+  (True, False, True, ChestnutState.LOADING),
+  (True, False, False, ChestnutState.UNCOMPILED),
+  (False, True, False, ChestnutState.DISCONNECTED),
+])
+def test_offroad_status_uses_selected_download(detected, installed, checking, expected):
+  sm = Mock()
+  sm.__getitem__ = Mock(return_value=SimpleNamespace(chestnutPresent=detected))
+  state = Mock(spec=UIState, sm=sm, started=False, chestnut_compiled=installed, chestnut_checking=checking)
+  UIState._update_chestnut_state(state)
+  assert state.chestnut_state == expected
+
+
+def test_offroad_selection_rechecks_without_a_ui_restart():
+  params = Mock()
+  params.get.return_value = None
+  params.get_bool.return_value = False
+  artifacts = Mock()
+  artifacts.selected_gpu_status.side_effect = [(False, True), (True, False), (False, False)]
+  state = Mock(spec=UIState, params=params, started=False, _gpu_artifacts=artifacts, _gpu_artifacts_at=None,
+               usb_connected=False)
+  with patch('openpilot.selfdrive.ui.ui_state.get_cache', return_value=None), \
+       patch('openpilot.selfdrive.ui.ui_state.cable_connected', return_value=False), \
+       patch('openpilot.selfdrive.ui.ui_state.time.monotonic', side_effect=[1., 1.2, 2., 3., 4.]):
+    UIState.update_params(state)
+    assert state.chestnut_checking and not state.chestnut_compiled
+    UIState.update_params(state)
+    artifacts.selected_gpu_status.assert_called_once()
+    UIState.update_params(state)
+    assert state.chestnut_compiled and not state.chestnut_checking
+    UIState.update_params(state)
+    assert not state.chestnut_compiled and not state.chestnut_checking
+    state.started = True
+    UIState.update_params(state)
+    assert artifacts.selected_gpu_status.call_count == 3
+
+
+@pytest.mark.parametrize('state,small_engaged,texture', [
+  (ChestnutState.LOADING, False, 'white'),
+  (ChestnutState.ACTIVE, False, 'green'),
+  (ChestnutState.FAILED, False, 'orange'),
+  (ChestnutState.FAILED, True, 'crossed'),
+  (ChestnutState.DISCONNECTED, True, 'crossed'),
+  (ChestnutState.ACTIVE, True, 'green'),
+])
+def test_native_gpu_icons_render_for_loading_active_and_small_engagement(state, small_engaged, texture):
+  from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
+
+  icons = {key: SimpleNamespace(name=key, width=60, height=44) for key in ('white', 'green', 'orange', 'crossed')}
+  renderer = Mock(spec=HudRenderer, _small_model_engaged=small_engaged, _chestnut_icon=None,
+                  _txt_chestnut=icons['white'], _txt_chestnut_green=icons['green'],
+                  _txt_chestnut_orange=icons['orange'], _txt_chestnut_crossed=icons['crossed'],
+                  _txt_wheel=SimpleNamespace(height=50))
+  renderer._chestnut_alpha_filter = Mock()
+  renderer._chestnut_alpha_filter.update.return_value = 1.
+  ui = SimpleNamespace(sm=SimpleNamespace(recv_frame={'selfdriveState': 20}), started_frame=10, chestnut_state=state)
+  with patch('openpilot.selfdrive.ui.mici.onroad.hud_renderer.ui_state', ui), \
+       patch('openpilot.selfdrive.ui.mici.onroad.hud_renderer.rl.get_time', return_value=10.), \
+       patch('openpilot.selfdrive.ui.mici.onroad.hud_renderer.rl.draw_texture_ex') as draw:
+    HudRenderer._draw_model_source(renderer, rl.Rectangle(0, 0, 476, 240))
+    assert draw.call_args.args[0] is icons[texture]

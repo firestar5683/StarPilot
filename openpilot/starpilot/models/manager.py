@@ -416,6 +416,14 @@ class ModelManager:
           if self._signature(mid, artifact_entry(mid, {mid: row}, variant), variant) == signature:
             self.checked[key] = (signature, valid)
 
+  def selected_gpu_status(self) -> tuple[bool, bool]:
+    """Verify the selected download asynchronously, without starting a model or download job."""
+    with self.lock:
+      mid = preferences(self.root)["big"]
+      if not mid:
+        return False, False
+      return self._snapshot_installed(mid, catalog(self.root).get(mid, {}))
+
   def snapshot(self) -> dict:
     with self.lock:
       entries, prefs = catalog(self.root), preferences(self.root)

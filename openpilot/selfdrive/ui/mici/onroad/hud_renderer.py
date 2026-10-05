@@ -107,6 +107,7 @@ class HudRenderer(Widget):
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
     self._engaged: bool = False
+    self._small_model_engaged = False
     self._chestnut_fade_time: float = 0
 
     self._can_draw_top_icons = True
@@ -126,6 +127,7 @@ class HudRenderer(Widget):
     self._txt_chestnut: rl.Texture = gui_app.texture('icons_mici/chestnut.png', 60, 44)
     self._txt_chestnut_green: rl.Texture = gui_app.texture('icons_mici/chestnut_green.png', 60, 44)
     self._txt_chestnut_orange: rl.Texture = gui_app.texture('icons_mici/chestnut_orange.png', 75, 44)
+    self._txt_chestnut_crossed: rl.Texture = gui_app.texture('icons_mici/egpu_crossed.png', 60, 52)
     self._chestnut_icon: rl.Texture | None = None
     self._wheel_alpha_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
     self._wheel_y_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
@@ -162,6 +164,9 @@ class HudRenderer(Widget):
       controls_state.deprecated.vCruise if v_cruise_cluster == 0.0 else v_cruise_cluster
     )
     engaged = sm['selfdriveState'].enabled
+    if (engaged and not self._engaged and not ui_state.chestnut_loading and ui_state.chestnut_active is not True and
+        sm.recv_frame['modelV2'] > ui_state.started_frame):
+      self._small_model_engaged = True
     if (set_speed != self.set_speed and engaged) or (engaged and not self._engaged):
       self._set_speed_changed_time = rl.get_time()
     if engaged != self._engaged:
@@ -194,9 +199,13 @@ class HudRenderer(Widget):
       return
 
     loading = ui_state.chestnut_state == ChestnutState.LOADING
+    self._small_model_engaged &= ui_state.chestnut_state in (ChestnutState.FAILED, ChestnutState.DISCONNECTED)
     if loading:
       icon = self._txt_chestnut
       opacity = 0.35 + 0.65 * (0.5 - 0.5 * math.cos(rl.get_time() * 6.0))
+    elif self._small_model_engaged:
+      icon = self._txt_chestnut_crossed
+      opacity = 0.65
     elif ui_state.chestnut_state in (ChestnutState.UNCOMPILED, ChestnutState.FAILED):
       icon = self._txt_chestnut_orange
       opacity = 1.0
