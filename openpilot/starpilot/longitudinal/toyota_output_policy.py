@@ -1,6 +1,6 @@
-"""Development-only frozen Toyota longitudinal target shaping.
+"""Vehicle-owned Toyota longitudinal target shaping.
 
-This is an opt-in, per-controller policy. The caller must supply current
+Corolla uses its production profile; Sienna remains development-only. The caller must supply current
 validated lead data for Sienna and reset it whenever longitudinal control or
 source authority is lost. It does not select a planner profile or grant control.
 """
@@ -75,6 +75,13 @@ def eligible(cp) -> bool:
     return False
 
 
+def production_enabled(cp) -> bool:
+  if not eligible(cp) or str(cp.carFingerprint) != COROLLA:
+    return False
+  from openpilot.starpilot.car.toyota.aol import qualified
+  return qualified(cp) and cp.safetyConfigs[0].safetyParam == 73
+
+
 def development_enabled(cp) -> bool:
   return os.getenv('TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME') == '1' and eligible(cp)
 
@@ -112,10 +119,16 @@ class ToyotaOutputPolicy:
       _finite(lead.speed_mps, -50.0, 80.0) and _finite(lead.accel_mps2, -20.0, 20.0)
       for lead in leads))
 
+  def hold_stopped_lead(self, speed_mps, leads):
+    return bool(self.corolla and math.isfinite(speed_mps) and speed_mps <= 0.5 and
+                self._leads_valid(leads) and any(
+                  lead.present and 0 < lead.distance_m <= 8.0 and
+                  abs(lead.lateral_m) <= 1.75 and abs(lead.speed_mps) <= 0.35 for lead in leads))
+
   def target(self, a_target: float, v_ego: float, should_stop: bool, last_output_accel: float,
              *, leads: tuple[Lead, ...] | None = None) -> float | None:
     """Return a shaped target, or None for invalid/missing required evidence."""
-    if (not _finite(a_target, _ACCEL_MIN, _ACCEL_MAX) or not _finite(v_ego, 0.0, 70.0) or
+    if (not _finite(a_target, _ACCEL_MIN, _ACCEL_MAX) or not _finite(v_ego, -math.inf if self.corolla else 0.0, 70.0) or
         type(should_stop) is not bool or not _finite(last_output_accel, _ACCEL_MIN, _ACCEL_MAX)):
       self.reset()
       return None
