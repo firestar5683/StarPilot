@@ -130,6 +130,33 @@ class CompileTest(unittest.TestCase):
       for value in host.values():
         np.testing.assert_array_equal(value, np.zeros(value.shape))
 
+  def test_out_of_band_pickle_without_default_device_buffers(self):
+    import io
+    import struct
+    from tinygrad import Context, Tensor
+    from tinygrad_repo.examples.openpilot.helpers import dump_pickle, load_pickle
+
+    with Context(DEV="CPU:LLVM"), tempfile.TemporaryDirectory() as temporary:
+      path = Path(temporary) / "fixture.pkl"
+      dump_pickle({"metadata": (1, "warp")}, path)
+      self.assertEqual(load_pickle(path, out_of_band=True), {"metadata": (1, "warp")})
+      values = np.arange(12, dtype=np.float32).reshape(2, 6)
+      dump_pickle({"other_device": Tensor(values, device="NPY").realize()}, path)
+      np.testing.assert_array_equal(load_pickle(path, out_of_band=True)["other_device"].numpy(), values)
+      dump_pickle({"default_device": Tensor(values).realize()}, path)
+      np.testing.assert_array_equal(load_pickle(path, out_of_band=True)["default_device"].numpy(), values)
+
+      opcodes = io.BytesIO()
+      marker = object()
+      class ReferencingPickler(pickle.Pickler):
+        def persistent_id(self, value):
+          return (1, "invalid", 0) if value is marker else None
+      pickler = ReferencingPickler(opcodes)
+      pickler.dump(marker)
+      path.write_bytes(struct.pack("<q", len(opcodes.getvalue())) + opcodes.getvalue())
+      with self.assertRaises(pickle.UnpicklingError):
+        load_pickle(path, out_of_band=True)
+
   def test_source_selection_rejects_ambiguity_and_missing_split_component(self):
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)

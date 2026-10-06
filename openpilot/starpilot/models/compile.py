@@ -459,11 +459,13 @@ def make_run_stateful_supercombo(model_runner, metadata):
     packed = packed_npy_inputs.to(Device.DEFAULT).realize()
     inputs = {name: value.reshape(shape).cast(model_runner.graph_inputs[name].dtype)
               for (name, shape), value in zip(shapes.items(), packed.split(sizes), strict=True)}
-    image = warped.to(Device.DEFAULT)
     if metadata.get('mapped_image_input', False):
       if mapped_gpu_image is None:
         raise ValueError('Mapped stateful image queue is missing')
+      image = warped.to('CPU').realize().to(Device.DEFAULT)
       image = mapped_gpu_image.assign(image).realize()
+    else:
+      image = warped.to(Device.DEFAULT)
     inputs['new_img'] = image.cast(model_runner.graph_inputs['new_img'].dtype)
     outputs = {name: value.contiguous() for name, value in model_runner(inputs | state).items()}
     for name, next_name in metadata['state_pairs'].items():
