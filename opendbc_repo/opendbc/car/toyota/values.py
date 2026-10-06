@@ -620,3 +620,12 @@ TOYOTA_AUTO_HOLD_AEB_CARS = {CAR.TOYOTA_CAMRY_TSS2}
 def uses_toyota_auto_hold_aeb(CP) -> bool:
   return (CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS or
           (CP.carFingerprint == CAR.TOYOTA_RAV4_TSS2 and bool(CP.flags & ToyotaFlags.HYBRID)))
+
+
+def stopping_decel_rate(CP):
+  if (CP.brand == "toyota" and CP.carFingerprint in CAR and
+      CAR[CP.carFingerprint].config.flags & ToyotaFlags.TSS2 and CP.flags & ToyotaFlags.TSS2 and
+      len(CP.safetyConfigs) == 1 and CP.safetyConfigs[0].safetyModel == CarParams.SafetyModel.toyota and
+      CP.openpilotLongitudinalControl and not CP.passive and not CP.dashcamOnly and not CP.notCar):
+    return 0.3
+  return None

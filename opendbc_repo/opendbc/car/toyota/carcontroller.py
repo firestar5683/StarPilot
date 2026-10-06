@@ -29,6 +29,7 @@ MAX_PITCH_COMPENSATION = 1.5  # m/s^2
 # LKA limits
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
 MAX_STEER_RATE = 100  # deg/s
+COROLLA_MAX_STEER_RATE = 80
 MAX_STEER_RATE_FRAMES = 17  # tx control frames needed before torque can be cut
 
 # EPS allows user torque above threshold for 50 frames before permanently faulting
@@ -37,6 +38,10 @@ MAX_USER_TORQUE = 500
 
 TOYOTA_AUTO_HOLD_ACCEL = -1.0
 TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES = 100
+
+
+def get_toyota_steer_rate_limit(car_fingerprint):
+  return COROLLA_MAX_STEER_RATE if car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 else MAX_STEER_RATE
 
 
 def supports_toyota_auto_hold(CP):
@@ -169,9 +174,10 @@ class CarController(CarControllerBase):
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
     apply_torque = apply_meas_steer_torque_limits(new_torque, self.last_torque, CS.out.steeringTorqueEps, self.params)
 
-    # >100 degree/sec steering fault prevention
-    self.steer_rate_counter, apply_steer_req = common_fault_avoidance(abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE, lat_active,
-                                                                      self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
+    # Steering-rate fault prevention
+    self.steer_rate_counter, apply_steer_req = common_fault_avoidance(
+      abs(CS.out.steeringRateDeg) >= get_toyota_steer_rate_limit(self.CP.carFingerprint), lat_active,
+      self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
 
     if not lat_active:
       apply_torque = 0

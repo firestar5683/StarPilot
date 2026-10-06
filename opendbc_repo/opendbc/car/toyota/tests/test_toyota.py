@@ -21,6 +21,33 @@ def cars_with(flags):
 
 
 class TestToyotaInterfaces(unittest.TestCase):
+  def test_corolla_rate_cut_is_decoded_and_preserves_sibling_boundary(self):
+    from opendbc.car.toyota.tests.test_auto_hold import setup_hold, step_hold, decode
+
+    for car, rate, cuts in ((CAR.TOYOTA_COROLLA_TSS2, 79.9, False),
+                            (CAR.TOYOTA_COROLLA_TSS2, 80.0, True),
+                            (CAR.TOYOTA_COROLLA_TSS2, -80.0, True),
+                            (CAR.TOYOTA_HIGHLANDER_TSS2, 80.0, False),
+                            (CAR.TOYOTA_HIGHLANDER_TSS2, 99.9, False),
+                            (CAR.TOYOTA_HIGHLANDER_TSS2, 100.0, True)):
+      with self.subTest(car=car, rate=rate):
+        cp, controller, command, state = setup_hold(car, enabled=False)
+        command.latActive = True
+        command.actuators.torque = 0.2
+        state.out.steeringRateDeg = rate
+        requests = []
+        for _ in range(19):
+          frame = next(frame for frame in step_hold(controller, command, state) if frame[0] == 0x2E4)
+          requests.append(int(decode(cp, frame, 'STEERING_LKA')['STEER_REQUEST']))
+        self.assertEqual(requests, [1] * 17 + ([0, 1] if cuts else [1, 1]))
+        command.latActive = False
+        frame = next(frame for frame in step_hold(controller, command, state) if frame[0] == 0x2E4)
+        self.assertEqual(decode(cp, frame, 'STEERING_LKA')['STEER_REQUEST'], 0)
+        command.latActive = True
+        state.out.steeringRateDeg = 0.0
+        frame = next(frame for frame in step_hold(controller, command, state) if frame[0] == 0x2E4)
+        self.assertEqual(decode(cp, frame, 'STEERING_LKA')['STEER_REQUEST'], 1)
+
   def test_car_flags(self):
     # Angle and radar-ACC cars are always TSS2 cars
     assert not (cars_with(ToyotaFlags.ANGLE_CONTROL | ToyotaFlags.RADAR_ACC) - cars_with(ToyotaFlags.TSS2))

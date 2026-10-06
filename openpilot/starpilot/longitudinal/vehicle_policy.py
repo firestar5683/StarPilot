@@ -31,6 +31,10 @@ def stopping_decel_rate(cp, policy):
   rate = prius_filter_stop_rate(cp)
   if rate is not None:
     return rate
+  from opendbc.car.toyota.values import stopping_decel_rate as toyota_stopping_decel_rate
+  rate = toyota_stopping_decel_rate(cp)
+  if rate is not None:
+    return rate
   from opendbc.car.honda.parameter_profiles import stopping_decel_rate as honda_stopping_decel_rate
   rate = honda_stopping_decel_rate(cp)
   if rate is not None:
