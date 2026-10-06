@@ -32,6 +32,40 @@ class ToyotaLongIntegrationTests(TestCase):
     with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '1' if enabled else '0'}):
       return LongControl(cp)
 
+  def test_tss2_stopping_ramp_uses_admitted_vehicle_rate(self):
+    from opendbc.car import structs
+    from opendbc.car.toyota.values import ToyotaFlags
+
+    for car in CAR:
+      if not car.config.flags & ToyotaFlags.TSS2:
+        continue
+      cp = CarInterface.get_params(car, {0: {}, 1: {}, 2: {}}, [], True, False, False)
+      if not cp.openpilotLongitudinalControl or cp.dashcamOnly:
+        continue
+      variants = [(cp, 0.3)]
+      for mutation in ('no_output', 'multiple', 'stock', 'passive'):
+        denied = cp.as_reader().as_builder()
+        if mutation == 'no_output':
+          denied.safetyConfigs[0].safetyModel = structs.CarParams.SafetyModel.noOutput
+        elif mutation == 'multiple':
+          denied.safetyConfigs = list(denied.safetyConfigs) + [structs.CarParams.SafetyConfig()]
+        elif mutation == 'stock':
+          denied.openpilotLongitudinalControl = False
+        else:
+          denied.passive = True
+        variants.append((denied, 1.0))
+      for candidate, rate in variants:
+        for target in (-0.8, 0.8):
+          with self.subTest(car=car, rate=rate, target=target, model=candidate.safetyConfigs[0].safetyModel):
+            with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '0'}):
+              owner = LongControl(candidate)
+            state = self.car_state(0.0)
+            for tick in range(1, 6):
+              result = owner.update(True, state, target, True, (-3.5, 2.0))
+              self.assertEqual(owner.long_control_state, structs.CarControl.Actuators.LongControlState.stopping)
+              self.assertAlmostEqual(result, -rate * 0.01 * tick)
+            self.assertEqual(owner.update(False, state, target, True, (-3.5, 2.0)), 0.0)
+
   def test_real_controller_gate_and_native_missing_lead_fallback(self):
     sienna = self.controller(CAR.TOYOTA_SIENNA_4TH_GEN)
     native = self.controller(CAR.TOYOTA_SIENNA_4TH_GEN, enabled=False)
