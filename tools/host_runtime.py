@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -12,8 +13,10 @@ from pathlib import Path
 import platform
 import shutil
 import signal
+import socket
 import subprocess
 import sys
+import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +29,10 @@ HELP = """Usage: ./dev <command> [args...]
   cabana        Build and run Cabana in its own concurrent cache.
   plotjuggler   Run PlotJuggler (alias: juggle).
   galaxy        Run authenticated Galaxy on loopback (optional --port).
+                --live releases the shared lock and follows edits under
+                openpilot/starpilot/galaxy, restarting for Python changes and
+                reloading the open page after each edit (--no-autoreload: refresh
+                by hand).
   python        Run Python with current source and native extensions.
   pytest        Run pytest with current source and native extensions.
   shell         Open a shell in the isolated host worktree.
@@ -45,8 +52,27 @@ VENDORS = ('msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinyg
 # Never inherit a device/cross compiler or another project's editable imports.
 REMOVE_ENV = ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS',
               'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'PKG_CONFIG_PATH', 'CPATH', 'LIBRARY_PATH',
-              'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR')
+              'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'SP_HOST_PARKED')
 EXCLUDE_DIRS = {'.git', '.venv', '.venv-linux-arm64', '.host_runtime', '.comma_sysroot', '.cache', '__pycache__'}
+NATIVE_SUFFIXES = {'.a', '.so', '.dylib', '.o', '.os'}
+GALAXY = Path('openpilot/starpilot/galaxy')
+LIVE_RELOAD = 'starpilot-live-reload.js'
+LIVE_VERSION = 'starpilot-live-version.txt'
+LIVE_TAG = f'<script src="/{LIVE_RELOAD}"></script>'
+LIVE_SCRIPT = f"""// Added by ./dev galaxy --live to its host cache only: reload after each mirrored edit.
+{{
+  let seen = null
+  setInterval(async () => {{
+    try {{
+      const response = await fetch('/{LIVE_VERSION}', {{ cache: 'no-store' }})
+      if (!response.ok) return
+      const version = (await response.text()).trim()
+      if (seen !== null && version !== seen) location.reload()
+      seen = version
+    }} catch {{}}
+  }}, 500)
+}}
+"""
 
 
 def run(arguments, *, cwd, env=None, capture=False):
@@ -119,7 +145,11 @@ class HostRuntime:
       try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
       except BlockingIOError:
-        print(f'Waiting for the {self.cache.name} host session to exit…', flush=True)
+        lock.seek(0)
+        owner = lock.read().strip()
+        detail = f' (owner PID {owner})' if owner.isdecimal() else ''
+        print(f'Waiting for the {self.cache.name} host session{detail} to exit…',
+              'Stop that session with Ctrl+C to continue.', flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
       lock.seek(0)
       lock.truncate()
@@ -137,7 +167,7 @@ class HostRuntime:
     # Include uncommitted development, exclude ignored native/device outputs.
     listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0')
     paths = {name for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
-             and not (set(Path(name).suffixes) & {'.a', '.so', '.dylib', '.o', '.os'})
+             and not (set(Path(name).suffixes) & NATIVE_SUFFIXES)
              and (self.root / name).is_file()}
     manifest = inside(self.cache / 'source-files.json', self.cache)
     previous = set(json.loads(manifest.read_text())) if manifest.exists() else set()
@@ -247,8 +277,16 @@ class HostRuntime:
       targets += ['openpilot/tools/' + ('cabana/cabana' if command == 'cabana' else 'replay/replay')]
     run([self.venv / 'bin/python', '-m', 'SCons', f'-j{jobs}', *targets], cwd=self.work, env=self.environment())
 
+  def private_ipc(self):
+    ipc = Path('/tmp' if self.system == 'Darwin' else '/dev/shm') / f'msgq_{self.prefix}'
+    if ipc.is_symlink() or (ipc.exists() and (not ipc.is_dir() or ipc.stat().st_uid != os.getuid())):
+      raise RuntimeError(f'Private messaging path is not owned by this user: {ipc}')
+    ipc.mkdir(mode=0o700, exist_ok=True)
+
   def launch(self, command, jobs, arguments):
     env = self.environment()
+    if command in ('c3', 'c4', 'galaxy'):
+      env['SP_HOST_PARKED'] = '1'  # No car or drive-state publishers: parked-only setup stays usable.
     python = self.venv / 'bin/python'
     if command in ('c3', 'c4', 'onroad'):
       script = 'launch_onroad_desktop.sh' if command == 'onroad' else f'launch_ui_{command}_desktop.sh'
@@ -268,10 +306,7 @@ class HostRuntime:
       argv = [env.get('SHELL', '/bin/bash'), *arguments]
     else:
       argv = [python, *arguments]
-    ipc = Path('/tmp' if self.system == 'Darwin' else '/dev/shm') / f'msgq_{self.prefix}'
-    if ipc.is_symlink() or (ipc.exists() and (not ipc.is_dir() or ipc.stat().st_uid != os.getuid())):
-      raise RuntimeError(f'Private messaging path is not owned by this user: {ipc}')
-    ipc.mkdir(mode=0o700, exist_ok=True)
+    self.private_ipc()
     # Keep the bucket locked if this wrapper is killed while its child is alive.
     inherited = () if self.lock_fd is None else (self.lock_fd,)
     with subprocess.Popen([str(arg) for arg in argv], cwd=self.work, env=env, pass_fds=inherited) as child:
@@ -286,9 +321,165 @@ class HostRuntime:
         for sig, handler in previous.items():
           signal.signal(sig, handler)
 
+  def galaxy_sources(self):
+    """Source Galaxy files with their (mtime, size), under the same rules as sync()."""
+    found = {}
+    for directory, names, files in os.walk(self.root / GALAXY):
+      names[:] = [name for name in names if name not in EXCLUDE_DIRS]
+      for name in files:
+        path = Path(directory, name)
+        if path.is_symlink() or set(path.suffixes) & NATIVE_SUFFIXES:
+          continue
+        try:
+          stat = path.stat()
+        except FileNotFoundError:
+          continue
+        found[path.relative_to(self.root)] = (stat.st_mtime_ns, stat.st_size)
+    return found
+
+  def ignored(self, names):
+    """Paths sync() would skip because Git ignores them, such as editor swap files."""
+    if not names:
+      return set()
+    env = {key: value for key, value in os.environ.items() if key not in REMOVE_ENV}
+    result = subprocess.run(['git', 'check-ignore', '-z', '--stdin'], cwd=self.root, env=env, capture_output=True,
+                            input='\0'.join(map(str, names)), text=True)
+    if result.returncode not in (0, 1):  # 1 means nothing was ignored.
+      raise RuntimeError(f'git check-ignore failed: {result.stderr.strip()}')
+    return {Path(name) for name in result.stdout.split('\0') if name}
+
+  def mirror(self, changed, removed):
+    # Unlocked on purpose: a concurrent sync copies these same files from the same checkout.
+    for name in removed:
+      path = inside(self.work / name, self.work)
+      if path.is_file() or path.is_symlink():
+        path.unlink()
+    for name in changed:
+      destination = inside(self.work / name, self.work)
+      destination.parent.mkdir(parents=True, exist_ok=True)
+      try:
+        shutil.copy2(self.root / name, destination)
+      except FileNotFoundError:
+        pass  # Editors may replace files mid-save; the next poll copies the result.
+
+  def live_reload(self, version=None):
+    """Keep the cached page loading the reload script; publish a new edit version if given."""
+    web = self.work / GALAXY / 'web'
+    if version is not None:
+      # Replace atomically so the page never reads a half-written version and reloads early.
+      temporary = inside(web / f'.{LIVE_VERSION}.tmp', self.work)
+      temporary.write_text(f'{version}\n')
+      os.replace(temporary, inside(web / LIVE_VERSION, self.work))
+    # Checked every poll, like the page tag below: an overlapping session's exit removes it.
+    script = inside(web / LIVE_RELOAD, self.work)
+    if not script.is_file() or script.read_text() != LIVE_SCRIPT:
+      script.write_text(LIVE_SCRIPT)
+    page = inside(web / 'index.html', self.work)
+    try:
+      html = page.read_text()
+    except FileNotFoundError:
+      return
+    # Another command's sync restores the checkout's page.
+    if LIVE_TAG not in html and '</body>' in html:
+      page.write_text(html.replace('</body>', f'  {LIVE_TAG}\n</body>', 1))
+
+  def end_live_reload(self):
+    web = self.work / GALAXY / 'web'
+    for name in (LIVE_RELOAD, LIVE_VERSION):
+      inside(web / name, self.work).unlink(missing_ok=True)
+    source = self.root / GALAXY / 'web/index.html'
+    if source.is_file():
+      shutil.copy2(source, inside(web / 'index.html', self.work))
+
+  def live_galaxy(self, arguments, *, autoreload=True, interval=0.5):
+    """Serve Galaxy without the bucket lock, following package edits until interrupted."""
+    argv = [str(self.venv / 'bin/python'), '-m', 'openpilot.starpilot.galaxy.server', *arguments]
+    env = self.environment() | {'SP_HOST_PARKED': '1'}
+    self.private_ipc()
+    # Without autoreload the cached page is left exactly as synced.
+    publish = self.live_reload if autoreload else lambda version=None: None
+    if autoreload:
+      print(f'Galaxy live: edits under {GALAXY} reload the open page; Python edits restart the server first.', flush=True)
+      print('Refresh an already-open page once.', flush=True)
+    else:
+      print(f'Galaxy live: refresh to see edits under {GALAXY}; Python edits restart the server.', flush=True)
+    print('Changes outside Galaxy need ./dev sync and a restart. Stop with Ctrl+C.', flush=True)
+    seen = self.galaxy_sources()
+    publish(time.time_ns())
+    child = subprocess.Popen(argv, cwd=self.work, env=env)
+    interrupted = False
+    try:
+      while True:
+        time.sleep(interval)
+        publish()
+        current = self.galaxy_sources()
+        changed = [name for name, identity in current.items() if seen.get(name) != identity]
+        removed = [name for name in seen if name not in current]
+        seen = current
+        skipped = self.ignored(changed + removed)
+        changed = [name for name in changed if name not in skipped]
+        removed = [name for name in removed if name not in skipped]
+        if not changed and not removed:
+          continue
+        self.mirror(changed, removed)
+        backend = [name for name in changed + removed
+                   if not name.is_relative_to(GALAXY / 'web')
+                   and not name.is_relative_to(GALAXY / 'tests')
+                   and not name.name.startswith('test_')]
+        if backend:
+          print(f'Galaxy live: restarting for {backend[0].relative_to(GALAXY)}', flush=True)
+          stop(child)
+          # Publish only once the old server is gone, so the page reloads onto the new one.
+          publish(time.time_ns())
+          child = subprocess.Popen(argv, cwd=self.work, env=env)
+        elif any(name.is_relative_to(GALAXY / 'web') for name in changed + removed):
+          publish(time.time_ns())
+    except KeyboardInterrupt:
+      interrupted = True
+      return 130
+    finally:
+      stop(child, interrupted=interrupted)
+      if autoreload:
+        self.end_live_reload()
+
+
+def galaxy_port_free(arguments):
+  """Fail before a long sync when another Galaxy, often a second --live, owns the port."""
+  parser = argparse.ArgumentParser(prog='./dev galaxy --live', add_help=False)
+  parser.add_argument('--port', type=int, default=8082)  # The server's own default.
+  parser.add_argument('--host', default='127.0.0.1')
+  known, _ = parser.parse_known_args(arguments)
+  with socket.socket() as probe:
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Matches the server's bind.
+    try:
+      probe.bind((known.host, known.port))
+    except OSError:
+      raise RuntimeError(f'Port {known.port} is already in use; stop the other Galaxy or pass --port.') from None
+
+
+def stop(child, *, interrupted=False, timeout=5):
+  # SIGINT is the server's clean shutdown path; it reaps its own camera and media helpers.
+  # A terminal Ctrl+C already delivered it, and a second one would cut that cleanup short.
+  first = (lambda: None) if interrupted else (lambda: child.send_signal(signal.SIGINT))
+  for send in (first, child.terminate, child.kill):
+    if child.poll() is not None:
+      return
+    send()
+    try:
+      child.wait(timeout)
+    except subprocess.TimeoutExpired:
+      pass
+
 
 def main(arguments=None):
   command, jobs, args = parse(sys.argv[1:] if arguments is None else arguments)
+  live = command == 'galaxy' and '--live' in args
+  autoreload = '--no-autoreload' not in args
+  if command == 'galaxy' and not autoreload and not live:
+    raise ValueError('--no-autoreload only applies to ./dev galaxy --live.')
+  if live:
+    args = [arg for arg in args if arg not in ('--live', '--no-autoreload')]
+    galaxy_port_free(args)
   if command == 'help':
     print(HELP)
     return 0
@@ -307,7 +498,11 @@ def main(arguments=None):
       runtime.prepare()
       if command != 'sync':
         runtime.build(command, jobs)
-        return runtime.launch(command, jobs, args)
+        if not live:
+          return runtime.launch(command, jobs, args)
+    if live:
+      # Hold the lock only while building, so ./c3, ./c4 and ./onroad can run alongside.
+      return runtime.live_galaxy(args, autoreload=autoreload)
   return 0
 
 

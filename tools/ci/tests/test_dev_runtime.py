@@ -1,12 +1,15 @@
+import fcntl
 import hashlib
 import os
 from pathlib import Path
+import signal
+import socket
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools.host_runtime import HostRuntime, parse
+from tools.host_runtime import GALAXY, LIVE_RELOAD, LIVE_TAG, LIVE_VERSION, HostRuntime, main, parse
 
 
 class TestDeveloperRuntime(unittest.TestCase):
@@ -109,6 +112,161 @@ class TestDeveloperRuntime(unittest.TestCase):
     for args in (['unknown'], ['c4', '0'], ['sync', '../oops'], ['sync', 'shared', 'extra']):
       with self.subTest(args=args), self.assertRaises(ValueError):
         parse(args)
+
+  def galaxy_fixture(self):
+    galaxy = self.root / GALAXY
+    (galaxy / 'web').mkdir(parents=True)
+    (galaxy / 'server.py').write_text('server\n')
+    (galaxy / 'web/app.js').write_text('app\n')
+    (galaxy / 'web/index.html').write_text('<body>\n</body>\n')
+    self.runtime.sync()
+    return galaxy
+
+  def test_live_galaxy_mirrors_package_edits_without_bytecode(self):
+    galaxy = self.galaxy_fixture()
+    (galaxy / '__pycache__').mkdir()
+    (galaxy / '__pycache__/server.pyc').write_bytes(b'bytecode')
+    sources = self.runtime.galaxy_sources()
+    self.assertEqual(set(sources), {GALAXY / 'server.py', GALAXY / 'web/app.js', GALAXY / 'web/index.html'})
+    (galaxy / 'web/app.js').write_text('edited\n')
+    (galaxy / 'server.py').unlink()
+    self.runtime.mirror([GALAXY / 'web/app.js'], [GALAXY / 'server.py'])
+    self.assertEqual((self.runtime.work / GALAXY / 'web/app.js').read_text(), 'edited\n')
+    self.assertFalse((self.runtime.work / GALAXY / 'server.py').exists())
+
+  def run_live(self, edits, before_edit, **options):
+    """Run live_galaxy with a fake server, applying one edit per poll, then Ctrl+C."""
+    edits = iter(edits)
+    children = []
+
+    class Child:
+      def __init__(self):
+        self.returncode = None
+        self.signals = []
+        children.append(self)
+
+      def poll(self):
+        return self.returncode
+
+      def send_signal(self, signum):
+        self.signals.append(signum)
+        self.returncode = 0
+
+      def terminate(self):
+        self.send_signal(signal.SIGTERM)
+
+      def kill(self):
+        self.send_signal(signal.SIGKILL)
+
+      def wait(self, timeout=None):
+        if self.returncode is None:
+          raise subprocess.TimeoutExpired('galaxy', timeout)
+        return self.returncode
+
+    real_popen = subprocess.Popen
+
+    def spawn(argv, *args, **kwargs):
+      # Only the server is faked; git check-ignore must really run.
+      return real_popen(argv, *args, **kwargs) if argv[0] == 'git' else Child()
+
+    def tick(_interval):
+      before_edit()
+      edit = next(edits, None)
+      if edit is None:
+        raise KeyboardInterrupt
+      edit()
+
+    with patch('tools.host_runtime.subprocess.Popen', spawn), patch('tools.host_runtime.time.sleep', tick):
+      self.assertEqual(self.runtime.live_galaxy(['--port', '8099'], **options), 130)
+    return children
+
+  def test_live_galaxy_restarts_only_for_backend_edits(self):
+    galaxy = self.galaxy_fixture()
+    (galaxy / '.gitignore').write_text('.*.swp\n')
+    web = self.runtime.work / GALAXY / 'web'
+    versions = []
+
+    def before_edit():
+      versions.append((web / LIVE_VERSION).read_text())
+      self.assertIn(LIVE_TAG, (web / 'index.html').read_text())
+
+    children = self.run_live([lambda: (galaxy / 'web/app.js').write_text('frontend edit\n'),
+                              lambda: (galaxy / '.server.py.swp').write_bytes(b'editor swap'),
+                              lambda: (galaxy / '.server.py.swp').unlink(),
+                              lambda: (galaxy / 'tests').mkdir(),
+                              lambda: (galaxy / 'tests/test_offline_road_maps.mjs').write_text('test edit\n'),
+                              lambda: (galaxy / 'tests/test_offline_road_maps.mjs').unlink(),
+                              lambda: (galaxy / 'test_projection_layout.py').write_text('test edit\n'),
+                              lambda: (galaxy / 'server.py').write_text('backend edit\n')], before_edit)
+    self.assertEqual(len(children), 2)
+    self.assertTrue(all(child.returncode == 0 for child in children))
+    self.assertEqual(children[0].signals, [signal.SIGINT])
+    self.assertEqual(children[1].signals, [signal.SIGTERM])  # Ctrl+C already reached it.
+    self.assertEqual((web / 'app.js').read_text(), 'frontend edit\n')
+    self.assertEqual((self.runtime.work / GALAXY / 'server.py').read_text(), 'backend edit\n')
+    self.assertFalse((self.runtime.work / GALAXY / '.server.py.swp').exists())
+    self.assertEqual(len(set(versions)), 3)  # Start, frontend edit, backend restart; never the swap file.
+    self.assertEqual((web / 'index.html').read_text(), '<body>\n</body>\n')
+    self.assertFalse((web / LIVE_RELOAD).exists() or (web / LIVE_VERSION).exists())
+
+  def test_live_galaxy_without_autoreload_leaves_the_page_alone(self):
+    galaxy = self.galaxy_fixture()
+    web = self.runtime.work / GALAXY / 'web'
+
+    def before_edit():
+      self.assertEqual((web / 'index.html').read_text(), '<body>\n</body>\n')
+      self.assertFalse((web / LIVE_RELOAD).exists() or (web / LIVE_VERSION).exists())
+
+    children = self.run_live([lambda: (galaxy / 'web/app.js').write_text('frontend edit\n'),
+                              lambda: (galaxy / 'server.py').write_text('backend edit\n')],
+                             before_edit, autoreload=False)
+    self.assertEqual(len(children), 2)  # Edits are still mirrored and Python still restarts.
+    self.assertEqual((web / 'app.js').read_text(), 'frontend edit\n')
+
+  def test_live_reload_tag_survives_resync_once(self):
+    galaxy = self.galaxy_fixture()
+    page = self.runtime.work / GALAXY / 'web/index.html'
+    self.runtime.live_reload(1)
+    self.runtime.live_reload()
+    self.assertEqual(page.read_text().count(LIVE_TAG), 1)
+    self.runtime.sync()  # Another shared command restores the checkout's page.
+    self.assertNotIn(LIVE_TAG, page.read_text())
+    self.runtime.live_reload()
+    self.assertEqual(page.read_text().count(LIVE_TAG), 1)
+    self.assertNotIn(LIVE_TAG, (galaxy / 'web/index.html').read_text())
+    script = self.runtime.work / GALAXY / 'web' / LIVE_RELOAD
+    script.unlink()  # An overlapping live session exited and cleaned up.
+    self.runtime.live_reload()
+    self.assertTrue(script.is_file())
+
+  def test_live_galaxy_refuses_a_taken_port_before_syncing(self):
+    with socket.socket() as taken:
+      taken.bind(('127.0.0.1', 0))
+      taken.listen()
+      port = str(taken.getsockname()[1])
+      with patch('tools.host_runtime.ROOT', self.root), patch.object(HostRuntime, 'sync') as sync, \
+           self.assertRaisesRegex(RuntimeError, f'Port {port} is already in use'):
+        main(['galaxy', '--live', '--port', port])
+    sync.assert_not_called()
+
+  def test_no_autoreload_requires_live(self):
+    with self.assertRaisesRegex(ValueError, 'only applies'):
+      main(['galaxy', '--no-autoreload'])
+
+  def test_live_galaxy_serves_after_releasing_shared_lock(self):
+    def serve(runtime, arguments, *, autoreload):
+      with (runtime.cache / 'lock').open('a+') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # Raises if the build still holds it.
+      self.assertEqual(arguments, ['--port', '8099'])
+      self.assertTrue(autoreload)
+      return 0
+
+    with patch('tools.host_runtime.ROOT', self.root), patch('tools.host_runtime.galaxy_port_free'), \
+         patch.object(HostRuntime, 'prepare'), patch.object(HostRuntime, 'build') as build, patch.object(HostRuntime, 'launch') as launch, \
+         patch.object(HostRuntime, 'live_galaxy', serve):
+      self.assertEqual(main(['galaxy', '4', '--live', '--port', '8099']), 0)
+    build.assert_called_once_with('galaxy', 4)
+    launch.assert_not_called()
 
 
 if __name__ == '__main__':

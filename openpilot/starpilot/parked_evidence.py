@@ -4,11 +4,22 @@ Python deviceState stamps MONOTONIC; C++ pandad stamps BOOTTIME on Linux.
 """
 
 from dataclasses import dataclass
+import os
 
 
 DEVICE_TTL_NS = 1_500_000_000  # 2 Hz publisher, allowing one missed frame.
 PANDA_TTL_NS = 300_000_000    # 10 Hz publisher, allowing one missed frame.
 RESUME_SKEW_NS = 5_000_000
+
+
+def host_parked(environ=os.environ) -> bool:
+  """./dev galaxy, ./c3 and ./c4 have no car or drive-state publishers; they are always parked.
+
+  Only those launchers set SP_HOST_PARKED. Route replay (./onroad) keeps its recorded drive state.
+  """
+  prefix = environ.get("OPENPILOT_PREFIX", "")
+  return (environ.get("SP_HOST_PARKED") == "1" and environ.get("SP_HOST_RUNTIME") == "1" and
+          bool(prefix) and prefix == environ.get("SP_HOST_PREFIX"))
 
 
 @dataclass(frozen=True)

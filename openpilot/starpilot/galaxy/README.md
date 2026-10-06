@@ -17,6 +17,14 @@ in the manager environment. A manual server cannot share its port with the
 managed service. Static browser files are under `web/`, with no JavaScript
 package installation required.
 
+For frontend or backend work, `./dev galaxy --live [--port N]` builds the shared
+host cache, releases its lock so `./c3`, `./c4` and `./onroad` can run alongside,
+then follows edits under this package. An open page reloads itself after each
+edit; other changes here restart the server first. Refresh a page opened before
+the session once. Edits outside the package need `./dev sync` and a restart.
+The reload script exists only in the host cache, never in this directory.
+Add `--no-autoreload` to keep following edits but refresh by hand.
+
 Run the package tests with `./dev pytest openpilot/starpilot/galaxy/tests`.
 Browser JavaScript tests use Node 24; set `STARPILOT_NODE` to an existing Node
 24 executable when needed. A static preview can serve `web/` over loopback;
