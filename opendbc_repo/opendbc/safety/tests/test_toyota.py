@@ -607,3 +607,37 @@ class TestToyotaHighlanderAol(unittest.TestCase):
     self.init()
     self.safety.aol_set_host_request(3)
     self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+
+  def test_prius_filter_axis_permissions_and_tx_laws(self):
+    for word, stock in ((4169, False), (4681, True)):
+      with self.subTest(word=word):
+        self.init(word=word)
+        self.physical(cruise=True)
+        self.assertEqual(self.safety.aol_get_request_mask(), 1 if stock else 3)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1 if stock else 3)
+        for accel, cancel, allowed in ((0, 1, True), (0, 0, not stock), (0.1, 0, not stock),
+                                       (-0.1, 0, not stock), (2.1, 0, False), (-3.6, 0, False)):
+          message = self.packer.make_can_msg_safety("ACC_CONTROL", 0, {"ACCEL_CMD": accel, "CANCEL_REQ": cancel})
+          self.assertEqual(bool(self.safety.safety_tx_hook(message)), allowed)
+        for address, bus, length in ((0x750, 0, 8), (0x343, 2, 8), (0x283, 2, 7), (0x411, 2, 8)):
+          self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, bytes(length))))
+        self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety("ACC_CONTROL", 0, {})))
+        self.assertFalse(self.safety.get_relay_malfunction())
+        self.assertEqual(self.safety.safety_fwd_hook(2, 0x343), 0)
+        self.physical(cruise=True, belt=False)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        for changes in ({"eps": 3}, {"main": False}, {"gear": 32}):
+          self.physical(cruise=True, **changes)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.physical(cruise=True)
+        self.safety.set_timer(1_400_001)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_prius_filter_exact_experience_and_word_admission(self):
+    for word, ae in ((4169, 0), (4169, 160), (4169, 288), (4681, 0), (4681, 160), (4681, 288),
+                     (4168, 32), (4170, 32), (4680, 32), (4682, 32)):
+      with self.subTest(word=word, ae=ae):
+        self.init(word=word, ae=ae)
+        self.physical(cruise=True)
+        self.assertEqual(self.safety.aol_get_request_mask(), 0)

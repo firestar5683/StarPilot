@@ -5,7 +5,7 @@ from opendbc.car.toyota.values import CAR, ToyotaFlags, ToyotaSafetyFlags, EPS_S
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE
 
-AOL_WORDS = frozenset((73, 585))
+AOL_WORDS = frozenset((73, 585, 4169, 4681))
 RADAR_TORQUE_CARS = frozenset((CAR.TOYOTA_CHR_TSS2, CAR.TOYOTA_RAV4_TSS2_2022))
 CAMERA_TORQUE_CARS = frozenset((
   CAR.TOYOTA_ALPHARD_TSS2, CAR.TOYOTA_AVALON_TSS2, CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_COROLLA_TSS2,
@@ -16,6 +16,9 @@ CAMERA_TORQUE_CARS = frozenset((
 
 
 def qualified(cp, *, marked_only=False):
+  from opendbc.car.toyota.prius_longitudinal import configured as prius_filter_configured
+  if cp is not None and prius_filter_configured(cp):
+    return cp.alternativeExperience in ((32,) if marked_only else (0, 32))
   if (cp is None or cp.brand != 'toyota' or cp.carFingerprint not in CAMERA_TORQUE_CARS | RADAR_TORQUE_CARS or
       cp.notCar or cp.passive or cp.dashcamOnly or not cp.pcmCruise or
       (cp.carFingerprint not in RADAR_TORQUE_CARS and not cp.openpilotLongitudinalControl) or
@@ -91,3 +94,13 @@ class ToyotaCardIntent(AolCardIntent):
 
 def create_intent(cp, settings):
   return ToyotaCardIntent(settings)
+
+
+def configuration_settings_policy(cp):
+  if qualified(cp):
+    return None
+  if (cp is not None and cp.brand == 'toyota' and cp.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT and
+      not cp.notCar and not cp.passive and not cp.dashcamOnly and
+      cp.steerControlType == structs.CarParams.SteerControlType.torque):
+    return AolVehiclePolicy(settings_supported=True, fixed_cruise_buttons=True, distance_pause_only=True)
+  return None
