@@ -74,6 +74,8 @@ class SubMasterFixture:
 def controls_fixture(alpha=False):
   now, offset = 5_000_000_000, 500_000_000
   controls = Controls.__new__(Controls)
+  from openpilot.starpilot.lateral.pause import LateralPause, PauseSettings
+  controls.lateral_pause = LateralPause(PauseSettings())
   attach_inputs(controls)
   controls.CP = ordinary_params(CAR.CHEVROLET_VOLT, alpha=alpha, radar=True)
   controls.longitudinal_inputs.CP = controls.CP
