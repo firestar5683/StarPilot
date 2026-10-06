@@ -17,6 +17,8 @@ PREFERENCES = frozenset({
   "AlwaysOnLateral", "IsMetric", "RecordAudio", "RecordFront", "RecordFrontLock",
   "ShowDebugInfo", "GsmMetered", "OpenpilotEnabledToggle",
 })
+# Keys removed from the registry. Saved copies are archived at startup instead of blocking it.
+RETIRED_KEYS = frozenset({'ShareUsageStats'})
 MAX_VALUE_BYTES = 32 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 MAX_KEYS = 4096
@@ -290,7 +292,8 @@ def stage_settings(bundle, storage, namespace):
   return destination
 
 
-def _migrate_first_start(params, namespace, storage, values, known, cache_keys, inspect_cache, *, retire_keys=None):
+def _migrate_first_start(params, namespace, storage, values, known, cache_keys, inspect_cache, *, retire_keys=None,
+                         retire_action='archive incompatible reconstructible vehicle cache'):
   actual = namespace.resolve(strict=True)
   snapshot = _save_snapshot(values, storage / 'snapshots')
   if load_snapshot(snapshot) != values:
@@ -407,6 +410,11 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
     else:
       migrated = False
     unknown = set(values) - known
+    retired = unknown & RETIRED_KEYS
+    if auto_migrate and not dry_run and initialized and not foreign_handoff and retired:
+      values = _migrate_first_start(params, namespace, storage, values, known, CACHE_KEYS, inspect_cache,
+                                    retire_keys=retired, retire_action='archive setting removed from the registry')
+      unknown = set(values) - known
     invalid_preferences = any(key in values and values[key] not in (b'0', b'1') for key in PREFERENCES)
     incompatible_keys = {key for key in CACHE_KEYS if key in values and inspect_cache(key, values[key]).status != 'valid'}
     invalid_booleans = any(getattr(params.get_type(key), 'name', None) == 'BOOL' and raw not in (b'0', b'1')
