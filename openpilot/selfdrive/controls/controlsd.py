@@ -120,8 +120,8 @@ class Controls:
                      "startupPidGain": [list(row) for row in self.LaC.pid._k_p],
                      "startupPidLimits": [self.LaC.pid.neg_limit, self.LaC.pid.pos_limit]})
 
-    from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
-    assist_enabled = self.vehicle_startup_preferences.turn_assist and turn_assist_supported(self.CP)
+    from openpilot.starpilot.lateral.controller_selection import model_turn_assist_supported
+    assist_enabled = self.vehicle_startup_preferences.turn_assist and model_turn_assist_supported(self.CP)
     self.turn_assist_enabled = lambda: assist_enabled
 
   def update(self):

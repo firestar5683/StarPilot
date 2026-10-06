@@ -281,6 +281,29 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertFalse(self.owner.apply(required_change(row)))
     self.assertFalse(self.params.get_bool("TurnAssist"))
 
+  def test_turn_assist_nonpolicy_owner_saved_off_survives_restart(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.mazda.values import CAR
+    from openpilot.starpilot.lateral.controller_selection import policy_for
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    cp = interfaces[CAR.MAZDA_CX5_2022].get_non_essential_params(CAR.MAZDA_CX5_2022)
+    self.assertIsNone(policy_for(cp))
+    self.owner.vehicle_params = lambda: cp
+    self.owner.controller.vehicle_params = self.owner.vehicle_params
+    self.fingerprint = cp.carFingerprint
+    row = self._row("torque", "TurnAssist")
+    self.assertTrue(row.available)
+    self.assertEqual(row.value, "On")
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertFalse(VehicleStartupPreferences.read(self.params, enabled=True).turn_assist)
+    row = self._row("torque", "TurnAssist")
+    self.assertEqual(row.value, "Off")
+    cp.minSteerSpeed += 1.
+    self.assertFalse(self.owner.apply(required_change(row)))
+    cp.minSteerSpeed -= 1.
+    self.assertTrue(self.owner.apply(required_change(self._row("torque", "TurnAssist"))))
+    self.assertTrue(VehicleStartupPreferences.read(self.params, enabled=True).turn_assist)
+
   def test_live_lane_owner_maps_only_explicit_keys(self):
     self.owner.authority = lambda group: group == "lane_live"
     view = self.owner.snapshot("lane", parked=False, system_long=False, lateral_context=False, metric=False)

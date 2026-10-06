@@ -5,6 +5,7 @@ from collections import deque
 
 import numpy as np
 
+from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from opendbc.car import structs
 from opendbc.car.lateral import get_friction
@@ -381,6 +382,7 @@ class GenesisG70TorquePolicy:
     freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < self.low_speed_reset_threshold or unwind_detected
     output_lataccel = parent.pid.update(pid_log.error, error_rate=-measurement_rate, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
     output_torque = parent.torque_from_lateral_accel(output_lataccel, parent.torque_params)
+    output_torque = apply_turn_assist(parent, CS, VM, params, desired_curvature, output_torque)
     if not CS.steeringPressed and CS.vEgo < GENESIS_G70_LOW_SPEED_ANGLE_DAMPING_SPEED + 2.0:
       desired_angle = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll))
       actual_angle = CS.steeringAngleDeg - params.angleOffsetDeg

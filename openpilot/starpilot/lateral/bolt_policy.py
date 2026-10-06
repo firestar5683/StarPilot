@@ -8,6 +8,7 @@ import numpy as np
 from opendbc.car import structs
 from opendbc.car.gm.values import CAR
 from opendbc.car.lateral import get_friction
+from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -156,6 +157,7 @@ class BoltTorquePolicy:
     output = parent.torque_from_lateral_accel(
       parent.pid.update(pid_log.error, error_rate=-rate, speed=cs.vEgo, feedforward=ff, freeze_integrator=freeze), parent.torque_params
     )
+    output = apply_turn_assist(parent, cs, vm, params, curvature, output)
     if self.generation == 2022:
       output *= shaping.get_bolt_2022_2023_center_output_scale(setpoint, cs.vEgo)
       limit = shaping.get_bolt_2022_2023_low_speed_center_output_limit(setpoint, cs.vEgo)

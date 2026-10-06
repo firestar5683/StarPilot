@@ -536,13 +536,16 @@ class FeatureSettingsOwner:
 
   def _turn_assist_row(self, configurable: bool) -> FeatureRow:
     from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
-    capability = self.controller.capability()
     cp = self.vehicle_params()
     supported = cp is not None and turn_assist_supported(cp)
+    capability = ((cp.carFingerprint, cp.lateralTuning.which(), str(cp.steerControlType), cp.passive,
+                   cp.dashcamOnly, cp.notCar, float(cp.minSteerSpeed),
+                   tuple((str(config.safetyModel), int(config.safetyParam)) for config in cp.safetyConfigs))
+                  if supported else None)
     row = self._bool_row("TurnAssist", "Turn Assist", configurable and self.authority("torque") and supported and capability is not None)
     return replace(row, capability=capability, dependencies=(),
                    reason=row.reason if row.value not in ("On", "Off") else
-                          ("Adds steering help during rolling low-speed turns, above about 0.1 mph or the vehicle minimum. " +
+                          ("Uses steering-angle feedback during rolling low-speed turns, above about 0.1 mph or the vehicle minimum. " +
                            "Never at standstill. Applies next drive.") if row.available else
                           "Turn Assist is available on supported vehicles when settings can be changed")
 

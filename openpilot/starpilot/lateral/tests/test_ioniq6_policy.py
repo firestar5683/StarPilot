@@ -20,7 +20,7 @@ from openpilot.starpilot.lateral.torque_shaping import INTERP_SPEEDS
 TESTDATA = Path(__file__).parent / 'testdata'
 
 
-def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=False, direct_original_controller=False):
+def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=False, direct_original_controller=False, turn_assist=True):
   cp = interfaces[car].get_non_essential_params(car)
   cp.passive = passive
   if matched_frozen_cp:
@@ -36,7 +36,7 @@ def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=Fal
       versions[0].fwVersion = b'IONIQ6-230915'
       versions[1].fwVersion = b'IONIQ6-240206'
   ci = interfaces[car](cp)
-  controller = LatControlTorque(cp.as_reader(), ci, DT_CTRL, turn_assist=True)
+  controller = LatControlTorque(cp.as_reader(), ci, DT_CTRL, turn_assist=turn_assist)
   if direct_original_controller:
     # The older frozen vectors called the controller directly, before the
     # original controlsd drive loop replaced the PID gain curve each tick.
@@ -143,7 +143,7 @@ class Ioniq6PolicyTests(unittest.TestCase):
       self.assertAlmostEqual(controller.torque_params.latAccelOffset, 0.02, places=6)
       self.assertAlmostEqual(controller.torque_params.friction, 0.10, places=6)
 
-  def test_other_cars_match_committed_parent_trace(self):
+  def test_other_cars_without_assist_match_committed_parent_trace(self):
     sequence = ([(False, 2., 5., -.0005, False)] * 2 +
                 [(True, 2., 5., -.0005, False)] * 3 +
                 [(True, 15., -1., .0004, False)] * 3 +
@@ -152,7 +152,7 @@ class Ioniq6PolicyTests(unittest.TestCase):
     parent = json.loads((TESTDATA / 'non_ioniq_parent.json').read_text())
     for car in (TOYOTA.TOYOTA_COROLLA_TSS2, HYUNDAI.HYUNDAI_IONIQ_5):
       with self.subTest(car=str(car)):
-        controller, actual = _rows(car, sequence, passive=car == TOYOTA.TOYOTA_COROLLA_TSS2)
+        controller, actual = _rows(car, sequence, passive=car == TOYOTA.TOYOTA_COROLLA_TSS2, turn_assist=False)
         self.assertIsNone(selected_policy(controller))
         for row, expected in zip(actual, parent[str(car)], strict=True):
           for value, reference in zip(row, expected, strict=True):

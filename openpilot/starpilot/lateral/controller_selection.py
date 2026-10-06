@@ -134,8 +134,15 @@ def policy_for(CP) -> str | None:
 
 
 def turn_assist_supported(CP) -> bool:
-  """Only the existing Ioniq 6 torque policy has a verified assist contract."""
-  return policy_for(CP) == 'ioniq6'
+  return bool(CP.steerControlType == structs.CarParams.SteerControlType.torque and
+              CP.lateralTuning.which() == 'torque' and not CP.notCar and not CP.passive and not CP.dashcamOnly and
+              any(config.safetyModel not in (structs.CarParams.SafetyModel.noOutput,
+                  structs.CarParams.SafetyModel.silent, structs.CarParams.SafetyModel.allOutput)
+                  for config in CP.safetyConfigs))
+
+
+def model_turn_assist_supported(CP) -> bool:
+  return turn_assist_supported(CP) and policy_for(CP) == 'ioniq6'
 
 
 def default_selection(CP) -> ControllerSelection:
