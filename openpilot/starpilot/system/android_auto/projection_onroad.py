@@ -64,6 +64,7 @@ class ProjectionOnroad:
     self.customization = customization
     self._base_customization = None
     self._projection_customization = None
+    self.camera_stream = None  # the camera stream the last frame drew, or None
     self.native = dependencies or native_dependencies()
     native = self.native
     if native.ui_state.projection_read_only is not True:
@@ -109,6 +110,7 @@ class ProjectionOnroad:
     self.onroad.close()
 
   def _camera_layer(self, rect, state):
+    self.camera_stream = self.camera.stream_type
     self.camera.render_camera_model_layer(rect, road_style=state.customization['roadColors']['large'])
 
   def _driver_monitor_layer(self, rect, state):
@@ -135,6 +137,7 @@ class ProjectionOnroad:
 
   def render(self):
     ui = self.native.ui_state
+    self.camera_stream = None
     if ui.started:
       state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=time.monotonic_ns()).onroad
       if self.customization is not None:

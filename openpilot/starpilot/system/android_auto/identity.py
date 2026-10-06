@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import stat
 import tempfile
@@ -82,10 +83,13 @@ def load_identity(directory: Path | None = None, now: datetime | None = None) ->
                   expires.isoformat() if expires is not None else "unknown", days_left)
 
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 # Before config versions, every save wrote these defaults, which pinned projection
 # at 12 fps / 4000 kbps. Unversioned files holding exactly them get today's defaults.
 LEGACY_DEFAULTS = {"fps": 12, "bitrate_kbps": 4000}
+# Before version 3 the car view could only publish RGBA, and every save wrote these off.
+# They were never a choice, so older files get today's defaults for them.
+V3_RESET = ("gpu_nv12", "async_readback")
 
 DEFAULT_CONFIG = {
   "config_version": CONFIG_VERSION,
@@ -101,9 +105,9 @@ DEFAULT_CONFIG = {
   "fps": 0,                    # 0 = automatic (30 with hardware, 15 with software); otherwise a cap, 5-30
   "bitrate_kbps": 6000,
   "rate_control": "cbr",       # hardware encoder: "cbr" holds the bitrate (easier on the car's Wi-Fi); "vbr" as before
-  "gpu_nv12": False,           # current car view publishes RGBA
-  "async_readback": False,     # current car view uses synchronous readback
-  "render_profile": False,     # current car view has no persistent profile writer
+  "gpu_nv12": True,            # car view: convert to the encoder's NV12 on the GPU (a third of the RGBA readback)
+  "async_readback": True,      # car view: read frames back without stalling the renderer on the GPU
+  "render_profile": True,      # car view: always-on sampling profile in logs/render_profile.txt (and .1.txt)
   "render_profile_kb": 256,    # size cap per render_profile file
   "wifi_interface": "wlan0",
   "device_name": "StarPilot",
@@ -123,6 +127,8 @@ def load_config(path: Path | None = None) -> dict:
       version = stored.get("config_version")
       if not isinstance(version, int) or version < 2:
         stored = {key: value for key, value in stored.items() if LEGACY_DEFAULTS.get(key, object()) != value}
+      if not isinstance(version, int) or version < 3:
+        stored = {key: value for key, value in stored.items() if key not in V3_RESET}
       config.update({key: value for key, value in stored.items() if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key]))})
   except (OSError, ValueError):
     pass
@@ -163,6 +169,17 @@ def expiry_warning(identity: Identity) -> str:
   if 0 <= identity.days_left <= EXPIRY_WARNING_DAYS:
     return f"Android Auto identity expires in {identity.days_left} days ({identity.expires[:10]}); renew it in The Galaxy"
   return ""
+
+
+def session_log_order(path: Path) -> tuple[int, str]:
+  """Sort key for session logs, oldest first.
+
+  Files are numbered, because the clock can read a date from months ago until it syncs;
+  ordering by the timestamp in the name put the newest session first. Unnumbered files
+  are from before numbering, so they are the oldest.
+  """
+  match = re.fullmatch(r"session-(\d{6})-.*\.jsonl", path.name)
+  return (int(match[1]), path.name) if match else (-1, path.name)
 
 
 def timestamp() -> str:

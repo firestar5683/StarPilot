@@ -14,7 +14,13 @@ import socket
 import threading
 from collections.abc import Callable
 
-AG_FEATURES = 0  # no three-way calling, no codec negotiation, no voice recognition
+# Advertise what an ordinary phone with no call in progress offers. With +BRSF: 0 the 2025 Civic (Alps Alpine
+# 8A501) finished the SLC, then dropped the link 1 ms after AT+BIA and redialled every 10 s (btmon, 2026-10-01).
+# Bits: three-way calling, EC/NR, reject call, enhanced call status, enhanced call control, extended error codes,
+# codec negotiation. No voice recognition, in-band ring or eSCO S4: there is never call audio behind this gateway.
+AG_FEATURES = 1 | 2 | 32 | 64 | 128 | 256 | 512
+SDP_FEATURES = 0x01 | 0x02 | 0x20  # three-way calling, EC/NR, wide band speech (pairs with codec negotiation)
+HFP_VERSION = 0x0107
 INDICATORS = ",".join(('("call",(0,1))', '("callsetup",(0-3))', '("service",(0-1))', '("signal",(0-5))',
                        '("roam",(0,1))', '("battchg",(0-5))', '("callheld",(0-2))'))
 INDICATOR_VALUES = "0,0,1,5,0,5,0"
@@ -39,11 +45,11 @@ def respond(command: str) -> list[str]:
     return ["+BIND: (1,2)", "OK"]
   if cmd == "AT+BIND?":
     return ["+BIND: 1,0", "+BIND: 2,0", "OK"]
-  if cmd.startswith(("ATD", "ATA", "AT+BLDN", "AT+BVRA", "AT+CHLD=")):
-    return ["ERROR"]  # no telephony behind this gateway
+  if cmd.startswith(("ATD", "ATA", "AT+BLDN", "AT+BVRA", "AT+CHLD=", "AT+BCC")):
+    return ["ERROR"]  # no telephony or call audio behind this gateway
   if cmd.startswith(("AT+CMER", "AT+CLIP", "AT+CCWA", "AT+NREC", "AT+VGS", "AT+VGM", "AT+CMEE", "AT+BIA", "AT+COPS=",
                      "AT+CLCC", "AT+CNUM", "AT+BTRH", "AT+BAC", "AT+BIND=", "AT+BIEV", "AT+XAPL", "AT+IPHONEACCEV",
-                     "AT+CHUP", "AT+XEVENT", "AT+CSRSF", "AT+APLSIRI", "AT+BCS", "AT+BCC", "AT+NREC")):
+                     "AT+CHUP", "AT+XEVENT", "AT+CSRSF", "AT+APLSIRI", "AT+BCS")):
     return ["OK"]
   return ["ERROR"]
 

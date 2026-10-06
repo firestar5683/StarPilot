@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
+import queue
 import socket
 import threading
 import time
@@ -47,9 +47,11 @@ UNAVAILABLE_AFTER = 1.0      # focused but no fresh UI frame for this long -> "u
 SDP_SETTLE = (1.5, 2.2, 3.0)
 TCP_ATTEMPTS = 6
 MAX_LOG_FILES = 20
+LOG_QUEUE_MAX = 1000          # session log records waiting for the writer; past this they are dropped and counted
 ENCODER_RECOVERIES = 3       # hardware encoder reopens allowed per window before the session is torn down
 ENCODER_RECOVERY_WINDOW = 10.0
 CAR_LINK_HOLD = 10.0         # a hands-free connection from the car counts as "car present" this long
+HFP_FRESH = 3.0              # a hands-free link from the car this recent still means "the car is reaching out now"
 WIRED_USB_VERIFIED = False   # configfs gadget/vehicle CAN USB isolation has not been proven on target
 
 
@@ -101,51 +103,84 @@ class UsbLease:
 
 
 class EventLog:
-  """Sanitized JSONL session log under /data/android_auto/logs, plus the recent tail in memory."""
+  """Sanitized JSONL session log under /data/android_auto/logs, plus the recent tail in memory.
+
+  The streaming loop logs too, so records are queued and a background thread writes them: a slow
+  or full disk never stalls projection. If the writer falls behind, records are dropped and the
+  next one that fits is preceded by a ``log_dropped`` count.
+  """
 
   def __init__(self, directory: Path | None = None):
     self.directory = directory or identity_store.LOG_DIR
-    self.handle = None
     self.recent: deque[dict] = deque(maxlen=40)
     self.lock = threading.Lock()
-
-  @staticmethod
-  def _order(path: Path) -> tuple[int, str]:
-    # Files are numbered, because the clock can read a date from months ago until it syncs;
-    # pruning by the timestamp in the name deleted the newest session first.
-    # Unnumbered files are from before numbering, so they are the oldest.
-    match = re.fullmatch(r"session-(\d{6})-.*\.jsonl", path.name)
-    return (int(match[1]), path.name) if match else (-1, path.name)
+    self._queue: queue.Queue = queue.Queue(maxsize=LOG_QUEUE_MAX)
+    self._writer: threading.Thread | None = None
+    self._writer_stop: threading.Event | None = None
+    self._dropped = 0
 
   def open(self) -> None:
     try:
       self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-      logs = sorted(self.directory.glob("session-*.jsonl"), key=self._order)
+      logs = sorted(self.directory.glob("session-*.jsonl"), key=identity_store.session_log_order)
       for old in logs[:max(0, len(logs) - MAX_LOG_FILES + 1)]:
         old.unlink(missing_ok=True)
-      number = max([0, *(self._order(log)[0] for log in logs)]) + 1
+      number = max([0, *(identity_store.session_log_order(log)[0] for log in logs)]) + 1
       path = self.directory / f"session-{number:06d}-{identity_store.timestamp()}.jsonl"
       fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-      self.handle = os.fdopen(fd, "a")
+      handle = os.fdopen(fd, "a")
     except OSError:
-      self.handle = None
+      return
+    with self.lock:
+      self._queue = queue.Queue(maxsize=LOG_QUEUE_MAX)
+      self._dropped = 0
+      self._writer_stop = threading.Event()
+      self._writer = threading.Thread(target=self._write, args=(handle, self._queue, self._writer_stop),
+                                      name="aa_session_log", daemon=True)
+      self._writer.start()
+
+  @staticmethod
+  def _write(handle, records: queue.Queue, stopped: threading.Event) -> None:
+    with handle:
+      while not stopped.is_set() or not records.empty():
+        try:
+          line = records.get(timeout=0.1)
+        except queue.Empty:
+          continue
+        try:
+          handle.write(line)
+          if records.empty():
+            handle.flush()
+        except OSError:
+          pass
 
   def close(self) -> None:
+    """Write what is queued, then stop the writer (bounded: a stuck disk is left to the daemon thread)."""
     with self.lock:
-      if self.handle is not None:
-        self.handle.close()
-        self.handle = None
+      writer, stopped = self._writer, self._writer_stop
+      self._writer = self._writer_stop = None
+    if writer is None:
+      return
+    assert stopped is not None
+    stopped.set()
+    writer.join(timeout=2.0)
+
+  def _line(self, record: dict) -> str:
+    return json.dumps(record, default=str) + "\n"
 
   def __call__(self, name: str, **values) -> None:
     record = {"t": datetime.now(UTC).isoformat(timespec="milliseconds"), "event": name, **values}
     with self.lock:
       self.recent.append(record)
-      if self.handle is not None:
-        try:
-          self.handle.write(json.dumps(record, default=str) + "\n")
-          self.handle.flush()
-        except OSError:
-          pass
+      if self._writer is None:
+        return
+      try:
+        if self._dropped:
+          self._queue.put_nowait(self._line({"t": record["t"], "event": "log_dropped", "count": self._dropped}))
+          self._dropped = 0
+        self._queue.put_nowait(self._line(record))
+      except queue.Full:
+        self._dropped += 1
 
 
 class Supervisor:
@@ -173,6 +208,7 @@ class Supervisor:
     self._pairing_until = 0.0
     self._pairing_known: set[str] | None = None  # Android Auto cars already paired when the pairing window opened
     self._car_seen_at = -CAR_LINK_HOLD
+    self._hfp_link = threading.Event()  # set when the chosen car opens the hands-free link
     self.auto = AutoConnectPolicy()
     self._companion_retry_at = 0.0
     self.log = EventLog()
@@ -589,6 +625,7 @@ class Supervisor:
   def _hfp_connected(self, address: str) -> None:
     if address.upper() in (self.config["receiver_address"].upper(), self.config.get("companion_address", "").upper()):
       self._car_seen_at = time.monotonic()
+      self._hfp_link.set()
 
   def _release_phone(self) -> None:
     """Stop looking like a phone; keep only the standby gateway auto-connect needs."""
@@ -667,6 +704,30 @@ class Supervisor:
     if self._stop.wait(seconds):
       raise Cancelled()
 
+  def _car_link_fresh(self) -> bool:
+    return time.monotonic() - self._car_seen_at < HFP_FRESH
+
+  def _wait_backoff(self, delay: float, car_can_wake: bool) -> None:
+    """Sleep out a retry delay, but retry at once when the car opens hands-free to us.
+
+    That is the car reaching out (at startup, or when the driver taps Android Auto); it hangs
+    up again within a second, so waiting out a 30 s backoff would miss it.
+    """
+    if not car_can_wake:
+      self._wait(delay)
+      return
+    if not self._car_link_fresh():
+      self._hfp_link.clear()
+    deadline = time.monotonic() + delay
+    while (remaining := deadline - time.monotonic()) > 0:
+      if self._hfp_link.is_set():
+        # One early retry per connection from the car: if that attempt also fails fast,
+        # the next backoff must not end at once just because the link is still fresh.
+        self._hfp_link.clear()
+        self.log("retry_early", reason="car opened hands-free", skipped_s=round(remaining, 1))
+        return
+      self._wait(min(0.1, remaining))
+
   # ---------------------------------------------------------------- session
 
   def _run(self, generation: int, trigger: str = "manual") -> None:
@@ -709,7 +770,7 @@ class Supervisor:
           delay = max(delay, PEER_STOP_RETRY_SECONDS)  # the car ended projection itself; do not bounce straight back
         self._set(state="backoff", attempt=attempt, retry_in=delay, mode=None)
         try:
-          self._wait(delay)
+          self._wait_backoff(delay, car_can_wake=not wired and not peer_stopped)
         except Cancelled:
           break
     finally:

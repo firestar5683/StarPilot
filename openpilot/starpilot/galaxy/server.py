@@ -179,7 +179,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None):
+                local_access=None, tmux_live=None, android_auto_logs=None):
   cloud = cloud_provider
 
   def cloud_status():
@@ -194,6 +194,14 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   console_source = tmux_live if tmux_live is not None else TmuxLive()
   monitor_source = monitor if monitor is not None else SystemMonitor()
   reports = crashes if crashes is not None else CrashReports()
+  aa_logs_source = android_auto_logs
+
+  def aa_logs():
+    nonlocal aa_logs_source
+    if aa_logs_source is None:
+      from openpilot.starpilot.galaxy.android_auto_logs import AndroidAutoLogs
+      aa_logs_source = AndroidAutoLogs()
+    return aa_logs_source
   software_source = software
   software_operations_source = software_operations
   software_lock = threading.Lock()
@@ -561,6 +569,19 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     def json(self, status, value):
       self.respond(status, json.dumps(value, allow_nan=False).encode())
 
+    def attachment(self, filename, body, content_type):
+      """A download the browser saves as ``filename`` rather than displays."""
+      self.send_response(200)
+      self.send_header('Content-Type', content_type)
+      self.send_header('Content-Length', str(len(body)))
+      self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+      self.send_header('Cache-Control', 'no-store')
+      self.send_header('X-Content-Type-Options', 'nosniff')
+      self.send_header('Referrer-Policy', 'no-referrer')
+      self.end_headers()
+      if self.command != 'HEAD':
+        self.wfile.write(body)
+
     def camera_video(self, encoded_name: str, *, combined=False):
       if not self.require_session():
         return
@@ -867,6 +888,37 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           # immediately before sending potentially sensitive content.
           if self.require_session():
             self.json(200, result)
+      elif path == '/api/android-auto/logs' or path.startswith('/api/android-auto/logs/'):
+        if not self.require_session():
+          return
+        from openpilot.starpilot.galaxy.android_auto_logs import LogMissing, LogsUnavailable
+        name = unquote(path.removeprefix('/api/android-auto/logs/file/')) if path.startswith('/api/android-auto/logs/file/') else None
+        if name is not None and not re.fullmatch(r'[\w.-]{1,128}', name):
+          self.json(400, {'error': 'Invalid log name'})
+          return
+        if path not in ('/api/android-auto/logs', '/api/android-auto/logs/bundle') and name is None:
+          self.json(404, {'error': 'Not found'})
+          return
+        try:
+          if path == '/api/android-auto/logs':
+            result = aa_logs().list()
+          elif name is None:
+            result = aa_logs().bundle()
+          else:
+            result = aa_logs().file(name)
+        except LogMissing:
+          self.json(404, {'error': 'That log is no longer kept; refresh the list'})
+        except LogsUnavailable:
+          self.json(503, {'error': 'Android Auto logs are unavailable'})
+        else:
+          # The session can be revoked while logs are read; check again right before sending them.
+          if not self.require_session():
+            return
+          if path == '/api/android-auto/logs':
+            self.json(200, result)
+          else:
+            filename, body = result
+            self.attachment(filename, body, 'application/zip' if filename.endswith('.zip') else 'text/plain; charset=utf-8')
       elif path.startswith('/api/navigation/map/tiles/'):
         if not self.require_session():
           return

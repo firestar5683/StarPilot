@@ -2,7 +2,9 @@
 
 The head unit is the RFCOMM server; StarPilot connects as the phone and runs:
 
-  HU -> WifiStartRequest(ip, port)          [some receivers first send WifiVersionRequest]
+  HU -> WifiStartRequest(ip, port)          [some receivers first send WifiVersionRequest; others wait
+                                             for the phone's WifiStartRequest and answer with
+                                             WifiStartResponse(ip, port, status)]
   ph -> WifiInfoRequest()
   HU -> WifiInfoResponse(ssid, key, bssid, security, ap_type)
   ph -> WifiStartResponse(status=0)
@@ -31,7 +33,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field as dataclass_field
 
-from openpilot.starpilot.system.android_auto.wire import field, one, parse_fields, signed, text
+from openpilot.starpilot.system.android_auto.wire import describe, field, one, parse_fields, signed, text
 
 WIFI_START_REQUEST = 1
 WIFI_INFO_REQUEST = 2
@@ -58,6 +60,7 @@ SECURITY_NAMES = {0: "unknown", 1: "open", 2: "wep64", 3: "wep128", 4: "wpa", 8:
 
 MAX_FRAME = 4096
 MAX_FRAMES = 64
+INITIAL_KICK_SECONDS = 2.5
 MAC_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
 
@@ -65,6 +68,10 @@ class BootstrapError(RuntimeError):
   def __init__(self, stage: str, message: str):
     super().__init__(f"{stage}: {message}")
     self.stage = stage
+
+
+class BootstrapTimeout(BootstrapError):
+  pass
 
 
 @dataclass(frozen=True)
@@ -198,12 +205,25 @@ class FrameReader:
     return frames
 
 
+def describe_version_request(payload: bytes):
+  """The whole WifiVersionRequest for diagnostics, without the vehicle identifier some receivers include."""
+  described = describe(payload)
+  if isinstance(described, dict):
+    for number in (4, 5):
+      for info in described.get(number, []):
+        if isinstance(info, dict) and isinstance((info.get(4) or [None])[0], str):
+          info[4] = ["redacted"]  # HeadUnitInfo.vehicle_id; the endpoint's field 4 is a number
+  return described
+
+
 class WirelessBootstrap:
   """Runs the phone side of the handshake on a connected RFCOMM socket."""
 
   def __init__(self, sock, log: Callable[..., None], *, device_serial: str = "starpilot",
-               version_status: int = STATUS_SUCCESS, stage_timeout: float = 20.0, start_request_delay: float = 5.0):
+               version_status: int = STATUS_SUCCESS, stage_timeout: float = 20.0, start_request_delay: float = 5.0,
+               initial_kick_delay: float = INITIAL_KICK_SECONDS):
     self.sock = sock
+    self.initial_kick_delay = initial_kick_delay
     self.start_request_delay = start_request_delay
     self.log = log
     self.device_serial = device_serial
@@ -227,7 +247,7 @@ class WirelessBootstrap:
     while not self.queue:
       remaining = deadline - time.monotonic()
       if remaining <= 0:
-        raise BootstrapError(self.stage, "head unit did not answer in time")
+        raise BootstrapTimeout(self.stage, "head unit did not answer in time")
       if self.cancelled():
         raise BootstrapError(self.stage, "cancelled")
       # Short slices keep Stop responsive even where closing a socket from
@@ -274,42 +294,69 @@ class WirelessBootstrap:
     # Android Auto 17.6 asks the car to start projection 5 s after the version
     # exchange if the car has not started it; newer head units (2025 Honda) wait for it.
     start_request_at: float | None = None
+    deadline = time.monotonic() + self.stage_timeout
+    initial_kick_at: float | None = time.monotonic() + self.initial_kick_delay
+    hint_ready_at: float | None = None
     while endpoint is None:
-      wait = 3.0 if hinted is not None else self.stage_timeout
-      if start_request_at is not None:
-        wait = min(wait, max(0.01, start_request_at - time.monotonic()))
-      try:
-        message_id, payload = self.next_frame(wait)
-      except BootstrapError:
-        if start_request_at is not None and time.monotonic() >= start_request_at:
-          start_request_at = None
-          self.send(WIFI_START_REQUEST)
-          continue
-        if hinted is None:
-          raise
-        endpoint = hinted  # the receiver sent its endpoint only with the version exchange
+      if cancelled():
+        raise BootstrapError(self.stage, "cancelled")
+      now = time.monotonic()
+      # An endpoint hint gets a short grace period for the normal StartRequest.
+      # Pings must not keep extending that grace period (or either stage).
+      if hinted is not None and hint_ready_at is not None and now >= hint_ready_at:
+        endpoint = hinted
         break
+      if now >= deadline:
+        raise BootstrapTimeout(self.stage, "head unit did not answer in time")
+      if initial_kick_at is not None and now >= initial_kick_at:
+        initial_kick_at = None
+        self.log("bootstrap_initial_kick")
+        self.send(WIFI_START_REQUEST)
+      if start_request_at is not None and now >= start_request_at:
+        start_request_at = None
+        self.send(WIFI_START_REQUEST)
+      wake_at = min(t for t in (deadline, initial_kick_at, start_request_at, hint_ready_at) if t is not None)
+      try:
+        message_id, payload = self.next_frame(max(0.001, wake_at - time.monotonic()))
+      except BootstrapTimeout:
+        continue  # only an actual read timeout advances timers; EOF/cancellation must fail
       if cancelled():
         raise BootstrapError(self.stage, "cancelled")
       if self.service(message_id, payload):
         continue
+      initial_kick_at = None  # setup messages drive the exchange; pings alone do not
       if message_id == WIFI_VERSION_REQUEST:
         major, minor, version_endpoint, info = parse_version_request(payload)
         version, head_unit = (major, minor), {**head_unit, **info}
         self.log("bootstrap_version", major=major, minor=minor, head_unit=info,
-                 endpoint=version_endpoint.__dict__ if version_endpoint else None)
+                 endpoint=version_endpoint.__dict__ if version_endpoint else None, message=describe_version_request(payload))
         self.send(WIFI_VERSION_RESPONSE, field(1, major) + field(2, minor) + field(3, self.device_serial) +
                   field(4, self.version_status))
         hinted = version_endpoint or hinted
-        start_request_at = time.monotonic() + self.start_request_delay
+        if hinted is not None and hint_ready_at is None:
+          hint_ready_at = time.monotonic() + 3.0
+        if start_request_at is None:
+          start_request_at = time.monotonic() + self.start_request_delay
       elif message_id == WIFI_START_REQUEST:
         parsed = parse_endpoint(payload)
         if parsed is None:
           raise BootstrapError(self.stage, "WifiStartRequest has no valid IPv4 endpoint")
         endpoint = parsed
+      elif message_id == WIFI_START_RESPONSE:
+        # The car's answer to our WifiStartRequest (2025 Honda): ip=1, port=2, status=3 once it is
+        # ready, or a negative status alone before then (it may follow up on its own; ask again anyway).
+        status = signed(one(parse_fields(payload), 3, STATUS_SUCCESS))
+        parsed = parse_endpoint(payload)
+        if parsed is not None and status == STATUS_SUCCESS:
+          endpoint = parsed
+        else:
+          self.log("bootstrap_start_refused", status=status, endpoint=parsed is not None)
+          start_request_at = time.monotonic() + self.start_request_delay
       elif message_id == WIFI_SETUP_INFO:
         setup_endpoint, setup_credentials = parse_setup_info(payload)
         hinted = setup_endpoint or hinted
+        if hinted is not None and hint_ready_at is None:
+          hint_ready_at = time.monotonic() + 3.0
         credentials = setup_credentials or credentials
         self.log("bootstrap_setup_info", endpoint=setup_endpoint.__dict__ if setup_endpoint else None,
                  credentials=credentials.describe() if credentials else None)
@@ -322,8 +369,12 @@ class WirelessBootstrap:
     if credentials is None:
       self.stage = "wifi_info"
       self.send(WIFI_INFO_REQUEST)
+      info_deadline = time.monotonic() + self.stage_timeout
       while credentials is None:
-        message_id, payload = self.next_frame(self.stage_timeout)
+        remaining = info_deadline - time.monotonic()
+        if remaining <= 0:
+          raise BootstrapTimeout(self.stage, "head unit did not answer in time")
+        message_id, payload = self.next_frame(remaining)
         if cancelled():
           raise BootstrapError(self.stage, "cancelled")
         if self.service(message_id, payload):
