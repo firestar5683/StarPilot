@@ -185,8 +185,8 @@ class RecordingMediaTest(unittest.TestCase):
       ready, release = threading.Event(), threading.Event()
 
       class PausedMedia(RecordingMedia):
-        def open(self, name, *, prepare=True):
-          lease = super().open(name, prepare=prepare)
+        def open(self, name, *, prepare=True, camera="qcamera"):
+          lease = super().open(name, prepare=prepare, camera=camera)
           ready.set()
           release.wait(2)
           return lease

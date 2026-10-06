@@ -211,6 +211,9 @@ class ShellInput:
     if self._pane is None:
       return
     if snapshot.mode == ShellMode.HOME:
+      if now is None:
+        self.home.cancel()
+        return
       self.home.move(x, y, now)
       self.home.tick(now, snapshot.home)
     elif snapshot.mode == ShellMode.ONROAD:
@@ -241,6 +244,9 @@ class ShellInput:
     if self._pane is None:
       return
     if snapshot.mode == ShellMode.HOME:
+      if now is None:
+        self.home.cancel()
+        return
       self.home.release(x, y, now, snapshot.home)
     elif snapshot.mode == ShellMode.ONROAD:
       self.onroad.release(x, y, snapshot.onroad)
