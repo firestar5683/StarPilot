@@ -11,7 +11,10 @@ from opendbc.car.structs import CarParams
 
 
 def params(car, *, alpha=False, release=False):
-  return CarInterface.get_params(car, gen_empty_fingerprint(), [], alpha, release, False)
+  fingerprint = gen_empty_fingerprint()
+  if car == CAR.CHEVROLET_MALIBU_CC:
+    fingerprint[0][0xBE] = 6
+  return CarInterface.get_params(car, fingerprint, [], alpha, release, False)
 
 
 def pt_frames(packer, *, cruise=True, main=True, brake=False, gas=False, counter=0, acc_cruise=0):

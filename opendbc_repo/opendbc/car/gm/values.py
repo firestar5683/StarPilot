@@ -923,8 +923,31 @@ def is_silverado_cc_stock_profile(cp):
 ORDINARY_CC_CAR = CC_GATEWAY_STOCK_CAR - {CAR.CHEVROLET_SILVERADO_CC}
 ORDINARY_CC_WORD = 0xC160
 
+MALIBU_CC_F1_WORD = 0xC161
+MALIBU_CC_F1_STOCK_WORD = 0xC162
+MALIBU_CC_F1_SOURCES = {0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0xF1: 6, 0x1C4: 8,
+                        0xC9: 8, 0x3D1: 8, 0x1F5: 8, 0x232: 8, 0x1E5: 8, 0x140: 3,
+                        0x12A: 8, 0x1F1: 8, 0x17D: 6}
+
+
+def is_malibu_cc_f1_profile(cp):
+  try:
+    configs = cp.safetyConfigs
+    return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_MALIBU_CC and
+            cp.networkLocation == CarParams.NetworkLocation.gateway and cp.radarUnavailable and
+            not cp.alphaLongitudinalAvailable and not cp.passive and not cp.dashcamOnly and not cp.notCar and
+            control_flags(cp) == int(GMFlags.CC_LONG | GMFlags.NO_ACCELERATOR_POS_MSG) and len(configs) == 1 and
+            configs[0].safetyModel == CarParams.SafetyModel.gm and
+            int(configs[0].safetyParam) == (MALIBU_CC_F1_WORD if cp.openpilotLongitudinalControl else MALIBU_CC_F1_STOCK_WORD) and
+            cp.pcmCruise == (not cp.openpilotLongitudinalControl))
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False
+
+
 def is_ordinary_cc_profile(cp):
   """Exact non-Volt conventional-cruise source; no pedal ownership."""
+  if is_malibu_cc_f1_profile(cp):
+    return True
   try:
     configs = cp.safetyConfigs
     return (cp.brand == 'gm' and cp.carFingerprint in ORDINARY_CC_CAR and

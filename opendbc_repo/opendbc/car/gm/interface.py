@@ -12,7 +12,8 @@ from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAM
 from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS,
                                    CanBus, GMSafetyFlags, GMFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, ASCM_INTERCEPT_CAR,
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
-                                   SILVERADO_CC_STOCK_SOURCES, ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS,
+                                   SILVERADO_CC_STOCK_SOURCES, MALIBU_CC_F1_SOURCES, MALIBU_CC_F1_WORD,
+                                   ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS,
                                    is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
                                    CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
                                        VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS, is_bolt_pedal_removed_profile)
@@ -802,6 +803,19 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam = BOLT_PEDAL_REMOVED_WORDS[candidate]
       else:
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.noOutput)]
+    if (candidate == CAR.CHEVROLET_MALIBU_CC and 0x201 not in fingerprint[CanBus.POWERTRAIN] and
+        0xBE not in fingerprint[CanBus.POWERTRAIN]):
+      pt = fingerprint[CanBus.POWERTRAIN]
+      admitted = (all(pt.get(address) == length for address, length in MALIBU_CC_F1_SOURCES.items()) and
+                  RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and
+                  CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs)
+      ret.flags = int(GMFlags.CC_LONG | GMFlags.NO_ACCELERATOR_POS_MSG)
+      ret.openpilotLongitudinalControl = admitted
+      ret.pcmCruise = not admitted
+      ret.dashcamOnly = not admitted
+      ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm if admitted else structs.CarParams.SafetyModel.noOutput)]
+      if admitted:
+        ret.safetyConfigs[0].safetyParam = MALIBU_CC_F1_WORD
     if 0x142 in fingerprint[CanBus.POWERTRAIN] or candidate in VOLT_BSM_CAR:
       ret.flags |= GMFlags.HAS_BSM.value
     return ret

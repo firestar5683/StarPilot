@@ -17,7 +17,57 @@ def qualified_frames(packer, counter):
   frames.append(packer.make_can_msg('EBCMWheelSpdRear', 0, {'RLWheelSpd': 60, 'RRWheelSpd': 60, 'RLWheelDir': 1, 'RRWheelDir': 1}))
   return frames
 
+
+def malibu_f1_params(*, release=False):
+  from opendbc.car import gen_empty_fingerprint
+  from opendbc.car.gm.interface import CarInterface
+  from opendbc.car.gm.values import MALIBU_CC_F1_SOURCES
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update(MALIBU_CC_F1_SOURCES)
+  return CarInterface.get_params(CAR.CHEVROLET_MALIBU_CC, fingerprint, [], False, release, False)
+
 class TestOrdinaryCc(unittest.TestCase):
+  def test_alternate_malibu_factory_and_parser_brake_sources(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.values import DBC, is_malibu_cc_f1_profile
+    for release in (False, True):
+      for disabled in (False, True):
+        cp = malibu_f1_params(release=release)
+        prepare_disable_longitudinal(cp, disabled)
+        self.assertTrue(is_malibu_cc_f1_profile(cp))
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC162 if disabled else 0xC161)
+        self.assertEqual(cp.pcmCruise, disabled)
+        self.assertEqual(cp.openpilotLongitudinalControl, not disabled)
+        ci = CarInterface(cp)
+        packer = CANPacker(DBC[CAR.CHEVROLET_MALIBU_CC][Bus.pt])
+        for tick in range(80):
+          raw, f1, c9 = ((20, 0, 0), (21, 0, 0), (0, 1, 0), (0, 0, 1), (0, 1, 1), (0, 0, 1), (0, 0, 0))[tick % 7]
+          frames = [frame for frame in qualified_frames(packer, tick % 4) if frame[0] not in (0xBE, 0xF1, 0xC9)]
+          frames += [packer.make_can_msg('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': raw, 'BrakePressed': f1}),
+                     packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': 1, 'BrakePressed': c9})]
+          out = ci.update([(1_000_000_000 + tick * 10_000_000, frames)])
+          self.assertEqual(out.brakePressed, bool(raw >= 21 or f1 or c9))
+          self.assertFalse(out.cruiseState.nonAdaptive)
+        self.assertTrue(out.canValid)
+        self.assertNotIn('ECMAcceleratorPos', ci.can_parsers[Bus.pt].vl)
+
+  def test_alternate_malibu_missing_source_is_final_no_output(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import MALIBU_CC_F1_SOURCES, is_malibu_cc_f1_profile
+    for address in MALIBU_CC_F1_SOURCES:
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0].update(MALIBU_CC_F1_SOURCES)
+      fingerprint[0].pop(address)
+      cp = CarInterface.get_params(CAR.CHEVROLET_MALIBU_CC, fingerprint, [], False, False, False)
+      self.assertTrue(cp.dashcamOnly)
+      self.assertFalse(cp.openpilotLongitudinalControl)
+      self.assertFalse(is_malibu_cc_f1_profile(cp))
+      self.assertEqual(cp.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+
   def test_actual_final_configuration_and_shared_owners(self):
     self.assertEqual(len(ORDINARY_CC_CAR), 8)
     for identity in ORDINARY_CC_CAR:

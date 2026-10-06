@@ -221,7 +221,7 @@ static safety_config gm_bolt_cc_init(uint16_t word) {
   gm_bolt_cc_selected = tag != 0U;
   safety_config ret = (tag != 0U) ? gm_bolt_cc_profile_init((uint16_t)tag) : gm_init(word);
   gm_aol_initialize(gm_aol_profile_word(word) && gm_aol_mode_valid());
-  gm_aol_stock_only = gm_bolt_cc_stock_only || (word == 16U);
+  gm_aol_stock_only = gm_bolt_cc_stock_only || (word == 16U) || (word == 0xC162U);
   gm_aol_stock_gateway = word == 16U;
   return ret;
 }
