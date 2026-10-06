@@ -125,7 +125,7 @@ def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str 
   draw_hud_background(rect, ACCENT)
   nodes, edges = constellation("settings-header", rect)
   draw_constellation_nodes(nodes, edges, rect, ACCENT, 1.0)
-  role, size = FontRole.MEDIUM, 35
+  role, size = FontRole.MEDIUM, 44
   x = left + 34
   segments = []
   if back:
@@ -136,7 +136,7 @@ def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str 
   title = elide_text(fonts, title, role, size, available)
   separator = " > "
   parent_width = available - fonts.measure(title + separator, role, size).width
-  if parent and parent_width >= 120:
+  if parent not in ("", "StarPilot", "Settings") and parent_width >= 120:
     breadcrumb = elide_text(fonts, parent, role, size, parent_width) + separator
     segments.append((breadcrumb, x, TEXT_SECONDARY))
     x += fonts.measure(breadcrumb, role, size).width
