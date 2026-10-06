@@ -22,8 +22,10 @@ export function uploadPackage(path, options, progress, makeRequest = () => new X
     xhr.upload.onprogress = (event) => {
       if (!settled && event.lengthComputable) progress({ loaded: event.loaded, total: event.total })
     }
-    xhr.onload = () => finish(resolve, { status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300,
-      json: async () => JSON.parse(xhr.responseText) })
+    xhr.onload = () => finish(resolve, {
+      status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300,
+      json: async () => JSON.parse(xhr.responseText)
+    })
     xhr.onerror = () => finish(reject, new Error("Upload interrupted. Check your connection and retry."))
     xhr.ontimeout = () => finish(reject, new Error("Upload timed out. Check your connection and retry."))
     xhr.onabort = () => finish(reject, new Error("Upload canceled."))
@@ -72,8 +74,8 @@ function validSetup(value) {
 }
 
 export class AndroidAutoFeed {
-  constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
-                uploader = uploadPackage, later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
+  constructor({ publish, unauthorized = () => { }, fetcher = (...args) => fetch(...args),
+    uploader = uploadPackage, later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
     Object.assign(this, { publish, unauthorized, fetcher, uploader, later, cancelTimer })
     this.active = false
     this.generation = 0
@@ -94,14 +96,20 @@ export class AndroidAutoFeed {
     this.error = ""
   }
 
-  emit() { this.publish({ setup: this.setup, pairing: this.pairing, selected: this.selected, runtime: this.runtime,
-    receivers: this.receivers,
-    endReason: this.endReason, busy: this.busy, uploadProgress: this.uploadProgress, error: this.error }) }
+  emit() {
+    this.publish({
+      setup: this.setup, pairing: this.pairing, selected: this.selected, runtime: this.runtime,
+      receivers: this.receivers,
+      endReason: this.endReason, busy: this.busy, uploadProgress: this.uploadProgress, error: this.error
+    })
+  }
 
   stop(cancelPair = false) {
     if (cancelPair && this.active && this.pairing?.active) {
-      this.fetcher("./api/android-auto/pairing/cancel", { method: "POST", credentials: "same-origin", keepalive: true,
-        headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {})
+      this.fetcher("./api/android-auto/pairing/cancel", {
+        method: "POST", credentials: "same-origin", keepalive: true,
+        headers: { "Content-Type": "application/json" }, body: "{}"
+      }).catch(() => { })
     }
     this.active = false
     this.generation++
@@ -209,8 +217,10 @@ export class AndroidAutoFeed {
 
   async action(path, body = {}, timeout = 12000) {
     if (!this.active || this.busy || !this.setup?.parked || !this.setup?.enabled) return false
-    const result = await this.request(path, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body) }, timeout)
+    const result = await this.request(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }, timeout)
     if (result === null) return false
     if (path.endsWith('/pairing')) this.endReason = ""
     if (path.endsWith('/cancel')) this.endReason = "canceled"
@@ -220,8 +230,8 @@ export class AndroidAutoFeed {
 
   async selectDevice(address) {
     if (!ADDRESS.test(address) || !this.pairing?.active || this.pairing?.prompt ||
-        ["pairing", "connecting"].includes(this.pairing?.state) || this.runtime?.running ||
-        !this.pairing?.devices?.some((device) => device.address === address)) return false
+      ["pairing", "connecting"].includes(this.pairing?.state) || this.runtime?.running ||
+      !this.pairing?.devices?.some((device) => device.address === address)) return false
     return this.action("./api/android-auto/pairing/select", { address })
   }
 
@@ -241,9 +251,11 @@ export class AndroidAutoFeed {
 
   async control(action, extra = {}) {
     if (!this.active || this.busy || !this.setup?.enabled || this.pairing?.active ||
-        !["start", "stop", "select_receiver", "auto_connect"].includes(action)) return false
-    const result = await this.request("./api/android-auto/control", { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) })
+      !["start", "stop", "select_receiver", "auto_connect"].includes(action)) return false
+    const result = await this.request("./api/android-auto/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra })
+    })
     if (result === null) return false
     await this.refresh()
     return true
@@ -251,9 +263,11 @@ export class AndroidAutoFeed {
 
   async setEnabled(enabled) {
     if (!this.active || this.busy || typeof enabled !== "boolean" ||
-        enabled && (!this.setup?.parked || !this.setup?.installReady)) return false
-    const result = await this.request("./api/android-auto/enable", { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) })
+      enabled && (!this.setup?.parked || !this.setup?.installReady)) return false
+    const result = await this.request("./api/android-auto/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled })
+    })
     if (result === null) return false
     await this.refresh()
     return true
@@ -261,7 +275,7 @@ export class AndroidAutoFeed {
 
   async upload(file) {
     if (!this.active || this.busy || !this.setup?.parked || !this.setup?.enabled ||
-        !file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > this.setup.maxUploadBytes) {
+      !file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > this.setup.maxUploadBytes) {
       this.error = "Choose an APK, XAPK, or APKM within the shown size limit."
       this.emit()
       return false
@@ -271,8 +285,10 @@ export class AndroidAutoFeed {
     const transport = (path, options) => this.uploader(path, options, (progress) => {
       if (this.active && generation === this.generation) { this.uploadProgress = progress; this.emit() }
     })
-    const result = await this.request("./api/android-auto/upload", { method: "POST",
-      headers: { "Content-Type": "application/octet-stream" }, body: file }, 180000, transport)
+    const result = await this.request("./api/android-auto/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" }, body: file
+    }, 180000, transport)
     this.uploadProgress = null
     this.emit()
     if (result === null) return false
@@ -282,7 +298,7 @@ export class AndroidAutoFeed {
 
   async removePackage() {
     if (!this.active || this.busy || !this.setup?.parked || !this.setup?.enabled ||
-        this.setup.import?.state === "running" || this.runtime?.running) return false
+      this.setup.import?.state === "running" || this.runtime?.running) return false
     const result = await this.request("./api/android-auto/identity", { method: "DELETE" })
     if (result === null) return false
     await this.refresh()
@@ -381,11 +397,15 @@ export function installChecks(job, locale = undefined) {
 
 export const AndroidAutoPage = {
   components: { GxIconButton, GxNotice },
-  props: { mode: { type: String, required: true }, localAccess: { type: Boolean, required: true },
-    unauthorized: { type: Function, required: true } },
-  data: () => ({ setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
+  props: {
+    mode: { type: String, required: true }, localAccess: { type: Boolean, required: true },
+    unauthorized: { type: Function, required: true }
+  },
+  data: () => ({
+    setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, installAttempted: false, installBaseline: null,
-    installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false }),
+    installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false
+  }),
   mounted() {
     this.feed = new AndroidAutoFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
     this.visibility = () => document.hidden ? this.feed.stop(true) : this.begin()
@@ -458,10 +478,14 @@ export const AndroidAutoPage = {
       if (this.pairing?.active) return "Finish or cancel pairing first."
       return ""
     },
-    waitingForCar() { return this.pairing?.active && !this.pairing?.receiver && !this.pairing?.prompt && !this.pairing?.approved &&
-      !["pairing", "connecting", "paired", "connected", "failed"].includes(this.pairing?.state) },
-    deviceSelectionBlocked() { return this.busy || !!this.pairingReason || !this.pairing?.active ||
-      !!this.pairing?.prompt || ["pairing", "connecting"].includes(this.pairing?.state) || !!this.runtime?.running },
+    waitingForCar() {
+      return this.pairing?.active && !this.pairing?.receiver && !this.pairing?.prompt && !this.pairing?.approved &&
+        !["pairing", "connecting", "paired", "connected", "failed"].includes(this.pairing?.state)
+    },
+    deviceSelectionBlocked() {
+      return this.busy || !!this.pairingReason || !this.pairing?.active ||
+        !!this.pairing?.prompt || ["pairing", "connecting"].includes(this.pairing?.state) || !!this.runtime?.running
+    },
   },
   methods: {
     async begin() {
@@ -541,12 +565,15 @@ export const AndroidAutoPage = {
               <p v-if="setup.import?.state === 'running' && !installOpen" class="gx-muted" role="status">Checking your package…</p>
               <p v-if="!setup.parked" class="gx-muted">Use offroad mode or Park to make changes.</p>
             </template>
-            <details class="gx-aa-wiki"><summary>Stuck installing? Which file to download</summary>
-              <ol>
-                <li>On APKMirror, open the newest <strong>Android Auto</strong> release by Google LLC whose name ends in <strong>‑release</strong> (not beta).</li>
-                <li>In the download table pick the variant for <strong>arm64-v8a</strong> or <strong>universal</strong>, with <strong>nodpi</strong>. APK, XAPK, and APKM all work; leave bundles zipped.</li>
-                <li>Tap the green <strong>Download APK</strong> button. You do not need the APKMirror Installer app.</li>
-              </ol>
+            <details class="gx-aa-wiki"><summary>Stuck installing? Common problems</summary>
+              <ul>
+                <li><strong>“This is the APKMirror Installer app”:</strong> you downloaded the helper app. Go back to the Android Auto release page and use <strong>Download APK Bundle</strong> there.</li>
+                <li><strong>“Not Android Auto” or an unverified file:</strong> make sure the app is <strong>Android Auto</strong> by <strong>Google LLC</strong>, and that the variant name ends in <strong>‑release</strong> (not beta or alpha).</li>
+                <li><strong>Certificate expired:</strong> that release is too old. Go back to All versions and download the one with the newest date.</li>
+                <li><strong>Can’t find the right file:</strong> only the release’s <strong>Variant</strong> entries are the app. Skip the ones named beta or any other app.</li>
+                <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded.</li>
+                <li><strong>Upload is slow or stops:</strong> stay on this page and keep the comma awake and on the same Wi-Fi until it finishes.</li>
+              </ul>
               <p><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. Nothing is sent anywhere, and no Android app is installed on the comma.</p>
             </details>
           </div>
@@ -680,7 +707,13 @@ export const AndroidAutoPage = {
               <li :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
                 <strong>Download Android Auto</strong>
                 <a class="gx-btn gx-btn--tonal" :href="apkmirror" target="_blank" rel="noopener noreferrer">Open APKMirror <i class="bi bi-box-arrow-up-right"></i></a>
-                <small>Pick the newest <strong>‑release</strong> build for <strong>arm64-v8a</strong> or <strong>universal</strong>, then tap the green <strong>Download APK</strong> button. You don’t need the APKMirror Installer app.</small>
+                <ol class="gx-aa-sheet__substeps">
+                  <li>Open <strong>Android Auto</strong> on APKMirror, then open the <strong>All versions</strong> list and click through the versions to compare their release dates.</li>
+                  <li>Open the version with the <strong>newest release date</strong>.</li>
+                  <li>Scroll down to <strong>Available downloads</strong>. Under <strong>Variant</strong>, click the <strong>17.x.xxxx‑release</strong> or <strong>18.x.xxxx‑release</strong> entry.</li>
+                  <li>Click <strong>Download APK Bundle</strong> (or <strong>Download APK</strong>). You get an <strong>.apk</strong>, <strong>.xapk</strong> or <strong>.apkm</strong> file. Leave it zipped.</li>
+                </ol>
+                <small>You don’t need the APKMirror Installer app.</small>
               </li>
               <li :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
                 <strong>Choose the downloaded file</strong>
