@@ -193,7 +193,7 @@ class BlendedLongitudinalController:
     return messages
 
 
-def hdai_startup_qualified(cp, *, is_release=False):
+def hdai_startup_qualified(cp, *, is_release=False, allow_marked=False):
   """Developer-only classic mixed owner; HDAII remains independently disabled."""
   from opendbc.car import structs
   from opendbc.car.hyundai.hyundaicanfd import CanBus
@@ -201,7 +201,8 @@ def hdai_startup_qualified(cp, *, is_release=False):
   dynamic = int(HyundaiFlags.HAS_LDA_BUTTON | HyundaiFlags.SEND_LFA)
   if (is_release or int(cp.flags) & ~dynamic != declared or not alpha_eligible(cp) or cp.passive or cp.dashcamOnly or cp.notCar or
       cp.brand != 'hyundai' or cp.steerControlType != structs.CarParams.SteerControlType.torque or
-      cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG or cp.alternativeExperience != 0 or
+      cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG or
+      cp.alternativeExperience not in ((0, 32) if allow_marked else (0,)) or
       len(cp.safetyConfigs) != 1):
     return False
   safety = cp.safetyConfigs[0]
@@ -225,6 +226,8 @@ class BlendedStartup:
     from opendbc.car.hyundai.hyundaicanfd import CanBus
     self.stock_cp = stock_cp
     self.candidate_snapshot = candidate.to_dict()
+    self.final_snapshot = None
+    self.configured_ci = None
     self.callbacks = callbacks
     self.owner = BlendedLongitudinalOwner(candidate, CanBus(candidate), confirm_disable_ecu)
     self.stop_event = threading.Event()
@@ -285,16 +288,43 @@ class BlendedStartup:
   def prepared_for(self, cp):
     return (not self.closed and self.fault is None and self.owner.active() and self.owner.result is not None and
             self.owner.result.outcome is Outcome.OWNED and self.source_floor_ns > 0 and
-            self.owner.cp.to_dict() == self.candidate_snapshot == cp.to_dict())
+            self.owner.cp.to_dict() == (self.final_snapshot or self.candidate_snapshot) == cp.to_dict())
 
   def configure(self, ci):
     self.check()
+    if self.closed or self.owner.published:
+      raise RuntimeError("Mixed startup configuration is closed")
     if self.owner.active():
       self.controller = BlendedLongitudinalController(self.owner, ci.CC.packer, ci.CC.CAN)
       ci.CC.blended_longitudinal = self.controller
+    self.configured_ci = ci
+
+  def finalize_aol_configuration(self, ci):
+    self.check()
+    if self.closed or self.owner.published or ci is not self.configured_ci:
+      raise RuntimeError('Mixed AOL finalization requires configured unpublished startup')
+    if self.owner.active() and (self.controller is None or ci.CC.blended_longitudinal is not self.controller):
+      raise RuntimeError('Mixed AOL finalization requires its installed controller')
+    if self.final_snapshot is not None:
+      if not self.prepared_for(ci.CP):
+        raise RuntimeError('Mixed AOL final configuration is frozen')
+      return
+    if not self.owner.active():
+      return
+    expected = dict(self.candidate_snapshot)
+    if ci.CP.alternativeExperience == 32:
+      from opendbc.car.hyundai.blended_stock_aol import qualified_alpha
+      if not qualified_alpha(ci.CP, marked_only=True):
+        raise RuntimeError('Unsupported mixed alpha AOL composition')
+      expected['alternativeExperience'] = 32
+    if ci.CP.to_dict() != expected or self.owner.cp.to_dict() != expected:
+      raise RuntimeError('Mixed alpha final CP differs from prepared transaction')
+    self.final_snapshot = expected
 
   def seal_publication(self):
     self.check()
+    if self.owner.active() and not self.prepared_for(self.owner.cp):
+      raise RuntimeError('Mixed alpha publication requires exact prepared final CP')
     self.owner.published = True
 
   def check(self):

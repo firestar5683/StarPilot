@@ -366,8 +366,12 @@ class TestBlendedStartupScope(unittest.TestCase):
     self.assertTrue(hdai_startup_qualified(active))
     self.assertTrue(eligible(active))
     self.assertFalse(eligible(stock))
+    marked = active.as_reader().as_builder()
+    marked.alternativeExperience = 32
+    self.assertFalse(hdai_startup_qualified(marked))
+    self.assertTrue(eligible(marked))
     for field, value in (('passive', True), ('dashcamOnly', True), ('notCar', True),
-                         ('alternativeExperience', 32), ('carFingerprint', 'foreign')):
+                         ('alternativeExperience', 33), ('carFingerprint', 'foreign')):
       cp = active.as_reader().as_builder()
       setattr(cp, field, value)
       self.assertFalse(hdai_startup_qualified(cp), field)
@@ -408,6 +412,69 @@ class TestBlendedStartupScope(unittest.TestCase):
     active.alternativeExperience = 0
     owner.owner.cancel()
     self.assertFalse(owner.prepared_for(active))
+
+  def test_alpha_aol_final_composition_is_explicit_and_immutable(self):
+    from opendbc.car.hyundai.tests.test_palisade_2023 import params
+    from opendbc.car.hyundai.blended_longitudinal import BlendedStartup, candidate_from_stock, TakeoverResult
+    from openpilot.starpilot.car.hyundai.aol import policy_for, native_accepts_cp
+    stock = params()
+    active = candidate_from_stock(stock, alpha_requested=True, native_qualified=True)
+    owner = BlendedStartup(stock, active, (lambda *a: None, lambda *a: None))
+    owner.owner.phase = Phase.OWNED
+    owner.owner.result = TakeoverResult(Outcome.OWNED)
+    owner.source_floor_ns = 1
+    policy = policy_for(active)
+    self.assertFalse(policy.full_axis_runtime_required)
+    self.assertEqual(policy.alternative_experience_addition, 32)
+    ci = SimpleNamespace(CP=active, CC=SimpleNamespace(packer=object(), CAN=object()))
+    with self.assertRaises(RuntimeError):
+      owner.finalize_aol_configuration(ci)
+    owner.configure(ci)
+    active.alternativeExperience = 32
+    self.assertFalse(owner.prepared_for(active))
+    with self.assertRaises(RuntimeError):
+      owner.finalize_aol_configuration(SimpleNamespace(CP=active, CC=ci.CC))
+    installed = ci.CC.blended_longitudinal
+    ci.CC.blended_longitudinal = None
+    with self.assertRaises(RuntimeError):
+      owner.finalize_aol_configuration(ci)
+    ci.CC.blended_longitudinal = installed
+    for field in ('closed',):
+      setattr(owner, field, True)
+      with self.assertRaises(RuntimeError):
+        owner.finalize_aol_configuration(ci)
+      setattr(owner, field, False)
+    owner.owner.published = True
+    with self.assertRaises(RuntimeError):
+      owner.finalize_aol_configuration(ci)
+    owner.owner.published = False
+    owner.finalize_aol_configuration(ci)
+    self.assertTrue(owner.prepared_for(active))
+    self.assertTrue(native_accepts_cp(active, active.safetyConfigs[0].safetyModel.raw, 0x2004))
+    owner.seal_publication()
+    with self.assertRaises(RuntimeError):
+      owner.finalize_aol_configuration(ci)
+    active.safetyConfigs[0].safetyParam = 0x2014
+    with self.assertRaises(RuntimeError):
+      owner.seal_publication()
+
+  def test_alpha_aol_scope_and_master_off_restart_transport(self):
+    from opendbc.car.hyundai.tests.test_palisade_2023 import params
+    from opendbc.car.hyundai.blended_longitudinal import candidate_from_stock
+    from openpilot.starpilot.car.hyundai.aol import policy_for
+    from openpilot.starpilot.aol.intent import AolSettings
+    from openpilot.starpilot.car.hyundai.aol import create_intent
+    cp = candidate_from_stock(params(), alpha_requested=True, native_qualified=True)
+    for experience in (0, 32):
+      cp.alternativeExperience = experience
+      self.assertEqual(policy_for(cp).full_axis_runtime_required, experience == 32)
+      intent = create_intent(cp, AolSettings(False, 0., 0, 0, (0, 0, 0), (0, 0, 0)))
+      self.assertFalse(intent.allowed_latch)
+    for experience in (1, 33):
+      cp.alternativeExperience = experience
+      self.assertFalse(policy_for(cp).runtime_supported)
+    cp = candidate_from_stock(params('hdaii'), alpha_requested=True, native_qualified=True)
+    self.assertFalse(policy_for(cp).runtime_supported)
 
 
 if __name__ == '__main__':

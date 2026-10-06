@@ -1,4 +1,4 @@
-from opendbc.car.hyundai.blended_stock_aol import qualified as qualified_blended_stock, MixedStockLkasSources
+from opendbc.car.hyundai.blended_stock_aol import qualified as qualified_blended_stock, qualified_alpha as qualified_blended_alpha, MixedStockLkasSources
 from opendbc.car.hyundai.classic_long_aol import qualified as qualified_classic_long
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_scc, ClassicSccLkasSources
 from opendbc.car.hyundai.ev9_camera_lead import EV9CameraLead
@@ -60,7 +60,7 @@ class CarState(CarStateBase):
     self.forte_lkas_sources = NonSccLkasSources() if qualified_non_scc(CP) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON else None
     if (qualified_classic_scc(CP) or qualified_classic_long(CP)) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON:
       self.forte_lkas_sources = ClassicSccLkasSources(CP.carFingerprint)
-    if qualified_blended_stock(CP):
+    if qualified_blended_stock(CP) or qualified_blended_alpha(CP):
       self.forte_lkas_sources = MixedStockLkasSources(CP)
     self.ev9_long = ev9_long_qualified(CP)
     self.ev9_camera_lead = EV9CameraLead(CP) if self.ev9_long else None
