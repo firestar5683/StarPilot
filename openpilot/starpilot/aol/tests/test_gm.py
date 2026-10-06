@@ -35,6 +35,13 @@ BOLT_IDS = (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
 
 
 def _configurations():
+  from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
+  for identity in BOLT_IDS:
+    cp = pedal_params(identity, pedal=True, removed=True)
+    yield cp
+    disabled = cp.as_reader().as_builder()
+    VehicleStartupPreferences(disable_bolt_long=True).prepare(disabled)
+    yield disabled
   for identity in GM_BASE_GATEWAY_IDS:
     cp = ordinary_params(identity, radar=True)
     yield cp

@@ -541,3 +541,176 @@ class TestGmBoltPedalSafety(unittest.TestCase):
       data[5] = pedal_crc(data)
       self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x201, 0, data))
       self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_removed_bolt_profiles_keep_distinct_limits_and_reset_topology(self):
+    canonical = (0xBD, 0x9D, 0x19D, 0x1CD)
+    for index, word in enumerate(canonical):
+      for selected in (0xE700 + index, word, 0xE700 + index):
+        with self.subTest(index=index, word=selected):
+          self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, selected), 0)
+          self.safety.init_tests()
+          for address in (0x409, 0x40A):
+            self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(7))), selected != word)
+            self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 2, bytes(7))))
+            self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(8))))
+            for byte in range(7):
+              payload = bytearray(7)
+              payload[byte] = 1
+              self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, payload)))
+          self.safety.set_controls_allowed(True)
+          self.safety.set_torque_driver(0, 0)
+          self.safety.set_desired_torque_last(400)
+          self.safety.set_rt_torque_last(400)
+          self.assertEqual(self.safety.safety_tx_hook(self.packet(create_steering_control(self.packer, 0, 400, 0, True))), index == 0)
+          self.assertEqual(self.safety.safety_fwd_hook(0, 0x184), -1)
+          for address in (0x2CB, 0x2CD, 0x370, 0x3D1):
+            self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(8))))
+
+  def test_removed_acc_brake_retains_accepted_producer_lease(self):
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, 0xE703), 0)
+    self.safety.init_tests()
+    self.safety.set_timer(1000)
+    for frame in (self.low_gear(), self.sensor(1),
+                  libsafety_py.make_CANPacket(0x3D1, 0, bytes(8)),
+                  self.stock("AcceleratorPedal2", {"CruiseState": 0}),
+                  self.stock("ECMEngineStatus", {"CruiseMainOn": 1})):
+      self.assertTrue(self.safety.safety_rx_hook(frame))
+    self.safety.set_controls_allowed(True)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    chassis = CANPacker("gm_global_a_chassis")
+    brake = self.packet(chassis.make_can_msg("EBCMFrictionBrakeCmd", 0, {
+      "FrictionBrakeCmd": 0, "FrictionBrakeMode": 1,
+      "RollingCounter": 0, "FrictionBrakeChecksum": 0xF000,
+    }))
+    self.assertTrue(self.safety.safety_tx_hook(brake))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+    self.safety.set_timer(101001)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    self.assertTrue(self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 0})))
+    self.assertFalse(self.safety.safety_tx_hook(brake))
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, 0xE703), 0)
+    self.safety.init_tests()
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+
+  def test_removed_acc_stock_cruise_withdraws_brake_lease_without_ecm_change(self):
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, 0xE703), 0)
+    self.safety.init_tests()
+    self.safety.set_timer(1000)
+    for frame in (self.low_gear(), self.sensor(1),
+                  self.stock("AcceleratorPedal2", {"CruiseState": 0}),
+                  self.stock("ECMEngineStatus", {"CruiseMainOn": 1})):
+      self.assertTrue(self.safety.safety_rx_hook(frame))
+    chassis = CANPacker("gm_global_a_chassis")
+    brake = self.packet(chassis.make_can_msg("EBCMFrictionBrakeCmd", 0, {
+      "FrictionBrakeCmd": 0, "FrictionBrakeMode": 1,
+      "RollingCounter": 0, "FrictionBrakeChecksum": 0xF000,
+    }))
+    self.assertFalse(self.safety.safety_tx_hook(brake))
+    self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x3D1, 0, bytes(8))))
+    self.assertTrue(self.safety.safety_tx_hook(brake))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+    active = bytes((0, 0, 0, 0, 128, 0, 0, 0))
+    self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x3D1, 0, active)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    self.assertFalse(self.safety.safety_tx_hook(brake))
+    self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x3D1, 0, bytes(8))))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    brake = self.packet(chassis.make_can_msg("EBCMFrictionBrakeCmd", 0, {
+      "FrictionBrakeCmd": 0, "FrictionBrakeMode": 1,
+      "RollingCounter": 1, "FrictionBrakeChecksum": 0xEFFF,
+    }))
+    self.assertTrue(self.safety.safety_tx_hook(brake))
+    self.safety.set_timer(301001)
+    self.assertTrue(self.safety.safety_rx_hook(self.stock("AcceleratorPedal2", {"CruiseState": 0})))
+    self.assertTrue(self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 1})))
+    self.assertFalse(self.safety.safety_tx_hook(brake))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+
+  def test_removed_acc_cancel_observes_pt_cruise_without_camera_state(self):
+    for word, expected in ((0xE703, True), (0x1CD, False)):
+      self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+      self.safety.init_tests()
+      self.safety.set_timer(1000)
+      for frame in (self.stock("AcceleratorPedal2", {"CruiseState": 0}),
+                    self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                    libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0)))):
+        self.safety.safety_rx_hook(frame)
+      for button in (2, 3, 6):
+        command = self.packet(self.packer.make_can_msg("ASCMSteeringButton", 2, {"ACCButtons": button}))
+        self.assertEqual(self.safety.safety_tx_hook(command), expected and button == 6)
+      self.safety.set_timer(301001)
+      command = self.packet(self.packer.make_can_msg("ASCMSteeringButton", 2, {"ACCButtons": 6}))
+      self.assertFalse(self.safety.safety_tx_hook(command))
+
+  def test_removed_no_acc_cancel_requires_physical_one_shot_neutral_slot(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for word, gear in ((0xE700, None), (0xE700, 4), (0xE700, 6), (0xE701, None), (0xE701, 4), (0xE701, 6),
+                       (0xE702, None), (0xE702, 4), (0xE702, 6)):
+      for button, bus, damaged in ((6, 0, False), (2, 0, False), (3, 0, False), (6, 2, False), (6, 0, True)):
+        with self.subTest(word=word, gear=gear, button=button, bus=bus, damaged=damaged):
+          self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+          self.safety.init_tests()
+          self.safety.set_timer(1000)
+          if gear is not None:
+            self.assertTrue(self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": gear})))
+          for frame in (self.sensor(1), self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                        libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
+                        libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, 0))):
+            self.assertTrue(self.safety.safety_rx_hook(frame))
+          data = bytearray(button_bytes(button, 1))
+          if damaged:
+            data[6] ^= 1
+          self.safety.set_timer(2000)
+          self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, bus, data)), gear is not None and button == 6 and bus == 0 and not damaged)
+          self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))),
+                           gear is not None and bus == 2)
+          self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))))
+
+  def test_acc_brake_counter_epoch_tracks_actual_producer_lease(self):
+    chassis = CANPacker("gm_global_a_chassis")
+    brake = self.packet(chassis.make_can_msg("EBCMFrictionBrakeCmd", 0, {
+      "FrictionBrakeCmd": 0, "FrictionBrakeMode": 1,
+      "RollingCounter": 0, "FrictionBrakeChecksum": 0xF000,
+    }))
+    bad_crc = self.packet(chassis.make_can_msg("EBCMFrictionBrakeCmd", 0, {
+      "FrictionBrakeCmd": 0, "FrictionBrakeMode": 1,
+      "RollingCounter": 1, "FrictionBrakeChecksum": 0xEFFE,
+    }))
+    for word in (0x1CD, 0xE703):
+      for withdrawal in ("main", "ecm", "expiry", "pt_cruise"):
+        if word == 0x1CD and withdrawal == "pt_cruise":
+          continue
+        with self.subTest(word=word, withdrawal=withdrawal):
+          self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+          self.safety.init_tests()
+          self.safety.set_timer(1000)
+          for frame in (self.low_gear(), self.sensor(1),
+                        self.stock("AcceleratorPedal2", {"CruiseState": 0}),
+                        self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                        libsafety_py.make_CANPacket(0x3D1, 0, bytes(8))):
+            self.safety.safety_rx_hook(frame)
+          self.assertTrue(self.safety.safety_tx_hook(brake))
+          self.safety.set_timer(1500)
+          self.assertFalse(self.safety.safety_tx_hook(bad_crc))
+          self.assertFalse(self.safety.safety_tx_hook(brake))
+          self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+          self.safety.set_timer(2000)
+          if withdrawal == "main":
+            self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 0}))
+          elif withdrawal == "ecm":
+            self.safety.safety_rx_hook(self.stock("AcceleratorPedal2", {"CruiseState": 2}))
+          elif withdrawal == "pt_cruise":
+            self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))))
+          else:
+            self.safety.set_timer(101001)
+          self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+          for frame in (self.stock("AcceleratorPedal2", {"CruiseState": 0}),
+                        self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                        libsafety_py.make_CANPacket(0x3D1, 0, bytes(8))):
+            self.safety.safety_rx_hook(frame)
+          self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+          self.assertFalse(self.safety.safety_tx_hook(bad_crc))
+          self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+          self.assertTrue(self.safety.safety_tx_hook(brake))
+          self.assertFalse(self.safety.safety_tx_hook(brake))
+          self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)

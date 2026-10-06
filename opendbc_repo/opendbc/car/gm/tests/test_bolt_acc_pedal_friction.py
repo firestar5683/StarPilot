@@ -9,6 +9,7 @@ from opendbc.car.gm.values import CAR, DBC
 
 def pedal_params(candidate=CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
   fingerprint = gen_empty_fingerprint()
+  fingerprint[2][0x320] = 8
   fingerprint[0][0x201] = 6
   return CarInterface.get_params(candidate, fingerprint, [], False, False, False)
 

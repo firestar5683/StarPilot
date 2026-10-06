@@ -92,11 +92,19 @@ class VehicleStartupPreferences:
 
   def _prepare_bolt(self, cp, fingerprints=None) -> None:
     if self.disable_bolt_long and bolt_disable_supported(cp):
-      from opendbc.car.gm.values import CAR, GMSafetyFlags, is_bolt_pedal_profile, is_bolt_pedal_stock_denied
+      from opendbc.car.gm.values import (CAR, GMSafetyFlags, is_bolt_pedal_profile, is_bolt_pedal_stock_denied,
+                                       is_bolt_pedal_removed_profile, BOLT_PEDAL_REMOVED_STOCK_WORDS)
       from opendbc.car.structs import CarParams
       pedal = is_bolt_pedal_profile(cp) or is_bolt_pedal_profile(cp, stock_only=True) or is_bolt_pedal_stock_denied(cp)
       stock_qualified = is_bolt_pedal_profile(cp, stock_only=True)
+      removed_pedal = is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True)
       denied = is_bolt_pedal_stock_denied(cp)
+      if removed_pedal:
+        cp.safetyConfigs[0].safetyParam = BOLT_PEDAL_REMOVED_STOCK_WORDS[cp.carFingerprint]
+        cp.openpilotLongitudinalControl = False
+        cp.pcmCruise = True
+        cp.autoResumeSng = False
+        return
       cp.openpilotLongitudinalControl = False
       if pedal:
         cp.pcmCruise = True

@@ -32,6 +32,7 @@ def configured(params, identity, *, alpha=False, release=False, removed=False, a
     else:
       fp[2][0x320] = 6
   elif not removed:
+    fp[2][0x320] = 8
     fp[2][0x180] = 4
   if pedal:
     fp[0][0x201] = 6

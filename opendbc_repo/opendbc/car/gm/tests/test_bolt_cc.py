@@ -23,15 +23,20 @@ def native(direction, msg, us):
   return safety.safety_rx_hook(packet) if direction == "rx" else safety.safety_tx_hook(packet)
 
 
-
-
 def params(identity, alpha=False, present=False, pedal=False, removed=False, metric=False):
   fp = gen_empty_fingerprint()
   if present:
     fp[0][0x201] = 6
+  if removed and present:
+    fp[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0xC9: 8, 0x1C4: 8, 0x1E1: 7,
+                  0x1F5: 8, 0xBD: 7, 0x232: 8, 0x3D1: 8, 0xBE: 6})
   if not removed:
+    fp[2][0x320] = 8
     fp[2][0x180] = 4
-  return CarInterface.get_params(identity, fp, [], alpha, False, False)
+  cp = CarInterface.get_params(identity, fp, [], alpha, False, False)
+  if not removed:
+    assert not cp.flags & GMFlags.NO_CAMERA
+  return cp
 
 
 def fixture(identity, removed=False, metric=False, alpha=False, present=False):
