@@ -848,7 +848,7 @@ class FeatureSettingsOwner:
       rows.append(replace(strength_row,
                           value=str(round(float(strength_row.value))) if strength_row.step > 0 else strength_row.value,
                           default_value=str(round(float(strength_row.default_value))) if strength_row.default_value is not None else None,
-                          minimum=33, maximum=105, step=1 if strength_row.step > 0 else 0,
+                          minimum=33, maximum=round(STRENGTH_MAX / STRENGTH_BASELINE * 100), step=1 if strength_row.step > 0 else 0,
                           reason="100% is normal; lower values reduce centering and higher values strengthen it" if strength_supported else
                           "Not available with this vehicle configuration"))
     elif page == FeaturePage.LANE_CHANGE:
@@ -1252,7 +1252,7 @@ class FeatureSettingsOwner:
         low, high, _, _ = FLOAT_SPECS[key]
         number = float(request.value)
         if key == "LaneCenteringStrength":
-          if not 33 <= number <= 105:
+          if not 33 <= number <= STRENGTH_MAX / STRENGTH_BASELINE * 100:
             return False
           number = max(low, number * STRENGTH_BASELINE / 100)
         elif key == "LaneCenteringE2EAuthority":

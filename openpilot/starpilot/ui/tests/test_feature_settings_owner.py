@@ -222,11 +222,11 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.owner.vehicle_params = lambda: tagged
     self.fingerprint = tagged.carFingerprint
     row = self._row("lane", "LaneCenteringStrength")
-    self.assertEqual((row.value, row.minimum, row.maximum, row.step), ("100", 33, 105, 1))
+    self.assertEqual((row.value, row.minimum, row.maximum, row.step), ("100", 33, 200, 1))
     self.assertTrue(row.available)
-    request = FeatureSettingsRequest(row.key, row.source, "105", vehicle_fingerprint=row.vehicle_fingerprint)
+    request = FeatureSettingsRequest(row.key, row.source, "200", vehicle_fingerprint=row.vehicle_fingerprint)
     self.assertTrue(self.owner.apply(request))
-    self.assertEqual((root / row.key).read_bytes(), b"1.575")
+    self.assertEqual((root / row.key).read_bytes(), b"3.0")
     self.assertFalse(self.owner.apply(request))
     reset_row = self._row("lane", "LaneCenteringStrength")
     self.assertEqual(reset_row.default_value, "100")
@@ -234,7 +234,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
                                                           vehicle_fingerprint=reset_row.vehicle_fingerprint)))
     self.assertEqual((root / row.key).read_bytes(), b"1.5")
     self.assertEqual(registered.get_default_value("LaneCenteringStrength"), 1.5)
-    for percent, expected in ((33, b"0.5"), (67, b"1.005"), (100, b"1.5"), (105, b"1.575")):
+    for percent, expected in ((33, b"0.5"), (67, b"1.005"), (100, b"1.5"), (105, b"1.575"), (150, b"2.25"), (200, b"3.0")):
       current = self._row("lane", "LaneCenteringStrength")
       self.assertTrue(self.owner.apply(FeatureSettingsRequest(current.key, current.source, str(percent),
                                                             vehicle_fingerprint=current.vehicle_fingerprint)))
@@ -244,7 +244,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertEqual(preserved.value, "67")
     self.assertEqual((root / row.key).read_bytes(), b"1.0")
     row = self._row("lane", "LaneCenteringStrength")
-    for invalid in ("32", "106", "nan"):
+    for invalid in ("32", "201", "nan"):
       self.assertFalse(self.owner.apply(FeatureSettingsRequest(row.key, row.source, invalid,
                                                              vehicle_fingerprint=row.vehicle_fingerprint)))
     self.owner.vehicle_params = lambda: None
