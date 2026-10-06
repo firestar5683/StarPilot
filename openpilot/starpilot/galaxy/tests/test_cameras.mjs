@@ -65,3 +65,25 @@ timer()
 captures[2].resolve({ status: 401 })
 await timed
 assert.match(snapshots.at(-1).error, /timed out/)
+
+// Browsers throw "Illegal invocation" when setTimeout/clearTimeout run with a `this`
+// other than the global object; Node does not, so mimic the browser check here.
+// The default timers once ran as feed methods, which killed every PiP/VASM/Cameras
+// snapshot before its request with no visible error.
+const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout
+const strict = (real) => function (...args) {
+  if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation")
+  return real(...args)
+}
+globalThis.setTimeout = strict(realSetTimeout)
+globalThis.clearTimeout = strict(realClearTimeout)
+try {
+  const defaults = new CameraSnapshotFeed({ publish: () => {}, unauthorized: () => {}, createURL: () => "blob:x", revokeURL: () => {},
+    fetcher: async () => ({ status: 200, ok: true, headers: { get: () => "image/jpeg" }, blob: async () => ({ size: 3 }) }) })
+  await defaults.capture("cabin")
+  assert.equal(defaults.url, "blob:x", "default timers must not throw before the request")
+  defaults.stop()
+} finally {
+  globalThis.setTimeout = realSetTimeout
+  globalThis.clearTimeout = realClearTimeout
+}

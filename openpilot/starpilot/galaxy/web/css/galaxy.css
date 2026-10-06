@@ -1341,9 +1341,9 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .gx-aa-switch[aria-checked="true"] .gx-aa-switch__track { background: var(--success); }
 .gx-aa-switch[aria-checked="true"] .gx-aa-switch__thumb { transform: translateX(20px); }
 .gx-aa-wiki { border-top: 1px solid var(--outline); padding-top: var(--sp-3); color: var(--on-surface-variant); line-height: 1.5; }
-.gx-aa-wiki > summary { cursor: pointer; color: var(--primary); font-weight: var(--fw-medium); list-style: none; }
+.gx-aa-wiki > summary { cursor: pointer; color: var(--primary); font-weight: var(--fw-medium); list-style: none; display: flex; align-items: center; gap: 0.25em; }
 .gx-aa-wiki > summary::-webkit-details-marker { display: none; }
-.gx-aa-wiki > summary::before { content: "›"; display: inline-block; width: 1em; transition: transform var(--motion-fast); }
+.gx-aa-wiki > summary::before { content: "›"; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1em; height: 1em; line-height: 1; transform-origin: 50% 50%; transition: transform var(--motion-fast); }
 .gx-aa-wiki[open] > summary::before { transform: rotate(90deg); }
 .gx-aa-wiki > summary:focus-visible, .gx-aa-advanced > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: var(--radius-sm); }
 .gx-aa-wiki p, .gx-aa-wiki ol { margin: var(--sp-3) 0 0; }

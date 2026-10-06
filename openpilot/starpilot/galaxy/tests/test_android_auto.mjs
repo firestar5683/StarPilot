@@ -236,7 +236,7 @@ assert.equal(off.pairWhenReady, true)
 
 // Step 1 status: expiry wording by remaining days, and the expired date from the certificate.
 assert.deepEqual(expiryInfo({ installed: true, expires: "2027-10-12T00:00:00+00:00", days_left: 372 }, "en-US"),
-  { level: "ready", label: "Ready · Valid until Oct 2027" })
+  { level: "ready", label: "Ready · Valid until Oct 12, 2027" })
 assert.deepEqual(expiryInfo({ installed: true, expires: "2027-04-12T00:00:00+00:00", days_left: 9 }, "en-US"),
   { level: "soon", label: "Expires in 9 days (Apr 12)" })
 assert.deepEqual(expiryInfo({ installed: false, expired: true, expires: "2026-04-12T00:00:00+00:00" }, "en-US"),
@@ -267,7 +267,7 @@ assert.deepEqual(statuses({ state: "failed", stage: "searching", code: "WRONG_AP
 assert.deepEqual(statuses({ state: "failed", stage: "verifying", code: "EXPIRED" }), ["done", "done", "done", "failed"])
 const done = installChecks({ state: "done", stage: "done", expires: "2027-10-12T00:00:00+00:00" }, "en-US")
 assert.deepEqual(done.map((check) => check.status), ["done", "done", "done", "done"])
-assert.equal(done[3].label, "Certificate valid until October 2027")
+assert.equal(done[3].label, "Certificate valid until October 12, 2027")
 
 // The install sheet follows only the import this page started, not an older result.
 const sheet = page({ ...setup, import: { state: "failed", code: "WRONG_APP", started: 1 } })

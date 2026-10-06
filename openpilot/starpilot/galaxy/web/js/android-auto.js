@@ -314,7 +314,7 @@ export function expiryInfo(identity, locale = undefined) {
       const left = days <= 0 ? "Expires within a day" : `Expires in ${days} day${days === 1 ? "" : "s"}`
       return { level: "soon", label: day ? `${left} (${day})` : left }
     }
-    const until = formatDate(identity.expires, { month: "short", year: "numeric" }, locale)
+    const until = formatDate(identity.expires, undefined, locale)
     return { level: "ready", label: until ? `Ready · Valid until ${until}` : "Ready" }
   }
   if (identity?.expired) {
@@ -372,7 +372,7 @@ export function installChecks(job, locale = undefined) {
   }
   return CHECKS.map((check, index) => {
     const label = index === CHECKS.length - 1 && job?.state === "done" && formatDate(job.expires, undefined, locale) ?
-      `Certificate valid until ${formatDate(job.expires, { month: "long", year: "numeric" }, locale)}` : check.label
+      `Certificate valid until ${formatDate(job.expires, { month: "long", day: "numeric", year: "numeric" }, locale)}` : check.label
     const status = failed >= 0 ? (index < failed ? "done" : index === failed ? "failed" : "pending") :
       at >= ends[index] ? "done" : at >= STAGES.indexOf(check.stage) ? "active" : "pending"
     return { label, status }
