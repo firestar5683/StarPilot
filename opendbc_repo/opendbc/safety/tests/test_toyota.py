@@ -486,6 +486,29 @@ class TestToyotaHighlanderAol(unittest.TestCase):
     self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety("EPS_STATUS", 0, {"LKA_STATE": eps})))
     self.safety.aol_set_host_request(3)
 
+  def test_radar_stock_lateral_never_grants_longitudinal(self):
+    self.init(word=585)
+    self.physical(cruise=True)
+    self.assertEqual(self.safety.aol_get_request_mask(), 1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    for accel, cancel, allowed in ((0, 1, True), (0, 0, False), (0.1, 1, False), (-0.1, 1, False)):
+      message = self.packer.make_can_msg_safety("ACC_CONTROL", 0, {"ACCEL_CMD": accel, "CANCEL_REQ": cancel})
+      self.assertEqual(bool(self.safety.safety_tx_hook(message)), allowed)
+    self.physical(main=False)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    for changes in ({'gear': 16}, {'eps': 9}, {'eps': 17}):
+      self.init(word=585)
+      self.physical(cruise=True)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+      self.physical(cruise=True, **changes)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.init(word=585)
+    self.physical(cruise=True)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x343), 0)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x283), 0)
+    self.safety.set_timer(1_400_001)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
   def test_main_lateral_independent_of_cruise_and_belt(self):
     for ae in (32, 160, 288):
       self.init(ae=ae)
@@ -574,7 +597,7 @@ class TestToyotaHighlanderAol(unittest.TestCase):
       self.assertEqual(self.safety.aol_get_permission_mask(), 0)
 
   def test_exact_profile_admission_and_reset(self):
-    for word, ae in ((585, 32), (72, 32), (329, 32), (1097, 32), (73, 33), (73, 289), (73, 416)):
+    for word, ae in ((585, 160), (585, 288), (72, 32), (329, 32), (1097, 32), (73, 33), (73, 289), (73, 416)):
       self.init(word, ae)
       self.physical()
       self.assertEqual(self.safety.aol_get_request_mask(), 0)

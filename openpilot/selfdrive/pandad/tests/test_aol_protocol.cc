@@ -86,7 +86,7 @@ void queue(FakeTransport &transport, const aol_safety_health_t &before,
 
 int main() {
   for (uint32_t word = 0U; word <= 65535U; ++word) {
-    const bool expected = word == 73U;
+    const bool expected = (word == 73U) || (word == 585U);
     auto toyota = status();
     toyota.safety_mode = 2U;
     toyota.safety_param = static_cast<uint16_t>(word);
