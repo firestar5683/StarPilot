@@ -22,6 +22,7 @@ with patch.object(Params, "__init__", lambda self, d="": _original_params_init(s
 
 from openpilot.starpilot.ui.device_state import DeviceAction, DeviceRequest
 from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
+from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.feature_settings_state import FEATURE_ROW_HEIGHT, FEATURE_ROW_TOP, FeaturePage, FeatureUiAction
 from openpilot.starpilot.ui.toggles_state import ToggleRequest, ToggleKey
 from openpilot.starpilot.ui.settings_state import Destination, SettingsAction, SettingsActionKind, tile_rects
@@ -32,6 +33,12 @@ from openpilot.system.ui.lib.application import gui_app, MouseEvent, MousePos
 from openpilot.starpilot.galaxy.access import AccessStatus, GalaxyAccessOwner
 from openpilot.starpilot.ui.galaxy_access import GalaxyAccessFlow, connection_url
 from pathlib import Path
+
+
+def make_feature_view(profile: Profile):
+  fonts = BitmapFonts.__new__(BitmapFonts)
+  fonts.profile = profile
+  return FeatureSettingsView(fonts)
 
 
 class TestRuntimePanelActions(unittest.TestCase):
@@ -76,7 +83,8 @@ class TestRuntimePanelActions(unittest.TestCase):
     session._on_destination_change = Mock()
     session._on_compact_destination = Mock()
     session.input = ShellInput(session.profile, session._emit)
-    session.view = NS(features=FeatureSettingsView(NS(profile=runtime_app.Profile.LARGE)))
+    session.view = ShellView.__new__(ShellView)
+    session.view.features = make_feature_view(runtime_app.Profile.LARGE)
     session.feature_owner = runtime_app.FeatureSettingsOwner(self.ui.params, session._feature_authority,
                                                            vehicle_fingerprint=lambda: getattr(self.ui.CP, "carFingerprint", None),
                                                            vehicle_params=lambda: self.ui.CP)
@@ -409,8 +417,10 @@ class TestRuntimePanelActions(unittest.TestCase):
           session._snapshot_cache = None
           session.confirmed_offroad = Mock(return_value=True)
           session.favorites = Mock()
-          session.view = NS(onroad=Mock(), **{name: FeatureSettingsView(NS(profile=session.profile))
-                                             for name, _, _ in runtime_app._FEATURE_SETTINGS_PANES.values()})
+          session.view = ShellView.__new__(ShellView)
+          session.view.onroad = Mock()
+          for name, _, _ in runtime_app._FEATURE_SETTINGS_PANES.values():
+            setattr(session.view, name, make_feature_view(session.profile))
           session.pip_warning = Mock()
           session.settings_layer = None
           session.notice = ""
