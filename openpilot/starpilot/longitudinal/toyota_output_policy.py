@@ -1,6 +1,6 @@
 """Vehicle-owned Toyota longitudinal target shaping.
 
-Corolla uses its production profile; Sienna remains development-only. The caller must supply current
+Corolla and key-ready Sienna4 use their production profiles. The caller must supply current
 validated lead data for Sienna and reset it whenever longitudinal control or
 source authority is lost. It does not select a planner profile or grant control.
 """
@@ -12,7 +12,8 @@ import time
 
 import numpy as np
 
-from opendbc.car.toyota.values import CAR
+from opendbc.car import structs
+from opendbc.car.toyota.values import CAR, EPS_SCALE, ToyotaFlags, ToyotaSafetyFlags
 from openpilot.common.realtime import DT_CTRL
 
 
@@ -76,10 +77,20 @@ def eligible(cp) -> bool:
 
 
 def production_enabled(cp) -> bool:
-  if not eligible(cp) or str(cp.carFingerprint) != COROLLA:
+  if not eligible(cp):
     return False
-  from openpilot.starpilot.car.toyota.aol import qualified
-  return qualified(cp) and cp.safetyConfigs[0].safetyParam == 73
+  if str(cp.carFingerprint) == COROLLA:
+    from openpilot.starpilot.car.toyota.aol import qualified
+    return qualified(cp) and cp.safetyConfigs[0].safetyParam == 73
+  required = ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.SECOC | ToyotaFlags.RAISED_ACCEL_LIMIT
+  allowed = required | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM
+  if (not cp.pcmCruise or not cp.secOcRequired or not cp.secOcKeyAvailable or cp.alternativeExperience != 0 or
+      cp.steerControlType != structs.CarParams.SteerControlType.torque or len(cp.safetyConfigs) != 1 or
+      cp.flags & required != required or int(cp.flags) & ~int(allowed)):
+    return False
+  config = cp.safetyConfigs[0]
+  expected = EPS_SCALE[CAR.TOYOTA_SIENNA_4TH_GEN] | int(ToyotaSafetyFlags.SECOC)
+  return config.safetyModel == structs.CarParams.SafetyModel.toyota and config.safetyParam == expected
 
 
 def development_enabled(cp) -> bool:
@@ -128,7 +139,7 @@ class ToyotaOutputPolicy:
   def target(self, a_target: float, v_ego: float, should_stop: bool, last_output_accel: float,
              *, leads: tuple[Lead, ...] | None = None) -> float | None:
     """Return a shaped target, or None for invalid/missing required evidence."""
-    if (not _finite(a_target, _ACCEL_MIN, _ACCEL_MAX) or not _finite(v_ego, -math.inf if self.corolla else 0.0, 70.0) or
+    if (not _finite(a_target, _ACCEL_MIN, _ACCEL_MAX) or not _finite(v_ego, -math.inf, 70.0) or
         type(should_stop) is not bool or not _finite(last_output_accel, _ACCEL_MIN, _ACCEL_MAX)):
       self.reset()
       return None

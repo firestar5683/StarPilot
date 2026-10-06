@@ -6,7 +6,7 @@ from opendbc.car.hyundai.blended_stopping import eligible as blended_longitudina
 
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.conditional_mode.traffic_launch import TrafficLaunchState
-from openpilot.starpilot.longitudinal.toyota_output_policy import (CLOCK_PAIR_MAX_SKEW_NS, SIENNA_4G, clock_pair_ns,
+from openpilot.starpilot.longitudinal.toyota_output_policy import (CLOCK_PAIR_MAX_SKEW_NS, COROLLA, SIENNA_4G, clock_pair_ns,
                                                                  development_enabled as toyota_development_enabled,
                                                                  production_enabled as toyota_production_enabled, leads_from_radar)
 from openpilot.starpilot.longitudinal.ioniq6_start import StartEvidence, eligible as ioniq6_start_eligible
@@ -69,7 +69,9 @@ class LongitudinalInputs:
     self.params = params
     self.messages = messages
     self.toyota_sienna_replay = toyota_development_enabled(self.CP) and str(self.CP.carFingerprint) == SIENNA_4G
-    self.toyota_corolla_stop = toyota_production_enabled(self.CP)
+    toyota_production = toyota_production_enabled(self.CP)
+    self.toyota_corolla_stop = toyota_production and str(self.CP.carFingerprint) == COROLLA
+    self.toyota_sienna_production = toyota_production and str(self.CP.carFingerprint) == SIENNA_4G
     self.ioniq6_start_enabled = ioniq6_start_eligible(self.CP)
     gm_policy = gm_pedal_policy_for(self.CP)
     self.gm_start_enabled = gm_policy is not None and gm_policy.friction_variant
@@ -104,7 +106,7 @@ class LongitudinalInputs:
       self.gm_source_floor_ns = 0
       self.gm_traffic_state = TrafficLaunchState(self.params)
       self.gm_profile_host = ProfileHost(self.params) if feature_enabled(self.params, self.CP, 'profile', os.environ) else None
-    if self.toyota_sienna_replay or self.toyota_corolla_stop:
+    if self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop:
       self.toyota_boot_offset_ns: int | None = None
       self.toyota_source_floor_ns = 0
     if self.ioniq6_start_enabled:
@@ -117,8 +119,9 @@ class LongitudinalInputs:
 
   @property
   def optional_services(self):
-    if (self.toyota_sienna_replay or self.toyota_corolla_stop or self.ioniq6_start_enabled or self.gm_start_enabled or self.gm_volt_enabled or
-        self.gm_euv_enabled or self.gm_cc_enabled or self.gm_cc_stop_enabled or self.gm_ascm_enabled or self.gm_suburban_enabled):
+    if (self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop or
+        self.ioniq6_start_enabled or self.gm_start_enabled or self.gm_volt_enabled or self.gm_euv_enabled or
+        self.gm_cc_enabled or self.gm_cc_stop_enabled or self.gm_ascm_enabled or self.gm_suburban_enabled):
       return ['radarState', 'deviceState'] + (['slcState'] if self.gm_start_enabled or self.ev9_long_enabled else [])
     if self.ev9_long_enabled:
       return ['deviceState', 'slcState']
@@ -137,7 +140,7 @@ class LongitudinalInputs:
   def context(self, active):
     if self.ev9_long_enabled:
       return self._ev9_context(active)
-    if self.toyota_sienna_replay or self.toyota_corolla_stop:
+    if self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop:
       return LongitudinalContext(leads=self._toyota_leads() if active else None)
     cc_evidence = (self.gm_cc_evidence if self.gm_cc_enabled else self._gm_cc_evidence()
                    if self.gm_cc_stop_enabled and active else None)
@@ -223,7 +226,7 @@ class LongitudinalInputs:
     return default
 
   def _toyota_leads(self):
-    if not (self.toyota_sienna_replay or self.toyota_corolla_stop):
+    if not (self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop):
       return None
     result = self._qualified_radar_leads('toyota_boot_offset_ns', 'toyota_source_floor_ns')
     return result[0] if result is not None else None

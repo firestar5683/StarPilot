@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from openpilot.common.realtime import DT_CTRL
 from opendbc.car.structs import car
-from openpilot.starpilot.longitudinal.toyota_output_policy import ToyotaOutputPolicy, development_enabled, production_enabled
+from openpilot.starpilot.longitudinal.toyota_output_policy import COROLLA, ToyotaOutputPolicy, development_enabled, production_enabled
 from openpilot.starpilot.longitudinal.ioniq6_start import Ioniq6StartPolicy, StartEvidence, eligible as ioniq6_start_eligible
 from openpilot.starpilot.longitudinal.vehicle_policy import policy_for as vehicle_policy_for, stopping_decel_rate, stopping_policy_for
 from opendbc.car.gm.longitudinal import GMPedalStartPolicy, volt_sng_resume_policy_for
@@ -35,8 +35,9 @@ class LongitudinalExtension:
                                 else stopping_decel_rate(CP, self.vehicle_policy))
     self.gm_start = GMPedalStartPolicy() if self.vehicle_policy is not None and self.vehicle_policy.friction_variant else None
     self.vehicle_stop = self.vehicle_policy.stop_policy() if hasattr(self.vehicle_policy, "stop_policy") else None
-    self.toyota_stopped_lead = production_enabled(CP)
-    self.toyota_output = ToyotaOutputPolicy(CP) if self.toyota_stopped_lead or development_enabled(CP) else None
+    toyota_production = production_enabled(CP)
+    self.toyota_stopped_lead = toyota_production and str(CP.carFingerprint) == COROLLA
+    self.toyota_output = ToyotaOutputPolicy(CP) if toyota_production or development_enabled(CP) else None
     self.ioniq6_start = Ioniq6StartPolicy() if ioniq6_start_eligible(CP) else None
     self.vehicle_target = getattr(self.vehicle_policy, "target", None)
     self.kp = self.vehicle_policy.kp if self.vehicle_policy is not None else 0.0
