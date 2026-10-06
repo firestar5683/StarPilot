@@ -102,6 +102,13 @@ def _configurations():
       for be in (False, True):
         for release in (False, True):
           yield camera_pedal(identity, camera=camera, be=be, release=release)
+  from opendbc.car.gm.tests.test_ordinary_cc import malibu_f1_params
+  for release in (False, True):
+    cp = malibu_f1_params(release=release)
+    yield cp
+    disabled = cp.as_reader().as_builder()
+    VehicleStartupPreferences(disable_bolt_long=True).prepare(disabled)
+    yield disabled
   for identity in ORDINARY_CC_CAR:
     yield intercept_params(identity)
     for removed in (False, True):

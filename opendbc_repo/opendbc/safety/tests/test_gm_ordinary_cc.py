@@ -224,3 +224,48 @@ class TestGmOrdinaryCc(unittest.TestCase):
       torque = gmcan.create_steering_control(self.packer, 0, 1, 1, True)
       self.assertTrue(self.safety.safety_tx_hook(self.packet(neutral)))
       self.assertFalse(self.safety.safety_tx_hook(self.packet(torque)))
+
+
+class TestGmMalibuAlternateCc(unittest.TestCase):
+  setUp = TestGmOrdinaryCc.setUp
+  tearDown = TestGmOrdinaryCc.tearDown
+  packet = staticmethod(TestGmOrdinaryCc.packet)
+  tx = TestGmOrdinaryCc.tx
+
+  def reset(self, word=0xC161, alternative=0):
+    self.safety.init_tests()
+    self.safety.set_alternative_experience(alternative)
+    self.assertEqual(self.safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, word), 0)
+    self.safety.set_timer(1_000_000)
+
+  def feed(self, counter=0, *, speed=20., stock_kph=54., active=True, main=True, gas=False, brake=False, gear=4, manual=False, missing=None):
+    frames = [frame for frame in pt_frames(self.packer, counter=counter, gas=gas, brake=brake) if frame[0] != 0xBE]
+    frames.append(self.packer.make_can_msg('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': 21 if brake else 0}))
+    replacements = [gmcan.create_buttons(self.packer, 0, counter, 1),
+                    self.packer.make_can_msg('EBCMWheelSpdRear', 0, {'RLWheelSpd': speed * 3.6, 'RRWheelSpd': speed * 3.6, 'RLWheelDir': 1, 'RRWheelDir': 1}),
+                    self.packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': active, 'CruiseSetSpeed': stock_kph}),
+                    self.packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': main}),
+                    self.packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': gear, 'ManualMode': manual})]
+    addresses = {frame[0] for frame in replacements}
+    frames = [frame for frame in frames if frame[0] not in addresses and frame[0] != 0xBD] + replacements
+    for frame in sorted(frames, key=lambda frame: 2 if frame[0] == 0x1E1 else 1 if frame[0] == 0x3D1 else 0):
+      if frame[0] != missing:
+        self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
+    self.safety.safety_tick()
+
+  def test_independent_brake_sources_and_stock_direction_denial(self):
+    for word in (0xC161, 0xC162):
+      self.reset(word)
+      self.feed()
+      self.assertTrue(self.safety.safety_config_valid())
+      for raw, f1, c9 in ((21, 0, 0), (0, 1, 0), (0, 0, 1), (0, 1, 1), (0, 0, 1), (0, 0, 0)):
+        self.safety.safety_rx_hook(self.packet(self.packer.make_can_msg('EBCMBrakePedalPosition', 0,
+                                  {'BrakePedalPosition': raw, 'BrakePressed': f1})))
+        self.safety.safety_rx_hook(self.packet(self.packer.make_can_msg('ECMEngineStatus', 0,
+                                  {'CruiseMainOn': 1, 'BrakePressed': c9})))
+        self.assertEqual(self.safety.get_brake_pressed_prev(), bool(raw >= 21 or f1 or c9))
+      self.feed(counter=1)
+      if word == 0xC162:
+        self.assertFalse(self.tx(counter=2, button=2))
+        self.assertFalse(self.tx(counter=2, button=3))
+        self.assertTrue(self.tx(counter=2, button=6))

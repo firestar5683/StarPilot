@@ -75,6 +75,10 @@ static bool gm_cc_gateway_stock = false;
 // Exact EV|NO_ACC word20 was rejected previously; it is a DEBUG-only Volt CC owner.
 static bool gm_volt_cc_long = false;
 static bool gm_ordinary_cc_long = false;
+static bool gm_malibu_cc_f1 = false;
+static bool gm_malibu_cc_stock = false;
+static bool gm_malibu_f1_brake = false;
+static bool gm_malibu_c9_brake = false;
 static bool gm_volt_cc_seen[8] = {false, false, false, false, false, false, false, false};
 static uint32_t gm_volt_cc_last_us[8] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
 static bool gm_volt_cc_main = false;
@@ -242,7 +246,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       } else if ((msg_matches(msg, 0xC9U, 0U)) && (GET_LEN(msg) == 8U)) {
         source = 2;
         gm_volt_cc_main = GET_BIT(msg, 29U);
-      } else if ((msg_matches(msg, 0xBEU, 0U)) && (GET_LEN(msg) == 6U)) {
+      } else if ((msg_matches(msg, gm_malibu_cc_f1 ? 0xF1U : 0xBEU, 0U)) && (GET_LEN(msg) == 6U)) {
         source = 3;
       } else if ((msg->addr == 0x1F5U) && (GET_LEN(msg) == 8U)) {
         source = 4;
@@ -352,9 +356,19 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       cruise_button_prev = button;
     }
 
+    if (gm_malibu_cc_f1) {
+      if (msg_matches(msg, 0xF1U, 0U) && (GET_LEN(msg) == 6U)) {
+        gm_malibu_f1_brake = (msg->data[1] >= 21U) || GET_BIT(msg, 1U);
+      }
+      if (msg_matches(msg, 0xC9U, 0U) && (GET_LEN(msg) == 8U)) {
+        gm_malibu_c9_brake = GET_BIT(msg, 40U);
+      }
+      brake_pressed = gm_malibu_f1_brake || gm_malibu_c9_brake;
+    }
+
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
-    if ((msg_matches(msg, 0xBEU, 0U)) && !gm_camera_gateway && (((gm_hw == GM_ASCM) && !gm_volt_gateway_alt_brake) || (gm_ascm_intercept && !gm_ascm_brake_c9) ||
+    if ((msg_matches(msg, 0xBEU, 0U)) && !gm_camera_gateway && !gm_malibu_cc_f1 && (((gm_hw == GM_ASCM) && !gm_volt_gateway_alt_brake) || (gm_ascm_intercept && !gm_ascm_brake_c9) ||
                                    (gm_sdgm && !gm_sdgm_brake_c9))) {
       brake_pressed = msg->data[1] >= 8U;
     }
@@ -686,7 +700,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     const uint8_t counter = (gm_volt_cc_counter + 1U) % 4U;
     const uint32_t button_offset = (button > 0U) ? ((uint32_t)button - 1U) : 0U;
     const uint16_t checksum = (uint16_t)(0xFFU + ((uint32_t)counter * 0x4EFU) - (button_offset << 4));
-    const bool direction = (button == GM_BTN_SET) || (button == GM_BTN_RESUME);
+    const bool direction = !gm_malibu_cc_stock && ((button == GM_BTN_SET) || (button == GM_BTN_RESUME));
     const bool cancel = button == GM_BTN_CANCEL;
     // Cruise set speed is 0.0625 km/h; each rear wheel count is 0.0311 km/h.
     const bool gas_set = (button == GM_BTN_SET) && gas_pressed && longitudinal_controls_allowed() &&
@@ -895,7 +909,11 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_volt_removed_cancel_seen = false;
   gm_volt_removed_cancel_us = 0U;
 
-  gm_ordinary_cc_long = safety_param == 0xC160U;
+  gm_malibu_cc_f1 = (safety_param == 0xC161U) || (safety_param == 0xC162U);
+  gm_malibu_cc_stock = safety_param == 0xC162U;
+  gm_malibu_f1_brake = false;
+  gm_malibu_c9_brake = false;
+  gm_ordinary_cc_long = (safety_param == 0xC160U) || gm_malibu_cc_f1;
   if (gm_ordinary_cc_long) { param = GM_PARAM_NO_ACC; }
   gm_ordinary_camera_removed = camera_param == 0xC172U;
   gm_ordinary_camera_removed_long = false;
@@ -1420,10 +1438,14 @@ static safety_config gm_init(uint16_t safety_param) {
   }
 
   if (gm_volt_cc_long || gm_ordinary_cc_long) {
-    if (gm_ordinary_cc_long) { SET_RX_CHECKS(gm_ordinary_cc_rx_checks, ret); }
+    if (gm_ordinary_cc_long) {
+      gm_ordinary_cc_rx_checks[3].msg[0].addr = gm_malibu_cc_f1 ? 0xF1U : 0xBEU;
+      gm_ordinary_cc_rx_checks[3].msg[0].frequency = gm_malibu_cc_f1 ? 100U : 80U;
+      SET_RX_CHECKS(gm_ordinary_cc_rx_checks, ret);
+    }
     else { SET_RX_CHECKS(gm_volt_cc_rx_checks, ret); }
     SET_TX_MSGS(GM_CC_GATEWAY_STOCK_TX_MSGS, ret);
-    if (gm_ordinary_cc_long) {
+    if (gm_ordinary_cc_long && !gm_malibu_cc_stock) {
       static const CanMsg GM_ORDINARY_CC_TX_MSGS[] = {
         {0x180, 0, 4, .check_relay = true}, {0x1E1, 0, 7, .check_relay = false},
         {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},
