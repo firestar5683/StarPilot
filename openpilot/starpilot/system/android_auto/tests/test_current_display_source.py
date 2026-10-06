@@ -42,6 +42,7 @@ class TestCurrentDisplaySource(unittest.TestCase):
     self.assertNotIn("openpilot.starpilot.ui.runtime_app", imports)
     self.assertIn("openpilot.starpilot.system.android_auto.frame_source", imports)
     self.assertNotIn("openpilot.starpilot.system.android_auto.ui.main", imports)
+    self.assertIn("pixels = readback.finish()", source)
     self.assertIn("producer.publish(request, pixels, in_flight_ns, pixel_format, advance=False)", source)
 
   def test_view_uses_current_renderer(self):
