@@ -56,6 +56,7 @@ _services: dict[str, tuple] = {
   "carControl": (True, 100., 10),
   "carOutput": (True, 100., 10),
   "longitudinalPlan": (True, 20., 10),
+  "starpilotLongitudinalPlan": (True, 20., 10),
   "slcState": (True, 20., 10),
   "slcAction": (True, 0., 1),
   "slcCruiseEvent": (True, 0., 1),

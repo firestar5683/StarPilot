@@ -114,6 +114,7 @@ class SelfdriveD:
     self.car_events = CarEvents(self.CP)
     from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
     self.tesla_stock_consumer = StockCruiseConsumer(self.CP)
+    self.tesla_stock_alerts = []
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -138,7 +139,7 @@ class SelfdriveD:
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
 
-    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan', 'laneChangeAssistWire']
+    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan']
     if self.aol_replay:
       ignore += ['aolIntentWire']
     if self.axis_transport_required:
@@ -155,7 +156,7 @@ class SelfdriveD:
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'deviceMotion', 'lateralDelay',
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark',
-                                   'lateralManeuverPlan', 'laneChangeAssistWire'] + (['aolIntentWire'] if self.aol_replay else []) +
+                                   'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan'] + (['aolIntentWire'] if self.aol_replay else []) +
                                    (['aolSafetyWire'] if self.axis_transport_required else []) +
                                    (['slcState'] if self.conditional_replay or self.switchback_capable else []) + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
@@ -254,6 +255,7 @@ class SelfdriveD:
     """Compute onroadEvents from carState"""
 
     self.events.clear()
+    self.tesla_stock_alerts = []
     self.nostalgia_paddle_cancel = False
     action_owner = getattr(self, 'controller_action_owner', None)
     action_sock = getattr(self, 'controller_action_sock', None)
@@ -345,7 +347,7 @@ class SelfdriveD:
         companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
                                    previous=self.aol_last_intent)
         session = companion.producerSessionId if companion is not None else None
-        self.tesla_stock_consumer.poll(self.events, self.sm, now_ns=now_ns, session=session)
+        self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
 
       paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)
       self.nostalgia_paddle_cancel = bool(paddle_pressed and EventName.buttonCancel not in self.events.names and
@@ -636,6 +638,8 @@ class SelfdriveD:
     pers = LONGITUDINAL_PERSONALITY_MAP[self.personality]
     alerts = self.events.create_alerts(self.state_machine.current_alert_types, [self.CP, CS, self.sm, self.is_metric,
                                                                                 self.state_machine.soft_disable_timer, pers])
+    alerts.extend(alert for alert in getattr(self, 'tesla_stock_alerts', [])
+                  if alert.event_type in self.state_machine.current_alert_types)
     now_ns = time.monotonic_ns()
     drive = int(self.sm['deviceState'].startedMonoTime) if self.sm['deviceState'].started else 0
     switchback = bool(self.switchback_capable and self.sm.seen['slcState'] and self.sm.alive['slcState'] and

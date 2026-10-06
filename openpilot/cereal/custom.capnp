@@ -97,7 +97,12 @@ struct CustomReserved1 @0xaedffd8f31e7b55d {
 struct CustomReserved2 @0xf35cc4560bbf6ec2 {
 }
 
-struct CustomReserved3 @0xda96579883444c35 {
+struct StarPilotLongitudinalPlan @0xda96579883444c35 {
+  version @0 :UInt16;
+  sourcePlanMonoTime @1 :UInt64;
+  modelMonoTime @2 :UInt64;
+  driveStartMonoTime @3 :UInt64;
+  forceStopHolding @4 :Bool;
 }
 
 struct SlcState @0xa1680744031fdb2d {

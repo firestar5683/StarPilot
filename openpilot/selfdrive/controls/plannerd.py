@@ -349,7 +349,7 @@ def starpilot_main():
   pending_conditional_ui = deque(maxlen=64)
   pending_traffic_events = deque(maxlen=64)
   drive_start_ns = 0
-  publish_services = ['longitudinalPlan', 'driverAssistance']
+  publish_services = ['longitudinalPlan', 'starpilotLongitudinalPlan', 'driverAssistance']
   if slc_runtime is not None or curve_host is not None or conditional_host is not None or traffic_owner is not None or mode_owner is not None:
     publish_services.append('slcState')
   if slc_runtime is not None:

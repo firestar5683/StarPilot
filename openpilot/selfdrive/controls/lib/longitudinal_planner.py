@@ -94,6 +94,7 @@ class LongitudinalPlanner:
     self.clock_ns = clock_ns
     self.allow_throttle = True
     self.accel_boost = AccelBoost()
+    self.plan_drive_id = 0
     self.throttle_gate = ModelThrottleGate()
     self.ioniq6_throttle_gate_enabled = ioniq6_long_eligible(CP)
     self.lane_change_gap = LaneChangeGap()
@@ -131,6 +132,7 @@ class LongitudinalPlanner:
              now_ns: int | None = None, drive_id: int = 0, wheel_coast=None):
     if curve_ceiling is not None and curve_provider is not None:
       raise ValueError('choose explicit Curve ceiling or same-cycle provider')
+    self.plan_drive_id = drive_id
     sample_now_ns = self.clock_ns() if now_ns is None else now_ns
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -446,8 +448,17 @@ class LongitudinalPlanner:
     longitudinalPlan.aTarget = float(self.output_a_target)
     longitudinalPlan.accelBoost = float(self.accel_boost.total_boost)
     longitudinalPlan.shouldStop = bool(self.output_should_stop)
-    longitudinalPlan.forceStopHolding = bool(self.force_stop_plan.manual_hold)
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = bool(self.allow_throttle)
 
+    companion = messaging.new_message('starpilotLongitudinalPlan')
+    companion.logMonoTime = plan_send.logMonoTime
+    companion.valid = bool(plan_send.valid and 0 < self.plan_drive_id < longitudinalPlan.modelMonoTime <= plan_send.logMonoTime)
+    hold = companion.starpilotLongitudinalPlan
+    hold.version = 1
+    hold.sourcePlanMonoTime = plan_send.logMonoTime
+    hold.modelMonoTime = longitudinalPlan.modelMonoTime
+    hold.driveStartMonoTime = self.plan_drive_id
+    hold.forceStopHolding = bool(self.force_stop_plan.manual_hold)
     pm.send('longitudinalPlan', plan_send)
+    pm.send('starpilotLongitudinalPlan', companion)
