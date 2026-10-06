@@ -308,6 +308,15 @@ class TestQcomSupplementalRuntimeCompatibility(unittest.TestCase):
     self.verify()
     self.assertEqual(before, (self.manifest_path.read_bytes(), self.parent_path.read_bytes()))
 
+  def test_empty_arena_loader_extension_preserves_compiled_provenance(self):
+    helper = "tinygrad_repo/examples/openpilot/helpers.py"
+    self.assertEqual(contract.RUNTIME_EXTENSION_CHANGES[helper], (
+      "f4bae8ab81931781dc7134d6450c9fa2f24410b81cbc6ecfcebd6c708eb6d912",
+      "6494f23757a1058d8c90db8434004e8f703bb61d55903ac4500c04a7d511c8a3"))
+    before = self.manifest_path.read_bytes(), self.parent_path.read_bytes(), copy.deepcopy(self.manifest["artifacts"])
+    self.verify()
+    self.assertEqual(before, (self.manifest_path.read_bytes(), self.parent_path.read_bytes(), self.manifest["artifacts"]))
+
   def test_exact_typing_only_helper_preserves_parent_and_artifact_attestation(self):
     before = self.manifest_path.read_bytes(), self.parent_path.read_bytes(), copy.deepcopy(self.manifest["artifacts"])
     for name, source_hash in contract.RUNTIME_EXTENSION_TYPED_ADDITIONS.items():

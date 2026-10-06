@@ -150,7 +150,7 @@ RUNTIME_EXTENSION_PROFILE = "deferred-benchmark-and-startup-trace-v1"
 RUNTIME_EXTENSION_CHANGES = {
   'tinygrad_repo/examples/openpilot/helpers.py': (
     'f4bae8ab81931781dc7134d6450c9fa2f24410b81cbc6ecfcebd6c708eb6d912',
-    '7849829700c575339de7d95ffa869507ad2d65143af4c23a4411ad4d95ba3ae2',
+    '6494f23757a1058d8c90db8434004e8f703bb61d55903ac4500c04a7d511c8a3',
   ),
   'tinygrad_repo/tinygrad/runtime/support/am/amdev.py': (
     '3ceddc6b7aabe0f03019c6a6d60b99da11d18ea29065f804dbe15a6ba8d1dd98',
