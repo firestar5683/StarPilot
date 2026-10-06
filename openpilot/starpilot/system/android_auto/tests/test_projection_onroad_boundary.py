@@ -104,6 +104,47 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertEqual(events[-3:], ['view_closed', 'camera_closed', 'fonts_closed'])
     self.assertEqual(native.ui_state._offroad_transition_callbacks, [])
 
+  def test_side_camera_layer_uses_blinkers_saved_preview_and_projection_placements(self):
+    native, events = self.dependencies()
+    calls = []
+
+    class Renderer:
+      def __init__(self, shape): events.append(('pip', shape))
+      def render(self, rect, mask, signals, **kwargs): calls.append((rect, mask, signals, kwargs))
+      def deactivate(self): events.append('pip_off')
+      def close(self): events.append('pip_closed')
+
+    saved = SimpleNamespace(enabled=True, mask='mask', invert=False, on_blinker=True, on_bsm=True)
+    car = SimpleNamespace(leftBlinker=True, rightBlinker=False, leftBlindspot=False, rightBlindspot=True)
+    layouts = {'pip_left': {'x': 10, 'y': 20, 'enabled': True}, 'pip_right': {'x': 30, 'y': 40, 'enabled': False}}
+    native.ui_state.params = object()
+    native.current_message = lambda _sm, name, *_a, **_k: car if name == 'carState' else None
+    native.pip_renderer = Renderer
+    native.read_pip = lambda _params: saved
+    native.pip_signals = lambda *values: values
+    native.pip_rect = lambda *values: values
+    native.pip_widgets = ('pip_left', 'pip_right')
+    native.placement = lambda _doc, profile, key: layouts[key] if profile == 'large' else None
+    native.widget_size = lambda *_: (600, 600)
+    view = projection.ProjectionOnroad(dependencies=native)
+    self.assertEqual(view.onroad.pip_layer, view._pip_layer)
+
+    view._pip_layer('content', SimpleNamespace(customization={}))
+    self.assertEqual(calls, [('content', 'mask', (True, True, False, False, True),
+                              {'enabled': True, 'on_blinker': True, 'on_bsm': True, 'invert': False,
+                               'placements': {'left': (10, 20, 600, 600)}})])
+
+    saved.enabled = False
+    view._pip_read_ns = None
+    view._pip_layer('content', SimpleNamespace(customization={}))
+    self.assertEqual(len(calls), 1)
+    self.assertEqual(events[-1], 'pip_off')
+    before = len(events)
+    view.render()  # offroad standby releases the cabin camera
+    self.assertEqual(events[before:before + 2], ['pip_off', 'draw'])
+    view.close()
+    self.assertIn('pip_closed', events)
+
   def test_negotiated_viewport_overrides_landscape_fallback(self):
     native, _ = self.dependencies()
     view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080))

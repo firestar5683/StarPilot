@@ -18,7 +18,11 @@ def native_dependencies():
   from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
   from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
   from openpilot.starpilot.ui.onroad import OnroadView
+  from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
   from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
+  from openpilot.starpilot.ui.pip_preferences import read_pip
+  from openpilot.starpilot.ui.pip_render import PiPRenderer
+  from openpilot.starpilot.ui.pip_sidecam import Rect, Signals
   from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
   from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message
   from openpilot.starpilot.ui.shell import ShellMode
@@ -52,7 +56,8 @@ def native_dependencies():
                          onroad=OnroadView, monitor=DriverMonitorLayer, fonts=BitmapFonts,
                          font_role=FontRole, profile=Profile, font_directory=default_font_directory,
                          adapter=RuntimeSnapshotAdapter, current_message=current_message,
-                         shell_mode=ShellMode)
+                         shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
+                         pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size)
 
 
 class ProjectionOnroad:
@@ -79,6 +84,13 @@ class ProjectionOnroad:
       self._resources.callback(self._close_onroad)
       self.monitor = native.monitor(native.profile.LARGE)
       self.onroad.driver_monitor_layer = self._driver_monitor_layer
+      self.pip = None
+      self._pip_saved = None
+      self._pip_read_ns = None
+      if getattr(native, 'pip_renderer', None) is not None:
+        self.pip = native.pip_renderer("bubble")
+        self._resources.callback(self.pip.close)
+        self.onroad.pip_layer = self._pip_layer
       self.adapter = native.adapter(native.ui_state)
     except BaseException:
       self._resources.close()
@@ -127,6 +139,34 @@ class ProjectionOnroad:
     finally:
       self.native.rl.rl_pop_matrix()
 
+  def _pip_layer(self, rect, state):
+    """The comma's blinker/blind-spot side-camera bubbles, at the AA layout's placements."""
+    native = self.native
+    now_ns = time.monotonic_ns()
+    if self._pip_read_ns is None or not 0 <= now_ns - self._pip_read_ns < 1_000_000_000:
+      self._pip_saved = native.read_pip(native.ui_state.params)
+      self._pip_read_ns = now_ns
+    saved = self._pip_saved
+    if (saved is None or saved.enabled is not True or saved.mask is None or
+        saved.invert is None or saved.on_blinker is None or saved.on_bsm is None):
+      self.pip.deactivate()
+      return
+    ui = native.ui_state
+    car = native.current_message(ui.sm, 'carState', now_ns, after_frame=ui.started_frame)
+    signals = native.pip_signals(car is not None,
+                                 bool(car.leftBlinker) if car is not None else False,
+                                 bool(car.rightBlinker) if car is not None else False,
+                                 bool(car.leftBlindspot) if car is not None else False,
+                                 bool(car.rightBlindspot) if car is not None else False)
+    placements = {}
+    for side, key in zip(('left', 'right'), native.pip_widgets, strict=True):
+      position = native.placement(state.customization, 'large', key)
+      if position['enabled']:
+        width, height = native.widget_size(state.customization, 'large', key)
+        placements[side] = native.pip_rect(position['x'], position['y'], width, height)
+    self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
+                    on_bsm=saved.on_bsm, invert=saved.invert, placements=placements)
+
   def _standby(self):
     rl = self.native.rl
     rl.draw_rectangle(0, 0, int(self.width), int(self.height), rl.Color(12, 26, 34, 255))
@@ -149,6 +189,8 @@ class ProjectionOnroad:
       self.onroad.render(state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:
+      if self.pip is not None:
+        self.pip.deactivate()
       self._standby()
 
   def close(self):
