@@ -192,7 +192,7 @@ class FeatureSettingsOwner:
     cp = self.vehicle_params()
     try:
       if (cp is None or cp.brand != "gm" or cp.notCar or
-          cp.carFingerprint not in ORDINARY_CC_CAR | PEDAL_BOLT_CAR | CAMERA_ACC_PEDAL_CAR | {CAR.CHEVROLET_SILVERADO_CC}):
+          cp.carFingerprint not in ORDINARY_CC_CAR | PEDAL_BOLT_CAR | CAMERA_ACC_PEDAL_CAR | {CAR.CHEVROLET_SILVERADO_CC, CAR.CHEVROLET_VOLT_CC}):
         return None
       return (str(cp.carFingerprint), str(cp.brand), int(cp.flags), bool(cp.passive), bool(cp.dashcamOnly),
               bool(cp.openpilotLongitudinalControl),
@@ -229,7 +229,7 @@ class FeatureSettingsOwner:
 
   def _long_pitch_capability(self) -> tuple | None:
     from opendbc.car.gm.suburban import stopping_decel_rate as suburban_stopping_decel_rate
-    from opendbc.car.gm.values import is_bolt_euv_longitudinal, is_volt_longitudinal, camera_acc_pedal_profile, CAMERA_ACC_PEDAL_CAR
+    from opendbc.car.gm.values import is_bolt_euv_longitudinal, is_volt_longitudinal, camera_acc_pedal_profile, volt_cc_pedal_profile, CAMERA_ACC_PEDAL_CAR
     cp = self.vehicle_params()
     try:
       if cp is None or cp.notCar:
@@ -237,7 +237,7 @@ class FeatureSettingsOwner:
       configurable_pedal = bool(self.configuration_vehicle() and cp.brand == "gm" and cp.carFingerprint in CAMERA_ACC_PEDAL_CAR)
       if (cp.passive or cp.dashcamOnly) and not configurable_pedal:
         return None
-      pedal = camera_acc_pedal_profile(cp)
+      pedal = camera_acc_pedal_profile(cp) or volt_cc_pedal_profile(cp)
       if not (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or suburban_stopping_decel_rate(cp) is not None or
               pedal is not None and pedal.longitudinal or configurable_pedal):
         return None

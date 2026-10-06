@@ -9,7 +9,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAMERA_DATA_HEADER_MSG
-from opendbc.car.gm.values import (CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS,
+from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS,
                                    CanBus, GMSafetyFlags, GMFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, ASCM_INTERCEPT_CAR,
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
                                    ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS, is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
@@ -40,6 +40,8 @@ class CarInterface(CarInterfaceBase):
     return super().get_params(pedal_candidate(candidate, fingerprint), fingerprint, car_fw, alpha_long, is_release, docs)
 
   def update(self, can_packets):
+    if volt_cc_pedal_profile(self.CP) is not None:
+      self.CS.conventional_cancel_credit.observe(can_packets)
     if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP) and not self.CP.openpilotLongitudinalControl:
       self.CS.conventional_cancel_credit.observe(can_packets)
     if not is_bolt_cc_profile(self.CP):
@@ -112,7 +114,7 @@ class CarInterface(CarInterfaceBase):
     profile = camera_acc_pedal_profile(CP)
     if profile is not None and profile.longitudinal and profile.topology in ("gateway", "ascm", "sdgm"):
       return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
-    if profile is not None and profile.longitudinal:
+    if (profile is not None and profile.longitudinal) or (volt_cc_pedal_profile(CP) is not None and CP.openpilotLongitudinalControl):
       return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
               float(np.interp(current_speed, [0., 1.5, 4., 8., 15.], [.60, .85, 1.15, 1.60, 2.])))
     if is_silverado_cc_pedal_profile(CP):
@@ -694,7 +696,31 @@ class CarInterface(CarInterfaceBase):
     if candidate in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA,
                      CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT_2019):
       ret.minSteerSpeed = 7 * CV.MPH_TO_MS
-    if candidate == CAR.CHEVROLET_VOLT_CC:
+    if candidate == CAR.CHEVROLET_VOLT_CC and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True):
+      pt = fingerprint.get(CanBus.POWERTRAIN, {})
+      cam = fingerprint.get(CanBus.CAMERA, {})
+      be = pt.get(0xBE) in (6, 7, 8)
+      f1 = 0xBE not in pt and pt.get(0xF1) == 6
+      removed = 0x320 not in cam
+      required = {0x184: 8, 0x34A: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0x3D1: 8, 0xBD: 7}
+      sources = (be or f1) and all(pt.get(a) == n for a, n in required.items())
+      ret.radarUnavailable = RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE]
+      ret.flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if removed else 0) |
+                      (GMFlags.NO_ACCELERATOR_POS_MSG if f1 else 0)) | (int(ret.flags) & int(GMFlags.HAS_BSM))
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.dashcamOnly = not sources or (not removed and (cam.get(0x180) != 4 or cam.get(0x320) != 6))
+      ret.alphaLongitudinalAvailable = not ret.dashcamOnly and not is_release and pt.get(0x1F5) == 8
+      ret.openpilotLongitudinalControl = ret.alphaLongitudinalAvailable
+      ret.pcmCruise = False
+      if not ret.dashcamOnly:
+        ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
+      ret.safetyConfigs[0].safetyParam = ((0xE600 if ret.openpilotLongitudinalControl else 0xE610) +
+                                          4 * int(not ret.radarUnavailable) + 2 * int(removed) + int(f1))
+      ret.autoResumeSng = ret.openpilotLongitudinalControl
+      ret.minEnableSpeed = -1.
+      ret.stopAccel = -1.5
+      ret.longitudinalTuning.kiBP, ret.longitudinalTuning.kiV = [0., 3., 6., 35.], [.09, .13, .19, .28]
+    elif candidate == CAR.CHEVROLET_VOLT_CC:
       ret.dashcamOnly = not ret.openpilotLongitudinalControl
     if candidate in BOLT_CC_WORDS and not ret.flags & GMFlags.PEDAL_LONG.value:
       camera_removed = 0x180 not in fingerprint.get(CanBus.CAMERA, {})

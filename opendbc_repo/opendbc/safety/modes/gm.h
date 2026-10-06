@@ -711,15 +711,15 @@ static bool gm_fwd_hook(int bus_num, int addr) {
 }
 
 static safety_config gm_init(uint16_t safety_param) {
-  const uint16_t camera_param = gm_camera_pedal_reset(safety_param);
+  const uint16_t camera_param = gm_camera_pedal_reset(gm_cc_pedal_volt_decode(safety_param));
   uint16_t param = gm_one_pedal_reset(camera_param);
   gm_cc_pedal_silverado = (safety_param == 0xC182U) || (safety_param == 0xC183U) ||
                           (safety_param == 0xC184U) || (safety_param == 0xC185U);
   gm_cc_pedal_ordinary_stock = (safety_param == 0xC186U) || (safety_param == 0xC187U);
-  gm_cc_pedal_stock_only = (safety_param == 0xC184U) || (safety_param == 0xC185U) || gm_cc_pedal_ordinary_stock;
-  gm_cc_pedal = (safety_param == 0xC180U) || (safety_param == 0xC181U) || gm_cc_pedal_silverado || gm_cc_pedal_ordinary_stock;
+  gm_cc_pedal_stock_only = (safety_param == 0xC184U) || (safety_param == 0xC185U) || gm_cc_pedal_ordinary_stock || gm_cc_pedal_volt_stock;
+  gm_cc_pedal = (safety_param == 0xC180U) || (safety_param == 0xC181U) || gm_cc_pedal_silverado || gm_cc_pedal_ordinary_stock || gm_cc_pedal_volt;
   const bool gm_cc_pedal_removed = (safety_param == 0xC181U) || (safety_param == 0xC183U) ||
-                                    (safety_param == 0xC185U) || (safety_param == 0xC187U);
+                                    (safety_param == 0xC185U) || (safety_param == 0xC187U) || gm_cc_pedal_volt_removed;
   gm_cc_pedal_reset();
   const uint16_t GM_PARAM_HW_CAM = 1;
   const uint16_t GM_PARAM_EV = 4;
@@ -777,7 +777,7 @@ static safety_config gm_init(uint16_t safety_param) {
   if (hold_removed) { param = 0xC151U; }
 #endif
 
-  if (gm_cc_pedal) { param = GM_PARAM_HW_CAM; }
+  if (gm_cc_pedal) { param = GM_PARAM_HW_CAM | (gm_cc_pedal_volt ? GM_PARAM_EV : 0U); }
   gm_volt_camera_removed = param == 0xC150U;
   gm_volt_removed_long = false;
 #ifdef ALLOW_DEBUG
@@ -1369,7 +1369,35 @@ static safety_config gm_init(uint16_t safety_param) {
     }
   }
 
-  if (gm_cc_pedal_ordinary_stock) {
+  if (gm_cc_pedal_volt) {
+    static const RxCheck VOLT_CC_RX_TEMPLATE[10] = {
+      {.msg = {{0x184, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x34A, 0, 5, 20U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x1E1, 0, 7, 33U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0xBE, 0, 6, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x1C4, 0, 8, 33U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0xC9, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x201, 0, 6, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x3D1, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x1F5, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0xBD, 0, 7, 40U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+    };
+    for (uint8_t i = 0U; i < 10U; i++) { gm_extended_rx_checks[i] = VOLT_CC_RX_TEMPLATE[i]; }
+    gm_extended_rx_checks[3].msg[0].addr = gm_cc_pedal_volt_f1 ? 0xF1U : 0xBEU;
+    if (!gm_cc_pedal_volt_f1) {
+      gm_extended_rx_checks[3].msg[1] = gm_extended_rx_checks[3].msg[0];
+      gm_extended_rx_checks[3].msg[1].len = 7U;
+      gm_extended_rx_checks[3].msg[2] = gm_extended_rx_checks[3].msg[0];
+      gm_extended_rx_checks[3].msg[2].len = 8U;
+    }
+    if (gm_cc_pedal_volt_stock) {
+      gm_extended_rx_checks[6] = VOLT_CC_RX_TEMPLATE[9];
+      gm_extended_rx_checks[8] = (RxCheck){0}; gm_extended_rx_checks[9] = (RxCheck){0};
+      ret.rx_checks = gm_extended_rx_checks; ret.rx_checks_len = 8;
+    } else { ret.rx_checks = gm_extended_rx_checks; ret.rx_checks_len = 10; }
+  }
+
+  if (gm_cc_pedal_ordinary_stock || gm_cc_pedal_volt_stock) {
     // DisableLong retains literal CAM cancellation without pedal or PT button authority.
     static const CanMsg GM_CC_PEDAL_STOCK_TX_MSGS[] = {
       {0x180, 0, 4, .check_relay = true}, {0x1E1, 2, 7, .check_relay = false},
@@ -1525,7 +1553,7 @@ static safety_config gm_init(uint16_t safety_param) {
     else { SET_TX_MSGS(GM_CAMERA_PEDAL_PRESENT_TX, ret); }
   }
 #endif
-  gm_volt_invalid |= gm_camera_pedal_rejected;
+  gm_volt_invalid |= gm_camera_pedal_rejected || gm_cc_pedal_volt_rejected;
 
   // Independent lateral authority also needs the physical main source on BE-selected rows.
   const bool gm_aol_be_main = ((unsigned int)alternative_experience == GM_ALT_EXP_ALWAYS_ON_LATERAL) &&
@@ -1575,7 +1603,7 @@ static safety_config gm_init(uint16_t safety_param) {
 
 
 static bool gm_aol_mode_valid(void) {
-  return !gm_volt_invalid && !gm_sdgm_invalid && !gm_cc_gateway_invalid;
+  return !gm_volt_invalid && !gm_sdgm_invalid && !gm_cc_gateway_invalid && !gm_cc_pedal_volt_rejected;
 }
 
 const safety_hooks gm_hooks = {

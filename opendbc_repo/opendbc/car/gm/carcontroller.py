@@ -1,5 +1,5 @@
 from opendbc.car.gm.one_pedal import VoltOnePedal
-from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, volt_cc_pedal_profile
 from opendbc.car.gm.longitudinal import volt_sng_release
 from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for, hold_brake as estimate_hold_brake
 from opendbc.car.gm.values import is_gm_auto_hold
@@ -30,6 +30,7 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
 from opendbc.car.interfaces import CarControllerBase
 
 from opendbc.car.gm.bolt_cc import BoltCcOwner, BoltCcProfile, auxiliary_messages
+from opendbc.car.gm.volt_cc_pedal import VoltCcPedalCommand
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 NetworkLocation = structs.CarParams.NetworkLocation
@@ -260,6 +261,9 @@ class CarController(CarControllerBase):
     self.silverado_pedal_command = SilveradoPedalCommand(self.CP) if self.silverado_cc_pedal_profile else None
     self.conventional_pedal_command = (ConventionalPedalCommand(self.CP)
                                        if self.conventional_pedal_profile and not self.silverado_cc_pedal_profile else None)
+    self.volt_cc_pedal_profile = volt_cc_pedal_profile(self.CP)
+    self.volt_cc_pedal_command = VoltCcPedalCommand() if self.volt_cc_pedal_profile is not None else None
+    self.volt_cc_pedal_cancel_used = 0
     self.camera_pedal_profile = camera_acc_pedal_profile(self.CP)
     self.camera_pedal_launch = False
     self.camera_pedal_input = None
@@ -369,7 +373,8 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos):
-    if self.camera_pedal_profile is not None and self.camera_pedal_profile.volt and self.frame % 25 == 0:
+    if ((self.camera_pedal_profile is not None and self.camera_pedal_profile.volt or self.volt_cc_pedal_profile is not None)
+        and self.frame % 25 == 0):
       self.longitudinal_maneuver_mode = bool(self.longitudinal_maneuver_input is not None and
                                            self.longitudinal_maneuver_input.update(now_nanos))
     if self.maneuver_paddle_input is not None and self.frame % 25 == 0:
@@ -512,7 +517,51 @@ class CarController(CarControllerBase):
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, lat_active))
 
-    if self.silverado_cc_pedal_profile:
+    if self.volt_cc_pedal_profile is not None:
+      profile = self.volt_cc_pedal_profile
+      credit = CS.conventional_cancel_credit
+      sources = CS.volt_cc_pedal_sources
+      physical = (CS.out.canValid and not CS.out.canTimeout and CS.out.cruiseState.available and
+                  CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low) and
+                  not CS.out.brakePressed and not CS.out.gasPressed and not CS.out.regenBraking)
+      source_current = (len(sources) == (9 if profile.longitudinal else 8) and
+                        all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources))
+      sensor_current = (not profile.longitudinal or CS.pedal_sensor_healthy and
+                        0 <= now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS)
+      runtime_allowed = self.camera_pedal_input is not None and self.camera_pedal_input.update(now_nanos)
+      if profile.longitudinal and self.frame % 4 == 0:
+        ready = runtime_allowed and physical and source_current and sensor_current
+        pedal = 0.
+        if ready:
+          gas, _ = volt_demands(actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+                                .75, self.CP.mass, self.CP.wheelbase, -4., 2., 400)
+          pedal = self.volt_cc_pedal_command.update(
+            actuators.accel, CC.enabled and CC.longActive, CS.out,
+            stopping=actuators.longControlState == LongCtrlState.stopping, resume=CC.cruiseControl.resume,
+            gas_above_inactive=gas > -650 and actuators.longControlState != LongCtrlState.stopping,
+            maneuver=self.longitudinal_maneuver_mode)
+        else:
+          if not runtime_allowed or not source_current or not sensor_current:
+            self.volt_cc_pedal_command.prime_recovery()
+          else:
+            self.volt_cc_pedal_command.pause_recovery()
+        self.apply_gas, self.apply_brake = pedal, 0
+        can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 4))
+      self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
+      cancel = CS.out.cruiseState.enabled if profile.longitudinal else self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES
+      if (cancel and CS.out.cruiseState.available and CS.out.cruiseState.enabled and
+          CS.out.canValid and not CS.out.canTimeout and source_current and sensor_current and
+          0 < credit.credit_ns <= now_nanos <= credit.credit_ns + 100_000_000 and
+          credit.available(now_nanos, self.volt_cc_pedal_cancel_used) and
+          (self.frame - self.last_button_frame) * DT_CTRL > .04):
+        self.volt_cc_pedal_cancel_used = credit.credit_ns
+        self.last_button_frame = self.frame
+        can_sends.append(gmcan.create_buttons(self.packer_pt,
+          CanBus.POWERTRAIN if profile.longitudinal else CanBus.CAMERA,
+          (CS.buttons_counter + 1) % 4 if profile.longitudinal else CS.buttons_counter, CruiseButtons.CANCEL))
+      if profile.longitudinal and profile.removed and self.frame % 100 == 0:
+        can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
+    elif self.silverado_cc_pedal_profile:
       sources_ready = conventional_pedal_sources_current(CS, now_nanos) and CS.pedal_sensor_healthy
       ready = (sources_ready and CS.out.cruiseState.available and CS.out.gearShifter in
                (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low) and
@@ -831,7 +880,7 @@ class CarController(CarControllerBase):
         self.last_button_frame = self.frame
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
-    elif (not self.volt_cc_profile and not self.ordinary_cc_profile and not self.bolt_cc_profile and
+    elif (self.volt_cc_pedal_profile is None and not self.volt_cc_profile and not self.ordinary_cc_profile and not self.bolt_cc_profile and
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
