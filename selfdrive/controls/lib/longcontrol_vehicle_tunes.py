@@ -67,6 +67,13 @@ HYUNDAI_ELANTRA_FINAL_STOP_URGENCY_MARGIN = 0.45
 HYUNDAI_SANTA_FE_FINAL_STOP_MAX_SPEED = 1.0
 HYUNDAI_SANTA_FE_FINAL_STOP_CAP_BP = [0.0, 0.2, 0.5, HYUNDAI_SANTA_FE_FINAL_STOP_MAX_SPEED]
 HYUNDAI_SANTA_FE_FINAL_STOP_CAP_V = [-0.25, -0.30, -0.50, -0.90]
+# Force Stop hands off to the stopping state ~5 m out at 9-11 mph, which freezes the brake
+# at its handoff level (-1.7..-2.4) to 0 mph. Release it over the last ~2 m/s like a driver
+# feathering the pedal. Costs ~0.5-0.75 m, repaid by IONIQ 6's longer force-stop handoff.
+HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED = 2.0
+HYUNDAI_IONIQ_6_FINAL_STOP_CAP_BP = [0.0, 0.3, 1.0, HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED]
+HYUNDAI_IONIQ_6_FINAL_STOP_CAP_V = [-0.40, -0.45, -1.00, -2.50]
+HYUNDAI_IONIQ_6_FINAL_STOP_URGENCY_MARGIN = 0.45
 VOLKSWAGEN_TAOS_COMFORT_STOP_MAX_SPEED = 4.5
 VOLKSWAGEN_TAOS_COMFORT_STOP_MIN_DISTANCE = 5.0
 VOLKSWAGEN_TAOS_COMFORT_STOP_MIN_TTC = 4.0
@@ -162,6 +169,9 @@ class LongControlVehicleTuning:
     self.is_hyundai_santa_fe_2022 = bool(
       CP.brand == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "HYUNDAI_SANTA_FE_2022"
     )
+    self.is_hyundai_ioniq_6 = bool(
+      CP.brand == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "HYUNDAI_IONIQ_6"
+    )
     self.is_volkswagen_taos = bool(
       CP.brand == "volkswagen" and
       str(getattr(CP, "carFingerprint", "")) == str(VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1)
@@ -234,6 +244,16 @@ class LongControlVehicleTuning:
     ):
       final_stop_cap = float(interp(v_ego, HYUNDAI_SANTA_FE_FINAL_STOP_CAP_BP, HYUNDAI_SANTA_FE_FINAL_STOP_CAP_V))
       return max(float(output_accel), final_stop_cap)
+
+    if (
+      self.is_hyundai_ioniq_6 and
+      should_stop and
+      not has_lead and
+      v_ego <= HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED
+    ):
+      final_stop_cap = float(interp(v_ego, HYUNDAI_IONIQ_6_FINAL_STOP_CAP_BP, HYUNDAI_IONIQ_6_FINAL_STOP_CAP_V))
+      if a_target > final_stop_cap - HYUNDAI_IONIQ_6_FINAL_STOP_URGENCY_MARGIN:
+        return max(float(output_accel), final_stop_cap)
 
     if (
       not self.is_hyundai_elantra_2021 or

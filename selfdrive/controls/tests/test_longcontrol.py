@@ -1304,6 +1304,20 @@ def test_santa_fe_final_stop_cap_softens_only_last_kmh():
   assert tuning.shape_stopping_accel(-2.0, 0.3, False, 0.2, False, -2.0) == pytest.approx(-2.0)
 
 
+def test_ioniq_6_final_stop_cap_releases_brake_over_last_two_ms():
+  CP = make_longcontrol_cp(brand="hyundai", carFingerprint="HYUNDAI_IONIQ_6")
+  tuning = LongControl(CP).vehicle_tuning
+
+  # Force Stop handoff froze -2.38 to 0 mph; the cap feathers it out like a driver would.
+  assert tuning.shape_stopping_accel(-2.38, -0.95, True, 1.0, False, -2.0) == pytest.approx(-1.00)
+  assert tuning.shape_stopping_accel(-2.38, -0.45, True, 0.0, False, -2.0) == pytest.approx(-0.40)
+  # Above 2 m/s, with a lead, or when the planner is braking urgently, keep the held brake.
+  assert tuning.shape_stopping_accel(-2.38, -1.5, True, 2.5, False, -2.0) == pytest.approx(-2.38)
+  assert tuning.shape_stopping_accel(-2.38, -0.95, True, 1.0, True, -2.0) == pytest.approx(-2.38)
+  assert tuning.shape_stopping_accel(-2.38, -1.60, True, 1.0, False, -2.0) == pytest.approx(-2.38)
+  assert tuning.shape_stopping_accel(-2.38, -0.95, False, 1.0, False, -2.0) == pytest.approx(-2.38)
+
+
 def test_taos_comfort_stop_cap_softens_non_urgent_moving_lead():
   CP = make_longcontrol_cp(
     brand="volkswagen",

@@ -207,6 +207,10 @@ def test_camry_tss2_uses_closer_force_stop_handoff():
   assert get_force_stop_handoff_distance("TOYOTA_RAV4_TSS2") == pytest.approx(6.0)
 
 
+def test_ioniq_6_hands_off_force_stop_early_to_repay_brake_release():
+  assert get_force_stop_handoff_distance("HYUNDAI_IONIQ_6") == pytest.approx(6.75)
+
+
 def test_camry_tss2_gets_forward_force_stop_bias_only():
   assert get_force_stop_distance_bias("TOYOTA_CAMRY_TSS2") == pytest.approx(6.0)
   assert get_force_stop_distance_bias("TOYOTA_RAV4_TSS2") == pytest.approx(0.0)
