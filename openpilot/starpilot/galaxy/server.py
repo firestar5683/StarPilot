@@ -2134,9 +2134,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if not setup_state['bluetoothEnabled']:
           self.json(409, {'error': 'Turn on Bluetooth before pairing the car'})
           return
-        if setup_state['identity'].get('installed') is not True:
-          self.json(409, {'error': 'Verify your Android Auto package before pairing'})
-          return
+        # Bluetooth pairing and the Wi-Fi bootstrap need no identity; only projection does.
         source = None
         try:
           source = aa_source_registry().mint(identity)

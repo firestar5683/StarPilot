@@ -141,6 +141,38 @@ def test_rejects_non_apk_and_oversized_code(tmp_path, ident, monkeypatch):
     apk_identity.extract_identity(make_apk(tmp_path, ident), root_sha256=ident["root_sha"])
 
 
+def test_rejections_carry_codes_for_galaxy(tmp_path, ident):
+  def code(path, **kwargs):
+    with pytest.raises(apk_identity.IdentityImportError) as error:
+      apk_identity.extract_identity(path, **kwargs)
+    return error.value.code, error.value.expires
+
+  junk = tmp_path / "junk.apk"
+  junk.write_bytes(b"not a zip")
+  assert code(junk) == ("NOT_PACKAGE", None)
+  assert code(make_apk(tmp_path, ident)) == ("WRONG_APP", None)
+  assert code(make_apk(tmp_path, ident, mask=bytes(256)), root_sha256=ident["root_sha"]) == ("UNSUPPORTED_VERSION", None)
+  later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=400)
+  expired, expires = code(make_apk(tmp_path, ident), root_sha256=ident["root_sha"], now=later)
+  assert expired == "EXPIRED" and datetime.datetime.fromisoformat(expires) < later
+
+  job = apk_identity.ImportJob(work_dir=tmp_path / "work", identity_dir=tmp_path / "identity")
+  job.start(path=junk)
+  job.thread.join(30)
+  assert job.status()["state"] == "failed" and job.status()["code"] == "NOT_PACKAGE"
+
+
+def test_status_reports_date_of_expired_identity(tmp_path):
+  cert, root, key_pem, _ = build_identity(days=0)
+  directory = tmp_path / "identity"
+  directory.mkdir()
+  for name, content in {"phone-cert.pem": cert, "phone-key.pem": key_pem, "root-cert.pem": root}.items():
+    (directory / name).write_bytes(content)
+  os.chmod(directory / "phone-key.pem", 0o600)
+  status = apk_identity.identity_status(directory)
+  assert not status["installed"] and status["expired"] and status["expires"][:10] == datetime.datetime.now(datetime.UTC).date().isoformat()
+
+
 def test_install_is_atomic_and_keeps_previous(tmp_path, ident):
   directory = tmp_path / "aa" / "identity"
   files = {"phone-cert.pem": ident["cert"], "phone-key.pem": ident["key"], "root-cert.pem": ident["root"]}

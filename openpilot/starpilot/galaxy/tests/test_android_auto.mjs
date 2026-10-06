@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { AndroidAutoFeed, AndroidAutoPage, validPairingStatus, validPromptInput, uploadPackage } from "../web/js/android-auto.js"
+import { AndroidAutoFeed, AndroidAutoPage, validPairingStatus, validPromptInput, uploadPackage,
+  expiryInfo, packagePreflight, importProblem, installChecks } from "../web/js/android-auto.js"
 
 const setup = { enabled: true, bluetoothEnabled: true, parked: true, installReady: true, serviceReady: true,
   identity: { installed: true, message: "Package ready" },
@@ -66,7 +67,8 @@ assert.deepEqual(feed.receivers, [{ address: "AA:BB:CC:DD:EE:FF", name: "Saved c
 assert.equal(await feed.control("select_receiver", { address: "AA:BB:CC:DD:EE:FF" }), true)
 assert.deepEqual(JSON.parse(calls.find(([path]) => path.endsWith("/control"))[1].body),
   { action: "select_receiver", address: "AA:BB:CC:DD:EE:FF" })
-assert.match(AndroidAutoPage.template, /Start Projection/)
+assert.match(AndroidAutoPage.template, /Connect to Your Car/)
+assert.match(AndroidAutoPage.template, />Disconnect</)
 assert.match(AndroidAutoPage.template, /Automatic Connection/)
 assert.equal(await feed.setEnabled(false), true)
 assert.deepEqual(JSON.parse(calls.find(([path]) => path.endsWith("/enable"))[1].body), { enabled: false })
@@ -201,6 +203,7 @@ const { compile } = await import('../web/vendor/vue/vue.esm-browser.js')
 const render = compile(AndroidAutoPage.template, { decodeEntities: value => value })
 const vm = page(setup)
 vm.mode = 'local'
+vm.installOpen = true  // the package picker lives in the install sheet
 const tree = render(vm, [])
 const tags = []
 function visit(node) {
@@ -211,34 +214,68 @@ function visit(node) {
 visit(tree)
 assert(!tags.includes('template'), 'setup cannot live inside an inert template element')
 assert(tags.includes('input') && tags.includes('button'), 'setup renders package selection and actions')
-for (const [field, reason] of [['installReady', /display|encoder/], ['enabled', /Enable/],
+for (const [field, reason] of [['installReady', /display|encoder/],
                              ['serviceReady', /service/], ['bluetoothEnabled', /Bluetooth/], ['parked', /Park/]]) {
   const blocked = page({ ...setup, [field]: false })
   assert.match(blocked.pairingReason, reason)
 }
 assert.equal(page(setup).pairingReason, '')
+// Pairing needs no package; only projection does, and Connect opens the installer instead.
+const noPackage = page({ ...setup, identity: { installed: false } })
+assert.equal(noPackage.pairingReason, '')
+noPackage.selected = { address: "AA:BB:CC:DD:EE:FF", name: "Car" }
+noPackage.control = () => assert.fail("projection must not start without a package")
+assert.equal(noPackage.connect(), false)
+assert.equal(noPackage.installOpen, true)
+// Turned off is no blocker either: Find My Car enables Android Auto, then pairs once the service is up.
+const off = page({ ...setup, enabled: false, serviceReady: false, identity: { installed: false } })
+assert.equal(off.pairingReason, '')
+off.feed = { async setEnabled(value) { assert.equal(value, true); return true }, action: async () => assert.fail("paired before the service was up") }
+assert.equal(await off.startPairing(), false)
+assert.equal(off.pairWhenReady, true)
 
-// The legacy parked field carries the server's connectivity admission. Effective
-// offroad permits setup while the car is powered; no browser ignition veto applies.
-const poweredCalls = []
-let admitted = false
-const powered = new AndroidAutoFeed({ publish: () => {}, later: () => 1, cancelTimer: () => {},
-  fetcher: async (path, options) => {
-    poweredCalls.push([path, options])
-    return response(path.endsWith("/setup") ? { ...setup, parked: admitted } :
-      path.endsWith("/status") ? { pairing: { active: false, receiver: null, prompt: null, approved: false }, selectedReceiver: null } : {})
-  },
-  uploader: async (path) => { poweredCalls.push([path]); return response({ ok: true }) },
-})
-await powered.start()
-assert.equal(await powered.setEnabled(true), false)
-assert.equal(await powered.action("./api/android-auto/pairing"), false)
-admitted = true
-await powered.refresh()
-assert.equal(await powered.setEnabled(true), true)
-assert.equal(await powered.upload({ size: 32 }), true)
-assert.equal(await powered.action("./api/android-auto/pairing"), true)
-assert(poweredCalls.some(([path]) => path.endsWith("/upload")))
-assert.match(AndroidAutoPage.template, /offroad mode or Park/)
-assert.match(page({ ...setup, parked: false }).pairingReason, /offroad mode or Park/)
-powered.stop()
+// Step 1 status: expiry wording by remaining days, and the expired date from the certificate.
+assert.deepEqual(expiryInfo({ installed: true, expires: "2027-10-12T00:00:00+00:00", days_left: 372 }, "en-US"),
+  { level: "ready", label: "Ready · Valid until Oct 2027" })
+assert.deepEqual(expiryInfo({ installed: true, expires: "2027-04-12T00:00:00+00:00", days_left: 9 }, "en-US"),
+  { level: "soon", label: "Expires in 9 days (Apr 12)" })
+assert.deepEqual(expiryInfo({ installed: false, expired: true, expires: "2026-04-12T00:00:00+00:00" }, "en-US"),
+  { level: "expired", label: "Expired on Apr 12, 2026" })
+assert.equal(expiryInfo({ installed: false, error: "unusable" }).level, "broken")
+assert.equal(expiryInfo({ installed: false }).level, "none")
+
+// Wrong downloads are caught by name before the upload; the real APKMirror file name passes.
+assert.equal(packagePreflight({ name: "com.google.android.projection.gearhead_17.6.663454-release-2025-apkmirror.com.apk" }), "")
+assert.match(packagePreflight({ name: "APKMirror Installer (Official)_1.6.apk" }), /Installer/)
+assert.match(packagePreflight({ name: "com.google.android.gms_24.apk" }), /Play Services/)
+assert.match(packagePreflight({ name: "android-auto.zip" }), /not an Android package/)
+const wrongPage = page(setup)
+wrongPage.choosePackage({ target: { files: [{ name: "APKMirror Installer.apk", size: 10 }] } })
+assert.match(wrongPage.uploadReason, /Installer/)
+
+// Server rejection codes become friendly messages and a failed checklist row.
+assert.match(importProblem({ state: "failed", code: "WRONG_APP" }, "Maps.apk"), /Wrong app selected \(Maps\.apk\)/)
+assert.match(importProblem({ state: "failed", code: "WRONG_APP" }, "APKMirror Installer.apk"), /Installer/)
+assert.match(importProblem({ state: "failed", code: "EXPIRED", expires: "2026-04-12T00:00:00+00:00" }, "", "en-US"), /expired on Apr 12, 2026/)
+assert.match(importProblem({ state: "failed", code: "CORRUPT" }), /incomplete or damaged/)
+assert.match(importProblem({ state: "failed", code: "UNSUPPORTED_VERSION" }), /17\.6\.663454-release/)
+assert.equal(importProblem({ state: "running" }), "")
+const statuses = (job) => installChecks(job, "en-US").map((check) => check.status)
+assert.deepEqual(statuses({ state: "running", stage: "searching" }), ["done", "active", "pending", "pending"])
+assert.deepEqual(statuses({ state: "running", stage: "installing" }), ["done", "done", "done", "active"])
+assert.deepEqual(statuses({ state: "failed", stage: "searching", code: "WRONG_APP" }), ["done", "failed", "pending", "pending"])
+assert.deepEqual(statuses({ state: "failed", stage: "verifying", code: "EXPIRED" }), ["done", "done", "done", "failed"])
+const done = installChecks({ state: "done", stage: "done", expires: "2027-10-12T00:00:00+00:00" }, "en-US")
+assert.deepEqual(done.map((check) => check.status), ["done", "done", "done", "done"])
+assert.equal(done[3].label, "Certificate valid until October 2027")
+
+// The install sheet follows only the import this page started, not an older result.
+const sheet = page({ ...setup, import: { state: "failed", code: "WRONG_APP", started: 1 } })
+assert.equal(sheet.installState, "choose")
+sheet.installAttempted = true; sheet.installBaseline = 1
+assert.equal(sheet.installState, "choose")
+sheet.setup.import = { state: "running", stage: "reading", started: 2 }
+assert.equal(sheet.installState, "checking")
+sheet.setup.import = { state: "done", stage: "done", started: 2 }
+assert.equal(sheet.installState, "done")
+console.log("Android Auto: expiry badges, package preflight, friendly rejections and install checklist passed")

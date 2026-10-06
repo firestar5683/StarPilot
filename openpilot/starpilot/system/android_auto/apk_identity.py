@@ -36,6 +36,7 @@ import tempfile
 import threading
 import urllib.request
 import zipfile
+import zlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,7 +61,12 @@ IMPORT_DIR = identity_store.DATA_DIR / "import"
 
 
 class IdentityImportError(RuntimeError):
-  pass
+  """A rejected package. ``code`` lets Galaxy explain the problem without parsing the message."""
+
+  def __init__(self, message: str, code: str = "FAILED", expires: str | None = None):
+    super().__init__(message)
+    self.code = code
+    self.expires = expires
 
 
 # ------------------------------------------------------------------ extraction
@@ -85,22 +91,22 @@ def derive_aes_material(cert: bytes, root: bytes, mask: bytes) -> bytes:
 
 def _checked_read(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> bytes:
   if info.file_size > limit:
-    raise IdentityImportError(f"{info.filename} is too large ({info.file_size // (1024 * 1024)} MB)")
+    raise IdentityImportError(f"{info.filename} is too large ({info.file_size // (1024 * 1024)} MB)", "TOO_LARGE")
   with archive.open(info) as handle:
     data = handle.read(limit + 1)
   if len(data) > limit:
-    raise IdentityImportError(f"{info.filename} is larger than it claims")
+    raise IdentityImportError(f"{info.filename} is larger than it claims", "CORRUPT")
   return data
 
 
 def _dex_files(path: Path) -> tuple[list[bytes], str]:
   """The DEX files of the Android Auto app in an APK, XAPK or APKM; returns (dexes, description)."""
   if path.stat().st_size > MAX_FILE_BYTES:
-    raise IdentityImportError("File is too large to be the Android Auto app")
+    raise IdentityImportError("File is too large to be the Android Auto app", "TOO_LARGE")
   try:
     outer = zipfile.ZipFile(path)
   except zipfile.BadZipFile as error:
-    raise IdentityImportError("Not an APK, XAPK or APKM file") from error
+    raise IdentityImportError("Not an APK, XAPK or APKM file", "NOT_PACKAGE") from error
   with outer:
     names = [info for info in outer.infolist() if DEX_NAME.fullmatch(info.filename)]
     if names:
@@ -117,7 +123,7 @@ def _dex_files(path: Path) -> tuple[list[bytes], str]:
         dex = [i for i in inner.infolist() if DEX_NAME.fullmatch(i.filename)]
         if dex:
           return [_checked_read(inner, i, MAX_DEX_BYTES) for i in dex[:MAX_DEX_FILES]], f"bundle ({info.filename})"
-  raise IdentityImportError("No app code found; choose the Android Auto APK, XAPK, or APKM")
+  raise IdentityImportError("No app code found; choose the Android Auto APK, XAPK, or APKM", "NO_CODE")
 
 
 def _candidates(dexes: list[bytes]) -> tuple[set[bytes], list[bytes], list[bytes]]:
@@ -169,7 +175,7 @@ def extract_identity(path: Path, *, root_sha256: str = GOOGLE_ROOT_SHA256, now: 
   der_sha = {pem: hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest() for pem, cert in certs.items()}
   roots = [pem for pem in certs if der_sha[pem] == root_sha256]
   if not roots:
-    raise IdentityImportError("This file does not contain the Android Auto identity; choose the Android Auto app itself")
+    raise IdentityImportError("This file does not contain the Android Auto identity; choose the Android Auto app itself", "WRONG_APP")
   root_pem = roots[0]
   root = certs[root_pem]
   leaves = []
@@ -182,7 +188,7 @@ def extract_identity(path: Path, *, root_sha256: str = GOOGLE_ROOT_SHA256, now: 
     except Exception:
       continue
   if not leaves:
-    raise IdentityImportError("No phone certificate issued by Google's Automotive Link root was found")
+    raise IdentityImportError("No phone certificate issued by Google's Automotive Link root was found", "UNVERIFIED")
 
   progress("decrypting")
   for leaf_pem in leaves:
@@ -204,9 +210,10 @@ def extract_identity(path: Path, *, root_sha256: str = GOOGLE_ROOT_SHA256, now: 
         now = now or datetime.now(UTC)
         for name, cert in (("phone certificate", leaf), ("Google root", root)):
           if now < _not_before(cert):
-            raise IdentityImportError(f"The {name} in this app is not valid yet; check the comma's clock")
+            raise IdentityImportError(f"The {name} in this app is not valid yet; check the comma's clock", "NOT_YET_VALID")
           if now >= _not_after(cert):
-            raise IdentityImportError(f"The {name} in this app expired on {_not_after(cert).date()}; use a newer Android Auto version")
+            raise IdentityImportError(f"The {name} in this app expired on {_not_after(cert).date()}; use a newer Android Auto version",
+                                      "EXPIRED", _not_after(cert).isoformat())
         pem_key = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
         metadata = {
           "subject": leaf.subject.rfc4514_string(),
@@ -218,7 +225,8 @@ def extract_identity(path: Path, *, root_sha256: str = GOOGLE_ROOT_SHA256, now: 
           "key_matches": True,
         }
         return {identity_store.CERT_NAME: leaf_pem, identity_store.KEY_NAME: pem_key, identity_store.ROOT_NAME: root_pem}, metadata
-  raise IdentityImportError(f"This Android Auto version stores its key differently; use version {KNOWN_GOOD_VERSION} or another that works")
+  raise IdentityImportError(f"This Android Auto version stores its key differently; use version {KNOWN_GOOD_VERSION} or another that works",
+                           "UNSUPPORTED_VERSION")
 
 
 # ------------------------------------------------------------------ install
@@ -258,7 +266,11 @@ def identity_status(directory: Path | None = None) -> dict:
   try:
     ident = identity_store.load_identity(directory)
   except identity_store.IdentityError as error:
-    return {"installed": False, "expired": "expired" in str(error), "error": str(error), "message": str(error)}
+    status = {"installed": False, "expired": "expired" in str(error), "error": str(error), "message": str(error)}
+    expires = identity_store._not_after(directory / identity_store.CERT_NAME)
+    if expires is not None:
+      status["expires"] = expires.isoformat()
+    return status
   try:
     provenance = json.loads((directory / "provenance.json").read_text())
   except (OSError, ValueError):
@@ -279,24 +291,24 @@ def identity_status(directory: Path | None = None) -> dict:
 
 def download(url: str, destination: Path, progress: Callable[[int, int], None] = lambda done, total: None) -> None:
   if not url.lower().startswith(("https://", "http://")):
-    raise IdentityImportError("Enter an http(s) link to the APK, XAPK, or APKM")
+    raise IdentityImportError("Enter an http(s) link to the APK, XAPK, or APKM", "DOWNLOAD")
   request = urllib.request.Request(url, headers={"User-Agent": "StarPilot-AndroidAuto/1"})
   try:
     with urllib.request.urlopen(request, timeout=30) as response, open(destination, "wb") as handle:
       total = int(response.headers.get("Content-Length") or 0)
       if total > MAX_FILE_BYTES:
-        raise IdentityImportError("That file is too large to be the Android Auto app")
+        raise IdentityImportError("That file is too large to be the Android Auto app", "TOO_LARGE")
       done = 0
       while chunk := response.read(1024 * 1024):
         done += len(chunk)
         if done > MAX_FILE_BYTES:
-          raise IdentityImportError("That file is too large to be the Android Auto app")
+          raise IdentityImportError("That file is too large to be the Android Auto app", "TOO_LARGE")
         handle.write(chunk)
         progress(done, total)
   except IdentityImportError:
     raise
   except Exception as error:
-    raise IdentityImportError(f"Download failed: {error}") from error
+    raise IdentityImportError(f"Download failed: {error}", "DOWNLOAD") from error
 
 
 class ImportJob:
@@ -337,7 +349,7 @@ class ImportJob:
   def _run(self, path: Path | None, url: str, enabled=None) -> None:
     def progress(**values):
       if enabled is not None and not enabled():
-        raise IdentityImportError("Import cancelled: Android Auto is disabled")
+        raise IdentityImportError("Import cancelled: Android Auto is disabled", "CANCELLED")
       self._set(**values)
 
     source = path or self.upload_path()
@@ -351,9 +363,12 @@ class ImportJob:
       self._set(state="done", stage="done", finished=datetime.now(UTC).timestamp(), expires=metadata["expires"],
                 message=f"Identity installed; valid until {metadata['expires'][:10]}")
     except IdentityImportError as error:
-      self._set(state="failed", finished=datetime.now(UTC).timestamp(), error=str(error))
+      self._set(state="failed", finished=datetime.now(UTC).timestamp(), error=str(error), code=error.code,
+                **({"expires": error.expires} if error.expires else {}))
+    except (zipfile.BadZipFile, EOFError, zlib.error) as error:  # a truncated or damaged download
+      self._set(state="failed", finished=datetime.now(UTC).timestamp(), error=f"The package is damaged: {error}", code="CORRUPT")
     except Exception as error:
-      self._set(state="failed", finished=datetime.now(UTC).timestamp(), error=f"{type(error).__name__}: {error}")
+      self._set(state="failed", finished=datetime.now(UTC).timestamp(), error=f"{type(error).__name__}: {error}", code="FAILED")
     finally:
       try:
         source.unlink(missing_ok=True)
