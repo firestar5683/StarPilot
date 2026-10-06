@@ -18,7 +18,7 @@ from openpilot.starpilot.lateral.ioniq6_policy import Ioniq6TorquePolicy
 
 
 # Independently generated from frozen 678af783 LatControlTorque and Ioniq helpers.
-# The fixture contains full controller/PID/filter rows, not pure surface output.
+# Full controller/PID/filter rows include the recorded symmetric-unwind correction.
 _GOLDEN = json.loads((Path(__file__).parent / "testdata" / "ioniq6_controller_replay.json").read_text())
 _EXTENDED = json.loads((Path(__file__).parent / "testdata" / "ioniq6_controller_extended.json").read_text())
 _LIVE = json.loads((Path(__file__).parent / "testdata" / "ioniq6_controller_live_update.json").read_text())
