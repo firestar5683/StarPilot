@@ -11,6 +11,7 @@ from opendbc.car.gm.lateral import lane_centering_supported
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.tests.test_bolt_cc import params as bolt_params, feed as feed_car, control, native
 from opendbc.safety.tests.libsafety import libsafety_py
+from opendbc.car.gm.tests.test_cc_gateway_stock import silverado_stock_params
 from opendbc.car.gm.tests.test_bolt_factory_acc import factory_params
 from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
 from opendbc.car.gm.tests.test_volt_camera_control import camera_params
@@ -129,6 +130,7 @@ def _configurations():
 
 
 def configurations():
+  yield silverado_stock_params()
   for cp in _configurations():
     yield cp
     selected = cp.as_reader().as_builder()
@@ -193,6 +195,50 @@ class TestGmAol(unittest.TestCase):
     with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
          patch('openpilot.selfdrive.car.card.get_car', side_effect=get_car):
       return Car()
+
+  def test_marked_gm_transport_survives_master_off_restart(self):
+    from openpilot.starpilot.feature_runtime import enabled
+    with OpenpilotPrefix():
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', False, block=True)
+      for cp in configurations():
+        cp = cp.as_reader().as_builder()
+        with self.subTest(identity=cp.carFingerprint, word=cp.safetyConfigs[0].safetyParam):
+          cp.alternativeExperience = 0
+          self.assertFalse(policy_for(cp).full_axis_runtime_required)
+          self.assertFalse(enabled(settings, cp, 'aol', {'AOL_REPLAY_RUNTIME': '0'}))
+          cp.alternativeExperience = 32
+          self.assertTrue(policy_for(cp).full_axis_runtime_required)
+          self.assertTrue(enabled(settings, cp, 'aol', {'AOL_REPLAY_RUNTIME': '0'}))
+      marked = silverado_stock_params()
+      marked.alternativeExperience = 32
+      card = self.card(marked, settings)
+      self.assertEqual(card.CP.alternativeExperience, 0)
+      if card.aol_card_intent is not None:
+        self.assertFalse(card.aol_card_intent.allowed_latch)
+
+  def test_silverado_stock_card_publishes_lateral_only_aol_owner(self):
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', True, block=True)
+      card = self.card(silverado_stock_params(), settings)
+      self.assertFalse(card.CP.dashcamOnly)
+      self.assertTrue(card.CP.pcmCruise)
+      self.assertFalse(card.CP.openpilotLongitudinalControl)
+      self.assertEqual(card.CP.safetyConfigs[0].safetyParam, 16)
+      self.assertEqual(card.CP.alternativeExperience, 32)
+      self.assertIsNotNone(card.aol_card_intent)
+      cs = structs.CarState(canValid=True, gearShifter='drive', vEgo=20.)
+      cs.cruiseState.available = True
+      cs.cruiseState.enabled = False
+      card.aol_card_intent.update(cs)
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      cs.gearShifter = 'reverse'
+      card.aol_card_intent.update(cs)
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      cs.cruiseState.available = False
+      card.aol_card_intent.update(cs)
+      self.assertFalse(card.aol_card_intent.allowed_latch)
 
   def test_actual_card_startup_default_off_and_main_cycle_fault_recovery(self):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):

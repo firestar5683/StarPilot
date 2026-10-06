@@ -152,6 +152,69 @@ class TestGmOrdinaryCc(unittest.TestCase):
       self.safety.aol_set_host_request(1)
       self.assertEqual(self.safety.aol_get_permission_mask(), 0)
 
+  def test_stock_silverado_aol_is_lateral_only_and_requires_forward_gear(self):
+    self.reset(word=16, alternative=32)
+    self.safety.set_aol_test_heartbeat(True)
+    self.feed(active=False)
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.safety.set_controls_allowed(True)
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.assertFalse(self.tx(button=2))
+    self.assertFalse(self.tx(button=3))
+    for gear, manual in ((2, False), (3, False), (0, False), (4, True)):
+      self.feed(active=False, gear=gear, manual=manual)
+      self.safety.aol_set_host_request(1)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.feed(active=False, gear=4)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.safety.set_timer(2_000_001)
+    self.feed(active=False, missing=0x1F5)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_stock_silverado_aol_physical_sources_and_mode_reset(self):
+    for missing, deadline in ((0xBE, 2_000_001), (0xC9, 1_300_001), (0x1F5, 2_000_001)):
+      with self.subTest(missing=hex(missing)):
+        self.reset(word=16, alternative=32)
+        self.safety.set_aol_test_heartbeat(True)
+        self.feed(active=False)
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.safety.set_timer(deadline)
+        self.feed(active=False, missing=missing)
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+    for bus, length in ((1, 8), (2, 8), (0, 7), (0, 6)):
+      with self.subTest(bus=bus, length=length):
+        self.reset(word=16, alternative=32)
+        self.safety.set_aol_test_heartbeat(True)
+        self.feed(active=False, missing=0x1F5)
+        gear = self.packer.make_can_msg('ECMPRDNL2', bus, {'PRNDL2': 4})
+        self.safety.safety_rx_hook(libsafety_py.make_CANPacket(gear[0], bus, gear[1][:length]))
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+    self.reset(word=16, alternative=32)
+    self.safety.set_aol_test_heartbeat(True)
+    self.feed(active=False)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.reset(word=16, alternative=32)
+    self.safety.set_aol_test_heartbeat(True)
+    self.feed(active=False, missing=0x1F5)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+    # The ordinary stock owner retains its original seven checks, without gear admission.
+    self.reset(word=16, alternative=0)
+    self.feed(active=True, missing=0x1F5)
+    self.assertTrue(self.safety.safety_config_valid())
+    self.assertTrue(self.safety.get_controls_allowed())
+
   def test_neutral_request_handoff_does_not_grant_torque(self):
     for kwargs in ({'active': False}, {'active': False, 'main': False}, {'active': False, 'missing': 0xBE}):
       self.reset()

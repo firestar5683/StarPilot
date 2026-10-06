@@ -5,7 +5,7 @@ from opendbc.car import Bus, gen_empty_fingerprint
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.fingerprints import FINGERPRINTS, FW_VERSIONS
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.values import CAR, CC_GATEWAY_STOCK_CAR, ORDINARY_CC_CAR, DBC, GMSafetyFlags
+from opendbc.car.gm.values import CAR, CC_GATEWAY_STOCK_CAR, ORDINARY_CC_CAR, DBC, GMSafetyFlags, is_silverado_cc_stock_profile
 from opendbc.car.fw_versions import match_fw_to_car
 from opendbc.car.structs import CarParams
 
@@ -32,7 +32,62 @@ def pt_frames(packer, *, cruise=True, main=True, brake=False, gas=False, counter
   return [packer.make_can_msg(name, 0, val) for name, val in values.items()]
 
 
+def silverado_stock_params(*, alpha=False, release=False):
+  packer = CANPacker(DBC[CAR.CHEVROLET_SILVERADO_CC][Bus.pt])
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0] = {address: len(data) for address, data, _ in pt_frames(packer)}
+  return CarInterface.get_params(CAR.CHEVROLET_SILVERADO_CC, fingerprint, [], alpha, release, False)
+
+
 class TestCcGatewayStock(unittest.TestCase):
+  def test_silverado_observed_stock_factory_and_parser(self):
+    from opendbc.car.gm.aol import qualified_gm
+    for release in (False, True):
+      for alpha in (False, True):
+        cp = silverado_stock_params(alpha=alpha, release=release)
+        baseline = params(CAR.CHEVROLET_SILVERADO_CC, alpha=alpha, release=release)
+        self.assertEqual(cp.lateralTuning.to_dict(), baseline.lateralTuning.to_dict())
+        self.assertEqual(cp.steerActuatorDelay, baseline.steerActuatorDelay)
+        self.assertTrue(is_silverado_cc_stock_profile(cp))
+        self.assertTrue(qualified_gm(cp))
+        self.assertFalse(cp.dashcamOnly)
+        self.assertTrue(cp.pcmCruise)
+        self.assertFalse(cp.openpilotLongitudinalControl)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 16)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        for cruise, acc in ((False, 4), (True, 0)):
+          state = CarState(cp)
+          parsers = state.get_can_parsers(cp)
+          frames = pt_frames(packer, cruise=cruise, acc_cruise=acc)
+          parsers[Bus.pt].update([(1_000_000_000, frames)])
+          out = state.update(parsers)
+          self.assertTrue(parsers[Bus.pt].can_valid)
+          self.assertEqual(out.cruiseState.enabled, cruise)
+          self.assertFalse(out.cruiseState.nonAdaptive)
+          self.assertTrue(out.cruiseState.available)
+          self.assertFalse(out.accFaulted)
+          self.assertEqual(len(state.silverado_stock_sources), 8)
+
+    packer = CANPacker(DBC[CAR.CHEVROLET_SILVERADO_CC][Bus.pt])
+    observed = {address: len(data) for address, data, _ in pt_frames(packer)}
+    for missing in observed:
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0] = {address: length for address, length in observed.items() if address != missing}
+      cp = CarInterface.get_params(CAR.CHEVROLET_SILVERADO_CC, fingerprint, [], False, False, False)
+      self.assertTrue(cp.dashcamOnly, hex(missing))
+      self.assertFalse(qualified_gm(cp))
+    for address, bus, length in ((0x201, 0, 6), (0x320, 2, 6), (0x460, 1, 8)):
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0] = dict(observed)
+      fingerprint[bus][address] = length
+      cp = CarInterface.get_params(CAR.CHEVROLET_SILVERADO_CC, fingerprint, [], False, False, False)
+      self.assertFalse(is_silverado_cc_stock_profile(cp))
+    cp = silverado_stock_params()
+    for field in ('passive', 'dashcamOnly', 'notCar', 'openpilotLongitudinalControl'):
+      denied = cp.as_reader().as_builder()
+      setattr(denied, field, True)
+      self.assertFalse(qualified_gm(denied), field)
+
   def test_production_firmware_matcher_never_infers_manual_identity(self):
     # GM has no production firmware literals. Vary complete/partial/mixed
     # observations: no observation can identify a no-ACC installation.

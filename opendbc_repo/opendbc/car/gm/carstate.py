@@ -13,9 +13,10 @@ from opendbc.car.gm.conventional_pedal import CancelCredit
 from opendbc.car.gm.values import (DBC, AccState, CruiseButtons, STEER_THRESHOLD, SDGM_CAR, ALT_ACCS,
                                    ASCM_INTERCEPT_CAR, ORDINARY_ASCM_CAR, ORDINARY_SDGM_CAR, GMFlags, GMSafetyFlags, NO_ACC_BOLT_CAR,
                                    CC_GATEWAY_STOCK_CAR, requires_camera_state_sources, is_conventional_cc_pedal_profile, is_silverado_cc_pedal_profile,
-                                   is_volt_cc_profile, is_ordinary_cc_profile, VOLT_BSM_CAR, CAR,
+                                   is_volt_cc_profile, is_silverado_cc_stock_profile, is_ordinary_cc_profile, VOLT_BSM_CAR, CAR,
                                    is_volt_gateway_profile, is_volt_gateway_alternate_brake, is_bolt_cc_profile, BOLT_CC_WORDS,
-                                   is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_volt_camera_removed, is_ordinary_camera_profile, is_ordinary_camera_removed)
+                                   is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_volt_camera_removed,
+                                   is_ordinary_camera_profile, is_ordinary_camera_removed)
 
 ButtonType = structs.CarState.ButtonEvent.Type
 TransmissionType = structs.CarParams.TransmissionType
@@ -82,6 +83,7 @@ class CarState(CarStateBase):
     self.volt_one_pedal_moving = False
     self.volt_one_pedal_stopped = False
     self.cc_gateway_cruise_ts_nanos = 0
+    self.silverado_stock_sources = ()
     self.cc_gateway_buttons_ts_nanos = 0
     self.camera_stock_status_ts_nanos = 0
     self.camera_stock_sources_valid = False
@@ -172,6 +174,16 @@ class CarState(CarStateBase):
     if (self.CP.carFingerprint in CC_GATEWAY_STOCK_CAR or self.CP.carFingerprint == CAR.CHEVROLET_VOLT_CC):
       self.cc_gateway_buttons_ts_nanos = pt_cp.ts_nanos["ASCMSteeringButton"]["RollingCounter"]
       self.cc_gateway_cruise_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
+    if is_silverado_cc_stock_profile(self.CP):
+      fields = (("PSCMStatus", "LKATorqueDelivered", 300_000_000),
+                ("EBCMWheelSpdRear", "RLWheelSpd", 100_000_000),
+                ("ASCMSteeringButton", "RollingCounter", 300_000_000),
+                ("AcceleratorPedal2", "AcceleratorPedal2", 300_000_000),
+                ("ECMEngineStatus", "CruiseMainOn", 300_000_000),
+                ("ECMAcceleratorPos", "BrakePedalPos", 300_000_000),
+                ("ECMPRDNL2", "PRNDL2", 1_000_000_000),
+                ("ECMCruiseControl", "CruiseActive", 300_000_000))
+      self.silverado_stock_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in fields)
     if is_ordinary_camera_removed(self.CP):
       names = (("PSCMStatus", "LKATorqueDelivered"), ("EBCMBrakePedalPosition", "BrakePedalPosition"),
                ("ECMEngineStatus", "CruiseMainOn"), ("AcceleratorPedal2", "CruiseState"),
@@ -450,7 +462,8 @@ class CarState(CarStateBase):
       if not is_conventional_cc_pedal_profile(self.CP):
         ret.cruiseState.standstill = False
       ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
-      ret.cruiseState.nonAdaptive = not (is_ordinary_cc_profile(self.CP) or is_conventional_cc_pedal_profile(self.CP))
+      ret.cruiseState.nonAdaptive = not (is_silverado_cc_stock_profile(self.CP) or
+                                         is_ordinary_cc_profile(self.CP) or is_conventional_cc_pedal_profile(self.CP))
     if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and self.CP.flags & GMFlags.PEDAL_LONG.value:
       self.stock_acc_status_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
     if self.CP.carFingerprint in NO_ACC_BOLT_CAR and not self.bolt_cc_profile:
@@ -464,7 +477,8 @@ class CarState(CarStateBase):
                                      pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL)
       else:
         ret.cruiseState.standstill = False
-    if (not removed_pedal and self.volt_cc_pedal_profile is None and self.CP.networkLocation == NetworkLocation.fwdCamera and not is_volt_camera_removed(self.CP)
+    if (not removed_pedal and self.volt_cc_pedal_profile is None and self.CP.networkLocation == NetworkLocation.fwdCamera
+        and not is_volt_camera_removed(self.CP)
         and not is_conventional_cc_pedal_profile(self.CP) and not is_ordinary_camera_removed(self.CP)
         and not (self.camera_pedal_profile is not None and self.camera_pedal_profile.removed)):
       if (self.CP.carFingerprint not in ALT_ACCS or self.camera_pedal_profile is not None or is_ordinary_camera_profile(self.CP) or
@@ -591,7 +605,8 @@ class CarState(CarStateBase):
       pt_messages.append(("GAS_SENSOR", 50))
       if CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and not bolt_pedal_profile:
         pt_messages.append(("AcceleratorPedal2", 10))
-    if not (is_bolt_pedal_removed_profile(CP) or is_bolt_pedal_removed_profile(CP, stock_only=True)) and CP.networkLocation == NetworkLocation.fwdCamera and (not is_conventional_cc_pedal_profile(CP) or is_silverado_cc_pedal_profile(CP)):
+    if (not (is_bolt_pedal_removed_profile(CP) or is_bolt_pedal_removed_profile(CP, stock_only=True)) and
+        CP.networkLocation == NetworkLocation.fwdCamera and (not is_conventional_cc_pedal_profile(CP) or is_silverado_cc_pedal_profile(CP))):
       pt_messages += [
         ("ASCMLKASteeringCmd", float('nan')),
       ]

@@ -5,7 +5,8 @@ import math
 from opendbc.car.structs import CarParams
 from opendbc.car.gm.values import (volt_cc_pedal_profile, control_flags,
   camera_acc_pedal_profile, CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_pedal_profile,
-  is_ordinary_ascm_profile, is_ordinary_camera_profile, is_ordinary_sdgm_profile, is_bolt_euv_longitudinal, is_volt_gateway_profile, is_volt_cc_profile,
+  is_ordinary_ascm_profile, is_ordinary_camera_profile, is_ordinary_sdgm_profile, is_bolt_euv_longitudinal,
+  is_volt_gateway_profile, is_volt_cc_profile, is_silverado_cc_stock_profile,
   is_volt_ascm_longitudinal, is_volt_camera_stock, is_volt_camera_longitudinal,
   is_volt_camera_removed, is_volt_sdgm_profile, is_ordinary_cc_profile, is_conventional_cc_pedal_profile,
 )
@@ -20,7 +21,7 @@ GM_AOL_WORDS = (frozenset(range(0xE600, 0xE608)) | frozenset(range(0xE610, 0xE61
                                                                    0xE400, 0xE410, 0xE420, 0xE440, 0xE460,
                                                                    0xE500, 0xE510, 0xE520, 0xE540, 0xE560) for index in range(4)) | frozenset((
   *range(0xE700, 0xE704), *range(0xE710, 0xE714),
-  0, 0x80, 0xE100, 0xE101, 0xE102, 0xE103, 0xE110, 0xE111, 0xE112, 0xE113,
+  0, 16, 0x80, 0xE100, 0xE101, 0xE102, 0xE103, 0xE110, 0xE111, 0xE112, 0xE113,
   0xD100, 0xD101, 0xD102, 0xD103, 0xD104, 0xD105, 0xD106, 0xD107, 0xD108, 0xD109, 0xD10A,
   0xD110, 0xD111, 0xD112, 0xD113, 0xD114, 0xD115, 0xD116, 0xD117, 0xD118, 0xD119, 0xD11A,
   0x1001, 0x1401, 0x3001, 0x3401, 0x1003, 0x1403,
@@ -67,7 +68,7 @@ def qualified_gm(cp) -> bool:
                cp.carFingerprint == CAR.BUICK_LACROSSE and cp.openpilotLongitudinalControl))
     if is_ordinary_camera_profile(cp, longitudinal=cp.openpilotLongitudinalControl):
       return True
-    if is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp):
+    if is_silverado_cc_stock_profile(cp) or is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp):
       return True
     if is_ordinary_sdgm_profile(cp, longitudinal=False) or is_ordinary_sdgm_profile(cp, longitudinal=True):
       return True

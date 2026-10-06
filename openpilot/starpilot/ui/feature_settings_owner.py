@@ -170,8 +170,11 @@ class FeatureSettingsOwner:
         return (str(cp.carFingerprint), str(cp.brand), str(cp.steerControlType), str(cp.lateralTuning.which()),
                 bool(cp.dashcamOnly), float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction),
                 str(cp.carVin) if getattr(cp, "carVin", None) else None)
+      from openpilot.starpilot.aol.vehicle import configuration_settings_policy
+      configuration_aol = (group in ("aol", "aol_wheel") and self.configuration_vehicle() and
+                           configuration_settings_policy(cp) is not None)
       if (group in ("aol", "aol_wheel") and self.aol_settings_policy(cp).settings_supported and
-          not cp.passive and not cp.dashcamOnly and not cp.notCar):
+          not cp.passive and (not cp.dashcamOnly or configuration_aol) and not cp.notCar):
         return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
                 tuple((str(config.safetyModel), int(config.safetyParam)) for config in cp.safetyConfigs))
     except (AttributeError, TypeError, ValueError, OverflowError):

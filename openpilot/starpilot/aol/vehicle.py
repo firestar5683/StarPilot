@@ -78,4 +78,4 @@ def allow_lateral_onset(CP, *, requested, normal_enabled, steering_pressed, prev
 
 def configuration_settings_policy(CP):
   from openpilot.starpilot.car.hyundai.settings import configuration_wheel_policy
-  return configuration_wheel_policy(CP) or toyota.configuration_settings_policy(CP)
+  return configuration_wheel_policy(CP) or toyota.configuration_settings_policy(CP) or gm.configuration_settings_policy(CP)

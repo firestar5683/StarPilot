@@ -46,6 +46,40 @@ class SettingsGatewayTest(unittest.TestCase):
   def page(self, name):
     return self.gateway.page(name, self.session, self.generation)
 
+  def test_manual_silverado_aol_preview_saves_intent_without_runtime_admission(self):
+    from opendbc.car.gm.values import CAR
+    from opendbc.car.gm.aol import qualified_gm
+    from openpilot.starpilot.aol.vehicle import policy_for
+    from openpilot.starpilot.galaxy.vehicle_configuration import configuration_context
+    from openpilot.starpilot.vehicle_selection import encode
+    self.params.put('VehicleSelection', json.loads(encode(str(CAR.CHEVROLET_SILVERADO_CC))), block=True)
+    self.params.put_bool('OpenpilotEnabledToggle', True, block=True)
+    cp, token = configuration_context(self.params, None, None)
+    self.assertIsNotNone(cp)
+    self.assertTrue(cp.dashcamOnly)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 16)
+    self.assertFalse(qualified_gm(cp))
+    self.assertFalse(policy_for(cp).runtime_supported)
+    raw = cp.as_builder().to_bytes()
+    self.context.value = AuthorityContext(True, cp, token, configuration_vehicle=True)
+    page = self.page('aol')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Enable Always On Lateral')
+    self.assertTrue(page['rows'][index]['available'])
+    intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value='On')
+    self.assertTrue(self.gateway.confirm(intent['intent'], self.session, self.generation))
+    self.assertTrue(self.params.get_bool('AlwaysOnLateral'))
+    self.assertEqual(cp.as_builder().to_bytes(), raw)
+    for key in ('CarParams', 'CarParamsPersistent', 'CarParamsCache'):
+      self.assertIsNone(self.params.get(key))
+    self.params.put_bool('AlwaysOnLateral', False, block=True)
+    for context in (AuthorityContext(True, cp, token),
+                    AuthorityContext(False, cp, token, configuration_vehicle=True)):
+      self.context.value = context
+      page = self.page('aol')
+      index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Enable Always On Lateral')
+      self.assertFalse(page['rows'][index]['available'])
+
   def test_enabled_aol_can_be_disabled_without_supported_vehicle(self):
     self.params.put('AlwaysOnLateral', True, block=True)
     self.context.value = AuthorityContext(True, None, None)

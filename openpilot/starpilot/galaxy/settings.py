@@ -100,6 +100,11 @@ def _qualified(ctx: AuthorityContext, group: str) -> bool:
     if group == "long":
       return bool(((cp.openpilotLongitudinalControl and not cp.pcmCruise) or ctx.configuration_longitudinal) and
                   not cp.notCar and not cp.dashcamOnly and not cp.passive)
+    if group in ("aol", "aol_wheel") and ctx.configuration_vehicle and ctx.parked:
+      from openpilot.starpilot.aol.vehicle import configuration_settings_policy
+      policy = configuration_settings_policy(cp)
+      if policy is not None:
+        return bool(policy.settings_supported and not cp.notCar and not cp.passive)
     if group in ("torque", "aol", "aol_wheel"):
       return bool(not cp.notCar and not cp.dashcamOnly and not cp.passive)
     return group in ("lane", "lane_change") and not cp.notCar and not cp.dashcamOnly and not cp.passive

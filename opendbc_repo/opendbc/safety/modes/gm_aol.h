@@ -5,6 +5,10 @@
 
 static bool gm_aol_enabled = false;
 static bool gm_aol_stock_only = false;
+static bool gm_aol_stock_gateway = false;
+static bool gm_aol_forward_gear = false;
+static bool gm_aol_gear_seen = false;
+static uint32_t gm_aol_gear_us = 0U;
 static bool gm_aol_main = false;
 static bool gm_aol_main_seen = false;
 static uint32_t gm_aol_main_us = 0U;
@@ -12,6 +16,10 @@ static uint32_t gm_aol_main_us = 0U;
 static void gm_aol_reset(void) {
   gm_aol_enabled = false;
   gm_aol_stock_only = false;
+  gm_aol_stock_gateway = false;
+  gm_aol_forward_gear = false;
+  gm_aol_gear_seen = false;
+  gm_aol_gear_us = 0U;
   gm_aol_main = false;
   gm_aol_main_seen = false;
   gm_aol_main_us = 0U;
@@ -29,7 +37,9 @@ static uint8_t gm_aol_permission_mask(void) {
     (safety_get_ts_elapsed(microsecond_timer_get(), gm_aol_main_us) <= GM_AOL_MAIN_TIMEOUT_US);
   if (aol_rx_healthy()) {
     const uint8_t request = gm_aol_request_mask();
-    if (main_current) {
+    const bool gear_current = !gm_aol_stock_gateway || (gm_aol_gear_seen && gm_aol_forward_gear &&
+      (safety_get_ts_elapsed(microsecond_timer_get(), gm_aol_gear_us) <= 1000000U));
+    if (main_current && gear_current) {
       permission = request & 0x1U;
     }
     if (!gm_aol_stock_only && controls_allowed && ((request & 0x2U) != 0U)) {
@@ -41,10 +51,18 @@ static uint8_t gm_aol_permission_mask(void) {
 
 static void gm_aol_rx_invalid(void) {
   gm_aol_main_seen = false;
+  gm_aol_gear_seen = false;
   aol_set_host_request(0U);
 }
 
 static void gm_aol_observe(const CANPacket_t *msg) {
+  if (gm_aol_enabled && gm_aol_stock_gateway && msg_matches(msg, 0x1F5U, 0U) && (GET_LEN(msg) == 8U)) {
+    const uint8_t gear = msg->data[3] & 0xFU;
+    gm_aol_forward_gear = ((gear == 4U) || (gear == 6U)) && !GET_BIT(msg, 41U);
+    gm_aol_gear_seen = true;
+    gm_aol_gear_us = microsecond_timer_get();
+    if (!gm_aol_forward_gear) { aol_set_host_request(0U); }
+  }
   if (gm_aol_enabled && (msg->addr == 0xC9U) && (msg->bus == 0U) && (GET_LEN(msg) == 8U)) {
     gm_aol_main = GET_BIT(msg, 29U);
     gm_aol_main_seen = true;
@@ -95,7 +113,7 @@ static bool gm_aol_profile_word(uint16_t word) {
     case 0xE710U: case 0xE711U: case 0xE712U: case 0xE713U:
     case 0xE700U: case 0xE701U: case 0xE702U: case 0xE703U:
     case 0x205U: case 0x605U: case 0xA05U: case 0xE05U:
-    case 0xC160U: case 0xC180U: case 0xC181U:
+    case 16U: case 0xC160U: case 0xC180U: case 0xC181U:
     case 0xC182U: case 0xC183U: case 0xC184U: case 0xC185U: case 0xC186U: case 0xC187U:
     case 0x1001U: case 0x1401U: case 0x3001U: case 0x3401U:
     case 0x1005U: case 0x1405U:
