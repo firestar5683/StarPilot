@@ -26,7 +26,7 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
                                    is_ordinary_sdgm_profile,
                                    is_volt_camera_longitudinal, is_volt_camera_stock, is_volt_sdgm_profile, is_volt_camera_removed,
                                    NO_ACC_BOLT_CAR, is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_bolt_euv_longitudinal,
-                                   is_volt_cc_longitudinal, is_volt_cc_profile, is_ordinary_cc_profile,
+                                   is_volt_cc_longitudinal, is_volt_cc_profile, is_silverado_cc_stock_profile, is_ordinary_cc_profile,
                                    CC_GATEWAY_STOCK_CAR, uses_camera_stock_controls, CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarControllerBase
 
@@ -473,6 +473,14 @@ class CarController(CarControllerBase):
                          (stock_cruise_fresh and CS.out.cruiseState.available and CS.out.cruiseState.enabled and
                           not CS.out.brakePressed and not CS.out.gasPressed))
     aol_lateral = aol_lateral_request(self.CP, CC)
+    if is_silverado_cc_stock_profile(self.CP):
+      sources = CS.silverado_stock_sources
+      stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(sources) == 8 and
+                          all(0 < stamp <= now_nanos <= stamp + limit for stamp, limit in sources) and
+                          CS.out.cruiseState.available and (CS.out.cruiseState.enabled or aol_lateral) and
+                          volt_cc_forward_gear(CS.out.gearShifter) and
+                          (aol_lateral or not CS.out.brakePressed and not CS.out.gasPressed))
+
     if self.volt_cc_profile or self.ordinary_cc_profile:
       physical = getattr(CS, 'volt_cc_physical', None)
       stock_steer_ready = (isinstance(physical, (VoltCcPhysical, PhysicalObservation)) and physical.sources_current(now_nanos) and
@@ -528,7 +536,8 @@ class CarController(CarControllerBase):
       stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(sources) == (9 if self.CP.openpilotLongitudinalControl else 7) and
                            all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources))
       if self.CP.openpilotLongitudinalControl:
-        stock_steer_ready = stock_steer_ready and CS.pedal_sensor_healthy and 0 < CS.pedal_sensor_ts_nanos <= now_nanos <= CS.pedal_sensor_ts_nanos + PEDAL_SENSOR_TIMEOUT_NS
+        stock_steer_ready = (stock_steer_ready and CS.pedal_sensor_healthy and
+                            0 < CS.pedal_sensor_ts_nanos <= now_nanos <= CS.pedal_sensor_ts_nanos + PEDAL_SENSOR_TIMEOUT_NS)
     lat_active = CC.latActive and stock_steer_ready
 
     # Steering (Active: 50Hz, inactive: 10Hz)
@@ -960,7 +969,8 @@ class CarController(CarControllerBase):
         self.last_button_frame = self.frame
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
-    elif (not self.bolt_pedal_removed and self.volt_cc_pedal_profile is None and not self.volt_cc_profile and not self.ordinary_cc_profile and not self.bolt_cc_profile and
+    elif (not self.bolt_pedal_removed and self.volt_cc_pedal_profile is None and not self.volt_cc_profile and
+          not self.ordinary_cc_profile and not self.bolt_cc_profile and
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly

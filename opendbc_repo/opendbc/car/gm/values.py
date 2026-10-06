@@ -899,6 +899,27 @@ def is_ordinary_sdgm_profile(cp, *, longitudinal):
     return False
 
 
+SILVERADO_CC_STOCK_SOURCES = {
+  0x184: 8, 0x17D: 6, 0x348: 5, 0x34A: 5, 0x232: 8, 0x1E5: 8,
+  0x1F5: 8, 0x1C4: 8, 0xC9: 8, 0x140: 3, 0x12A: 8, 0x1F1: 8,
+  0x1E1: 7, 0x3D1: 8,
+}
+
+
+def is_silverado_cc_stock_profile(cp):
+  """Observed conventional-cruise Silverado, without interceptor authority."""
+  try:
+    return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_SILVERADO_CC and
+            cp.networkLocation == CarParams.NetworkLocation.gateway and
+            cp.transmissionType == CarParams.TransmissionType.automatic and cp.radarUnavailable and
+            cp.pcmCruise and not cp.openpilotLongitudinalControl and not cp.alphaLongitudinalAvailable and
+            not cp.passive and not cp.dashcamOnly and not cp.notCar and control_flags(cp) == 0 and
+            len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+            int(cp.safetyConfigs[0].safetyParam) == int(GMSafetyFlags.NO_ACC))
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False
+
+
 ORDINARY_CC_CAR = CC_GATEWAY_STOCK_CAR - {CAR.CHEVROLET_SILVERADO_CC}
 ORDINARY_CC_WORD = 0xC160
 

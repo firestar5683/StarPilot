@@ -216,7 +216,7 @@ int main() {
     forte.safety_mode = HYUNDAI_AOL_PROFILE.mode;
     assert(!aol_capable(forte, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
   }
-  for (const uint16_t word : {0U, 0x80U,
+  for (const uint16_t word : {0U, 16U, 0x80U,
                             0xE100U, 0xE101U, 0xE102U, 0xE103U,
                             0xE110U, 0xE111U, 0xE112U, 0xE113U,
                             0xE200U, 0xE201U, 0xE202U, 0xE203U,

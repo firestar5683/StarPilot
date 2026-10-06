@@ -1143,6 +1143,7 @@ static safety_config gm_init(uint16_t safety_param) {
   static RxCheck gm_cc_gateway_stock_rx_checks[] = {
     GM_COMMON_RX_CHECKS
     {.msg = {{0x3D1, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{0x1F5, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
   static const CanMsg GM_CAM_TX_MSGS[] = {
@@ -1329,6 +1330,9 @@ static safety_config gm_init(uint16_t safety_param) {
     ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_ASCM_TX_MSGS);
     if (gm_cc_gateway_stock) {
       SET_RX_CHECKS(gm_cc_gateway_stock_rx_checks, ret);
+      if ((unsigned int)alternative_experience != GM_ALT_EXP_ALWAYS_ON_LATERAL) {
+        ret.rx_checks_len -= 1;
+      }
       SET_TX_MSGS(GM_CC_GATEWAY_STOCK_TX_MSGS, ret);
     }
   }

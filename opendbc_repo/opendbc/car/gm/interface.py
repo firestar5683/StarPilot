@@ -12,7 +12,8 @@ from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAM
 from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS,
                                    CanBus, GMSafetyFlags, GMFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, ASCM_INTERCEPT_CAR,
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
-                                   ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS, is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
+                                   SILVERADO_CC_STOCK_SOURCES, ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS,
+                                   is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
                                    CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
                                        VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS, is_bolt_pedal_removed_profile)
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
@@ -228,8 +229,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam = int(GMSafetyFlags.EV | GMSafetyFlags.NO_ACC)
 
     elif candidate in CC_GATEWAY_STOCK_CAR:
-      # Conventional cruise is owned by the PCM in both builds. The frozen CC_LONG
-      # button-spam/status-spoof longitudinal path is intentionally not enabled.
+      # Start with stock PCM ownership; qualified button-control owners override below.
       ret.networkLocation = NetworkLocation.gateway
       ret.radarUnavailable = True
       ret.pcmCruise = True
@@ -527,6 +527,14 @@ class CarInterface(CarInterfaceBase):
         ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       ret.dashcamOnly = candidate not in ORDINARY_CC_CAR
+      if candidate == CAR.CHEVROLET_SILVERADO_CC:
+        pt = fingerprint.get(CanBus.POWERTRAIN, {})
+        ret.dashcamOnly = not (
+          all(pt.get(address) == length for address, length in SILVERADO_CC_STOCK_SOURCES.items()) and
+          pt.get(0xBE) in (6, 7, 8) and 0x201 not in pt and
+          0x320 not in fingerprint.get(CanBus.CAMERA, {}) and
+          RADAR_HEADER_MSG not in fingerprint.get(CanBus.OBSTACLE, {}) and
+          CAMERA_DATA_HEADER_MSG not in fingerprint.get(CanBus.OBSTACLE, {}) and not docs)
 
     if candidate in CAMERA_STOCK_CAR:
       ret.dashcamOnly = True  # Require a recognized camera layout for manual identities.
