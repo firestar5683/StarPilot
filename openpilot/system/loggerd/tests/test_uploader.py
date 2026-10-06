@@ -163,6 +163,21 @@ class TestUploader(UploaderTestCase):
     upload_candidates = {candidate[2] for candidate in uploader.list_upload_files(metered=False)}
     assert upload_candidates.isdisjoint(map(str, f_paths)), "Uploaded file selected again"
 
+  def test_finished_routes_are_not_rescanned(self, mocker):
+    self.gen_files(lock=False, xattr=UPLOAD_ATTR_VALUE, boot=False)
+    for i in range(3):  # the newest routes are always rescanned, so bury the finished one
+      newer = Path(Paths.log_root()) / f"{9000 + i:08x}--aaaaaaaaaa--0"
+      newer.mkdir()
+    uploader = Uploader("0000000000000000", Paths.log_root())
+    assert list(uploader.list_upload_files(metered=False)) == []
+    assert self.seg_dir.split("/")[0] in uploader.settled
+
+    listed = []
+    real_listdir = os.listdir
+    mocker.patch("os.listdir", side_effect=lambda path: listed.append(str(path)) or real_listdir(path))
+    assert list(uploader.list_upload_files(metered=False)) == []
+    assert not any(self.seg_dir.split("/")[0] in path for path in listed), "Settled route rescanned"
+
   def test_clear_locks_on_startup(self, mocker):
     f_paths = self.gen_files(lock=True, boot=False)
     locks_cleared = threading.Event()
