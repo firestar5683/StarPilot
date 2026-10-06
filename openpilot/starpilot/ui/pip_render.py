@@ -135,23 +135,29 @@ class PiPRenderer:
   def render(self, content: rl.Rectangle, mask: Mask | None, signals: Signals, *, enabled: bool,
              on_blinker: bool, on_bsm: bool, invert: bool,
              now: float | None = None, placements: dict[str, Rect] | None = None) -> str:
+    if not enabled or mask is None or (placements is not None and not placements):
+      self.deactivate()
+      return "inactive"
     sides = selected_sides(mask, signals, started=True, enabled=enabled,
                            on_blinker=on_blinker, on_bsm=on_bsm)
     if placements is not None:
       sides = tuple(side for side in sides if side in placements)
-    if not sides or mask is None:
-      self.deactivate()
-      return "inactive"
     observed_now = time.monotonic() if now is None else now
-    for side in set(sides) - self._active_sides:
-      self._activated_at[side] = observed_now
-    self._active_sides = set(sides)
+    # While a bubble can still appear, keep the cabin stream connected and current even
+    # when none is shown, so a blinker or blind-spot warning draws on the very next frame.
     self.stream.set_active(True)
     frame = self.stream.poll(observed_now)
     if self._stream_generation != self.stream.generation:
       self._clear_images()
       self._stream_generation = self.stream.generation
       self.stream.release_retired()
+    if not sides:
+      self._active_sides.clear()
+      self._activated_at.clear()
+      return "inactive"
+    for side in set(sides) - self._active_sides:
+      self._activated_at[side] = observed_now
+    self._active_sides = set(sides)
     if frame is None:
       self._clear_images()
       return "no_frame"

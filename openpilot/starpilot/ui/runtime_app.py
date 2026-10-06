@@ -61,7 +61,7 @@ from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, 
 from openpilot.starpilot.ui.startup import slc_action_transport_enabled, validate_artwork, validate_fonts
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
 from openpilot.starpilot.ui.bluetooth_status import BluetoothStatusSource
-from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message
+from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
 from openpilot.starpilot.ui.network_panel import NetworkPanelBridge
 from openpilot.starpilot.ui.slc_action_dispatch import SlcActionDispatcher
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, SlcUiRequest
@@ -671,7 +671,8 @@ class StarShellSession:
       self.pip_warning.close()
       self.pip_renderer.deactivate()
       return
-    car = current_message(ui_state.sm, "carState", now_ns, after_frame=ui_state.started_frame)
+    # Display freshness: carState is 100 Hz, so the 20 ms control window often lapses within one drawn frame.
+    car = display_message(ui_state.sm, "carState", now_ns, after_frame=ui_state.started_frame)
     vasm = self._vasm_saved
     pair = clock_pair_ns() if car is not None else None
     vasm_enabled = (car is not None and car.canValid and car.gearShifter == car_schema.CarState.GearShifter.drive and

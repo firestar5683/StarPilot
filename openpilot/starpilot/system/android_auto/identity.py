@@ -172,6 +172,19 @@ def expiry_warning(identity: Identity) -> str:
   return ""
 
 
+def certificate_days_left(directory: Path | None = None, now: datetime | None = None) -> int | None:
+  """Whole days until the installed certificate expires (as ``Identity.days_left``), or None if unreadable.
+
+  Reads only the certificate, never the key, so the read-only car view can call it.
+  """
+  cert = (directory or IDENTITY_DIR) / CERT_NAME
+  try:
+    expires = _not_after(cert) if cert.is_file() else None
+  except (OSError, ValueError):
+    return None
+  return None if expires is None else (expires - (now or datetime.now(UTC))).days
+
+
 def session_log_order(path: Path) -> tuple[int, str]:
   """Sort key for session logs, oldest first.
 

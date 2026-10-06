@@ -6,7 +6,18 @@ from pathlib import Path
 from types import SimpleNamespace
 import time
 
+from openpilot.starpilot.system.android_auto.identity import EXPIRY_WARNING_DAYS
 from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK_VIEWPORT
+
+CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
+
+
+def certificate_notice(days_left: int | None) -> str:
+  """The car-screen heads-up for a certificate in its last two weeks; empty otherwise."""
+  if days_left is None or not 0 <= days_left <= EXPIRY_WARNING_DAYS:
+    return ""
+  when = "Within a Day" if days_left == 0 else f"in {days_left} Day{'' if days_left == 1 else 's'}"
+  return f"Heads Up: AA Certificate Expires {when}"
 
 
 def native_dependencies():
@@ -20,11 +31,12 @@ def native_dependencies():
   from openpilot.starpilot.ui.onroad import OnroadView
   from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
   from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
+  from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
   from openpilot.starpilot.ui.pip_preferences import read_pip
   from openpilot.starpilot.ui.pip_render import PiPRenderer
   from openpilot.starpilot.ui.pip_sidecam import Rect, Signals
   from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
-  from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message
+  from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
   from openpilot.starpilot.ui.shell import ShellMode
 
   class ProjectionRoadCamera(AugmentedRoadView):
@@ -55,18 +67,21 @@ def native_dependencies():
   return SimpleNamespace(rl=rl, ui_state=ui_state, camera=ProjectionRoadCamera,
                          onroad=OnroadView, monitor=DriverMonitorLayer, fonts=BitmapFonts,
                          font_role=FontRole, profile=Profile, font_directory=default_font_directory,
-                         adapter=RuntimeSnapshotAdapter, current_message=current_message,
+                         adapter=RuntimeSnapshotAdapter, current_message=current_message, display_message=display_message,
                          shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
-                         pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size)
+                         pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size,
+                         alert=OnroadAlert, alert_size=AlertSize)
 
 
 class ProjectionOnroad:
   """Display-only renderer: no shell, settings, network, pairing, or action owner."""
 
-  def __init__(self, *, dependencies=None, viewport=None, customization=None):
+  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
     self.width, self.height = viewport
     self.customization = customization
+    self._certificate_notice = certificate_notice(certificate_days)
+    self._certificate_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
     self.camera_stream = None  # the camera stream the last frame drew, or None
@@ -152,7 +167,8 @@ class ProjectionOnroad:
       self.pip.deactivate()
       return
     ui = native.ui_state
-    car = native.current_message(ui.sm, 'carState', now_ns, after_frame=ui.started_frame)
+    # Display freshness: carState is 100 Hz, so the 20 ms control window often lapses within one drawn frame.
+    car = native.display_message(ui.sm, 'carState', now_ns, after_frame=ui.started_frame)
     signals = native.pip_signals(car is not None,
                                  bool(car.leftBlinker) if car is not None else False,
                                  bool(car.rightBlinker) if car is not None else False,
@@ -167,6 +183,18 @@ class ProjectionOnroad:
     self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
                     on_bsm=saved.on_bsm, invert=saved.invert, placements=placements)
 
+  def _with_certificate_notice(self, state, now_ns):
+    """Show the certificate heads-up for the first seconds of each drive; a real alert always wins."""
+    if not self._certificate_notice:
+      return state
+    if self._certificate_notice_until_ns is None:
+      self._certificate_notice_until_ns = now_ns + CERTIFICATE_NOTICE_NS
+    sizes = self.native.alert_size
+    if now_ns >= self._certificate_notice_until_ns or state.alert.size != sizes.NONE:
+      return state
+    return replace(state, alert=self.native.alert(size=sizes.SMALL, text1=self._certificate_notice,
+                                                  alert_type='androidAutoCertificate/warning'))
+
   def _standby(self):
     rl = self.native.rl
     rl.draw_rectangle(0, 0, int(self.width), int(self.height), rl.Color(12, 26, 34, 255))
@@ -179,16 +207,18 @@ class ProjectionOnroad:
     ui = self.native.ui_state
     self.camera_stream = None
     if ui.started:
-      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=time.monotonic_ns()).onroad
+      now_ns = time.monotonic_ns()
+      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=now_ns).onroad
       if self.customization is not None:
         from openpilot.starpilot.system.android_auto.projection_layout import projection_customization
         if state.customization is not self._base_customization:
           self._projection_customization = projection_customization(self.customization, state.customization)
           self._base_customization = state.customization
         state = replace(state, customization=self._projection_customization)
-      self.onroad.render(state)
+      self.onroad.render(self._with_certificate_notice(state, now_ns))
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:
+      self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
       if self.pip is not None:
         self.pip.deactivate()
       self._standby()

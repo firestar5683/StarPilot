@@ -535,7 +535,6 @@ export const AndroidAutoPage = {
       if (!this.setup.identity.installed) { this.openInstall(); return false }
       return this.control("start")
     },
-    formatDate(iso) { return formatDate(iso) },
     loadReceivers() { return this.feed.loadReceivers() },
     control(action, extra = {}) { return this.feed.control(action, extra) },
   },
@@ -636,10 +635,10 @@ export const AndroidAutoPage = {
             <details class="gx-aa-wiki"><summary>Stuck pairing? Pairing order and wireless adapters</summary>
               <p><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</p>
               <p><strong>Car with built-in wireless Android Auto:</strong> open the car’s phone pairing screen, tap Find My Car, choose your car, then confirm the code on both screens.</p>
-              <p><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</p>
+              <p><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</p>
               <p><strong>Start fresh:</strong></p>
               <ol>
-                <li>Forget the car on the comma: <a href="/bluetooth">Bluetooth</a> → Forget.</li>
+                <li>Forget the car on the comma: <a href="#/bluetooth">Bluetooth</a> → Forget.</li>
                 <li>Delete the comma from the car’s Bluetooth list.</li>
                 <li>Turn the car off and on (or unplug the adapter for 5 seconds).</li>
                 <li>Pair again here.</li>
@@ -654,8 +653,8 @@ export const AndroidAutoPage = {
             <div><h3>Connect &amp; Drive</h3><p>Start streaming to your dashboard.</p></div>
           </div>
           <div class="gx-aa-step__body">
-            <p v-if="runtime?.running" class="gx-aa-pill gx-aa-pill--ready" role="status">Connected<span v-if="runtime.state"> · {{ runtime.state }}</span><span v-if="runtime.detail"> — {{ runtime.detail }}</span></p>
-            <p v-else-if="runtime?.state && runtime.state !== 'idle'" class="gx-muted" role="status">Projection: {{ runtime.state }}<span v-if="runtime.detail"> — {{ runtime.detail }}</span>.</p>
+            <p v-if="runtime?.running" class="gx-aa-pill gx-aa-pill--ready" role="status">Connected<span v-if="runtime.state"> · {{ runtime.label || runtime.state }}</span><span v-if="runtime.detail"> — {{ runtime.detail }}</span></p>
+            <p v-else-if="runtime?.state && runtime.state !== 'idle'" class="gx-muted" role="status">Projection: {{ runtime.label || runtime.state }}<span v-if="runtime.detail"> — {{ runtime.detail }}</span>.</p>
             <button v-if="!runtime?.running" class="gx-btn gx-aa-cta" :disabled="busy || !!connectReason" @click="connect">{{ selected ? 'Connect to ' + selected.name : 'Connect to Your Car' }}</button>
             <button v-else class="gx-btn gx-btn--tonal gx-aa-cta" :disabled="busy" @click="control('stop')">Disconnect</button>
             <p v-if="connectReason" class="gx-muted" role="status">{{ connectReason }}</p>
@@ -687,20 +686,109 @@ export const AndroidAutoPage = {
         </li>
       </ol>
 
-      <details v-if="setup" class="gx-card gx-aa-advanced"><summary>Advanced Tools &amp; Diagnostics</summary>
-        <div class="gx-aa-advanced__body">
-          <p v-if="setup.identity.expires">Certificate: {{ setup.identity.expired ? 'expired' : 'valid until' }} {{ formatDate(setup.identity.expires) }}.</p>
-          <p v-if="setup.identity.warning" role="status">{{ setup.identity.warning }}</p>
-          <p v-if="setup.identity.error" role="status">{{ setup.identity.error }}</p>
-          <p v-if="setup.import?.state === 'failed' && !installOpen" role="status">Last package check: {{ setup.import.error || 'failed' }}</p>
-          <div class="gx-driving__actions">
-            <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="refresh">Refresh</button>
-            <button class="gx-btn gx-btn--tonal" :disabled="busy || !setup.enabled || !setup.serviceReady || !setup.parked || pairing?.active" @click="loadReceivers">Find Paired Cars</button>
-            <a class="gx-btn gx-btn--tonal" href="#/logs/android-auto">Session Logs</a>
-          </div>
-          <p class="gx-muted">If the video encoder can’t start, projection stops and reports the error in step 3. Projection support still needs validation with your car and this device. Maximum package size: {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</p>
+      <section v-if="setup" class="gx-card gx-aa-faq" aria-labelledby="gx-aa-faq-title">
+        <div class="gx-aa-faq__head">
+          <h3 id="gx-aa-faq-title">FAQ</h3>
+          <p>Quick answers to the problems people run into most. Tap a question to open it.</p>
         </div>
-      </details>
+
+        <h4>Getting connected</h4>
+        <details class="gx-aa-wiki"><summary>It won’t connect at all. Where do I start?</summary>
+          <p>Go down this list. Most problems are one of these:</p>
+          <ul>
+            <li><strong>Step 1 says Ready.</strong> If it says Expired or Needs reinstalling, fix that first.</li>
+            <li><strong>Step 2 shows your car</strong> with a check mark next to it.</li>
+            <li><strong>The car is on</strong> and its screen is awake, not just the accessory power.</li>
+            <li><strong>Wireless Android Auto is turned on in the car’s settings.</strong> Some cars call it “smartphone connection” or “phone projection.”</li>
+            <li><strong>Bluetooth is on</strong> in the comma’s <a href="#/bluetooth">Bluetooth</a> page.</li>
+            <li><strong>No phone is taking over.</strong> See “It won’t connect automatically when other phones are paired” below.</li>
+          </ul>
+          <p>Still nothing? Look at the status line in step 3. The next question explains what it means.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>What do the status messages in step 3 mean?</summary>
+          <p>They show how far the comma got. Find the last one you saw:</p>
+          <ul>
+            <li><strong>Connecting to car / Finding Android Auto:</strong> the comma is reaching the car over Bluetooth. Make sure the car is on and was paired in step 2.</li>
+            <li><strong>Starting wireless setup / Waiting for car:</strong> the comma asked the car to start Android Auto. If it stops here, wireless Android Auto is probably turned off in the car, or the car is busy with your phone.</li>
+            <li><strong>Getting car Wi‑Fi / Joining car Wi‑Fi:</strong> the car is sharing its private Wi‑Fi with the comma. If it keeps failing here, turn the car off and on.</li>
+            <li><strong>Authenticating:</strong> the car is checking the Android Auto certificate. If it fails here, update the package in step 1.</li>
+            <li><strong>Projecting:</strong> everything is working.</li>
+            <li><strong>Car showing its own screen:</strong> you switched to the radio, map, or another car screen. Tap the Android Auto icon on the car’s screen to come back.</li>
+            <li><strong>Retrying:</strong> something interrupted the connection. The comma tries again by itself, so give it a moment.</li>
+          </ul>
+        </details>
+        <details class="gx-aa-wiki"><summary>It won’t connect automatically when other phones are paired to my car</summary>
+          <p>When you start the car, it reconnects to the phones it knows, usually starting with its favorite or the one used most recently. Android Auto only runs on one device at a time, so whichever device gets there first usually wins. If that’s a phone, the comma has to wait.</p>
+          <p>The comma doesn’t give up. It keeps asking about every 30 seconds while you drive, so it takes over within about half a minute once the screen is free.</p>
+          <p><strong>To make the car pick the comma:</strong></p>
+          <ol>
+            <li><strong>Make the comma the car’s preferred device.</strong> Many cars have a setting for this in the phone or Bluetooth menu, called something like “Preferred device,” “Priority phone,” or “Primary device.”</li>
+            <li><strong>Turn off wireless Android Auto on the phones.</strong> On each phone paired to the car, including other drivers’ phones, open <strong>Settings → Android Auto</strong> and turn off wireless Android Auto for this car, or remove the car from its list of connected cars.</li>
+            <li><strong>Make room for the comma.</strong> Some cars only keep two phones connected at once. If two are already connected, there may be no room left for the comma. Turn off Bluetooth on one phone, or delete old phones the car no longer needs.</li>
+            <li><strong>Using a wireless adapter?</strong> The adapter chooses which phone to use, not the car. Remove the adapter from your phone’s Bluetooth list, or set the comma as the main device in the adapter’s app.</li>
+          </ol>
+          <p>Your phone can stay paired over regular Bluetooth, so calls and music keep working.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>Can I still take calls and play music from my phone?</summary>
+          <p>Yes. The comma never handles calls or audio. Keep your phone connected to the car over regular Bluetooth like you always do. The car’s screen shows StarPilot, and your phone keeps doing calls and music. Most cars allow two phones to be connected at once, so the comma and your phone can both be connected.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>Will this work with my car?</summary>
+          <p>It works with cars that have <strong>wireless Android Auto</strong> built in. If your car only has wired Android Auto through a USB cable, add a <strong>wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit, and similar). A direct USB cable from the comma isn’t supported yet.</p>
+          <p>Every car brand does things a little differently. If yours gives you trouble, a log from your car helps get it fixed. You can download one from <strong>Connection Logs</strong> at the bottom of this page.</p>
+        </details>
+
+        <h4>While driving</h4>
+        <details class="gx-aa-wiki"><summary>It connected, but the car screen is black or frozen</summary>
+          <p>The first picture can take up to about <strong>30 seconds</strong> while StarPilot gets its view ready, so wait a little first. If it’s still black:</p>
+          <ol>
+            <li>Tap <strong>Disconnect</strong> in step 3, wait a few seconds, then connect again.</li>
+            <li>If that doesn’t help, turn the car off, wait until its screen goes dark, and turn it back on.</li>
+          </ol>
+        </details>
+        <details class="gx-aa-wiki"><summary>It disconnects while I’m driving</summary>
+          <p>Short drops usually fix themselves. The comma reconnects on its own and step 3 shows <strong>Retrying</strong> in the meantime.</p>
+          <p>If it happens often, a phone may be taking the screen back. See “It won’t connect automatically when other phones are paired” above. If it keeps happening, download your <strong>Connection Logs</strong> at the bottom of this page so it can be looked at.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>Does it start by itself, or do I tap Connect every time?</summary>
+          <p>With <strong>Automatic Connection</strong> turned on, it connects every time you start driving. You don’t need to open this page.</p>
+          <ul>
+            <li>If you tap <strong>Disconnect</strong>, it stays off for the rest of that drive and starts again on your next one.</li>
+            <li>It ends by itself about a minute after you turn the car off.</li>
+          </ul>
+        </details>
+        <details class="gx-aa-wiki"><summary>Why are some buttons grayed out?</summary>
+          <p>For safety, installing, pairing, switching cars, and changing settings only work while the car is in <strong>Park</strong> or the comma is in <strong>offroad mode</strong>. Connect and Disconnect work any time.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>Why did this page or my comma’s Wi‑Fi drop when it connected?</summary>
+          <p>Android Auto talks to the car over the car’s own private Wi‑Fi. While it’s connected, the comma uses its Wi‑Fi for the car instead of your home or hotspot Wi‑Fi. If you’re using this page over Wi‑Fi near the car, it may lose its connection for a moment.</p>
+          <p>Your comma’s cell connection isn’t affected, and it goes back to your usual Wi‑Fi once Android Auto ends.</p>
+        </details>
+
+        <h4>Setup and upkeep</h4>
+        <details class="gx-aa-wiki"><summary>Step 1 says it expires soon, or that it expired</summary>
+          <p>Every version of the Android Auto app comes with a Google certificate that has an end date. When it gets close, step 1 shows an <strong>Update</strong> button. Download the newest version the same way you did the first time and install it.</p>
+          <p>It takes about two minutes, and your paired car and settings stay as they are.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>I have more than one car. How do I switch?</summary>
+          <p>Pair each car in step 2 with <strong>Pair Another Car</strong>. All your paired cars appear in the list. Tap <strong>Use</strong> next to the one you’re driving. Disconnect first if Android Auto is running.</p>
+        </details>
+        <details class="gx-aa-wiki"><summary>Is my information private?</summary>
+          <p>Yes. The Android Auto file you install stays on your comma and isn’t sent anywhere. Connection logs also stay on the comma until you download them yourself. They leave out Wi‑Fi passwords, Bluetooth addresses, and your vehicle ID.</p>
+        </details>
+
+        <h4>Still stuck?</h4>
+        <details class="gx-aa-wiki"><summary>How do I start over from scratch?</summary>
+          <ol>
+            <li>Remove the car on the comma: <a href="#/bluetooth">Bluetooth</a> → Forget.</li>
+            <li>Delete the comma from your car’s Bluetooth list.</li>
+            <li>Turn the car off and on, or unplug a wireless adapter for 5 seconds.</li>
+            <li>Pair again in step 2 with the car’s pairing screen open.</li>
+          </ol>
+        </details>
+        <div class="gx-driving__actions">
+          <a class="gx-btn gx-btn--tonal" href="#/logs/android-auto"><i class="bi bi-journal-text"></i> Connection Logs</a>
+        </div>
+      </section>
 
       <div v-if="removeOpen && setup" class="gx-settings__modal gx-aa-sheet" @click.self="closeRemove" @keydown.esc="closeRemove">
         <div class="gx-card gx-settings__dialog gx-aa-sheet__dialog gx-aa-confirm" role="alertdialog" aria-modal="true" aria-labelledby="gx-aa-remove-title" aria-describedby="gx-aa-remove-body">
