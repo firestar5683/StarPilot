@@ -687,7 +687,6 @@ export const AndroidAutoPage = {
             <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="refresh">Refresh</button>
             <button class="gx-btn gx-btn--tonal" :disabled="busy || !setup.enabled || !setup.serviceReady || !setup.parked || pairing?.active" @click="loadReceivers">Find Paired Cars</button>
             <a class="gx-btn gx-btn--tonal" href="#/logs/android-auto">Session Logs</a>
-            <button v-if="setup.enabled" class="gx-btn gx-btn--tonal" :disabled="busy" @click="setEnabled(false)">Turn Off Android Auto</button>
           </div>
           <p class="gx-muted">If the video encoder can’t start, projection stops and reports the error in step 3. Projection support still needs validation with your car and this device. Maximum package size: {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</p>
         </div>
