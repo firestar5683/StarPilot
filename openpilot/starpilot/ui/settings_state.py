@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from openpilot.starpilot.ui.device_state import DeviceAction, DeviceState
+from openpilot.starpilot.ui.feature_settings_state import FEATURE_BACK_WIDTH, FEATURE_HEADER_HEIGHT
 from openpilot.starpilot.ui.home_state import HomeAction, HomeActionKind
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.software_state import SoftwareAction, SoftwareState
@@ -137,6 +138,9 @@ class SettingsInput:
         if inside((50, 300 + index * 110, 350, 110)):
           return destination
     if self.selected() == Destination.STAR:
+      if (not state.sidebar_expanded and 20 <= x < 20 + FEATURE_BACK_WIDTH and
+          12 <= y <= 12 + FEATURE_HEADER_HEIGHT):
+        return "close"
       for (destination, _, _), rect in zip(TILES, tile_rects(state), strict=True):
         if inside(rect):
           return destination

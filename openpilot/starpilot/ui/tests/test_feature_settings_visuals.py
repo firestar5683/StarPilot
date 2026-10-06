@@ -385,8 +385,10 @@ class FeatureVisualTests(unittest.TestCase):
       ):
         with self.subTest(expanded=expanded, title=title):
           fonts = fake_fonts()
+          rl.draw_line.reset_mock()
           geometry.draw_settings_header(fonts, expanded, title, parent, back=back)
-          self.assertEqual([call.args[0] for call in fonts.draw.call_args_list], expected)
+          self.assertEqual([call.args[0] for call in fonts.draw.call_args_list], expected[1:] if expanded and back else expected)
+          self.assertEqual(rl.draw_line.call_count, int(back and not expanded))
 
   def test_numeric_value_is_read_only_and_buttons_keep_source_binding(self):
     row = FeatureRow("number", "Number", "75", b"75", step=5, available=True)
@@ -417,13 +419,19 @@ class FeatureVisualTests(unittest.TestCase):
       self.assertTrue(all(call.args[2] in (35, 44, 50) for call in fonts.draw.call_args_list))
       header = [call for call in fonts.draw.call_args_list
                 if call.args[0] == "< Back" or call.args[0].startswith("Driving Controls") or call.args[0] == "Lane Centering"]
-      self.assertEqual(len(header), 3)
+      self.assertEqual(len(header), 2 if expanded else 3)
+      self.assertEqual(header[0].args[3], left + 34 if expanded else left + 28)
       self.assertTrue(all(call.args[1:3] == (FontRole.MEDIUM, 44) for call in header))
       self.assertEqual(len({call.args[4] for call in header}), 1)
       self.assertNotEqual(FeatureInput.target(left + 60, 120, state).kind, "back")
-      self.assertEqual(FeatureInput.target(left + 60, 76, state).kind, "back")
-      self.assertEqual(FeatureInput.target(left + 207, 76, state).kind, "back")
+      self.assertEqual(FeatureInput.target(left + 60, 76, state).kind, "details" if expanded else "back")
+      self.assertEqual(FeatureInput.target(left + 207, 76, state).kind, "details" if expanded else "back")
       self.assertEqual(FeatureInput.target(left + 208, 76, state).kind, "details")
+      actions = []
+      owner = FeatureInput(actions.append)
+      owner.press(left + 60, 76, state)
+      owner.release(left + 60, 76, replace(state, sidebar_expanded=not expanded))
+      self.assertFalse(actions)
 
 
 if __name__ == "__main__":

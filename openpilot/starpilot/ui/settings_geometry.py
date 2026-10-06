@@ -128,7 +128,7 @@ def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str 
   role, size = FontRole.MEDIUM, 44
   x = left + 34
   segments = []
-  if back:
+  if back and not sidebar_expanded:
     segments.append(("< Back", left + 28, TEXT_PRIMARY))
     rl.draw_line(left + FEATURE_BACK_WIDTH, 32, left + FEATURE_BACK_WIDTH, 80, CONTROL_BORDER)
     x = left + FEATURE_BACK_WIDTH + 28

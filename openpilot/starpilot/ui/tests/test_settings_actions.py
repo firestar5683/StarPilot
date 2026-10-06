@@ -170,8 +170,19 @@ class TestSettingsActions(unittest.TestCase):
       handler.release(20, 581, router.settings)
       self.assertEqual(router.settings.sidebar_expanded, expanded)
       self.assertEqual(tile_rects(router.settings)[0][0], 520 if expanded else 20)
+    handler.press(570, 50, router.settings)
+    handler.release(570, 50, router.settings)
+    self.assertTrue(router.in_settings)
     handler.press(250, 160, router.settings)
     handler.release(250, 160, router.settings)
+    self.assertFalse(router.in_settings)
+    router.in_settings = True
+    router.settings = replace(router.settings, sidebar_expanded=False)
+    handler.press(70, 50, router.settings)
+    handler.release(70, 50, replace(router.settings, sidebar_expanded=True))
+    self.assertTrue(router.in_settings)
+    handler.press(70, 50, router.settings)
+    handler.release(70, 50, router.settings)
     self.assertFalse(router.in_settings)
 
   def test_compact_only_visible_static_cards_are_targets(self):
