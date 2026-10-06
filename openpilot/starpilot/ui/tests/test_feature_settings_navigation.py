@@ -131,6 +131,49 @@ class FeatureNavigationTests(unittest.TestCase):
         controller.release(end, 200, boundary)
         self.assertFalse(actions)
 
+  def test_flicks_use_recent_movement_and_reject_noise_pauses_and_reversals(self):
+    row = FeatureRow("", "Child", "", page="child", available=True)
+    cases = (
+      ("fast", ((0, 0), (.02, 22), (.05, 55), (.075, 80)), (.08, 80), True),
+      ("hold then flick", ((0, 0), (.5, 0), (.52, 24), (.55, 58), (.575, 80)), (.58, 80), True),
+      ("long slow drag", ((0, 0), (.15, 40), (.3, 90), (.5, 125)), (.51, 125), True),
+      ("short slow drag", ((0, 0), (.15, 25), (.3, 55), (.5, 80)), (.51, 80), False),
+      ("below flick speed", ((0, 0), (.04, 25), (.08, 55), (.12, 80)), (.13, 80), False),
+      ("too short", ((0, 0), (.02, 25), (.04, 45)), (.05, 45), False),
+      ("pause before lift", ((0, 0), (.02, 22), (.05, 55), (.075, 80)), (.18, 80), False),
+      ("lift position spike", ((0, 0), (.02, 22), (.05, 55)), (.06, 80), False),
+      ("single movement spike", ((0, 0), (.05, 80)), (.06, 80), False),
+      ("reversal", ((0, 0), (.02, 40), (.05, 110), (.075, 70)), (.08, 70), False),
+      ("duplicate timestamps", ((0, 0), (0, 22), (0, 55), (0, 80)), (.01, 80), False),
+      ("out of order timestamps", ((0, 0), (.02, 22), (.01, 55), (.04, 80)), (.05, 80), False),
+    )
+    for scroll, start, direction in ((0, 2000, 1), (5, 1800, -1)):
+      state = FeatureSettingsState(rows=(row,) * 13, scroll=scroll)
+      for name, samples, release, accepted in cases:
+        with self.subTest(direction=direction, gesture=name):
+          actions = []
+          controller = FeatureInput(actions.append)
+          controller.press(start, 200, state)
+          for timestamp, distance in samples:
+            controller.move(start - direction * distance, 200, state, now=timestamp)
+          self.assertFalse(actions)
+          timestamp, distance = release
+          controller.release(start - direction * distance, 200, state, now=timestamp)
+          controller.release(start - direction * distance, 200, state, now=timestamp)
+          self.assertEqual(actions, [FeatureUiAction("scroll", direction=direction)] if accepted else [])
+
+  def test_flick_history_does_not_leak_into_a_new_press_or_canceled_touch(self):
+    state = FeatureSettingsState(rows=(FeatureRow("", "Child", "", page="child", available=True),) * 7)
+    for reset in (lambda controller: controller.cancel(), lambda controller: controller.press(2000, 200, state)):
+      actions = []
+      controller = FeatureInput(actions.append)
+      controller.press(2000, 200, state)
+      for timestamp, x in ((0, 2000), (.03, 1960), (.06, 1920)):
+        controller.move(x, 200, state, now=timestamp)
+      reset(controller)
+      controller.release(1920, 200, state, now=.07)
+      self.assertFalse(actions)
+
   def test_swipe_context_changes_cancel_but_row_value_refresh_does_not(self):
     row = FeatureRow("switch", "Switch", "Off", b"0", ("Off", "On"), available=True)
     state = FeatureSettingsState(rows=(row,) * 7)

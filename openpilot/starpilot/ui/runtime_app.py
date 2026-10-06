@@ -1333,11 +1333,11 @@ class StarShellSession:
       if self._favorite_claimed:
         self.input.cancel()
 
-  def move(self, mode: ShellMode, x: float, y: float) -> None:
+  def move(self, mode: ShellMode, x: float, y: float, *, timestamp: float | None = None) -> None:
     self._mode = mode
     if mode == ShellMode.SETTINGS:
       if snapshot := self._settings_gesture_snapshot():
-        self.input.move(x, y, time.monotonic(), snapshot)
+        self.input.move(x, y, timestamp, snapshot)
       return
     if getattr(self, "_navigation_claimed", False):
       self.view.onroad.navigation.move(x, y, self.snapshot(mode).onroad)
@@ -1348,13 +1348,13 @@ class StarShellSession:
       return
     self.input.move(x, y, time.monotonic(), self._input_snapshot(mode))
 
-  def release(self, mode: ShellMode, x: float, y: float) -> bool:
+  def release(self, mode: ShellMode, x: float, y: float, *, timestamp: float | None = None) -> bool:
     self._mode = mode
     if mode == ShellMode.SETTINGS:
       snapshot = self._settings_gesture_snapshot()
       self._settings_touch = None
       if snapshot is not None:
-        self.input.release(x, y, time.monotonic(), snapshot)
+        self.input.release(x, y, timestamp, snapshot)
       return self._request_emitted
     if getattr(self, "_navigation_claimed", False):
       self._navigation_claimed = False
@@ -1407,6 +1407,7 @@ class StarShellPage(Widget):
     self.on_background_tap = on_background_tap
     self._press_pos: tuple[float, float] | None = None
     self._dragged = False
+    self._touch_time: float | None = None
 
   def _render(self, rect: rl.Rectangle) -> None:
     self.session.render(self.mode, rect, self._parent_rect)
@@ -1419,18 +1420,20 @@ class StarShellPage(Widget):
   def _handle_mouse_press(self, mouse_pos: MousePos) -> None:
     self._press_pos = (mouse_pos.x, mouse_pos.y)
     self._dragged = False
+    self._touch_time = None
     self.session.press(self.mode, mouse_pos.x - self.rect.x, mouse_pos.y - self.rect.y)
 
   def _handle_mouse_event(self, mouse_event: MouseEvent) -> None:
-    if mouse_event.left_down and not mouse_event.left_pressed:
+    self._touch_time = mouse_event.t
+    if mouse_event.left_down and (not mouse_event.left_pressed or self.mode == ShellMode.SETTINGS):
       self._track_background_drag(mouse_event.pos)
-      self.session.move(self.mode, mouse_event.pos.x - self.rect.x, mouse_event.pos.y - self.rect.y)
+      self.session.move(self.mode, mouse_event.pos.x - self.rect.x, mouse_event.pos.y - self.rect.y, timestamp=mouse_event.t)
     elif mouse_event.left_released and not rl.check_collision_point_rec(mouse_event.pos, self.rect):
       self.session.cancel()
 
   def _handle_mouse_release(self, mouse_pos: MousePos) -> None:
     self._track_background_drag(mouse_pos)
-    handled = self.session.release(self.mode, mouse_pos.x - self.rect.x, mouse_pos.y - self.rect.y)
+    handled = self.session.release(self.mode, mouse_pos.x - self.rect.x, mouse_pos.y - self.rect.y, timestamp=self._touch_time)
     bookmark_handled = (self.mode == ShellMode.ONROAD and self.session.profile == Profile.COMPACT and
                         self.session.camera_owner._bookmark_icon.interacting())
     if not handled and not self._dragged and not bookmark_handled and self.on_background_tap is not None:

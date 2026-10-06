@@ -75,7 +75,7 @@ class NativeSettingsPageTests(unittest.TestCase):
       row.callback.assert_not_called()
       row.action_item.enabled, row.is_visible, pane.scroll = True, True, 0
     pane._handle_mouse_press(pos)
-    pane._handle_mouse_event(NS(pos=MousePos(1930, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT / 2 + 40)))
+    pane._handle_mouse_event(MouseEvent(MousePos(1930, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT / 2 + 40), 0, False, False, True, 1))
     pane._handle_mouse_release(pos)
     row.callback.assert_not_called()
     self.click(pane)
@@ -136,6 +136,25 @@ class NativeSettingsPageTests(unittest.TestCase):
           dialog.assert_not_called()
         for row in rows:
           row.callback.assert_not_called()
+
+  def test_batched_flicks_use_event_times_in_both_sidebar_modes(self):
+    for width, left in ((1560, 550), (2060, 50)):
+      rows = [item(str(index), button_action()) for index in range(13)]
+      pane = self.panel(rows)
+      bounds = rl.Rectangle(left + 40, 55, width, 1030)
+      with (patch.object(pane, '_render'), patch.object(gui_app, '_show_touches', False),
+            patch('openpilot.system.ui.widgets.device', NS(awake=True)), patch.object(gui_app, '_mouse_events', [])):
+        pane.render(bounds)
+        for duration, last_down, expected in ((.075, 80, 5), (.5, 80, 5), (.075, 55, 5)):
+          events = [MouseEvent(MousePos(2000 - distance + pane.origin[0], 200 + pane.origin[1]), 0,
+                               index == 0, index == 3, index != 3, 1 + timestamp)
+                    for index, (timestamp, distance) in enumerate(((0, 0), (duration / 2, last_down / 2),
+                                                                  (duration, last_down), (duration + .01, 80)))]
+          with patch.object(gui_app, '_mouse_events', events):
+            pane.render(bounds)
+          self.assertEqual(pane.scroll, expected)
+      for row in rows:
+        row.callback.assert_not_called()
 
   def test_toggle_calls_its_native_callback_once_and_respects_displayed_value(self):
     action = ToggleAction(callback=Mock())
