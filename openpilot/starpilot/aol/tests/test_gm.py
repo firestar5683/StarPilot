@@ -36,6 +36,17 @@ BOLT_IDS = (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
 
 
 def _configurations():
+  from opendbc.car.gm.tests.test_ordinary_cc import malibu_hybrid_params
+  from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+  for pedal in (False, True):
+    for removed in (False, True):
+      for alternate in (False, True):
+        for radar in ((False, True) if pedal else (False,)):
+          cp = malibu_hybrid_params(pedal=pedal, removed=removed, alternate=alternate, radar=radar)
+          yield cp
+          disabled = cp.as_reader().as_builder()
+          prepare_disable_longitudinal(disabled, True)
+          yield disabled
   from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
   for identity in BOLT_IDS:
     cp = pedal_params(identity, pedal=True, removed=True)

@@ -102,6 +102,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_ascm.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_sdgm.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_cc.py",
+  "opendbc_repo/opendbc/safety/tests/test_gm_hybrid_cc.py",
   "opendbc_repo/opendbc/car/gm/tests/test_ordinary_cc.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_camera.py",
   "opendbc_repo/opendbc/car/gm/tests/test_ordinary_camera.py",

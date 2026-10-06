@@ -55,6 +55,11 @@ def create_intent(cp, settings):
 def configuration_settings_policy(cp):
   """Saving stock Silverado lateral intent does not establish its physical source graph."""
   try:
+    if (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC and
+        not cp.notCar and not cp.passive and cp.lateralTuning.which() == 'torque' and
+        cp.steerControlType == CarParams.SteerControlType.torque and
+        int(cp.alternativeExperience) in (0, GM_AOL_ALTERNATIVE_EXPERIENCE)):
+      return AolVehiclePolicy(settings_supported=True)
     if (cp.brand != 'gm' or cp.carFingerprint != CAR.CHEVROLET_SILVERADO_CC or
         cp.notCar or cp.passive or cp.networkLocation != CarParams.NetworkLocation.gateway or
         cp.transmissionType != CarParams.TransmissionType.automatic or not cp.radarUnavailable or

@@ -3,7 +3,7 @@
 import math
 
 from opendbc.car.structs import CarParams
-from opendbc.car.gm.values import (volt_cc_pedal_profile, control_flags,
+from opendbc.car.gm.values import (malibu_hybrid_profile, volt_cc_pedal_profile, control_flags,
   camera_acc_pedal_profile, CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_pedal_profile,
   is_ordinary_ascm_profile, is_ordinary_camera_profile, is_ordinary_sdgm_profile, is_bolt_euv_longitudinal,
   is_volt_gateway_profile, is_volt_cc_profile, is_silverado_cc_stock_profile,
@@ -33,6 +33,7 @@ GM_AOL_WORDS = (frozenset(range(0xE600, 0xE608)) | frozenset(range(0xE610, 0xE61
   0x5087, 0x5487,
   0xC1D1, 0xC1D3,
   0xC110, 0xC111, 0xC120, 0xC121, 0xC130, 0xC131, 0xC140, 0xC141,
+  0xE800, 0xE801, 0xE802, 0xE803, 0xE804, 0xE805,
   0xC150, 0xC151, 0xC160, 0xC161, 0xC162, 0xC170, 0xC171, 0xC172, 0xC173, 0xC180, 0xC181, 0xC182, 0xC183, 0xC184, 0xC185, 0xC186, 0xC187,
 ))
 
@@ -68,7 +69,7 @@ def qualified_gm(cp) -> bool:
                cp.carFingerprint == CAR.BUICK_LACROSSE and cp.openpilotLongitudinalControl))
     if is_ordinary_camera_profile(cp, longitudinal=cp.openpilotLongitudinalControl):
       return True
-    if is_silverado_cc_stock_profile(cp) or is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp):
+    if is_silverado_cc_stock_profile(cp) or is_ordinary_cc_profile(cp) or is_conventional_cc_pedal_profile(cp) or malibu_hybrid_profile(cp) is not None:
       return True
     if is_ordinary_sdgm_profile(cp, longitudinal=False) or is_ordinary_sdgm_profile(cp, longitudinal=True):
       return True

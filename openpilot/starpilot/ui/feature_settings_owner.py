@@ -198,7 +198,8 @@ class FeatureSettingsOwner:
     cp = self.vehicle_params()
     try:
       if (cp is None or cp.brand != "gm" or cp.notCar or
-          cp.carFingerprint not in ORDINARY_CC_CAR | PEDAL_BOLT_CAR | CAMERA_ACC_PEDAL_CAR | {CAR.CHEVROLET_SILVERADO_CC, CAR.CHEVROLET_VOLT_CC}):
+          cp.carFingerprint not in ORDINARY_CC_CAR | PEDAL_BOLT_CAR | CAMERA_ACC_PEDAL_CAR |
+          {CAR.CHEVROLET_SILVERADO_CC, CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_MALIBU_HYBRID_CC}):
         return None
       return (str(cp.carFingerprint), str(cp.brand), int(cp.flags), bool(cp.passive), bool(cp.dashcamOnly),
               bool(cp.openpilotLongitudinalControl),

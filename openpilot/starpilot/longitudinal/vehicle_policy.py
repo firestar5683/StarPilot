@@ -2,6 +2,7 @@
 
 from opendbc.car.gm.conventional_pedal import policy_for as conventional_pedal_policy_for
 from opendbc.car.gm.camera import policy_for as camera_policy_for
+from opendbc.car.gm.hybrid_cc import policy_for as hybrid_policy_for
 from opendbc.car.gm.ordinary_cc import policy_for as ordinary_cc_policy_for
 from opendbc.car.gm.bolt_cc import policy_for as bolt_cc_policy_for
 from opendbc.car.gm.longitudinal import policy_for as gm_pedal_policy_for, volt_policy_for, euv_policy_for, ascm_policy_for, sdgm_policy_for
@@ -14,7 +15,7 @@ from opendbc.car.hyundai.g90_longitudinal import (stopping_decel_rate as hyundai
 
 
 def installed_policy_for(cp):
-  return (suburban_policy_for(cp) or conventional_pedal_policy_for(cp) or camera_policy_for(cp) or ordinary_cc_policy_for(cp) or
+  return (hybrid_policy_for(cp) or suburban_policy_for(cp) or conventional_pedal_policy_for(cp) or camera_policy_for(cp) or ordinary_cc_policy_for(cp) or
           sdgm_policy_for(cp) or ascm_policy_for(cp) or gm_pedal_policy_for(cp) or volt_policy_for(cp) or
           euv_policy_for(cp) or volt_cc_policy_for(cp) or bolt_cc_policy_for(cp))
 

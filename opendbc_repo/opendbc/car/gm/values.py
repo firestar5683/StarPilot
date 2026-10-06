@@ -143,6 +143,9 @@ VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
 
 def gm_control_word(cp: CarParams) -> int:
   word = int(cp.safetyConfigs[0].safetyParam)
+  hybrid = malibu_hybrid_profile(cp)
+  if hybrid is not None:
+    return 5 | (8 if hybrid.pedal and hybrid.longitudinal else 0)
   if is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True):
     return int(BOLT_PEDAL_STOCK_WORDS[cp.carFingerprint] if not cp.openpilotLongitudinalControl else BOLT_PEDAL_WORDS[cp.carFingerprint])
   if word in VOLT_CC_PEDAL_PROFILES and volt_cc_pedal_profile(cp) is not None:
@@ -230,6 +233,9 @@ def uses_camera_stock_controls(cp: CarParams) -> bool:
 
 
 def requires_camera_state_sources(cp: CarParams) -> bool:
+  hybrid = malibu_hybrid_profile(cp)
+  if hybrid is not None:
+    return False
   if is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True):
     return False
   profile = camera_acc_pedal_profile(cp)
@@ -634,6 +640,7 @@ class CAR(Platforms):
   CADILLAC_XT4_CC = GMCCGatewayPlatformConfig([], CADILLAC_XT4.specs)
   CADILLAC_XT5_CC = GMCCGatewayPlatformConfig([], replace(CADILLAC_XT5.specs, tireStiffnessFactor=1.0))
   CHEVROLET_EQUINOX_CC = GMCCGatewayPlatformConfig([], CHEVROLET_EQUINOX.specs)
+  CHEVROLET_MALIBU_HYBRID_CC = GMPlatformConfig([], GMCarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4))
   CHEVROLET_MALIBU_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=1450, wheelbase=2.8, steerRatio=18.25,
                                                                   centerToFrontRatio=0.4, tireStiffnessFactor=0.997))
   CHEVROLET_SILVERADO_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=2994, wheelbase=3.75, steerRatio=16.3, tireStiffnessFactor=1.0))
@@ -727,7 +734,7 @@ PEDAL_BOLT_CAR = {
 NO_ACC_BOLT_CAR = PEDAL_BOLT_CAR - {CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL}
 VOLT_BSM_CAR = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019,
                 CAR.CHEVROLET_VOLT_CAMERA}
-EV_CAR = {CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019,
+EV_CAR = {CAR.CHEVROLET_MALIBU_HYBRID_CC, CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019,
           CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_ACC_2022_2023} | PEDAL_BOLT_CAR
 
 ASCM_INTERCEPT_CAR = {
@@ -1152,6 +1159,47 @@ def volt_cc_pedal_profile(cp):
         cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
         cp.openpilotLongitudinalControl == profile.longitudinal and not cp.pcmCruise and
         profile.radar != cp.radarUnavailable):
+      return profile
+  except (AttributeError, IndexError, TypeError, ValueError):
+    pass
+  return None
+
+
+@dataclass(frozen=True)
+class MalibuHybridProfile:
+  pedal: bool
+  longitudinal: bool
+  removed: bool
+
+
+MALIBU_HYBRID_PROFILES = MappingProxyType({
+  0xE800 + index: MalibuHybridProfile(index in (2, 3), index < 4, bool(index & 1))
+  for index in range(6)
+})
+MALIBU_HYBRID_SOURCES = {0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0x1C4: 8,
+                        0xC9: 8, 0x3D1: 8, 0x1F5: 8, 0x232: 8, 0x1E5: 8, 0x140: 3,
+                        0x12A: 8, 0x1F1: 8, 0x17D: 6, 0xBD: 7}
+
+
+def malibu_hybrid_profile(cp):
+  try:
+    if len(cp.safetyConfigs) != 1:
+      return None
+    profile = MALIBU_HYBRID_PROFILES.get(int(cp.safetyConfigs[0].safetyParam))
+    flags = int(GMFlags.CC_LONG | (GMFlags.NO_CAMERA if profile and profile.removed else 0))
+    if cp.flags & GMFlags.PEDAL_LONG:
+      flags |= int(GMFlags.PEDAL_LONG)
+    if cp.flags & GMFlags.NO_ACCELERATOR_POS_MSG:
+      flags |= int(GMFlags.NO_ACCELERATOR_POS_MSG)
+    if (profile is not None and cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC and
+        cp.networkLocation == CarParams.NetworkLocation.fwdCamera and
+        cp.transmissionType == CarParams.TransmissionType.direct and not cp.alphaLongitudinalAvailable and
+        cp.steerControlType == CarParams.SteerControlType.torque and cp.lateralTuning.which() == 'torque' and
+        not cp.passive and not cp.dashcamOnly and not cp.notCar and control_flags(cp) == flags and
+        cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+        cp.openpilotLongitudinalControl == profile.longitudinal and cp.pcmCruise == (not profile.longitudinal) and
+        (not profile.longitudinal or bool(cp.flags & GMFlags.PEDAL_LONG) == profile.pedal) and
+        (bool(cp.flags & GMFlags.PEDAL_LONG) or cp.radarUnavailable)):
       return profile
   except (AttributeError, IndexError, TypeError, ValueError):
     pass
