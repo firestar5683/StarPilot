@@ -9,23 +9,30 @@ from pathlib import Path
 from openpilot.starpilot.ui.onroad_state import ObservationKind, speed_limit_from_message
 from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.device_state import DeviceRequest
-from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.preview_home import reference_state
 from openpilot.starpilot.ui.settings_state import Destination, SettingsState
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellSnapshot, ShellView
 from openpilot.starpilot.ui.toggles_state import Personality, ToggleKey, TogglesInput, TogglesState
 
 
+def make_feature_view(profile: Profile):
+  fonts = BitmapFonts.__new__(BitmapFonts)
+  fonts.profile = profile
+  from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
+  return FeatureSettingsView(fonts)
+
+
 class ShellActionTests(unittest.TestCase):
   def test_runtime_transition_interruptions_preserve_row_bindings_for_every_feature_pane(self):
     from openpilot.starpilot.ui import runtime_app
-    from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
     from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
 
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.profile = Profile.LARGE
     session.favorites = Mock()
-    session.view = SimpleNamespace(onroad=Mock())
+    session.view = ShellView.__new__(ShellView)
+    session.view.onroad = Mock()
     requests = []
     session.input = ShellInput(Profile.LARGE, requests.append)
     rows = (FeatureRow("action", "Action", "", actions=(("OPEN", True),), available=True),) * 15
@@ -36,7 +43,7 @@ class ShellActionTests(unittest.TestCase):
     with patch("openpilot.starpilot.ui.feature_settings.time.monotonic", return_value=0):
       for destination, (state_name, _, input_name) in runtime_app._FEATURE_SETTINGS_PANES.items():
         with self.subTest(destination=destination):
-          feature_view = FeatureSettingsView(SimpleNamespace(profile=Profile.LARGE))
+          feature_view = make_feature_view(Profile.LARGE)
           setattr(session.view, state_name, feature_view)
           snapshot = replace(base, selected=destination, **{state_name: end})
           session.selected = destination
@@ -91,7 +98,7 @@ class ShellActionTests(unittest.TestCase):
     session.view.onroad, session.view.settings, session.view.device = Mock(), Mock(), Mock()
     panes = runtime_app._FEATURE_SETTINGS_PANES
     for state_name, _, _ in panes.values():
-      setattr(session.view, state_name, FeatureSettingsView(SimpleNamespace(profile=Profile.LARGE)))
+      setattr(session.view, state_name, make_feature_view(Profile.LARGE))
     base = ShellSnapshot(ShellMode.SETTINGS, reference_state(), SettingsState(),
                          OnroadState(False, False, None, None, SpeedLimitObservation()))
     # Each controller carries a distinct displacement so a wrong pane cannot pass.
