@@ -378,8 +378,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     with layout_lock:
       if projection_layout_source is None:
         from openpilot.common.params import Params
-        from openpilot.starpilot.galaxy.projection_layout import ProjectionLayoutOwner
-        projection_layout_source = ProjectionLayoutOwner(Params(), configuration_allowed)
+        from openpilot.starpilot.galaxy.projection_layout import ProjectionLayoutOwner, host_owner
+        params = Params()
+        projection_layout_source = host_owner(params, configuration_allowed) or ProjectionLayoutOwner(params, configuration_allowed)
       return projection_layout_source
 
   def bluetooth_session_valid(identity):

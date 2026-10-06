@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from openpilot.starpilot.galaxy.onroad_layout import LayoutChanged
-from openpilot.starpilot.galaxy.projection_layout import ProjectionLayoutOwner
+from openpilot.starpilot.galaxy.projection_layout import ProjectionLayoutOwner, host_owner
 from openpilot.starpilot.system.android_auto.display_profile import record_screen
 from openpilot.starpilot.system.android_auto.projection_layout import ProjectionLayoutSource
 from openpilot.starpilot.ui.onroad_customization import default_document
@@ -177,6 +177,25 @@ class TestProjectionLayoutOwner(unittest.TestCase):
       self.assertFalse(self.owner.snapshot()['available'])
       with self.assertRaises(LayoutChanged):
         self.owner.save({'revision': 'any', 'document': {}}, session_valid=lambda: True)
+
+
+  def test_host_runtime_seeds_private_screen_and_ignores_disabled(self):
+    root = self.root / 'host'
+    self.assertIsNone(host_owner(self.params, lambda: True, root, environ={}))
+    self.assertFalse(root.exists())
+    owner = host_owner(self.params, lambda: True, root, environ={'SP_HOST_RUNTIME': '1'})
+    self.params.enabled = False
+    snapshot = owner.snapshot()
+    self.assertTrue(snapshot['editable'])
+    self.assertIsNone(snapshot['reason'])
+    self.assertEqual(snapshot['screen']['width'], 1920)
+    payload = {'revision': snapshot['revision'], 'document': copy.deepcopy(snapshot['document'])}
+    payload['document']['widgets']['current_speed']['x'] += 10
+    owner.save(payload, session_valid=lambda: True)
+    screen = (root / 'screen.json').read_bytes()
+    again = host_owner(self.params, lambda: True, root, environ={'SP_HOST_RUNTIME': '1'})
+    self.assertEqual((root / 'screen.json').read_bytes(), screen)
+    self.assertEqual(again.snapshot()['document'], payload['document'])
 
 
 if __name__ == '__main__':

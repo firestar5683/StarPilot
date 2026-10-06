@@ -15,7 +15,7 @@ cache. The UI remains the custom large and compact Raylib UI.
 | `./dev replay [jobs] <replay arguments>` | Native replay and its terminal controls |
 | `./dev cabana [jobs] <arguments>` | Native Cabana in an independent cache |
 | `./dev plotjuggler [jobs] <arguments>` | Current PlotJuggler helper; `juggle` is an alias |
-| `./dev galaxy [jobs] [--port N]` | Authenticated local Galaxy server |
+| `./dev galaxy [jobs] [--live [--no-autoreload]] [--port N]` | Authenticated local Galaxy server; `--live` follows Galaxy edits |
 | `./dev python <arguments>` | Python with host native libraries and current source |
 | `./dev pytest <arguments>` | pytest, including its xdist and mock plugins |
 | `./dev shell` | Shell with host imports and private settings |
@@ -116,7 +116,9 @@ the current control features. The legacy navigation and combined Galaxy replay
 demo switches still need adapters for this branch's current services. They fail
 explicitly while absent. `./dev galaxy` starts the implemented local Galaxy
 server independently; set its local password in the desktop UI first. Galaxy
-continues to use its existing authenticated loopback interface.
+continues to use its existing authenticated loopback interface. Add `--live` to
+release the shared lock after building and follow edits under
+`openpilot/starpilot/galaxy`; see its README.
 
 Developer compatibility remains a release requirement. Launcher/parser tests,
 native desktop builds, UI/replay smoke checks, complete device builds, and the
