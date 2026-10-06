@@ -45,7 +45,7 @@ class ForteCardIntent(AolCardIntent):
       self._native_rejection_ns = native_rejection_ns
     if invalid or fatal or rejected:
       self.physical_latch = False
-      self.neutral_seen = False
+      self.neutral_seen = self.neutral_seen and not self._lkas_down
       if fatal:
         self.fault_rearm = True
         self.main_off_seen = False
