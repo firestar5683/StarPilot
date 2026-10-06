@@ -66,13 +66,53 @@ class SlcOffsetFeatureTests(unittest.TestCase):
     self.cp.openpilotLongitudinalControl = False
     self.assertFalse(self.row("SpeedLimitController").available)
 
+  def test_valid_legacy_enable_preserves_sources_and_invalid_offsets_deny(self):
+    for legacy in (None, b"5"):
+      with self.subTest(legacy=legacy):
+        self.params.put_bool("SpeedLimitController", False, block=True)
+        if legacy is not None:
+          Path(self.params.get_param_path("Offset1")).write_bytes(legacy)
+        original = tuple(self.raw(key) for key in ("IsMetric", *(f"Offset{i}" for i in range(1, 8))))
+        row = self.row("SpeedLimitController")
+        self.assertTrue(row.available)
+        request = row_change(row)
+        assert request is not None
+        self.assertTrue(self.owner.apply(request))
+        self.assertTrue(read_params(self.params).enabled)
+        self.assertIsNone(self.raw(DOCUMENT_KEY))
+        self.assertEqual(tuple(self.raw(key) for key in ("IsMetric", *(f"Offset{i}" for i in range(1, 8)))), original)
+    for key, raw in (("Offset1", b"bad"), (DOCUMENT_KEY, b"{bad"),
+                     (DOCUMENT_KEY, od.encode(od.NEEDS_REVIEW)), ("IsMetric", b"bad")):
+      with self.subTest(key=key, raw=raw):
+        for saved in ("Offset1", DOCUMENT_KEY, "IsMetric"):
+          path = Path(self.params.get_param_path(saved))
+          path.unlink(missing_ok=True)
+        self.params.put_bool("SpeedLimitController", False, block=True)
+        Path(self.params.get_param_path(key)).write_bytes(raw)
+        row = self.row("SpeedLimitController")
+        self.assertFalse(row.available)
+        self.assertIn("Repair invalid", row.reason)
+        self.assertFalse(self.owner.slc_offsets.ready_to_enable())
+
+  def test_unavailable_control_explains_vehicle_and_context_gate(self):
+    assert self.cp is not None
+    cp = self.cp
+    self.cp = None
+    self.assertIn("Select or connect", self.row("SpeedLimitController").reason)
+    self.cp = cp
+    cp.openpilotLongitudinalControl = False
+    self.assertIn("StarPilot speed control is unavailable", self.row("SpeedLimitController").reason)
+    cp.openpilotLongitudinalControl = True
+    self.parked = False
+    self.assertIn("settings context is unavailable", self.row("SpeedLimitController").reason)
+
   def test_explicit_adopt_edit_and_global_units_preserve_exact_si(self):
     self.params.put_bool("IsMetric", False, block=True)
     self.params.put("Offset1", 5.0, block=True)
     self.params.put("Offset7", -2.0, block=True)
     old = (self.raw("Offset1"), self.raw("Offset7"))
     before = read_params(self.params).offsets
-    self.assertFalse(self.row("SpeedLimitController").available)
+    self.assertTrue(self.row("SpeedLimitController").available)
     adopt = self.row("slc_adopt")
     self.assertFalse(self.owner.apply(FeatureSettingsRequest(adopt.key, adopt.source, "confirm",
                                                               vehicle_fingerprint=adopt.vehicle_fingerprint,

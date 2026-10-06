@@ -111,7 +111,7 @@ class SlcOffsetOwner:
 
   def ready_to_enable(self) -> bool:
     snap = self.snapshot()
-    return snap.raw_document is not None and isinstance(snap.document, od.OffsetDocument)
+    return snap.valid and isinstance(snap.document, od.OffsetDocument)
 
   def rows(self, allowed: bool, *, repair_allowed: bool | None = None) -> tuple[bool, tuple[FeatureRow, ...]]:
     snap = self.snapshot()
@@ -172,7 +172,7 @@ class SlcOffsetOwner:
       rows.append(FeatureRow("slc_reset", "Reset saved offsets", reset_ranges, snap.raw_document,
                              available=reset_available, related_source=snap.raw_unit, capability=capable,
                              dependencies=deps))
-    return snap.raw_document is not None and isinstance(snap.document, od.OffsetDocument), tuple(rows)
+    return snap.valid and isinstance(snap.document, od.OffsetDocument), tuple(rows)
 
   def _same(self, request: FeatureSettingsRequest, snap: OffsetSnapshot, *, require_capability: bool) -> bool:
     expected_deps = (("IsMetric", snap.raw_unit), ("SpeedLimitController", snap.raw_control))

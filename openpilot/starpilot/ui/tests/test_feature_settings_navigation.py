@@ -45,6 +45,132 @@ class FeatureNavigationTests(unittest.TestCase):
       self.assertTrue(session._feature_authority("preferences"))
       self.assertFalse(session._feature_authority("parked_preferences"))
 
+  def test_aol_save_does_not_block_navigation_or_queue_duplicate_requests(self):
+    import fcntl
+    from typing import Any
+    import threading
+    import time
+    from openpilot.starpilot.ui import runtime_app
+    from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsRequest
+    from openpilot.starpilot import saved_document
+
+    for profile, withdrawal in ((profile, withdrawal) for profile in (Profile.LARGE, Profile.COMPACT)
+                                for withdrawal in ("back", "cancel", "close")):
+      with self.subTest(profile=profile, withdrawal=withdrawal), tempfile.TemporaryDirectory() as directory:
+        params = Params(directory)
+        params.put_bool("AlwaysOnLateral", True, block=True)
+        session: Any = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+        session.profile = profile
+        session._mode = runtime_app.ShellMode.SETTINGS
+        session.selected = Destination.DRIVING_CONTROLS
+        session.feature_page, session.feature_root_page = "aol", "hub"
+        session.feature_scroll = 0
+        session.input = NS(cancel=lambda: None)
+        session.favorites = NS(cancel=lambda: None)
+        session.view = NS(onroad=NS(navigation=NS(cancel=lambda: None)), close=lambda: None)
+        session.drive_state = NS(physical=NS(close=lambda: None))
+        session.galaxy_flow = session.pip_warning = session.pip_renderer = session.fonts = NS(close=lambda: None)
+        session.bluetooth_source = session.model_source = session.map_source = None
+        session.feature_owner = FeatureSettingsOwner(params, lambda _: True, vehicle_fingerprint=lambda: None)
+        request = FeatureSettingsRequest("AlwaysOnLateral", b"1", "Off")
+        entered = threading.Event()
+        acquire = saved_document.acquire_native_lock
+
+        def blocked(fd, entered=entered, acquire=acquire):
+          entered.set()
+          acquire(fd)
+        root = Path(params.get_param_path("AlwaysOnLateral")).parent.parent
+        with (root / ".lock").open("a") as lock, patch.object(session, "_feature_authority", return_value=True), \
+             patch.object(session, "feature_snapshot", return_value=FeatureSettingsState(page="aol")), \
+             patch.object(saved_document, "acquire_native_lock", blocked):
+          fcntl.flock(lock, fcntl.LOCK_EX)
+          started = time.monotonic()
+          self.assertFalse(session.feature_request(request))
+          self.assertLess(time.monotonic() - started, .2)
+          pending = session._aol_save
+          self.assertTrue(entered.wait(1.))
+          self.assertEqual(Path(params.get_param_path("AlwaysOnLateral")).read_bytes(), b"1")
+          self.assertIn("Saving", session.notice)
+          self.assertFalse(session.feature_request(request))
+          self.assertIs(session._aol_save, pending)
+          if withdrawal == "back":
+            session._feature_ui(FeatureUiAction("back"))
+            self.assertEqual(session.feature_page, "hub")
+          else:
+            getattr(session, withdrawal)()
+            self.assertTrue(pending.cancel.is_set())
+          fcntl.flock(lock, fcntl.LOCK_UN)
+          self.assertTrue(pending.done.wait(1.))
+          session._poll_aol_save()
+          self.assertEqual(Path(params.get_param_path("AlwaysOnLateral")).read_bytes(), b"1")
+          self.assertIn("not saved", session.notice)
+          if withdrawal == "close":
+            self.assertFalse(session.feature_request(request))
+            self.assertIsNone(session._aol_save)
+            continue
+          session.feature_page = "aol"
+          self.assertFalse(session.feature_request(request))
+          pending = session._aol_save
+          self.assertTrue(pending.done.wait(1.))
+          session._poll_aol_save()
+          self.assertEqual(Path(params.get_param_path("AlwaysOnLateral")).read_bytes(), b"0")
+          self.assertEqual(session.notice, "AOL preference saved")
+          self.assertIsNone(session._aol_save)
+
+  def test_aol_enable_worker_rechecks_live_vehicle_after_native_lock(self):
+    import fcntl
+    import threading
+    from typing import Any
+    from openpilot.starpilot import saved_document
+    from openpilot.starpilot.ui import runtime_app
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import CAR
+
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[0][0x201] = 6
+    fingerprint[2][0x180] = 4
+    cp = CarInterface.get_params(CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, fingerprint, [], True, False, False)
+    current = [cp]
+    with tempfile.TemporaryDirectory() as directory:
+      params = Params(directory)
+      params.put_bool("AlwaysOnLateral", False, block=True)
+      session: Any = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+      session._mode = runtime_app.ShellMode.SETTINGS
+      session.selected = Destination.DRIVING_CONTROLS
+      session.feature_page = "aol"
+      session.feature_owner = FeatureSettingsOwner(params, lambda _: True, vehicle_fingerprint=lambda: cp.carFingerprint,
+                                                   vehicle_params=lambda: current[0])
+      def request():
+        state = session.feature_owner.snapshot("aol", parked=True, system_long=True, lateral_context=True, metric=False)
+        row = next(row for row in state.rows if row.key == "AlwaysOnLateral")
+        self.assertTrue(row.available)
+        return row_change(row)
+      with patch.object(session, "_feature_authority", return_value=True):
+        self.assertFalse(session.feature_request(request()))
+        self.assertTrue(session._aol_save.done.wait(1.))
+        session._poll_aol_save()
+        self.assertTrue(params.get_bool("AlwaysOnLateral"))
+        self.assertEqual(session.notice, "AOL preference saved")
+        params.put_bool("AlwaysOnLateral", False, block=True)
+        entered = threading.Event()
+        acquire = saved_document.acquire_native_lock
+        def blocked(fd):
+          entered.set()
+          acquire(fd)
+        root = Path(params.get_param_path("AlwaysOnLateral")).parent.parent
+        with (root / ".lock").open("a") as lock, patch.object(saved_document, "acquire_native_lock", blocked):
+          fcntl.flock(lock, fcntl.LOCK_EX)
+          self.assertFalse(session.feature_request(request()))
+          pending = session._aol_save
+          self.assertTrue(entered.wait(1.))
+          current[0] = None
+          fcntl.flock(lock, fcntl.LOCK_UN)
+          self.assertTrue(pending.done.wait(1.))
+          session._poll_aol_save()
+          self.assertFalse(params.get_bool("AlwaysOnLateral"))
+          self.assertIn("not saved", session.notice)
+
   def test_large_root_tile_geometry_and_destination(self):
     state = SettingsState()
     self.assertEqual(tile_rects(state)[2], (1611, 112, 529, 461))

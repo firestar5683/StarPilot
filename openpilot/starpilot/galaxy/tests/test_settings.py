@@ -46,6 +46,32 @@ class SettingsGatewayTest(unittest.TestCase):
   def page(self, name):
     return self.gateway.page(name, self.session, self.generation)
 
+  def test_enabled_aol_can_be_disabled_without_supported_vehicle(self):
+    self.params.put('AlwaysOnLateral', True, block=True)
+    self.context.value = AuthorityContext(True, None, None)
+    page = self.page('aol')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Enable Always On Lateral')
+    self.assertTrue(page['rows'][index]['available'])
+    intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value='Off')
+    self.assertTrue(self.gateway.confirm(intent['intent'], self.session, self.generation))
+    self.assertFalse(self.params.get_bool('AlwaysOnLateral'))
+    row = next(row for row in self.page('aol')['rows'] if row['label'] == 'Enable Always On Lateral')
+    self.assertFalse(row['available'], 'Enabling still requires an actual supported capability')
+
+  def test_aol_off_rechecks_session_authority_after_parameter_lock(self):
+    self.params.put('AlwaysOnLateral', True, block=True)
+    self.context.value = AuthorityContext(True, None, None)
+    page = self.page('aol')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Enable Always On Lateral')
+    intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value='Off')
+    acquire = saved_document.acquire_native_lock
+    def revoke(fd):
+      acquire(fd)
+      self.context.value = AuthorityContext(True, None, b'changed-vehicle-context')
+    with mock.patch('openpilot.starpilot.saved_document.acquire_native_lock', side_effect=revoke):
+      self.assertFalse(self.gateway.confirm(intent['intent'], self.session, self.generation))
+    self.assertTrue(self.params.get_bool('AlwaysOnLateral'))
+
   def test_pcm_cruise_long_owner_can_configure_slc_without_custom_cruise_authority(self):
     cp = self.context.value.cp
     cp.carFingerprint = "TOYOTA_HIGHLANDER_TSS2"
