@@ -40,6 +40,8 @@ def policy_for(cp):
 
 
 class CancelCredit:
+  DRIVER_OVERRIDE_LENGTHS = {0xBD: 7, 0xC9: 8, 0x1C4: 8, 0x1F5: 8}
+
   """One cancellation per sequential, byte-valid neutral wheel-button packet."""
 
   def __init__(self):
@@ -47,17 +49,29 @@ class CancelCredit:
     self.packet_ns = self.source_ns = self.credit_ns = 0
     self.main_ns = self.stock_ns = 0
     self.main = self.stock_active = False
+    self.override_ns = {}
 
-  def observe(self, can_packets):
+  def observe(self, can_packets, *, clear_on_main_off=False, clear_on_driver_override=False):
     # Decoded signals omit reserved bits. Observe ordered physical packets so
     # the sender cannot grant credit for a button frame Panda would reject.
     for stamp, packets in can_packets:
       for address, raw, bus in packets:
         if bus != 0:
           continue
+        if clear_on_driver_override and stamp > self.override_ns.get(address, 0):
+          if address in self.DRIVER_OVERRIDE_LENGTHS and len(raw) == self.DRIVER_OVERRIDE_LENGTHS[address]:
+            self.override_ns[address] = stamp
+            override = ((address == 0xBD and raw[0] >> 4 != 0) or
+                        (address == 0xC9 and raw[5] & 1 != 0) or
+                        (address == 0x1C4 and raw[5] != 0) or
+                        (address == 0x1F5 and (raw[3] & 15 not in (4, 6) or raw[5] & 2 != 0)))
+            if override:
+              self.credit_ns = 0
         if address == 0xC9:
           self.main_ns = stamp if len(raw) == 8 and stamp > 0 else 0
           self.main = bool(self.main_ns and raw[3] & 0x20)
+          if clear_on_main_off and not self.main:
+            self.credit_ns = 0
         elif address == 0x3D1:
           self.stock_ns = stamp if len(raw) == 8 and stamp > 0 else 0
           self.stock_active = bool(self.stock_ns and raw[4] & 0x80)

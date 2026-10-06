@@ -54,6 +54,7 @@ def policy_for(cp):
   if (is_conventional_cc_pedal_profile(cp) or is_ordinary_camera_profile(cp, longitudinal=True) or
       is_ordinary_cc_profile(cp) or is_bolt_cc_profile(cp) or is_bolt_euv_longitudinal(cp)):
     return BoltModeTransition()
+  from opendbc.car.gm.values import gm_control_word
   base = GMSafetyFlags.HW_CAM | GMSafetyFlags.EV | GMSafetyFlags.PEDAL_LONG | GMSafetyFlags.PADDLE_SCHED
   words = {
     CAR.CHEVROLET_BOLT_CC_2017: base | GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_2017,
@@ -64,6 +65,6 @@ def policy_for(cp):
   if (pedal_policy_for(cp) is not None and not cp.flags & GMFlags.CC_LONG.value and
       len(cp.safetyConfigs) == 1 and
       cp.networkLocation == CarParams.NetworkLocation.fwdCamera and
-      cp.safetyConfigs[0].safetyParam == words.get(cp.carFingerprint)):
+      gm_control_word(cp) == words.get(cp.carFingerprint)):
     return BoltModeTransition()
   return None

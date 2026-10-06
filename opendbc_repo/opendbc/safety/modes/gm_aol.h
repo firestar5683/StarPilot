@@ -4,12 +4,14 @@
 #define GM_AOL_MAIN_TIMEOUT_US 300000U
 
 static bool gm_aol_enabled = false;
+static bool gm_aol_stock_only = false;
 static bool gm_aol_main = false;
 static bool gm_aol_main_seen = false;
 static uint32_t gm_aol_main_us = 0U;
 
 static void gm_aol_reset(void) {
   gm_aol_enabled = false;
+  gm_aol_stock_only = false;
   gm_aol_main = false;
   gm_aol_main_seen = false;
   gm_aol_main_us = 0U;
@@ -30,7 +32,7 @@ static uint8_t gm_aol_permission_mask(void) {
     if (main_current) {
       permission = request & 0x1U;
     }
-    if (controls_allowed && ((request & 0x2U) != 0U)) {
+    if (!gm_aol_stock_only && controls_allowed && ((request & 0x2U) != 0U)) {
       permission |= 0x2U;
     }
   }
@@ -90,6 +92,8 @@ static bool gm_aol_profile_word(uint16_t word) {
     case 0xE110U: case 0xE111U: case 0xE112U: case 0xE113U:
     case 0xC171U: case 0xC172U: case 5U:
     case 0xBDU: case 0x9DU: case 0x19DU: case 0x1CDU:
+    case 0xE710U: case 0xE711U: case 0xE712U: case 0xE713U:
+    case 0xE700U: case 0xE701U: case 0xE702U: case 0xE703U:
     case 0x205U: case 0x605U: case 0xA05U: case 0xE05U:
     case 0xC160U: case 0xC180U: case 0xC181U:
     case 0xC182U: case 0xC183U: case 0xC184U: case 0xC185U: case 0xC186U: case 0xC187U:

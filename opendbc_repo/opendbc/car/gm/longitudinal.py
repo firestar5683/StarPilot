@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from opendbc.car.gm.values import (CAR, GMFlags, GMSafetyFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, is_volt_longitudinal,
+from opendbc.car.gm.values import (gm_control_word, CAR, GMFlags, GMSafetyFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, is_volt_longitudinal,
                                   is_volt_gateway_longitudinal, is_bolt_euv_longitudinal, is_ordinary_ascm_profile, is_ordinary_sdgm_profile)
 from opendbc.car.structs import car
 
@@ -340,7 +340,7 @@ def volt_policy_for(cp) -> GMVoltLongitudinalPolicy | None:
 def policy_for(cp) -> GMPedalLongitudinalPolicy | None:
   """Admit only the already selected, exact GM Bolt interceptor path."""
   try:
-    flags = int(cp.safetyConfigs[0].safetyParam)
+    flags = gm_control_word(cp)
     required = int(GMSafetyFlags.PEDAL_LONG | GMSafetyFlags.PADDLE_SCHED)
     candidate = cp.carFingerprint
     return (GMPedalLongitudinalPolicy(candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,

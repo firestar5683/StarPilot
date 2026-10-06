@@ -11,8 +11,13 @@ from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.values import CAR, DBC, GMFlags, GMSafetyFlags, NO_ACC_BOLT_CAR, PEDAL_BOLT_CAR
 
 
-def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=False, camera=False):
+def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=False, camera=False, removed=False):
   fingerprint = gen_empty_fingerprint()
+  if not removed:
+    fingerprint[2][0x320] = 8
+  else:
+    fingerprint[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0xC9: 8, 0x1C4: 8, 0x1E1: 7,
+                           0x1F5: 8, 0xBD: 7, 0x232: 8, 0x3D1: 8, 0xBE: 6})
   if camera:
     fingerprint[2][0x180] = 4
   if pedal:
@@ -21,6 +26,81 @@ def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=
 
 
 class TestBoltPedalIdentity(unittest.TestCase):
+  def test_removed_pedal_factory_has_one_physical_parser_owner(self):
+    from opendbc.car.gm.values import (BOLT_PEDAL_REMOVED_CARS, BOLT_PEDAL_REMOVED_STOCK_WORDS,
+                                      is_bolt_pedal_profile, is_bolt_pedal_removed_profile)
+    for index, candidate in enumerate(BOLT_PEDAL_REMOVED_CARS):
+      with self.subTest(candidate=candidate):
+        cp = params(candidate, pedal=True, removed=True)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE700 + index)
+        self.assertTrue(is_bolt_pedal_removed_profile(cp))
+        self.assertTrue(cp.openpilotLongitudinalControl)
+        self.assertFalse(cp.pcmCruise)
+        for stock in (False, True):
+          selected = cp.as_reader().as_builder()
+          if stock:
+            selected.safetyConfigs[0].safetyParam = BOLT_PEDAL_REMOVED_STOCK_WORDS[candidate]
+            selected.openpilotLongitudinalControl = False
+            selected.pcmCruise = True
+          self.assertTrue(is_bolt_pedal_removed_profile(selected, stock_only=stock))
+          state = CarState(selected)
+          parsers = state.get_can_parsers(selected)
+          for parser in parsers.values():
+            parser.update([(1_000_000_000, [])])
+          state.update(parsers)
+          self.assertFalse(parsers[Bus.cam].message_states)
+          self.assertNotIn(0x180, parsers[Bus.pt].message_states)
+          self.assertIn(0x180, parsers[Bus.loopback].message_states)
+          self.assertEqual(0x201 in parsers[Bus.pt].message_states, not stock)
+        missing = params(candidate, pedal=False, removed=True)
+        self.assertFalse(is_bolt_pedal_removed_profile(missing))
+        present = params(candidate, pedal=True)
+        self.assertTrue(is_bolt_pedal_profile(present))
+        self.assertFalse(is_bolt_pedal_removed_profile(present))
+
+  def test_removed_acc_admission_keeps_both_physical_cruise_sources(self):
+    cp = params(CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, pedal=True, removed=True)
+    cs = CarState(cp)
+    parsers = cs.get_can_parsers(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    controller = CarController(DBC[cp.carFingerprint], cp)
+    control = structs.CarControl(longActive=True)
+    for tick, (acc, cruise) in enumerate(((1, 0), (0, 1), (0, 0)), 1):
+      now = 1_000_000_000 + tick * 20_000_000
+      frames = [packer.make_can_msg("AcceleratorPedal2", 0, {"CruiseState": acc}),
+                packer.make_can_msg("ECMCruiseControl", 0, {"CruiseActive": cruise})]
+      parsers[Bus.pt].update([(now, frames)])
+      cs.out = cs.update(parsers)
+      self.assertEqual(cs.bolt_pedal_removed_acc_active, bool(acc))
+      self.assertEqual(cs.out.cruiseState.enabled, bool(cruise))
+      self.assertEqual(controller.bolt_pedal_admission(control, cs, now)[1], not (acc or cruise))
+
+  def test_reduced_stock_cancel_credit_requires_new_slot_after_driver_override(self):
+    from opendbc.car.gm.conventional_pedal import CancelCredit
+    packer = CANPacker(DBC[CAR.CHEVROLET_BOLT_CC_2017][Bus.pt])
+    neutral = packer.make_can_msg("ASCMSteeringButton", 0, {
+      "ACCAlwaysOne": 1, "ACCButtons": 1, "RollingCounter": 0, "SteeringButtonChecksum": 0xFF})
+    overrides = ((0xBD, bytes((0x20, 0, 0, 0, 0, 0, 0))),
+                 (0xC9, bytes((0, 0, 0, 32, 0, 1, 0, 0))),
+                 (0x1C4, bytes((0, 0, 0, 0, 0, 1, 0, 0))),
+                 (0x1F5, bytes((0, 0, 0, 3, 0, 0, 0, 0))))
+    for address, raw in overrides:
+      for scoped in (False, True):
+        with self.subTest(address=address, scoped=scoped):
+          credit = CancelCredit()
+          credit.observe([(1_000_000_000, [neutral])], clear_on_driver_override=scoped)
+          self.assertGreater(credit.credit_ns, 0)
+          released = (bytes((0, 0, 0, 32, 0, 0, 0, 0)) if address == 0xC9 else
+                      bytes((0, 0, 0, 4, 0, 0, 0, 0)) if address == 0x1F5 else bytes(len(raw)))
+          credit.observe([(1_010_000_000, [(address, raw, 0)]),
+                          (1_020_000_000, [(address, released, 0)])],
+                         clear_on_driver_override=scoped)
+          self.assertEqual(credit.credit_ns, 0 if scoped else 1_000_000_000)
+          next_neutral = packer.make_can_msg("ASCMSteeringButton", 0, {
+            "ACCAlwaysOne": 1, "ACCButtons": 1, "RollingCounter": 1, "SteeringButtonChecksum": 0x5EE})
+          credit.observe([(1_030_000_000, [next_neutral])], clear_on_driver_override=scoped)
+          self.assertEqual(credit.credit_ns, 1_030_000_000)
+
   def test_no_acc_fixed_stop_preserves_calc_memory_and_emits_neutral(self):
     for candidate in NO_ACC_BOLT_CAR:
       with self.subTest(candidate=candidate):

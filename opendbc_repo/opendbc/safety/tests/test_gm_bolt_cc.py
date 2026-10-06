@@ -157,3 +157,59 @@ class TestGmBoltCcSafety(unittest.TestCase):
     self.assertTrue(libsafety_py.libsafety.get_controls_allowed())
     self.assertTrue(packet(0x180, bytes(4), 1_001_000, transmit=True))
     self.assertFalse(packet(0x200, bytes(6), 1_001_000, transmit=True))
+
+
+class TestGmRemovedBoltStockSafety(unittest.TestCase):
+  def test_reduced_stock_has_cancel_only_physical_button_authority(self):
+    for word in (0xE710, 0xE711, 0xE712, 0xE713):
+      for button in (2, 3, 6):
+        with self.subTest(word=word, button=button):
+          ready(word)
+          packet(0xC9, bytes((0, 0, 0, 32, 0, 0, 0, 0)), 1_000_001)
+          self.assertEqual(packet(0x1E1, button_bytes(button, 1), 1_001_000, transmit=True), button == 6)
+          if button == 6:
+            self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_002_000, transmit=True))
+          for address, length in ((0x200, 6), (0x315, 5), (0xBD, 7), (0x1F5, 8), (0x409, 7), (0x40A, 7)):
+            self.assertFalse(packet(address, bytes(length), 1_002_000, transmit=True))
+          self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_002_000, transmit=True, bus=2))
+
+  def test_reduced_stock_requires_current_cruise_and_neutral_credit(self):
+    for word in (0xE710, 0xE711, 0xE712, 0xE713):
+      with self.subTest(word=word):
+        ready(word)
+        packet(0xC9, bytes((0, 0, 0, 32, 0, 0, 0, 0)), 1_000_001)
+        self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_100_001, transmit=True))
+        ready(word)
+        packet(0xC9, bytes((0, 0, 0, 32, 0, 0, 0, 0)), 1_000_001)
+        packet(0x3D1, bytes(8), 1_001_000)
+        self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_002_000, transmit=True))
+        ready(word)
+        packet(0xC9, bytes((0, 0, 0, 32, 0, 0, 0, 0)), 1_000_001)
+        self.assertTrue(packet(0x1E1, button_bytes(6, 1), 1_001_000, transmit=True))
+        packet(0x1E1, button_bytes(1, 0), 1_002_000)
+        self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_003_000, transmit=True))
+
+  def test_stock_dispatch_resets_to_existing_manual_button_authority(self):
+    for stock, ordinary in ((0xE710, 0xC111), (0xE711, 0xC121), (0xE712, 0xC131), (0xE713, 0xC141)):
+      for word, expected in ((stock, False), (ordinary, True), (stock, False)):
+        ready(word)
+        packet(0xC9, bytes((0, 0, 0, 32, 0, 0, 0, 0)), 1_000_001)
+        libsafety_py.libsafety.set_controls_allowed(True)
+        self.assertEqual(packet(0x1E1, button_bytes(2, 1), 1_001_000, transmit=True), expected)
+
+  def test_stock_main_cycle_cannot_restore_consumed_or_withdrawn_credit(self):
+    for word in (0xE710, 0xE711, 0xE712, 0xE713):
+      ready(word)
+      packet(0xC9, bytes(8), 1_000_001)
+      packet(0xC9, bytes((0, 0, 0, 32, 0, 0, 0, 0)), 1_000_002)
+      self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_001_000, transmit=True))
+      packet(0x1E1, button_bytes(1, 1), 1_002_000)
+      self.assertTrue(packet(0x1E1, button_bytes(6, 2), 1_003_000, transmit=True))
+
+  def test_unknown_removed_bolt_words_cannot_borrow_stock_or_active_authority(self):
+    for word in (0xE6FF, 0xE704, 0xE70F, 0xE714, 0xE7FF):
+      setup(word)
+      libsafety_py.libsafety.set_controls_allowed(True)
+      self.assertFalse(packet(0x180, bytes(4), transmit=True))
+      self.assertFalse(packet(0x1E1, button_bytes(6, 1), transmit=True))
+      self.assertFalse(packet(0x409, bytes(7), transmit=True))

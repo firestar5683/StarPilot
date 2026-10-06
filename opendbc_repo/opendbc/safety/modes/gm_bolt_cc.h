@@ -10,6 +10,8 @@ static bool gm_aol_mode_valid(void);
 
 static GmBoltCcGate gm_bolt_cc_state;
 static bool gm_bolt_cc_removed;
+static bool gm_bolt_cc_stock_only;
+static bool gm_bolt_cc_stock_main;
 static unsigned int gm_bolt_cc_generation;
 static uint8_t gm_bolt_cc_pscm[8];
 static uint64_t gm_bolt_cc_pscm_tx_ns;
@@ -43,6 +45,10 @@ static void gm_bolt_cc_profile_rx(const CANPacket_t *msg) {
       if (msg->addr == 0x34AU) {
         vehicle_moving = gm_bolt_cc_state.speed > (0.311F / 3.6F);
       }
+      if (gm_bolt_cc_stock_only && (msg->addr == 0xC9U)) {
+        gm_bolt_cc_stock_main = GET_BIT(msg, 29U);
+        if (!gm_bolt_cc_stock_main) { gm_bolt_cc_state.credit = false; }
+      }
       brake_pressed = gm_bolt_cc_state.brake;
       gas_pressed = gm_bolt_cc_state.gas;
       regen_braking = gm_bolt_cc_state.regen;
@@ -61,7 +67,8 @@ static bool gm_bolt_cc_profile_tx(const CANPacket_t *msg) {
   }
   bool allowed = false;
   if (msg->addr == 0x1E1U) {
-    allowed = gm_bolt_cc_transmit(&gm_bolt_cc_state, msg->addr, msg->bus, msg->data, GET_LEN(msg), now,
+    const bool stock_cancel = !gm_bolt_cc_stock_only || (gm_bolt_cc_stock_main && (((msg->data[5] >> 4U) & 7U) == 6U));
+    allowed = stock_cancel && gm_bolt_cc_transmit(&gm_bolt_cc_state, msg->addr, msg->bus, msg->data, GET_LEN(msg), now,
                                   longitudinal_controls_allowed(), get_longitudinal_allowed());
   } else if ((msg->addr == 0x180U) && (msg->bus == 0U) && (GET_LEN(msg) == 4U)) {
     allowed = fresh && (!gm_aol_lateral_allowed() || gm_bolt_cc_state.drive) && gm_tx_hook(msg);
@@ -167,6 +174,13 @@ static safety_config gm_bolt_cc_profile_init(uint16_t tag) {
   if (gm_bolt_cc_removed) {
     SET_TX_MSGS(removed_tx, ret);
   }
+  if (gm_bolt_cc_stock_only) {
+    static const CanMsg stock_tx[] = {
+      {0x180U, 0U, 4U, .check_relay = false}, {0x1E1U, 0U, 7U, .check_relay = false},
+      {0x184U, 2U, 8U, .check_relay = false}
+    };
+    SET_TX_MSGS(stock_tx, ret);
+  }
   if (gm_bolt_cc_generation == 0U) {
     SET_TX_MSGS(denied_tx, ret);
   }
@@ -179,6 +193,13 @@ static unsigned int gm_bolt_cc_tag(uint16_t word) {
   static const uint16_t GM_BOLT_CC_WORDS[6] = {0xC110U, 0xC111U, 0xC120U, 0xC121U, 0xC130U, 0xC131U};
 
   unsigned int tag = (word == 0xC140U) ? 7U : 0U;
+  switch (word) {
+    case 0xE710U: tag = 2U; break;
+    case 0xE711U: tag = 4U; break;
+    case 0xE712U: tag = 6U; break;
+    case 0xE713U: tag = 8U; break;
+    default: break;
+  }
   if (word == 0xC141U) {
     tag = 8U;
   }
@@ -194,10 +215,13 @@ static unsigned int gm_bolt_cc_tag(uint16_t word) {
 static bool gm_bolt_cc_selected;
 
 static safety_config gm_bolt_cc_init(uint16_t word) {
+  gm_bolt_cc_stock_main = false;
+  gm_bolt_cc_stock_only = (word == 0xE710U) || (word == 0xE711U) || (word == 0xE712U) || (word == 0xE713U);
   const unsigned int tag = gm_bolt_cc_tag(word);
   gm_bolt_cc_selected = tag != 0U;
   safety_config ret = (tag != 0U) ? gm_bolt_cc_profile_init((uint16_t)tag) : gm_init(word);
   gm_aol_initialize(gm_aol_profile_word(word) && gm_aol_mode_valid());
+  gm_aol_stock_only = gm_bolt_cc_stock_only;
   return ret;
 }
 

@@ -143,6 +143,8 @@ VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
 
 def gm_control_word(cp: CarParams) -> int:
   word = int(cp.safetyConfigs[0].safetyParam)
+  if is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True):
+    return int(BOLT_PEDAL_STOCK_WORDS[cp.carFingerprint] if not cp.openpilotLongitudinalControl else BOLT_PEDAL_WORDS[cp.carFingerprint])
   if word in VOLT_CC_PEDAL_PROFILES and volt_cc_pedal_profile(cp) is not None:
     return 5
   if word in CAMERA_ACC_PEDAL_PROFILES:
@@ -228,6 +230,8 @@ def uses_camera_stock_controls(cp: CarParams) -> bool:
 
 
 def requires_camera_state_sources(cp: CarParams) -> bool:
+  if is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True):
+    return False
   profile = camera_acc_pedal_profile(cp)
   if profile is not None:
     return not profile.removed
@@ -804,8 +808,30 @@ BOLT_PEDAL_STOCK_WORDS = MappingProxyType({**BOLT_PEDAL_WORDS,
                                          CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL: GMSafetyFlags.HW_CAM | GMSafetyFlags.EV})
 
 
+BOLT_PEDAL_REMOVED_CARS = (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
+                           CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+BOLT_PEDAL_REMOVED_WORDS = MappingProxyType({candidate: 0xE700 + index for index, candidate in enumerate(BOLT_PEDAL_REMOVED_CARS)})
+BOLT_PEDAL_REMOVED_STOCK_WORDS = MappingProxyType({candidate: 0xE710 + index for index, candidate in enumerate(BOLT_PEDAL_REMOVED_CARS)})
+
+
+def is_bolt_pedal_removed_profile(cp, *, stock_only=False):
+  words = BOLT_PEDAL_REMOVED_STOCK_WORDS if stock_only else BOLT_PEDAL_REMOVED_WORDS
+  try:
+    return (cp.brand == 'gm' and cp.carFingerprint in words and cp.transmissionType == CarParams.TransmissionType.direct and
+            cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.radarUnavailable and
+            not (cp.passive or cp.dashcamOnly or cp.notCar or cp.alphaLongitudinalAvailable) and
+            bool(cp.openpilotLongitudinalControl) is not stock_only and bool(cp.pcmCruise) is stock_only and
+            int(cp.flags) & ~int(GMFlags.HAS_BSM) == int(GMFlags.PEDAL_LONG | GMFlags.NO_CAMERA) and
+            len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+            int(cp.safetyConfigs[0].safetyParam) == words[cp.carFingerprint])
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False
+
+
 def is_bolt_pedal_profile(cp, *, stock_only=False):
   """Exact selected interceptor profile, including its startup authority reduction."""
+  if is_bolt_pedal_removed_profile(cp, stock_only=stock_only):
+    return True
   words = BOLT_PEDAL_STOCK_WORDS if stock_only else BOLT_PEDAL_WORDS
   return (cp.brand == 'gm' and cp.carFingerprint in words and
           cp.networkLocation == CarParams.NetworkLocation.fwdCamera and

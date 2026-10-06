@@ -181,6 +181,7 @@ class FeatureNavigationTests(unittest.TestCase):
 
     fingerprint = gen_empty_fingerprint()
     fingerprint[0][0x201] = 6
+    fingerprint[2][0x320] = 8
     fingerprint[2][0x180] = 4
     cp = CarInterface.get_params(CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, fingerprint, [], True, False, False)
     current = [cp]

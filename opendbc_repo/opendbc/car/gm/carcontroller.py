@@ -25,7 +25,7 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
                                    is_ordinary_camera_profile, is_ordinary_camera_removed,
                                    is_ordinary_sdgm_profile,
                                    is_volt_camera_longitudinal, is_volt_camera_stock, is_volt_sdgm_profile, is_volt_camera_removed,
-                                   NO_ACC_BOLT_CAR, is_bolt_pedal_profile, is_bolt_euv_longitudinal,
+                                   NO_ACC_BOLT_CAR, is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_bolt_euv_longitudinal,
                                    is_volt_cc_longitudinal, is_volt_cc_profile, is_ordinary_cc_profile,
                                    CC_GATEWAY_STOCK_CAR, uses_camera_stock_controls, CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarControllerBase
@@ -244,6 +244,8 @@ class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
     self.long_pitch = True
+    self.bolt_removed_cancel_credit_used = 0
+    self.bolt_pedal_removed = is_bolt_pedal_removed_profile(CP) or is_bolt_pedal_removed_profile(CP, stock_only=True)
     self.gm_acc_tune_input = None
     self.gm_acc_tune = False
     self.start_time = 0.
@@ -338,9 +340,13 @@ class CarController(CarControllerBase):
                     0 <= age_ns <= PEDAL_SENSOR_TIMEOUT_NS)
     stock_acc = self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
     stock_age = now_nanos - CS.stock_acc_status_ts_nanos if stock_acc else 0
+    removed_stock_current = (not self.bolt_pedal_removed or
+                             CS.bolt_pedal_removed_stock_ts_nanos > 0 and
+                             0 <= now_nanos - CS.bolt_pedal_removed_stock_ts_nanos <= STOCK_ACC_STATUS_TIMEOUT_NS)
     owner_clear = (not stock_acc or
                    (CS.stock_acc_status_ts_nanos > 0 and 0 <= stock_age <= STOCK_ACC_STATUS_TIMEOUT_NS and
-                    not CS.out.cruiseState.enabled))
+                    not CS.out.cruiseState.enabled and removed_stock_current and
+                    (not self.bolt_pedal_removed or not CS.bolt_pedal_removed_acc_active)))
     in_regen_gear = CS.out.gearShifter == structs.CarState.GearShifter.low
     drive_ready = in_regen_gear or (stock_acc and CS.out.gearShifter == structs.CarState.GearShifter.drive)
     if stock_acc:
@@ -517,12 +523,18 @@ class CarController(CarControllerBase):
                            all(stamp > 0 and 0 <= now_nanos - stamp <= 300_000_000 for stamp in CS.volt_removed_sources))
     if self.conventional_pedal_profile:
       stock_steer_ready = conventional_pedal_sources_current(CS, now_nanos) and CS.out.cruiseState.available
+    if self.bolt_pedal_removed:
+      sources = CS.bolt_pedal_removed_sources
+      stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(sources) == (9 if self.CP.openpilotLongitudinalControl else 7) and
+                           all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources))
+      if self.CP.openpilotLongitudinalControl:
+        stock_steer_ready = stock_steer_ready and CS.pedal_sensor_healthy and 0 < CS.pedal_sensor_ts_nanos <= now_nanos <= CS.pedal_sensor_ts_nanos + PEDAL_SENSOR_TIMEOUT_NS
     lat_active = CC.latActive and stock_steer_ready
 
     # Steering (Active: 50Hz, inactive: 10Hz)
     steer_step = self.params.STEER_STEP if lat_active else self.params.INACTIVE_STEER_STEP
 
-    if (self.CP.networkLocation == NetworkLocation.fwdCamera and
+    if (not self.bolt_pedal_removed and self.CP.networkLocation == NetworkLocation.fwdCamera and
         not (self.conventional_pedal_profile and not self.silverado_cc_pedal_profile and self.CP.flags & GMFlags.NO_CAMERA)):
       # Also send at 50Hz:
       # - on startup, first few msgs are blocked
@@ -540,7 +552,7 @@ class CarController(CarControllerBase):
     last_lka_steer_msg_ms = (now_nanos - CS.loopback_lka_steering_cmd_ts_nanos) * 1e-6
     if (self.frame - self.last_steer_frame) >= steer_step and last_lka_steer_msg_ms > MIN_STEER_MSG_INTERVAL_MS:
       # Initialize ASCMLKASteeringCmd counter using the camera until we get a msg on the bus
-      if CS.loopback_lka_steering_cmd_ts_nanos == 0:
+      if CS.loopback_lka_steering_cmd_ts_nanos == 0 and not self.bolt_pedal_removed:
         self.lka_steering_cmd_counter = CS.pt_lka_steering_cmd_counter + 1
 
       if lat_active and not (self.ordinary_cc_profile and CC.enabled and not CS.out.cruiseState.enabled and not aol_lateral):
@@ -724,8 +736,12 @@ class CarController(CarControllerBase):
               active and CS.out.standstill and actuators.longControlState == LongCtrlState.stopping, self.CP))
         else:
           self.apply_brake = 0
+      if self.bolt_pedal_removed and self.frame % 100 == 0:
+        can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
       # Stock ACC on the equipped variant is canceled while pedal control owns longitudinal.
       if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and CS.out.cruiseState.enabled and
+          (not self.bolt_pedal_removed or stock_steer_ready and CS.bolt_pedal_removed_stock_ts_nanos > 0 and
+           0 <= now_nanos - CS.bolt_pedal_removed_stock_ts_nanos <= STOCK_ACC_STATUS_TIMEOUT_NS) and
           (self.frame - self.last_button_frame) * DT_CTRL > 0.04):
         self.last_button_frame = self.frame
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
@@ -944,7 +960,7 @@ class CarController(CarControllerBase):
         self.last_button_frame = self.frame
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
-    elif (self.volt_cc_pedal_profile is None and not self.volt_cc_profile and not self.ordinary_cc_profile and not self.bolt_cc_profile and
+    elif (not self.bolt_pedal_removed and self.volt_cc_pedal_profile is None and not self.volt_cc_profile and not self.ordinary_cc_profile and not self.bolt_cc_profile and
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
@@ -961,6 +977,17 @@ class CarController(CarControllerBase):
           cancel_bus = (CanBus.POWERTRAIN if cc_gateway or gm_control_word(self.CP) & GMSafetyFlags.SDGM_CANCEL_PT.value
                         else CanBus.CAMERA)
           can_sends.append(gmcan.create_buttons(self.packer_pt, cancel_bus, CS.buttons_counter, CruiseButtons.CANCEL))
+
+    if self.bolt_pedal_removed and not self.CP.openpilotLongitudinalControl:
+      self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
+      credit = CS.conventional_cancel_credit
+      if (self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and stock_steer_ready and
+          (self.frame - self.last_button_frame) * DT_CTRL > .04 and
+          credit.available(now_nanos, self.bolt_removed_cancel_credit_used) and
+          0 <= now_nanos - credit.credit_ns <= 100_000_000):
+        self.last_button_frame = self.frame
+        self.bolt_removed_cancel_credit_used = credit.credit_ns
+        can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (credit.counter + 1) % 4, CruiseButtons.CANCEL))
 
     if self.silverado_cc_pedal_profile:
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
@@ -991,6 +1018,14 @@ class CarController(CarControllerBase):
       self.last_button_frame = self.frame
       can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN,
                                            (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
+
+    if (self.bolt_pedal_removed and self.CP.openpilotLongitudinalControl and self.CP.carFingerprint in NO_ACC_BOLT_CAR and
+        stock_steer_ready and CS.bolt_pedal_removed_stock_active and (self.frame - self.last_button_frame) * DT_CTRL > .04 and
+        CS.conventional_cancel_credit.available(now_nanos, self.bolt_removed_cancel_credit_used) and
+        0 <= now_nanos - CS.conventional_cancel_credit.credit_ns <= 100_000_000):
+      self.last_button_frame = self.frame
+      self.bolt_removed_cancel_credit_used = CS.conventional_cancel_credit.credit_ns
+      can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
 
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.bolt_cc_profile:
       # Silence "Take Steering" alert sent by camera, forward PSCMStatus with HandsOffSWlDetectionStatus=1

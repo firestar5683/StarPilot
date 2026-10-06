@@ -15,6 +15,7 @@ from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 
 def params(identity, pedal=False, alpha=False):
   fingerprint = gen_empty_fingerprint()
+  fingerprint[2][0x320] = 8
   fingerprint[2][0x180] = 4
   if pedal:
     fingerprint[0][0x201] = 6

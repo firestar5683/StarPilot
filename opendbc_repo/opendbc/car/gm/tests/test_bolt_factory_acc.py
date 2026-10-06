@@ -12,6 +12,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 def factory_params(alpha=True, release=False, present=False, pedal=False):
   fingerprint = gen_empty_fingerprint()
   fingerprint[2][0x180] = 4
+  fingerprint[2][0x320] = 8
   if present:
     fingerprint[0][0x201] = 6
   return CarInterface.get_params(CAR.CHEVROLET_BOLT_ACC_2022_2023, fingerprint, [], alpha, release, False)

@@ -14,7 +14,7 @@ from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerPara
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
                                    ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS, is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
                                    CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
-                                       VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
+                                       VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS, is_bolt_pedal_removed_profile)
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -40,6 +40,10 @@ class CarInterface(CarInterfaceBase):
     return super().get_params(pedal_candidate(candidate, fingerprint), fingerprint, car_fw, alpha_long, is_release, docs)
 
   def update(self, can_packets):
+    if (is_bolt_pedal_removed_profile(self.CP) or is_bolt_pedal_removed_profile(self.CP, stock_only=True)):
+      self.CS.conventional_cancel_credit.observe(
+        can_packets, clear_on_main_off=True,
+        clear_on_driver_override=is_bolt_pedal_removed_profile(self.CP, stock_only=True))
     if volt_cc_pedal_profile(self.CP) is not None:
       self.CS.conventional_cancel_credit.observe(can_packets)
     if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP) and not self.CP.openpilotLongitudinalControl:
@@ -774,6 +778,22 @@ class CarInterface(CarInterfaceBase):
     if candidate == CAR.CHEVROLET_SUBURBAN:
       ret.longitudinalTuning.kiBP = [5., 35., 60.]
       ret.longitudinalTuning.kiV = [0.5, 0.5, 0.5]
+    if (candidate in BOLT_PEDAL_REMOVED_WORDS and supported_pedal_detected(fingerprint, CanBus.POWERTRAIN, supported=True) and
+        0x320 not in fingerprint.get(CanBus.CAMERA, {})):
+      pt = fingerprint.get(CanBus.POWERTRAIN, {})
+      required = {0x184: 8, 0x34A: 5, 0x348: 5, 0xC9: 8, 0x1C4: 8, 0x1E1: 7,
+                  0x1F5: 8, 0xBD: 7, 0x232: 8, 0x3D1: 8}
+      sources = all(pt.get(address) == length for address, length in required.items()) and pt.get(0xBE) in (6, 7, 8)
+      ret.flags = int(GMFlags.PEDAL_LONG | GMFlags.NO_CAMERA) | (int(ret.flags) & int(GMFlags.HAS_BSM))
+      ret.dashcamOnly = not sources
+      ret.openpilotLongitudinalControl = sources
+      ret.pcmCruise = False
+      ret.alphaLongitudinalAvailable = False
+      if sources:
+        ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
+        ret.safetyConfigs[0].safetyParam = BOLT_PEDAL_REMOVED_WORDS[candidate]
+      else:
+        ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.noOutput)]
     if 0x142 in fingerprint[CanBus.POWERTRAIN] or candidate in VOLT_BSM_CAR:
       ret.flags |= GMFlags.HAS_BSM.value
     return ret
