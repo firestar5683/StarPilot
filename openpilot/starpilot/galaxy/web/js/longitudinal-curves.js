@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsFeed } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
@@ -35,7 +36,7 @@ export function curveGeometry(points) {
 }
 
 export const LongitudinalCurvesPage = {
-  components: { GalaxySettingRow },
+  components: { GxNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, go: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, error: "", profile: "standard", category: "acceleration" })
@@ -68,14 +69,14 @@ export const LongitudinalCurvesPage = {
           <button v-for="category in categories" :key="category" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.category === category"
             :disabled="state.status === 'saving'" @click="selectCategory(category)">{{ category }}</button></div>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved curve…</div>
-        <div v-else-if="state.status === 'unavailable'" class="gx-card gx-message" role="alert">Saved curve is unavailable.</div>
-        <div v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}
-          <button type="button" class="gx-btn gx-btn--tonal" @click="feed.load(page)">Refresh</button></div>
+        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved curve is unavailable.</GxNotice>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}
+          </GxNotice>
         <article v-if="state.data" class="gx-card gx-long-curves__body">
           <div class="gx-long-curves__heading"><div><h3>{{ state.data.title }}</h3><p>Enable saved profiles and this personality in All profile settings to use its curve.</p></div>
-            <button type="button" class="gx-btn gx-btn--tonal" :disabled="state.status === 'saving'" @click="feed.load(page)">Refresh</button></div>
+            </div>
           <p v-if="!state.data.parked" class="gx-note">Editing requires fresh parked vehicle evidence.</p>
-          <GalaxySettingRow v-if="preset" :key="state.data.view + ':preset'" :row="preset" :index="0"
+          <GalaxySettingRow v-if="preset" :key="state.data.page + ':preset'" :row="preset" :index="0"
             :disabled="!state.data.parked || state.status !== 'ready' || !!state.pending"
             :save-value="(index, value) => feed.previewValue(index, value)" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           <template v-if="points && graph">
@@ -88,7 +89,7 @@ export const LongitudinalCurvesPage = {
             </svg>
             <p class="gx-note">Saved custom points in {{ points[0].unit }}. Use the controls below to change one point at a time.</p>
             <div class="gx-long-curves__points">
-              <GalaxySettingRow v-for="point in points" :key="state.data.view + ':' + point.index" :row="state.data.rows[point.index]" :index="point.index"
+              <GalaxySettingRow v-for="point in points" :key="state.data.page + ':' + point.index" :row="state.data.rows[point.index]" :index="point.index"
                 :disabled="!state.data.parked || state.status !== 'ready' || !!state.pending"
                 :save-value="(index, value) => feed.previewValue(index, value)" />
             </div>

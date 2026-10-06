@@ -32,6 +32,7 @@ export class LayoutPreviewFeed {
     this.pending = null
     this.inputKey = null
     this.request?.abort()
+    this.request = null
     this.clearImage()
   }
 
@@ -55,7 +56,7 @@ export class LayoutPreviewFeed {
     this.request?.abort()
     if (dragging) { this.publish({ status: "editing", error: "" }); return }
     this.pending = { document: JSON.parse(JSON.stringify(document)), profile, scene, version: this.version }
-    this.publish({ status: "updating", error: "" })
+    this.publish({ status: "updating" })
     this.timer = this.later(() => { this.timer = null; this.dispatch() }, 200)
   }
 
@@ -72,32 +73,39 @@ export class LayoutPreviewFeed {
     this.last = item
     const request = new AbortController()
     this.request = request
-    let timeout = this.later(() => request.abort(), 7000)
-    let failure = "Preview is unavailable. Try again."
+    const timeout = this.later(() => request.abort(), 7000)
+    let rejectAborted
+    const aborted = new Promise((_, reject) => { rejectAborted = () => reject(new Error("Preview request cancelled")) })
+    request.signal.addEventListener("abort", rejectAborted, { once: true })
+    let failure = "Preview is unavailable. Reconnecting automatically…"
     try {
-      const response = await this.fetcher("./api/ui/layout/preview", { method: "POST", credentials: "same-origin",
-        cache: "no-store", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene }), signal: request.signal })
-      if (!this.active || item.version !== this.version) return
-      if (response.status === 401) { this.stop(); this.unauthorized(); return }
-      if (response.status === 403) { failure = "Turn off the vehicle to preview this layout."; throw new Error() }
-      if (response.status === 429) { failure = "Preview is busy. Try again."; throw new Error() }
-      if (!response.ok) { const detail = await response.json().catch(() => null); failure = detail?.error || failure; throw new Error() }
-      if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("image/png")) throw new Error("Preview is unavailable. Try again.")
-      const blob = await response.blob()
-      if (!this.active || item.version !== this.version) return
-      if (!blob.size || blob.size > 4 * 1024 * 1024) throw new Error("Preview is unavailable. Try again.")
-      const previousUrl = this.currentUrl
-      this.currentUrl = this.urls.createObjectURL(blob)
-      this.publish({ status: "ready", error: "", url: this.currentUrl })
-      if (previousUrl) this.urls.revokeObjectURL(previousUrl)
+      await Promise.race([aborted, (async () => {
+        const response = await this.fetcher("./api/ui/layout/preview", { method: "POST", credentials: "same-origin",
+          cache: "no-store", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene }), signal: request.signal })
+        if (!this.active || item.version !== this.version || request.signal.aborted) return
+        if (response.status === 401) { this.stop(); this.unauthorized(); return }
+        if (response.status === 403) { failure = "Turn off the vehicle to preview this layout."; throw new Error() }
+        if (response.status === 429) { failure = "Preview is busy. Retrying automatically…"; throw new Error() }
+        if (!response.ok) { const detail = await response.json().catch(() => null); failure = detail?.error || failure; throw new Error() }
+        if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("image/png")) throw new Error("Preview is unavailable. Reconnecting automatically…")
+        const blob = await response.blob()
+        if (!this.active || item.version !== this.version || request.signal.aborted) return
+        if (!blob.size || blob.size > 4 * 1024 * 1024) throw new Error("Preview is unavailable. Reconnecting automatically…")
+        const previousUrl = this.currentUrl
+        this.currentUrl = this.urls.createObjectURL(blob)
+        this.publish({ status: "ready", error: "", url: this.currentUrl })
+        if (previousUrl) this.urls.revokeObjectURL(previousUrl)
+      })()])
     } catch {
       if (this.active && item.version === this.version) {
         this.inputKey = null
         this.publish({ status: "unavailable", error: failure })
+        this.timer = this.later(() => { this.timer = null; this.retry() }, 5000)
       }
     } finally {
       this.cancelTimer(timeout)
+      request.signal.removeEventListener("abort", rejectAborted)
       if (this.request === request) this.request = null
       if (this.active && this.pending && this.timer === null) this.dispatch()
     }

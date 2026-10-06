@@ -633,3 +633,34 @@ def test_overlapping_small_sign_restores_after_pending_and_actions_keep_exact_in
     inputs.release(x, 200, state)
     emit.assert_called_once()
     assert emit.call_args.args[0].kind == kind
+
+
+@pytest.mark.parametrize('profile', ['large', 'compact'])
+def test_pip_circles_are_independent_widgets_and_migrate_old_camera_pair(profile):
+  import copy
+  document = default_document()
+  metadata = customization_metadata()['profiles'][profile]['widgets']
+  assert 'vasm' not in metadata
+  for key in ('pip_left', 'pip_right'):
+    assert metadata[key]['kind'] == 'pip_camera'
+    assert metadata[key]['width'] == metadata[key]['height']
+  right = copy.deepcopy(document['layouts'][profile]['pip_right'])
+  document['layouts'][profile]['pip_left']['enabled'] = False
+  assert validate_document(document)['layouts'][profile]['pip_right'] == right
+
+  legacy = copy.deepcopy(document)
+  for name, layout in legacy['layouts'].items():
+    layout.pop('pip_left')
+    layout.pop('pip_right')
+    layout['vasm'] = {'x': 1200 if name == 'large' else 300, 'y': 650 if name == 'large' else 30, 'enabled': False}
+  migrated = validate_document(legacy)
+  for name, layout in migrated['layouts'].items():
+    assert 'vasm' not in layout
+    assert not layout['pip_left']['enabled'] and not layout['pip_right']['enabled']
+    assert layout['pip_left']['x'] <= layout['pip_right']['x']
+    assert layout['current_speed' if name == 'large' else 'max_speed'] == document['layouts'][name]['current_speed' if name == 'large' else 'max_speed']
+  assert validate_document(migrated) == migrated
+
+  for layout in legacy['layouts'].values():
+    layout.pop('vasm')
+  assert validate_document(legacy)['layouts'][profile]['pip_left']['enabled']

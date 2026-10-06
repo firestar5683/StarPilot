@@ -366,13 +366,6 @@ button.gx-chip:hover {
 .gx-model-manager .gx-card { overflow: visible; }
 .gx-model-manager .gx-card > div { min-width: 0; }
 .gx-model-manager .gx-card strong, .gx-model-manager .gx-chip { overflow-wrap: anywhere; }
-.gx-model-manager .gx-alert { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); }
-.gx-model-manager .gx-alert--info { background: rgba(157, 114, 255, .12); }
-.gx-model-manager .gx-alert--warn { background: rgba(255, 184, 101, .12); }
-.gx-model-manager .gx-alert__icon { font-size: 1.4rem; color: var(--primary); }
-.gx-model-manager .gx-alert__body { flex: 1 1 220px; }
-.gx-model-manager .gx-alert__body strong { display: block; font-weight: var(--fw-bold); }
-.gx-model-manager .gx-alert__body span { color: var(--text-muted); font-size: var(--fs-sm); }
 .gx-model-manager .gx-btn--danger { background: var(--error); color: var(--on-error); }
 .gx-model-reason { margin: 0; padding: 0 var(--sp-3) var(--sp-3); color: var(--text-muted); font-size: var(--fs-sm); }
 .gx-model-runtime { margin-top: var(--sp-3); }
@@ -479,3 +472,5 @@ button.gx-chip:hover {
   .gx-layout__savebar > button { flex: 1; }
   .gx-layout__color:not(:last-child) { padding-bottom: 18px; border-bottom: 1px solid var(--glass-border); }
 }
+
+.gx-slider-header .gx-setting-default { order: 1; margin: 0 0 0 auto; }

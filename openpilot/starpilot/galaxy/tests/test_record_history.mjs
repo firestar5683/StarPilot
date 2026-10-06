@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { LocalHistoryFeed, LocalRecordingsPage, availableFiles, validLocalHistory, quickRoadUrl,
-  segmentSummaryUrl, validSegmentSummary, routeFiles, firstQuickVideo, routeDate, connectRouteUrl } from '../web/js/record-history.js'
+  segmentSummaryUrl, validSegmentSummary, routeFiles, firstQuickVideo, routeDate, connectRouteUrl, routeMatchesSearch } from '../web/js/record-history.js'
 
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 const current = '0000021e--371eaf116b'
@@ -28,7 +28,7 @@ assert.equal(validSegmentSummary(summary, `${current}--2`), false)
 assert.match(LocalRecordingsPage.template, /Local recordings/)
 assert.match(LocalRecordingsPage.template, /scan was incomplete/)
 assert.doesNotMatch(LocalRecordingsPage.template, /v-html|deleteRoute/)
-assert.match(LocalRecordingsPage.template, /<details class="gx-recordings__expand"><summary>/)
+assert.match(LocalRecordingsPage.template, /aria-label="Video segment"/)
 assert.doesNotMatch(LocalRecordingsPage.template, /<details[^>]*\sopen[\s=>]/)
 assert.deepEqual(routeFiles(history.routes[0]), ['Full log', 'Quick log', 'Road video', 'Driver video', 'Quick video'])
 assert.equal(firstQuickVideo(history.routes[0]).number, 0)
@@ -47,7 +47,7 @@ for (const connectUrl of [`https://example.com/abcdef0123456789/${current}`, `${
   assert.equal(connectRouteUrl({ ...connected, connectUrl }), null)
 }
 assert.equal(connectRouteUrl({ ...connected, routeId: `0000000000000000|${current}` }), null)
-const cards = LocalRecordingsPage.computed.routeCards.call({ data: { routes: [connected] } })
+const cards = LocalRecordingsPage.computed.routeCards.call({ query: "", data: { routes: [connected] } })
 assert.equal(cards[0].connect, connected.connectUrl)
 assert.equal(cards[0].firstQuick.number, 0)
 assert.equal(cards[0].fileLabels.length, 5)
@@ -73,7 +73,7 @@ assert.equal(normal.requests[0].options.credentials, 'same-origin')
 await normal.reply(0, history)
 assert.equal(normal.states.at(-1).status, 'ready')
 assert.equal(normal.states.at(-1).data.routes[0].routeId, current)
-assert.equal(normal.timers.size, 0)
+assert.equal(normal.timers.size, 1)
 await flush()
 assert.equal(normal.requests.length, 1, 'no repeated scans without explicit refresh')
 normal.feed.load()
@@ -120,8 +120,8 @@ assert.equal(late.feed.data, null)
 // A transport that ignores AbortSignal cannot strand the UI in loading.
 const timedOut = fixture()
 timedOut.feed.start()
-assert.deepEqual([...timedOut.timers.values()].map((timer) => timer.ms), [4000])
-const [timeoutId, timeout] = [...timedOut.timers.entries()][0]
+assert.deepEqual([...timedOut.timers.values()].map((timer) => timer.ms), [10000, 4000])
+const [timeoutId, timeout] = [...timedOut.timers.entries()].find(([, timer]) => timer.ms === 4000)
 timedOut.timers.delete(timeoutId)
 timeout.fn()
 assert.equal(timedOut.feed.status, 'unavailable')
@@ -138,7 +138,7 @@ slowBody.feed.start()
 let finishSlowBody
 slowBody.requests[0].resolve({ status: 200, ok: true, json: () => new Promise((resolve) => { finishSlowBody = resolve }) })
 await flush()
-const [slowId, slowTimer] = [...slowBody.timers.entries()][0]
+const [slowId, slowTimer] = [...slowBody.timers.entries()].find(([, timer]) => timer.ms === 4000)
 slowBody.timers.delete(slowId)
 slowTimer.fn()
 assert.equal(slowBody.feed.status, 'unavailable')
@@ -218,7 +218,7 @@ await player.videoError({ currentTarget: player.$refs.quickVideo })
 assert.equal(player.playing, null, 'offline preview never opens a video')
 assert.equal(sessionRequest, undefined, 'offline preview does not request media or session')
 globalThis.fetch = oldFetch
-assert.match(LocalRecordingsPage.template, /Quick Road Video/)
+assert.match(LocalRecordingsPage.template, /cameraLabel\(playing.camera\)/)
 assert.match(LocalRecordingsPage.template, /@error="videoError\(\$event\)"/)
 assert.match(LocalRecordingsPage.template, /Distance is estimated from recorded speed/)
 assert.match(LocalRecordingsPage.template, /Steering active/)
@@ -270,3 +270,21 @@ globalThis.fetch = oldFetch
 globalThis.document = savedDocument
 globalThis.setTimeout = savedSetTimeout
 globalThis.clearTimeout = savedClearTimeout
+
+// Dom-style library filtering, duration ordering, and fallback camera selection.
+assert.equal(routeMatchesSearch({ ...history.routes[0], displayName: "Café trip" }, "cafe TRIP"), true)
+assert.equal(routeMatchesSearch(history.routes[0], "missing drive"), false)
+const short = { ...history.routes[0], routeId: "0000021f--371eaf116b", segmentCount: 1, segments: history.routes[0].segments.slice(0, 1) }
+const library = { data: { routes: [short, history.routes[0]] }, sortOrder: "longest", preservedOnly: false, query: "" }
+assert.equal(LocalRecordingsPage.computed.routeCards.call(library)[0].segmentCount, 2)
+library.sortOrder = "shortest"
+assert.equal(LocalRecordingsPage.computed.routeCards.call(library)[0].segmentCount, 1)
+library.preservedOnly = true
+assert.equal(LocalRecordingsPage.computed.routeCards.call(library).length, 0)
+player.mode = "local"
+player.watchRoute(history.routes[0])
+assert.equal(player.playing.camera, "fcamera")
+player.selectCamera("dcamera")
+assert.equal(player.playing.camera, "dcamera")
+assert.equal(player.playing.segments[0].number, 2)
+player.closePlayer()

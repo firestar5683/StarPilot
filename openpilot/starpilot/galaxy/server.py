@@ -27,6 +27,7 @@ from openpilot.starpilot.galaxy.remote import default_remote_pairing, gateway_co
 from openpilot.starpilot.galaxy.crash_reports import CrashChanged, CrashMissing, CrashReports, CrashUnavailable
 from openpilot.starpilot.galaxy.device_name import DeviceName
 from openpilot.starpilot.galaxy.device_state import DeviceStateSource
+from openpilot.starpilot.galaxy.recording_library import RecordingLibrary
 from openpilot.starpilot.galaxy.drive_history import DriveHistory, DriveHistoryUnavailable, recording_details
 from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
 from openpilot.starpilot.galaxy.recording_media import (RecordingMedia, RecordingMediaBusy, RecordingMediaChanged,
@@ -205,6 +206,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   history = recordings if recordings is not None else DriveHistory()
   drive_stats_source = drive_stats
   drive_stats_lock = threading.Lock()
+  recording_library = RecordingLibrary(history)
   recordings_lock = threading.Lock()
   recording_media_source = recording_media
   recording_media_lock = threading.Lock()
@@ -559,26 +561,28 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     def json(self, status, value):
       self.respond(status, json.dumps(value, allow_nan=False).encode())
 
-    def quick_road_video(self, encoded_name: str):
+    def camera_video(self, encoded_name: str, *, combined=False):
       if not self.require_session():
         return
-      name = unquote(encoded_name)
-      if not name or '/' in name or '?' in name:
+      name, separator, camera = unquote(encoded_name).partition('/')
+      camera = camera if separator else "qcamera"
+      if not name or '/' in camera or '?' in name or camera not in {"qcamera", "fcamera", "dcamera", "ecamera"}:
         self.json(400, {'error': 'Invalid recording identity'})
         return
       try:
-        lease = local_media().open(name, prepare=self.command != 'HEAD')
+        lease = local_media().open_route(name, camera=camera, prepare=self.command != 'HEAD') if combined else \
+          local_media().open(name, prepare=self.command != 'HEAD', **({'camera': camera} if camera != 'qcamera' else {}))
       except ValueError:
         if self.require_session():
           self.json(400, {'error': 'Invalid recording identity'})
         return
       except RecordingMediaMissing:
         if self.require_session():
-          self.json(404, {'error': 'Closed Quick road recording unavailable'})
+          self.json(404, {'error': 'Closed camera recording unavailable'})
         return
       except RecordingMediaNotPrepared:
         if self.require_session():
-          self.json(202, {'status': 'Quick road video not prepared; use GET to prepare it'})
+          self.json(202, {'status': 'Camera video not prepared; use GET to prepare it'})
         return
       except RecordingMediaChanged:
         if self.require_session():
@@ -586,12 +590,15 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       except RecordingMediaUnsupported:
         if self.require_session():
-          self.json(415, {'error': 'Quick road source is not supported H.264 video'})
+          self.json(415, {'error': 'Camera recording format is unsupported'})
         return
       except (RecordingMediaBusy, RecordingMediaUnavailable, OSError):
         if self.require_session():
-          self.json(503, {'error': 'Quick road video unavailable'})
+          self.json(503, {'error': 'Camera video unavailable'})
         return
+      self.send_recording(lease)
+
+    def send_recording(self, lease, content_type='video/mp4'):
       try:
         if not self.require_session():
           return
@@ -608,7 +615,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         start, end = selected
         self.send_response(206 if self.headers.get('Range') is not None else 200)
-        self.send_header('Content-Type', 'video/mp4')
+        self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(end - start + 1))
         self.send_header('Accept-Ranges', 'bytes')
         if self.headers.get('Range') is not None:
@@ -726,11 +733,17 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if not self.local_request():
         return
       path = urlsplit(self.path).path
+      if path.startswith('/api/recordings/route/'):
+        if urlsplit(self.path).query:
+          self.json(400, {'error': 'Unexpected media query'})
+        else:
+          self.camera_video(path.removeprefix('/api/recordings/route/'), combined=True)
+        return
       if path.startswith('/api/recordings/media/'):
         if urlsplit(self.path).query:
           self.json(400, {'error': 'Unexpected media query'})
         else:
-          self.quick_road_video(path.removeprefix('/api/recordings/media/'))
+          self.camera_video(path.removeprefix('/api/recordings/media/'))
         return
       if path == '/api/connect/provider':
         if not self.require_session():
@@ -1044,12 +1057,35 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           state = vehicle_display.sample()
           if self.require_session():
             self.json(200, state)
+      elif path.startswith('/api/recordings/logs/'):
+        if not self.require_session():
+          return
+        try:
+          with recordings_lock:
+            lease = recording_library.open_archive(unquote(path.removeprefix('/api/recordings/logs/')), permitted=self.authenticated)
+        except (OSError, ValueError, RecordingMediaUnavailable, DriveHistoryUnavailable):
+          self.json(404, {'error': 'Drive logs unavailable; download individual segment logs'})
+        else:
+          self.send_recording(lease, 'application/x-tar')
+      elif path.startswith('/api/recordings/files/'):
+        if not self.require_session():
+          return
+        name, _, filename = unquote(path.removeprefix('/api/recordings/files/')).partition('/')
+        if filename not in {'rlog.zst', 'rlog.bz2', 'qlog.zst', 'qlog.bz2'}:
+          self.json(400, {'error': 'Invalid log file'})
+          return
+        try:
+          lease = recording_library.open_log(name, filename)
+        except (OSError, ValueError, RecordingMediaUnavailable):
+          self.json(404, {'error': 'Closed recording log unavailable'})
+        else:
+          self.send_recording(lease, 'application/octet-stream')
       elif path == '/api/recordings/local':
         if not self.require_session():
           return
         try:
           with recordings_lock:
-            result = history.snapshot()
+            result = recording_library.describe(history.snapshot())
             dongle, dates, device_ids = None, {}, {}
             try:
               from openpilot.common.params import Params
@@ -1364,7 +1400,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.connection.settimeout(old_timeout)
         return
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
-                      '/api/settings/reset-default',
+                      '/api/settings/reset-default', '/api/recordings/action',
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
@@ -1378,7 +1414,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
+      if (path.startswith(('/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
                            '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/')) and
@@ -1408,6 +1444,24 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         payload = json.loads(self.rfile.read(size), object_pairs_hook=unique_object)
       except (ValueError, UnicodeError, RecursionError):
         self.json(400, {'error': 'Invalid request'})
+        return
+      if path == '/api/recordings/action':
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          with recordings_lock:
+            result = recording_library.action(payload, permitted=lambda: self.settings_session() == identity and parked())
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        except PermissionError as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, DriveHistoryUnavailable):
+          self.json(503, {'error': 'Recording action could not be completed'})
+        else:
+          if self.require_session():
+            self.json(200, result)
         return
       if path == '/api/sentry/notifications':
         identity = self.settings_session()

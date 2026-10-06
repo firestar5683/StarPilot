@@ -77,12 +77,8 @@ assert.deepEqual(placed, [900, 344])
 PipPage.methods.position.call(editor, 1, { target: { value: "500" } })
 assert.deepEqual(placed, [900, 500])
 let stopped = 0
-const life = { _imageGeneration: 0, _image: null, state: { imageName: "Live cabin camera" },
-  snapshots: { stop() { stopped++ } }, feed: { stop() { stopped++ } }, dropImage: PipPage.methods.dropImage }
-globalThis.document = { removeEventListener() {} }
+const life = { liveCamera: { stop() { stopped++ } }, feed: { stop() { stopped++ } } }
 PipPage.beforeUnmount.call(life)
 assert.equal(stopped, 2)
-assert.equal(life._liveStopped, true)
-assert.equal(life.state.imageName, "")
 
 assert.equal((PipPage.template.match(/type="range"/g) || []).length, 3)

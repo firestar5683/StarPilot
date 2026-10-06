@@ -19,18 +19,13 @@ feed.resetDefault(0)
 assert.equal(requests[1].url, "./api/settings/reset-default")
 assert.deepEqual(JSON.parse(requests[1].options.body), { view: "opaque-view", row: 0 })
 await reply(1, { intent: "reset-intent", question: "Reset to default?", proposed: "On" })
-assert.equal(updates.at(-1).pending.intent, "reset-intent")
-assert.equal(requests.length, 2, "review must never mutate settings")
-feed.cancel()
-assert.equal(requests.length, 2, "cancel must never mutate settings")
+assert.equal(updates.at(-1).pending, null, "defaults never display a per-setting confirmation")
+assert.equal(requests[2].url, "./api/settings/confirm")
+assert.deepEqual(JSON.parse(requests[2].options.body), { intent: "reset-intent", confirmed: true })
+await reply(2, { saved: true })
+await reply(3, { ...page, view: "fresh", rows: [{ ...row, value: "On", resetAvailable: false }] })
 feed.resetDefault(0)
-await reply(2, { intent: "reset-again", question: "Reset to default?", proposed: "On" })
-feed.confirm()
-assert.deepEqual(JSON.parse(requests[3].options.body), { intent: "reset-again", confirmed: true })
-await reply(3, { saved: true })
-await reply(4, { ...page, view: "fresh", rows: [{ ...row, value: "On", resetAvailable: false }] })
-feed.resetDefault(0)
-assert.equal(requests.length, 5, "an unavailable default cannot be submitted")
+assert.equal(requests.length, 4, "an unavailable default cannot be submitted")
 feed.stop()
 assert.ok(GalaxySettingRow.emits.includes("reset-default"))
 
@@ -50,3 +45,22 @@ button.props.onClick()
 assert.deepEqual(events, [["reset-default", 2]])
 assert.equal(buttons(render({ ...context, locked: true }, [])).find(node => node.children === "Default").props.disabled, true)
 assert.equal(buttons(render({ ...context, row: { ...row, defaultValue: null } }, [])).some(node => node.children === "Default"), false)
+
+// A successful mutation invalidates every active consumer without user refreshes.
+let savedValue = "Off"
+const dependent = []
+const sharedFetcher = async (url) => ({ ok: true, status: 200, json: async () => {
+  if (url.endsWith("/reset-default")) return { intent: "shared-default" }
+  if (url.endsWith("/confirm")) { savedValue = "On"; return { saved: true } }
+  const pageName = url.split("/").at(-1)
+  return { page: pageName, view: pageName + savedValue, parked: true, rows: [{ ...row, value: savedValue }] }
+} })
+const source = new SettingsFeed({ publish() {}, fetcher: sharedFetcher, later: () => 1, cancelTimer() {} })
+const consumer = new SettingsFeed({ publish: value => dependent.push(value), fetcher: sharedFetcher, later: () => 1, cancelTimer() {} })
+await source.start("appearance")
+await consumer.start("pip")
+await source.resetDefault(0)
+await flush()
+assert.equal(dependent.at(-1).data.rows[0].value, "On")
+source.stop()
+consumer.stop()

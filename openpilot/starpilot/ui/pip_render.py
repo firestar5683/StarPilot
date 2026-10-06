@@ -1,4 +1,4 @@
-"""Onroad PiP GPU owner: current cabin VisionIPC frame, frozen C3/C4 shape."""
+"""Onroad PiP GPU owner: current cabin frame and independent side-camera placement."""
 
 from __future__ import annotations
 
@@ -134,9 +134,11 @@ class PiPRenderer:
 
   def render(self, content: rl.Rectangle, mask: Mask | None, signals: Signals, *, enabled: bool,
              on_blinker: bool, on_bsm: bool, invert: bool,
-             now: float | None = None) -> str:
+             now: float | None = None, placements: dict[str, Rect] | None = None) -> str:
     sides = selected_sides(mask, signals, started=True, enabled=enabled,
                            on_blinker=on_blinker, on_bsm=on_bsm)
+    if placements is not None:
+      sides = tuple(side for side in sides if side in placements)
     if not sides or mask is None:
       self.deactivate()
       return "inactive"
@@ -173,11 +175,14 @@ class PiPRenderer:
         continue
       rect = bubble_rect(Rect(content.x, content.y, content.width, content.height), side) if self.shape == "bubble" else \
         Rect(content.x, content.y, content.width, content.height)
-      self._draw(shader, texture, frame, rect, crop.x, crop.y, crop.size, invert)
+      if placements is not None:
+        rect = placements[side]
+      warning = (signals.vasm_left or signals.left_blindspot) if side == "left" else (signals.vasm_right or signals.right_blindspot)
+      self._draw(shader, texture, frame, rect, crop.x, crop.y, crop.size, invert, warning=warning)
     return "rendered"
 
   def _draw(self, shader: rl.Shader, texture: rl.Texture, frame, rect: Rect,
-            crop_x: float, crop_y: float, crop_size: float, invert: bool) -> None:
+            crop_x: float, crop_y: float, crop_size: float, invert: bool, *, warning: bool = False) -> None:
     texture_width = frame.width if COMMA_HARDWARE else frame.stride
     crop_min = rl.Vector2(crop_x / texture_width, crop_y / frame.height)
     crop_extent = rl.Vector2(crop_size / texture_width, crop_size / frame.height)
@@ -203,3 +208,7 @@ class PiPRenderer:
       rl.draw_texture_pro(texture, source, target, rl.Vector2(0, 0), 0.0, rl.WHITE)
     finally:
       rl.end_shader_mode()
+    if self.shape == "bubble":
+      radius = rect.width / 2
+      rl.draw_ring(rl.Vector2(rect.x + radius, rect.y + radius), max(0, radius - 3), radius,
+                   0, 360, 64, rl.Color(255, 60, 60, 255) if warning else rl.Color(94, 229, 238, 255))

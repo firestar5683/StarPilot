@@ -1,3 +1,5 @@
+import { GxNotice } from "./notice.js"
+import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsPage } from "./settings.js"
 import { GalaxySelect } from "./galaxy-select.js"
@@ -46,13 +48,20 @@ export class VehicleSelectionFeed {
   start() { this.stop(); this.active = true; return this.refresh() }
 
   async run(path, body = null) {
-    if (!this.active || this.request) return null
+    if (!this.active) return null
+    if (this.request) {
+      if (body === null || this.busy) return null
+      this.request.abort()
+      this.generation++
+      this.cancelTimer(this.timer)
+      this.request = this.timer = null
+    }
     if (this.pollTimer !== null) this.cancelTimer(this.pollTimer)
     this.pollTimer = null
     const generation = this.generation
     const request = new AbortController()
     this.request = request
-    this.busy = true
+    this.busy = body !== null
     this.emit(body === null ? (this.data ? "ready" : "loading") : "saving")
     this.timer = this.later(() => {
       if (!this.active || this.generation !== generation || this.request !== request) return
@@ -62,7 +71,8 @@ export class VehicleSelectionFeed {
       this.busy = false
       this.data = this.pending = null
       request.abort()
-      this.emit("unavailable", "Vehicle selection timed out. Refresh saved values before trying again.")
+      this.emit("unavailable", "Vehicle selection could not connect. Reconnecting automatically…")
+      this.schedulePoll()
     }, 8000)
     try {
       const response = await this.fetcher(path, { credentials: "same-origin", cache: "no-store", signal: request.signal,
@@ -86,7 +96,7 @@ export class VehicleSelectionFeed {
     } catch (error) {
       if (this.active && this.generation === generation && this.request === request && !request.signal.aborted) {
         this.data = this.pending = null
-        this.emit("unavailable", error?.message || "Vehicle selection is unavailable.")
+        this.emit("unavailable", connectionError(error))
       }
       return null
     } finally {
@@ -95,12 +105,18 @@ export class VehicleSelectionFeed {
         this.request = this.timer = null
         this.busy = false
         this.emit(this.data ? "ready" : "unavailable")
+        this.schedulePoll()
       }
     }
   }
 
+  schedulePoll() {
+    if (!this.active || this.pending || this.request || this.pollTimer !== null) return
+    this.pollTimer = this.later(() => { this.pollTimer = null; this.refresh() }, 2000)
+  }
+
   async refresh() {
-    if (!this.active || this.request) return
+    if (!this.active || this.request || this.pending) return
     this.pending = null
     const generation = this.generation
     const data = await this.run("./api/vehicle-selection")
@@ -108,18 +124,15 @@ export class VehicleSelectionFeed {
     if (data && validVehiclePage(data)) {
       this.data = data
       this.emit("ready")
-      if (!data.parked && data.readable) this.pollTimer = this.later(() => {
-        this.pollTimer = null
-        this.refresh()
-      }, 1000)
     } else if (data) {
       this.data = null
       this.emit("unavailable", "Vehicle selection response was invalid.")
     }
+    this.schedulePoll()
   }
 
   async preview(platform) {
-    if (!this.active || this.request || this.pending || !this.data?.parked || !this.data.readable ||
+    if (!this.active || this.busy || this.pending || !this.data?.parked || !this.data.readable ||
         (!this.data.valid && platform !== null) ||
         (platform !== null && !this.data.choices.some((item) => item.platform === platform))) return
     const result = await this.run("./api/vehicle-selection/preview", { view: this.data.view, platform })
@@ -129,10 +142,10 @@ export class VehicleSelectionFeed {
     }
   }
 
-  cancel() { this.pending = null; if (this.active) this.emit(this.data ? "ready" : "unavailable") }
+  cancel() { this.pending = null; if (this.active) this.emit(this.data ? "ready" : "unavailable"); this.schedulePoll() }
 
   async confirm() {
-    if (!this.active || this.request || !this.pending?.intent) return
+    if (!this.active || this.busy || !this.pending?.intent) return
     const intent = this.pending.intent
     this.pending = null
     this.data = null
@@ -147,7 +160,7 @@ export class VehicleSelectionFeed {
 }
 
 export const VehicleControlsPage = {
-  components: { SettingsPage, GalaxySelect },
+  components: { GxNotice, SettingsPage, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, busy: false, error: "", query: "", make: "" })
@@ -171,8 +184,8 @@ export const VehicleControlsPage = {
         <p>Auto detects your car. A manual choice is saved for the next start; it does not change the car reported now.</p></div>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local vehicle selection is unavailable in preview.</div>
       <template v-else>
-        <div v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}
-          <button type="button" class="gx-btn gx-btn--tonal" :disabled="state.busy" @click="feed.refresh()">Refresh</button></div>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}
+          </GxNotice>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading vehicle selection…</div>
         <article v-if="state.data" class="gx-card gx-vehicle__body">
           <div class="gx-vehicle__summary"><div><small>Saved for next start</small><strong>{{ state.data.selectedLabel }}</strong>
@@ -180,7 +193,7 @@ export const VehicleControlsPage = {
             <div><small>Last identified vehicle</small><strong>{{ state.data.reported?.label || 'Not available' }}</strong>
               <p>This is a cached report, not current vehicle confirmation.</p></div></div>
           <p v-if="!state.data.parked" class="gx-note">Changes require fresh parked vehicle evidence.</p>
-          <div class="gx-vehicle__actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="state.busy" @click="feed.refresh()">Refresh</button>
+          <div class="gx-vehicle__actions">
             <button type="button" class="gx-btn" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(null)">Choose Auto detection</button></div>
           <template v-if="state.data.valid">
             <h3>Choose a Vehicle</h3>

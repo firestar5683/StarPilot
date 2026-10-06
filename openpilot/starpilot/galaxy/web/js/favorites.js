@@ -1,3 +1,5 @@
+import { PollTimer, connectionError } from "./polling.js"
+import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
@@ -17,14 +19,17 @@ export class FavoritesFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
     Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer })
+    this.poller = new PollTimer({ read: () => this.load(), later, cancel: cancelTimer })
+    this.error = ""
     this.active = false; this.generation = 0; this.data = this.request = this.timer = null; this.needsReload = false
   }
   stop() {
+    this.poller.stop()
     this.active = false; this.generation++; this.request?.abort()
     if (this.timer !== null) this.cancelTimer(this.timer)
     this.request = this.timer = null
   }
-  start() { this.stop(); this.active = true; return this.load() }
+  start() { this.stop(); this.active = true; this.poller.start(); return this.load() }
   load() { return this.run() }
   update(index, patch) {
     if (!this.data?.editable || this.request || this.needsReload || !Number.isInteger(index) || index < 0 || index > 2 ||
@@ -44,8 +49,9 @@ export class FavoritesFeed {
     if (!this.active || this.request) return
     const request = new AbortController(), generation = ++this.generation, saving = body !== null
     this.request = request
-    this.publish({ status: saving ? "saving" : "loading", error: "", notice: "" })
+    if (saving || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
     const fail = (error) => {
+      this.error = error
       this.needsReload ||= saving
       this.publish({ status: this.data ? "ready" : "unavailable", needsReload: this.needsReload, error })
     }
@@ -63,10 +69,10 @@ export class FavoritesFeed {
       if (response.status === 401 || ["access_unavailable", "setup_required"].includes(data?.code)) { this.stop(); this.unauthorized(); return }
       if (response.status === 409) throw new Error("Quick Select changed on another screen. Reload before editing again.")
       if (!response.ok || !validFavorites(data)) throw new Error(saving ? "Quick Select could not be confirmed. Reload before editing again." : "Saved Quick Select are unavailable.")
-      this.data = data; this.needsReload = false
+      this.data = data; this.needsReload = false; this.error = ""
       this.publish({ status: "ready", data, needsReload: false, error: "", notice: saving ? "Quick Select saved." : "" })
     } catch (error) {
-      if (this.active && generation === this.generation) fail(error?.message || "Quick Select are unavailable.")
+      if (this.active && generation === this.generation) fail(connectionError(error))
     } finally {
       if (this.request === request) {
         if (this.timer !== null) this.cancelTimer(this.timer)
@@ -77,7 +83,7 @@ export class FavoritesFeed {
 }
 
 export const FavoritesPage = {
-  components: { GalaxySelect },
+  components: { GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close"],
   setup(props) {
@@ -122,8 +128,8 @@ export const FavoritesPage = {
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Connect to local Galaxy to configure Quick Select.</div>
       <template v-else>
         <div class="gx-favorites__status"><span role="status">{{ state.status === 'saving' ? 'Saving Quick Select…' : state.status === 'loading' ? 'Loading Quick Select…' : state.notice }}</span>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy" @click="feed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Reload saved</button></div>
-        <p v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}</p>
+          </div>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <p v-if="state.data && !state.data.valid" class="gx-note" role="status">Saved Quick Select could not be read. Empty slots are shown. Choosing a control will replace the invalid saved configuration.</p>
         <div v-if="state.data" class="gx-favorites__slots">
           <section v-for="(slot, index) in state.data.slots" :key="index" class="gx-card gx-favorites__slot">

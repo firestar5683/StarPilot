@@ -1,4 +1,4 @@
-"""One bounded, local Quick road recording remux for authenticated Galaxy playback."""
+"""One bounded, local camera recording remux for authenticated Galaxy playback."""
 
 from __future__ import annotations
 
@@ -12,12 +12,15 @@ import tempfile
 import threading
 
 from openpilot.common.hardware.hw import Paths
-from openpilot.starpilot.galaxy.drive_history import DIR_FLAGS, MAX_SEGMENT_ENTRIES, SEGMENT_NAME
+from openpilot.starpilot.galaxy.drive_history import DIR_FLAGS, MAX_SEGMENT_ENTRIES, SEGMENT_NAME, DriveHistory, DriveHistoryUnavailable
 
 
 SOURCE_NAME = 'qcamera.ts'
-MAX_SOURCE_BYTES = 128 * 1024 * 1024
-MAX_MP4_BYTES = 256 * 1024 * 1024
+CAMERA_SOURCES = {'qcamera': SOURCE_NAME, 'fcamera': 'fcamera.hevc',
+                  'dcamera': 'dcamera.hevc', 'ecamera': 'ecamera.hevc'}
+RECORDING_SOURCES = {**CAMERA_SOURCES, **{name: name for name in ('rlog.zst', 'rlog.bz2', 'qlog.zst', 'qlog.bz2')}}
+MAX_SOURCE_BYTES = 512 * 1024 * 1024
+MAX_MP4_BYTES = 512 * 1024 * 1024
 REMUX_TIMEOUT_S = 30
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _RANGE = re.compile(r'bytes=(\d*)-(\d*)\Z')
@@ -63,7 +66,11 @@ def _same(fd: int, name: str | Path, parent: int | None = None) -> bool:
 
 
 class VerifiedRecording:
-  def __init__(self, root: Path, name: str):
+  def __init__(self, root: Path, name: str, camera: str = "qcamera"):
+    if camera not in RECORDING_SOURCES:
+      raise ValueError("Invalid recording camera")
+    self.source_name = RECORDING_SOURCES[camera]
+    self.camera = camera
     if SEGMENT_NAME.fullmatch(name) is None:
       raise ValueError('Invalid segment identity')
     self.root, self.name = root, name
@@ -71,7 +78,7 @@ class VerifiedRecording:
     try:
       self.root_fd = os.open(root, DIR_FLAGS)
       self.segment_fd = os.open(name, DIR_FLAGS, dir_fd=self.root_fd)
-      self.source_fd = os.open(SOURCE_NAME, FILE_FLAGS, dir_fd=self.segment_fd)
+      self.source_fd = os.open(self.source_name, FILE_FLAGS, dir_fd=self.segment_fd)
       info = os.fstat(self.source_fd)
       self.identity = _identity(self.source_fd)
       if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_SOURCE_BYTES or not self.current():
@@ -88,7 +95,7 @@ class VerifiedRecording:
       return False
     if not (_same(self.root_fd, self.root) and _same(self.segment_fd, self.name, self.root_fd) and
             _identity(self.source_fd) == self.identity and
-            _same(self.source_fd, SOURCE_NAME, self.segment_fd)):
+            _same(self.source_fd, self.source_name, self.segment_fd)):
       return False
     try:
       with os.scandir(self.segment_fd) as entries:
@@ -105,6 +112,41 @@ class VerifiedRecording:
       if fd >= 0:
         os.close(fd)
         setattr(self, name, -1)
+
+
+class VerifiedRoute:
+  """Hold every closed camera source open through one combined remux."""
+  def __init__(self, root: Path, name: str, camera: str):
+    if camera not in CAMERA_SOURCES or SEGMENT_NAME.fullmatch(name.replace('|', '_') + '--0') is None:
+      raise ValueError('Invalid recording route')
+    self.name, self.camera, self.sources = name, camera, []
+    try:
+      inventory = DriveHistory(root).snapshot()
+      route = next((route for route in inventory['routes'] if route['routeId'] == name), None)
+      if inventory['scanIncomplete'] or route is None:
+        raise RecordingMediaMissing
+      for segment in route['segments']:
+        if segment['files'][camera]:
+          self.sources.append(VerifiedRecording(root, segment['segmentName'], camera))
+      if not self.sources:
+        raise RecordingMediaMissing
+      if sum(source.identity[2] for source in self.sources) > MAX_SOURCE_BYTES:
+        raise RecordingMediaUnsupported('This drive is too large to combine; download individual segments')
+      self.identity = tuple((source.name, source.identity) for source in self.sources)
+    except DriveHistoryUnavailable as error:
+      self.close()
+      raise RecordingMediaUnavailable from error
+    except Exception:
+      self.close()
+      raise
+
+  def current(self):
+    return bool(self.sources) and all(source.current() for source in self.sources)
+
+  def close(self):
+    for source in self.sources:
+      source.close()
+    self.sources.clear()
 
 
 class MediaLease:
@@ -183,10 +225,15 @@ class RecordingMedia:
     with self._lock:
       self._cache.cleanup()
 
-  def open(self, name: str, *, prepare: bool = True) -> MediaLease:
-    source = VerifiedRecording(self.root, name)
+  def open(self, name: str, *, prepare: bool = True, camera: str = "qcamera") -> MediaLease:
+    return self._open(VerifiedRecording(self.root, name, camera), prepare=prepare)
+
+  def open_route(self, name: str, *, camera: str, prepare: bool = True) -> MediaLease:
+    return self._open(VerifiedRoute(self.root, name, camera), prepare=prepare)
+
+  def _open(self, source: VerifiedRecording | VerifiedRoute, *, prepare: bool) -> MediaLease:
     try:
-      key = (name, source.identity)
+      key = (source.name, source.camera, source.identity)
       if not self._lock.acquire(blocking=False):
         raise RecordingMediaBusy
       try:
@@ -209,17 +256,28 @@ class RecordingMedia:
       source.close()
       raise
 
-  def _remux(self, source: VerifiedRecording) -> None:
+  def _remux(self, source: VerifiedRecording | VerifiedRoute) -> None:
     pending = Path(self._cache.name) / 'pending.mp4'
     pending.unlink(missing_ok=True)
     descriptor_root = '/proc/self/fd' if Path('/proc/self/fd').is_dir() else '/dev/fd'
+    sources = source.sources if isinstance(source, VerifiedRoute) else [source]
+    descriptors = tuple(item.source_fd for item in sources)
+    playlist = Path(self._cache.name) / 'sources.txt'
+    if len(descriptors) > 1:
+      playlist.write_text(''.join(f"file '{descriptor_root}/{fd}'\n" for fd in descriptors))
+      input_path = str(playlist)
+      input_options = ['-f', 'concat', '-safe', '0', '-r', '20']
+    else:
+      input_path = f'{descriptor_root}/{descriptors[0]}'
+      input_options = ['-f', 'mpegts'] if source.camera == 'qcamera' else ['-f', 'hevc', '-r', '20']
     command = [str(self.ffmpeg_binary), '-nostdin', '-hide_banner', '-loglevel', 'error',
-               '-protocol_whitelist', 'file,pipe', '-f', 'mpegts', '-i', f'{descriptor_root}/{source.source_fd}',
-               '-map', '0:v:0', '-an', '-c:v', 'copy', '-bsf:v', 'h264_mp4toannexb', '-movflags', 'faststart',
+               '-protocol_whitelist', 'file,pipe', *input_options, '-i', input_path,
+               '-map', '0:v:0', '-an', '-c:v', 'copy', *(['-tag:v', 'hvc1'] if source.camera != 'qcamera' else []),
+               '-avoid_negative_ts', 'make_zero', '-movflags', 'faststart',
                '-fs', str(MAX_MP4_BYTES), '-f', 'mp4', '-y', str(pending)]
     try:
       process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, pass_fds=(source.source_fd,), start_new_session=True)
+                                 stderr=subprocess.DEVNULL, pass_fds=descriptors, start_new_session=True)
       with self._state_lock:
         self._process = process
         closed = self._closed
@@ -234,9 +292,9 @@ class RecordingMedia:
       if not source.current():
         raise RecordingMediaChanged
       if result != 0:
-        raise RecordingMediaUnsupported('Quick road source is not a supported H.264 MPEG-TS recording')
+        raise RecordingMediaUnsupported('Camera recording format is unsupported')
       info = pending.stat()
-      if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_MP4_BYTES:
+      if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size < MAX_MP4_BYTES:
         raise RecordingMediaUnavailable
       pending.replace(self._cache_path)
     except OSError as error:
@@ -245,3 +303,4 @@ class RecordingMedia:
       with self._state_lock:
         self._process = None
       pending.unlink(missing_ok=True)
+      playlist.unlink(missing_ok=True)

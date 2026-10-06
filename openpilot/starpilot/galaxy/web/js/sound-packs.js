@@ -1,3 +1,5 @@
+import { GxNotice } from "./notice.js"
+import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 
 const RUNNING = new Set(["downloading", "verifying"])
@@ -16,6 +18,7 @@ export class SoundPacksFeed {
     this.seenComplete = new Set()
     this.busy = false
     this.blocked = false
+    this.error = ""
   }
 
   stop() {
@@ -38,14 +41,14 @@ export class SoundPacksFeed {
   }
 
   async run(path, body = null) {
-    if (!this.active || this.busy) return
+    if (!this.active || this.request) return
     const generation = ++this.generation
     if (this.pollTimer !== null) this.cancelTimer(this.pollTimer)
     this.pollTimer = null
     const request = new AbortController()
     this.request = request
-    this.busy = true
-    this.publish({ status: this.snapshot ? "ready" : "loading", snapshot: this.snapshot, busy: true, error: "" })
+    this.busy = body !== null
+    this.publish({ status: this.snapshot ? "ready" : this.error ? "unavailable" : "loading", snapshot: this.snapshot, busy: this.busy, error: this.error })
     this.timeout = this.later(() => {
       if (!this.active || generation !== this.generation || this.request !== request) return
       request.abort()
@@ -54,8 +57,9 @@ export class SoundPacksFeed {
       this.busy = false
       this.blocked = true
       this.publish({ status: this.snapshot ? "ready" : "unavailable", snapshot: this.snapshot, busy: false,
-        error: body ? "The request timed out. Its result is unknown; refresh the catalog before trying again." :
-          "The sound catalog timed out. Refresh to try again." })
+        error: this.error = body ? "The request timed out. Its result is unknown; checking automatically…" :
+          "The sound catalog timed out. Reconnecting automatically…" })
+      this.pollTimer = this.later(() => { this.pollTimer = null; this.refresh() }, 5000)
     }, 4000)
     try {
       const response = await this.fetcher(path, body === null
@@ -76,26 +80,28 @@ export class SoundPacksFeed {
           (payload.job !== null && typeof payload.job !== "object")) throw new Error("Sound catalog is unavailable.")
       this.snapshot = payload
       this.blocked = false
+      this.error = ""
       this.publish({ status: "ready", snapshot: payload, busy: false, error: "" })
       if (payload.job?.state === "complete" && payload.job.id != null && !this.seenComplete.has(payload.job.id)) {
         this.seenComplete.add(payload.job.id)
         this.installed(payload.job.pack)
       }
-      if (RUNNING.has(payload.job?.state) || !payload.parked) this.pollTimer = this.later(() => {
+      this.pollTimer = this.later(() => {
         this.pollTimer = null
         this.refresh()
-      }, 1000)
+      }, RUNNING.has(payload.job?.state) ? 1000 : 5000)
     } catch (error) {
       if (this.active && generation === this.generation && !request.signal.aborted) {
         this.blocked = true
         this.publish({ status: this.snapshot ? "ready" : "unavailable", snapshot: this.snapshot, busy: false,
-          error: error?.message || "Sound request failed." })
+          error: this.error = connectionError(error) })
       }
     } finally {
       if (this.request === request) {
         if (this.timeout !== null) this.cancelTimer(this.timeout)
         this.request = this.timeout = null
         this.busy = false
+        if (this.active && this.pollTimer === null) this.pollTimer = this.later(() => { this.pollTimer = null; this.refresh() }, 5000)
       }
     }
   }
@@ -117,6 +123,7 @@ export class SoundPacksFeed {
 }
 
 export const SoundPacks = {
+  components: { GxNotice },
   props: { unauthorized: { type: Function, required: true }, disabled: { type: Boolean, default: false } },
   emits: ["installed"],
   setup(props, { emit }) {
@@ -145,12 +152,12 @@ export const SoundPacks = {
       <div class="gx-section__header"><i class="bi bi-music-note-list" aria-hidden="true"></i>
         <span class="gx-section__title">Sound pack catalog</span>
         <span v-if="state.snapshot && !state.snapshot.parked" class="gx-note gx-settings__hint">Park the vehicle to download sound packs.</span>
-        <button type="button" class="gx-icon-btn" aria-label="Refresh sound packs" :disabled="state.busy" @click="feed.refresh()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
+
       </div>
       <div class="gx-settings__grid" style="padding: 16px">
         <p v-if="state.status === 'loading'" role="status">Loading sound packs…</p>
-        <p v-else-if="state.status === 'unavailable'" role="alert">Sound packs are unavailable.</p>
-        <p v-if="state.error" role="alert">{{ state.error }}</p>
+        <GxNotice tone="danger" v-else-if="state.status === 'unavailable'">Sound packs are unavailable.</GxNotice>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <p v-if="state.snapshot && !state.snapshot.packs.length" class="gx-note">No sound packs are available.</p>
         <div v-for="pack in state.snapshot?.packs || []" :key="pack.id" class="gx-card gx-settings__row">
           <strong>{{ pack.name }}</strong>
@@ -163,7 +170,7 @@ export const SoundPacks = {
           <p v-if="running">{{ job.state === 'verifying' ? 'Verifying' : 'Downloading' }} {{ state.snapshot.packs.find(pack => pack.id === job.pack)?.name || 'sound pack' }}<span v-if="progress !== null"> · {{ progress }}%</span></p>
           <p v-else-if="job.state === 'complete'">Sound pack installed. Choose it from the pack selector above when ready.</p>
           <p v-else-if="job.state === 'cancelled'">Download cancelled.</p>
-          <p v-else-if="job.state === 'failed'" role="alert">Download failed: {{ job.error || 'Unknown error.' }}</p>
+          <GxNotice tone="danger" v-else-if="job.state === 'failed'">Download failed: {{ job.error || 'Unknown error.' }}</GxNotice>
           <progress v-if="running && progress !== null" :value="progress" max="100" :aria-label="'Sound pack download ' + progress + '%'">{{ progress }}%</progress>
           <button v-if="running" type="button" class="gx-btn gx-btn--tonal" :disabled="disabled || state.busy || !!state.error || !state.snapshot.parked" @click="feed.cancel()">Cancel download</button>
         </div>

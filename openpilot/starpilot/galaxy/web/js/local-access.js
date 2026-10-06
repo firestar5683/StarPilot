@@ -1,3 +1,5 @@
+import { PollTimer, connectionError } from "./polling.js"
+import { requestJson } from "./startup.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 
 export function validLocalAccess(value) {
@@ -16,56 +18,38 @@ export class LocalAccessFeed {
   constructor({ publish, onUnauthorized = () => {}, fetcher = (...args) => fetch(...args),
     later = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id) }) {
     Object.assign(this, { publish, onUnauthorized, fetcher, later, cancel })
-    this.active = false
-    this.request = null
-    this.generation = 0
+    this.active = false; this.request = null; this.generation = 0; this.data = null
+    this.poller = new PollTimer({ read: () => this.refresh(), later, cancel })
   }
   start(mode) {
-    this.stop()
-    this.active = true
-    this.mode = mode
-    if (mode !== "local") {
-      this.publish({ loading: false, data: null, error: "Local comma addresses are unavailable in sample mode." })
-      return
-    }
+    this.stop(); this.active = true; this.mode = mode
+    if (mode !== "local") { this.publish({ loading: false, data: null, error: "Local comma addresses are unavailable in preview." }); return }
+    this.poller.start()
     return this.refresh()
   }
-  stop() {
-    this.active = false
-    this.generation++
-    this.request?.abort()
-    this.request = null
-  }
+  stop() { this.active = false; this.generation++; this.poller.stop(); this.request?.abort(); this.request = null }
   async refresh() {
     if (!this.active || this.mode !== "local" || this.request) return
     const request = new AbortController(), generation = ++this.generation
     this.request = request
-    this.publish({ loading: true, error: "" })
-    const timer = this.later(() => request.abort(), 4000)
+    if (!this.data) this.publish({ loading: true })
     try {
-      const response = await this.fetcher("./api/local-access", { credentials: "same-origin", cache: "no-store", signal: request.signal })
+      const data = await requestJson("./api/local-access", { fetcher: this.fetcher, timeout: 4000, later: this.later, cancel: this.cancel, request: { signal: request.signal } })
       if (!this.active || generation !== this.generation) return
-      if (response.status === 401) { this.stop(); this.onUnauthorized(); return }
-      const data = await response.json()
-      if (!this.active || generation !== this.generation) return
-      if (!response.ok || !validLocalAccess(data)) throw new Error("Local comma addresses are unavailable. Try Refresh.")
+      if (!validLocalAccess(data)) throw new Error("Local comma addresses are unavailable.")
+      this.data = data
       this.publish({ data, error: "" })
     } catch (error) {
-      if (this.active && generation === this.generation)
-        this.publish({ data: null, error: error.name === "AbortError" ? "Reading local addresses timed out. Try Refresh." : "Local comma addresses are unavailable. Try Refresh." })
-    } finally {
-      this.cancel(timer)
       if (this.active && generation === this.generation) {
-        this.request = null
-        this.publish({ loading: false })
+        if (error.status === 401 || ["setup_required", "access_unavailable"].includes(error.code)) { this.stop(); this.onUnauthorized(); return }
+        this.publish({ error: connectionError(error) })
       }
-    }
+    } finally { if (this.active && generation === this.generation) { this.request = null; this.publish({ loading: false }) } }
   }
 }
 
 export const LocalAccess = {
-  props: { mode: { type: String, required: true }, onUnauthorized: { type: Function, default: () => {} },
-    showRefresh: { type: Boolean, default: true } },
+  props: { mode: { type: String, required: true }, onUnauthorized: { type: Function, default: () => {} } },
   setup(props) {
     const state = reactive({ loading: false, data: null, error: "" })
     const feed = new LocalAccessFeed({ publish: update => Object.assign(state, update), onUnauthorized: props.onUnauthorized })
@@ -75,7 +59,7 @@ export const LocalAccess = {
   watch: { mode(value) { this.feed.start(value) } },
   beforeUnmount() { this.feed.stop() },
   template: `<section class="gx-card gx-local-access" style="padding:var(--sp-4)" aria-label="Local comma access">
-    <div class="gx-settings__subhead"><h3>Local Comma Access</h3><button v-if="showRefresh" class="gx-btn gx-btn--tonal" type="button" :disabled="mode !== 'local' || state.loading" @click="feed.refresh()">{{ state.loading ? 'Checking…' : 'Refresh' }}</button></div>
+    <div class="gx-settings__subhead"><h3>Local Comma Access</h3></div>
     <p v-if="state.error" class="gx-note" role="status">{{ state.error }}</p>
     <template v-else-if="state.data?.available">
       <p>On the same network, open one of these comma addresses:</p>

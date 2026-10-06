@@ -74,7 +74,7 @@ for (const status of [409, 503, 400]) {
   assert.equal(failed.feed.needsReload, false)
 }
 const timeout = fixture(); timeout.feed.start(); await timeout.reply(0); timeout.feed.update(0, { key: BOOKMARK })
-const expire = [...timeout.timers.values()][0]; expire()
+const expire = timeout.timers.get(timeout.feed.timer); expire()
 assert.equal(timeout.requests[1].options.signal.aborted, true)
 assert.match(timeout.updates.at(-1).error, /Reload to check/)
 await timeout.reply(1); assert.equal(timeout.feed.needsReload, true)

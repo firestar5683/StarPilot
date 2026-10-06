@@ -1,3 +1,6 @@
+import { GxNotice } from "./notice.js"
+import { connectionError } from "./polling.js"
+import { requestJson } from "./startup.js"
 // One parked map operation belongs to the local owner, not to this browser tab.
 const STATES = new Set(["idle", "transferring", "validating", "selecting", "completed", "canceled", "failed", "interrupted", "unavailable"])
 const GENERATION = /^(?:|[0-9a-f]{64})$/
@@ -75,6 +78,7 @@ export class MapOperationsClient {
     this.operation = null
     this.busy = false
     this.error = ""
+    this.readErrors = {}
     this.actionError = ""
   }
 
@@ -93,6 +97,7 @@ export class MapOperationsClient {
     this.setup = this.catalog = this.operation = null
     this.busy = false
     this.error = this.actionError = ""
+    this.readErrors = {}
     this.emit()
   }
 
@@ -108,21 +113,20 @@ export class MapOperationsClient {
     const generation = this.generation
     const controller = new AbortController()
     this.requests.add(controller)
-    const deadline = this.later(() => controller.abort(), 10000)
     try {
-      const response = await this.fetcher(url, { credentials: "same-origin", cache: "no-store",
-        signal: controller.signal, ...(body === null ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) })
+      const { response, data: payload } = await requestJson(url, { fetcher: this.fetcher, later: this.later, cancel: this.cancelTimer, timeout: 10000, withResponse: true, request: { credentials: "same-origin", cache: "no-store",
+        signal: controller.signal, ...(body === null ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) } })
       if (!this.active || generation !== this.generation || controller.signal.aborted) return null
       if (response.status === 401) { this.stop(); this.unauthorized(); return null }
       if (response.status === 409) {
-        const body = await response.json().catch(() => null)
+        const body = payload
         if (!this.active || generation !== this.generation || controller.signal.aborted) return null
         const message = Object.hasOwn(ACTION_ERRORS, body?.code) ? ACTION_ERRORS[body.code] :
           "Map request could not be completed. Refresh status and try again."
         throw new Error(message)
       }
       if (response.status === 503) {
-        const body = await response.json().catch(() => null)
+        const body = payload
         if (!this.active || generation !== this.generation || controller.signal.aborted) return null
         if (["setup_required", "access_unavailable"].includes(body?.code)) {
           this.stop(); this.unauthorized(); return null
@@ -132,38 +136,44 @@ export class MapOperationsClient {
         throw new Error("Offline maps service is unavailable.")
       }
       if (!response.ok) throw new Error("Map request was rejected.")
-      const data = await response.json()
+      const data = payload
       if (!this.active || generation !== this.generation || controller.signal.aborted) return null
       return data
     } finally {
-      this.cancelTimer(deadline)
       this.requests.delete(controller)
     }
   }
 
+  readResult(source, error = null) {
+    this.readErrors[source] = error ? connectionError(error) : ""
+    this.error = Object.values(this.readErrors).find(Boolean) || ""
+    this.emit()
+  }
+
   async loadSetup() {
     if (!this.active) return
+    const generation = this.generation
     try {
       const data = await this.request("./api/maps/setup")
       if (data === null) return
       if (!validSetup(data)) throw new Error("Map setup status is unavailable.")
       const wasReady = this.setup?.packageReady
       this.setup = data
-      this.emit()
+      this.readResult("setup")
       if (data.packageReady && wasReady === false) await this.loadCatalog()
-    } catch (error) { if (this.active) { this.error = error.message; this.emit() } }
+    } catch (error) { if (this.active && generation === this.generation) this.readResult("setup", error) }
   }
 
   async loadCatalog() {
     if (!this.active) return
+    const generation = this.generation
     try {
       const data = await this.request("./api/maps/catalog")
       if (data === null) return
       if (!validCatalog(data)) throw new Error("Map catalog is unavailable.")
       this.catalog = data
-      if (this.operation !== null) this.error = ""
-      this.emit()
-    } catch (error) { if (this.active) { this.error = error.message; this.emit() } }
+      this.readResult("catalog")
+    } catch (error) { if (this.active && generation === this.generation) this.readResult("catalog", error) }
   }
 
   async loadStatus() {
@@ -174,16 +184,20 @@ export class MapOperationsClient {
       if (data !== null) {
         if (!validOperation(data)) throw new Error("Map operation status is unavailable.")
         this.operation = data
-        if (this.catalog !== null) this.error = ""
-        this.emit()
+        this.readResult("operation")
       }
     } catch (error) {
       if (this.active && generation === this.generation) {
-        this.operation = null; this.error = error.message; this.emit()
+        this.operation = null; this.readResult("operation", error)
       }
     } finally {
       if (this.active && generation === this.generation && !this.busy)
-        this.timer = this.later(() => { this.timer = null; this.loadStatus() }, 2500)
+        this.timer = this.later(() => {
+          this.timer = null
+          this.loadStatus()
+          if (this.readErrors.catalog) this.loadCatalog()
+          if (this.readErrors.setup) this.loadSetup()
+        }, 2500)
     }
   }
 
@@ -247,6 +261,7 @@ export class MapOperationsClient {
 }
 
 export const MapOperationsPanel = {
+  components: { GxNotice },
   name: "MapOperationsPanel",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ setup: null, catalog: null, operation: null, busy: false, error: "", search: "", review: null }),
@@ -292,8 +307,8 @@ export const MapOperationsPanel = {
           <template v-if="setup"><p role="status">{{ setup.packageReady ? 'Map service ready.' : 'Map service setup required.' }} {{ setup.snapshotReady ? 'A downloaded map is selected.' : 'Choose a region after setup to download its maps.' }}</p>
             <p v-if="!setup.packageReady" class="gx-note">{{ setup.packageState === 'invalid_package' ? 'The installed map service does not match this software’s verified source package.' : 'The verified map service package is missing.' }} Install a matching Mapd package through the device software update, then retry maps. Saved map selection is retained.</p>
             <p class="gx-note">{{ formatBytes(setup.freeDiskBytes) }} available storage. {{ setup.parked ? 'Parked downloads available.' : 'Park to download maps.' }}</p></template>
-          <p v-if="error" role="alert">{{ error }}</p>
-          <button v-if="(error || setup && !setup.packageReady) && !busy" type="button" class="gx-btn gx-btn--tonal" @click="review=null; client.start()">Retry maps</button>
+          <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+
           <p v-if="!operation" role="status">{{ error ? 'Map operation status unavailable.' : 'Loading map operation…' }}</p>
           <template v-else>
             <dl class="gx-map-manager__status"><dt>Operation</dt><dd>{{ operation.state }}</dd>

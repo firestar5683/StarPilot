@@ -19,14 +19,14 @@ class PreviewContractTest(unittest.TestCase):
     self.assertEqual([tool["path"] for tool in catalog["tools"] if tool["availability"] == "partial-preview"], ["/logs"])
     self.assertEqual([tool["path"] for tool in catalog["tools"] if tool["availability"] == "local-only"],
                      ["/bluetooth", "/cameras", "/device-preferences", "/galaxy", "/manage_models", "/model_laboratory",
-                      "/navigation", "/system", "/theme_maker", "/tuning", "/vehicle"])
+                      "/navigation", "/system", "/theme_maker", "/tuning", "/vehicle", "/android-auto"])
     self.assertTrue(all(tool["availability"] in {"unavailable", "partial-preview", "local-only"} for tool in catalog["tools"]))
     self.assertTrue(all(tool["name"] and tool["description"] and tool["icon"] for tool in catalog["tools"]))
 
   def test_static_preview_and_read_only_runtime_are_explicit(self):
     scripts = "\n".join(path.read_text() for path in (WEB / "js").glob("*.js"))
     self.assertEqual(sorted(re.findall(r"\bfetch\s*\(\s*[\"']([^\"']+)", scripts)),
-                     ['./api/auth/session', './api/connect/provider', './api/drive-state/action', './api/drive-state/status',
+                     ['./api/auth/session', './api/drive-state/action', './api/drive-state/status',
                       './api/ui/layout', '/_gateway/devices'])
     config = json.loads((WEB / 'data/runtime.json').read_text())
     self.assertEqual(config, {'schemaVersion': 1, 'monitor': 'sample'})

@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { TroubleshootPage, TmuxPage } from "./diagnostic-tools.js"
 import { navigate } from "./router.js"
 import { SystemMonitor } from "./system-monitor.js"
@@ -6,7 +7,7 @@ import { MenuTile } from "./menu-tile.js"
 
 export const Logs = {
   name: "Logs",
-  components: { SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
+  components: { GxNotice, SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
   props: { path: { type: String, required: true }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle" }, search: "" }),
   computed: {
@@ -54,18 +55,18 @@ export const Logs = {
       <template v-else-if="path === '/logs/crashes' && mode === 'local'">
 
         <h2>Crash Reports</h2>
-        <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"><button type="button" class="gx-btn gx-btn--tonal" @click="crashFeed.load()">Refresh</button></div>
+        <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"></div>
         <p v-if="crashes.scanIncomplete" class="gx-note">Directory scan is incomplete; newer reports may be omitted.</p>
         <p v-else-if="crashes.listLimited" class="gx-note">Showing the 200 newest reports; older reports are omitted.</p>
         <p v-if="crashes.status === 'loading'">Loading crash reports…</p>
-        <p v-else-if="crashes.status === 'unavailable'" role="alert">Crash reports are unavailable.</p>
+        <GxNotice tone="danger" v-else-if="crashes.status === 'unavailable' && !crashes.error">Crash reports are unavailable.</GxNotice>
         <p v-else-if="crashes.status === 'ready' && !visibleReports.length">{{ search ? 'No matching reports.' : 'No crash reports.' }}</p>
         <div v-if="crashes.status === 'ready'" class="gx-crash-list">
           <button v-for="report in visibleReports" :key="report.id" type="button" class="gx-card gx-crash-row" @click="crashFeed.open(report)"><strong>{{ report.name }}</strong><span>{{ reportDate(report.modifiedAt) }} · {{ reportSize(report.size) }}</span></button>
         </div>
         <section v-if="crashes.previewStatus === 'loading'" class="gx-card">Loading report…</section>
         <section v-else-if="crashes.preview" class="gx-card gx-crash-preview"><div class="gx-crash-preview__head"><strong>{{ crashes.preview.name }}</strong><button type="button" class="gx-btn gx-btn--tonal" @click="copyPreview">Copy visible text</button></div><p v-if="crashes.preview.truncated" class="gx-note">Preview truncated to the first 256 KiB.</p><pre>{{ crashes.preview.text }}</pre></section>
-        <p v-if="crashes.error" role="alert">{{ crashes.error }}</p>
+        <GxNotice tone="danger" v-if="crashes.error">{{ crashes.error }}</GxNotice>
       </template>
       <div v-else class="gx-card gx-message" role="status">This Logs & Diagnostics page is unavailable in the offline preview.</div>
     </div>`,

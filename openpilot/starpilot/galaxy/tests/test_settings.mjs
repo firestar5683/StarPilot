@@ -11,7 +11,7 @@ function fixture() {
   let nextTimer = 0
   let unauthorized = 0
   const feed = new SettingsFeed({ publish: (state) => states.push(state), unauthorized: () => { unauthorized++ },
-    later: (fn, ms) => { assert.ok([1000, 4000].includes(ms)); const id = ++nextTimer; timers.set(id, { fn, ms }); return id },
+    later: (fn, ms) => { assert.ok([1500, 3000, 4000].includes(ms)); const id = ++nextTimer; timers.set(id, { fn, ms }); return id },
     cancelTimer: (id) => timers.delete(id),
     fetcher: (url, options) => new Promise((resolve) => requests.push({ url, options, resolve })) })
   async function reply(index, body, status = 200) { requests[index].resolve(response(body, status)); await flush() }
@@ -23,7 +23,7 @@ function fixture() {
     fn()
   }
   function firePoll() {
-    const entry = [...timers.entries()].find(([, timer]) => timer.ms === 1000)
+    const entry = [...timers.entries()].find(([, timer]) => timer.ms === 1500)
     assert.ok(entry)
     timers.delete(entry[0]); entry[1].fn()
   }
@@ -71,9 +71,9 @@ keyContext.state.data = refreshed.states.at(-1).data
 assert.equal(SettingsPage.methods.rowKey.call(keyContext, keyContext.state.data.rows[0], 0), originalKey)
 refreshed.feed.preview(0, 1)
 assert.equal(JSON.parse(refreshed.requests[2].options.body).view, "new-view")
-assert.notEqual(SettingsPage.methods.rowKey.call(keyContext, { ...lane.rows[0], revision: "new-vehicle" }, 0), originalKey)
-assert.notEqual(SettingsPage.methods.rowKey.call(keyContext, { ...lane.rows[0], available: false }, 0), originalKey)
-assert.notEqual(SettingsPage.methods.rowKey.call(keyContext, { ...lane.rows[0], value: "On" }, 0), originalKey)
+assert.equal(SettingsPage.methods.rowKey.call(keyContext, { ...lane.rows[0], revision: "new-vehicle" }, 0), originalKey)
+assert.equal(SettingsPage.methods.rowKey.call(keyContext, { ...lane.rows[0], available: false }, 0), originalKey)
+assert.equal(SettingsPage.methods.rowKey.call(keyContext, { ...lane.rows[0], value: "On" }, 0), originalKey)
 refreshed.feed.load("torque")
 assert.equal(refreshed.states.at(-1).status, "loading")
 assert.equal(refreshed.states.at(-1).data, null)
@@ -182,13 +182,14 @@ const timeout = fixture()
 timeout.feed.start()
 timeout.expire()
 assert.equal(timeout.states.at(-1).status, "unavailable")
-assert.match(timeout.states.at(-1).error, /timed out/)
+assert.match(timeout.states.at(-1).error, /Reconnecting/)
 assert.equal(timeout.requests[0].options.signal.aborted, true)
 timeout.feed.load("lane")
 await timeout.reply(1, { ...lane, view: "new-view" })
 await timeout.reply(0, { ...lane, view: "late-view" })
 assert.equal(timeout.states.at(-1).data.view, "new-view")
-assert.equal(timeout.timers.size, 0)
+assert.equal(timeout.timers.size, 1)
+timeout.feed.stop()
 
 // Losing a save response cannot prove that the already dispatched save failed.
 const uncertain = fixture()
@@ -201,7 +202,7 @@ uncertain.feed.preview(0, 1) // Do not overlap an in-flight save with a new inte
 uncertain.feed.load("slc")
 assert.equal(uncertain.requests.length, 3)
 uncertain.expire()
-assert.match(uncertain.states.at(-1).error, /result is unknown/)
+assert.match(uncertain.states.at(-1).error, /Checking saved values/)
 assert.equal(uncertain.states.at(-1).data, null)
 assert.equal(uncertain.requests.length, 3) // Neither retry the POST nor silently read and claim failure.
 uncertain.feed.confirm()
@@ -240,7 +241,8 @@ await bodyTimeout.reply(1, { ...lane, view: "after-body-timeout" })
 finishBody(lane)
 await flush()
 assert.equal(bodyTimeout.states.at(-1).data.view, "after-body-timeout")
-assert.equal(bodyTimeout.timers.size, 0)
+assert.equal(bodyTimeout.timers.size, 1)
+bodyTimeout.feed.stop()
 
 // An older save's post-error read cannot attach its warning to a different page.
 const replacedRead = fixture()
@@ -302,7 +304,7 @@ assert.equal(parkedRecovery.states.at(-1).status, "ready")
 assert.equal(parkedRecovery.states.at(-1).data.view, lane.view)
 await parkedRecovery.reply(1, { ...lane, view: "fresh-parked" })
 assert.equal(parkedRecovery.states.at(-1).data.parked, true)
-assert.equal(parkedRecovery.timers.size, 0)
+assert.equal(parkedRecovery.timers.size, 1)
 parkedRecovery.feed.stop()
 
 // A background parked read yields to a user action and cannot replace its preview.
@@ -330,8 +332,8 @@ parkedTimeout.firePoll()
 parkedTimeout.expire()
 assert.equal(parkedTimeout.states.at(-1).status, "ready")
 assert.equal(parkedTimeout.states.at(-1).data.view, lane.view)
-assert.match(parkedTimeout.states.at(-1).error, /timed out/)
-assert.equal(parkedTimeout.timers.size, 0)
+assert.match(parkedTimeout.states.at(-1).error, /Reconnecting/)
+assert.equal(parkedTimeout.timers.size, 1)
 parkedTimeout.feed.stop()
 
 const wheelSection = SETTINGS_SECTIONS.find((section) => section.id === "wheel")

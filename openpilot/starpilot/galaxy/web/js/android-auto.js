@@ -1,3 +1,6 @@
+import { requestJson } from "./startup.js"
+import { GxNotice } from "./notice.js"
+import { connectionError } from "./polling.js"
 import { BluetoothDeviceList } from "./bluetooth-devices.js"
 
 export function uploadPackage(path, options, progress, makeRequest = () => new XMLHttpRequest()) {
@@ -134,21 +137,18 @@ export class AndroidAutoFeed {
     const controller = new AbortController()
     this.controller = controller
     if (!background) { this.busy = true; this.emit() }
-    let timedOut = false
-    this.timer = this.later(() => { timedOut = true; controller.abort() }, timeout)
     try {
-      const response = await transport(path, { ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal })
+      const { response, data } = await requestJson(path, { fetcher: transport, timeout, later: this.later, cancel: this.cancelTimer,
+        request: { ...options, signal: controller.signal }, withResponse: true })
       if (!this.active || this.generation !== generation || controller.signal.aborted) return null
       if (response.status === 401) { this.stop(); this.unauthorized(); return null }
-      const data = await response.json()
       if (!this.active || this.generation !== generation || controller.signal.aborted) return null
       if (!response.ok) throw new Error(data?.error || "Android Auto setup is unavailable")
-      this.error = ""
+      if (!background) this.error = ""
       return data
     } catch (error) {
       if (this.active && this.generation === generation) {
-        this.error = timedOut ? "Android Auto took too long to respond. Try again." :
-          error instanceof Error ? error.message : "Android Auto setup is unavailable"
+        this.error = error.name === "TimeoutError" ? "Android Auto took too long to respond. Reconnecting automatically…" : connectionError(error)
       }
       return null
     } finally {
@@ -174,6 +174,7 @@ export class AndroidAutoFeed {
     const setup = await this.request("./api/android-auto/setup", {}, 8000, this.fetcher, true)
     if (!this.active || this.generation !== generation) return
     const setupValid = setup && validSetup(setup)
+    let healthy = !!setupValid
     if (setupValid) this.setup = setup
     else if (setup) this.error = "Android Auto setup response changed"
     if (setupValid && !setup.enabled) {
@@ -194,9 +195,10 @@ export class AndroidAutoFeed {
         this.runtime = result.runtime && typeof result.runtime === "object" ? result.runtime : null
         if (wasActive && !this.pairing.active && !this.selected && !this.endReason) this.endReason = "ended"
       }
-      else if (result) this.error = "Pairing status response changed"
+      else { healthy = false; if (result) this.error = "Pairing status response changed" }
     }
     this.refreshing = false
+    if (healthy) this.error = ""
     this.emit()
     if (this.active && this.generation === generation) {
       const delay = this.pairing?.active || this.setup?.import?.state === "running" ? 1000 : 5000
@@ -279,6 +281,7 @@ export class AndroidAutoFeed {
 }
 
 export const AndroidAutoPage = {
+  components: { GxNotice },
   props: { mode: { type: String, required: true }, localAccess: { type: Boolean, required: true },
     unauthorized: { type: Function, required: true } },
   data: () => ({ setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
@@ -358,8 +361,8 @@ export const AndroidAutoPage = {
       <div class="gx-card gx-driving__intro"><h2>Android Auto</h2>
         <p>Show StarPilot on your car’s wireless Android Auto display. Enable projection, upload your Android Auto package, then find your car or wireless adapter. Setup works here over local or remote Galaxy.</p></div>
       <div class="gx-android-auto-setup">
-        <p v-if="error" class="gx-card gx-message" role="alert">{{ error }}</p>
-        <div v-if="!setup" class="gx-card gx-message" role="status">{{ error ? "Setup could not be loaded." : "Checking Android Auto setup…" }} <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="refresh">Retry</button></div>
+        <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+        <div v-if="!setup && !error" class="gx-card gx-message" role="status">{{ error ? "Setup could not be loaded." : "Checking Android Auto setup…" }} </div>
         <template v-else>
           <div class="gx-card gx-driving__intro"><h3>1. Prepare</h3>
             <p v-if="!setup.installReady" role="status">Android Auto display and encoder are not installed on this build. Projection setup is unavailable.</p>
@@ -379,9 +382,9 @@ export const AndroidAutoPage = {
             </details>
             <p v-if="setup.identity.warning" role="status">{{ setup.identity.warning }}</p>
             <p v-if="setup.import?.state === 'running'" role="status">Checking your package…</p>
-            <p v-if="setup.import?.state === 'failed'" role="alert">Package verification failed: {{ setup.import.error || 'Try another package.' }}</p>
+            <GxNotice tone="danger" v-if="setup.import?.state === 'failed'">Package verification failed: {{ setup.import.error || 'Try another package.' }}</GxNotice>
             <p v-if="setup.import?.state === 'done' && setup.identity.installed" role="status">Package verified and ready.</p>
-            <div class="gx-driving__actions"><input type="file" accept=".apk,.xapk,.apkm" style="max-width:100%;min-width:0" aria-label="Android Auto APK, XAPK, or APKM" @change="choosePackage" />
+            <div class="gx-driving__actions"><input class="gx-field" type="file" accept=".apk,.xapk,.apkm" style="max-width:100%;min-width:0" aria-label="Android Auto APK, XAPK, or APKM" @change="choosePackage" />
               <button class="gx-btn" :disabled="!!uploadReason" @click="upload">{{ setup.enabled ? 'Upload Package' : 'Enable and Upload Package' }}</button></div>
             <p v-if="packageFile" role="status">Selected: {{ packageFile.name }} ({{ Math.ceil(packageFile.size / 1048576) }} MB).</p>
             <div v-if="uploadProgress" role="status" aria-live="polite">
@@ -404,7 +407,7 @@ export const AndroidAutoPage = {
             <p v-if="pairing?.state === 'pairing' && !pairing.prompt && !pairing.approved" role="status">Pairing with {{ pairing.receiver?.name || 'the selected device' }}…</p>
             <p v-if="pairing?.state === 'connecting'" role="status">Connecting to {{ pairing.receiver?.name || 'the selected device' }}…</p>
             <p v-if="['paired', 'connected'].includes(pairing?.state)" role="status">{{ pairing.receiver?.name || 'Device' }} {{ pairing.state === 'connected' ? 'connected' : 'paired' }} over Bluetooth.</p>
-            <p v-if="pairing?.error" role="alert">{{ pairing.error }}</p>
+            <GxNotice tone="danger" v-if="pairing?.error">{{ pairing.error }}</GxNotice>
             <div v-if="pairing?.active" style="display:grid;gap:10px;margin:16px 0;min-width:0">
               <p v-if="!pairing.devices?.length && waitingForCar" role="status">No devices found yet. Keep the car or adapter’s pairing screen open.</p>
               <div v-for="device in pairing.devices || []" :key="device.address" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
@@ -430,7 +433,7 @@ export const AndroidAutoPage = {
             <p v-if="runtime?.companion_name" class="gx-muted">Car: {{ runtime.companion_name }}</p>
             <div class="gx-driving__actions"><button v-if="!pairing?.active" class="gx-btn" :disabled="busy || !!pairingReason" @click="startPairing">Find Car or Adapter</button>
               <button v-else class="gx-btn gx-btn--tonal" :disabled="busy" @click="cancelPairing">Cancel Search / Pairing</button>
-              <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="refresh">Refresh</button></div>
+              </div>
           </div>
           <div class="gx-card gx-driving__intro"><h3>3. Connect</h3>
             <p v-if="selected">Selected Android Auto receiver: {{ selected.name }}.</p>

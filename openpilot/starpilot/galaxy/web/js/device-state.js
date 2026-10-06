@@ -1,4 +1,4 @@
-import { LocalHistoryFeed } from "./record-history.js"
+import { SnapshotFeed } from "./snapshot-feed.js"
 
 const STATES = Object.freeze({ parked: "Parked", driving: "Driving", standby: "Standby" })
 
@@ -8,7 +8,8 @@ export const validDeviceState = (value) => value &&
 
 // Reuse the authenticated request/deadline boundary; this lightweight endpoint
 // does not scan processes or start any device services.
-export class DeviceStateFeed extends LocalHistoryFeed {
+export class DeviceStateFeed extends SnapshotFeed {
+  static interval = 0
   static endpoint = "./api/device/state"
   static valid = validDeviceState
   static subject = "device state"

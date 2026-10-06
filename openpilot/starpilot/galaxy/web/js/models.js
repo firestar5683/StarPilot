@@ -1,3 +1,4 @@
+import { connectionError } from "./polling.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
 // Read-only model identity; a saved label never proves what modeld loaded.
@@ -203,7 +204,7 @@ export class ModelManagerFeed {
   }
   async requestJson(path, payload) {
     const generation = ++this.generation
-    this.lastError = ""
+    if (payload) this.lastError = ""
     this.request?.abort()
     if (this.poll !== null) this.cancel(this.poll)
     this.poll = null
@@ -216,7 +217,8 @@ export class ModelManagerFeed {
       this.request = null
       this.data = null
       this.saving = false
-      this.publish({ loading: false, data: null, error: payload ? "The result is unknown. Refresh before trying again." : "Model Manager is unavailable. Retrying…" })
+      this.lastError = payload ? "The result is unknown. Checking automatically…" : "Model Manager is unavailable. Reconnecting automatically…"
+      this.publish({ loading: false, data: null, error: this.lastError })
       this.poll = this.later(() => this.load(), 2000)
     }, 10000)
     try {
@@ -235,7 +237,7 @@ export class ModelManagerFeed {
     } catch (error) {
       if (this.active && generation === this.generation) {
         this.data = null
-        this.lastError = error.message || "Model Manager is unavailable"
+        this.lastError = connectionError(error)
         this.publish({ loading: false, data: null, error: this.lastError })
       }
       return null
@@ -246,7 +248,7 @@ export class ModelManagerFeed {
   }
   async load() {
     if (!this.active || this.saving) return null
-    if (!this.data) this.publish({ loading: true, data: null, error: "" })
+    if (!this.data && !this.lastError) this.publish({ loading: true, data: null, error: "" })
     const data = await this.requestJson("manager")
     if (!this.active) return null
     if (data) {
@@ -257,6 +259,7 @@ export class ModelManagerFeed {
         this.publish({ loading: false, data: null, error: "Invalid Model Manager response" })
       } else {
         this.data = data
+        this.lastError = ""
         if (this.expiry !== null) this.cancel(this.expiry)
         this.expiry = null
         if (data.jetlink?.active === true) {
@@ -500,7 +503,7 @@ export const ModelsPage = {
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <button v-if="status.downloading" type="button" class="gx-btn gx-btn--danger" :disabled="!canAction('cancel')" @click="runAction('cancel')"><i aria-hidden="true" class="bi bi-stop-circle"></i> Cancel Download</button>
               <button v-else type="button" class="gx-btn" :disabled="!canAction('downloadAll')" @click="runAction('downloadAll')"><i aria-hidden="true" class="bi bi-download"></i> Download Missing Models</button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!canAction('refresh')" @click="runAction('refresh')"><i aria-hidden="true" v-if="busy === 'refresh:'" class="bi bi-arrow-repeat gx-spin"></i><i aria-hidden="true" v-else class="bi bi-arrow-clockwise"></i> Refresh</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!canAction('refresh')" @click="runAction('refresh')"><i aria-hidden="true" v-if="busy === 'refresh:'" class="bi bi-arrow-repeat gx-spin"></i><i aria-hidden="true" v-else class="bi bi-arrow-clockwise"></i> Check model catalog</button>
             </div>
 
             <div class="gx-row" style="border-top:none;">

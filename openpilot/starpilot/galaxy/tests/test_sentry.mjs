@@ -64,8 +64,8 @@ assert.equal(unavailable.feed.status, 'unavailable')
 
 const timedOut = fixture()
 timedOut.feed.start()
-assert.deepEqual([...timedOut.timers.values()].map((timer) => timer.ms), [4000])
-const [timeoutId, timeout] = [...timedOut.timers.entries()][0]
+assert.deepEqual([...timedOut.timers.values()].map((timer) => timer.ms), [10000, 4000])
+const [timeoutId, timeout] = [...timedOut.timers.entries()].find(([, timer]) => timer.ms === 4000)
 timedOut.timers.delete(timeoutId)
 timeout.fn()
 assert.equal(timedOut.feed.status, 'unavailable')

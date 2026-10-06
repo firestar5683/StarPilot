@@ -10,7 +10,7 @@ import numpy as np
 import pyray as rl
 
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
-from openpilot.starpilot.ui.onroad_customization import PROFILES, placement, validate_document
+from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, PROFILES, placement, validate_document
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
@@ -161,7 +161,7 @@ class _Canvas:
     self.target: rl.RenderTexture | None = None
     try:
       self.fonts = BitmapFonts(profile, default_font_directory())
-      layers = {'background_layer': lambda rect, state: render_sample_road(rect, state, profile)}
+      layers = {'background_layer': self._render_background}
       if viewport is None:
         self.view = OnroadView(self.fonts, ASSET_DIRECTORY, background_layer=layers['background_layer'])
       else:
@@ -175,6 +175,22 @@ class _Canvas:
     except Exception:
       self.close()
       raise
+
+  def _render_background(self, rect: rl.Rectangle, state: OnroadState) -> None:
+    render_sample_road(rect, state, self.profile)
+    if self.viewport is None:
+      self._render_side_cameras(state)
+
+  def _render_side_cameras(self, state: OnroadState) -> None:
+    for key in CAMERA_WIDGETS:
+      position = placement(state.customization, self.profile, key)
+      if not position["enabled"]:
+        continue
+      widget = PROFILES[str(self.profile)]["widgets"][key]
+      radius = widget["width"] / 2
+      center = rl.Vector2(position["x"] + radius, position["y"] + radius)
+      rl.draw_circle_v(center, radius, rl.Color(21, 44, 57, 230))
+      rl.draw_ring(center, radius - 3, radius, 0, 360, 64, rl.Color(94, 229, 238, 255))
 
   def _render_driver_monitor(self, rect: rl.Rectangle, state: OnroadState) -> None:
     top_icons = (self.profile == Profile.COMPACT and state.alert.size == AlertSize.NONE and

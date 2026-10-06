@@ -14,8 +14,8 @@ export const GxNotice = {
       return this.tone === "danger" ? "bi-x-octagon" : this.tone === "warn" ? "bi-exclamation-triangle" : "bi-info-circle"
     },
   },
-  template: `<div class="gx-alert" :class="toneClass" role="status">
+  template: `<div class="gx-alert" :class="toneClass" :role="tone === 'danger' ? 'alert' : 'status'">
     <i class="bi gx-alert__icon" :class="iconClass" aria-hidden="true"></i>
-    <div class="gx-alert__body"><strong v-if="title">{{ title }}</strong><span><slot /></span></div>
+    <div class="gx-alert__body"><strong v-if="title">{{ title }}</strong><div class="gx-alert__text"><slot /></div></div>
   </div>`,
 }

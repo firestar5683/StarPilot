@@ -1,5 +1,6 @@
+import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
-import { CameraSnapshotFeed } from "./cameras.js"
+import { LiveCameraPreview } from "./cameras.js"
 import { SettingsFeed, isPipCropRow } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 import { displayPoint, FORMATS, maskDraft, sourcePoint } from "./pip-geometry.js"
@@ -11,18 +12,18 @@ const SIDES = [
 
 export const PipPage = {
   name: "PipPage",
-  components: { GalaxySettingRow },
+  components: { GxNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, error: "", width: 1928, height: 1208,
       cropSize: 580, centerLeft: null, centerRight: null, invert: null, activeSide: "centerRight",
-      localNote: "", imageName: "", reviewing: false })
-    let lastView = null
+      localNote: "", cameraError: "", imageName: "", reviewing: false })
+    let lastEditor = null
     const feed = new SettingsFeed({ unauthorized: props.unauthorized, publish: (update) => {
       Object.assign(state, update)
-      if (update.status === "ready" && update.data?.view && update.data.view !== lastView) {
-        lastView = update.data.view
+      if (update.status === "ready" && update.data?.view && JSON.stringify(update.data.editor) !== lastEditor) {
+        lastEditor = JSON.stringify(update.data.editor)
         const editor = update.data.editor
         if (editor) {
           state.width = editor.width
@@ -41,46 +42,18 @@ export const PipPage = {
     return { state, feed, FORMATS, SIDES }
   },
   mounted() {
-    this._image = null
-    this._imageGeneration = 0
+    this._dragIndex = -1
+    this._dragSide = null
+    this.liveCamera = new LiveCameraPreview({
+      unauthorized: this.unauthorized, enabled: () => this.mode === "local",
+      publish: update => Object.assign(this.state, update), redraw: () => this.redraw(),
+    })
     if (this.mode === "local") this.feed.start("pip")
-    this._liveStopped = false
-    this.snapshots = new CameraSnapshotFeed({ unauthorized: this.unauthorized, publish: (update) => {
-      if (update.error) { this.state.localNote = update.error; this._image = null; this.state.imageName = "" }
-      if (!update.image) return
-      const generation = ++this._imageGeneration
-      const image = new Image()
-      image.onload = () => {
-        if (this._liveStopped || generation !== this._imageGeneration) return
-        this._image = image
-        this.state.imageName = "Live cabin camera"
-        this.state.localNote = ""
-        this.redraw()
-      }
-      image.onerror = () => { this.state.localNote = "Camera frame could not be displayed."; this._image = null }
-      image.src = update.image
-    } })
-    const refresh = async () => {
-      if (this._liveStopped) return
-      if (this.mode === "local" && !document.hidden) await this.snapshots.capture("cabin")
-      if (!this._liveStopped) this._liveTimer = setTimeout(refresh, 1500)
-    }
-    this.visibility = () => { if (document.hidden) { this.snapshots.stop(); this._image = null; this.state.imageName = "" } }
-    document.addEventListener("visibilitychange", this.visibility)
-    refresh()
+    this.liveCamera.start()
     this.$nextTick(() => this.redraw())
   },
-  updated() {
-    this.$nextTick(() => this.redraw())
-  },
-  beforeUnmount() {
-    this._liveStopped = true
-    clearTimeout(this._liveTimer)
-    document.removeEventListener("visibilitychange", this.visibility)
-    this.snapshots?.stop()
-    this.feed.stop()
-    this.dropImage()
-  },
+  updated() { this.$nextTick(() => this.redraw()) },
+  beforeUnmount() { this.liveCamera.stop(); this.feed.stop() },
   computed: {
     controls() { return (this.state.data?.rows || []).map((row, index) => ({ row, index }))
       .filter(({ row }) => !isPipCropRow(row)) },
@@ -90,12 +63,6 @@ export const PipPage = {
       FORMATS.some(([w, h]) => w === this.state.width && h === this.state.height) },
   },
   methods: {
-    dropImage() {
-      this._imageGeneration++
-      if (this._image) this._image.src = ""
-      this._image = null
-      this.state.imageName = ""
-    },
     position(axis, event) {
       if (!this.canEdit) return
       const center = [...(this.state[this.state.activeSide] || [this.state.width / 2, this.state.height / 2])]
@@ -159,9 +126,9 @@ export const PipPage = {
       const w = canvas.width, h = canvas.height
       ctx.fillStyle = "#151821"
       ctx.fillRect(0, 0, w, h)
-      if (this._image) {
+      if (this.liveCamera?.image) {
         if (this.state.invert) { ctx.save(); ctx.translate(w, 0); ctx.scale(-1, 1) }
-        ctx.drawImage(this._image, 0, 0, w, h)
+        ctx.drawImage(this.liveCamera.image, 0, 0, w, h)
         if (this.state.invert) ctx.restore()
       } else {
         ctx.strokeStyle = "#38404e"
@@ -169,15 +136,15 @@ export const PipPage = {
       }
       const preview = this.$refs.preview
       const center = this.state[this.state.activeSide]
-      if (preview && this._image && center) {
+      if (preview && this.liveCamera?.image && center) {
         preview.width = preview.height = 300
         const crop = preview.getContext("2d")
         crop.save()
         if (this.state.invert) { crop.translate(300, 0); crop.scale(-1, 1) }
         const size = this.state.cropSize
-        crop.drawImage(this._image, (center[0] - size / 2) * this._image.naturalWidth / w,
-          (center[1] - size / 2) * this._image.naturalHeight / h,
-          size * this._image.naturalWidth / w, size * this._image.naturalHeight / h, 0, 0, 300, 300)
+        crop.drawImage(this.liveCamera.image, (center[0] - size / 2) * this.liveCamera.image.naturalWidth / w,
+          (center[1] - size / 2) * this.liveCamera.image.naturalHeight / h,
+          size * this.liveCamera.image.naturalWidth / w, size * this.liveCamera.image.naturalHeight / h, 0, 0, 300, 300)
         crop.restore()
       }
       for (const side of SIDES) {
@@ -200,14 +167,13 @@ export const PipPage = {
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
       <template v-else>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
-        <div v-else-if="state.status === 'unavailable'" class="gx-card gx-message" role="alert">Saved settings are unavailable.</div>
-        <div v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}
-          <button type="button" class="gx-btn gx-btn--tonal" @click="feed.load()">Refresh</button></div>
+        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved settings are unavailable.</GxNotice>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}
+          </GxNotice>
         <div v-if="state.data" class="gx-settings__body">
-          <div class="gx-settings__subhead"><p>{{ state.data.subtitle }} <span v-if="!state.data.parked">Turn the vehicle off to change these settings.</span></p>
-            <button type="button" class="gx-btn gx-btn--tonal" :disabled="state.status === 'saving'" @click="feed.load()">Refresh</button></div>
+          <div class="gx-settings__subhead"><p>{{ state.data.subtitle }} <span v-if="!state.data.parked">Turn the vehicle off to change these settings.</span></p></div>
           <section class="gx-card gx-settings__section" aria-label="Saved settings">
-            <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.view + ':' + index" :row="row" :index="index"
+            <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.page + ':' + index" :row="row" :index="index"
               :disabled="!state.data.parked || state.status !== 'ready' || state.reviewing || !!state.pending"
               :save-value="(index, value) => feed.previewValue(index, value)"
               @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
@@ -215,7 +181,8 @@ export const PipPage = {
           <section class="gx-card gx-vasm__editor" aria-label="Blind Spot Camera crop editor">
             <h3>Live Camera Crop</h3>
             <p>Choose a vehicle side and adjust horizontal position, vertical position, and crop size.</p>
-            <p v-if="!state.imageName" role="status">Waiting for a fresh cabin frame. Turn off the vehicle to preview and edit the crop.</p>
+            <p v-if="!state.imageName && !state.cameraError" role="status">Waiting for a fresh cabin frame. Turn off the vehicle to preview and edit the crop.</p>
+            <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
             <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
             <div class="gx-vasm__sides"><div v-for="side in SIDES" :key="side.key" class="gx-vasm__side">
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="!canEdit" :aria-pressed="state.activeSide === side.key" @click="choose(side.key)">{{ side.label }}</button>
@@ -225,11 +192,11 @@ export const PipPage = {
             <canvas v-show="state.imageName" ref="canvas" class="gx-vasm__canvas" :aria-label="'Cabin source crop canvas, editing ' + (state.activeSide === 'centerRight' ? 'vehicle left' : 'vehicle right')" @pointerdown="place"></canvas>
             <canvas v-show="state.imageName" ref="preview" aria-label="Live selected crop preview" style="max-width:300px;width:100%"></canvas>
             <label>Horizontal position
-              <input type="range" :min="Math.ceil(state.cropSize / 2)" :max="state.width - Math.ceil(state.cropSize / 2)" :value="state[state.activeSide]?.[0] || state.width / 2" :disabled="!canEdit" @input="position(0, $event)" /></label>
+              <input class="gx-slider" type="range" :min="Math.ceil(state.cropSize / 2)" :max="state.width - Math.ceil(state.cropSize / 2)" :value="state[state.activeSide]?.[0] || state.width / 2" :disabled="!canEdit" @input="position(0, $event)" /></label>
             <label>Vertical position
-              <input type="range" :min="Math.ceil(state.cropSize / 2)" :max="state.height - Math.ceil(state.cropSize / 2)" :value="state[state.activeSide]?.[1] || state.height / 2" :disabled="!canEdit" @input="position(1, $event)" /></label>
+              <input class="gx-slider" type="range" :min="Math.ceil(state.cropSize / 2)" :max="state.height - Math.ceil(state.cropSize / 2)" :value="state[state.activeSide]?.[1] || state.height / 2" :disabled="!canEdit" @input="position(1, $event)" /></label>
             <label>Shared square crop size: {{ state.cropSize }} px
-              <input type="range" min="20" :max="Math.min(state.width, state.height)" step="1" :value="state.cropSize" :disabled="!canEdit" @input="size" /></label>
+              <input class="gx-slider" type="range" min="20" :max="Math.min(state.width, state.height)" step="1" :value="state.cropSize" :disabled="!canEdit" @input="size" /></label>
             <div class="gx-settings__controls"><button type="button" class="gx-btn" :disabled="!canEdit" @click="saveCrop">Save Crop</button></div>
             <p class="gx-note">The C3 bubble and C4 panel use this saved crop.</p>
           </section>

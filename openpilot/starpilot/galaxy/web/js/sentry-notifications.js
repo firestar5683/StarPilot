@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 export const channels = ["webPush", "discord", "webhook", "ntfy"]
 export const labels = { webPush: "Browser push", discord: "Discord", webhook: "General webhook", ntfy: "ntfy" }
 
@@ -56,6 +57,7 @@ export class NotificationClient {
 }
 
 export const SentryNotifications = {
+  components: { GxNotice },
   name: "SentryNotifications",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ channels, labels, notifications: null, notificationBusy: false, notificationError: "",
@@ -109,16 +111,16 @@ export const SentryNotifications = {
       <p class="gx-note">Receive new locally recorded motion events. Notification channels work independently.</p>
       <p v-if="mode !== 'local'">Notification configuration is available on your connected device.</p>
       <template v-else>
-        <p v-if="notificationError" role="alert">{{ notificationError }}</p>
+        <GxNotice tone="danger" v-if="notificationError">{{ notificationError }}</GxNotice>
         <p v-if="notificationBusy" role="status">Updating notifications…</p>
-        <p v-if="notifications?.queueFull" role="alert">The notification queue is full. Some events could not be queued.</p>
+        <GxNotice tone="danger" v-if="notifications?.queueFull">The notification queue is full. Some events could not be queued.</GxNotice>
         <template v-if="notifications">
           <p class="gx-note">{{ notifications.deliverySemantics }}</p>
           <section v-for="name in channels" :key="name" class="gx-card gx-sentry-channel">
             <h3>{{ labels[name] }}</h3>
             <p>{{ notifications.channels[name].enabled ? 'Enabled' : 'Disabled' }} · {{ notifications.channels[name].configured ? 'Configured' : 'Not configured' }}</p>
             <p role="status">Delivery: {{ notifications.channels[name].lastState }} · Pending: {{ notifications.channels[name].pending }}</p>
-            <p v-if="notifications.channels[name].lastError" role="alert">Delivery status: {{ notifications.channels[name].lastError.replaceAll('_', ' ') }}</p>
+            <GxNotice tone="danger" v-if="notifications.channels[name].lastError">Delivery status: {{ notifications.channels[name].lastError.replaceAll('_', ' ') }}</GxNotice>
             <div v-if="name !== 'webPush'" class="gx-sentry-channel__fields">
               <label>HTTPS URL <input v-model="drafts[name].url" class="gx-field" type="password" autocomplete="off" placeholder="Leave blank to keep saved URL"></label>
               <label>Bearer token (optional) <input v-model="drafts[name].token" class="gx-field" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>

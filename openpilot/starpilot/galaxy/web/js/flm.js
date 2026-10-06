@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { LocalHistoryFeed, validLocalHistory } from './record-history.js'
 
 const SEGMENT = /^(?:[a-f0-9]{8}--[a-f0-9]{10}|[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}|[a-f0-9]{16}[|_](?:[a-f0-9]{8}--[a-f0-9]{10}|[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}))--[0-9]{1,6}$/
@@ -132,14 +133,8 @@ export class FlmFeed {
     }
   }
   schedule() {
-    if (!this.active || this.status?.state !== 'running') {
-      if (this.timer !== null) this.cancelTimer(this.timer)
-      this.timer = null
-      return
-    }
-    if (this.active && this.status?.state === 'running' && this.timer === null) {
-      this.timer = this.later(() => { this.timer = null; this.refresh() }, 1000)
-    }
+    if (!this.active || this.timer !== null) return
+    this.timer = this.later(() => { this.timer = null; this.refresh() }, this.status?.state === 'running' ? 1000 : 5000)
   }
   async refresh() {
     if (!this.active || this.inFlight || this.busy) return
@@ -210,7 +205,7 @@ export const FlmChart = {
 
 export const FlmPage = {
   name: 'FlmPage',
-  components: { FlmChart },
+  components: { GxNotice, FlmChart },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, go: { type: Function, required: true } },
   data: () => ({ inventoryStatus: 'idle', inventory: null, inventoryError: '', operation: null, report: null,
     operationError: '', busy: false, requesting: false, selected: [] }),
@@ -244,8 +239,8 @@ export const FlmPage = {
     <div class="gx-settings__header"><div><h2>Offline Tracking</h2><p>Local recording diagnostics for Ioniq 6 steering torque tracking. Reports do not qualify a vehicle or recommend a tune.</p></div></div>
     <p v-if="mode !== 'local'" class="gx-card gx-message">Offline analysis requires authenticated local Galaxy access.</p>
     <template v-else>
-      <button type="button" class="gx-btn gx-btn--tonal" :disabled="inventoryStatus === 'loading'" @click="inventoryFeed.load()">Refresh local recordings</button>
-      <p v-if="inventoryStatus === 'loading'" role="status">Reading local recordings…</p><p v-if="inventoryStatus === 'unavailable'" role="alert">{{ inventoryError }}</p>
+
+      <p v-if="inventoryStatus === 'loading'" role="status">Reading local recordings…</p><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
       <p v-if="inventory?.scanIncomplete" role="status">This recording scan was incomplete. More local segments may exist.</p>
       <section class="gx-card gx-flm__panel"><h3>Choose Full Logs</h3><p class="gx-note">Select 1–5 closed local segments. Quick logs alone cannot provide this report.</p>
 <div class="gx-flm__actions" style="position:sticky;top:0;z-index:1;background:var(--gx-surface, #181526);padding:0.75rem 0;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
@@ -260,11 +255,11 @@ export const FlmPage = {
         <p v-if="operation?.state === 'running'" role="status">Analyzing {{ operation.processed }} of {{ operation.selected }} selected segments…</p>
         <p v-else-if="operation?.state === 'completed'" role="status">Analysis completed.</p>
         <p v-else-if="operation?.state === 'canceled'" role="status">Analysis canceled.</p>
-        <p v-else-if="operation?.state === 'failed'" role="alert">Analysis failed.</p>
+        <GxNotice tone="danger" v-else-if="operation?.state === 'failed'">Analysis failed.</GxNotice>
         <p v-else-if="operation?.state === 'unavailable'" role="status">Analysis owner unavailable.</p>
         <p v-else role="status">No analysis running.</p>
-        <p v-if="operationError" role="alert">{{ operationError }}</p>
-        <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy || requesting" @click="operationFeed.refresh()">Refresh status</button>
+        <GxNotice tone="danger" v-if="operationError">{{ operationError }}</GxNotice>
+
         <button v-if="operation?.state === 'running'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy || requesting" @click="operationFeed.cancelAnalysis()">Cancel analysis</button>
       </section>
       <template v-if="report"><p class="gx-note">Offline diagnostic only · {{ report.segments.length }} {{ report.segments.length === 1 ? 'segment' : 'segments' }} · No tune recommendation</p>

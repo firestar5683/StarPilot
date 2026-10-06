@@ -1,21 +1,24 @@
+import { GxNotice } from "./notice.js"
+import { requestJson } from "./startup.js"
 import { LocalAccess } from "./local-access.js"
 
 export const GalaxyPage = {
   name: "GalaxyPage",
-  components: { LocalAccess },
+  components: { GxNotice, LocalAccess },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "" }),
   mounted() { this.load() },
   methods: {
     async request(path, body) {
-      const response = await fetch(path, body === undefined ? { cache: "no-store" } : {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      })
-      if (response.status === 401) this.unauthorized()
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || "Galaxy request failed")
-      return data
+      try {
+        return await requestJson(path, { request: body === undefined ? {} : {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        } })
+      } catch (error) {
+        if (error.status === 401) this.unauthorized()
+        throw error
+      }
     },
     async load() {
       if (this.mode !== "local") { this.loading = false; return }
@@ -73,7 +76,7 @@ export const GalaxyPage = {
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="gx-field" style="flex:1;min-width:200px" type="password" v-model="password" :minlength="legacyPassword || legacyPairingAvailable ? 6 : 8" maxlength="255" :autocomplete="legacyPassword ? 'current-password' : 'new-password'" :placeholder="legacyPassword ? 'Existing Galaxy password' : legacyPairingAvailable ? 'Existing or new Galaxy password' : 'New password (at least 8 characters)'" @keydown.enter="pair" />
           <button type="button" class="gx-btn" :disabled="busy || password.trim().length < (legacyPassword || legacyPairingAvailable ? 6 : 8)" @click="pair">{{ busy ? 'Pairing…' : 'Set password & pair' }}</button></div>
         </template>
-        <p v-if="error" class="gx-note gx-note--danger" role="alert">{{ error }}</p>
+        <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       </section>
       <LocalAccess :mode="mode" :on-unauthorized="unauthorized" />
     </div>

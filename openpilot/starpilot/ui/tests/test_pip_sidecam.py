@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from contextlib import nullcontext
 from types import SimpleNamespace
+from openpilot.starpilot.ui.onroad_customization import default_document
 from unittest.mock import patch
 from unittest.mock import Mock
 import gc
@@ -35,14 +36,15 @@ def test_mask_maps_image_left_to_vehicle_right_and_rejects_unbounded_crop():
     assert Mask.parse(invalid) is None
 
 
-def test_selected_sides_preserve_frozen_trigger_and_optional_vasm_semantics():
+def test_selected_sides_use_pip_triggers_independently_of_vasm():
   mask = Mask.parse({"width": 100, "height": 100, "center_left": [25, 50],
                      "center_right": [75, 50], "crop_size": 20})
   assert mask is not None
   signals = Signals(True, left_blinker=True, right_blinker=False, left_blindspot=False,
                     right_blindspot=False, vasm_right=True)
   active = {"started": True, "enabled": True, "on_blinker": True, "on_bsm": True}
-  assert selected_sides(mask, signals, **active) == ("right", "left")
+  assert selected_sides(mask, signals, **active) == ("left",)
+  assert selected_sides(mask, Signals(True, False, False, False, False, True, True), **active) == ()
   assert selected_sides(mask, signals, **{**active, "on_bsm": False}) == ("left",)
   assert selected_sides(mask, signals, **{**active, "started": False}) == ()
   assert selected_sides(mask, Signals(False, True, True, True, True), **active) == ()
@@ -144,7 +146,7 @@ def test_native_pip_passes_only_qualified_visual_sides_without_replacing_oem_bsm
                          fingerprint="b" * 64)
   car = SimpleNamespace(leftBlinker=False, rightBlinker=False, leftBlindspot=False, rightBlindspot=True,
                         canValid=True, gearShifter=runtime_app.car_schema.CarState.GearShifter.drive)
-  state = SimpleNamespace(alert=SimpleNamespace(size=None))
+  state = SimpleNamespace(customization=default_document(), alert=SimpleNamespace(size=None))
   with patch.object(runtime_app, "ui_state", SimpleNamespace(params=object(), sm=object(), started_frame=0)), \
        patch.object(runtime_app, "read_pip", return_value=saved), \
        patch.object(runtime_app, "read_vasm_preferences", return_value=vasm), \
@@ -247,6 +249,39 @@ def test_frozen_shape_shaders_crop_and_mask_before_camera_reads():
     external = _external_shader(shader)
     assert "samplerExternalOES texture0" in external
     assert "texture(texture1" not in external
+
+
+def test_renderer_uses_saved_widget_position_and_removal_deactivates_camera():
+  mask = Mask.parse({"width": 100, "height": 100, "center_left": [25, 50],
+                     "center_right": [75, 50], "crop_size": 20})
+  signals = Signals(True, True, True, False, False)
+  targets = {"left": Rect(100, 200, 300, 300), "right": Rect(900, 400, 300, 300)}
+  stream = Mock(spec=PiPStream)
+  stream.generation = 0
+  stream.poll.return_value = SimpleNamespace(width=100, height=100, stride=100)
+  renderer = PiPRenderer("bubble", stream, frame_availability=Mock())
+  with patch.object(renderer, "_shader", return_value=object()), patch.object(renderer, "_texture", return_value=object()), \
+       patch.object(renderer, "_draw") as draw:
+    assert renderer.render(Rect(0, 0, 1800, 1020), mask, signals, enabled=True, on_blinker=True, on_bsm=True,
+                           invert=False, now=1, placements=targets) == "rendered"
+    assert [call.args[3] for call in draw.call_args_list] == [targets["right"], targets["left"]]
+    draw.reset_mock()
+    warning = Signals(True, True, True, False, False, True, False)
+    renderer.render(Rect(0, 0, 1800, 1020), mask, warning, enabled=True, on_blinker=True, on_bsm=True,
+                    invert=False, now=2, placements={"left": targets["left"]})
+    assert draw.call_count == 1
+    assert draw.call_args.args[3] == targets["left"]
+    assert draw.call_args.kwargs["warning"] is True
+    draw.reset_mock()
+    renderer.render(Rect(0, 0, 1800, 1020), mask, signals, enabled=True, on_blinker=True, on_bsm=True,
+                    invert=False, now=3, placements={"left": targets["left"]})
+    assert draw.call_args.kwargs["warning"] is False
+    count = stream.poll.call_count
+    assert renderer.render(Rect(0, 0, 1800, 1020), mask, signals, enabled=True, on_blinker=True, on_bsm=True,
+                           invert=False, now=4, placements={}) == "inactive"
+    assert stream.poll.call_count == count
+    stream.set_active.assert_called_with(False)
+
 
 
 def test_renderer_c4_uses_recent_side_and_does_not_poll_when_inactive():
@@ -567,7 +602,7 @@ class TestPiPSidecam(unittest.TestCase):
     test_mask_maps_image_left_to_vehicle_right_and_rejects_unbounded_crop()
 
   def test_selected_sides(self):
-    test_selected_sides_preserve_frozen_trigger_and_optional_vasm_semantics()
+    test_selected_sides_use_pip_triggers_independently_of_vasm()
 
   def test_visual_warning_expiry_and_oem_bsm(self):
     test_visual_warning_event_expires_without_refresh_and_preserves_oem_bsm()

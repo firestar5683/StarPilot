@@ -38,7 +38,8 @@ from openpilot.starpilot.ui.power_owner import POWER_KEYS, PowerOwner, confirm_q
 from openpilot.starpilot.ui.pip_owner import FORMAT_PREFIX as PIP_FORMAT_PREFIX, PiPOwner, RESET as PIP_RESET
 from openpilot.starpilot.ui.pip_preferences import read_pip
 from openpilot.starpilot.ui.pip_render import PiPRenderer
-from openpilot.starpilot.ui.pip_sidecam import Signals
+from openpilot.starpilot.ui.pip_sidecam import Signals, Rect
+from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
 from openpilot.starpilot.ui.pip_warning import PiPWarningSource
 from openpilot.starpilot.spot_monitor.preferences import read_preferences as read_vasm_preferences
 from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns
@@ -129,7 +130,7 @@ class StarShellSession:
     self.network_layer = network_layer
     self.settings_layer = settings_layer
     self.fonts = BitmapFonts(profile, Path(font_dir) if font_dir else default_font_directory())
-    self.pip_renderer = PiPRenderer("bubble" if profile == Profile.LARGE else "curved")
+    self.pip_renderer = PiPRenderer("bubble")
     self.pip_warning = PiPWarningSource()
     self._pip_saved = None
     self._vasm_saved = None
@@ -619,8 +620,15 @@ class StarShellSession:
                       bool(car.leftBlindspot) if car is not None else False,
                       bool(car.rightBlindspot) if car is not None else False,
                       left_warning, right_warning)
+    camera_positions = {}
+    for side, key in zip(("left", "right"), CAMERA_WIDGETS, strict=True):
+      position = placement(state.customization, self.profile, key)
+      if position["enabled"]:
+        width, height = widget_size(state.customization, self.profile, key)
+        camera_positions[side] = Rect(position["x"], position["y"], width, height)
     status = self.pip_renderer.render(rect, saved.mask, signals, enabled=True,
-                                      on_blinker=saved.on_blinker, on_bsm=saved.on_bsm, invert=saved.invert)
+                                      on_blinker=saved.on_blinker, on_bsm=saved.on_bsm, invert=saved.invert,
+                                      placements=camera_positions)
     if status not in ("rendered", "inactive") and state.alert.size == AlertSize.NONE:
       self.fonts.draw("SIDE CAMERA UNAVAILABLE", FontRole.MEDIUM,
                       18 if self.profile == Profile.COMPACT else 25,

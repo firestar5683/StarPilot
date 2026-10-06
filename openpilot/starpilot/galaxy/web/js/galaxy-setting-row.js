@@ -153,6 +153,9 @@ export const GalaxySettingRow = {
       if (this.$refs.slider) this.$refs.slider.value = this.sliderValue
     },
   },
+  watch: {
+    locked(value) { if (value) { this.releasePointer(); this.preview = undefined } },
+  },
   beforeUnmount() { this.clearHoldTimer() },
   template: `
     <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' || control === 'select' }">
@@ -160,18 +163,22 @@ export const GalaxySettingRow = {
         <span class="gx-row__label">{{ row.label }}</span>
         <span v-if="row.reason" class="gx-row__desc">{{ row.reason.replace('https://firestar.link/discord', '') }}<a v-if="row.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
         <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ row.value }}</span>
-        <button v-if="row.defaultValue !== null && row.defaultValue !== undefined && !row.page" type="button"
+      </div>
+      <button v-if="control !== 'slider' && row.defaultValue !== null && row.defaultValue !== undefined && !row.page" type="button"
           class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
           :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
           @click="$emit('reset-default', index)">Default</button>
-      </div>
       <label v-if="control === 'switch'" class="gx-switch">
         <input type="checkbox" role="switch" :aria-label="row.label" :checked="currentValue === 'On'" :disabled="locked" @change="onSwitch">
         <span class="gx-switch__track"></span><span class="gx-switch__thumb"></span>
       </label>
       <div v-else-if="control === 'slider'" class="gx-slider-row" :class="{ 'is-fine-scrubbing': isFineScrubbing }">
         <div class="gx-slider-header"><span class="gx-row__value">{{ displayValue }}</span>
-          <span v-if="interacting" class="gx-slider-hint">{{ isFineScrubbing ? 'Fine scrubbing' : 'Hold to fine scrub' }}</span></div>
+          <span v-if="interacting" class="gx-slider-hint">{{ isFineScrubbing ? 'Fine scrubbing' : 'Hold to fine scrub' }}</span>
+          <button v-if="row.defaultValue !== null && row.defaultValue !== undefined && !row.page" type="button"
+          class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
+          :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
+          @click="$emit('reset-default', index)">Default</button></div>
         <input ref="slider" type="range" class="gx-slider" :aria-label="row.label" :aria-valuetext="displayValue"
           :min="bounds.min" :max="bounds.max" :step="bounds.step" :value="sliderValue" :disabled="locked"
           @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"

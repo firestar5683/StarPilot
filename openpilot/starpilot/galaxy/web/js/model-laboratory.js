@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { ModelManagerFeed } from "./models.js"
 
@@ -94,7 +95,7 @@ export class LaboratoryFeed extends ModelManagerFeed {
 }
 
 export const LaboratoryPage = {
-  components: { GalaxySelect },
+  components: { GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, status: null, error: "", message: "", busy: false, dirty: false, trackingProgress: false,
     configuration: { enabled: false, lateralModel: "", longitudinalModel: "" } }),
@@ -159,7 +160,7 @@ export const LaboratoryPage = {
         <div style="padding:var(--sp-4);display:grid;gap:var(--sp-3)"><span class="gx-row__desc">Use lateral judgment from one model and longitudinal judgment from another.</span><div style="display:flex;gap:8px;flex-wrap:wrap"><span class="gx-chip">{{ status ? (status.chestnutReady ? 'Chestnut ready' : 'Chestnut required') : 'Waiting for device status' }}</span><span v-if="status" class="gx-chip">{{ status.isOnroad ? 'Onroad' : 'Parked' }}</span></div></div>
         <p v-if="mode !== 'local'" class="gx-note" style="margin:var(--sp-4)">Model Laboratory is available on the device. Preview does not configure a pair.</p>
         <p v-else-if="loading" class="gx-note" style="margin:var(--sp-4)">Loading Model Laboratory…</p>
-        <p v-if="error" class="gx-note gx-note--danger" style="margin:var(--sp-4)" role="alert">{{ error }}</p>
+        <GxNotice tone="danger" v-if="error" style="margin:var(--sp-4)">{{ error }}</GxNotice>
         <p v-if="status?.configurationError" class="gx-note gx-note--danger">{{ status.configurationError }}</p>
         <p v-if="message" class="gx-note" style="margin:var(--sp-4)" role="status">{{ message }}</p>
       </section>
@@ -177,7 +178,7 @@ export const LaboratoryPage = {
           <label style="display:grid;gap:4px;min-width:0"><strong>Longitudinal model</strong><small>Speed, acceleration, stopping, leads, and scene confidence</small><GalaxySelect class="gx-field" aria-label="Longitudinal model" :disabled="!status || busy || status.isOnroad || status.download.downloading" :value="configuration.longitudinalModel" @change="configuration.longitudinalModel=$event.target.value;dirty=true"><option value="">Choose a model</option><option v-for="m in candidates" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option></GalaxySelect></label>
           <p class="gx-row__desc">{{ modelLabel(configuration.lateralModel) }} steers · {{ modelLabel(configuration.longitudinalModel) }} paces</p>
           <p v-if="selectionError" class="gx-row__desc">{{ selectionError }}</p>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0"><button class="gx-btn" :disabled="!can('enable')" @click="act('enable')">Enable for next drive</button><button class="gx-btn gx-btn--tonal" :disabled="!can('disable')" @click="act('disable')">Disable</button><button class="gx-btn gx-btn--tonal" :disabled="!can('refresh')" @click="act('refresh')">Refresh</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0"><button class="gx-btn" :disabled="!can('enable')" @click="act('enable')">Enable for next drive</button><button class="gx-btn gx-btn--tonal" :disabled="!can('disable')" @click="act('disable')">Disable</button><button class="gx-btn gx-btn--tonal" :disabled="!can('refresh')" @click="act('refresh')">Check model catalog</button></div>
         </div>
       </section>
       <section class="gx-card"><div class="gx-section__header"><i class="bi bi-activity"></i><span class="gx-section__title">Runtime</span><span class="gx-chip">{{ runtimeState }}</span></div><div class="gx-row"><div class="gx-row__info"><span class="gx-row__desc">Lateral: {{ modelLabel(status?.runtime.lateralModel) }}</span><span class="gx-row__desc">Longitudinal: {{ modelLabel(status?.runtime.longitudinalModel) }}</span><span v-if="status?.runtime.error" class="gx-note gx-note--danger">{{ status.runtime.error }}</span><span v-if="status && !status.runtimeSupported" class="gx-row__desc">{{ status.runtimeUnavailableReason || 'Pair runtime is unavailable.' }}</span></div></div></section>

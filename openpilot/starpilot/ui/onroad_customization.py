@@ -106,6 +106,17 @@ for _index, (_key, _label) in enumerate(zip(RAIL_WIDGETS, ("Model confidence", "
     "bounds": {"x": 0, "y": 0, "width": 536, "height": 240},
   }
 
+# Keep layouts saved before camera widgets valid when the registry grows.
+CAMERALESS_WIDGETS = {profile: set(data["widgets"]) for profile, data in PROFILES.items()}
+CAMERA_WIDGETS = ("pip_left", "pip_right")
+for _profile, (_size, _margin) in {"large": (600, 24), "compact": (80, 16)}.items():
+  _bounds = PROFILES[_profile]["bounds"]
+  for _side, _key in zip(("left", "right"), CAMERA_WIDGETS, strict=True):
+    _x = _bounds["x"] + (_margin if _side == "left" else _bounds["width"] - _margin - _size)
+    _y = _bounds["y"] + _bounds["height"] - _margin - _size
+    PROFILES[_profile]["widgets"][_key] = {
+      **_widget(f"PiP {_side} side camera", "pip_camera", _size, _size, _x, _y), "layer": "underlay"}
+
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}
 _ACTION_COLORS = {"cardFill": "#0C1820EB", "cardBorder": "#A6DFBEFF", "text": "#FFFFFFFF"}
 WIDGET_COLORS = {
@@ -176,7 +187,7 @@ def validate_document(value):
   palette, layouts = value["palette"], value["layouts"]
   if type(palette) is not dict or set(palette) != set(PALETTE) or type(layouts) is not dict or set(layouts) != set(PROFILES):
     raise ValueError("Invalid customization fields")
-  if any(all(type(layouts[profile]) is dict and set(layouts[profile]) == keys for profile, keys in shape.items())
+  if any(all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", *CAMERA_WIDGETS}) == keys for profile, keys in shape.items())
          for shape in (LEGACY_WIDGETS, DM_WIDGETS, ACTIONLESS_WIDGETS)):
     layouts = copy.deepcopy(layouts)
     cruise = layouts["large"]["cruise_limits"]
@@ -198,10 +209,29 @@ def validate_document(value):
     for profile in PROFILES:
       for key in ("driver_monitor", "torque_bar", "speed_limit_actions"):
         layouts[profile].setdefault(key, dict(PROFILES[profile]["widgets"][key]["default"]))
-  if all(type(layouts[profile]) is dict and set(layouts[profile]) == keys for profile, keys in RAILLESS_WIDGETS.items()):
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", *CAMERA_WIDGETS}) == keys for profile, keys in RAILLESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for key in RAIL_WIDGETS:
       layouts["compact"][key] = dict(PROFILES["compact"]["widgets"][key]["default"])
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm"}) == keys
+         for profile, keys in CAMERALESS_WIDGETS.items()):
+    layouts = copy.deepcopy(layouts)
+    for profile in PROFILES:
+      has_legacy = "vasm" in layouts[profile]
+      legacy = layouts[profile].pop("vasm", None)
+      if has_legacy and (type(legacy) is not dict or set(legacy) != {"x", "y", "enabled"} or
+                                 type(legacy["enabled"]) is not bool or
+                                 any(type(legacy[axis]) not in (int, float) or not math.isfinite(legacy[axis]) for axis in ("x", "y"))):
+        raise ValueError("Invalid legacy camera placement")
+      for side, key in enumerate(CAMERA_WIDGETS):
+        widget = PROFILES[profile]["widgets"][key]
+        position = dict(widget["default"])
+        if legacy is not None:
+          bounds = widget_bounds(profile, key)
+          position.update(enabled=legacy["enabled"],
+                          x=max(bounds["x"], min(legacy["x"], bounds["x"] + bounds["width"] - 2 * widget["width"])) + side * widget["width"],
+                          y=max(bounds["y"], min(legacy["y"], bounds["y"] + bounds["height"] - widget["height"])))
+        layouts[profile][key] = position
   result = default_document()
   for key, color in palette.items():
     if type(color) is not str or re.fullmatch(r"#[0-9a-fA-F]{8}", color) is None:
@@ -261,7 +291,7 @@ def validate_document(value):
       actions = result["layouts"][profile]["speed_limit_actions"]
       area = data["widgets"]["speed_limit_actions"]
       for key, widget in data["widgets"].items():
-        if key in ("speed_limit_actions", "speed_limit", "torque_bar"):
+        if key in ("speed_limit_actions", "speed_limit") or widget.get("layer") == "underlay":
           continue
         placement = result["layouts"][profile][key]
         width, height = ((placement["size"],) * 2 if key == "steering_wheel" else

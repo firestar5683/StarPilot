@@ -65,7 +65,7 @@ const deadlineMap = new RasterMap(canvas, value => { message = value }); deadlin
 const pendingLoad = deadlineMap.load('0/0/0')
 const deadline = [...timers.values()].find(timer => timer.ms === 8000)
 deadline.fn(); await pendingLoad
-assert.equal(deadlineMap.failed.has('0/0/0'), true); assert.ok(message.includes('retry')); assert.equal(requests, 1)
+assert.equal(deadlineMap.failed.has('0/0/0'), true); assert.ok(message.includes('Reconnecting')); assert.equal(requests, 1)
 deadlineMap.close(); timers.clear()
 globalThis.fetch = realFetch; globalThis.performance = actualPerformance; globalThis.setTimeout = savedSet; globalThis.clearTimeout = savedClear
 console.log('Same-payload stale recovery cannot extend GPS lease; tile deadline requires explicit Retry')

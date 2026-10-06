@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { markRaw } from "../vendor/vue/vue.esm-browser.js"
 
 const SIZE = 512
@@ -188,12 +189,13 @@ export class RasterMap {
         this.tiles.get(oldest).close();
         this.tiles.delete(oldest)
       }
-      this.changed('')
+      if (!this.failed.size) this.changed('')
     } catch (error) {
       if (timedOut || !controller.signal.aborted) {
         this.failed.add(key);
         if (this.failed.size > 64) this.failed.delete(this.failed.values().next().value);
-        this.changed('Map tiles unavailable. Check the saved key and connection, then retry.')
+        this.changed('Map tiles unavailable. Check the saved key and connection. Reconnecting automatically…')
+        this.retryTimer ??= setTimeout(() => { this.retryTimer = null; this.retry() }, 5000)
       }
     } finally {
       clearTimeout(timer);
@@ -213,6 +215,7 @@ export class RasterMap {
   close() {
     this.closed = true;
     clearTimeout(this.locationTimer);
+    clearTimeout(this.retryTimer);
     this.observer.disconnect();
     clearTimeout(this.paintScheduled);
     for (const controller of this.pending.values()) controller.abort();
@@ -222,6 +225,7 @@ export class RasterMap {
   }
 }
 export const NavigationMap = {
+  components: { GxNotice },
   props: ['data', 'stale'], data: () => ({
     error: '', map: null, locationFresh: false, lastLocation: null
   }),
@@ -251,8 +255,7 @@ export const NavigationMap = {
     <button class="gx-btn" @click="map.changeZoom(-1)" aria-label="Zoom out">−</button>
     <button class="gx-btn" @click="map.recenter()">Recenter</button>
     </div>
-    <p v-if="error" role="status">{{error}} <button @click="map.retry()">Retry</button>
-    </p>
+    <GxNotice v-if="error" tone="danger">{{error}}</GxNotice>
     <a class="gx-navigation-map__logo" href="https://www.mapbox.com/" target="_blank" rel="noopener noreferrer" aria-label="Mapbox">
     </a>
     <div class="gx-navigation-map__credits">

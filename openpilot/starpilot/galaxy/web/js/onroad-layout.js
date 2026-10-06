@@ -1,3 +1,4 @@
+import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
 import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
 import { editorSnapshot, projectionPayload } from "./projection-layout.js"
@@ -40,7 +41,7 @@ export function clampPlacement(profile, id, x, y, layout = null) {
 
 export function overlapsReserved(profile, id, x, y, layout = null) {
   const widget = profile.widgets[id]
-  if (id === "torque_bar" && widget.kind === "torque_bar" && widget.layer === "underlay") return false
+  if (widget.layer === "underlay") return false
   const size = widget.resizable ? layout?.[id]?.size ?? widget.width : null
   const width = size ?? widget.width, height = size ?? widget.height
   const intersects = (left, top, otherWidth, otherHeight) => x < left + otherWidth && x + width > left &&
@@ -51,7 +52,7 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
   const positions = layout || Object.fromEntries(Object.entries(profile.widgets).map(([key, item]) => [key, item.default]))
   if (id === "speed_limit_actions") return Object.entries(profile.widgets).some(([key, other]) => {
     const at = positions[key]
-    return key !== id && key !== "speed_limit" && key !== "torque_bar" && at && Number.isFinite(at.x) && Number.isFinite(at.y) &&
+    return key !== id && key !== "speed_limit" && other.layer !== "underlay" && at && Number.isFinite(at.x) && Number.isFinite(at.y) &&
       intersects(at.x, at.y, other.resizable ? at.size ?? other.width : other.width,
         other.resizable ? at.size ?? other.height : other.height)
   })
@@ -150,42 +151,40 @@ export class OnroadLayoutFeed {
     this.active = false
     this.generation = 0
     this.request = this.timer = this.data = null
-    this.retryTimer = null
-    this.readRetries = 0
-    this.autoRead = false
+    this.poller = new PollTimer({ read: () => this.load(true), interval: 5000, later, cancel: cancelTimer })
+    this.error = ""
     this.needsReload = false
   }
 
   stop() {
+    this.poller.stop()
     this.active = false
     this.generation++
     this.request?.abort()
     if (this.timer !== null) this.cancelTimer(this.timer)
-    if (this.retryTimer !== null) this.cancelTimer(this.retryTimer)
     this.request = this.timer = null
-    this.retryTimer = null
   }
 
-  start() { this.stop(); this.active = true; this.data = null; this.needsReload = false; return this.load() }
-  load() {
-    if (this.retryTimer !== null) this.cancelTimer(this.retryTimer)
-    this.retryTimer = null
-    this.readRetries = 0
-    this.autoRead = !this.data?.editable && !this.needsReload
-    return this.run()
-  }
+  start() { this.stop(); this.active = true; this.data = null; this.needsReload = false; this.poller.start(); return this.load() }
+  load(background = false) { return this.run(null, { background }) }
   save(document) {
     if (!this.data?.editable || this.needsReload || !validDocument(document, this.data.metadata)) return
     return this.run({ revision: this.data.revision, document: clone(document) })
   }
 
-  async run(body = null) {
-    if (!this.active || this.request) return
+  async run(body = null, { background = false } = {}) {
+    if (!this.active) return
+    if (this.request) {
+      if (body === null || this.saving) return
+      this.request.abort(); this.generation++; this.cancelTimer(this.timer)
+      this.request = this.timer = null
+    }
     const saving = body !== null, generation = ++this.generation, request = new AbortController()
-    if (saving) this.autoRead = false
     this.request = request
-    this.publish({ status: saving ? "saving" : "loading", error: "", notice: "" })
+    this.saving = saving
+    if (saving || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
     const fail = (message) => {
+      this.error = message
       this.needsReload ||= saving
       this.publish({ status: this.data ? "ready" : "unavailable", error: message, needsReload: this.needsReload })
     }
@@ -211,26 +210,19 @@ export class OnroadLayoutFeed {
         "Colors and layout are unavailable. Try reloading.")
       if (this.projection) data = editorSnapshot(data)
       if (!validSnapshot(data)) throw new Error("The device returned an unsupported colors and layout document. Reload to try again.")
+      const initial = !this.data
       this.data = data
+      this.error = ""
       this.needsReload = false
-      if (data.editable) this.autoRead = false
-      this.publish({ status: "ready", data, draft: clone(data.document), error: "", needsReload: false,
+      this.publish({ status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
         notice: saving ? (this.projection ? "Android Auto layout saved." : "Colors and both layouts saved.") : "" })
-      if (!saving && !data.editable && this.autoRead && this.readRetries < 3) {
-        this.readRetries++
-        const retryGeneration = this.generation
-        this.retryTimer = this.later(() => {
-          if (this.generation !== retryGeneration) return
-          this.retryTimer = null
-          if (this.active && !this.needsReload && !this.data?.editable) this.run()
-        }, 1000)
-      }
     } catch (error) {
-      if (this.active && generation === this.generation) fail(error?.message || "Colors and layout are unavailable.")
+      if (this.active && generation === this.generation) fail(connectionError(error))
     } finally {
       if (this.request === request) {
         if (this.timer !== null) this.cancelTimer(this.timer)
         this.request = this.timer = null
+        this.saving = false
       }
     }
   }
@@ -318,6 +310,10 @@ export const LayoutWidgetPreview = {
         <path :d="'M 12 ' + widget.height * .8 + ' Q ' + widget.width / 2 + ' ' + widget.height * .55 + ' ' + (widget.width - 12) + ' ' + widget.height * .8" :stroke-width="widget.height * .18" opacity=".3" />
         <path :d="'M ' + widget.width / 2 + ' ' + widget.height * .68 + ' Q ' + widget.width * .65 + ' ' + widget.height * .68 + ' ' + widget.width * .8 + ' ' + widget.height * .74" :stroke-width="widget.height * .18" opacity=".9" />
       </g>
+      <g v-else-if="widget.kind === 'pip_camera'">
+        <circle :cx="widget.width / 2" :cy="widget.height / 2" :r="widget.width / 2 - 3" fill="#152c39" stroke="#5ee5ee" stroke-width="3" />
+        <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" :font-size="widget.height / 10">{{ widget.label }}</text>
+      </g>
       <g v-else-if="widget.kind === 'driver_monitor'" :transform="'translate(' + (widget.width - (profile === 'large' ? 128 : 60)) / 2 + ' ' + (widget.height - (profile === 'large' ? 128 : 60)) / 2 + ') scale(' + (profile === 'large' ? 128 : 60) / 60 + ')'">
         <circle cx="30" cy="30" r="30" fill="#000000a6" />
         <path d="M30 30 L8 12 A29 29 0 0 1 52 12 Z" fill="#00ff40" />
@@ -356,6 +352,16 @@ export const OnroadLayoutPage = {
         }
       }
 
+      if (update.data && state.data && !Object.hasOwn(update, "draft") && JSON.stringify(update.data.document) !== JSON.stringify(state.data.document)) {
+        if (JSON.stringify(state.draft) !== JSON.stringify(state.data.document)) {
+          update.needsReload = true
+          update.error = "Saved values changed while editing. Your edits are kept here. Reload saved to review them."
+        } else update.draft = clone(update.data.document)
+      }
+      if (state.needsReload && update.data && !Object.hasOwn(update, "draft")) {
+        update.needsReload = true
+        update.error = state.error
+      }
       if (update.data) {
         if (!state.data && update.data.activeProfile) state.profile = update.data.activeProfile
         if (!update.data.metadata.profiles[state.profile]) state.profile = Object.keys(update.data.metadata.profiles)[0]
@@ -392,7 +398,7 @@ export const OnroadLayoutPage = {
   },
   computed: {
     busy() { return ["loading", "saving"].includes(this.state.status) },
-    editable() { return !!this.state.data?.editable && !this.busy && !this.state.needsReload && !this.state.discard },
+    editable() { return !!this.state.data?.editable && !this.state.error && !this.busy && !this.state.needsReload && !this.state.discard },
     dirty() { return !!this.state.draft && JSON.stringify(this.state.draft) !== JSON.stringify(this.state.data.document) },
     stockChanged() { return !!this.state.draft && JSON.stringify(this.state.draft) !== JSON.stringify(this.state.data.defaults) },
     canUndo() { return this.state.history.undo.length > 0 },
@@ -719,7 +725,7 @@ export const OnroadLayoutPage = {
           <button class="gx-btn gx-btn--tonal gx-layout__reset" type="button" :disabled="!editable || !stockChanged || !!state.drag" @click="resetToStock">Reset to stock StarPilot</button>
           <button class="gx-btn" type="button" :disabled="!editable || !dirty || !!state.drag" @click="save">Save changes</button>
         </div>
-        <p v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}</p>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <div v-if="state.discard" class="gx-card gx-layout__discard" role="alert">
           <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
           <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" type="button" @click="state.discard = null">Keep editing</button>
@@ -794,7 +800,7 @@ export const OnroadLayoutPage = {
                   <img v-if="state.preview.url" :src="state.preview.url" alt="Device-rendered sample driving screen" />
                   <span v-else role="status">{{ state.preview.status === 'editing' ? 'Finish moving the widget to refresh Device preview.' : state.preview.status === 'updating' ? 'Updating Device preview…' : state.preview.status === 'unavailable' ? state.preview.error : 'Device preview is waiting.' }}</span>
                 </div>
-                <button v-if="state.preview.status === 'unavailable'" class="gx-btn gx-btn--tonal" type="button" @click="previewFeed.retry()">Retry Device preview</button>
+
               </section>
               <p class="gx-note">The steering wheel can be resized in each layout. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
@@ -825,7 +831,7 @@ export const OnroadLayoutPage = {
                     <label :for="'layout-alpha-' + field.id">Opacity · {{ Math.round(alpha(selectedColors[field.id]) / 255 * 100) }}%</label>
                     <input :id="'layout-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(selectedColors[field.id])" :disabled="!editable || !!state.drag" @input="colorAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                   </div></div>
-                  <p v-if="state.colorError" class="gx-note" role="alert">{{ state.colorError }}</p>
+                  <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
                 </section>
                 <p v-if="!projection && !colorFields.length" class="gx-note">This widget uses its original status colors.</p>
                 <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !!state.drag" @click="remove()">Remove from layout</button>
@@ -855,7 +861,7 @@ export const OnroadLayoutPage = {
                   <input :id="'road-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(roadColors[field.id])" :disabled="!editable || !!state.drag" @input="roadAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                 </div></div>
                 <p class="gx-note">These colors apply to this layout only. The preview uses a sample road. Follow Appearance Settings previews acceleration colors; your saved Rainbow Road preference still applies while driving.</p>
-                <p v-if="state.colorError" class="gx-note" role="alert">{{ state.colorError }}</p>
+                <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
               </section>
             </section>
           </div>
