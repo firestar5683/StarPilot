@@ -101,3 +101,8 @@ class TestProcessRecovery(unittest.TestCase):
     self.step(p)
     self.assertEqual(p.restart_failures, 0)
     self.assertEqual(p.restart_at, 0)
+
+  def test_boot_racing_processes_restart(self):
+    from openpilot.system.manager.process_config import procs
+    restarting = {p.name for p in procs if getattr(p, "restart_on_exit", False)}
+    self.assertLessEqual({"ui", "soundd", "android_autod"}, restarting)
