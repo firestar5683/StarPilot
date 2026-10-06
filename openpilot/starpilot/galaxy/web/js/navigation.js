@@ -199,7 +199,7 @@ export const NavigationPage = {
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibilityHandler); this.client.stop(); this.token = "" },
   methods: {
     async search() { await this.client.search(this.query) },
-    async saveKey() { const token = this.token.trim(); this.token = ""; await this.client.action("configure", { patch: { token } }) },
+    async saveKey(enable = false) { const token = this.token.trim(); this.token = ""; await this.client.action("configure", { patch: enable ? { token, enabled: true } : { token } }) },
     distance(value) {
       const metric = this.data?.isMetric !== false
       return metric ? value < 1000 ? `${Math.round(value)} m` : `${(value / 1000).toFixed(1)} km` :
@@ -224,8 +224,7 @@ export const NavigationPage = {
           <section class="gx-card gx-navigation__section">
             <h3>Navigation</h3>
             <p>Show directions on your comma. Navigation works with every driving model. Route guidance helps prepare for turns; steering and speed control follow your normal engagement settings.</p>
-            <label class="gx-toggle-row"><input type="checkbox" :checked="data?.enabled" :disabled="!available"
-              @change="client.action('configure',{patch:{enabled:$event.target.checked}})"> Enable Navigation</label>
+
           </section>
           <section class="gx-card gx-navigation__section">
             <h3>Mapbox</h3>
@@ -233,7 +232,7 @@ export const NavigationPage = {
             <p>Save your token while parked. Galaxy keeps it on your comma and never displays it after saving. Saving address favorites requires permanent geocoding: a payment method on file or an enterprise agreement with Mapbox. Place-search results are available for the current route only. Map tiles use your Mapbox quota; URL-restricted keys may reject these requests.</p>
             <a href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer">Get a Mapbox access token</a>
             <p v-if="data?.hasKey" class="gx-note">A Mapbox key is saved.</p>
-            <form @submit.prevent="saveKey" class="gx-navigation__search">
+            <form @submit.prevent="saveKey(false)" class="gx-navigation__search">
               <label for="navigation-token" class="gx-sr-only">Public Mapbox access token</label>
               <input id="navigation-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available">
               <button class="gx-btn" type="submit" :disabled="!available || !token.trim()">{{ data?.hasKey ? 'Replace Key' : 'Save Key' }}</button>
@@ -241,6 +240,7 @@ export const NavigationPage = {
           </section>
         </template>
         <template v-else>
+          <button v-if="data?.enabled" type="button" class="gx-btn gx-btn--tonal" :disabled="!available" @click="client.action('configure',{patch:{enabled:false}})">Turn off navigation</button>
           <NavigationMap v-if="data?.enabled && data?.hasKey" :data="data" :stale="stale" />
           <div class="gx-navigation__panel">
             <form v-if="data?.enabled && data?.hasKey" @submit.prevent="search" class="gx-navigation__search">
@@ -269,8 +269,10 @@ export const NavigationPage = {
               <button v-if="!data.destination.temporary" class="gx-btn" :disabled="!available" @click="isFavorite(data.destination) ? client.action('removeFavorite',{id:data.destination.id}) : client.action('favorite',{destination:data.destination})">{{isFavorite(data.destination) ? '♥ Unfavorite' : '♥ Favorite'}}</button>
             </div>
           </section>
-          <section v-if="data && !data.enabled" class="gx-card gx-navigation__section"><h3>Navigation is off</h3><p>Enable it in Setup to use destinations and directions.</p><button type="button" class="gx-btn" @click="tab='setup'">Open Setup</button></section>
-          <section v-else-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your key to search for places and plan a route.</p><button type="button" class="gx-btn" @click="tab='setup'">Open Setup</button></section>
+          <section v-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your public Mapbox key to search for places and plan a route. Your key stays on your comma.</p>
+            <form @submit.prevent="saveKey(true)" class="gx-navigation__search"><label for="navigation-inline-token" class="gx-sr-only">Public Mapbox access token</label><input id="navigation-inline-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available"><button type="submit" class="gx-btn" :disabled="!available || !token.trim()">Save and enable</button></form><button type="button" class="gx-btn gx-btn--tonal" @click="tab='setup'">Key details</button>
+          </section>
+          <section v-else-if="data && !data.enabled" class="gx-card gx-navigation__section"><h3>Navigation is off</h3><button type="button" class="gx-btn" :disabled="!available" @click="client.action('configure',{patch:{enabled:true}})">Enable Navigation</button></section>
           <template v-else>
             <p v-if="busy" role="status">Working…</p>
             <p v-if="searched && !busy && !error && results.length === 0" class="gx-note">No places found. Try a nearby town or a more specific address.</p>

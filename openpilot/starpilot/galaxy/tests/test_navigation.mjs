@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { NavigationClient, validNavigation, validSearchResult, searchUuid, routePath } from "../web/js/navigation.js"
+import { NavigationPage, NavigationClient, validNavigation, validSearchResult, searchUuid, routePath } from "../web/js/navigation.js"
 
 const place = { id: "place", name: "Library", latitude: 41, longitude: -88 }
 const snapshot = (revision = "a") => ({ enabled: true, isMetric: false, hasKey: true, destination: null, favorites: [],
@@ -145,4 +145,15 @@ console.log("POI suggestions: validation, selected-only retrieval, destination s
 }
 console.log("Local HTTP search UUID fallback passed")
 
+{
+  const actions = []
+  const page = { token: ' pk.example ', client: { action: async (...args) => actions.push(args) } }
+  await NavigationPage.methods.saveKey.call(page, true)
+  assert.equal(page.token, '')
+  assert.deepEqual(actions[0], ['configure', { patch: { token: 'pk.example', enabled: true } }])
+  page.token = 'pk.replacement'; await NavigationPage.methods.saveKey.call(page, false)
+  assert.deepEqual(actions[1], ['configure', { patch: { token: 'pk.replacement' } }])
+  assert.ok(NavigationPage.template.includes('Save and enable'))
+  assert.ok(NavigationPage.template.includes('v-if="data?.enabled && data?.hasKey"'))
+}
 await import("./test_navigation_map.mjs")

@@ -9,6 +9,10 @@ for (const zoom of [0, 2, 13, 18]) {
 }
 assert.equal(relativeX(5, 1010, 1024), 1029)
 assert.ok(project({ latitude: 90, longitude: 0 }, 2).every(Number.isFinite))
+const frames = new Map(); let frameId = 0
+const originalRaf = globalThis.requestAnimationFrame, originalCancelRaf = globalThis.cancelAnimationFrame
+globalThis.requestAnimationFrame = fn => { frames.set(++frameId, fn); return frameId }
+globalThis.cancelAnimationFrame = id => frames.delete(id)
 const calls = [], listeners = new Map()
 globalThis.ResizeObserver = class { observe() {} disconnect() { calls.push('disconnect') } }
 const ctx = new Proxy({}, { get: (obj, key) => obj[key] || (() => {}) })
@@ -79,3 +83,22 @@ restored.update({location:{latitude:43,longitude:-87,validForMs:100}},false)
 assert.equal(restored.center.latitude,43); assert.equal(restored.lastLocation.latitude,43); assert.equal(restored.lastLocation.bearing,170); assert.equal(restored.locationFresh,true)
 restored.close()
 console.log('Durable last-known context initializes map without a live lease; reconnect and new live fix retain bearing')
+
+// Completed requests share one browser frame, without a 200ms wait or repeated canvas allocation.
+let widthWrites = 0, heightWrites = 0, width = 0, height = 0
+const measuredCanvas = { ...canvas, get width() { return width }, set width(value) { width = value; widthWrites++ }, get height() { return height }, set height(value) { height = value; heightWrites++ } }
+const measured = new RasterMap(measuredCanvas); measured.load = () => {}
+measured.draw(); measured.draw(); assert.equal(widthWrites, 1); assert.equal(heightWrites, 1)
+measuredCanvas.clientWidth = 401; measured.draw(); assert.equal(widthWrites, 2); assert.equal(heightWrites, 1)
+const savedFetch = globalThis.fetch, savedBitmap = globalThis.createImageBitmap
+let closedImages = 0
+globalThis.fetch = async () => ({ ok: true, blob: async () => ({}) })
+globalThis.createImageBitmap = async () => ({ close() { closedImages++ } })
+await Promise.all([RasterMap.prototype.load.call(measured, '0/0/0'), RasterMap.prototype.load.call(measured, '1/0/0')])
+assert.equal(frames.size, 1)
+const paint = [...frames.values()][0]; frames.clear(); paint(); assert.equal(widthWrites, 2)
+await RasterMap.prototype.load.call(measured, '1/1/0'); assert.equal(frames.size, 1)
+measured.close(); assert.equal(frames.size, 0); assert.equal(closedImages, 3)
+globalThis.fetch = savedFetch; globalThis.createImageBitmap = savedBitmap
+globalThis.requestAnimationFrame = originalRaf; globalThis.cancelAnimationFrame = originalCancelRaf
+console.log('Tile completions coalesce into one frame; canvas allocation changes only on resize; close cancels paint')

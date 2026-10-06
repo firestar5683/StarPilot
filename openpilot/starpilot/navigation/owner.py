@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -27,6 +28,9 @@ MAX_RESPONSE = 8 * 1024 * 1024
 SEARCH_TTL = 180
 ACTIVE_TTL = 12 * 60 * 60
 MAX_SEARCHES = 32
+TILE_CACHE_TTL = 60
+TILE_CACHE_ENTRIES = 64
+TILE_CACHE_BYTES = 16 * 1024 * 1024
 
 
 class ValidationError(ValueError):
@@ -81,6 +85,10 @@ class NavigationOwner:
     self.position_store = LastPositionStore(self.root)
     self.runtime_source, self.session = runtime_source, session
     self._tile_slots = threading.BoundedSemaphore(4)
+    self._tile_lock = threading.Lock()
+    self._tiles = OrderedDict()
+    self._tile_key = None
+    self._tile_bytes = 0
     self._lock = threading.RLock()
     self._searches = {}
     identity = hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()[:24]
@@ -328,6 +336,17 @@ class NavigationOwner:
     token = self.read()['token']
     if not token:
       raise ValidationError('Save a Mapbox key to view the map')
+    key = hashlib.sha256(token.encode()).digest()
+    coordinates = (z, x, y)
+    with self._tile_lock:
+      self._expire_tiles(key)
+      cached = self._tiles.get(coordinates)
+      if cached is not None:
+        self._tiles.move_to_end(coordinates)
+    if cached is not None:
+      if self.read()['token'] != token:
+        raise ValidationError('Map key changed; try again')
+      return cached[1]
     if not self._tile_slots.acquire(blocking=False):
       raise ValidationError('Map is busy; try again')
     try:
@@ -345,11 +364,36 @@ class NavigationOwner:
           raise ValidationError('Invalid map tile response')
       if self.read()['token'] != token:
         raise ValidationError('Map key changed; try again')
-      return bytes(raw)
+      tile = bytes(raw)
+      with self._tile_lock:
+        if self.read()['token'] != token:
+          raise ValidationError('Map key changed; try again')
+        self._expire_tiles(key)
+        previous = self._tiles.pop(coordinates, None)
+        if previous is not None:
+          self._tile_bytes -= len(previous[1])
+        self._tiles[coordinates] = (time.monotonic() + TILE_CACHE_TTL, tile)
+        self._tile_bytes += len(tile)
+        while len(self._tiles) > TILE_CACHE_ENTRIES or self._tile_bytes > TILE_CACHE_BYTES:
+          _, removed = self._tiles.popitem(last=False)
+          self._tile_bytes -= len(removed[1])
+      return tile
     except requests.RequestException:
       raise ValidationError('Map tiles are unavailable') from None
     finally:
       self._tile_slots.release()
+
+  def _expire_tiles(self, key):
+    # Called with the metadata lock held; provider requests never hold this lock.
+    if self._tile_key != key:
+      self._tiles.clear()
+      self._tile_bytes = 0
+      self._tile_key = key
+    now = time.monotonic()
+    for coordinates, (expires, tile) in list(self._tiles.items()):
+      if expires <= now:
+        del self._tiles[coordinates]
+        self._tile_bytes -= len(tile)
 
   def configure(self, patch: dict, expected_revision: str, authorized) -> dict:
     if not isinstance(patch, dict) or not patch or set(patch) - {'enabled', 'token'}:
@@ -361,7 +405,13 @@ class NavigationOwner:
       raise ValidationError('Enter a valid Mapbox access token')
     with self._lock:
       self._searches.clear()
-    return self._change(lambda value: value.update(patch), expected_revision, authorized)
+    result = self._change(lambda value: value.update(patch), expected_revision, authorized)
+    if 'token' in patch:
+      with self._tile_lock:
+        self._tiles.clear()
+        self._tile_bytes = 0
+        self._tile_key = None
+    return result
 
   def search(self, query: str) -> list[dict]:
     if not isinstance(query, str) or not 2 <= len(query.strip()) <= 256:
