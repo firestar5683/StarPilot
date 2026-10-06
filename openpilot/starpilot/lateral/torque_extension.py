@@ -21,6 +21,7 @@ class TorqueExtension:
     return self.policy.update(active, cs, vm, params, safety_limited, curvature, curvature_limited, delay)
 
 
+
 def create_extension(parent, cp, mode, selected, *, turn_assist=False):
   if mode != ControllerMode.STARPILOT:
     return None
@@ -87,5 +88,11 @@ def create_turn_assist(cp, enabled):
   from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
   if not enabled or not turn_assist_supported(cp):
     return None
-  from openpilot.starpilot.lateral.ioniq6_turn_assist import Ioniq6TurnAssist
-  return Ioniq6TurnAssist(cp)
+  from openpilot.starpilot.lateral.torque_turn_assist import TorqueTurnAssist
+  return TorqueTurnAssist(cp)
+
+
+def apply_turn_assist(parent, cs, vm, params, curvature, output):
+  if parent.turn_assist is None:
+    return output
+  return parent.turn_assist.apply(cs, vm, params, curvature, output, parent.steer_max)

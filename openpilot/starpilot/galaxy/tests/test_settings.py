@@ -957,6 +957,22 @@ class SettingsGatewayTest(unittest.TestCase):
     self.context.value = unrelated
     self.assertFalse(any(row["label"] == "Turn Assist" for row in self.page("torque")["rows"]))
 
+  def test_turn_assist_nonpolicy_gateway_default_and_saved_off(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.mazda.values import CAR
+    from openpilot.starpilot.lateral.controller_selection import policy_for
+    cp = interfaces[CAR.MAZDA_CX5_2022].get_non_essential_params(CAR.MAZDA_CX5_2022)
+    self.assertIsNone(policy_for(cp))
+    self.context.value = AuthorityContext(True, cp, cp.as_reader().as_builder().to_bytes())
+    page = self.page('torque')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Turn Assist')
+    self.assertTrue(page['rows'][index]['available'])
+    self.assertEqual(page['rows'][index]['value'], 'On')
+    intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value='Off')
+    self.assertTrue(self.gateway.confirm(intent['intent'], self.session, self.generation))
+    self.assertEqual(Path(self.params.get_param_path('TurnAssist')).read_bytes(), b'0')
+    self.assertEqual(self.page('torque')['rows'][index]['value'], 'Off')
+
   def test_live_lane_keys_write_through_existing_owner(self):
     _, root = self._live_lane_context()
     for key, value, expected in (("LaneCentering", "On", b"1"),

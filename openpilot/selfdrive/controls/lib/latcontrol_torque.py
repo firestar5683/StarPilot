@@ -9,7 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
 from openpilot.starpilot.lateral.controller_selection import ControllerMode, default_selection, policy_for
-from openpilot.starpilot.lateral.torque_extension import create_extension, create_turn_assist
+from openpilot.starpilot.lateral.torque_extension import apply_turn_assist, create_extension, create_turn_assist
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -69,7 +69,7 @@ class LatControlTorque(LatControl):
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
     if self.starpilot_extension is not None:
       return self.starpilot_extension.update(active, CS, VM, params, steer_limited_by_safety,
-                                            desired_curvature, curvature_limited, lat_delay)
+                                                        desired_curvature, curvature_limited, lat_delay)
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
     measured_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
@@ -106,8 +106,7 @@ class LatControlTorque(LatControl):
       output_lataccel = self.pid.update(pid_log.error, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
 
-      if self.turn_assist is not None:
-        output_torque = self.turn_assist.apply(CS, VM, params, desired_curvature, output_torque, self.steer_max)
+      output_torque = apply_turn_assist(self, CS, VM, params, desired_curvature, output_torque)
 
       pid_log.active = True
       pid_log.p = float(self.pid.p)

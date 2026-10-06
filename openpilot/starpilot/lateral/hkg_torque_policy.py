@@ -4,6 +4,7 @@ import math
 import numpy as np
 
 from opendbc.car.lateral import get_friction
+from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -115,6 +116,7 @@ class HKGShapedTorquePolicy:
     output = parent.torque_from_lateral_accel(
       parent.pid.update(pid_log.error, error_rate=-rate, speed=cs.vEgo, feedforward=ff, freeze_integrator=freeze), parent.torque_params
     )
+    output = apply_turn_assist(parent, cs, vm, params, curvature, output)
     output = self.output_context(output, setpoint, jerk, measurement, cs.vEgo)
     self.previous_pressed = cs.steeringPressed
     pid_log.active = True

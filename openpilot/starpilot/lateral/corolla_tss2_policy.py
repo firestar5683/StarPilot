@@ -5,6 +5,7 @@ from collections import deque
 
 import numpy as np
 
+from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from opendbc.car import structs
 from opendbc.car.lateral import get_friction
@@ -179,6 +180,7 @@ class CorollaTSS2TorquePolicy:
     freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < self.low_speed_reset_threshold or unwind_detected
     output_lataccel = parent.pid.update(pid_log.error, error_rate=-measurement_rate, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
     output_torque = parent.torque_from_lateral_accel(output_lataccel, parent.torque_params)
+    output_torque = apply_turn_assist(parent, CS, VM, params, desired_curvature, output_torque)
     output_torque *= get_toyota_corolla_tss2_center_output_scale(setpoint, CS.vEgo)
     pid_log.active = True
     pid_log.p = float(parent.pid.p)
