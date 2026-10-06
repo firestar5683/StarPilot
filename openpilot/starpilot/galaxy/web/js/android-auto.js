@@ -147,8 +147,10 @@ export class AndroidAutoFeed {
     this.controller = controller
     if (!background) { this.busy = true; this.emit() }
     try {
-      const { response, data } = await requestJson(path, { fetcher: transport, timeout, later: this.later, cancel: this.cancelTimer,
-        request: { ...options, signal: controller.signal }, withResponse: true })
+      const { response, data } = await requestJson(path, {
+        fetcher: transport, timeout, later: this.later, cancel: this.cancelTimer,
+        request: { ...options, signal: controller.signal }, withResponse: true
+      })
       if (!this.active || this.generation !== generation || controller.signal.aborted) return null
       if (response.status === 401) { this.stop(); this.unauthorized(); return null }
       if (!this.active || this.generation !== generation || controller.signal.aborted) return null
@@ -403,7 +405,7 @@ export const AndroidAutoPage = {
   },
   data: () => ({
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
-    pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, installAttempted: false, installBaseline: null,
+    pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
     installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false
   }),
   mounted() {
@@ -521,9 +523,11 @@ export const AndroidAutoPage = {
       if (!this.setup.enabled && !await this.feed.setEnabled(true)) { this.installAttempted = false; return false }
       return this.feed.upload(file)
     },
-    removePackage() {
-      if (this.removeReason) return false
-      if (!window.confirm("Delete the Android Auto package and its certificate from this device? Projection will not start until you install it again.")) return false
+    openRemove() { if (!this.removeReason) this.removeOpen = true },
+    closeRemove() { this.removeOpen = false },
+    async removePackage() {
+      if (this.removeReason) { this.removeOpen = false; return false }
+      this.removeOpen = false
       return this.feed.removePackage()
     },
     connect() {
@@ -554,6 +558,7 @@ export const AndroidAutoPage = {
             <template v-else>
               <div class="gx-aa-status">
                 <span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level" role="status">{{ expiry.label }}<template v-if="hasPackage && !setup.enabled"> · Off</template></span>
+                <button v-if="hasPackage" type="button" class="gx-aa-trash" aria-label="Delete Package" :disabled="busy || !!removeReason" :title="removeReason || 'Delete Package'" @click="openRemove"><i class="bi bi-trash3"></i></button>
                 <span v-if="setup.enabled && !setup.serviceReady" class="gx-muted" role="status">Starting…</span>
                 <div class="gx-aa-status__actions">
                   <button v-if="!setup.identity.installed" class="gx-btn" :disabled="busy || !setup.parked" @click="openInstall">{{ setup.identity.expired || setup.identity.error ? 'Reinstall' : 'Install Android Auto Support' }}</button>
@@ -681,14 +686,23 @@ export const AndroidAutoPage = {
           <div class="gx-driving__actions">
             <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="refresh">Refresh</button>
             <button class="gx-btn gx-btn--tonal" :disabled="busy || !setup.enabled || !setup.serviceReady || !setup.parked || pairing?.active" @click="loadReceivers">Find Paired Cars</button>
-            <button v-if="hasPackage" class="gx-btn gx-btn--tonal" :disabled="busy || !!removeReason" :title="removeReason" @click="removePackage">Delete Package</button>
-            <a class="gx-btn gx-btn--tonal" href="/logs">Session Logs</a>
+            <a class="gx-btn gx-btn--tonal" href="#/logs/android-auto">Session Logs</a>
             <button v-if="setup.enabled" class="gx-btn gx-btn--tonal" :disabled="busy" @click="setEnabled(false)">Turn Off Android Auto</button>
           </div>
-          <p v-if="hasPackage && removeReason && setup.import?.state !== 'running'" class="gx-muted">{{ removeReason }}</p>
           <p class="gx-muted">If the video encoder can’t start, projection stops and reports the error in step 3. Projection support still needs validation with your car and this device. Maximum package size: {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</p>
         </div>
       </details>
+
+      <div v-if="removeOpen && setup" class="gx-settings__modal gx-aa-sheet" @click.self="closeRemove" @keydown.esc="closeRemove">
+        <div class="gx-card gx-settings__dialog gx-aa-sheet__dialog gx-aa-confirm" role="alertdialog" aria-modal="true" aria-labelledby="gx-aa-remove-title" aria-describedby="gx-aa-remove-body">
+          <div><h3 id="gx-aa-remove-title">Remove the package?</h3>
+            <p id="gx-aa-remove-body">Are you sure you want to remove the package? The device will not connect to your car until you re-add one.</p></div>
+          <div class="gx-aa-confirm__actions">
+            <button type="button" class="gx-btn gx-btn--tonal" @click="closeRemove">Cancel</button>
+            <button type="button" class="gx-btn gx-aa-danger" :disabled="busy" @click="removePackage">Confirm</button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="installOpen && setup" class="gx-settings__modal gx-aa-sheet" @click.self="closeInstall" @keydown.esc="closeInstall">
         <div ref="installDialog" class="gx-card gx-settings__dialog gx-aa-sheet__dialog" role="dialog" aria-modal="true" aria-labelledby="gx-aa-install-title" tabindex="-1">
@@ -708,9 +722,10 @@ export const AndroidAutoPage = {
                 <strong>Download Android Auto</strong>
                 <a class="gx-btn gx-btn--tonal" :href="apkmirror" target="_blank" rel="noopener noreferrer">Open APKMirror <i class="bi bi-box-arrow-up-right"></i></a>
                 <ol class="gx-aa-sheet__substeps">
-                  <li>Open <strong>Android Auto</strong> on APKMirror, then open the <strong>All versions</strong> list and click through the versions to compare their release dates.</li>
-                  <li>Open the version with the <strong>newest release date</strong>.</li>
-                  <li>Scroll down to <strong>Available downloads</strong>. Under <strong>Variant</strong>, click the <strong>17.x.xxxx‑release</strong> or <strong>18.x.xxxx‑release</strong> entry.</li>
+                  <li>Open <strong>Android Auto</strong> on APKMirror, then open the <strong class="gx-aa-hl">All versions</strong> list and click through the versions to compare their release dates.</li>
+                  <li>Click the version with the <strong>newest release date</strong>.</li>
+                  <li>Click <strong>Scroll down to Available downloads</strong>.</li>
+                  <li>Under <strong>Variant</strong>, click the <strong>17.x.xxxx‑release</strong> or <strong>18.x.xxxx‑release</strong> entry.</li>
                   <li>Click <strong>Download APK Bundle</strong> (or <strong>Download APK</strong>). You get an <strong>.apk</strong>, <strong>.xapk</strong> or <strong>.apkm</strong> file. Leave it zipped.</li>
                 </ol>
                 <small>You don’t need the APKMirror Installer app.</small>
