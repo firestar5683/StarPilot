@@ -8,6 +8,8 @@ from urllib.parse import quote
 
 import requests
 
+from openpilot.starpilot.analytics.credentials import CLIENT_TOKEN
+
 WRITE_URL = "https://stats.firestar.link/api/v2/write"
 COMMITS_URL = "https://api.github.com/repos/firestar5683/StarPilot/commits/"
 MAX_PAYLOAD = 128 * 1024
@@ -173,7 +175,7 @@ class ReportClient:
     credential = self._token if token is None else self._valid_token(token)
     if credential is None or not isinstance(payload, bytes) or not 0 < len(payload) <= MAX_PAYLOAD:
       return False
-    if credential.encode() in payload or _scalar(credential).encode() in payload:
+    if credential != CLIENT_TOKEN and (credential.encode() in payload or _scalar(credential).encode() in payload):
       return False
     try:
       if allowed is not None and not allowed():

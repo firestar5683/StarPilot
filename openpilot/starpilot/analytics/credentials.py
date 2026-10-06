@@ -1,9 +1,10 @@
-"""Runtime provisioning for the existing statistics service."""
+"""Authentication for the existing statistics service."""
 import os
 from pathlib import Path
 import stat
 
 
+CLIENT_TOKEN = 'StarPilot'
 TOKEN_FILE = Path('/data/starpilot/analytics/token')
 
 
@@ -18,7 +19,8 @@ def read_token():
   value = os.environ.get('STARPILOT_STATS_TOKEN')
   if value is not None:
     return _token(value)
-  path = Path(os.environ.get('STARPILOT_STATS_TOKEN_FILE', str(TOKEN_FILE)))
+  explicit_path = os.environ.get('STARPILOT_STATS_TOKEN_FILE')
+  path = Path(explicit_path) if explicit_path is not None else TOKEN_FILE
   descriptor = None
   try:
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -27,6 +29,8 @@ def read_token():
         info.st_uid not in (0, os.getuid()) or not 16 <= info.st_size <= 4097):
       return None
     return _token(os.read(descriptor, 4097).decode('ascii'))
+  except FileNotFoundError:
+    return CLIENT_TOKEN if explicit_path is None else None
   except (OSError, UnicodeError):
     return None
   finally:

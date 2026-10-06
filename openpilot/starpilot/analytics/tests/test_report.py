@@ -139,3 +139,13 @@ def test_branch_lookup_gate_prevents_request():
   session = Mock()
   assert fetch_branch_commit("branch", session=session, allowed=lambda: False) is None
   session.get.assert_not_called()
+
+
+def test_builtin_authentication_allows_normal_branch_branding():
+  from openpilot.starpilot.analytics.credentials import CLIENT_TOKEN
+  session = Mock()
+  session.post.return_value = Mock(status_code=204)
+  payload = build_payload({'branch': 'SecretGood' + CLIENT_TOKEN}, {}, 1)
+  assert CLIENT_TOKEN.encode() in payload
+  assert ReportClient(CLIENT_TOKEN, session=session).send(payload)
+  assert session.post.call_args.kwargs['data'] == payload

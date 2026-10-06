@@ -5,11 +5,16 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from openpilot.starpilot.analytics.credentials import read_token
+from openpilot.starpilot.analytics.credentials import CLIENT_TOKEN, read_token
 from openpilot.starpilot.analytics.location import coarse_cell, resolve_region
 
 
 class TestCredentialProvisioning(unittest.TestCase):
+  def test_fresh_install_uses_client_authentication(self):
+    with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {}, clear=True), \
+         patch('openpilot.starpilot.analytics.credentials.TOKEN_FILE', Path(root) / 'missing'):
+      self.assertEqual(read_token(), CLIENT_TOKEN)
+
   def test_only_private_regular_files_are_accepted(self):
     with tempfile.TemporaryDirectory() as root:
       token = Path(root) / 'token'
@@ -61,7 +66,7 @@ class TestRegionalLocation(unittest.TestCase):
     reverse.close.assert_called_once()
     city.close.assert_called_once()
 
-  def test_invalid_fix_no_consent_or_drive_transition_prevents_lookups(self):
+  def test_invalid_fix_or_drive_transition_prevents_lookups(self):
     session = Mock()
     for gps in (None, {}, {'latitude': float('nan'), 'longitude': 0}, {'latitude': 91, 'longitude': 0}):
       self.assertIsNone(coarse_cell(gps))

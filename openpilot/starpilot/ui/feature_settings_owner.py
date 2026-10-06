@@ -66,7 +66,7 @@ from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_c
 
 
 BOOL_DEFAULTS = {
-  "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "ShareUsageStats": True, "TurnAssist": True,
+  "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
   "ReverseCruise": False, "ToyotaAutoHold": False, "VoltSNG": False, "GMAutoHold": False, "VoltOnePedalMode": False,
   "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": False,
@@ -577,10 +577,7 @@ class FeatureSettingsOwner:
     if page == "data":
       title = "Data Uploads"
       rows = [self._bool_row("AlwaysAllowUploads", "Always Allow Uploads", self.authority("preferences"),
-                             "Allow queued full logs and videos on metered networks. Uses mobile data."),
-              self._bool_row("ShareUsageStats", "Share Usage Statistics", self.authority("preferences"),
-                             "Send StarPilot your branch, device, vehicle, driving model, regional location, and feature settings " +
-                             "while offroad. Excludes passwords, precise GPS, recordings, and VIN.")]
+                             "Allow queued full logs and videos on metered networks. Uses mobile data.")]
     elif page == FeaturePage.HUB:
       rows = [FeatureRow("", "Speed Limit Controller", "Choose speed-limit sources, offsets, and confirmation behavior", page=FeaturePage.SLC, available=True),
               FeatureRow("", "Lane Centering", "Adjust lane positioning, lane detection, and steering alerts", page=FeaturePage.LANE, available=True),
@@ -985,7 +982,7 @@ class FeatureSettingsOwner:
                                    default_value=str(round(max(low, min(high, default_curve[index])), 4))))
     fingerprint = self.vehicle_fingerprint()
     rows = [replace(row, vehicle_fingerprint=None if row.key in (PLANNER_SELECTION_KEY, LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY,
-                                                              "ShowSpeedLimits", "AlwaysAllowUploads", "ShareUsageStats") or
+                                                              "ShowSpeedLimits", "AlwaysAllowUploads") or
                     row.key == OUTPUT_MAX_KEY and row.capability is None and row.vehicle_fingerprint is None or
                     row.key.startswith('conditional:') and not row.key.startswith(BUTTON_PREFIX) else fingerprint)
             for row in rows]
@@ -1106,7 +1103,7 @@ class FeatureSettingsOwner:
       source_key = key
       long_key = (key in ("CustomPersonalities", "ForceStops", "ForceStopDistanceOffset") or "Personality" in key or
                   key.endswith(("Follow", "FollowHigh")) or "Jerk" in key)
-      if key in ("ShowSpeedLimits", "AlwaysAllowUploads", "ShareUsageStats", SLC_PRIORITY, SLC_SECONDARY) or (key == "ForceStops" and request.value == "Off"):
+      if key in ("ShowSpeedLimits", "AlwaysAllowUploads", SLC_PRIORITY, SLC_SECONDARY) or (key == "ForceStops" and request.value == "Off"):
         group = "preferences"
       elif key in LANE_LIVE_KEYS and not self.authority("lane"):
         group = "lane_live"
@@ -1116,7 +1113,7 @@ class FeatureSettingsOwner:
       return False
     try:
       profile_master_source = self._raw("CustomPersonalities") if source_key == PERSONALITY_PROFILES_PARAM else None
-      if ((request.vehicle_fingerprint is not None if key in ("ShowSpeedLimits", "AlwaysAllowUploads", "ShareUsageStats") else
+      if ((request.vehicle_fingerprint is not None if key in ("ShowSpeedLimits", "AlwaysAllowUploads") else
            not request.vehicle_fingerprint or self.vehicle_fingerprint() != request.vehicle_fingerprint) or
           not self.authority(group) or self._raw(source_key) != request.expected or
           not self._readable(source_key)):
@@ -1268,7 +1265,7 @@ class FeatureSettingsOwner:
         from openpilot.starpilot.lateral.lane_runtime import runtime_supported
         if not runtime_supported(self.vehicle_params()):
           return False
-      if ((request.vehicle_fingerprint is not None if key in ("ShowSpeedLimits", "AlwaysAllowUploads", "ShareUsageStats") else
+      if ((request.vehicle_fingerprint is not None if key in ("ShowSpeedLimits", "AlwaysAllowUploads") else
            self.vehicle_fingerprint() != request.vehicle_fingerprint) or
           not self.authority(group) or self._raw(source_key) != request.expected or
           key == "reset_profiles" and not self.authority("parked_preferences") or
