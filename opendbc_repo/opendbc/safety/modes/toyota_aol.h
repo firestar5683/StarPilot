@@ -93,7 +93,7 @@ static void toyota_aol_observe(const CANPacket_t *msg) {
 
 static void toyota_aol_configure(uint16_t param) {
   toyota_aol_reset();
-  toyota_aol_enabled = (param == 73U) && ((alternative_experience == 32) || (alternative_experience == 160));
+  toyota_aol_enabled = (param == 73U) && ((alternative_experience == 32) || (alternative_experience == 160) || (alternative_experience == 288));
   if (toyota_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = toyota_aol_reset,
