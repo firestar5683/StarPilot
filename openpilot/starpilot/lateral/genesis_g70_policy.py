@@ -288,6 +288,21 @@ def get_genesis_g70_stabilized_output(output_torque: float, prev_output_torque: 
   return float(output_torque + speed_weight * (smoothed_output - output_torque))
 
 
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_MAX = 0.06
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_SPEED_BP = [50.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_LAT_BP = [0.15, 0.35]
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_JERK_BP = [0.20, 0.50]
+
+
+def get_genesis_g70_center_measurement_damping_gain(v_ego: float, desired_lateral_accel: float,
+                                                  measured_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  speed_weight = np.interp(v_ego, GENESIS_G70_CENTER_MEASUREMENT_DAMPING_SPEED_BP, [0.0, 1.0])
+  center_weight = np.interp(max(abs(desired_lateral_accel), abs(measured_lateral_accel)),
+                           GENESIS_G70_CENTER_MEASUREMENT_DAMPING_LAT_BP, [1.0, 0.0])
+  jerk_weight = np.interp(abs(desired_lateral_jerk), GENESIS_G70_CENTER_MEASUREMENT_DAMPING_JERK_BP, [1.0, 0.0])
+  return float(GENESIS_G70_CENTER_MEASUREMENT_DAMPING_MAX * speed_weight * center_weight * jerk_weight)
+
+
 class GenesisG70TorquePolicy:
   def __init__(self, parent, CP):
     if not supported_cp(CP):
@@ -359,6 +374,10 @@ class GenesisG70TorquePolicy:
     ff += get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, parent.torque_params)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
+    damping_gain = 0.0 if CS.steeringPressed else get_genesis_g70_center_measurement_damping_gain(
+      CS.vEgo, setpoint, measurement, desired_lateral_jerk,
+    )
+    parent.pid._k_d = [[0.0], [damping_gain]]
     freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < self.low_speed_reset_threshold or unwind_detected
     output_lataccel = parent.pid.update(pid_log.error, error_rate=-measurement_rate, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
     output_torque = parent.torque_from_lateral_accel(output_lataccel, parent.torque_params)

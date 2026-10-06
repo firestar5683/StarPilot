@@ -1,6 +1,7 @@
 """Compare runtime output against frozen default original StarPilot traces."""
 
 import json
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.hyundai.values import CAR
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.starpilot.lateral.controller_selection import ControllerMode
 from openpilot.starpilot.lateral.torque_extension import selected_policy
 from openpilot.starpilot.lateral.genesis_g70_policy import supported_cp
 from openpilot.starpilot.lateral import genesis_g70_policy
@@ -26,7 +28,8 @@ def controller_for(car=CAR.GENESIS_G70_2020):
 
 
 @pytest.mark.parametrize('case_index', range(5))
-def test_frozen_original_numeric_traces(case_index):
+@patch.object(genesis_g70_policy, 'get_genesis_g70_center_measurement_damping_gain', return_value=0.0)
+def test_frozen_base_tuning_numeric_traces(_damping, case_index):
   fixture = json.loads(FIXTURE.read_text())
   cp, controller, vm = controller_for()
   assert selected_policy(controller) is not None
@@ -144,3 +147,61 @@ def test_angle_taper_uses_actual_sent_torque_direction(angle, pid_output):
       assert 0 < abs(tapered) < abs(baseline)
     else:
       assert tapered == pytest.approx(baseline)
+
+
+@pytest.mark.parametrize('mph,desired,measured,jerk,expected', [
+  (65., 0., .10, 0., .06), (50., 0., .10, 0., 0.), (55., 0., .10, 0., .03),
+  (65., .25, .10, 0., .03), (65., 0., .25, 0., .03),
+  (65., .35, .10, 0., 0.), (65., 0., .35, 0., 0.),
+  (65., 0., .10, .35, .03), (65., 0., .10, .50, 0.),
+])
+def test_center_measurement_damping_gates(mph, desired, measured, jerk, expected):
+  for direction in (-1., 1.):
+    gain = genesis_g70_policy.get_genesis_g70_center_measurement_damping_gain(
+      mph * .44704, desired * direction, measured * direction, jerk * direction)
+    assert gain == pytest.approx(expected)
+
+
+@pytest.mark.parametrize('direction', (-1., 1.))
+def test_center_measurement_damping_update_and_recovery(direction):
+  _, controller, vm = controller_for()
+  cs = SimpleNamespace(vEgo=65. * .44704, steeringAngleDeg=0., steeringPressed=False)
+  params = log.VehicleParameters.new_message(angleOffsetDeg=0., roll=0.)
+  controller.update(True, cs, vm, params, False, 0., False, .2)
+  cs.steeringAngleDeg = -direction * .5
+  output, _, moving = controller.update(True, cs, vm, params, False, 0., False, .2)
+  assert moving.d * direction < 0.
+  assert abs(moving.d) <= .15
+  assert abs(output) <= controller.steer_max
+  for _ in range(150):
+    _, _, steady = controller.update(True, cs, vm, params, False, 0., False, .2)
+  assert steady.d == pytest.approx(0., abs=1e-6)
+  cs.steeringPressed = True
+  cs.steeringAngleDeg = 0.
+  _, _, driver = controller.update(True, cs, vm, params, False, 0., False, .2)
+  assert driver.d == 0.
+  cs.steeringPressed = False
+  controller.update(False, cs, vm, params, False, 0., False, .2)
+  _, _, resumed = controller.update(True, cs, vm, params, False, 0., False, .2)
+  assert resumed.d == 0.
+  cs.vEgo = 40. * .44704
+  cs.steeringAngleDeg = -direction * .5
+  _, _, low_speed = controller.update(True, cs, vm, params, False, 0., False, .2)
+  assert low_speed.d == 0.
+  cs.vEgo = 65. * .44704
+  curvature = direction * .8 / cs.vEgo**2
+  policy = selected_policy(controller)
+  policy.curvature_request_buffer = deque([curvature] * policy.request_buffer_len, maxlen=policy.request_buffer_len)
+  _, _, curve = controller.update(True, cs, vm, params, False, curvature, False, .2)
+  assert curve.d == 0.
+
+
+@pytest.mark.parametrize('car', (CAR.GENESIS_G70_2020, CAR.GENESIS_G70, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN, CAR.KIA_EV6, CAR.HYUNDAI_IONIQ_6))
+def test_center_damping_isolated_to_selected_g70(car):
+  cp, controller, vm = controller_for(car)
+  if car == CAR.GENESIS_G70_2020:
+    controller = LatControlTorque(cp.as_reader(), interfaces[car](cp), .01, controller_mode=ControllerMode.STANDARD)
+  cs = SimpleNamespace(vEgo=65. * .44704, steeringAngleDeg=0., steeringPressed=False)
+  params = log.VehicleParameters.new_message(angleOffsetDeg=0., roll=0.)
+  with patch.object(genesis_g70_policy, 'get_genesis_g70_center_measurement_damping_gain', side_effect=AssertionError('Wrong vehicle policy')):
+    controller.update(True, cs, vm, params, False, 0., False, .2)
