@@ -52,6 +52,115 @@ def brake_wire(brake, counter, full_stop=False):
 
 
 class TestVoltStop(unittest.TestCase):
+  def test_selected_tune_uses_installed_stop_evidence_for_each_volt_owner(self):
+    import os
+    from opendbc.car.structs import car
+    from opendbc.car.gm.tests.test_volt_transitions import (volt_ascm_pedal_params, volt_camera_pedal_params,
+                                                          volt_sdgm_pedal_params, volt_cc_pedal_params)
+    from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
+    from openpilot.starpilot.longitudinal.tests.test_gm_volt_long_policy import SubMasterFixture
+    states = car.CarControl.Actuators.LongControlState
+    for helper in (volt_ascm_pedal_params, volt_camera_pedal_params, volt_sdgm_pedal_params, volt_cc_pedal_params):
+      for pedal in (False, True):
+        with self.subTest(owner=helper.__name__, pedal=pedal), patch.dict(os.environ, {'REPLAY': '0'}):
+          kwargs = {"pedal": pedal, "alpha": True}
+          if helper is not volt_camera_pedal_params:
+            kwargs.update(radar=True, sascm=not pedal and helper is not volt_cc_pedal_params)
+          cp = helper(**kwargs)
+          self.assertTrue(cp.openpilotLongitudinalControl)
+          now = [5_000_000_000]
+          sm = SubMasterFixture(now[0])
+          inputs = LongitudinalInputs(cp, NS(), lambda sm=sm: sm)
+          long = LongControl(cp, startup_preferences=NS(gm_longitudinal_tune=2))
+          long.extension.vehicle_stop.clock = lambda now=now: now[0]
+          sm.data['carState'] = state(0.)
+          sm['longitudinalPlan'].hasLead = False
+          for prefix in ('gm_cc', 'gm_volt', 'gm_ascm', 'gm_euv', 'gm_suburban'):
+            if hasattr(inputs, prefix + '_boot_offset_ns'):
+              setattr(inputs, prefix + '_boot_offset_ns', 0)
+              setattr(inputs, prefix + '_source_floor_ns', now[0] - 500_000_000)
+          with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', side_effect=lambda now=now: (now[0], now[0])):
+            for stopped, expected in ((True, states.stopping), (True, states.stopping),
+                                      (False, states.pid), (False, states.starting)):
+              now[0] += 10_000_000
+              for name in sm.logMonoTime:
+                sm.logMonoTime[name] = now[0] - 1_000_000
+                sm.recv_time[name] = (now[0] - 500_000) / 1e9
+              self.assertTrue(inputs.qualify_active(True))
+              context = inputs.context(True)
+              self.assertIsInstance(context.vehicle_stop_evidence, long.extension.vehicle_stop.evidence_type)
+              output = long.update(True, sm['carState'], .5, stopped, (-4., 2.), context=context)
+              self.assertEqual(long.long_control_state, expected)
+            self.assertEqual(output, 1.15)
+            long.long_control_state = states.stopping
+            now[0] += 10_000_000
+            sm.logMonoTime['longitudinalPlan'] = now[0] - 150_000_001
+            # Physical CC retains the existing activation contract despite its CC evidence class.
+            active = inputs.qualify_active(True)
+            if helper is volt_cc_pedal_params:
+              self.assertEqual(active, pedal)
+            context = inputs.context(active)
+            self.assertIsNone(context.vehicle_stop_evidence)
+            long.update(True, sm['carState'], .5, False, (-4., 2.), context=context)
+            self.assertEqual(long.long_control_state, states.stopping)
+            self.assertFalse(long.extension.vehicle_stop.start_authorized)
+
+  def test_selected_volt_tune_off_edge_survives_only_fresh_seed(self):
+    from opendbc.car.structs import car
+    cp = ordinary_params(CAR.CHEVROLET_VOLT, alpha=False, accelerator=True, radar=True)
+    preferences = NS(gm_longitudinal_tune=2)
+    states = car.CarControl.Actuators.LongControlState
+    now = [1_000_000_000]
+    long = LongControl(cp, startup_preferences=preferences)
+    # Policy clock is injected after construction because its default is bound once.
+    long.extension.vehicle_stop.clock = lambda now=now: now[0]
+    context = LongitudinalContext(vehicle_stop_evidence=VoltStopEvidence(1, now[0], False))
+    long.update(True, state(0.), .5, False, (-4., 2.), context=context)
+    self.assertEqual(long.long_control_state, states.pid)
+    now[0] += 10_000_000
+    context = LongitudinalContext(vehicle_stop_evidence=VoltStopEvidence(1, now[0], False))
+    output = long.update(True, state(0.), .5, False, (-4., 2.), context=context)
+    self.assertEqual(long.long_control_state, states.starting)
+    self.assertEqual(output, 1.15)
+    long.update(True, state(0.), 0., False, (-4., 2.), context=context)
+    self.assertEqual(long.long_control_state, states.pid)
+    self.assertFalse(long.extension.vehicle_stop.start_authorized)
+
+  def test_selected_volt_tune_pending_edge_does_not_survive_invalid_authority(self):
+    from opendbc.car.structs import car
+    cp = ordinary_params(CAR.CHEVROLET_VOLT, alpha=False, accelerator=True, radar=True)
+    for invalid in ('repeated', 'gap', 'drive', 'brake', 'gas', 'stop', 'negative'):
+      with self.subTest(invalid=invalid):
+        now = [1_000_000_000]
+        long = LongControl(cp, startup_preferences=NS(gm_longitudinal_tune=2))
+        long.extension.vehicle_stop.clock = lambda now=now: now[0]
+        context = LongitudinalContext(vehicle_stop_evidence=VoltStopEvidence(1, now[0], False))
+        long.update(True, state(0.), .5, False, (-4., 2.), context=context)
+        now[0] += 30_000_000 if invalid == 'gap' else 10_000_000
+        stamp = 1_000_000_000 if invalid == 'repeated' else now[0]
+        context = LongitudinalContext(vehicle_stop_evidence=VoltStopEvidence(2 if invalid == 'drive' else 1, stamp, False))
+        current = state(0.)
+        current.brakePressed = invalid == 'brake'
+        current.gasPressed = invalid == 'gas'
+        long.update(True, current, -.1 if invalid == 'negative' else .5,
+                    invalid == 'stop', (-4., 2.), context=context)
+        self.assertNotEqual(long.long_control_state, car.CarControl.Actuators.LongControlState.starting)
+        self.assertFalse(long.extension.vehicle_stop.start_authorized)
+        self.assertFalse(long.extension.vehicle_stop.pending_start)
+
+  def test_selected_volt_tune_high_speed_off_edge_exits_starting_next_tick(self):
+    from opendbc.car.structs import car
+    cp = ordinary_params(CAR.CHEVROLET_VOLT, alpha=False, accelerator=True, radar=True)
+    now = [1_000_000_000]
+    long = LongControl(cp, startup_preferences=NS(gm_longitudinal_tune=2))
+    long.extension.vehicle_stop.clock = lambda now=now: now[0]
+    states = car.CarControl.Actuators.LongControlState
+    for expected in (states.pid, states.starting, states.pid):
+      context = LongitudinalContext(vehicle_stop_evidence=VoltStopEvidence(1, now[0], False))
+      long.update(True, state(10.), .5, False, (-4., 2.), context=context)
+      self.assertEqual(long.long_control_state, expected)
+      now[0] += 10_000_000
+
   def test_actual_constructor_services_and_exact_final_owner(self):
     class Registered(Exception):
       pass

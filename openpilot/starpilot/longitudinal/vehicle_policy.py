@@ -13,10 +13,17 @@ from opendbc.car.hyundai.g90_longitudinal import (stopping_decel_rate as hyundai
                                                  forecast_should_stop as hyundai_forecast_should_stop)
 
 
-def policy_for(cp):
+def installed_policy_for(cp):
   return (suburban_policy_for(cp) or conventional_pedal_policy_for(cp) or camera_policy_for(cp) or ordinary_cc_policy_for(cp) or
           sdgm_policy_for(cp) or ascm_policy_for(cp) or gm_pedal_policy_for(cp) or volt_policy_for(cp) or
           euv_policy_for(cp) or volt_cc_policy_for(cp) or bolt_cc_policy_for(cp))
+
+
+def policy_for(cp, startup_preferences=None):
+  from opendbc.car.gm.long_tune import selected_policy
+  installed = installed_policy_for(cp)
+  selection = getattr(startup_preferences, "gm_longitudinal_tune", 0)
+  return selected_policy(cp, installed, selection)
 
 
 def stopping_decel_rate(cp, policy):

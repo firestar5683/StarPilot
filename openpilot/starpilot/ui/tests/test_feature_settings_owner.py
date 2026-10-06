@@ -31,6 +31,49 @@ def required_document(raw: object) -> dict:
 
 
 class FeatureSettingsOwnerTests(unittest.TestCase):
+  def test_gm_tune_configured_choice_preserves_intent_and_guards_commit(self):
+    from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
+    cp = volt_camera_pedal_params(release=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.owner.configuration_vehicle = lambda: True
+    row = self._row("vehicle", "GMLongitudinalTune")
+    self.assertEqual(row.choices, ("Vehicle Default", "Volt Tune"))
+    request = required_change(row)
+    self.assertEqual(request.value, "Volt Tune")
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"2")
+    self.owner.configuration_vehicle = lambda: False
+    self.assertNotIn("GMLongitudinalTune", [r.key for r in self.owner.snapshot(
+      "vehicle", parked=True, system_long=False, lateral_context=True, metric=False).rows])
+    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"2")
+    self.owner.configuration_vehicle = lambda: True
+    row = self._row("vehicle", "GMLongitudinalTune")
+    reset = row_default(row)
+    assert reset is not None
+    self.allowed = False
+    self.assertFalse(self.owner.apply(reset))
+    self.allowed = True
+    self.assertTrue(self.owner.apply(reset))
+    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"0")
+
+  def test_gm_tune_invalid_saved_choice_repairs_only_vehicle_default(self):
+    from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
+    cp = volt_camera_pedal_params()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    path = Path(self.params.get_param_path("GMLongitudinalTune"))
+    path.write_bytes(b"2\n")
+    row = self._row("vehicle", "GMLongitudinalTune")
+    self.assertEqual(row.value, "Invalid saved choice")
+    reset = row_default(row)
+    assert reset is not None
+    self.assertFalse(self.owner.apply(replace(reset, value="Volt Tune")))
+    self.assertEqual(path.read_bytes(), b"2\n")
+    self.assertTrue(self.owner.apply(reset))
+    self.assertEqual(path.read_bytes(), b"0")
+
   def setUp(self):
     self.temp = tempfile.TemporaryDirectory()
     self.addCleanup(self.temp.cleanup)

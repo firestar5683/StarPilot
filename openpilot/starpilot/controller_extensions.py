@@ -110,6 +110,10 @@ class ResumePlanInputs:
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
+  from opendbc.car.gm.long_tune import tune_options
+  if controller is not None and 1 in tune_options(cp):
+    from openpilot.starpilot.car.gm.tune_preferences import AccTunePreference
+    controller.gm_acc_tune_input = AccTunePreference(cp, params)
   from opendbc.car.toyota.prius_longitudinal import enabled as prius_filter_enabled, prepare_stock as prepare_prius_stock
   if prius_filter_enabled(cp):
     from openpilot.starpilot.car.toyota.prius_preferences import PriusFilterPreference, filter_preference_enabled

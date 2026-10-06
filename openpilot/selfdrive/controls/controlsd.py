@@ -97,7 +97,7 @@ class Controls:
     self.calibrated_pose: Pose | None = None
 
     self.lateral_gain_owner = None
-    self.LoC = LongControl(self.CP)
+    self.LoC = LongControl(self.CP, startup_preferences=self.vehicle_startup_preferences)
     self.VM = VehicleModel(self.CP)
     self.LaC: LatControl
     if self.CP.steerControlType == car.CarParams.SteerControlType.angle:

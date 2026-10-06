@@ -10,14 +10,14 @@ from openpilot.starpilot.longitudinal.toyota_output_policy import (CLOCK_PAIR_MA
                                                                  development_enabled as toyota_development_enabled, leads_from_radar)
 from openpilot.starpilot.longitudinal.ioniq6_start import StartEvidence, eligible as ioniq6_start_eligible
 from opendbc.car.gm.conventional_pedal import policy_for as conventional_pedal_policy_for
-from opendbc.car.gm.camera import policy_for as camera_policy_for
-from opendbc.car.gm.suburban import policy_for as suburban_policy_for, SuburbanStopEvidence
 from opendbc.car.gm.ordinary_cc import policy_for as ordinary_cc_policy_for
+from opendbc.car.gm.suburban import SuburbanStopEvidence
 from opendbc.car.gm.cc_longitudinal import VoltCcEvidence, policy_for as volt_cc_policy_for
 from opendbc.car.gm.longitudinal import (
-  PedalStartEvidence, policy_for as gm_pedal_policy_for, volt_policy_for, euv_policy_for,
-  EuvLongitudinalEvidence, VoltStopEvidence, ascm_policy_for, sdgm_policy_for, AscmStopEvidence,
+  PedalStartEvidence, policy_for as gm_pedal_policy_for,
+  EuvLongitudinalEvidence, VoltStopEvidence, AscmStopEvidence,
 )
+from openpilot.starpilot.longitudinal.vehicle_policy import installed_policy_for
 from openpilot.starpilot.longitudinal.profile_runtime import ProfileHost, active_personality_id
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
 
@@ -71,22 +71,26 @@ class LongitudinalInputs:
     self.ioniq6_start_enabled = ioniq6_start_eligible(self.CP)
     gm_policy = gm_pedal_policy_for(self.CP)
     self.gm_start_enabled = gm_policy is not None and gm_policy.friction_variant
-    self.gm_volt_enabled = volt_policy_for(self.CP) is not None
+    installed_policy = installed_policy_for(self.CP)
+    stop_policy = installed_policy.stop_policy() if hasattr(installed_policy, 'stop_policy') else None
+    evidence_type = getattr(stop_policy, 'evidence_type', None)
+    self.gm_volt_enabled = evidence_type is VoltStopEvidence
     self.resume_freshness = ResumeFreshness()
     self.gm_cc_enabled = (conventional_pedal_policy_for(self.CP) or ordinary_cc_policy_for(self.CP) or volt_cc_policy_for(self.CP)) is not None
-    if self.gm_cc_enabled:
+    self.gm_cc_stop_enabled = evidence_type is VoltCcEvidence
+    if self.gm_cc_enabled or self.gm_cc_stop_enabled:
       self.gm_cc_evidence = None
       self.gm_cc_boot_offset_ns = None
       self.gm_cc_source_floor_ns = 0
-    self.gm_suburban_enabled = suburban_policy_for(self.CP) is not None
+    self.gm_suburban_enabled = evidence_type is SuburbanStopEvidence
     if self.gm_suburban_enabled:
       self.gm_suburban_boot_offset_ns = None
       self.gm_suburban_source_floor_ns = 0
-    self.gm_ascm_enabled = (camera_policy_for(self.CP) or sdgm_policy_for(self.CP) or ascm_policy_for(self.CP)) is not None
+    self.gm_ascm_enabled = evidence_type is AscmStopEvidence
     if self.gm_ascm_enabled:
       self.gm_ascm_boot_offset_ns = None
       self.gm_ascm_source_floor_ns = 0
-    self.gm_euv_enabled = euv_policy_for(self.CP) is not None
+    self.gm_euv_enabled = evidence_type is EuvLongitudinalEvidence
     if self.gm_euv_enabled:
       self.gm_euv_boot_offset_ns = None
       self.gm_euv_source_floor_ns = 0
@@ -112,7 +116,7 @@ class LongitudinalInputs:
   @property
   def optional_services(self):
     if (self.toyota_sienna_replay or self.ioniq6_start_enabled or self.gm_start_enabled or self.gm_volt_enabled or
-        self.gm_euv_enabled or self.gm_cc_enabled or self.gm_ascm_enabled or self.gm_suburban_enabled):
+        self.gm_euv_enabled or self.gm_cc_enabled or self.gm_cc_stop_enabled or self.gm_ascm_enabled or self.gm_suburban_enabled):
       return ['radarState', 'deviceState'] + (['slcState'] if self.gm_start_enabled or self.ev9_long_enabled else [])
     if self.ev9_long_enabled:
       return ['deviceState', 'slcState']
@@ -133,7 +137,8 @@ class LongitudinalInputs:
       return self._ev9_context(active)
     if self.toyota_sienna_replay:
       return LongitudinalContext(leads=self._toyota_leads() if active else None)
-    cc_evidence = self.gm_cc_evidence if self.gm_cc_enabled else None
+    cc_evidence = (self.gm_cc_evidence if self.gm_cc_enabled else self._gm_cc_evidence()
+                   if self.gm_cc_stop_enabled and active else None)
     volt_observation = self._gm_volt_observation() if self.gm_volt_enabled and active else None
     return LongitudinalContext(
       experimental_mode=bool(self.sm['selfdriveState'].experimentalMode) if self.sm.all_checks(['selfdriveState']) else None,
@@ -389,4 +394,3 @@ class LongitudinalInputs:
       return None
     return PedalStartEvidence(drive_id, now_ns, any(lead.present for lead in leads), traffic_mode=traffic_mode,
                               custom_acceleration=profile.custom_acceleration if profile is not None else False, profile_max_accel=ceiling)
-

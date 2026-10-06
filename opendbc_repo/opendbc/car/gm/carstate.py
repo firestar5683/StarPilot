@@ -61,6 +61,7 @@ class CarState(CarStateBase):
     self.pedal_sensor_counter = None
     self.pedal_packer = CANPacker(DBC[CP.carFingerprint][Bus.pt]) if CP.flags & GMFlags.PEDAL_LONG.value else None
     self.stock_acc_status_ts_nanos = 0
+    self.bolt_pedal_standstill_ts_nanos = 0
     self.volt_cc_physical = None
     self.volt_cc_button_counter = None
     self.volt_cc_button_source_ns = self.volt_cc_button_credit_ns = 0
@@ -438,7 +439,14 @@ class CarState(CarStateBase):
     if self.CP.carFingerprint in NO_ACC_BOLT_CAR and not self.bolt_cc_profile:
       ret.accFaulted = False
       ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0 if pedal_stock_no_acc else False
-      ret.cruiseState.standstill = False
+      if is_bolt_pedal_profile(self.CP):
+        self.bolt_pedal_standstill_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
+        stamp = self.bolt_pedal_standstill_ts_nanos
+        ret.cruiseState.standstill = (0 < stamp <= pt_cp._last_update_nanos and
+                                     pt_cp._last_update_nanos - stamp <= 300_000_000 and
+                                     pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL)
+      else:
+        ret.cruiseState.standstill = False
     if (self.volt_cc_pedal_profile is None and self.CP.networkLocation == NetworkLocation.fwdCamera and not is_volt_camera_removed(self.CP)
         and not is_conventional_cc_pedal_profile(self.CP) and not is_ordinary_camera_removed(self.CP)
         and not (self.camera_pedal_profile is not None and self.camera_pedal_profile.removed)):

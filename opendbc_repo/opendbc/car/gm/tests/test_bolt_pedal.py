@@ -21,6 +21,116 @@ def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=
 
 
 class TestBoltPedalIdentity(unittest.TestCase):
+  def test_no_acc_fixed_stop_preserves_calc_memory_and_emits_neutral(self):
+    for candidate in NO_ACC_BOLT_CAR:
+      with self.subTest(candidate=candidate):
+        cp = params(candidate, pedal=True)
+        controller = CarController(DBC[candidate], cp)
+        controller.frame = controller.last_steer_frame = 4
+        controller.pedal_steady, controller.pedal_active_last = .2, True
+        controller.regen_press_count, controller.regen_release_count = 2, 3
+        controller.regen_min_on_frames, controller.regen_min_off_frames = 4, 5
+        controller.regen_paddle_pressed = True
+        names = ("pedal_steady", "pedal_active_last", "regen_press_count", "regen_release_count",
+                 "regen_min_on_frames", "regen_min_off_frames", "regen_paddle_pressed")
+        memory = tuple(getattr(controller, name) for name in names)
+        out = structs.CarState(vEgo=0., aEgo=0., standstill=True)
+        out.gearShifter = structs.CarState.GearShifter.low
+        out.cruiseState.available = out.cruiseState.standstill = True
+        cs = SimpleNamespace(out=out, pedal_sensor_healthy=True, pedal_sensor_ts_nanos=1_000_000_000,
+                             bolt_pedal_standstill_ts_nanos=1_000_000_000,
+                             bolt_pedal_main_ts_nanos=1_000_000_000, bolt_pedal_gear_ts_nanos=1_000_000_000,
+                             cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
+                             loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
+                             buttons_counter=0)
+        control = structs.CarControl(enabled=True, longActive=True)
+        control.actuators.accel = -.03
+        control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.stopping
+        _, commands = controller.update(control.as_reader(), cs, 1_000_000_000)
+        self.assertEqual(tuple(getattr(controller, name) for name in names), memory)
+        self.assertEqual(controller.apply_gas, 0.)
+        for frame in commands:
+          if frame[0] == 0x200:
+            self.assertFalse(frame[1][4] & 0x80)
+          elif frame[0] == 0xBD:
+            self.assertEqual(frame[1][0] & 0xF0, 0)
+          elif frame[0] == 0x1F5:
+            self.assertEqual(frame[1][3] & 15, 6)
+            self.assertEqual(frame[1][5] & 2, 0)
+
+  def test_no_acc_standstill_is_fresh_and_does_not_block_interceptor_release(self):
+    from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+    from openpilot.starpilot.longitudinal.extension import LongitudinalContext
+    states = structs.CarControl.Actuators.LongControlState
+    for candidate in NO_ACC_BOLT_CAR:
+      with self.subTest(candidate=candidate):
+        cp = params(candidate, pedal=True)
+        cs = CarState(cp)
+        parsers = cs.get_can_parsers(cp)
+        parser = parsers[Bus.pt]
+        packer = CANPacker(DBC[candidate][Bus.pt])
+        packets = []
+        for message in parser.message_states.values():
+          values = ({"CruiseState": 4} if message.name == "AcceleratorPedal2" else
+                    {"CruiseMainOn": 1} if message.name == "ECMEngineStatus" else
+                    {"PRNDL2": 6, "ManualMode": 0} if message.name == "ECMPRDNL2" else {})
+          if message.name == "GAS_SENSOR":
+            packets.append(TestBoltPedalMessages.sensor(packer, 0., 1))
+          else:
+            packets.append(packer.make_can_msg(message.name, 0, values))
+        parser.update([(1_000_000_000, packets)])
+        out = cs.update(parsers)
+        self.assertTrue(parser.can_valid)
+        self.assertTrue(out.cruiseState.standstill)
+        out.canValid = parser.can_valid
+        out.canTimeout = parser.bus_timeout
+        long = LongControl(cp)
+        long.long_control_state = states.stopping
+        long.update(True, out, .5, False, (-4., 2.), context=LongitudinalContext())
+        self.assertEqual(long.long_control_state, states.pid)
+        long.update(True, out, .5, True, (-4., 2.), context=LongitudinalContext())
+        self.assertEqual(long.long_control_state, states.stopping)
+        out.brakePressed = True
+        long.update(True, out, .5, False, (-4., 2.), context=LongitudinalContext())
+        self.assertEqual(long.long_control_state, states.stopping)
+        parser.update([(1_300_000_001, [packer.make_can_msg("ECMEngineStatus", 0, {})])])
+        self.assertFalse(cs.update(parsers).cruiseState.standstill)
+
+  def test_no_acc_fixed_launch_requires_current_original_stop_state(self):
+    for candidate in NO_ACC_BOLT_CAR:
+      cp = params(candidate, pedal=True)
+      for unavailable in (None, "missing", "future", "stale", "stale_main", "stale_gear", "moving", "main", "gas", "brake",
+                          "regen", "stopping", "untuned", "tuned"):
+        with self.subTest(candidate=candidate, unavailable=unavailable):
+          controller = CarController(DBC[candidate], cp)
+          controller.frame = controller.last_steer_frame = 104
+          controller.gm_acc_tune_input = SimpleNamespace(update=lambda now, case=unavailable: case == "tuned")
+          control = structs.CarControl(enabled=True, longActive=True)
+          control.actuators.accel = -.12 if unavailable in ("untuned", "tuned") else .5
+          control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
+          if unavailable == "stopping":
+            control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.stopping
+          out = structs.CarState(vEgo=2., aEgo=0., standstill=unavailable != "moving")
+          out.gearShifter = structs.CarState.GearShifter.low
+          out.cruiseState.available = unavailable != "main"
+          out.cruiseState.standstill = True
+          out.gasPressed, out.brakePressed, out.regenBraking = (unavailable == "gas", unavailable == "brake", unavailable == "regen")
+          stamp = 699_999_999 if unavailable == "stale" else 1_000_000_001 if unavailable == "future" else 1_000_000_000
+          cs = SimpleNamespace(out=out, pedal_sensor_healthy=True, pedal_sensor_ts_nanos=1_000_000_000,
+                               bolt_pedal_standstill_ts_nanos=stamp,
+                               bolt_pedal_main_ts_nanos=699_999_999 if unavailable == "stale_main" else 1_000_000_000,
+                               bolt_pedal_gear_ts_nanos=899_999_999 if unavailable == "stale_gear" else 1_000_000_000,
+                               cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
+                               loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0, buttons_counter=0)
+          if unavailable == "missing":
+            del cs.bolt_pedal_standstill_ts_nanos
+          _, messages = controller.update(control.as_reader(), cs, 1_000_000_000)
+          self.assertEqual(messages[0][0], 0x200)
+          if unavailable in (None, "untuned"):
+            self.assertAlmostEqual(controller.apply_gas, 18. / 255.)
+          else:
+            self.assertNotAlmostEqual(controller.apply_gas, 18. / 255.)
+
   def test_pedal_requires_exact_hardware_not_saved_opt_in(self):
     for candidate in PEDAL_BOLT_CAR:
       for setting in (False, True):

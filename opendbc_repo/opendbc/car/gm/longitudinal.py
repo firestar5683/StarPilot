@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from opendbc.car.gm.values import (CAR, GMFlags, GMSafetyFlags, PEDAL_BOLT_CAR, is_volt_longitudinal,
+from opendbc.car.gm.values import (CAR, GMFlags, GMSafetyFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, is_volt_longitudinal,
                                   is_volt_gateway_longitudinal, is_bolt_euv_longitudinal, is_ordinary_ascm_profile, is_ordinary_sdgm_profile)
 from opendbc.car.structs import car
 
@@ -98,6 +98,7 @@ def _interp(value, points, values):
 @dataclass
 class GMPedalLongitudinalPolicy:
   friction_variant: bool
+  ignore_cruise_standstill: bool = False
   stopping_decel_rate: float = field(default=0.8, init=False)
   kp: tuple[tuple[float, ...], tuple[float, ...]] = (PEDAL_KP_BP, PEDAL_KP_V)
   last_a_target: float = field(default=0.0, init=False)
@@ -342,7 +343,8 @@ def policy_for(cp) -> GMPedalLongitudinalPolicy | None:
     flags = int(cp.safetyConfigs[0].safetyParam)
     required = int(GMSafetyFlags.PEDAL_LONG | GMSafetyFlags.PADDLE_SCHED)
     candidate = cp.carFingerprint
-    return (GMPedalLongitudinalPolicy(candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+    return (GMPedalLongitudinalPolicy(candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+                                        ignore_cruise_standstill=candidate in NO_ACC_BOLT_CAR)
             if cp.brand == 'gm' and candidate in PEDAL_BOLT_CAR and
             cp.openpilotLongitudinalControl and not cp.pcmCruise and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and

@@ -26,10 +26,10 @@ class LongitudinalContext:
 
 
 class LongitudinalExtension:
-  def __init__(self, CP):
+  def __init__(self, CP, startup_preferences=None):
     self.resume_policy = volt_sng_resume_policy_for(CP)
     self.bolt_mode = bolt_mode_policy_for(CP)
-    self.vehicle_policy = vehicle_policy_for(CP)
+    self.vehicle_policy = vehicle_policy_for(CP, startup_preferences)
     self.stopping_policy = stopping_policy_for(CP, DT_CTRL)
     self.stopping_decel_rate = (self.stopping_policy.stopping_decel_rate if self.stopping_policy is not None
                                 else stopping_decel_rate(CP, self.vehicle_policy))
@@ -39,6 +39,8 @@ class LongitudinalExtension:
     self.ioniq6_start = Ioniq6StartPolicy() if ioniq6_start_eligible(CP) else None
     self.vehicle_target = getattr(self.vehicle_policy, "target", None)
     self.kp = self.vehicle_policy.kp if self.vehicle_policy is not None else 0.0
+    self.ki = getattr(self.vehicle_policy, "ki", None)
+    self.ignore_cruise_standstill = bool(getattr(self.vehicle_policy, "ignore_cruise_standstill", False))
 
   def qualify_resume(self, default, *, preferences, inputs):
     if self.resume_policy is None or not preferences.volt_sng:
@@ -99,12 +101,15 @@ class LongitudinalExtension:
       return self.stopping_policy.starting_output(a_target, accel_limits, context)
     if self.ioniq6_start is not None:
       return self.ioniq6_start.starting_output(a_target, accel_limits)
+    if hasattr(self.vehicle_stop, "starting_output"):
+      return self.vehicle_stop.starting_output(a_target, accel_limits, context)
     self.vehicle_policy.reset()
     return self.gm_start.output(a_target, context.gm_start_evidence)
 
   @property
   def starting(self):
-    return self.ioniq6_start is not None or self.gm_start is not None or hasattr(self.stopping_policy, "starting_output")
+    return (self.ioniq6_start is not None or self.gm_start is not None or
+            hasattr(self.stopping_policy, "starting_output") or hasattr(self.vehicle_stop, "starting_output"))
 
   def target(self, a_target, CS, should_stop, last_output, context):
     if self.toyota_output is not None:
@@ -140,8 +145,8 @@ class LongitudinalExtension:
     return output_accel
 
 
-def create_extension(cp):
-  extension = LongitudinalExtension(cp)
+def create_extension(cp, startup_preferences=None):
+  extension = LongitudinalExtension(cp, startup_preferences)
   if (extension.vehicle_policy is None and extension.toyota_output is None and extension.ioniq6_start is None and
       extension.bolt_mode is None and extension.stopping_policy is None and extension.stopping_decel_rate == 1.0):
     return None
