@@ -46,6 +46,45 @@ class NativeSettingsPageTests(unittest.TestCase):
     pane._handle_mouse_press(pos)
     pane._handle_mouse_release(pos)
 
+  def test_native_render_forwards_current_drag(self):
+    pane = self.panel([item(str(index), button_action()) for index in range(7)])
+    pane._handle_mouse_press(MousePos(1000, 200))
+    pane._handle_mouse_event(MouseEvent(MousePos(920, 200), 0, False, False, True, 1))
+    self.assertEqual(pane.input.drag_x, -80)
+    with patch.object(pane.view, "render") as render, patch("openpilot.starpilot.ui.starpilot_settings_adapter_large.placed_at"):
+      pane._render(rl.Rectangle(0, 0, 2160, 1080))
+      render.assert_called_once_with(pane.snapshot(), -80)
+      pane.input.cancel()
+      pane._render(rl.Rectangle(0, 0, 2160, 1080))
+      self.assertEqual(render.call_args.args[1], 0)
+
+  def test_press_during_transition_finishes_it_without_activating_replaced_rows(self):
+    rows = [item(str(index), button_action()) for index in range(7)]
+    pane = self.panel(rows)
+    start = pane.snapshot()
+    pane.view._page_frame(start, 0, False)
+    pane._emit(FeatureUiAction("scroll"))
+    with patch("openpilot.starpilot.ui.feature_settings.time.monotonic", return_value=0):
+      pane.view._page_frame(pane.snapshot(), 0, False)
+      self.click(pane)
+      rows[5].callback.assert_not_called()
+      self.assertIsNone(pane.view._transition)
+      self.click(pane)
+      rows[5].callback.assert_not_called()
+      pane.view._page_frame(pane.snapshot(), 0, False)
+      self.click(pane)
+      rows[5].callback.assert_called_once()
+      # Footer navigation remains usable during the transition.
+      pane.view._page_frame(start, 0, False)
+      pos = MousePos(1720, 1015)
+      pane._handle_mouse_press(pos)
+      pane._handle_mouse_release(pos)
+      self.assertEqual(pane.scroll, 5)
+    pane.hide_event()
+    self.assertIsNone(pane.view._last_state)
+    pane.show_event()
+    self.assertIsNone(pane.view._last_state)
+
   def test_every_row_reachable_and_page_clamps_when_visibility_changes(self):
     items = [item(str(index), button_action()) for index in range(12)]
     pane = self.panel(items)
@@ -62,6 +101,27 @@ class NativeSettingsPageTests(unittest.TestCase):
     pane.show_event()
     self.assertEqual(pane.scroll, 0)
     self.assertFalse(hasattr(pane, "scroll_panel"))
+
+  def test_swipes_started_during_transition_preserve_recognition_and_suppress_row_actions(self):
+    for direction in (1, -1):
+      for distance, duration, accepted in ((200, .5, True), (80, .075, True), (80, .5, False)):
+        with self.subTest(direction=direction, distance=distance, duration=duration):
+          rows = [item(str(index), button_action()) for index in range(15)]
+          pane = self.panel(rows)
+          pane.scroll = 0 if direction == 1 else 10
+          with patch("openpilot.starpilot.ui.feature_settings.time.monotonic", return_value=0):
+            pane.view._page_frame(pane.snapshot(), 0, False)
+            pane.scroll = 5
+            pane.view._page_frame(pane.snapshot(), 0, False)
+            self.assertIsNotNone(pane.view._transition)
+            x = 1930 if direction == 1 else 1800
+            pane._handle_mouse_press(MousePos(x, 200))
+            for timestamp, fraction in ((0, 0), (duration / 2, .5), (duration, 1)):
+              pane._handle_mouse_event(MouseEvent(MousePos(x - direction * distance * fraction, 200),
+                                                 0, False, False, True, timestamp))
+            pane._handle_mouse_release(MousePos(x - direction * distance, 200))
+          self.assertEqual(pane.scroll, 5 + direction * 5 if accepted else 5)
+          self.assertTrue(all(not row.callback.called for row in rows))
 
   def test_buttons_cancel_on_disabled_hidden_changed_page_and_drag(self):
     row = item("Update", button_action())

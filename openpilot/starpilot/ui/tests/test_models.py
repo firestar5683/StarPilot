@@ -77,7 +77,7 @@ class TestModelPage(unittest.TestCase):
     view.onroad = mock.Mock()
     shell = mock.Mock(mode=ShellMode.SETTINGS, selected=Destination.DRIVING_MODEL, models=page, settings=mock.Mock())
     view.render(shell)
-    view.models.render.assert_called_once_with(page)
+    view.models.render.assert_called_once_with(page, 0.0)
     view.settings.render_rail.assert_called_once_with(shell.settings, selected=Destination.STAR)
 
   def test_compact_visible_page_refreshes_and_hidden_page_does_not_sample(self):

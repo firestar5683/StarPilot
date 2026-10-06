@@ -33,11 +33,13 @@ class StarPilotSettingsAdapterLarge(Widget):
     self.scroll = 0
     self.active = True
     self.input.cancel()
+    self.view.reset()
     self.panel.show_event()
 
   def hide_event(self):
     self.active = False
     self.input.cancel()
+    self.view.reset()
     self.panel.hide_event()
 
   def render(self, rect=None):
@@ -130,14 +132,19 @@ class StarPilotSettingsAdapterLarge(Widget):
 
   def _render(self, rect):
     with placed_at(rl.Rectangle(*self.origin, 2160, 1080)):
-      self.view.render(self.snapshot())
+      self.view.render(self.snapshot(), self.input.drag_x)
 
   def _position(self, pos: MousePos) -> tuple[float, float]:
     return pos.x - self.origin[0], pos.y - self.origin[1]
 
   def _handle_mouse_press(self, pos):
     self._touch_time = None
-    self.input.press(*self._position(pos), self.snapshot())
+    state = self.snapshot()
+    x, y = self._position(pos)
+    block_tap = self.view.reset(state) and FeatureInput._in_body(x, y, state)
+    self.input.press(x, y, state)
+    if block_tap:
+      self.input.cancel_tap()
 
   def _handle_mouse_event(self, mouse_event: MouseEvent):
     self._touch_time = mouse_event.t
@@ -216,3 +223,4 @@ class StarPilotSettingsAdapterLarge(Widget):
     self.panel._cycle_panel()
     self.scroll = 0
     self.input.cancel()
+    self.view.reset()

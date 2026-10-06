@@ -46,7 +46,7 @@ from openpilot.starpilot.spot_monitor.preferences import read_preferences as rea
 from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns
 from openpilot.starpilot.ui.sounds_owner import SoundsOwner
 from openpilot.starpilot.ui.feature_settings_state import (
-  FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureUiAction, row_change,
+  FeatureInput, FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureUiAction, row_change,
   feature_scroll, feature_parent_page, feature_parent_title,
 )
 from openpilot.starpilot.ui.lane_change_feature import KEYS as LANE_CHANGE_KEYS, RESET as LANE_CHANGE_RESET
@@ -90,11 +90,11 @@ from openpilot.system.ui.widgets.nav_widget import NavWidget
 
 NATIVE_SETTINGS_PANELS = (Destination.DEVICE, Destination.SOFTWARE, Destination.BLUETOOTH, Destination.TOGGLES, Destination.DEVELOPER)
 _FEATURE_SETTINGS_PANES = {
-  Destination.DRIVING_CONTROLS: ("features", "feature"),
-  Destination.SOUNDS: ("sounds", "sounds"),
-  Destination.APPEARANCE: ("appearance", "appearance"),
-  Destination.SYSTEM: ("display", "display"),
-  Destination.DRIVING_MODEL: ("models", "model"),
+  Destination.DRIVING_CONTROLS: ("features", "feature", "features"),
+  Destination.SOUNDS: ("sounds", "sounds", "sounds"),
+  Destination.APPEARANCE: ("appearance", "appearance", "appearance"),
+  Destination.SYSTEM: ("display", "display", "display"),
+  Destination.DRIVING_MODEL: ("models", "model", "models"),
 }
 
 
@@ -1158,6 +1158,10 @@ class StarShellSession:
         self._snapshot_cache = None
     snapshot = self.snapshot(mode)
     self._mode = mode
+    rendered = getattr(self, "_rendered_settings", None)
+    if mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and (rendered is None or rendered[1].selected != snapshot.selected):
+      if pane := _FEATURE_SETTINGS_PANES.get(snapshot.selected):
+        getattr(self.view, pane[0]).reset()
     self._rendered_settings = (time.monotonic_ns(), snapshot) if mode == ShellMode.SETTINGS else None
     self._rendered_settings_pipeline = (bool(ui_state.started), ui_state.started_frame) if mode == ShellMode.SETTINGS else None
     if mode == ShellMode.ONROAD:
@@ -1176,7 +1180,9 @@ class StarShellSession:
     with placed_at(rect, parent_clip):
       external = (self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and
                   snapshot.selected in NATIVE_SETTINGS_PANELS and self.settings_layer is not None)
-      self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot)
+      pane = _FEATURE_SETTINGS_PANES.get(snapshot.selected)
+      drag_x = getattr(self.input, pane[2]).drag_x if pane else 0.0
+      self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot, drag_x=drag_x)
       if external:
         self.view.settings.render_rail(snapshot.settings, selected=snapshot.selected)
       if mode == ShellMode.ONROAD:
@@ -1377,7 +1383,12 @@ class StarShellSession:
     self._request_emitted = False
     self._mode = mode
     if mode == ShellMode.SETTINGS:
-      self.input.press(x, y, time.monotonic(), self._settings_press_snapshot())
+      snapshot = self._settings_press_snapshot()
+      self.input.press(x, y, time.monotonic(), snapshot)
+      if (pane := _FEATURE_SETTINGS_PANES.get(snapshot.selected)) and self.profile == Profile.LARGE:
+        state = getattr(snapshot, pane[0])
+        if getattr(self.view, pane[0]).reset(state) and FeatureInput._in_body(x, y, state):
+          getattr(self.input, pane[2]).cancel_tap()
       return
     now, snapshot = time.monotonic(), self.snapshot(mode)
     self._favorite_claimed = False
@@ -1440,6 +1451,8 @@ class StarShellSession:
     if pending := getattr(self, "_aol_save", None):
       pending.cancel.set()
     self._settings_touch = None
+    if (pane := _FEATURE_SETTINGS_PANES.get(self.selected)) and self.profile == Profile.LARGE:
+      getattr(self.view, pane[0]).reset()
     self._power_request_epoch = getattr(self, "_power_request_epoch", 0) + 1
     self._pip_request_epoch = getattr(self, "_pip_request_epoch", 0) + 1
     self._lane_change_request_epoch = getattr(self, "_lane_change_request_epoch", 0) + 1

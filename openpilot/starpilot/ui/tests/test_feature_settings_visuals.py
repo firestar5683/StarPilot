@@ -22,6 +22,166 @@ def fake_fonts():
 
 
 class FeatureVisualTests(unittest.TestCase):
+  def test_page_counter_counts_partial_pages_and_aligns_with_footer_in_both_layouts(self):
+    self.drawing()
+    for expanded in (True, False):
+      for count, scroll, expected in ((0, 0, "1/1"), (1, 0, "1/1"), (5, 0, "1/1"), (6, 0, "1/2"),
+                                       (6, 5, "2/2"), (20, 0, "1/4"), (20, 15, "4/4"), (13, 10, "3/3")):
+        with self.subTest(expanded=expanded, count=count, scroll=scroll):
+          fonts = fake_fonts()
+          state = FeatureSettingsState(rows=(FeatureRow("", "Heading", ""),) * count, scroll=scroll, sidebar_expanded=expanded)
+          view.FeatureSettingsView(fonts).render(state, -80)
+          counter, = [call for call in fonts.draw.call_args_list if call.args[0] == expected]
+          self.assertEqual(counter.args[1:3], (FontRole.MEDIUM, view.DETAIL_SIZE))
+          self.assertIs(counter.args[-1], geometry.TEXT_SECONDARY)
+          left = 520 if expanded else 20
+          self.assertEqual(counter.args[3] + fonts.measure(*counter.args[:3]).width / 2, (left + 25 + 2120) / 2)
+          for label in ("Previous", "Next"):
+            button = next(call for call in fonts.draw.call_args_list if call.args[0] == label)
+            self.assertEqual(counter.args[4], button.args[4])
+
+  def test_page_change_fades_through_one_row_pass_and_preserves_direction(self):
+    self.drawing()
+    rows = tuple(FeatureRow("", str(index), "") for index in range(10))
+    half = view.PAGE_TRANSITION_TIME / 2
+    with patch.object(view, "draw_settings_header"), patch.object(view.time, "monotonic") as clock:
+      for direction in (1, -1):
+        start = FeatureSettingsState(rows=rows, scroll=0 if direction == 1 else 5)
+        end = replace(start, scroll=5 if direction == 1 else 0)
+        fonts = fake_fonts()
+        renderer = view.FeatureSettingsView(fonts)
+        clock.return_value = 0.0
+        renderer.render(start, -direction * 80)
+        for elapsed, shown, offset, alpha in ((0, start, -direction * 44, 0),
+                                             (half / 2, start, -direction * 52, 128),
+                                             (half, end, direction * 60, 255),
+                                             (half * 1.5, end, direction * 30, 128),
+                                             (view.PAGE_TRANSITION_TIME, end, 0, 0)):
+          with self.subTest(direction=direction, elapsed=elapsed):
+            clock.return_value = elapsed
+            fonts.draw.reset_mock()
+            rl.draw_rectangle_rec.reset_mock()
+            for transform in (rl.rl_push_matrix, rl.rl_translatef, rl.rl_pop_matrix):
+              transform.reset_mock()
+            renderer.render(end)
+            counter, = [call for call in fonts.draw.call_args_list if call.args[0] == f"{end.scroll // FEATURE_VISIBLE_ROWS + 1}/2"]
+            self.assertEqual(counter.args[4], 980 + 35 - (6 + 33) / 2)
+            labels = [call.args[0] for call in fonts.draw.call_args_list if call.args[0].isdigit()]
+            self.assertEqual(labels, [row.label for row in shown.rows[shown.scroll:shown.scroll + 5]])
+            self.assertEqual(rl.rl_push_matrix.call_count, int(bool(offset)))
+            self.assertEqual(rl.rl_pop_matrix.call_count, int(bool(offset)))
+            if offset:
+              self.assertAlmostEqual(rl.rl_translatef.call_args.args[0], offset)
+            else:
+              rl.rl_translatef.assert_not_called()
+            fills = rl.draw_rectangle_rec.call_args_list
+            self.assertEqual(len(fills), int(bool(offset)) + int(alpha != 0))
+            if alpha:
+              self.assertAlmostEqual(fills[-1].args[1].a, alpha, delta=1)
+        self.assertFalse(renderer.reset(end))
+
+  def test_transition_interruptions_show_current_rows_at_rest(self):
+    rows = tuple(FeatureRow("", str(index), "") for index in range(10))
+    start = FeatureSettingsState(rows=rows)
+    end = replace(start, scroll=5)
+    with patch.object(view.time, "monotonic", return_value=0):
+      changes = (replace(end, page="other"), replace(end, title="Other"), replace(end, subtitle="Description"),
+                 replace(end, sidebar_expanded=False), replace(end, rows=rows[:-1]))
+      for changed in changes:
+        renderer = view.FeatureSettingsView(fake_fonts())
+        renderer._page_frame(start, 0, False)
+        renderer._page_frame(end, 0, False)
+        self.assertEqual(renderer._page_frame(changed, 0, False), (changed, 0, 0))
+        self.assertIsNone(renderer._transition)
+      renderer = view.FeatureSettingsView(fake_fonts())
+      renderer._page_frame(start, 0, False)
+      renderer._page_frame(end, 0, False)
+      self.assertTrue(renderer.reset(end))
+      self.assertEqual(renderer._page_frame(end, 0, False), (end, 0, 0))
+      # Rejected/boundary gestures never change scroll and cannot start a transition.
+      renderer._page_frame(end, -18, True)
+      self.assertEqual(renderer._page_frame(end, 0, False), (end, 0, 0))
+      # A second drag takes over immediately.
+      renderer._page_frame(start, 0, False)
+      self.assertEqual(renderer._page_frame(start, 24, True), (start, 24, 0))
+
+  def test_pending_swap_and_fast_press_release_are_handled_without_an_intermediate_frame(self):
+    rows = tuple(FeatureRow("", str(index), "") for index in range(10))
+    start = FeatureSettingsState(rows=rows)
+    end = replace(start, scroll=5)
+    renderer = view.FeatureSettingsView(fake_fonts())
+    with patch.object(view.time, "monotonic", return_value=0):
+      renderer._page_frame(start, 0, False)
+      self.assertTrue(renderer.reset(end))
+      self.assertEqual(renderer._page_frame(end, 0, False), (end, 0, 0))
+      renderer.reset(start)
+      self.assertEqual(renderer._page_frame(end, 0, False), (start, 0, 0))
+      renderer.reset()
+      self.assertEqual(renderer._page_frame(end, 0, False), (end, 0, 0))
+
+  def test_pull_policy_reuses_gesture_thresholds_for_both_signs(self):
+    for sign in (-1, 1):
+      for raw, expected in ((20, 0), (36, 0), (60, 24), (80, 44), (96, 60), (120, 60), (300, 60)):
+        self.assertEqual(view.feature_pull(sign * raw, True), sign * expected)
+        self.assertEqual(view.feature_pull(sign * raw, False), sign * min(expected, 18))
+
+  def test_edge_reveal_uses_scroll_authority_and_fixed_clip(self):
+    self.drawing()
+    rows = (FeatureRow("", "Heading", ""),) * 7
+    for expanded in (True, False):
+      left = 520 if expanded else 20
+      for scroll, drag, can_page in ((0, -37.5, True), (5, 37.5, True), (0, -80, True), (5, 80, True),
+                                     (0, -300, True), (5, 300, True), (0, 80, False), (5, -80, False), (0, 20, True), (0, 0, False)):
+        with self.subTest(expanded=expanded, scroll=scroll, drag=drag):
+          rl.draw_rectangle_rec.reset_mock()
+          rl.draw_rectangle_gradient_ex.reset_mock()
+          rl.draw_line_ex.reset_mock()
+          for transform in (rl.rl_push_matrix, rl.rl_translatef, rl.rl_pop_matrix):
+            transform.reset_mock()
+          fonts = fake_fonts()
+          with patch.object(view, "feature_scroll", wraps=feature_scroll) as paging, patch.object(view, "draw_settings_header"):
+            view.FeatureSettingsView(fonts).render(FeatureSettingsState(rows=rows, scroll=scroll, sidebar_expanded=expanded), drag)
+          if drag:
+            paging.assert_called_once_with(scroll, 1 if drag < 0 else -1, len(rows))
+          else:
+            paging.assert_not_called()
+          self.assertEqual(rl.begin_scissor_mode.call_args.args, (left + 25, FEATURE_ROW_TOP, 2100 - left, 5 * FEATURE_ROW_HEIGHT))
+          pull = view.feature_pull(drag, can_page)
+          self.assertEqual(rl.rl_push_matrix.call_count, int(bool(pull)))
+          self.assertEqual(rl.rl_pop_matrix.call_count, int(bool(pull)))
+          if pull:
+            rl.rl_translatef.assert_called_once_with(pull, 0, 0)
+          else:
+            rl.rl_translatef.assert_not_called()
+          fills = rl.draw_rectangle_rec.call_args_list
+          cue = can_page and abs(drag) > 36
+          self.assertEqual(len(fills), int(bool(pull)))
+          self.assertEqual(rl.draw_rectangle_gradient_ex.call_count, int(cue))
+          self.assertEqual(rl.draw_line_ex.call_count, 2 * int(cue))
+          if pull:
+            self.assertIs(fills[-1].args[1], geometry.PANEL_BG)
+            rect = fills[-1].args[0]
+            self.assertEqual((rect.x, rect.y, rect.width, rect.height), (left + 25, FEATURE_ROW_TOP, 2100 - left, 5 * FEATURE_ROW_HEIGHT))
+          if cue:
+            gradient = rl.draw_rectangle_gradient_ex.call_args
+            gap = abs(view.feature_pull(drag, can_page))
+            bounds = gradient.args[0]
+            self.assertEqual((bounds.x, bounds.y, bounds.width, bounds.height),
+                             (2125 - gap if drag < 0 else left + 25, FEATURE_ROW_TOP, gap, 5 * FEATURE_ROW_HEIGHT))
+            color_left, color_right = (geometry.PANEL_BG, view.EDGE_ACCENT) if drag < 0 else (view.EDGE_ACCENT, geometry.PANEL_BG)
+            self.assertEqual(gradient.args[1:], (color_left, color_left, color_right, color_right))
+            self.assertEqual(rl.draw_line_ex.call_args.args[0].x, (2095 if drag < 0 else left + 55) + (8 if drag < 0 else -8))
+          footer = [call for call in fonts.draw.call_args_list if call.args[0] in ("Previous", "Next")]
+          self.assertEqual(len(footer), 2)
+
+  def test_row_failure_restores_matrix_and_scissor(self):
+    self.drawing()
+    with patch.object(rl, "draw_line", side_effect=RuntimeError("row failed")), patch.object(view, "draw_settings_header"):
+      with self.assertRaisesRegex(RuntimeError, "row failed"):
+        view.FeatureSettingsView(fake_fonts()).render(FeatureSettingsState(rows=(FeatureRow("", "Heading", ""),)), -80)
+    rl.rl_pop_matrix.assert_called_once()
+    rl.end_scissor_mode.assert_called()
+
   def test_description_space_and_row_hit_targets_share_the_rendered_layout(self):
     self.drawing()
     rows = tuple(FeatureRow(str(index), "Setting", "", available=True, actions=(("OPEN", True),)) for index in range(5))
@@ -53,7 +213,7 @@ class FeatureVisualTests(unittest.TestCase):
   def drawing(self):
     stack = ExitStack()
     self.addCleanup(stack.close)
-    for name in ("draw_rectangle_rounded", "draw_rectangle_rounded_lines_ex", "draw_line", "draw_line_ex",
+    for name in ("draw_rectangle_rec", "draw_rectangle_gradient_ex", "draw_rectangle_rounded", "draw_rectangle_rounded_lines_ex", "draw_line", "draw_line_ex",
                  "draw_circle", "begin_scissor_mode", "end_scissor_mode", "rl_push_matrix", "rl_pop_matrix", "rl_translatef"):
       stack.enter_context(patch.object(rl, name))
     return stack

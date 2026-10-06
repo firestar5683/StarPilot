@@ -13,6 +13,7 @@ from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, feature_row_top, FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, row_change,
+  FEATURE_PAGE_COUNTER_WIDTH, feature_page_counter_left,
 )
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
@@ -21,6 +22,57 @@ from opendbc.car.honda.values import CAR as HONDA_CAR
 
 
 class FeatureNavigationTests(unittest.TestCase):
+  def test_page_counter_is_inert_and_footer_buttons_remain_tappable(self):
+    for expanded in (True, False):
+      state = FeatureSettingsState(sidebar_expanded=expanded)
+      counter_left = feature_page_counter_left(state)
+      actions = []
+      controller = FeatureInput(actions.append)
+      for x in (counter_left, counter_left + FEATURE_PAGE_COUNTER_WIDTH / 2, counter_left + FEATURE_PAGE_COUNTER_WIDTH):
+        with self.subTest(expanded=expanded, x=x):
+          controller.press(x, 1015, state)
+          controller.release(x, 1015, state)
+          self.assertFalse(actions)
+          self.assertIsNone(controller.held)
+      left = 520 if expanded else 20
+      for x, direction in (((left + 25 + 1320) / 2, -1), (1720, 1)):
+        controller.press(x, 1015, state)
+        controller.release(x, 1015, state)
+        self.assertEqual(actions.pop(), FeatureUiAction("scroll", direction=direction))
+
+  def test_drag_tracks_only_horizontal_body_movement(self):
+    state = FeatureSettingsState()
+    controller = FeatureInput(lambda _action: None)
+    for dx, dy, expected, canceled in ((20, 0, 0, False), (-80, 0, -80, False), (80, 10, 80, False),
+                                        (80, 41, 0, False), (0, 80, 0, True)):
+      with self.subTest(dx=dx, dy=dy):
+        controller.press(1000, 200, state)
+        controller.move(1000 + dx, 200 + dy, state)
+        self.assertEqual(controller.drag_x, expected)
+        self.assertEqual(controller.held is None, canceled)
+    controller.press(1000, 200, state)
+    controller.move(920, 200, state)
+    controller.move(980, 200, state)
+    self.assertEqual(controller.drag_x, 0)
+    controller.move(1080, 200, state)
+    self.assertEqual(controller.drag_x, 80)
+
+  def test_drag_resets_through_existing_cancel_paths(self):
+    state = FeatureSettingsState()
+    controller = FeatureInput(lambda _action: None)
+    resets = (lambda: controller.cancel(), lambda: controller.press(1000, 200, state),
+              lambda: controller.release(920, 200, state),
+              lambda: controller.move(10, 200, state),
+              lambda: controller.move(920, 200, replace(state, scroll=5)),
+              lambda: controller.move(920, 200, replace(state, page="child")),
+              lambda: controller.move(920, 200, replace(state, sidebar_expanded=False)))
+    for reset in resets:
+      controller.press(1000, 200, state)
+      controller.move(920, 200, state)
+      self.assertEqual(controller.drag_x, -80)
+      reset()
+      self.assertEqual(controller.drag_x, 0)
+
   def test_native_saved_preferences_need_settings_or_favorite_context_not_cp(self):
     from openpilot.starpilot.ui import runtime_app
 
