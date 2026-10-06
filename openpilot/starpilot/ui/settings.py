@@ -34,7 +34,7 @@ class SettingsView:
       self._compact(state)
 
   def _large(self, state: SettingsState):
-    draw_settings_header(self.fonts, state.sidebar_expanded, "StarPilot")
+    draw_settings_header(self.fonts, state.sidebar_expanded, "StarPilot", back=True)
     for (_, title, icon), bounds in zip(TILES, tile_rects(state), strict=True):
       rect = rl.Rectangle(*bounds)
       draw_hud_background(rect, ACCENT)

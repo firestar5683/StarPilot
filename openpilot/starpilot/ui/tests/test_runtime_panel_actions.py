@@ -220,7 +220,7 @@ class TestRuntimePanelActions(unittest.TestCase):
           elif failure == "onroad":
             self.ui.started = True
           elif failure == "page":
-            self._settings_tap(session, 570, 50)
+            self._settings_tap(session, 250, 160)
             self._settings_tap(session, 1800, 800)
           original = read_selection(self.ui.params)
           model.callback(DialogResult.CANCEL if failure == "cancel" else DialogResult.CONFIRM)
@@ -274,8 +274,7 @@ class TestRuntimePanelActions(unittest.TestCase):
         view.features.render.assert_called_once_with(shown.features, 0.0)
         view.settings.render.assert_not_called()
         view.settings.render_rail.assert_called_once_with(shown.settings, selected=Destination.STAR)
-        left = 520 if sidebar_expanded else 20
-        self._settings_tap(session, left + 50, 50)
+        self._settings_tap(session, *((250, 160) if sidebar_expanded else (70, 50)))
         self.assertEqual(session.selected, Destination.STAR)
 
         # Reopening through Driving Controls must reset the entry page.
@@ -288,11 +287,16 @@ class TestRuntimePanelActions(unittest.TestCase):
         session._feature_ui(FeatureUiAction("open", vehicle))
         shown = session.snapshot(ShellMode.SETTINGS)
         self.assertEqual(shown.features.parent_title, "Driving Controls")
-        self._settings_tap(session, left + 50, 50)
+        if sidebar_expanded:
+          self._settings_tap(session, 20, 581)
+        self._settings_tap(session, 70, 50)
         self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.page, FeaturePage.HUB)
         self.assertEqual(session.selected, Destination.DRIVING_CONTROLS)
-        self._settings_tap(session, left + 50, 50)
+        self._settings_tap(session, 70, 50)
         self.assertEqual(session.selected, Destination.STAR)
+        session._on_home = Mock()
+        self._settings_tap(session, 70, 50)
+        session._on_home.assert_called_once_with()
 
   def test_large_vehicle_control_uses_confirmation_and_cancels_after_leaving(self):
     from openpilot.system.ui.widgets import DialogResult
@@ -309,7 +313,7 @@ class TestRuntimePanelActions(unittest.TestCase):
       self.assertTrue(self.ui.params.get_bool("LongPitch"))
       self._settings_tap(session, 2000, y)
       confirmation = pushed.call_args.args[0].callback
-      self._settings_tap(session, 570, 50)
+      self._settings_tap(session, 250, 160)
       self._settings_tap(session, 1800, 800)
       confirmation(DialogResult.CONFIRM)
       self.assertTrue(self.ui.params.get_bool("LongPitch"))
