@@ -550,7 +550,34 @@ def remote_compile(info: ReleaseInfo, source: Path, ip: str, workspace: Path, ke
     return_code = process.wait()
   if return_code != 0:
     raise ReleaseError(f"Device compilation failed; see {log_path}")
+  return fetch_device_artifact(info, ip, workspace, keep_device_files, cleanup_command)
 
+
+def reuse_device_artifact(info: ReleaseInfo, device_path: str, ip: str, workspace: Path, keep_device_files: bool) -> dict:
+  """Publish an already-compiled PKL from the comma instead of recompiling.
+
+  A local-<id> build is the same artifact a release compile produces before
+  chunking (the embedded metadata holds no IDs or paths), so copy it into the
+  release name on-device, chunk it with the compiler's --split-artifact, and
+  hand off to the normal retrieval and checksum verification.
+  """
+  output_dir = f"{DEVICE_ROOT}/compiledmodels"
+  artifact_prefix = f"{info.model_id}_driving_tinygrad.pkl"
+  staged = f"{output_dir}/{artifact_prefix}"
+  cleanup_command = f"rm -f {shlex.quote(output_dir)}/{artifact_prefix}*"
+  run(ssh_base(ip) + [
+    f"test -f {shlex.quote(device_path)} && mkdir -p {shlex.quote(output_dir)} && {cleanup_command} && "
+    f"cp {shlex.quote(device_path)} {shlex.quote(staged)} && "
+    f"cd {shlex.quote(DEVICE_ROOT)} && ./models --split-artifact {shlex.quote(staged)} --output-dir {shlex.quote(output_dir)} && "
+    f"rm -f {shlex.quote(staged)}"
+  ])
+  return fetch_device_artifact(info, ip, workspace, keep_device_files, cleanup_command)
+
+
+def fetch_device_artifact(info: ReleaseInfo, ip: str, workspace: Path, keep_device_files: bool,
+                          cleanup_command: str) -> dict:
+  output_dir = f"{DEVICE_ROOT}/compiledmodels"
+  artifact_prefix = f"{info.model_id}_driving_tinygrad.pkl"
   list_command = f"for f in {shlex.quote(output_dir)}/{artifact_prefix}*; do [ -f \"$f\" ] && basename \"$f\"; done"
   listed = run(ssh_base(ip) + [list_command], capture=True).stdout.splitlines()
   remote_files = sorted(name for name in listed if name.startswith(artifact_prefix))
@@ -949,7 +976,7 @@ def parse_args() -> argparse.Namespace:
                            "and the real ONNX must be fetched by hand from elsewhere. Skips the runtime-change "
                            "scan since there is no commit history to scan; review the source yourself first. "
                            "Requires --model-id or a v-numbered name in --display-name.")
-  parser.add_argument("--display-name", help="Display name to record in the manifest when using --source-file.")
+  parser.add_argument("--display-name", help="Display name to record in the manifest (overrides the parsed name).")
   parser.add_argument("--model-id", help="Override the ID parsed from the model name.")
   parser.add_argument("--behavior-version", default=DEFAULT_BEHAVIOR_VERSION, help="Runtime behavior version (default: v16).")
   parser.add_argument("--ip", help="Comma IP; prompted interactively when omitted.")
@@ -970,6 +997,9 @@ def parse_args() -> argparse.Namespace:
                            "installed straight into /data/models on-device (with a correct version sidecar) "
                            "and never uploaded to Hugging Face or GitHub. Implies --allow-runtime-changes is "
                            "still required separately if a runtime change is flagged.")
+  parser.add_argument("--reuse-device-artifact", metavar="DEVICE_PATH",
+                      help="Publish an already-compiled PKL on the comma (e.g. /data/models/local-<id>_driving_tinygrad.pkl) "
+                           "instead of recompiling. It must come from the same ONNX, tinygrad pin, and flags.")
   parser.add_argument("--force", action="store_true", help="Replace an existing source/artifact/model ID.")
   parser.add_argument("--dry-run", action="store_true", help="Parse and scan only; do not download, compile, or publish.")
   return parser.parse_args()
@@ -991,6 +1021,8 @@ def main() -> int:
       if not text.strip():
         raise ReleaseError("No release text was supplied")
       info = parse_pasted_release(text, args.model_id, args.behavior_version.strip().lower())
+      if args.display_name:
+        info.display_name = args.display_name
     if args.gpu is not None:
       info.uses_external_gpu = args.gpu
     print_summary(info)
@@ -1032,7 +1064,10 @@ def main() -> int:
       remote_compile_local(info, source, ip, workspace)
       return 0
 
-    result = remote_compile(info, source, ip, workspace, args.keep_device_files)
+    if args.reuse_device_artifact:
+      result = reuse_device_artifact(info, args.reuse_device_artifact, ip, workspace, args.keep_device_files)
+    else:
+      result = remote_compile(info, source, ip, workspace, args.keep_device_files)
     resources_repo = args.resources_repo.expanduser().resolve()
     check_resources_repo(resources_repo, args.resources_branch)
     manifest = resources_repo / f"model_names_{args.manifest_version}.json"
