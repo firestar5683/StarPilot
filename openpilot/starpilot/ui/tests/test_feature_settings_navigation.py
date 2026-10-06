@@ -105,6 +105,8 @@ class FeatureNavigationTests(unittest.TestCase):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsRequest
     from openpilot.starpilot import saved_document
+    from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
+    from openpilot.starpilot.ui.presentation import BitmapFonts
 
     for profile, withdrawal in ((profile, withdrawal) for profile in (Profile.LARGE, Profile.COMPACT)
                                 for withdrawal in ("back", "cancel", "close")):
@@ -119,7 +121,10 @@ class FeatureNavigationTests(unittest.TestCase):
         session.feature_scroll = 0
         session.input = NS(cancel=lambda: None)
         session.favorites = NS(cancel=lambda: None)
-        session.view = NS(onroad=NS(navigation=NS(cancel=lambda: None)), close=lambda: None)
+        fonts = BitmapFonts.__new__(BitmapFonts)
+        fonts.profile = profile
+        session.view = NS(features=FeatureSettingsView(fonts) if profile == Profile.LARGE else None,
+                          onroad=NS(navigation=NS(cancel=lambda: None)), close=lambda: None)
         session.drive_state = NS(physical=NS(close=lambda: None))
         session.galaxy_flow = session.pip_warning = session.pip_renderer = session.fonts = NS(close=lambda: None)
         session.bluetooth_source = session.model_source = session.map_source = None
