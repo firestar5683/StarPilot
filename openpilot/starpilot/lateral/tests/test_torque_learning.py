@@ -17,7 +17,7 @@ from openpilot.selfdrive.locationd import torqued
 from openpilot.starpilot.lateral.controller_selection import (
   DOCUMENT_KEY, LEARNING_OFF_KEY, ControllerMode, learning_allowed, replace_mode,
 )
-from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
+from openpilot.starpilot.lateral.tests.test_lane_runtime import feed, publish_corolla_params
 from openpilot.starpilot.lateral.tests.test_torque_runtime import LearnedFrame
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, read_settings
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource
@@ -153,7 +153,10 @@ class TestTorqueLearning(unittest.TestCase):
       with self.subTest(vehicle=vehicle), OpenpilotPrefix(), mock.patch.dict(os.environ, {**ENV, 'SIMULATION': '0'}), \
            mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
         params, cp = Params(), cp_for(vehicle)
-        params.put('CarParams', cp.to_bytes(), block=True)
+        if vehicle == TOYOTA.TOYOTA_COROLLA_TSS2:
+          cp = publish_corolla_params(params)
+        else:
+          params.put('CarParams', cp.to_bytes(), block=True)
         controls = Controls()
         self.assertIsNone(controls.torque_host)
         feed_learning(controls)
