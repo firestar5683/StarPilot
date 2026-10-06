@@ -305,7 +305,7 @@ class FeatureVisualTests(unittest.TestCase):
                                  rows=(FeatureRow("switch", "Long label " * 30, "On", choices=("Off", "On"), available=True),))
     renderer.render(state)
     title = next(call for call in fonts.draw.call_args_list if call.args[0].startswith("Long title"))
-    self.assertLessEqual(fonts.measure(*title.args[:3]).width, 1372)
+    self.assertLessEqual(title.args[3] + fonts.measure(*title.args[:3]).width, 2110)
     label = next(call for call in fonts.draw.call_args_list if call.args[0].startswith("Long label"))
     self.assertLessEqual(fonts.measure(*label.args[:3]).width, 1149)
     subtitle = next(call for call in fonts.draw.call_args_list if call.args[0] == state.subtitle)
@@ -373,6 +373,21 @@ class FeatureVisualTests(unittest.TestCase):
       header.assert_called_once()
       stars.assert_called_once()
 
+  def test_header_omits_generic_roots_and_retains_nested_parents(self):
+    self.drawing()
+    for expanded in (True, False):
+      for title, parent, back, expected in (
+        ("Driving Model", "StarPilot", True, ["< Back", "Driving Model"]),
+        ("Device", "Settings", True, ["< Back", "Device"]),
+        ("Lane Centering", "Driving Controls", True, ["< Back", "Driving Controls > ", "Lane Centering"]),
+        ("Aggressive", "Long Planner", True, ["< Back", "Long Planner > ", "Aggressive"]),
+        ("StarPilot", "", False, ["StarPilot"]),
+      ):
+        with self.subTest(expanded=expanded, title=title):
+          fonts = fake_fonts()
+          geometry.draw_settings_header(fonts, expanded, title, parent, back=back)
+          self.assertEqual([call.args[0] for call in fonts.draw.call_args_list], expected)
+
   def test_numeric_value_is_read_only_and_buttons_keep_source_binding(self):
     row = FeatureRow("number", "Number", "75", b"75", step=5, available=True)
     state = FeatureSettingsState(rows=(row,))
@@ -399,15 +414,16 @@ class FeatureVisualTests(unittest.TestCase):
       self.assertEqual(label.args[3], left + 55)
       self.assertEqual(label.args[2], 50)
       self.assertEqual(label.args[1], FontRole.NORMAL)
-      self.assertTrue(all(call.args[2] in (35, 50) for call in fonts.draw.call_args_list))
+      self.assertTrue(all(call.args[2] in (35, 44, 50) for call in fonts.draw.call_args_list))
       header = [call for call in fonts.draw.call_args_list
                 if call.args[0] == "< Back" or call.args[0].startswith("Driving Controls") or call.args[0] == "Lane Centering"]
       self.assertEqual(len(header), 3)
-      self.assertTrue(all(call.args[1:3] == (FontRole.MEDIUM, 35) for call in header))
+      self.assertTrue(all(call.args[1:3] == (FontRole.MEDIUM, 44) for call in header))
       self.assertEqual(len({call.args[4] for call in header}), 1)
       self.assertNotEqual(FeatureInput.target(left + 60, 120, state).kind, "back")
       self.assertEqual(FeatureInput.target(left + 60, 76, state).kind, "back")
-      self.assertEqual(FeatureInput.target(left + 300, 76, state).kind, "details")
+      self.assertEqual(FeatureInput.target(left + 207, 76, state).kind, "back")
+      self.assertEqual(FeatureInput.target(left + 208, 76, state).kind, "details")
 
 
 if __name__ == "__main__":

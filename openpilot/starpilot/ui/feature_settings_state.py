@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Callable
 
 FEATURE_HEADER_HEIGHT = 88
-FEATURE_BACK_WIDTH = 190
+FEATURE_BACK_WIDTH = 208
 FEATURE_ROW_TOP = 112
 FEATURE_ROW_HEIGHT = 154
 FEATURE_VISIBLE_ROWS = 5
