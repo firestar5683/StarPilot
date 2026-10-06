@@ -73,7 +73,11 @@ export class DeviceStateFeed extends SnapshotFeed {
 export const DeviceState = {
   props: { unauthorized: { type: Function, required: true }, connection: { type: String, default: "" } },
   data: () => ({ state: null, stale: false }),
-  computed: { label() { return STATES[this.state] || "State unavailable" } },
+  computed: {
+    label() { return STATES[this.state] || "State unavailable" },
+    statusLabel() { return this.stale ? this.label + " · reconnecting" : this.label },
+    icon() { return this.stale ? "bi-wifi-off" : ({ parked: "bi-p-circle", driving: "bi-car-front", standby: "bi-moon" }[this.state] || "bi-question-circle") },
+  },
   created() { this.feed = new DeviceStateFeed({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
   mounted() {
     this.visibility = () => document.hidden ? this.feed.stop() : this.feed.start()
@@ -81,7 +85,7 @@ export const DeviceState = {
     if (!document.hidden) this.feed.start()
   },
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
-  template: `<span class="gx-status-pill gx-device-state" role="status" :title="stale ? 'Reconnecting; showing last reported state' : connection">
-    <span class="gx-status-dot" :class="state && !stale ? 'online' : 'offline'" aria-hidden="true"></span>{{ label }}
+  template: `<span class="gx-status-pill gx-device-state" role="status" :aria-label="statusLabel" :title="statusLabel + (connection ? ' · ' + connection : '')">
+    <i class="bi gx-device-state__icon" :class="[icon, { 'is-stale': stale || !state }]" aria-hidden="true"></i><span class="gx-device-state__label">{{ label }}</span>
   </span>`,
 }

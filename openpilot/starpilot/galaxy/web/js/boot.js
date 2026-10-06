@@ -4,6 +4,7 @@ const retry = status.querySelector("button")
 retry.addEventListener("click", () => location.reload())
 function failed() {
   message.textContent = "Galaxy could not finish opening. Check your connection and try again."
+  status.classList.add("gx-boot--failed")
   retry.hidden = false
 }
 const timer = setTimeout(failed, 10000)

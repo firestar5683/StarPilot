@@ -114,20 +114,21 @@ export const CamerasPage = {
 
 // Shared owner for live editor frames, including bounded capture and image decode.
 export class LiveCameraPreview {
-  constructor({ publish, unauthorized, redraw, enabled, imageFactory = () => new Image() }) {
-    Object.assign(this, { publish, redraw, enabled, imageFactory })
+  constructor({ publish, unauthorized, redraw, enabled, imageFactory = () => new Image(), later = (fn, ms) => setTimeout(fn, ms), cancelTimer = id => clearTimeout(id) }) {
+    Object.assign(this, { publish, redraw, enabled, imageFactory, later, cancelTimer })
     this.image = null
     this.generation = 0
     this.stopped = true
     this.snapshots = new CameraSnapshotFeed({ unauthorized, publish: update => this.receive(update) })
     this.visibility = () => {
-      if (document.hidden) this.clear()
-      else { clearTimeout(this.timer); this.poll() }
+      this.cancelTimer(this.timer)
+      this.snapshots.stop()
+      if (!document.hidden && this.warming) this.poll()
     }
   }
   clear() {
     this.generation++
-    clearTimeout(this.decodeTimer)
+    this.cancelTimer(this.decodeTimer)
     this.snapshots.stop()
     if (this.image) this.image.src = ""
     this.image = null
@@ -136,49 +137,66 @@ export class LiveCameraPreview {
   }
   receive(update) {
     if (update.error) {
-      this.generation++
-      clearTimeout(this.decodeTimer)
-      this.image = null
-      this.publish({ imageName: "", cameraError: update.error })
-      this.redraw()
+      this.lastError = update.error
+      return
     }
     if (!update.image) return
     const generation = ++this.generation
     const image = this.imageFactory()
     const failed = () => {
       if (this.stopped || generation !== this.generation) return
-      clearTimeout(this.decodeTimer)
+      this.cancelTimer(this.decodeTimer)
       this.generation++
-      this.image = null
-      this.publish({ imageName: "", cameraError: "Camera frame could not be displayed." })
+      this.lastError = "Camera frame could not be displayed."
+      if (!this.image && !this.warming) this.publish({ cameraError: this.lastError })
       this.redraw()
     }
     image.onload = () => {
       if (this.stopped || generation !== this.generation) return
-      clearTimeout(this.decodeTimer)
+      this.cancelTimer(this.decodeTimer)
       this.image = image
       this.publish({ imageName: "Live cabin camera", cameraError: "" })
       this.redraw()
     }
     image.onerror = failed
-    clearTimeout(this.decodeTimer)
-    this.decodeTimer = setTimeout(failed, 4000)
+    this.cancelTimer(this.decodeTimer)
+    this.decodeTimer = this.later(failed, 4000)
     image.src = update.image
   }
   start() {
     this.stopped = false
     document.addEventListener("visibilitychange", this.visibility)
+    this.refresh()
+  }
+  refresh() {
+    this.cancelTimer(this.warmupTimer)
+    this.cancelTimer(this.timer)
+    this.warming = true
+    this.lastError = ""
+    this.publish({ cameraWarming: true, cameraError: "" })
+    this.warmupTimer = this.later(() => this.freeze(), 5000)
     this.poll()
   }
+  freeze() {
+    this.generation++
+    this.cancelTimer(this.decodeTimer)
+    this.warming = false
+    this.pollGeneration = (this.pollGeneration || 0) + 1
+    this.cancelTimer(this.timer)
+    this.snapshots.stop()
+    this.publish({ cameraWarming: false, cameraError: this.image ? "" : this.lastError || "No cabin frame was available. Turn off the vehicle and take a new snapshot." })
+  }
   async poll() {
-    if (this.stopped) return
+    if (this.stopped || !this.warming) return
     const generation = this.pollGeneration = (this.pollGeneration || 0) + 1
     if (this.enabled() && !document.hidden) await this.snapshots.capture("cabin")
-    if (!this.stopped && generation === this.pollGeneration) this.timer = setTimeout(() => this.poll(), 1500)
+    if (!this.stopped && this.warming && generation === this.pollGeneration) this.timer = this.later(() => this.poll(), 1000)
   }
   stop() {
     this.stopped = true
-    clearTimeout(this.timer)
+    this.warming = false
+    this.cancelTimer(this.warmupTimer)
+    this.cancelTimer(this.timer)
     document.removeEventListener("visibilitychange", this.visibility)
     this.clear()
   }

@@ -87,7 +87,7 @@ input[type="range"].gx-slider:disabled { cursor: default; opacity: .4; }
 }
 
 .gx-row__info { flex: 1; min-width: 0; }
-.gx-setting-default { margin-top: 8px; min-height: 32px; padding: 4px 12px; font-size: var(--fs-sm); }
+.gx-setting-default { margin-top: 0; min-height: 32px; padding: 4px 12px; font-size: var(--fs-sm); }
 
 .gx-row__label {
   display: flex;
@@ -474,3 +474,10 @@ button.gx-chip:hover {
 }
 
 .gx-slider-header .gx-setting-default { order: 1; margin: 0 0 0 auto; }
+
+/* Choice rows keep their label and controls beside each other. */
+.gx-row:not(.gx-row--stack) > .gx-select { flex: 0 1 45%; min-width: 100px; width: auto; }
+.gx-row:not(.gx-row--stack) .gx-setting-default { margin-top: 0; min-height: var(--touch-target); }
+.gx-settings__header h2 { font-size: clamp(1.2rem, 4vw, 1.5rem); }
+.gx-settings__header > div:first-child { flex: 1; min-width: 0; }
+.gx-settings__header > .gx-actions, .gx-settings__header > .gx-icon-btn { flex: none; }

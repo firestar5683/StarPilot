@@ -1,3 +1,4 @@
+import { GalaxyLoading } from "./loading-screen.js"
 import { GxNotice } from "./notice.js"
 import { createApp, reactive, defineAsyncComponent } from "../vendor/vue/vue.esm-browser.js"
 import { route, navigate, navigateBack, setRouteLeaveGuard, startRouter } from "./router.js"
@@ -72,7 +73,7 @@ const NAV = [
 ]
 
 createApp({
-  components: { Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, InstallApp, MenuTile },
+  components: { GalaxyLoading, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, InstallApp, MenuTile },
   data: () => ({ state, authState, authForm, route, NAV }),
   computed: {
     visibleTools() { return state.tools.filter(tool => tool.visibility !== "authenticated" ||
@@ -163,7 +164,7 @@ createApp({
         <DevicePicker />
       </aside>
       <main class="gx-content">
-        <template v-if="state.loading && !state.error"><div v-if="state.startupPending" class="gx-card gx-message" role="status">Connecting to your device…</div></template>
+        <template v-if="state.loading && !state.error"><GalaxyLoading v-if="state.startupPending" message="Connecting to your device…" /></template>
         <GxNotice v-else-if="state.error" tone="danger">{{ state.error }}</GxNotice>
         <section v-else-if="state.monitorMode === 'local' && authState.status !== 'authenticated'" class="gx-card gx-auth" aria-label="Galaxy sign in">
           <h2>Galaxy access</h2>

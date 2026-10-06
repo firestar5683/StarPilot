@@ -62,7 +62,9 @@ test("search revokes cached labels on unauthorized response and ignores late rea
 
 test("keyboard selection and Escape are bounded to visible results", () => {
   const chosen = []
+  let focused = false
   const context = { state: { query: "lane", open: true, active: 0 }, showResults: true,
+    $nextTick: fn => fn(), $refs: { toggle: { getClientRects: () => [1], focus: () => { focused = true } } },
     results: [{ page: "lane" }, { page: "lane_change" }], choose(hit) { chosen.push(hit.page) } }
   const event = (key) => ({ key, prevented: false, preventDefault() { this.prevented = true } })
   ToggleSearch.methods.onKey.call(context, event("ArrowDown"))
@@ -72,4 +74,5 @@ test("keyboard selection and Escape are bounded to visible results", () => {
   ToggleSearch.methods.onKey.call(context, event("Escape"))
   assert.equal(context.state.query, "")
   assert.equal(context.state.open, false)
+  assert.equal(focused, true, "Escape restores focus to the compact search button")
 })

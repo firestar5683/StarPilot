@@ -65,6 +65,7 @@ export function driveSummary(feed) {
     analysis: data.analysis,
     last: last && { routeId: last.routeId, date: driveDate(last.startTime, last.endTime), complete: last.complete,
       distance: distance(last.distanceMeters, isMetric), duration: duration(last.durationSeconds), engaged: percent(last.engagedPercent),
+      average: measure(last.distanceMeters === null || !(last.durationSeconds > 0) ? null : last.distanceMeters / last.durationSeconds * (isMetric ? 3.6 : 2.236936), isMetric ? " km/h" : " mph"),
       model: shown(last.model), distracted: last.distractedMoments === null ? "Unavailable" : String(last.distractedMoments),
       unresponsive: last.unresponsiveMoments === null ? "Unavailable" : String(last.unresponsiveMoments) },
     totals: { distance: distance(data.totals.distanceMeters, isMetric), duration: hours(data.totals.durationSeconds),
@@ -178,13 +179,13 @@ export const Home = {
           <p v-if="drives.status !== 'ready'" role="status">{{ drives.status === 'loading' ? 'Loading your drives…' : drives.error || 'Drive history is unavailable.' }}</p>
           <p v-else-if="!driving.last">No saved drives yet.</p>
           <template v-else>
-            <h2>{{ driving.last.date }}</h2>
+            <p class="gx-home__date">{{ driving.last.date }}</p>
             <p v-if="!driving.last.complete" class="gx-home__subtle">This drive is still being analyzed.</p>
             <div class="gx-home__four"><div><strong>{{ driving.last.distance }}</strong><span>distance</span></div>
               <div><strong>{{ driving.last.duration }}</strong><span>duration</span></div>
               <div><strong>{{ driving.last.engaged }}</strong><span>engaged</span></div>
-              <div><strong>{{ driving.last.model }}</strong><span>recorded model</span></div></div>
-            <div class="gx-home__attention"><span><i class="bi bi-eye"></i> {{ driving.last.distracted }} distracted {{ driving.last.distracted === "1" ? "moment" : "moments" }}</span>
+              <div><strong>{{ driving.last.average }}</strong><span>average speed</span></div></div>
+            <div class="gx-home__attention"><span class="gx-home__model-tag"><i class="bi bi-cpu"></i> {{ driving.last.model }}</span><span><i class="bi bi-eye"></i> {{ driving.last.distracted === "Unavailable" ? "Attention data unavailable" : driving.last.distracted + " distracted " + (driving.last.distracted === "1" ? "moment" : "moments") }}</span>
               <span><i class="bi bi-exclamation-triangle"></i> {{ driving.last.unresponsive }} unresponsive {{ driving.last.unresponsive === "1" ? "moment" : "moments" }}</span></div>
           </template>
         </section>
