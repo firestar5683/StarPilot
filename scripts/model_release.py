@@ -678,7 +678,8 @@ def remote_compile_local(info: ReleaseInfo, source: Path, ip: str, workspace: Pa
       "check the compile log above for an install warning."
     )
   print(f"\nInstalled on device: /data/models/{artifact_prefix}")
-  print(f"Reboot the comma (or restart the model manager) and pick \"{info.display_name}\" in the model selector.")
+  picker_name = local_model_id[len("local-"):].replace("_", " ").replace("-", " ").strip()
+  print(f"Reboot the comma (or restart the model manager) and pick \"{picker_name}\" in the model selector.")
 
 
 def manifest_entry(info: ReleaseInfo, result: dict) -> dict:
