@@ -163,6 +163,11 @@
       "body": "\n  hudControl @0 :HUDControl;\n  steeringLimitInfo @1 :SteeringLimitInfo;\n\n  struct HUDControl {\n    audibleAlert @0 :AudibleAlert;\n\n    enum AudibleAlert {\n      none @0;\n\n      engage @1;\n      disengage @2;\n      refuse @3;\n\n      warningSoft @4;\n      warningImmediate @5;\n\n      prompt @6;\n      promptRepeat @7;\n      promptDistracted @8;\n\n      # Random Events\n      angry @9;\n      continued @10;\n      dejaVu @11;\n      doc @12;\n      fart @13;\n      firefox @14;\n      goat @15;\n      hal9000 @16;\n      mail @17;\n      nessie @18;\n      noice @19;\n      startup @20;\n      thisIsFine @21;\n      uwu @22;\n    }\n  }\n\n  struct SteeringLimitInfo {\n    valid @0 :Bool;\n    modelLimitErrorDeg @1 :Float32;\n    resumeLimitErrorDeg @2 :Float32;\n    cooperativeLimitErrorDeg @3 :Float32;\n    cooperativeOffsetDeg @4 :Float32;\n    monoTime @5 :UInt64;\n    combinedLimitErrorDeg @6 :Float32;\n  }\n",
       "source_commit": "c2109496a72e85ca702ecef7aff53ff45adcfb8c",
       "source_path": "cereal/custom.capnp"
+    },
+    "3": {
+      "type_id": "0xda96579883444c35",
+      "name": "StarPilotLongitudinalPlan",
+      "body": "\n  version @0 :UInt16;\n  sourcePlanMonoTime @1 :UInt64;\n  modelMonoTime @2 :UInt64;\n  driveStartMonoTime @3 :UInt64;\n  forceStopHolding @4 :Bool;\n"
     }
   },
   "reviewed_enum_additions": {
