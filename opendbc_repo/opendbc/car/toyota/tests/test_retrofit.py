@@ -10,6 +10,43 @@ def params(car, fp=None, alpha=False):
 
 
 class TestRetrofit(unittest.TestCase):
+  def test_prius_smart_dsu_requires_exact_rack_and_source(self):
+    from opendbc.car.structs import CarParams
+    rack = CarParams.CarFw.new_message(ecu=CarParams.Ecu.eps, fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')
+    from opendbc.car.toyota.prius_longitudinal import enabled
+    from opendbc.car.toyota.prius_longitudinal import stopping_decel_rate
+    for alpha in (False, True):
+      cp = CarInterface.get_params(CAR.TOYOTA_PRIUS_RETROFIT, {0: {0x2FF: 4}, 1: {}, 2: {}}, [rack], alpha, False, False)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, 4169)
+      self.assertTrue(enabled(cp))
+      self.assertFalse(cp.dashcamOnly)
+      self.assertTrue(cp.openpilotLongitudinalControl)
+      self.assertTrue(cp.pcmCruise)
+      self.assertFalse(cp.flags & ToyotaFlags.TSS2)
+      self.assertAlmostEqual(cp.steerActuatorDelay, .14)
+      self.assertAlmostEqual(cp.longitudinalActuatorDelay, .05)
+      self.assertEqual(stopping_decel_rate(cp), .3)
+    automatic = CarInterface.get_params(CAR.TOYOTA_PRIUS, {0: {0x2FF: 4}, 1: {}, 2: {}}, [rack], False, False, False)
+    self.assertTrue(enabled(automatic))
+    self.assertEqual(automatic.carFingerprint, CAR.TOYOTA_PRIUS)
+    self.assertEqual(automatic.safetyConfigs[0].safetyParam, 4169)
+    self.assertFalse(automatic.flags & ToyotaFlags.TSS2)
+    self.assertAlmostEqual(automatic.steerActuatorDelay, .14)
+    from opendbc.car.toyota.prius_longitudinal import configured, prepare_stock
+    self.assertTrue(prepare_stock(automatic))
+    self.assertTrue(configured(automatic))
+    self.assertFalse(enabled(automatic))
+    self.assertEqual(automatic.safetyConfigs[0].safetyParam, 4681)
+    self.assertFalse(automatic.openpilotLongitudinalControl)
+    self.assertTrue(automatic.pcmCruise)
+    self.assertTrue(prepare_stock(automatic))
+    for identity, fw, length in ((CAR.TOYOTA_PRIUS, [], 8), (CAR.TOYOTA_PRIUS_RETROFIT, [], 8),
+                                 (CAR.TOYOTA_PRIUS_RETROFIT, [], 7)):
+      cp = CarInterface.get_params(identity, {0: {0x2FF: length}, 1: {}, 2: {}}, fw, False, False, False)
+      self.assertFalse(enabled(cp))
+      if identity == CAR.TOYOTA_PRIUS_RETROFIT:
+        self.assertTrue(cp.dashcamOnly)
+
   def test_original_stock_contracts(self):
     for car, word, factor, friction in ((CAR.TOYOTA_MATRIX_RETROFIT, 856, 4.05, .10),
                                         (CAR.TOYOTA_PRIUS_RETROFIT, 585, 1.60, .151515)):

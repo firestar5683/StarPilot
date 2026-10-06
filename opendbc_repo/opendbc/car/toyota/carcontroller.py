@@ -8,6 +8,7 @@ from opendbc.car.common.pid import PIDController
 from opendbc.car.secoc import add_mac, build_sync_mac
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
+from opendbc.car.toyota import prius_longitudinal
 from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags, TOYOTA_AUTO_HOLD_CARS, TOYOTA_AUTO_HOLD_AEB_CARS
 from opendbc.can import CANPacker
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -47,14 +48,15 @@ def supports_toyota_auto_hold(CP):
 
 
 def get_long_tune(CP, params):
-  if CP.flags & ToyotaFlags.TSS2:
+  prius = prius_longitudinal.enabled(CP)
+  if prius or CP.flags & ToyotaFlags.TSS2:
     kiBP = [2., 5.]
     kiV = [0.5, 0.25]
   else:
     kiBP = [0., 5., 35.]
     kiV = [3.6, 2.4, 1.5]
 
-  return PIDController(0.0, (kiBP, kiV), k_f=1.0,
+  return PIDController(0.0, (kiBP, kiV), k_f=.8 if prius else 1.0,
                        pos_limit=params.ACCEL_MAX, neg_limit=params.ACCEL_MIN,
                        rate=1 / (DT_CTRL * 3))
 
@@ -63,11 +65,14 @@ class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
     self.reverse_cruise_input = None
+    self.prius_filter_input = None
     self.params = CarControllerParams(self.CP)
     self.last_torque = 0
     self.last_angle = 0
     self.alert_active = False
     self.standstill_req = False
+    self.last_standstill = False
+    self.prius_longitudinal = prius_longitudinal.enabled(CP)
     self.permit_braking = True
     self.steer_rate_counter = 0
     self.distance_button = 0
@@ -132,6 +137,9 @@ class CarController(CarControllerBase):
     self._auto_hold_rearm_blocked = False
 
   def update(self, CC, CS, now_nanos):
+    filter_allowed = (not self.prius_longitudinal or self.prius_filter_input is not None and
+                      self.prius_filter_input.update(now_nanos))
+    long_active = CC.longActive and filter_allowed
     actuators = CC.actuators
     stopping = actuators.longControlState == LongCtrlState.stopping
     hud_control = CC.hudControl
@@ -229,7 +237,7 @@ class CarController(CarControllerBase):
     # *** gas and brake ***
     if supports_toyota_auto_hold(self.CP):
       self.update_auto_hold_state(CS, pcm_cancel_cmd if self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS else False,
-                                  long_active=CC.longActive, stopping=stopping)
+                                  long_active=long_active, stopping=stopping)
       if (self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS and self.frame % 2 == 0 and
           CS.out.standstill and CS.out.cruiseState.available and not CS.out.gasPressed):
         can_sends.append(toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active))
@@ -240,7 +248,13 @@ class CarController(CarControllerBase):
       # brakes can take a while to ramp up causing a lurch forward. prevent resume press until planner wants to move.
       # don't use CC.cruiseControl.resume since it is gated on CS.cruiseState.standstill which goes false for 3s after resume press
       # whitelist hybrids as they do not have this issue and can stay stopped after resume press
-      if not self.CP.flags & ToyotaFlags.HYBRID.value:
+      if self.prius_longitudinal:
+        if CS.out.standstill and not self.last_standstill:
+          self.standstill_req = True
+        if CS.pcm_acc_status != 8 or CC.cruiseControl.resume:
+          self.standstill_req = False
+        self.last_standstill = CS.out.standstill
+      elif not self.CP.flags & ToyotaFlags.HYBRID.value:
         should_resume = actuators.accel > 0
         if should_resume:
           self.standstill_req = False
@@ -261,8 +275,8 @@ class CarController(CarControllerBase):
             self.distance_button = 0
 
         # internal PCM gas command can get stuck unwinding from negative accel so we apply a generous rate limit
-        pcm_accel_cmd = actuators.accel
-        if CC.longActive:
+        pcm_accel_cmd = actuators.accel if filter_allowed else 0.
+        if long_active:
           pcm_accel_cmd = rate_limit(pcm_accel_cmd, self.prev_accel, ACCEL_WINDDOWN_LIMIT, ACCEL_WINDUP_LIMIT)
         self.prev_accel = pcm_accel_cmd
 
@@ -286,9 +300,10 @@ class CarController(CarControllerBase):
         future_t = float(np.interp(CS.out.vEgo, [2., 5.], [0.25, 0.5]))
         a_ego_future = a_ego_blended + j_ego * future_t
 
-        if CC.longActive:
+        if long_active:
           # constantly slowly unwind integral to recover from large temporary errors
-          self.long_pid.i -= ACCEL_PID_UNWIND * float(np.sign(self.long_pid.i))
+          unwind = ACCEL_PID_UNWIND * (8. if self.prius_longitudinal and pcm_accel_cmd * self.long_pid.i < 0. else 1.)
+          self.long_pid.i -= unwind * float(np.sign(self.long_pid.i))
 
           error_future = pcm_accel_cmd - a_ego_future
 
@@ -301,7 +316,8 @@ class CarController(CarControllerBase):
 
           pcm_accel_cmd = self.long_pid.update(error_future,
                                                speed=CS.out.vEgo,
-                                               feedforward=pcm_accel_cmd,
+                                               feedforward=(prius_longitudinal.get_prius_feedforward(pcm_accel_cmd, CS.out.vEgo)
+                                                            if self.prius_longitudinal else pcm_accel_cmd),
                                                freeze_integrator=actuators.longControlState != LongCtrlState.pid)
         else:
           self.long_pid.reset()
@@ -309,11 +325,19 @@ class CarController(CarControllerBase):
         # Along with rate limiting positive jerk above, this greatly improves gas response time
         # Consider the net acceleration request that the PCM should be applying (pitch included)
         net_acceleration_request_min = min(actuators.accel + accel_due_to_pitch, net_acceleration_request)
-        if net_acceleration_request_min < 0.2 or stopping or not CC.longActive:
+        if self.prius_longitudinal:
+          self.permit_braking = prius_longitudinal.update_permit_braking(
+            self.permit_braking, net_acceleration_request_min, stopping, long_active, CS.out.vEgo, lead)
+        elif net_acceleration_request_min < 0.2 or stopping or not long_active:
           self.permit_braking = True
         elif net_acceleration_request_min > 0.3:
           self.permit_braking = False
 
+        if self.prius_longitudinal:
+          pcm_accel_cmd = prius_longitudinal.limit_no_lead_cruise_sign_flip(
+            pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo, CS.out.cruiseState.speed, lead)
+          pcm_accel_cmd = prius_longitudinal.limit_prius_stopping_accel(
+            pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo, lead)
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
         if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:

@@ -72,6 +72,9 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
       ret.steerLimitTimer = 0.4
 
+    smart_dsu = (candidate in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT) and 0x2FF in fingerprint[0] and
+                 any(fw.ecu == Ecu.eps and bytes(fw.fwVersion) == b"8965B47070\x00\x00\x00\x00\x00\x00"
+                     for fw in car_fw))
     stop_and_go = bool(ret.flags & ToyotaFlags.TSS2)
 
     # In TSS2 cars, the camera does long control
@@ -87,11 +90,11 @@ class CarInterface(CarInterfaceBase):
       # Only give steer angle deadzone to for bad angle sensor prius
       for fw in car_fw:
         if fw.ecu == "eps" and not fw.fwVersion == b'8965B47060\x00\x00\x00\x00\x00\x00':
-          retrofit = candidate == CAR.TOYOTA_PRIUS_RETROFIT
+          retrofit = candidate == CAR.TOYOTA_PRIUS_RETROFIT or smart_dsu
           ret.steerActuatorDelay = 0.14 if retrofit else 0.25
           CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.3 if retrofit else 0.2)
         # 2021+ TSS2 steering rack swapped into a TSS-P car, not supported
-        if candidate == CAR.TOYOTA_PRIUS and fw.ecu == "eps" and fw.fwVersion == b'8965B47070\x00\x00\x00\x00\x00\x00':
+        if candidate == CAR.TOYOTA_PRIUS and not smart_dsu and fw.ecu == "eps" and fw.fwVersion == b'8965B47070\x00\x00\x00\x00\x00\x00':
           ret.dashcamOnly = True
 
     elif candidate in (CAR.LEXUS_RX, CAR.LEXUS_RX_TSS2):
@@ -141,13 +144,23 @@ class CarInterface(CarInterfaceBase):
       if late_camera:
         bypass = ((0x343 in camera_fp and not any(0x343 in fingerprint.get(bus, {}) for bus in (0, 1))) or
                   (0x4CB in camera_fp and 0x4CB not in fingerprint[0]))
+      smart_dsu = (candidate == CAR.TOYOTA_PRIUS_RETROFIT and 0x2FF in fingerprint[0] and
+                   any(fw.ecu == Ecu.eps and bytes(fw.fwVersion) == b"8965B47070\x00\x00\x00\x00\x00\x00"
+                       for fw in car_fw))
       takeover = 0x2FF in fingerprint[0] or bypass
-      if takeover:
+      if smart_dsu:
+        ret.flags |= int(ToyotaFlags.LONG_FILTER)
+        ret.safetyConfigs[0].safetyParam |= int(ToyotaSafetyFlags.LONG_FILTER)
+      elif takeover:
         ret.dashcamOnly = True
-      ret.openpilotLongitudinalControl = False
+      ret.openpilotLongitudinalControl = smart_dsu
       ret.alphaLongitudinalAvailable = False
 
-    ret.autoResumeSng = ret.openpilotLongitudinalControl
+    if smart_dsu:
+      ret.flags |= int(ToyotaFlags.HYBRID | ToyotaFlags.LONG_FILTER)
+      ret.safetyConfigs[0].safetyParam = 4169
+      ret.openpilotLongitudinalControl = True
+    ret.autoResumeSng = ret.openpilotLongitudinalControl and not ret.flags & ToyotaFlags.LONG_FILTER
 
     if not ret.openpilotLongitudinalControl:
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
@@ -156,7 +169,7 @@ class CarInterface(CarInterfaceBase):
     # to a negative value, so it won't matter.
     ret.minEnableSpeed = -1. if stop_and_go else MIN_ACC_SPEED
 
-    if ret.flags & ToyotaFlags.TSS2:
+    if ret.flags & (ToyotaFlags.TSS2 | ToyotaFlags.LONG_FILTER):
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
       # Hybrids have much quicker longitudinal actuator response

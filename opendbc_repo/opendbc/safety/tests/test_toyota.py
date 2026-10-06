@@ -413,6 +413,44 @@ class TestToyotaSecOcSafety(TestToyotaSecOcSafetyBase):
         self.assertEqual(should_tx, self._tx(self._accel_msg_343(accel, cancel_req=1)))
 
 
+
+
+class TestToyotaPriusLongFilter(TestToyotaSafetyTorque):
+  SAFETY_PARAM = 0x1049
+  TX_MSGS = TOYOTA_COMMON_TX_MSGS + [msg for msg in TOYOTA_COMMON_LONG_TX_MSGS if msg != [0x750, 0]]
+  RELAY_MALFUNCTION_ADDRS = {0: (0x2E4, 0x191, 0x412)}
+  FWD_BLACKLISTED_ADDRS = {2: [0x2E4, 0x412, 0x191]}
+
+  def test_diagnostics(self):
+    super().test_diagnostics(ecu_disabled=False)
+
+  def test_filter_relay_exception_is_exact(self):
+    for word, relay in ((73, True), (585, False), (0x1049, False), (0x1249, False),
+                        (0x1048, True), (0x104A, True), (0x1149, True)):
+      with self.subTest(word=word):
+        self.safety.set_safety_hooks(self.SAFETY_MODEL, word)
+        self.safety.init_tests()
+        self.assertTrue(self._rx(self._accel_msg_343(0)))
+        self.assertEqual(self.safety.get_relay_malfunction(), relay)
+        self.assertEqual(self.safety.safety_fwd_hook(2, 0x343), -1 if relay else 0)
+
+  def test_filter_does_not_admit_camera_bus_commands(self):
+    self.safety.set_controls_allowed(True)
+    for address, length in ((0x283, 7), (0x343, 8), (0x411, 8)):
+      with self.subTest(address=address):
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(address, 2, bytes(length))))
+    for length in (7, 6):
+      self.assertFalse(self._tx(libsafety_py.make_CANPacket(0x343, 0, bytes(length))))
+
+
+class TestToyotaPriusLongFilterStock(TestToyotaStockLongitudinalTorque):
+  SAFETY_PARAM = 0x1249
+
+  def test_filter_stock_does_not_admit_dsu_commands(self):
+    self.safety.set_controls_allowed(True)
+    for address, length in ((0x283, 7), (0x411, 8), (0x750, 8)):
+      self.assertFalse(self._tx(libsafety_py.make_CANPacket(address, 0, bytes(length))))
+
 if __name__ == "__main__":
   unittest.main()
 

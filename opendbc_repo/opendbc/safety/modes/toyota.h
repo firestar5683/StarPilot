@@ -32,6 +32,17 @@
   /* ACC */                            \
   {0x343, 0, 8, .check_relay = true},  \
 
+#define TOYOTA_FILTER_LONG_TX_MSGS \
+  TOYOTA_COMMON_TX_MSGS \
+  /* DSU bus 0 */ \
+  {0x283, 0, 7, .check_relay = false}, {0x2E6, 0, 8, .check_relay = false}, {0x2E7, 0, 8, .check_relay = false}, {0x33E, 0, 7, .check_relay = false}, \
+  {0x344, 0, 8, .check_relay = false}, {0x365, 0, 7, .check_relay = false}, {0x366, 0, 7, .check_relay = false}, {0x4CB, 0, 8, .check_relay = false}, \
+  /* DSU bus 1 */ \
+  {0x128, 1, 6, .check_relay = false}, {0x141, 1, 4, .check_relay = false}, {0x160, 1, 8, .check_relay = false}, {0x161, 1, 7, .check_relay = false}, \
+  {0x470, 1, 4, .check_relay = false}, \
+  /* PCS_HUD */                        \
+  {0x411, 0, 8, .check_relay = false},
+
 #define TOYOTA_COMMON_SECOC_LONG_TX_MSGS \
   TOYOTA_COMMON_SECOC_TX_MSGS \
   {0x343, 0, 8, .check_relay = true}, \
@@ -468,6 +479,10 @@ static safety_config toyota_init(uint16_t param) {
     TOYOTA_COMMON_LONG_TX_MSGS
   };
 
+  static const CanMsg TOYOTA_FILTER_LONG_TX_MSGS_SET[] = {
+    TOYOTA_FILTER_LONG_TX_MSGS
+  };
+
   static const CanMsg TOYOTA_SECOC_LONG_TX_MSGS[] = {
     TOYOTA_COMMON_SECOC_LONG_TX_MSGS
   };
@@ -501,7 +516,11 @@ static safety_config toyota_init(uint16_t param) {
     if (toyota_stock_longitudinal) {
       SET_TX_MSGS(TOYOTA_TX_MSGS, ret);
     } else {
-      SET_TX_MSGS(TOYOTA_LONG_TX_MSGS, ret);
+      if (param == 0x1049U) {
+        SET_TX_MSGS(TOYOTA_FILTER_LONG_TX_MSGS_SET, ret);
+      } else {
+        SET_TX_MSGS(TOYOTA_LONG_TX_MSGS, ret);
+      }
     }
   }
 
