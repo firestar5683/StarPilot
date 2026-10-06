@@ -236,11 +236,21 @@ class ForceStopRuntimeTests(unittest.TestCase):
       sm = Frame(tick, stopped=True, horizon=30. if tick == 40 else 192.)
       sm['carState'].gasPressed = gas
       sm.all_checks = lambda _: True
-      planner.update(sm, now_ns=sm.stamp + 1_000_000,
+      planner.update(sm, now_ns=sm.stamp + 1_000_000, drive_id=DRIVE,
                      force_stop_provider=lambda follow, source=sm: self.sample(source, follow_seconds=follow))
-      planner.publish(sm, SimpleNamespace(send=lambda name, event: published.__setitem__(name, event)))
+      from unittest.mock import patch
+      with patch('openpilot.cereal.messaging.time.monotonic', return_value=(sm.stamp + 1_000_000) / 1e9):
+        planner.publish(sm, SimpleNamespace(send=lambda name, event: published.__setitem__(name, event)))
       event = published['longitudinalPlan']
-      self.assertEqual(event.longitudinalPlan.forceStopHolding, not gas)
+      companion = published['starpilotLongitudinalPlan']
+      hold = companion.starpilotLongitudinalPlan
+      self.assertTrue(companion.valid)
+      self.assertEqual(hold.version, 1)
+      self.assertEqual(hold.sourcePlanMonoTime, event.logMonoTime)
+      self.assertEqual(companion.logMonoTime, event.logMonoTime)
+      self.assertEqual(hold.modelMonoTime, event.longitudinalPlan.modelMonoTime)
+      self.assertEqual(hold.driveStartMonoTime, DRIVE)
+      self.assertEqual(hold.forceStopHolding, not gas)
       self.assertEqual(planner.force_stop_plan.manual_hold, not gas)
       self.assertEqual(event.longitudinalPlan.modelMonoTime, sm.stamp)
       if not gas:

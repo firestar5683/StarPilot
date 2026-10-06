@@ -132,9 +132,6 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     excessiveActuation @96;
     bigModelLoading @100;
     bigModelFailed @102;
-    teslaCCEngaged @105;
-    teslaCCDisengaged @106;
-    teslaCCNotArmed @107;
 
     lowBatteryDEPRECATED @40;
     soundsUnavailableDEPRECATED @47;
@@ -2644,7 +2641,7 @@ struct Event {
     starpilotNavigation @107 :Custom.StarPilotCarControl;
     customReserved1 @108 :Custom.CustomReserved1;
     customReserved2 @109 :Custom.CustomReserved2;
-    customReserved3 @110 :Custom.CustomReserved3;
+    starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
     slcVisionObservation @111 :Custom.StarPilotModelDataV2;
     customReserved5 @112 :Custom.CustomReserved5;
     customReserved6 @113 :Custom.CustomReserved6;

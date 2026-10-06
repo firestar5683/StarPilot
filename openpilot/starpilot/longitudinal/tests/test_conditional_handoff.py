@@ -137,7 +137,7 @@ class ConditionalHandoffTests(unittest.TestCase):
     self.assertFalse(planner.output_should_stop)
     self.assertTrue(apply_conditional_stop_hold(self.host, planner, self.sm, self.cp, NOW, DRIVE, now_boot_ns=BOOT))
     published = []
-    planner.publish(self.sm, SimpleNamespace(send=lambda service, value: published.append(value)))
+    planner.publish(self.sm, SimpleNamespace(send=lambda service, value: published.append(value) if service == 'longitudinalPlan' else None))
     self.assertTrue(published[-1].longitudinalPlan.shouldStop)
     self.assertLessEqual(published[-1].longitudinalPlan.aTarget, 0.)
     from openpilot.selfdrive.controls.lib.longcontrol import LongControl, LongCtrlState
@@ -150,7 +150,7 @@ class ConditionalHandoffTests(unittest.TestCase):
     detector.standstill_committed = False
     update_curve_frame(planner, self.sm, self.cp, NOW + 10_000_000)
     self.assertFalse(apply_conditional_stop_hold(self.host, planner, self.sm, self.cp, NOW + 10_000_000, DRIVE, now_boot_ns=BOOT + 10_000_000))
-    planner.publish(self.sm, SimpleNamespace(send=lambda service, value: published.append(value)))
+    planner.publish(self.sm, SimpleNamespace(send=lambda service, value: published.append(value) if service == 'longitudinalPlan' else None))
     self.assertFalse(published[-1].longitudinalPlan.shouldStop)
 
   def test_committed_hold_requires_current_drive_and_control_evidence(self):
