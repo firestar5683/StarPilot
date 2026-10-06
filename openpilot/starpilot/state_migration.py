@@ -301,7 +301,8 @@ def _migrate_first_start(params, namespace, storage, values, known, cache_keys, 
     if retire_keys is not None:
       if key in retire_keys:
         prepared.pop(key)
-        actions[key] = 'archive incompatible reconstructible vehicle cache'
+        actions[key] = ('archive incompatible reconstructible vehicle cache' if key in known else
+                        'archive unknown saved key; retire without interpretation')
       continue
     if key not in known or key not in OPERATIONAL_KEYS:
       prepared.pop(key)
@@ -410,6 +411,12 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
     incompatible_keys = {key for key in CACHE_KEYS if key in values and inspect_cache(key, values[key]).status != 'valid'}
     invalid_booleans = any(getattr(params.get_type(key), 'name', None) == 'BOOL' and raw not in (b'0', b'1')
                            for key, raw in values.items() if key in known)
+    if (auto_migrate and not dry_run and initialized and not foreign_handoff and unknown and
+        not invalid_preferences and not invalid_booleans and not incompatible_keys and
+        'LocationFilterInitialState' not in values):
+      values = _migrate_first_start(params, namespace, storage, values, known, CACHE_KEYS, inspect_cache,
+                                    retire_keys=unknown)
+      unknown = set()
     if (auto_migrate and not dry_run and initialized and incompatible_keys and
         incompatible_keys <= {'CarParamsCache', 'CarParamsPersistent', 'CarParamsPrevRoute'} and
         not unknown and not invalid_preferences and not invalid_booleans and 'LocationFilterInitialState' not in values):
