@@ -102,6 +102,10 @@ def main(arguments=None):
        tempfile.TemporaryDirectory(prefix='msgq_starpilot-test-', dir=shared_memory) as messaging:
     environment.update(PARAMS_ROOT=params, OPENPILOT_PREFIX=Path(messaging).name.removeprefix('msgq_'))
     plan = commands(output, Path('/unused'))['source']
+    aol_protocol = output / 'test_aol_protocol'
+    plan.extend((('aol-protocol-build', ['c++', '-std=c++17', '-I.', '-Iopenpilot', '-Iopendbc_repo',
+                                       'openpilot/selfdrive/pandad/tests/test_aol_protocol.cc', '-o', str(aol_protocol)]),
+                 ('aol-protocol', [str(aol_protocol)])))
     plan.append(('regressions', [sys.executable, '-m', 'pytest', '-q', '--import-mode=importlib',
                                  '--junitxml', str(output / 'regressions.xml'), *QUICK_TARGETS]))
     result = run(plan, output, environment=environment)
