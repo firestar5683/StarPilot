@@ -279,6 +279,15 @@ export class AndroidAutoFeed {
     await this.refresh()
     return true
   }
+
+  async removePackage() {
+    if (!this.active || this.busy || !this.setup?.parked || !this.setup?.enabled ||
+        this.setup.import?.state === "running" || this.runtime?.running) return false
+    const result = await this.request("./api/android-auto/identity", { method: "DELETE" })
+    if (result === null) return false
+    await this.refresh()
+    return true
+  }
 }
 
 export const AndroidAutoPage = {
@@ -314,6 +323,14 @@ export const AndroidAutoPage = {
       if (!this.setup.enabled && !this.setup.installReady) return "The Android Auto display and encoder must be installed before uploading."
       if (this.setup.import?.state === "running") return "Wait for the current package verification to finish."
       if (this.busy) return "Waiting for Android Auto setup to respond…"
+      return ""
+    },
+    hasPackage() { return !!(this.setup?.identity.installed || this.setup?.identity.expired || this.setup?.identity.error) },
+    removeReason() {
+      if (!this.setup?.parked) return "Use offroad mode or Park to delete the package."
+      if (!this.setup.enabled) return "Enable Android Auto to delete the package."
+      if (this.setup.import?.state === "running") return "Wait for the current package verification to finish."
+      if (this.runtime?.running) return "Stop projection before deleting the package."
       return ""
     },
     pairingReason() {
@@ -354,6 +371,11 @@ export const AndroidAutoPage = {
       if (!this.setup.enabled && !await this.feed.setEnabled(true)) return false
       return this.feed.upload(file)
     },
+    removePackage() {
+      if (this.removeReason) return false
+      if (!window.confirm("Delete the Android Auto package and its certificate from this device? Projection will not start until you upload a package again.")) return false
+      return this.feed.removePackage()
+    },
     loadReceivers() { return this.feed.loadReceivers() },
     control(action, extra = {}) { return this.feed.control(action, extra) },
   },
@@ -385,6 +407,8 @@ export const AndroidAutoPage = {
             <p v-if="setup.import?.state === 'running'" role="status">Checking your package…</p>
             <GxNotice tone="danger" v-if="setup.import?.state === 'failed'">Package verification failed: {{ setup.import.error || 'Try another package.' }}</GxNotice>
             <p v-if="setup.import?.state === 'done' && setup.identity.installed" role="status">Package verified and ready.</p>
+            <div v-if="hasPackage" class="gx-driving__actions"><button class="gx-btn gx-btn--tonal" :disabled="busy || !!removeReason" :title="removeReason" @click="removePackage">Delete Package</button></div>
+            <p v-if="hasPackage && removeReason && setup.import?.state !== 'running'" class="gx-muted">{{ removeReason }}</p>
             <div class="gx-driving__actions"><input class="gx-field" type="file" accept=".apk,.xapk,.apkm" aria-label="Android Auto APK, XAPK, or APKM" @change="choosePackage" />
               <GxIconButton v-if="setup.enabled" label="Upload package" icon="bi-upload" :disabled="!!uploadReason" @click="upload" />
               <button v-else class="gx-btn" :disabled="!!uploadReason" @click="upload">Enable &amp; upload</button></div>

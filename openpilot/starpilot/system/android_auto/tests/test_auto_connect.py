@@ -237,3 +237,80 @@ def test_config_sanitizes_channel_cache(tmp_path):
   config = identity_store.load_config(path)
   assert config["rfcomm_cache"] == {CAR: 8} and config["auto_connect"] is True
   assert identity_store.load_config(tmp_path / "missing.json")["rfcomm_cache"] is not identity_store.DEFAULT_CONFIG["rfcomm_cache"]
+
+
+def test_config_v2_rgba_pipeline_upgrades_to_gpu_nv12(tmp_path):
+  from openpilot.starpilot.system.android_auto import identity as identity_store
+  path = tmp_path / "config.json"
+  # Every v2 save wrote these off; the car view could not do anything else then.
+  path.write_text(json.dumps({"config_version": 2, "gpu_nv12": False, "async_readback": False, "fps": 20}))
+  config = identity_store.load_config(path)
+  assert config["gpu_nv12"] is True and config["async_readback"] is True and config["fps"] == 20
+  identity_store.save_config(config, path)
+  # From v3 on they are a real choice and stay as saved.
+  path.write_text(json.dumps({**json.loads(path.read_text()), "gpu_nv12": False}))
+  assert identity_store.load_config(path)["gpu_nv12"] is False
+
+
+def _wireless_backoff_harness(sup, monkeypatch, failure):
+  from openpilot.starpilot.system.android_auto import supervisor
+  now = [100.0]
+  monkeypatch.setattr(supervisor.time, "monotonic", lambda: now[0])
+  monkeypatch.setattr(sup, "_lease", lambda: supervisor.NoLease())
+  sup.config["connection"] = "wireless"
+  starts, waits = [], []
+
+  def attempt(_):
+    starts.append(now[0])
+    if len(starts) == 2:
+      sup._stop.set()
+    raise failure
+
+  def wait(seconds):
+    waits.append(seconds)
+    now[0] += seconds
+    if len(starts) == 1 and now[0] - starts[0] >= 5 and not sup._hfp_link.is_set():
+      sup._hfp_connected(CAR.lower())  # the car reaches out mid-backoff, e.g. the driver taps Android Auto
+    if sup._stop.is_set():
+      raise supervisor.Cancelled()
+
+  monkeypatch.setattr(sup, "_attempt", attempt)
+  monkeypatch.setattr(sup, "_wait", wait)
+  return starts, waits
+
+
+def test_car_opening_hands_free_ends_the_backoff_early(identity, tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import supervisor
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: socket.socketpair()[0])
+  sup.select_receiver(CAR, "Civic")
+  monkeypatch.setattr(supervisor, "BACKOFF_SECONDS", (30.0,))
+  starts, _ = _wireless_backoff_harness(sup, monkeypatch, RuntimeError("car not answering"))
+  sup._run(1)
+  assert len(starts) == 2
+  assert starts[1] - starts[0] < 6  # retried when the car connected, not after the 30 s backoff
+
+
+def test_one_hands_free_connection_ends_only_one_backoff(identity, tmp_path, monkeypatch):
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: socket.socketpair()[0])
+  sup.select_receiver(CAR, "Civic")
+  sup._hfp_connected(CAR)
+  started = time.monotonic()
+  sup._wait_backoff(0.3, car_can_wake=True)
+  assert time.monotonic() - started < 0.1   # the car reached out: retry now
+  started = time.monotonic()
+  sup._wait_backoff(0.3, car_can_wake=True)  # the link is still fresh, but that connection was used
+  assert time.monotonic() - started >= 0.25
+  sup._hfp_connected(CAR)                    # a new connection from the car ends the next one early again
+  started = time.monotonic()
+  sup._wait_backoff(0.3, car_can_wake=True)
+  assert time.monotonic() - started < 0.1
+
+
+def test_car_ending_projection_still_gets_its_full_pause(identity, tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import supervisor
+  from openpilot.starpilot.system.android_auto.session import PeerRequestedStop
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: socket.socketpair()[0])
+  sup.select_receiver(CAR, "Civic")
+  starts, waits = _wireless_backoff_harness(sup, monkeypatch, PeerRequestedStop("Head unit ended projection"))
+  sup._run(1)
+  assert waits[0] == supervisor.PEER_STOP_RETRY_SECONDS
