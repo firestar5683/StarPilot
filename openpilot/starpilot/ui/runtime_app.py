@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from html import escape, unescape
 import os
 import math
 from pathlib import Path
 import time
+import threading
 from typing import Any
 from collections.abc import Callable
 
@@ -119,6 +120,15 @@ def _slc_action_publisher() -> messaging.PubMaster:
 
 def _galaxy_access_owner() -> GalaxyAccessOwner:
   return default_owner()
+
+
+@dataclass
+class _AolSave:
+  context: tuple
+  group: str
+  cancel: threading.Event
+  done: threading.Event
+  saved: bool = False
 
 
 class StarShellSession:
@@ -231,6 +241,8 @@ class StarShellSession:
     self._visual_preview_start_ns = time.monotonic_ns()
     self._native_favorite_actions: Callable[[], dict] = dict
     self._wheel_sock = messaging.sub_sock("slcCruiseEvent", conflate=False)
+    self._aol_save = None
+    self._aol_save_closed = False
     self._wheel_pending = deque(maxlen=32)
     self._wheel_consumer = WheelConsumer()
     self._wheel_personality = None
@@ -538,6 +550,7 @@ class StarShellSession:
     return False
 
   def feature_snapshot(self, page: str | None = None, *, favorite: bool = False):
+    self._poll_aol_save()
     state = self.feature_owner.snapshot(page or self.feature_page, parked=False if favorite else self.configuration_allowed(),
                                        system_long=self._feature_authority("long"),
                                        lateral_context=self._feature_authority("lane"), metric=bool(ui_state.is_metric),
@@ -546,6 +559,9 @@ class StarShellSession:
     if self.profile == Profile.LARGE and state.page == FeaturePage.VEHICLE:
       state = replace(state, rows=self._vehicle_selector().rows() + state.rows,
                       subtitle="Vehicle selection applies at the next startup.")
+    if getattr(self, "_aol_save", None) is not None:
+      state = replace(state, rows=tuple(replace(row, available=False, reason="Saving AOL preference…")
+                                        if row.key == "AlwaysOnLateral" else row for row in state.rows))
     return state
 
   def _vehicle_selector(self) -> VehicleLarge:
@@ -553,7 +569,57 @@ class StarShellSession:
       self.vehicle_selector = VehicleLarge(self)
     return self.vehicle_selector
 
+  def _aol_context(self):
+    return self._mode, getattr(self, "selected", None), getattr(self, "feature_page", None)
+
+  def _poll_aol_save(self) -> None:
+    pending = getattr(self, "_aol_save", None)
+    if pending is None:
+      return
+    if self._aol_context() != pending.context or not self._feature_authority(pending.group):
+      pending.cancel.set()
+    if not pending.done.is_set():
+      self.notice, self.notice_until = "Saving AOL preference…", time.monotonic() + 3.0
+      return
+    self._aol_save = None
+    self._snapshot_cache = None
+    self._favorite_read_at = None
+    if pending.saved:
+      self.notice, self.notice_until = "AOL preference saved", time.monotonic() + 3.0
+    else:
+      self._unavailable("AOL preference was not saved; refresh settings")
+
+  def _save_aol(self, request: FeatureSettingsRequest) -> bool:
+    self._poll_aol_save()
+    if getattr(self, "_aol_save_closed", False) or getattr(self, "_aol_save", None) is not None:
+      return False
+    group = "preferences" if request.value == "Off" else "aol"
+    if not self._feature_authority(group):
+      self._unavailable("AOL preference is unavailable in this context")
+      return False
+    pending = _AolSave(self._aol_context(), group, threading.Event(), threading.Event())
+    self._aol_save = pending
+    owner = self.feature_owner
+    def authorized(group: str) -> bool:
+      return (group == pending.group and not pending.cancel.is_set() and
+              not getattr(self, "_aol_save_closed", False) and self._aol_context() == pending.context)
+    writer = FeatureSettingsOwner(owner.params, authorized, vehicle_fingerprint=owner.vehicle_fingerprint,
+                                  vehicle_params=owner._vehicle_params_source)
+    def save() -> None:
+      try:
+        pending.saved = writer.apply(request)
+      except Exception:
+        pending.saved = False
+      finally:
+        pending.done.set()
+    threading.Thread(target=save, name="aol-preference", daemon=True).start()
+    self._snapshot_cache = None
+    self.notice, self.notice_until = "Saving AOL preference…", time.monotonic() + 3.0
+    return False  # The bool API reports a completed save, never an accepted job.
+
   def feature_request(self, request: FeatureSettingsRequest) -> bool:
+    if request.key == "AlwaysOnLateral":
+      return self._save_aol(request)
     ok = self.feature_owner.apply(request)
     self._snapshot_cache = None
     if not ok:
@@ -1084,6 +1150,7 @@ class StarShellSession:
     return snapshot
 
   def render(self, mode: ShellMode, rect: rl.Rectangle, parent_clip: rl.Rectangle | None = None) -> None:
+    self._poll_aol_save()
     if mode == ShellMode.ONROAD and self.profile == Profile.LARGE:
       width = rect.width - 300
       if width != self._onroad_width:
@@ -1370,6 +1437,8 @@ class StarShellSession:
     return self._request_emitted or getattr(self, '_onroad_claimed', False)
 
   def cancel(self) -> None:
+    if pending := getattr(self, "_aol_save", None):
+      pending.cancel.set()
     self._settings_touch = None
     self._power_request_epoch = getattr(self, "_power_request_epoch", 0) + 1
     self._pip_request_epoch = getattr(self, "_pip_request_epoch", 0) + 1
@@ -1381,6 +1450,9 @@ class StarShellSession:
     self._favorite_claimed = False
 
   def close(self) -> None:
+    self._aol_save_closed = True
+    if pending := getattr(self, "_aol_save", None):
+      pending.cancel.set()
     self.drive_state.physical.close()
     self.slc_actions = None
     self.galaxy_flow.close()

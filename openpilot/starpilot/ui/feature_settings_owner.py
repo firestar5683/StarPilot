@@ -746,8 +746,9 @@ class FeatureSettingsOwner:
       multiplier = 3.6 if units == "1" else 1 / MPH_TO_MPS
       master, _, master_valid = self._value("AlwaysOnLateral")
       allowed = configurable and self.authority("aol") and capability is not None
-      rows.append(replace(self._bool_row("AlwaysOnLateral", "Enable Always On Lateral", allowed and
-                                         (threshold_valid or master == "1")), capability=capability,
+      rows.append(replace(self._bool_row("AlwaysOnLateral", "Enable Always On Lateral",
+                                         (allowed and threshold_valid) or
+                                         (master_valid and master == "1" and self.authority("preferences"))), capability=capability,
                           dependencies=self._dependents(AOL_THRESHOLD, AOL_LEGACY_THRESHOLD),
                           reason="Invalid saved master preference" if not master_valid or master not in ("0", "1") else
                                  "Connect a supported vehicle to configure Always On Lateral" if capability is None else
@@ -774,10 +775,21 @@ class FeatureSettingsOwner:
       allowed = configurable and system_long
       offsets_ready, offset_rows = self.slc_offsets.rows(allowed, repair_allowed=parked and allowed)
       control, _, _ = self._value("SpeedLimitController")
-      rows.append(self._bool_row("SpeedLimitController", "Speed Limit Controller",
-                                 allowed and (offsets_ready or control == "1"),
-                                 reason="Adopt fixed offsets before enabling control" if not offsets_ready else
-                                        "On adjusts cruise speed to accepted limits; Off keeps speed control unchanged"))
+      if self.vehicle_params() is None:
+        control_reason = "Select or connect a vehicle to configure speed control"
+      elif not self.longitudinal_available():
+        control_reason = "StarPilot speed control is unavailable; check the vehicle and longitudinal settings"
+      elif not self.authority("slc"):
+        control_reason = "Vehicle settings context is unavailable; refresh this page"
+      elif not configurable:
+        control_reason = "Park to configure Speed Limit Controller"
+      elif not offsets_ready:
+        control_reason = "Repair invalid saved speed-limit offsets or units before enabling control"
+      else:
+        control_reason = "On adjusts cruise speed to accepted limits; Off keeps speed control unchanged"
+      control_row = self._bool_row("SpeedLimitController", "Speed Limit Controller",
+                                   allowed and (offsets_ready or control == "1"), reason=control_reason)
+      rows.append(replace(control_row, reason=control_reason) if control_row.choices else control_row)
       rows.append(self._bool_row("ShowSpeedLimits", "Show speed limit signs", self.authority("preferences"),
                                  reason="Display signs independently of Speed Limit Controller; does not change cruise speed"))
       rows.append(self._bool_row("SLCConfirmation", "Require confirmation", allowed))
@@ -1005,6 +1017,13 @@ class FeatureSettingsOwner:
 
   def _apply(self, request: FeatureSettingsRequest) -> bool:
     key = request.key
+    if key == "AlwaysOnLateral" and request.value == "Off":
+      def authorized_off():
+        return (self.authority("preferences") and self._readable(key) and
+                self._raw(key) == request.expected and request.expected in (None, b"0", b"1"))
+      result = commit_exact(self.params, key=key, max_bytes=8, raw=b"0", expected=request.expected,
+                            authorized=authorized_off, temp_prefix=".aol-off-")
+      return result.committed and result.verified
     if key.startswith(WHEEL_PREFIX):
       return self.wheel.apply(request)
     if key == OUTPUT_MAX_KEY:
@@ -1310,6 +1329,14 @@ class FeatureSettingsOwner:
                   (request.value == "Off" or self.long_profiles._fresh(request, dependencies)))
         result = commit_exact(self.params, key=key, max_bytes=128, raw=encoded.encode(), expected=request.expected,
                               authorized=authorized, temp_prefix=".long-profile-switch-")
+        return result.committed and result.verified
+      if source_key == "AlwaysOnLateral":
+        def authorized_aol() -> bool:
+          return (self.authority("aol") and self.vehicle_fingerprint() == request.vehicle_fingerprint and
+                  request.capability == self._capability("aol") and
+                  all(self._readable(name) and self._raw(name) == raw for name, raw in request.dependencies))
+        result = commit_exact(self.params, key=source_key, max_bytes=8, raw=encoded.encode(),
+                              expected=request.expected, authorized=authorized_aol, temp_prefix=".aol-on-")
         return result.committed and result.verified
       if source_key in BOOL_DEFAULTS:
         self.params.put_bool(source_key, encoded == "1", block=True)
