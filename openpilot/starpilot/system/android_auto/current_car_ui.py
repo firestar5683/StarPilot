@@ -23,6 +23,7 @@ from openpilot.starpilot.system.android_auto.projection_geometry import projecti
 STARTUP_WAIT_SECONDS = 15.0
 CAMERA_WAIT_STEP = 0.01    # s; keeps demand/stop checks responsive while waiting for the camera
 CAMERA_MAX_GAP = 0.1       # s; a shown camera silent this long stops pacing (the encoder rate applies)
+ASYNC_READBACK_FAILURES = 3  # consecutive failed asynchronous readbacks before the session reads back synchronously
 
 
 class CameraPacer:
@@ -183,7 +184,8 @@ def run(frames_path: str) -> int:
                              asynchronous=bool(request.flags & FLAG_ASYNC_READBACK))
     resources.callback(lambda: readback.close())
     rgba_regions = [(output.id, request.width, request.height, 0)]
-    pipeline = f"{'nv12' if converter is not None else 'rgba'}, {'async' if readback.asynchronous else 'sync'} readback"
+    pixel_format_name = 'nv12' if converter is not None else 'rgba'
+    pipeline = f"{pixel_format_name}, {'async' if readback.asynchronous else 'sync'} readback"
     print(f"car view pipeline: {pipeline}", flush=True)
     from openpilot.starpilot.system.android_auto import identity as identity_store
     from openpilot.starpilot.system.android_auto.render_profile import RenderSampler, RenderSummary
@@ -197,13 +199,27 @@ def run(frames_path: str) -> int:
     camera_pacer = CameraPacer()
     in_flight_ns = 0
 
+    async_failures = 0
+
     def publish_readback() -> None:
-      """Hand the frame read back last to android_autod."""
-      nonlocal readback
-      readback, pixels = finish_readback(FrameReadback, readback)
-      if pixels is None:
-        return
+      """Hand the frame read back last to android_autod.
+
+      A failed asynchronous wait drops only that frame; repeated failures switch
+      the session to synchronous readback instead of crashing the renderer."""
+      nonlocal async_failures
       try:
+        try:
+          pixels = readback.finish()
+        except RuntimeError as error:
+          if not readback.asynchronous:
+            raise
+          async_failures += 1
+          print(f"car view dropped a frame: {error}", flush=True)
+          if async_failures >= ASYNC_READBACK_FAILURES:
+            readback.fall_back_to_sync()
+            print(f"car view pipeline: {pixel_format_name}, sync readback (async failed {async_failures} times in a row)", flush=True)
+          return
+        async_failures = 0
         producer.publish(request, pixels, in_flight_ns, pixel_format, advance=False)
       finally:
         readback.release()

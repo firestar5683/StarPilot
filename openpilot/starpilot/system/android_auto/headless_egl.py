@@ -70,6 +70,7 @@ class FrameReadback:
       "glDeleteSync": (None, [C.c_void_p]),
       "glFlush": (None, []),
       "glFinish": (None, []),
+      "glGetError": (C.c_uint, []),
     }
     for name, (result, args) in signatures.items():
       function = getattr(gl, name)
@@ -125,7 +126,7 @@ class FrameReadback:
     gl.glDeleteSync(fence)
     if result in (GL_TIMEOUT_EXPIRED, GL_WAIT_FAILED):
       self.pending = False
-      raise RuntimeError(f"GPU readback did not complete ({result:#x})")
+      raise RuntimeError(f"GPU readback did not complete ({result:#x}, GL error {gl.glGetError():#x})")
     gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, self._buffer)
     address = gl.glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, self.size, GL_MAP_READ_BIT)
     if not address:
@@ -146,6 +147,16 @@ class FrameReadback:
       gl.glDeleteSync(self._fence)
       self._fence = None
     self.pending = False
+
+  def fall_back_to_sync(self) -> None:
+    """Read back synchronously from now on, dropping any frame in flight."""
+    self.release()
+    if self._buffer.value:
+      self.gl.glDeleteBuffers(1, C.byref(self._buffer))
+      self._buffer = C.c_uint(0)
+    self.asynchronous = False
+    self._storage = (C.c_ubyte * self.size)()
+    self.pixels = memoryview(self._storage).cast("B")
 
   def close(self) -> None:
     self.release()
