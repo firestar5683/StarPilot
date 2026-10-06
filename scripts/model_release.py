@@ -610,6 +610,77 @@ def remote_compile(info: ReleaseInfo, source: Path, ip: str, workspace: Path, ke
   return result
 
 
+def remote_compile_local(info: ReleaseInfo, source: Path, ip: str, workspace: Path) -> None:
+  """Compile a local-<id> model on-device for testing only.
+
+  Unlike remote_compile(), the artifact never comes back to the desktop: the
+  device's own `local-` handling in model_compiler.py installs a single
+  unchunked pkl straight into /data/models with a correct version sidecar
+  (see install_local_artifact), which is exactly what the model picker needs
+  to show it. There is nothing to upload afterward -- this never touches
+  Hugging Face or GitHub.
+  """
+  if info.input_format != "supercombo":
+    raise ReleaseError("The release tool currently requires a single supercombo ONNX source")
+
+  local_model_id = info.model_id if info.model_id.startswith("local-") else f"local-{info.model_id}"
+  input_dir = f"{DEVICE_ROOT}/uncompiledmodels"
+  output_dir = f"{DEVICE_ROOT}/compiledmodels"
+  remote_source = f"{input_dir}/{local_model_id}_driving_supercombo.onnx"
+  artifact_prefix = f"{local_model_id}_driving_tinygrad.pkl"
+  cleanup_command = f"rm -f {shlex.quote(remote_source)} {shlex.quote(output_dir)}/{artifact_prefix}*"
+  run(ssh_base(ip) + [f"mkdir -p {shlex.quote(input_dir)} {shlex.quote(output_dir)} && {cleanup_command}"])
+  run(scp_base(ip) + [str(source), f"comma@{ip}:{remote_source}"])
+
+  command = [
+    f"cd {shlex.quote(DEVICE_ROOT)} && ./models",
+    f"--model {shlex.quote(local_model_id)}",
+    f"--input-dir {shlex.quote(input_dir)}",
+    f"--output-dir {shlex.quote(output_dir)}",
+    f"--input-format supercombo",
+    f"--version {shlex.quote(info.behavior_version)}",
+  ]
+  if info.uses_external_gpu:
+    command.append("--gpu")
+  remote_command = " ".join(command)
+  log_path = workspace / "logs" / f"{local_model_id}.log"
+  log_path.parent.mkdir(parents=True, exist_ok=True)
+  print(f"\nCompiling {local_model_id} on comma@{ip} for local install. Output is also logged to {log_path}")
+  with log_path.open("w", encoding="utf-8") as log:
+    process = subprocess.Popen(
+      ssh_base(ip) + [remote_command],
+      stdout=subprocess.PIPE,
+      stderr=subprocess.STDOUT,
+      text=True,
+      encoding="utf-8",
+      errors="replace",
+      bufsize=1,
+    )
+    assert process.stdout is not None
+    for line in process.stdout:
+      try:
+        print(f"[device] {line}", end="")
+      except UnicodeEncodeError:
+        print(f"[device] {line}".encode(sys.stdout.encoding or 'utf-8', errors='replace').decode(sys.stdout.encoding or 'utf-8'), end="")
+      log.write(line)
+    return_code = process.wait()
+  if return_code != 0:
+    raise ReleaseError(f"Device compilation failed; see {log_path}")
+
+  installed_check = run(
+    ssh_base(ip) + [f"[ -f /data/models/{shlex.quote(artifact_prefix)} ] && echo present || echo missing"],
+    capture=True,
+  ).stdout.strip()
+  run(ssh_base(ip) + [cleanup_command])
+  if installed_check != "present":
+    raise ReleaseError(
+      f"Device did not report {artifact_prefix} installed under /data/models; "
+      "check the compile log above for an install warning."
+    )
+  print(f"\nInstalled on device: /data/models/{artifact_prefix}")
+  print(f"Reboot the comma (or restart the model manager) and pick \"{info.display_name}\" in the model selector.")
+
+
 def manifest_entry(info: ReleaseInfo, result: dict) -> dict:
   display_name = info.display_name
   if "👀" not in display_name and "📡" not in display_name:
@@ -893,6 +964,11 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--allow-runtime-changes", action="store_true", help="Continue only after reviewing the runtime-change warning.")
   parser.add_argument("--no-onnx-upload", action="store_true", help="Do not archive the source ONNX in Hugging Face.")
   parser.add_argument("--keep-device-files", action="store_true", help="Leave the staged source and compiled output on the comma.")
+  parser.add_argument("--local", action="store_true",
+                      help="Compile as a local-<id> model for testing on this comma only: the artifact is "
+                           "installed straight into /data/models on-device (with a correct version sidecar) "
+                           "and never uploaded to Hugging Face or GitHub. Implies --allow-runtime-changes is "
+                           "still required separately if a runtime change is flagged.")
   parser.add_argument("--force", action="store_true", help="Replace an existing source/artifact/model ID.")
   parser.add_argument("--dry-run", action="store_true", help="Parse and scan only; do not download, compile, or publish.")
   return parser.parse_args()
@@ -950,6 +1026,10 @@ def main() -> int:
       source_result = download_source(info.source_ref, info.source_path, source, args.force)
     (workspace / "release.txt").write_text(text, encoding="utf-8")
     (workspace / "source.json").write_text(json.dumps({**source_result, "model": info.__dict__}, indent=2) + "\n", encoding="utf-8")
+
+    if args.local:
+      remote_compile_local(info, source, ip, workspace)
+      return 0
 
     result = remote_compile(info, source, ip, workspace, args.keep_device_files)
     resources_repo = args.resources_repo.expanduser().resolve()
