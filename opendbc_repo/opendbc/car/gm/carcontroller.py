@@ -30,6 +30,8 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
                                    CC_GATEWAY_STOCK_CAR, uses_camera_stock_controls, CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarControllerBase
 
+from opendbc.car.gm.hybrid_cc import HybridPedalCommand, rearm_ready as hybrid_rearm_ready, lateral_ready as hybrid_lateral_ready
+from opendbc.car.gm.values import malibu_hybrid_profile
 from opendbc.car.gm.bolt_cc import BoltCcOwner, BoltCcProfile, auxiliary_messages
 from opendbc.car.gm.volt_cc_pedal import VoltCcPedalCommand
 from opendbc.car.gm.long_tune import acc_tune_limits
@@ -280,6 +282,8 @@ class CarController(CarControllerBase):
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
 
+    self.hybrid_profile = malibu_hybrid_profile(self.CP)
+    self.hybrid_command = HybridPedalCommand(self.CP) if self.hybrid_profile is not None else None
     self.params = CarControllerParams(self.CP)
     self.volt_one_pedal_state = VoltOnePedal(CP, self.params) if is_volt_one_pedal(CP) else None
     self.volt_gateway_profile = is_volt_gateway_profile(self.CP)
@@ -473,6 +477,9 @@ class CarController(CarControllerBase):
                          (stock_cruise_fresh and CS.out.cruiseState.available and CS.out.cruiseState.enabled and
                           not CS.out.brakePressed and not CS.out.gasPressed))
     aol_lateral = aol_lateral_request(self.CP, CC)
+    if self.hybrid_profile is not None:
+      stock_steer_ready = hybrid_lateral_ready(CS, now_nanos) and (aol_lateral or
+                           CS.out.cruiseState.enabled and not CS.out.brakePressed and not CS.out.gasPressed)
     if is_silverado_cc_stock_profile(self.CP):
       sources = CS.silverado_stock_sources
       stock_steer_ready = (CS.out.canValid and not CS.out.canTimeout and len(sources) == 8 and
@@ -543,7 +550,8 @@ class CarController(CarControllerBase):
     # Steering (Active: 50Hz, inactive: 10Hz)
     steer_step = self.params.STEER_STEP if lat_active else self.params.INACTIVE_STEER_STEP
 
-    if (not self.bolt_pedal_removed and self.CP.networkLocation == NetworkLocation.fwdCamera and
+    if (not self.bolt_pedal_removed and not (self.hybrid_profile is not None and self.hybrid_profile.removed) and
+        self.CP.networkLocation == NetworkLocation.fwdCamera and
         not (self.conventional_pedal_profile and not self.silverado_cc_pedal_profile and self.CP.flags & GMFlags.NO_CAMERA)):
       # Also send at 50Hz:
       # - on startup, first few msgs are blocked
@@ -561,7 +569,7 @@ class CarController(CarControllerBase):
     last_lka_steer_msg_ms = (now_nanos - CS.loopback_lka_steering_cmd_ts_nanos) * 1e-6
     if (self.frame - self.last_steer_frame) >= steer_step and last_lka_steer_msg_ms > MIN_STEER_MSG_INTERVAL_MS:
       # Initialize ASCMLKASteeringCmd counter using the camera until we get a msg on the bus
-      if CS.loopback_lka_steering_cmd_ts_nanos == 0 and not self.bolt_pedal_removed:
+      if CS.loopback_lka_steering_cmd_ts_nanos == 0 and not self.bolt_pedal_removed and not (self.hybrid_profile is not None and self.hybrid_profile.removed):
         self.lka_steering_cmd_counter = CS.pt_lka_steering_cmd_counter + 1
 
       if lat_active and not (self.ordinary_cc_profile and CC.enabled and not CS.out.cruiseState.enabled and not aol_lateral):
@@ -575,7 +583,52 @@ class CarController(CarControllerBase):
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, lat_active))
 
-    if self.volt_cc_pedal_profile is not None:
+    if self.hybrid_profile is not None:
+      profile = self.hybrid_profile
+      ready = hybrid_rearm_ready(CS, now_nanos)
+      sensor_ready = (not profile.pedal or CS.pedal_sensor_healthy and
+                      0 < CS.pedal_sensor_ts_nanos <= now_nanos <= CS.pedal_sensor_ts_nanos + 100_000_000)
+      if profile.pedal and profile.longitudinal and self.frame % 4 == 0:
+        if ready and sensor_ready and not CS.out.cruiseState.enabled:
+          pedal = self.hybrid_command.update(
+            actuators.accel, CC.enabled and CC.longActive, CS.out,
+            stopping=actuators.longControlState == LongCtrlState.stopping, resume=CC.cruiseControl.resume,
+            orientation=CC.orientationNED if self.long_pitch else None, acc_tune=self.gm_acc_tune)
+        else:
+          self.hybrid_command.withdraw()
+          pedal = 0.
+        self.apply_gas, self.apply_brake = pedal, 0
+        can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 16))
+      self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
+      cancel = (CC.enabled and CS.out.cruiseState.enabled if profile.pedal and profile.longitudinal else
+                self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES)
+      slot = CS.hybrid_buttons.slot
+      if slot.credit_ns <= self.volt_cc_consumed_source_ns:
+        slot.credit_ns = 0
+      action = None
+      interval_ns = 40_000_001
+      authorized = hybrid_lateral_ready(CS, now_nanos)
+      if cancel:
+        action = "cancel"
+      elif (profile.longitudinal and not profile.pedal and CC.longActive and ready and
+            CS.out.vEgo >= self.CP.minEnableSpeed and self.frame % 4 == 0):
+        button, rate, self.apply_speed = ordinary_button_request(
+          CS.out.vEgo, CS.out.cruiseState.speed, actuators.accel, self.CP.minEnableSpeed, self.volt_cc_metric)
+        action = {CruiseButtons.RES_ACCEL: "resume", CruiseButtons.DECEL_SET: "set", CruiseButtons.CANCEL: "cancel"}.get(button)
+        interval_ns = int(rate * 1e9) + 1
+      elif (profile.longitudinal and not profile.pedal and CC.enabled and CS.out.gasPressed and
+            self.frame % 52 == 0 and CC.hudControl.setSpeed > CS.out.vEgo > CS.out.cruiseState.speed and
+            hybrid_lateral_ready(CS, now_nanos) and not CS.out.brakePressed and not CS.out.regenBraking):
+        action, interval_ns = "gas_set", 520_000_000
+      if action in ("cancel", "gas_set"):
+        authorized = authorized and CS.out.cruiseState.enabled
+      if action is not None:
+        raw = slot.expected(action, now_nanos, interval_ns=interval_ns, authorized=authorized)
+        if raw is not None and slot.accept(action, raw, now_nanos, interval_ns=interval_ns, authorized=authorized):
+          can_sends.append((0x1E1, raw, CanBus.POWERTRAIN))
+      if profile.removed and profile.longitudinal and self.frame % 100 == 0:
+        can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
+    elif self.volt_cc_pedal_profile is not None:
       profile = self.volt_cc_pedal_profile
       credit = CS.conventional_cancel_credit
       sources = CS.volt_cc_pedal_sources
@@ -970,7 +1023,7 @@ class CarController(CarControllerBase):
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
     elif (not self.bolt_pedal_removed and self.volt_cc_pedal_profile is None and not self.volt_cc_profile and
-          not self.ordinary_cc_profile and not self.bolt_cc_profile and
+          self.hybrid_profile is None and not self.ordinary_cc_profile and not self.bolt_cc_profile and
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly

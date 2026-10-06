@@ -2,12 +2,14 @@
 
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/can_tx.h"
+#include "gm_rx.h"
 #include "gm_aol.h"
 #include "gm_volt_one_pedal.h"
-#include "gm_bolt_cc.h"
 #include "gm_cc_pedal.h"
 #include "gm_volt_auto_hold.h"
 #include "gm_camera_acc_pedal.h"
+#include "gm_hybrid_cc.h"
+#include "gm_bolt_cc.h"
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
 #define GM_COMMON_RX_CHECKS \
@@ -1054,7 +1056,6 @@ static safety_config gm_init(uint16_t safety_param) {
   };
 
 #endif
-  static RxCheck gm_extended_rx_checks[10];
   for (uint8_t i = 0U; i < 10U; i++) { gm_extended_rx_checks[i] = (RxCheck){0}; }
   for (uint8_t i = 0U; i < 6U; i++) { gm_extended_rx_checks[i] = gm_ordinary_camera_rx_template[i]; }
   gm_extended_rx_checks[3].msg[0].addr = (gm_camera_pedal && !gm_camera_pedal_f1) ? 0xBEU : 0xF1U;
