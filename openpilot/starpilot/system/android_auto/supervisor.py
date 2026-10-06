@@ -1088,7 +1088,7 @@ class Supervisor:
       from PIL import Image, ImageDraw, ImageFont
       from openpilot.common.basedir import BASEDIR
 
-      base = Path(BASEDIR)
+      base = Path(BASEDIR) / "openpilot"
       logo_path = base / "selfdrive" / "assets" / "images" / "starpilot_logo.png"
       brand_font_path = base / "starpilot" / "ui" / "assets" / "fonts" / "Sora[wght].ttf"  # the logo wordmark's font
       fallback_font_path = base / "selfdrive" / "assets" / "fonts" / "Inter-Black.ttf"  # if Sora cannot be set to weight 800
