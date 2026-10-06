@@ -107,6 +107,6 @@ def project_status(requested_id: str | None, process: ModelProcess | None, load:
     return ModelStatus(common[0], common[1], common[2], ModelHealth.STALE, *common[3:])
   if any(now_mono_ns - stamp > OUTPUT_MAX_AGE_NS for stamp in stamps):
     return ModelStatus(common[0], common[1], common[2], ModelHealth.STALE, *common[3:])
-  if output.chestnut_active is None or output.model_v2_big != output.chestnut_active or output.model_v2_big != (load.variant is ModelVariant.CHESTNUT):
+  if output.model_v2_big != (load.variant is ModelVariant.CHESTNUT):
     return ModelStatus(common[0], common[1], common[2], ModelHealth.FAILED, *common[3:])
   return ModelStatus(common[0], common[1], common[2], ModelHealth.ACTIVE, *common[3:])

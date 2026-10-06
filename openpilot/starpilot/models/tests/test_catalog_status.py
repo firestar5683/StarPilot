@@ -41,6 +41,17 @@ class TestModelCatalogStatus(unittest.TestCase):
                                                                      True, True, True), 1_200_000_000).health,
                      ModelHealth.FAILED)
 
+  def test_verified_actual_big_is_not_overridden_by_cached_load_marker(self):
+    process = ModelProcess(421, 5000, True)
+    load = ModelLoad(421, 5000, 1_100_000_000, "cinquev3", ModelVariant.CHESTNUT, "a" * 64)
+    for marker in (None, False, True):
+      output = ModelOutput(1_180_000_000, True, 1_185_000_000, True, True, marker)
+      self.assertEqual(project_status("cinquev3", process, load, output, 1_200_000_000).health, ModelHealth.ACTIVE)
+      invalid = ModelOutput(1_180_000_000, False, 1_185_000_000, True, True, marker)
+      self.assertEqual(project_status("cinquev3", process, load, invalid, 1_200_000_000).health, ModelHealth.STALE)
+      small = ModelOutput(1_180_000_000, True, 1_185_000_000, True, False, marker)
+      self.assertEqual(project_status("cinquev3", process, load, small, 1_200_000_000).health, ModelHealth.FAILED)
+
   def test_runtime_stall_preserves_requested_big_and_active_small_identity(self):
     process = ModelProcess(421, 5000, True)
     load = ModelLoad(421, 5000, 1_100_000_000, 'sc23', ModelVariant.SMALL, 'a' * 64, 'chestnut-run-stalled')

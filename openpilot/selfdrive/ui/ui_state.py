@@ -145,6 +145,7 @@ class UIState:
     self.chestnut_compiled: bool = False
     self.chestnut_checking: bool = False
     self.chestnut_active: bool | None = None
+    self.chestnut_output_seen: bool = False
     self.chestnut_loading: bool = False
     self.usb_connected: bool = False
     self.usb_connected_ts: float | None = None
@@ -265,6 +266,7 @@ class UIState:
     if self.started != self._started_prev or self.sm.frame == 1:
       if self.started:
         self.status = UIStatus.DISENGAGED
+        self.chestnut_output_seen = False
         self.started_frame = self.sm.frame
         self.started_time = time.monotonic()
         self.chestnut_present = self.sm["deviceState"].chestnutPresent or (self.chestnut_compiled and self.usb_connected)
@@ -287,16 +289,22 @@ class UIState:
     model_stamp = self.sm.logMonoTime["modelV2"]
     model_fresh = (model_seen and self.sm.valid["modelV2"] and self.sm.alive["modelV2"] and
                    0 < model_stamp <= time.monotonic_ns() <= model_stamp + 250_000_000)
+    if model_fresh and self.sm["modelV2"].big:
+      self.chestnut_output_seen = True
     if not self.chestnut_present:
       self.chestnut_state = ChestnutState.DISCONNECTED
-    elif self.chestnut_loading or not model_seen:
-      self.chestnut_state = ChestnutState.LOADING
-    elif not detected or not model_fresh or not self.sm["modelV2"].big:
-      self.chestnut_state = ChestnutState.FAILED
-    elif self.chestnut_active is False:
-      self.chestnut_state = ChestnutState.FAILED
-    else:
+    elif detected and model_fresh and self.sm["modelV2"].big:
       self.chestnut_state = ChestnutState.ACTIVE
+    elif model_fresh and not self.sm["modelV2"].big:
+      self.chestnut_state = ChestnutState.FAILED
+    elif not self.chestnut_output_seen and self.chestnut_loading:
+      self.chestnut_state = ChestnutState.LOADING
+    elif not detected:
+      self.chestnut_state = ChestnutState.FAILED
+    elif not self.chestnut_output_seen and (self.chestnut_loading or not model_seen or self.chestnut_active is not False):
+      self.chestnut_state = ChestnutState.LOADING
+    else:
+      self.chestnut_state = ChestnutState.FAILED
 
   def update_params(self) -> None:
     # For slower operations

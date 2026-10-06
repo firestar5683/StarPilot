@@ -87,14 +87,48 @@ class TestBigModelStatus(unittest.TestCase):
         self.assertFalse(drive.big_model_active)
         self.assertFalse(drive.update_big_model_status())
 
+  def test_chestnut_startup_invalid_frame_does_not_report_run_failure(self):
+    drive = fixture(True)
+    drive.sm['deviceState'].chestnutPresent = True
+    drive.sm['modelV2'].big = True
+    drive.sm.valid['modelV2'] = False
+    self.assertFalse(drive.update_big_model_status())
+    self.assertFalse(drive.big_model_active)
+    self.assertNotIn(EventName.bigModelFailed, drive.events.names)
+    drive.sm.valid['modelV2'] = True
+    self.assertFalse(drive.update_big_model_status())
+    self.assertTrue(drive.big_model_active)
+    drive.sm.valid['modelV2'] = False
+    self.assertTrue(drive.update_big_model_status())
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
+
+  def test_fresh_chestnut_execution_overrides_cached_negative_load_marker(self):
+    drive = fixture(False)
+    drive.sm['deviceState'].chestnutPresent = True
+    drive.sm['modelV2'].big = True
+    self.assertFalse(drive.update_big_model_status())
+    self.assertTrue(drive.big_model_chestnut)
+    drive.sm['modelV2'].big = False
+    self.assertTrue(drive.update_big_model_status())
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
+
+  def test_loaded_chestnut_with_initial_valid_small_output_is_a_failure(self):
+    drive = fixture(True)
+    drive.sm['deviceState'].chestnutPresent = True
+    drive.sm['modelV2'].big = False
+    self.assertTrue(drive.update_big_model_status())
+    self.assertFalse(drive.big_model_active)
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
+
   def test_chestnut_failure_and_physical_loss_are_preserved(self):
-    for failed_param in (False, True):
-      with self.subTest(chestnut=failed_param):
-        drive = fixture(failed_param)
-        drive.sm['modelV2'].big = True
-        drive.sm['deviceState'].chestnutPresent = True
-        if failed_param:
-          self.assertFalse(drive.update_big_model_status())
-          drive.sm['deviceState'].chestnutPresent = False
-        self.assertTrue(drive.update_big_model_status())
-        self.assertIn(EventName.bigModelFailed, drive.events.names)
+    drive = fixture(False)
+    drive.sm['deviceState'].chestnutPresent = True
+    self.assertTrue(drive.update_big_model_status())
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
+    drive = fixture(True)
+    drive.sm['modelV2'].big = True
+    drive.sm['deviceState'].chestnutPresent = True
+    self.assertFalse(drive.update_big_model_status())
+    drive.sm['deviceState'].chestnutPresent = False
+    self.assertTrue(drive.update_big_model_status())
+    self.assertIn(EventName.bigModelFailed, drive.events.names)
