@@ -97,6 +97,46 @@ class TestStageMapdProvider(unittest.TestCase):
     with self.assertRaisesRegex(ValueError, 'release Mapd source differs'):
       stage_provider(self.source, self.destination)
 
+  def test_tracked_archive_and_release_copy_include_valid_provider(self):
+    lifecycle = self.source / 'openpilot/starpilot/maps/shadow_lifecycle.py'
+    lifecycle.write_text('# fixture lifecycle\n')
+    self.git('add', 'openpilot/starpilot/maps')
+    self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+             'commit', '--quiet', '-m', 'tracked provider')
+    archive = self.base / 'source.tar'
+    self.git('archive', '--format=tar', '--output', str(archive), 'HEAD')
+    extracted = self.base / 'archive'
+    extracted.mkdir()
+    shutil.unpack_archive(archive, extracted)
+    self.assertEqual(validate_provider(extracted), validate_provider(self.source))
+    for raw in release_files(str(self.source)):
+      target = self.destination / raw.decode()
+      target.parent.mkdir(parents=True, exist_ok=True)
+      shutil.copy2(self.source / raw.decode(), target)
+    binary = self.destination / PROVIDER / 'mapd'
+    before = binary.stat()
+    self.assertEqual(stage_provider(self.source, self.destination), validate_provider(self.source))
+    self.assertEqual(binary.stat().st_ino, before.st_ino)
+    self.assertEqual(binary.stat().st_mode, before.st_mode)
+
+  def test_ignored_local_provider_cannot_mask_missing_git_package(self):
+    self.assertIsInstance(validate_provider(self.source), dict)
+    with self.assertRaisesRegex(ValueError, 'Mapd Git package missing'):
+      release_files(str(self.source), require_provider=True)
+
+  def test_existing_partial_tampered_or_symlink_package_denied(self):
+    stage_provider(self.source, self.destination)
+    binary = self.destination / PROVIDER / 'mapd'
+    binary.write_bytes(binary.read_bytes() + b'tampered')
+    with self.assertRaisesRegex(ValueError, 'hash or embedded'):
+      stage_provider(self.source, self.destination)
+    binary.unlink()
+    with self.assertRaises(OSError):
+      stage_provider(self.source, self.destination)
+    binary.symlink_to(self.source / PROVIDER / 'mapd')
+    with self.assertRaises(ValueError):
+      stage_provider(self.source, self.destination)
+
   def test_finder_metadata_does_not_change_source_attestation(self):
     manifest = self.make_package()
     metadata = self.source / 'mapd_repo/.DS_Store'
