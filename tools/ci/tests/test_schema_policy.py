@@ -167,3 +167,17 @@ class SchemaPolicyTest(unittest.TestCase):
       self.assertIn(before, changed[path])
       changed[path] = changed[path].replace(before, after)
       self.assertTrue(validate(changed, self.policy, self.sync))
+
+  def test_longitudinal_companion_keeps_wire_prefix_and_allows_append(self):
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'forceStopHolding @4 :Bool;'
+    self.assertIn(original, self.schemas[path])
+    appended = self.schemas.copy()
+    appended[path] = appended[path].replace(original, original + b'\n  futureStatus @5 :UInt32;')
+    self.assertEqual(validate(appended, self.policy, self.sync), [])
+    for replacement in (b'', b'forceStopHolding @5 :Bool;', b'forceStopHolding @4 :UInt32;',
+                        b'changedHold @4 :Bool;'):
+      with self.subTest(replacement=replacement):
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(original, replacement)
+        self.assertTrue(any('occupied prefix changed' in error for error in validate(changed, self.policy, self.sync)))
