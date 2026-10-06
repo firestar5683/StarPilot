@@ -9540,6 +9540,17 @@ def setup(app):
       if error:
         return jsonify({"error": error}), 400
 
+      # create_theme builds under /tmp, which is tmpfs (cleared on reboot). The active_theme
+      # symlinks below must point at persistent storage or the applied theme reverts on the next
+      # boot. Copy the temp build into a stable folder under /data and link to that instead.
+      if temp_path is not None:
+        persistent_path = THEME_SAVE_PATH / "active_build"
+        if persistent_path.exists():
+          shutil.rmtree(persistent_path, ignore_errors=True)
+        shutil.copytree(temp_path, persistent_path)
+        shutil.rmtree(temp_path, ignore_errors=True)
+        temp_path = persistent_path
+
       save_checklist = json.loads(form_data.get("saveChecklist", "{}"))
       selected_theme_sources = json.loads(form_data.get("selectedThemeSources", "{}"))
 
