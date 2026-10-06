@@ -675,6 +675,16 @@ export const AndroidAutoPage = {
             </details>
           </div>
         </li>
+
+        <li class="gx-card gx-aa-step">
+          <div class="gx-aa-step__head">
+            <span class="gx-aa-step__num" aria-hidden="true">4</span>
+            <div><h3>Customize Your Dashboard</h3><p>Once connected, customize your dashboard setup.</p></div>
+          </div>
+          <div class="gx-aa-step__body">
+            <a class="gx-btn gx-btn--tonal gx-aa-cta" href="#/theme_maker/android_auto">Customize Dashboard</a>
+          </div>
+        </li>
       </ol>
 
       <details v-if="setup" class="gx-card gx-aa-advanced"><summary>Advanced Tools &amp; Diagnostics</summary>
