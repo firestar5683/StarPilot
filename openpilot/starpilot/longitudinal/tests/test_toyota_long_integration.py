@@ -76,6 +76,64 @@ class ToyotaLongIntegrationTests(TestCase):
         self.assertFalse(production_enabled(bad), mutation)
         self.assertIsNone(extension_state(LongControl(bad), 'toyota_output'), mutation)
 
+  def test_production_sienna_requires_final_card_key_and_secoc_profile(self):
+    from opendbc.car import structs, gen_empty_fingerprint
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.selfdrive.car.card import Car
+    from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
+    from openpilot.starpilot.longitudinal.toyota_output_policy import production_enabled
+
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '0'}):
+      saved = Params()
+      saved.put_bool('OpenpilotEnabledToggle', True, block=True)
+      saved.put_bool('SafeMode', False, block=True)
+      saved.put('SecOCKey', '11' * 16, block=True)
+      cp = CarInterface.get_params(CAR.TOYOTA_SIENNA_4TH_GEN, gen_empty_fingerprint(), [], False, False, False)
+      self.assertFalse(production_enabled(cp))
+      def discover(*args, pre_create_hook, **kwargs):
+        return CarInterface(pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
+      with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=NS(can=[1])), \
+           patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
+        selected = Car()
+      self.assertTrue(selected.CP.secOcKeyAvailable)
+      self.assertTrue(production_enabled(selected.CP))
+      owner = LongControl(selected.CP)
+      self.assertFalse(extension_state(owner, 'toyota_stopped_lead'))
+      inputs = LongitudinalInputs(selected.CP, NS(), lambda: None)
+      self.assertIn('radarState', inputs.optional_services)
+      self.assertFalse(inputs.toyota_corolla_stop)
+      self.assertFalse(inputs.toyota_sienna_replay)
+      state = self.car_state(-0.238205)
+      context = LongitudinalContext(leads=())
+      output = owner.update(True, state, 1.5, False, (-3.5, 2.0), context=context)
+      self.assertTrue(extension_state(owner, 'toyota_output').initialized)
+      self.assertGreater(output, 0.0)
+      self.assertLess(output, 1.5)
+      owner.update(True, state, -1.0, True, (-3.5, 2.0), context=context)
+      self.assertFalse(extension_state(owner, 'toyota_output').initialized)
+      for mutation in ('missing_key', 'stock', 'release', 'no_output', 'foreign_flags', 'foreign_ae', 'sienna3'):
+        bad = selected.CP.as_reader().as_builder()
+        if mutation == 'missing_key':
+          bad.secOcKeyAvailable = False
+        elif mutation == 'stock':
+          bad.openpilotLongitudinalControl = False
+          bad.safetyConfigs[0].safetyParam = 2633
+        elif mutation == 'release':
+          bad = CarInterface.get_params(CAR.TOYOTA_SIENNA_4TH_GEN, gen_empty_fingerprint(), [], False, True, False)
+          bad.secOcKeyAvailable = True
+          self.assertTrue(bad.dashcamOnly)
+        elif mutation == 'no_output':
+          bad.safetyConfigs[0].safetyModel = structs.CarParams.SafetyModel.noOutput
+        elif mutation == 'foreign_flags':
+          bad.flags |= 1 << 30
+        elif mutation == 'foreign_ae':
+          bad.alternativeExperience = 32
+        else:
+          bad.carFingerprint = CAR.TOYOTA_SIENNA
+        self.assertFalse(production_enabled(bad), mutation)
+        self.assertIsNone(extension_state(LongControl(bad), 'toyota_output'), mutation)
+
   def test_corolla_filtered_speed_undershoot_retains_pid_target_filter(self):
     from opendbc.car import gen_empty_fingerprint
     cp = CarInterface.get_params(CAR.TOYOTA_COROLLA_TSS2, gen_empty_fingerprint(), [], False, False, False)

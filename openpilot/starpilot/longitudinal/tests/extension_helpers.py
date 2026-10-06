@@ -12,7 +12,7 @@ def attach_inputs(controls):
   controls.turn_assist_enabled = lambda: False
   inputs = LongitudinalInputs.__new__(LongitudinalInputs)
   inputs.messages = lambda: controls.sm
-  for name in ('ev9_long_enabled', 'blended_longitudinal_enabled', 'toyota_sienna_replay', 'toyota_corolla_stop',
+  for name in ('ev9_long_enabled', 'blended_longitudinal_enabled', 'toyota_sienna_replay', 'toyota_sienna_production', 'toyota_corolla_stop',
                'ioniq6_start_enabled', 'gm_start_enabled', 'gm_volt_enabled', 'gm_euv_enabled',
                'gm_cc_enabled', 'gm_cc_stop_enabled', 'gm_ascm_enabled', 'gm_suburban_enabled'):
     setattr(inputs, name, False)
