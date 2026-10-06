@@ -31,6 +31,24 @@ def required_document(raw: object) -> dict:
 
 
 class FeatureSettingsOwnerTests(unittest.TestCase):
+  def test_toyota_hold_is_reachable_from_hub_with_correct_stop_description(self):
+    from opendbc.car import structs
+    from opendbc.car.toyota.interface import CarInterface
+    from opendbc.car.toyota.values import CAR
+    for hybrid, description in ((True, "manual stops"), (False, "manual and cruise-controlled stops")):
+      fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+      cp = CarInterface.get_params(CAR.TOYOTA_RAV4_TSS2, {0: {0x3F6: 8}, 1: {}, 2: {}}, fw, False, False, False)
+      self.fingerprint = cp.carFingerprint
+      self.owner.vehicle_params = lambda cp=cp: cp
+      hub = self.owner.snapshot("hub", parked=True, system_long=True, lateral_context=True, metric=False)
+      self.assertTrue(any(row.label == "Vehicle Settings" and row.available for row in hub.rows))
+      row = self._row("vehicle", "ToyotaAutoHold")
+      self.assertTrue(row.available)
+      self.assertIn(description, row.reason)
+      request = replace(required_change(row), confirmation=True)
+      self.assertTrue(self.owner.apply(request))
+      self.params.put_bool("ToyotaAutoHold", False, block=True)
+
   def test_gm_tune_configured_choice_preserves_intent_and_guards_commit(self):
     from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
     cp = volt_camera_pedal_params(release=True)
