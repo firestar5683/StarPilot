@@ -1395,5 +1395,23 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
   .gx-aa-status__actions .gx-btn { flex: 1 1 auto; }
   .gx-aa-row { flex-wrap: wrap; }
 }
-.gx-card.gx-aa-sheet__dialog { background: var(--background); }
+.gx-card.gx-aa-sheet__dialog { background: color-mix(in srgb, var(--primary) 14%, var(--background)); border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .5), 0 0 40px var(--primary-glow); color: var(--on-surface); }
+.gx-aa-sheet__dialog h3 { color: var(--on-surface); }
+.gx-aa-sheet__dialog .gx-muted, .gx-aa-sheet__steps small, .gx-aa-sheet__dialog .gx-aa-checks li { color: color-mix(in srgb, var(--on-surface) 82%, transparent); }
+.gx-aa-sheet__substeps { color: var(--on-surface); font-size: var(--fs-md, 1rem); line-height: 1.5; }
+.gx-aa-sheet__substeps strong, .gx-aa-sheet__steps > li > strong { color: var(--on-surface); }
+.gx-aa-sheet__steps > li > strong { font-size: var(--fs-lg, 1.1rem); }
+.gx-aa-sheet__steps > li::before { background: var(--primary); color: #fff; box-shadow: 0 0 12px var(--primary-glow); }
+.gx-aa-sheet__close { background: color-mix(in srgb, var(--primary) 22%, transparent); color: var(--on-surface); }
+.gx-aa-sheet__step--muted { opacity: .7; }
+.gx-aa-sheet__substeps strong.gx-aa-hl { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); padding: 1px 6px; border-radius: var(--radius-sm, 6px); }
 .gx-aa-step__body > p:has(> .gx-aa-spinner) { display: flex; align-items: center; gap: var(--sp-2); }
+
+.gx-aa-trash { display: inline-grid; place-items: center; width: var(--touch-target); height: var(--touch-target); padding: 0; border-radius: 50%; cursor: pointer; font-size: 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--error) 40%, transparent); background: color-mix(in srgb, var(--error) 12%, transparent); color: var(--error); }
+.gx-aa-trash:hover:not(:disabled) { background: color-mix(in srgb, var(--error) 22%, transparent); }
+.gx-aa-trash:disabled { opacity: .4; cursor: not-allowed; }
+.gx-aa-confirm { width: min(100%, 420px); }
+.gx-aa-confirm__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.gx-aa-danger { background: var(--error); color: var(--on-error); }
