@@ -248,11 +248,10 @@ class SoftwareOperations:
     elif state == "idle" and status["updater"]["failedCount"] is not None and self._baseline[2] is not None and \
          status["updater"]["failedCount"] > self._baseline[2]:
       error = "Updater reported a failure"
-      if request["action"] in ("fast", "rollback", "versions", "version"):
-        try:
-          error = self._param("LastUpdateException", 4096) or error
-        except SoftwareOperationError:
-          pass
+      try:
+        error = self._param("LastUpdateException", 4096) or error
+      except SoftwareOperationError:
+        pass
       request.update(state="failed", error=error)
     elif request['action'] == 'versions' and state == 'idle' and status['updater']['failedCount'] == 0 and \
          status['updater']['lastFetchAt'] is not None and status['updater']['lastFetchAt'] != self._baseline[1]:
@@ -293,6 +292,7 @@ class SoftwareOperations:
         status = self.status.snapshot()
       except SoftwareUnavailable:
         raise SoftwareOperationError("Updater status is unavailable", 503) from None
+      process = self.process.available()
       self._refresh_request(status)
       parked = self._parked()
       branches = self._branches()
@@ -301,7 +301,6 @@ class SoftwareOperations:
       disabled_state = self._flag("DisableUpdates")
       disabled = disabled_state is not False
       reboot = self._flag("DoReboot") is not False
-      process = self.process.available() if parked and updater_idle and not disabled and not pending and not reboot else False
       usable = parked and updater_idle and not disabled and not pending and not reboot and process
       target = self.selected_target or status["updater"]["targetBranch"] or status["installed"]["branch"]
       selected = target is not None and target in branches and status["updater"]["targetBranch"] == target
@@ -312,11 +311,19 @@ class SoftwareOperations:
         reason = "Updates are disabled"
       elif reboot:
         reason = "Reboot is pending"
+      elif not process:
+        reason = "Updater status is unavailable"
       elif pending or not updater_idle:
         reason = "Updater is busy"
-      elif not process:
-        reason = "Updater is not running"
+      fast = status["updater"].get("fast")
+      stage = fast["stage"] if fast and status["updater"]["state"] == "updating..." else status["updater"]["state"] or "unknown"
+      detail = fast["detail"] if fast and status["updater"]["state"] == "updating..." else ""
+      if not process and not updater_idle:
+        stage, detail = "unavailable", "Updater status unavailable; last reported state: " + str(status["updater"]["state"])
+      elif self.request is not None and self.request.get("error") == "Updater did not report completion":
+        stage, detail = "timed_out", "Request timed out; the updater may still be running"
       return {
+        "updaterAvailable": process, "progress": {"stage": stage, "detail": detail, "percent": None},
         "parked": parked, "availableBranches": branches, "selectedTarget": target,
         "canCheck": usable, "canFastUpdate": usable and self._valid_branch(status["installed"]["branch"]), "canSelect": usable and bool(branches),
         "canRollback": usable and self._rollback_available(),
@@ -398,7 +405,7 @@ class SoftwareOperations:
       if not view["parked"]:
         raise SoftwareOperationError("Vehicle is not safely parked", 409)
       if view["reason"] is not None:
-        raise SoftwareOperationError(view["reason"], 503 if view["reason"] == "Updater is not running" else 409)
+        raise SoftwareOperationError(view["reason"], 503 if view["reason"] == "Updater status is unavailable" else 409)
       if action not in ("fast", "rollback", "versions", "version") and branch is not None and branch not in view["availableBranches"]:
         raise SoftwareOperationError("Branch is not in the current updater list", 409)
       if action not in ("check", "select", "fast", "rollback", "versions", "version") and (branch != view["selectedTarget"] or not view["canDownload"]):

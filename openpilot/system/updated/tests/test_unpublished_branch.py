@@ -46,6 +46,16 @@ class TestUnpublishedBranch(unittest.TestCase):
 
     self.updated.run = run
 
+  def test_check_clock_requires_successful_remote_check(self):
+    self.assertNotIn("UpdaterLastCheckTime", self.updater.params.values)
+    self.updater.check_for_update()
+    checked = self.updater.params.values["UpdaterLastCheckTime"]
+    self.updated.run = Mock(side_effect=subprocess.CalledProcessError(1, "git ls-remote"))
+    with self.assertRaises(subprocess.CalledProcessError):
+      self.updater.check_for_update()
+    self.assertEqual(self.updater.params.values["UpdaterLastCheckTime"], checked)
+    self.assertNotIn("LastUpdateTime", self.updater.params.values)
+
   def test_missing_target_never_becomes_a_branch_or_fetches(self):
     self.updater.check_for_update()
     self.assertEqual(self.updater.branches, {"another-branch": REMOTE})

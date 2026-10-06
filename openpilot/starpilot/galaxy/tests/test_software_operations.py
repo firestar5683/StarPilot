@@ -72,6 +72,60 @@ class SoftwareOperationsTest(unittest.TestCase):
       self.act(action, branch)
     self.assertEqual(caught.exception.status, status)
 
+  def test_normal_finalization_completes_only_after_idle_success(self):
+    for failed in (False, True):
+      with self.subTest(failed=failed):
+        self.owner.request = None
+        self.params.put("UpdateFailedCount", 0, block=True)
+        self.params.put("UpdaterState", "idle", block=True)
+        self.params.remove("LastUpdateTime")
+        self.act("download", "main")
+        self.params.put("UpdaterState", "finalizing update...", block=True)
+        self.params.put("UpdaterFastState", {"version": 1, "stage": "complete", "detail": "Old fast update"}, block=True)
+        view = self.owner.snapshot()
+        self.assertEqual(view["request"]["state"], "pending")
+        self.assertEqual(view["progress"], {"stage": "finalizing update...", "detail": "", "percent": None})
+        self.params.put("UpdaterState", "idle", block=True)
+        if failed:
+          self.params.put("UpdateFailedCount", 1, block=True)
+          self.params.put("LastUpdateException", "Finalization copy failed", block=True)
+        else:
+          self.params.put("LastUpdateTime", datetime(2026, 10, 6), block=True)
+          self.params.put("UpdaterLastFetchTime", datetime(2026, 10, 6), block=True)
+        result = self.owner.snapshot()["request"]
+        self.assertEqual(result["state"], "failed" if failed else "complete")
+        if failed:
+          self.assertEqual(result["error"], "Finalization copy failed")
+
+  def test_unavailable_finalizing_preserves_request_until_status_recovers(self):
+    self.act("download", "main")
+    self.params.put("UpdaterState", "finalizing update...", block=True)
+    self.process.running = False
+    view = self.owner.snapshot()
+    self.assertEqual(view["progress"]["stage"], "unavailable")
+    self.assertEqual(view["request"]["state"], "pending")
+    self.assertEqual(view["reason"], "Updater status is unavailable")
+    self.assertFalse(view["canCheck"])
+    self.assertEqual(self.params.get("UpdaterState"), "finalizing update...")
+    self.process.running = True
+    self.params.put("UpdaterState", "idle", block=True)
+    self.params.put("LastUpdateTime", datetime(2026, 10, 6), block=True)
+    self.params.put("UpdaterLastFetchTime", datetime(2026, 10, 6), block=True)
+    self.assertEqual(self.owner.snapshot()["request"]["state"], "complete")
+
+  def test_running_finalization_timeout_does_not_fabricate_completion(self):
+    self.owner.clock = lambda: 0.0
+    self.act("download", "main")
+    self.params.put("UpdaterState", "finalizing update...", block=True)
+    self.owner.clock = lambda: 901.0
+    view = self.owner.snapshot()
+    self.assertEqual(view["progress"], {"stage": "timed_out",
+                                      "detail": "Request timed out; the updater may still be running", "percent": None})
+    self.assertTrue(view["updaterAvailable"])
+    self.assertEqual(view["request"]["state"], "failed")
+    self.assertFalse(view["canCheck"])
+    self.assertEqual(self.params.get("UpdaterState"), "finalizing update...")
+
   def test_recent_version_admission_pins_installed_snapshot_and_listed_target(self):
     selected = 'c' * 40
     recent = {'branch': 'main', 'head': 'b' * 40,

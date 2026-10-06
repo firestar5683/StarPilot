@@ -1288,3 +1288,14 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .gx-summary dt { color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.35; overflow-wrap: anywhere; }
 .gx-summary dd { order: -1; margin: 0 0 var(--sp-1); font-size: var(--fs-lg); font-weight: var(--fw-bold); color: var(--primary); overflow-wrap: anywhere; }
 .gx-model-selection { margin: 0; padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+
+.gx-update-step { margin: var(--sp-4) 0; }
+.gx-update-step h4 { margin: 0 0 var(--sp-2); }
+.gx-update-step > .gx-btn { margin-bottom: var(--sp-2); }
+.gx-update-progress { margin: var(--sp-4) 0; }
+.gx-update-progress__heading { display: flex; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.gx-update-progress__track { height: 10px; border-radius: 999px; overflow: hidden; background: var(--surface-container-high); }
+.gx-update-progress__fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #5ec8c8, #8b6cc5); transition: width .3s ease; }
+.gx-update-progress__fill--indeterminate { width: 35%; animation: gx-update-progress 1.6s ease-in-out infinite; }
+@keyframes gx-update-progress { from { transform: translateX(-100%); } to { transform: translateX(385%); } }
+@media (prefers-reduced-motion: reduce) { .gx-update-progress__fill--indeterminate { width: 100%; animation: none; opacity: .6; } }

@@ -427,6 +427,7 @@ class Updater:
     cur_branch = self.get_branch(OVERLAY_MERGED)
     cur_commit = self.get_commit_hash(OVERLAY_MERGED)
     self._branches_checked = True
+    write_time_to_param(self.params, "UpdaterLastCheckTime")
     new_branch = self.target_branch
     new_commit = self.branches.get(new_branch)
     if new_commit is None:
