@@ -9895,6 +9895,10 @@ def setup(app):
     theme_type = request.args.get("type", "")
     if theme_type == "stock" or theme_path == "__stock__":
       theme_dir = STOCK_THEME_PATH
+    elif theme_type == "steering_wheel":
+      # A steering-wheel-only theme is a single file under steering_wheels/, not a theme pack.
+      # The library sends its filename as theme_path; there is no component directory to scan.
+      theme_dir = THEME_SAVE_PATH / "steering_wheels"
     else:
       theme_dir = HOLIDAY_THEME_PATH / theme_path if "holiday" in theme_type else THEME_SAVE_PATH / "theme_packs" / theme_path
 
@@ -10003,7 +10007,14 @@ def setup(app):
           }
 
     steering_wheel_path = None
-    if theme_type == "stock" or theme_path == "__stock__":
+    if theme_type == "steering_wheel":
+      # theme_path is the wheel's filename (e.g. "rubber_duck.png"); match it directly.
+      # Use only the basename so theme_path can't point outside steering_wheels/.
+      wheel_name = os.path.basename(theme_path)
+      wheel_file = THEME_SAVE_PATH / "steering_wheels" / wheel_name
+      if wheel_file.is_file() and wheel_file.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif"]:
+        steering_wheel_path = f"steering_wheels/{wheel_file.name}"
+    elif theme_type == "stock" or theme_path == "__stock__":
       if _resolve_stock_theme_asset_path("steering_wheel/wheel.png").exists():
         steering_wheel_path = "steering_wheel/wheel.png"
     elif "holiday" in theme_type:

@@ -349,6 +349,22 @@ def _get_pillow_image():
   return _PIL_IMAGE
 
 
+def _resize_gif_pillow(src_path, width, height):
+  # Resize an animated GIF while preserving its frames. Used instead of ffmpeg because the
+  # device's bundled ffmpeg is built without a GIF decoder (--disable-everything), so every
+  # ffmpeg GIF call fails with "Invalid data found when processing input" (exit 183).
+  pil_image = _get_pillow_image()
+  from PIL import ImageSequence
+  src = pil_image.open(src_path)
+  loop = src.info.get("loop", 0)
+  frames, durations = [], []
+  for frame in ImageSequence.Iterator(src):
+    durations.append(frame.info.get("duration", 50))
+    frames.append(frame.convert("RGBA").resize((width, height), pil_image.Resampling.LANCZOS))
+  frames[0].save(src_path, "GIF", save_all=True, append_images=frames[1:], loop=loop,
+                 duration=durations, disposal=2, optimize=False)
+
+
 def _get_pydub_audio_segment():
   global _PYDUB_AUDIOSEGMENT
   if _PYDUB_AUDIOSEGMENT is None:
@@ -403,12 +419,22 @@ def check_theme_components(theme_path):
   return components
 
 def covert_audio(input_file):
+  # Convert a theme sound to mono 16-bit 48 kHz WAV. The device's ffmpeg is built without the
+  # wav muxer (--disable-everything), so pydub's export(..., format="wav"), which shells out to
+  # ffmpeg, fails with "Unknown input format: 'wav'". pydub reads WAV via the stdlib (ffmpeg is
+  # only needed for compressed inputs), and we write the output with the wave module, so the
+  # broken ffmpeg wav path is never used.
+  import wave
+
   sound = _get_pydub_audio_segment().from_file(input_file)
-  sound = sound.set_frame_rate(48000)
-  sound = sound.set_channels(1)
+  sound = sound.set_frame_rate(48000).set_channels(1).set_sample_width(2)
 
   output_filename = os.path.splitext(input_file)[0] + ".wav"
-  sound.export(output_filename, format="wav", parameters=["-acodec", "pcm_s16le"])
+  with wave.open(output_filename, "wb") as wav_file:
+    wav_file.setnchannels(sound.channels)
+    wav_file.setsampwidth(sound.sample_width)
+    wav_file.setframerate(sound.frame_rate)
+    wav_file.writeframes(sound.raw_data)
 
   if input_file != output_filename:
     os.remove(input_file)
@@ -543,12 +569,7 @@ def create_theme(form_data, files, temporary=False):
         if resize_dims:
           if ext == ".gif":
             width, height = resize_dims
-            palette_path = save_path.with_suffix(".palette.png")
-            temp_output_path = save_path.with_suffix(".resized.gif")
-            subprocess.run(["ffmpeg", "-i", str(save_path), "-vf", "palettegen", "-y", str(palette_path)], check=True)
-            subprocess.run(["ffmpeg", "-i", str(save_path), "-i", str(palette_path), "-lavfi", f"fps=20,scale={width}:{height}:flags=lanczos[x];[x][1:v]paletteuse", "-y", str(temp_output_path)], check=True)
-            palette_path.unlink()
-            temp_output_path.rename(save_path)
+            _resize_gif_pillow(save_path, width, height)
           else:
             pil_image = _get_pillow_image()
             img = pil_image.open(save_path).resize(resize_dims, pil_image.Resampling.LANCZOS)
@@ -571,13 +592,7 @@ def create_theme(form_data, files, temporary=False):
       saved_wheel_path = wheels_dir / f"{sane_theme_name}-user_created{ext}"
       file.save(saved_wheel_path)
       if ext == ".gif":
-        width, height = (250, 250)
-        palette_path = saved_wheel_path.with_suffix(".palette.png")
-        temp_output_path = saved_wheel_path.with_suffix(".resized.gif")
-        subprocess.run(["ffmpeg", "-i", str(saved_wheel_path), "-vf", "palettegen", "-y", str(palette_path)], check=True)
-        subprocess.run(["ffmpeg", "-i", str(saved_wheel_path), "-i", str(palette_path), "-lavfi", f"fps=20,scale={width}:{height}:flags=lanczos[x];[x][1:v]paletteuse", "-y", str(temp_output_path)], check=True)
-        palette_path.unlink()
-        temp_output_path.rename(saved_wheel_path)
+        _resize_gif_pillow(saved_wheel_path, 250, 250)
       else:
         pil_image = _get_pillow_image()
         img = pil_image.open(saved_wheel_path).resize((250, 250), pil_image.Resampling.LANCZOS)
@@ -611,13 +626,7 @@ def create_theme(form_data, files, temporary=False):
         save_path = dist_path / f"{name}{ext}"
         file.save(save_path)
         if ext == ".gif":
-          width, height = (250, 250)
-          palette_path = save_path.with_suffix(".palette.png")
-          temp_output_path = save_path.with_suffix(".resized.gif")
-          subprocess.run(["ffmpeg", "-i", str(save_path), "-vf", "palettegen", "-y", str(palette_path)], check=True)
-          subprocess.run(["ffmpeg", "-i", str(save_path), "-i", str(palette_path), "-lavfi", f"fps=20,scale={width}:{height}:flags=lanczos[x];[x][1:v]paletteuse", "-y", str(temp_output_path)], check=True)
-          palette_path.unlink()
-          temp_output_path.rename(save_path)
+          _resize_gif_pillow(save_path, 250, 250)
         else:
           pil_image = _get_pillow_image()
           img = pil_image.open(save_path).resize((250, 250), pil_image.Resampling.LANCZOS)
