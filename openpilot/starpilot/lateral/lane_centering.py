@@ -16,6 +16,10 @@ import numpy as np
 from openpilot.cereal import log
 
 
+STRENGTH_BASELINE = 1.5
+# At 8 m lookahead, keep the unsaturated error interval above the 0.08 m deadband.
+STRENGTH_MAX = 1.575
+
 MIN_SPEED = 5.0
 MIN_LANE_PROB = 0.6
 MAX_LANE_STD = 0.3
@@ -49,7 +53,7 @@ class LaneCenteringSettings:
   offset_m: float = 0.0
   e2e_authority: float = 1.0
   pause_on_signal: bool = True
-  strength: float = 1.0
+  strength: float = STRENGTH_BASELINE
 
 
 @dataclass(frozen=True)
@@ -220,7 +224,7 @@ class LaneCenteringController:
     authority = _finite_number(settings.e2e_authority) if isinstance(settings, LaneCenteringSettings) else None
     strength = _finite_number(settings.strength) if isinstance(settings, LaneCenteringSettings) else None
     if (base is None or speed is None or dt is None or dt <= 0 or
-        offset is None or authority is None or strength is None or not 0.5 <= strength <= 1.5 or type(observation.model_sample_id) is not int or
+        offset is None or authority is None or strength is None or not 0.5 <= strength <= STRENGTH_MAX or type(observation.model_sample_id) is not int or
         observation.model_sample_id < 0 or not isinstance(observation.mode, ControlMode) or
         type(observation.model_valid) is not bool or type(observation.lateral_active) is not bool or
         type(observation.turn_signal_active) is not bool or type(observation.driver_override) is not bool or

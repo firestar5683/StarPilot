@@ -7,7 +7,7 @@ from pathlib import Path
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params import UnknownKeyName
-from openpilot.starpilot.lateral.lane_centering import ControlMode, LaneCenteringRequest, LaneCenteringSettings
+from openpilot.starpilot.lateral.lane_centering import ControlMode, LaneCenteringRequest, LaneCenteringSettings, STRENGTH_BASELINE, STRENGTH_MAX
 from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
 
 
@@ -30,10 +30,10 @@ def read_settings(params) -> LaneCenteringSettings:
     offset = float(raw('LaneCenterOffset', b'0.0'))
     authority = float(raw('LaneCenteringE2EAuthority', b'1.0'))
     try:
-      strength = float(raw('LaneCenteringStrength', b'1.0'))
+      strength = float(raw('LaneCenteringStrength', str(STRENGTH_BASELINE).encode()))
     except UnknownKeyName:
-      strength = 1.0
-    if not math.isfinite(strength) or not 0.5 <= strength <= 1.5:
+      strength = STRENGTH_BASELINE
+    if not math.isfinite(strength) or not 0.5 <= strength <= STRENGTH_MAX:
       raise ValueError('Invalid lane strength')
     if not math.isfinite(offset) or not -0.3 <= offset <= 0.3 or not math.isfinite(authority) or not 0 <= authority <= 1:
       raise ValueError('Invalid lane tuning')
