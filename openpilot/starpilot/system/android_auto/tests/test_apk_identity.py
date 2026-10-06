@@ -220,6 +220,17 @@ def test_status_reports_expiry(tmp_path):
   assert status["installed"] and status["days_left"] in (4, 5) and "renew" in status["warning"]
 
 
+def test_certificate_days_left_reads_only_the_certificate(tmp_path):
+  cert, _, _, _ = build_identity(days=5)
+  directory = tmp_path / "identity"
+  directory.mkdir()
+  assert identity_store.certificate_days_left(directory) is None
+  (directory / identity_store.CERT_NAME).write_bytes(cert)  # no key: the car view never reads it
+  assert identity_store.certificate_days_left(directory) in (4, 5)
+  (directory / identity_store.CERT_NAME).write_bytes(b"not a certificate")
+  assert identity_store.certificate_days_left(directory) is None
+
+
 def wait_job(job):
   job.thread.join(30)
   return job.status()

@@ -156,9 +156,11 @@ def run(frames_path: str) -> int:
     gui_app._width, gui_app._height = geometry.logical_width, geometry.logical_height
     gui_app._scale = 1.0
     gui_app._render_texture = None
+    from openpilot.starpilot.system.android_auto.identity import certificate_days_left
     from openpilot.starpilot.system.android_auto.projection_layout_runtime import load_projection_layout
     viewport = (geometry.logical_width, geometry.logical_height)
-    layout = ProjectionOnroad(viewport=viewport, customization=load_projection_layout(viewport))
+    layout = ProjectionOnroad(viewport=viewport, customization=load_projection_layout(viewport),
+                              certificate_days=certificate_days_left())
     resources.callback(layout.close)
     content = rl.load_render_texture(geometry.logical_width, geometry.logical_height)
     if not content.id:

@@ -1,6 +1,7 @@
 """CPU-only ownership and cleanup checks for the projection-only road view."""
 
 import ast
+from dataclasses import dataclass
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,7 +85,7 @@ class TestProjectionOnroad(unittest.TestCase):
                              monitor=lambda *_: SimpleNamespace(render=lambda *_a, **_k: None),
                              fonts=Fonts, font_role=SimpleNamespace(BRAND='brand', MEDIUM='medium'),
                              profile=SimpleNamespace(LARGE='large'), font_directory=lambda: Path('/unused'),
-                             adapter=Adapter, current_message=lambda *_a, **_k: None,
+                             adapter=Adapter, current_message=lambda *_a, **_k: None, display_message=lambda *_a, **_k: None,
                              shell_mode=SimpleNamespace(ONROAD='onroad'))
     return native, events
 
@@ -118,7 +119,7 @@ class TestProjectionOnroad(unittest.TestCase):
     car = SimpleNamespace(leftBlinker=True, rightBlinker=False, leftBlindspot=False, rightBlindspot=True)
     layouts = {'pip_left': {'x': 10, 'y': 20, 'enabled': True}, 'pip_right': {'x': 30, 'y': 40, 'enabled': False}}
     native.ui_state.params = object()
-    native.current_message = lambda _sm, name, *_a, **_k: car if name == 'carState' else None
+    native.display_message = lambda _sm, name, *_a, **_k: car if name == 'carState' else None
     native.pip_renderer = Renderer
     native.read_pip = lambda _params: saved
     native.pip_signals = lambda *values: values
@@ -144,6 +145,62 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertEqual(events[before:before + 2], ['pip_off', 'draw'])
     view.close()
     self.assertIn('pip_closed', events)
+
+  def test_certificate_notice_text_covers_only_the_last_two_weeks(self):
+    self.assertEqual(projection.certificate_notice(None), '')
+    self.assertEqual(projection.certificate_notice(15), '')
+    self.assertEqual(projection.certificate_notice(-1), '')
+    self.assertEqual(projection.certificate_notice(14), 'Heads Up: AA Certificate Expires in 14 Days')
+    self.assertEqual(projection.certificate_notice(1), 'Heads Up: AA Certificate Expires in 1 Day')
+    self.assertEqual(projection.certificate_notice(0), 'Heads Up: AA Certificate Expires Within a Day')
+
+  def test_certificate_notice_shows_ten_seconds_per_drive_under_real_alerts(self):
+    native, _ = self.dependencies()
+
+    @dataclass(frozen=True)
+    class Alert:
+      size: str = 'none'
+      text1: str = ''
+      alert_type: str = ''
+
+    @dataclass(frozen=True)
+    class State:
+      alert: Alert = Alert()
+
+    real = {'alert': Alert()}
+    native.alert, native.alert_size = Alert, SimpleNamespace(NONE='none', SMALL='small')
+    native.adapter = lambda *_: SimpleNamespace(build=lambda *_a, **_k: SimpleNamespace(onroad=State(real['alert'])))
+    view = projection.ProjectionOnroad(dependencies=native, certificate_days=3)
+    shown = []
+    view.onroad.render = lambda state: shown.append(state.alert.text1)
+    clock = [0]
+    original = projection.time
+    projection.time = SimpleNamespace(monotonic_ns=lambda: clock[0])
+    try:
+      native.ui_state.started = True
+      for clock[0] in (100, 9_000_000_000):
+        view.render()
+      real['alert'] = Alert('mid', 'Lane Departure Detected')
+      view.render()  # a real alert always wins
+      real['alert'] = Alert()
+      clock[0] = 10_000_000_100
+      view.render()  # ten seconds after the first road frame
+      native.ui_state.started = False
+      view.render()
+      native.ui_state.started = True
+      view.render()  # the next drive shows it again
+    finally:
+      projection.time = original
+    notice = 'Heads Up: AA Certificate Expires in 3 Days'
+    self.assertEqual(shown, [notice, notice, 'Lane Departure Detected', '', notice])
+    view.close()
+
+  def test_no_certificate_notice_when_far_from_expiry(self):
+    native, _ = self.dependencies()
+    view = projection.ProjectionOnroad(dependencies=native, certificate_days=200)
+    state = SimpleNamespace(alert=None)
+    self.assertIs(view._with_certificate_notice(state, 0), state)
+    view.close()
 
   def test_negotiated_viewport_overrides_landscape_fallback(self):
     native, _ = self.dependencies()
