@@ -71,6 +71,7 @@ class ToyotaOutputPolicyTests(unittest.TestCase):
     sienna = ToyotaOutputPolicy(self.cp(CAR.TOYOTA_SIENNA_4TH_GEN))
     self.assertIsNone(sienna.target(1.0, 1.0, False, 0.0, leads=None))
     self.assertIsNone(sienna.target(float('nan'), 1.0, False, 0.0, leads=()))
+    self.assertIsNone(sienna.target(0.5, -0.238205, False, 0.0, leads=()))
     self.assertIsNone(sienna.target(1.0, 1.0, False, 0.0, leads=(Lead(True, float('inf'), 0.0, 0.0, 0.0),)))
     self.assertIsNone(sienna.target(1.0, 1.0, True, True, leads=()))
     self.assert_target(sienna.target(1.0, 0.0, False, 0.0, leads=()), 0.0196078431372549)

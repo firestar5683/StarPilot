@@ -29,8 +29,151 @@ class ToyotaLongIntegrationTests(TestCase):
   @staticmethod
   def controller(car, enabled=True):
     cp = CarInterface.get_non_essential_params(car)
-    with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '1' if enabled else '0'}):
+    with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '1' if enabled else '0'}), \
+         patch('openpilot.starpilot.longitudinal.extension.production_enabled', return_value=False):
       return LongControl(cp)
+
+  def test_production_corolla_actual_card_and_denied_profiles(self):
+    from opendbc.car import structs, gen_empty_fingerprint
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.selfdrive.car.card import Car
+    from openpilot.starpilot.longitudinal.toyota_output_policy import production_enabled
+
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '0'}):
+      saved = Params()
+      for key, value in (('OpenpilotEnabledToggle', True), ('SafeMode', False), ('AlwaysOnLateral', True)):
+        saved.put_bool(key, value, block=True)
+      cp = CarInterface.get_params(CAR.TOYOTA_COROLLA_TSS2, gen_empty_fingerprint(), [], False, False, False)
+      def discover(*args, pre_create_hook, **kwargs):
+        return CarInterface(pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
+      with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=NS(can=[1])), \
+           patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
+        selected = Car()
+      for candidate in (cp, selected.CP):
+        self.assertTrue(production_enabled(candidate))
+        owner = LongControl(candidate)
+        self.assertIsNotNone(extension_state(owner, 'toyota_output'))
+        state = self.car_state(1.0)
+        filtered = owner.update(True, state, 1.5, False, (-3.5, 2.0))
+        reference = self.controller(CAR.TOYOTA_COROLLA_TSS2, enabled=False)
+        self.assertLess(filtered, reference.update(True, state, 1.5, False, (-3.5, 2.0)))
+        owner.update(True, state, -1.0, True, (-3.5, 2.0))
+        self.assertFalse(extension_state(owner, 'toyota_output').initialized)
+      for mutation in ('stock', 'passive', 'no_output', 'identity', 'foreign_flags'):
+        bad = selected.CP.as_reader().as_builder()
+        if mutation == 'stock':
+          bad.openpilotLongitudinalControl = False
+          bad.safetyConfigs[0].safetyParam = 585
+        elif mutation == 'passive':
+          bad.passive = True
+        elif mutation == 'no_output':
+          bad.safetyConfigs[0].safetyModel = structs.CarParams.SafetyModel.noOutput
+        elif mutation == 'identity':
+          bad.carFingerprint = CAR.TOYOTA_PRIUS_RETROFIT
+        else:
+          bad.flags |= 1 << 30
+        self.assertFalse(production_enabled(bad), mutation)
+        self.assertIsNone(extension_state(LongControl(bad), 'toyota_output'), mutation)
+
+  def test_corolla_filtered_speed_undershoot_retains_pid_target_filter(self):
+    from opendbc.car import gen_empty_fingerprint
+    cp = CarInterface.get_params(CAR.TOYOTA_COROLLA_TSS2, gen_empty_fingerprint(), [], False, False, False)
+    outputs = []
+    with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '0'}):
+      for speed in (0.0, -0.238205):
+        owner = LongControl(cp)
+        outputs.append(owner.update(True, self.car_state(speed), 0.5, False, (-3.5, 2.0)))
+        policy = extension_state(owner, 'toyota_output')
+        self.assertTrue(policy.initialized)
+        self.assertAlmostEqual(policy.filtered_target, 0.5 * 0.01 / (0.30 + 0.01))
+    self.assertEqual(outputs[0], outputs[1])
+
+  def test_corolla_stopped_lead_only_vetoes_stopping_release(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    states = structs.CarControl.Actuators.LongControlState
+    cp = CarInterface.get_params(CAR.TOYOTA_COROLLA_TSS2, gen_empty_fingerprint(), [], False, False, False)
+    for speed, leads, veto in (
+        (0.5, (Lead(True, 8.0, 1.75, 0.35, 0.0),), True),
+        (-0.238205, (Lead(True, 5.0, 0.0, 0.0, 0.0),), True),
+        (0.5001, (Lead(True, 8.0, 0.0, 0.0, 0.0),), False),
+        (0.0, (Lead(True, 8.001, 0.0, 0.0, 0.0),), False),
+        (0.0, (Lead(True, 0.0, 0.0, 0.0, 0.0),), False),
+        (0.0, (Lead(True, 8.0, 1.751, 0.0, 0.0),), False),
+        (0.0, (Lead(True, 8.0, 0.0, 0.351, 0.0),), False),
+        (0.0, (Lead(False, 8.0, 0.0, 0.0, 0.0),), False),
+        (0.0, (), False), (0.0, None, False)):
+      owner = LongControl(cp)
+      cs = self.car_state(speed)
+      context = LongitudinalContext(leads=leads)
+      owner.update(True, cs, -1.0, True, (-3.5, 2.0), context=context)
+      self.assertEqual(owner.long_control_state, states.stopping)
+      owner.update(True, cs, 0.5, False, (-3.5, 2.0), context=context)
+      self.assertEqual(owner.long_control_state, states.stopping if veto else states.pid)
+      owner.update(False, cs, 0.5, False, (-3.5, 2.0), context=context)
+      self.assertEqual(owner.long_control_state, states.off)
+      owner.update(True, cs, 0.5, False, (-3.5, 2.0), context=context)
+      self.assertEqual(owner.long_control_state, states.pid)
+    owner = LongControl(cp)
+    cs = self.car_state(0.0).as_builder()
+    owner.update(True, cs, -1.0, True, (-3.5, 2.0))
+    cs.brakePressed = True
+    owner.update(True, cs, 0.5, False, (-3.5, 2.0), context=LongitudinalContext(leads=()))
+    self.assertEqual(owner.long_control_state, states.stopping)
+
+  def test_production_corolla_routes_fresh_stop_leads(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
+    cp = CarInterface.get_params(CAR.TOYOTA_COROLLA_TSS2, gen_empty_fingerprint(), [], False, False, False)
+    radar_event = messaging.new_message('radarState', valid=True)
+    radar_event.radarState.leadOne.present = True
+    radar_event.radarState.leadOne.dRel = 5.0
+    radar = messaging.log_from_bytes(radar_event.to_bytes()).radarState
+    device = NS(started=True, startedMonoTime=900_000_000)
+    class Messages(NS):
+      def __getitem__(self, name):
+        return {'radarState': radar, 'deviceState': device}[name]
+    now = [1_050_000_000, 500_000_000]
+    sm = Messages(seen={'radarState': True, 'deviceState': True},
+                  alive={'radarState': True, 'deviceState': True},
+                  valid={'radarState': True, 'deviceState': True},
+                  logMonoTime={}, recv_time={}, all_checks=lambda names: names == ['carState'])
+    def advance_sources():
+      for name in ('radarState', 'deviceState', 'carState'):
+        sm.logMonoTime[name] = now[0] - 5_000_000
+      for name in ('radarState', 'deviceState'):
+        sm.recv_time[name] = (now[0] - 2_000_000) / 1e9
+    advance_sources()
+    with patch.dict(os.environ, {'TOYOTA_LONG_OUTPUT_REPLAY_RUNTIME': '0', 'REPLAY': '0'}), \
+         patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', side_effect=lambda: (now[0], now[0] + now[1])):
+      inputs = LongitudinalInputs(cp, NS(), lambda: sm)
+      self.assertIn('radarState', inputs.optional_services)
+      self.assertIsNone(inputs.context(True).leads)
+      now[0] += 20_000_000
+      advance_sources()
+      current = inputs.context(True)
+      self.assertIsNotNone(current.leads)
+      owner = LongControl(cp)
+      cs = self.car_state(0.0)
+      owner.update(True, cs, -1.0, True, (-3.5, 2.0), context=current)
+      owner.update(True, cs, 0.5, False, (-3.5, 2.0), context=current)
+      self.assertEqual(owner.long_control_state, structs.CarControl.Actuators.LongControlState.stopping)
+      sm.logMonoTime['radarState'] = now[0] - 101_000_000
+      stale = inputs.context(True)
+      self.assertIsNone(stale.leads)
+      owner.update(True, cs, 0.5, False, (-3.5, 2.0), context=stale)
+      self.assertEqual(owner.long_control_state, structs.CarControl.Actuators.LongControlState.pid)
+      advance_sources()
+      self.assertIsNotNone(inputs.context(True).leads)
+      now[1] += 9_000_000_000
+      self.assertIsNone(inputs.context(True).leads)
+      now[0] += 20_000_000
+      self.assertIsNone(inputs.context(True).leads)
+      advance_sources()
+      self.assertIsNotNone(inputs.context(True).leads)
+      device.startedMonoTime = now[0] - 1_000_000
+      self.assertIsNone(inputs.context(True).leads)
+      self.assertIsNone(inputs.context(False).leads)
 
   def test_tss2_stopping_ramp_uses_admitted_vehicle_rate(self):
     from opendbc.car import structs
