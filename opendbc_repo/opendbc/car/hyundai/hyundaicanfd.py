@@ -56,7 +56,11 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque)
     lkas_msg = "LKAS_ALT" if CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG_ALT else "LKAS"
     if CP.openpilotLongitudinalControl:
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, values))
-    ret.append(packer.make_can_msg(lkas_msg, CAN.ACAN, values))
+    lkas_values = values
+    if (CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and CP.openpilotLongitudinalControl and
+        not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING):
+      lkas_values = {**values, "Damping_Gain": 0}
+    ret.append(packer.make_can_msg(lkas_msg, CAN.ACAN, lkas_values))
   else:
     ret.append(packer.make_can_msg("LFA", CAN.ECAN, values))
 

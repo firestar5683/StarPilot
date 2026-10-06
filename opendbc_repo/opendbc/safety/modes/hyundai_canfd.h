@@ -659,7 +659,7 @@ static bool hyundai_canfd_tx_hook_valid(const CANPacket_t *msg) {
       mirror &= (msg->data[13] & 0x08U) == 0U; // no FCA_ESA actuation
     }
     for (uint8_t i = 7U; i < GET_LEN(msg); i++) {
-      mirror &= msg->data[i] == ((i == 8U) ? 0x64U : 0U);
+      mirror &= msg->data[i] == (((i == 8U) && !hyundai_canfd_ioniq6_long) ? 0x64U : 0U);
     }
     mirror &= hyundai_canfd_get_checksum(msg) == (hyundai_common_canfd_compute_checksum(msg) ^
                                                  ((GET_LEN(msg) == 16U) ? 0x041DU : 0U));
