@@ -10,7 +10,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def eligible(cp):
-  if not blended_longitudinal.BLENDED_ALPHA_STARTUP_ENABLED or not blended_longitudinal.alpha_eligible(cp):
+  if not blended_longitudinal.hdai_startup_qualified(cp):
     return False
   word = 0x2014 if cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG else 0x2004
   if (not cp.openpilotLongitudinalControl or cp.pcmCruise or cp.passive or
@@ -62,4 +62,3 @@ class BlendedStoppingPolicy(HKGModePolicy):
       return output
     step = np.interp(CS.vEgo, [follow_min_speed, 3., 6., 10.], [.02, .03, .05, .07])
     return max(float(a_target), output - float(step))
-

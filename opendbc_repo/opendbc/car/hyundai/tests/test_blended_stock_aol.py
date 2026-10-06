@@ -90,11 +90,12 @@ class MixedReceiveStream:
 
 @pytest.mark.parametrize('hda2', [False, True])
 @pytest.mark.parametrize('alpha', [False, True])
-def test_exact_stock_final_profile_and_alpha_stays_disabled(hda2, alpha):
+def test_exact_stock_profile_advertises_hdai_without_selecting_long(hda2, alpha):
   cp = params(hda2, alpha)
   assert qualified(cp) == (not hda2)
   assert cp.alternativeExperience == 0
-  assert not cp.alphaLongitudinalAvailable and not cp.openpilotLongitudinalControl
+  assert cp.alphaLongitudinalAvailable == (not hda2)
+  assert not cp.openpilotLongitudinalControl
   assert cp.safetyConfigs[0].safetyParam == (0x2010 if hda2 else 0x2000)
   cp.alternativeExperience = 32
   assert qualified(cp, marked_only=True) == (not hda2)
@@ -167,7 +168,8 @@ def test_actual_card_publication_and_controls_stock_only(hda2, aol, disabled, mo
     subscriber = messaging.sub_sock('carParams', timeout=100, conflate=True)
     ci = CarInterface(cp)
     card = Car(CI=ci, RI=RadarInterface(cp))
-    assert not card.CP.openpilotLongitudinalControl and not card.CP.alphaLongitudinalAvailable
+    assert not card.CP.openpilotLongitudinalControl
+    assert card.CP.alphaLongitudinalAvailable == (not hda2)
     assert card.CP.pcmCruise and card.CP.safetyConfigs[0].safetyParam == (0x2010 if hda2 else 0x2000)
     assert card.CP.alternativeExperience == (32 if aol and not hda2 else 0)
     expected = card.CP.to_dict()

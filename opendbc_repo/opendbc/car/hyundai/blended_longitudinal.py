@@ -6,7 +6,7 @@ Shared Ioniq and generic Hyundai initialization are intentionally independent.
 from dataclasses import dataclass
 from enum import Enum
 
-from opendbc.car.hyundai.values import is_blended, HyundaiFlags, HyundaiSafetyFlags
+from opendbc.car.hyundai.values import CAR, is_blended, HyundaiFlags, HyundaiSafetyFlags
 
 DISABLE = b'\x28\x03\x01'  # Unsuppressed takeover requires a matching68 03 acknowledgment.
 ENABLE = b'\x28\x00\x01'  # Unsuppressed restoration: source-equivalent sent is not confirmation.
@@ -193,8 +193,28 @@ class BlendedLongitudinalController:
     return messages
 
 
-# Deliberately off until native, consumed tuning and full lifecycle are qualified.
-BLENDED_ALPHA_STARTUP_ENABLED = False
+def hdai_startup_qualified(cp, *, is_release=False):
+  """Developer-only classic mixed owner; HDAII remains independently disabled."""
+  from opendbc.car import structs
+  from opendbc.car.hyundai.hyundaicanfd import CanBus
+  declared = int(CAR.HYUNDAI_PALISADE_2023.config.flags)
+  dynamic = int(HyundaiFlags.HAS_LDA_BUTTON | HyundaiFlags.SEND_LFA)
+  if (is_release or int(cp.flags) & ~dynamic != declared or not alpha_eligible(cp) or cp.passive or cp.dashcamOnly or cp.notCar or
+      cp.brand != 'hyundai' or cp.steerControlType != structs.CarParams.SteerControlType.torque or
+      cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG or cp.alternativeExperience != 0 or
+      len(cp.safetyConfigs) != 1):
+    return False
+  safety = cp.safetyConfigs[0]
+  word = 0x2004 if cp.openpilotLongitudinalControl and not cp.pcmCruise else 0x2000
+  buses = CanBus(cp)
+  return (safety.safetyModel == structs.CarParams.SafetyModel.hyundai and safety.safetyParam == word and
+          (cp.openpilotLongitudinalControl != cp.pcmCruise) and
+          (buses.ECAN, buses.CAM) == (0, 2))
+
+
+def startup_required(cp):
+  # Active mixed CP must never bypass its car-owned prepublication transaction.
+  return is_blended(cp) and cp.openpilotLongitudinalControl
 
 
 class BlendedStartup:
@@ -204,6 +224,7 @@ class BlendedStartup:
     from opendbc.car.hyundai.blended_disable_ecu import confirm_disable_ecu
     from opendbc.car.hyundai.hyundaicanfd import CanBus
     self.stock_cp = stock_cp
+    self.candidate_snapshot = candidate.to_dict()
     self.callbacks = callbacks
     self.owner = BlendedLongitudinalOwner(candidate, CanBus(candidate), confirm_disable_ecu)
     self.stop_event = threading.Event()
@@ -236,6 +257,7 @@ class BlendedStartup:
     self.started_at = self.clock()
     self._tester()  # Continuity starts before parser/controller construction.
     import threading
+
     def loop():
       while not self.stop_event.wait(.5):
         self._tester()
@@ -259,6 +281,11 @@ class BlendedStartup:
       self.fault = 'Startup diagnostic sender failed'
       self.owner.cancel()
       self.stop_event.set()
+
+  def prepared_for(self, cp):
+    return (not self.closed and self.fault is None and self.owner.active() and self.owner.result is not None and
+            self.owner.result.outcome is Outcome.OWNED and self.source_floor_ns > 0 and
+            self.owner.cp.to_dict() == self.candidate_snapshot == cp.to_dict())
 
   def configure(self, ci):
     self.check()
@@ -444,5 +471,5 @@ class BlendedStartup:
 
 def startup_owner(cp, callbacks, *, requested):
   candidate = candidate_from_stock(cp, alpha_requested=requested,
-                                   native_qualified=BLENDED_ALPHA_STARTUP_ENABLED)
+                                   native_qualified=cp.alphaLongitudinalAvailable and hdai_startup_qualified(cp))
   return None if candidate is None else BlendedStartup(cp, candidate, callbacks)

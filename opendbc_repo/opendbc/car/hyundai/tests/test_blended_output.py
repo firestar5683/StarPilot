@@ -19,7 +19,7 @@ State = car.CarControl.Actuators.LongControlState
 
 class TestBlendedOutput(unittest.TestCase):
   def setUp(self):
-    self.scope = patch('opendbc.car.hyundai.blended_longitudinal.BLENDED_ALPHA_STARTUP_ENABLED', True)
+    self.scope = patch('opendbc.car.hyundai.blended_longitudinal.hdai_startup_qualified', return_value=True)
     self.scope.start()
     self.addCleanup(self.scope.stop)
     self.cp = candidate_from_stock(params(), alpha_requested=True, native_qualified=True)
