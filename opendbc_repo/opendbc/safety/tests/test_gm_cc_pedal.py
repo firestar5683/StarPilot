@@ -215,3 +215,85 @@ class TestGmCcPedal(unittest.TestCase):
       self.assertTrue(self.safety.get_controls_allowed())
       self.rx(0x201, self.sensor(2 if track1 == 4096 else 3, track1=track1, track2=track2))
       self.assertFalse(self.safety.get_controls_allowed())
+
+  def volt_feed(self, word, counter=0, *, active=True, regen=False):
+    self.feed(counter=counter, active=active)
+    if not (word & 1):
+      self.rx(0xBE, bytes(6))
+    self.rx(0xBD, bytes([16 if regen else 0] + [0] * 6))
+
+  def test_volt_cc_exact_records_and_release_denial(self):
+    release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
+    for index in range(8):
+      word = 0xE600 + index
+      with self.subTest(word=word):
+        self.init(word)
+        self.volt_feed(word)
+        self.engage()
+        self.assertEqual(self.safety.safety_tx_hook(self.command(0)), not release)
+        for address, length in ((0x315, 5), (0x2CB, 8), (0x370, 6), (0x2CD, 8), (0x306, 8)):
+          self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(length))))
+        for address in (0x409, 0x40A):
+          self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(7))),
+                           bool(index & 2) and not release)
+    for word in (0xE5FF, 0xE608, 0xE60F, 0xE618, 0xE61F, 0xE6FF):
+      self.init(word)
+      self.feed()
+      self.engage()
+      self.assertFalse(self.safety.safety_tx_hook(self.command(0)))
+
+  def test_volt_cc_independent_adc_gas_threshold_and_regen(self):
+    if self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0:
+      self.skipTest("Active Volt CC interceptor profiles are DEBUG-only")
+    for raw1, raw2, gas in ((0, 787, False), (0, 788, True), (604, 486, False), (604, 487, True)):
+      self.init(0xE600)
+      self.volt_feed(0xE600)
+      self.engage()
+      self.assertTrue(self.rx(0x201, self.sensor(1, raw1, raw2)))
+      self.assertEqual(self.safety.safety_tx_hook(self.command(0)), not gas)
+    self.init(0xE601)
+    self.volt_feed(0xE601, regen=True)
+    self.engage()
+    self.assertFalse(self.safety.safety_tx_hook(self.command(0)))
+    self.assertTrue(self.safety.safety_tx_hook(self.command(0, 0.)))
+
+  def test_volt_cc_stock_optional_pedal_and_gear_cannot_withdraw_cruise(self):
+    for index in range(8):
+      word = 0xE610 + index
+      self.init(word)
+      # Feed every stock-owned source, deliberately never supplying 201 or gear.
+      for address, length in ((0x184, 8), (0x34A, 5), (0x1C4, 8), (0xBD, 7)):
+        self.rx(address, bytes(length))
+      self.rx(0xF1 if index & 1 else 0xBE, bytes(6))
+      main = bytearray(8)
+      main[3] = 32
+      self.rx(0xC9, main)
+      cruise = bytearray(8)
+      cruise[4] = 128
+      self.rx(0x3D1, cruise)
+      self.safety.safety_rx_hook(self.buttons(0))
+      self.engage()
+      self.assertTrue(self.safety.get_controls_allowed())
+      self.rx(0x201, self.sensor(1, 4096, 0))
+      self.rx(0x1F5, bytes(8))
+      self.assertTrue(self.safety.get_controls_allowed())
+      self.assertFalse(self.safety.safety_tx_hook(self.command(0)))
+      self.safety.safety_rx_hook(self.buttons(1))
+      cancel = create_buttons(self.packer, 2, 1, 6)
+      self.assertTrue(self.safety.safety_tx_hook(self.packet(cancel)))
+      self.assertFalse(self.safety.safety_tx_hook(self.packet(cancel)))
+      self.assertFalse(self.safety.safety_tx_hook(self.buttons(1, 6)))
+
+  def test_volt_cc_sequential_command_counter_and_source_expiry(self):
+    if self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0:
+      self.skipTest("Active Volt CC interceptor profiles are DEBUG-only")
+    self.init(0xE600)
+    self.volt_feed(0xE600)
+    self.engage()
+    self.assertTrue(self.safety.safety_tx_hook(self.command(3)))
+    self.assertTrue(self.safety.safety_tx_hook(self.command(0)))
+    self.assertFalse(self.safety.safety_tx_hook(self.command(2)))
+    self.assertTrue(self.safety.safety_tx_hook(self.command(1)))
+    self.safety.set_timer(100001)
+    self.assertFalse(self.safety.safety_tx_hook(self.command(2)))
+    self.assertTrue(self.safety.safety_tx_hook(self.command(2, 0.)))

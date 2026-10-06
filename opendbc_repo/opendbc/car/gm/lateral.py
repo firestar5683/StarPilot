@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import gm_control_word, camera_acc_pedal_profile
+from opendbc.car.gm.values import gm_control_word, camera_acc_pedal_profile, volt_cc_pedal_profile
 """Exact finalized GM configurations for shared lateral preferences."""
 import math
 from opendbc.car.structs import CarParams
@@ -31,7 +31,7 @@ def lane_centering_supported(cp) -> bool:
       return True
     if is_volt_camera_removed(cp) or is_volt_sdgm_profile(cp) or is_volt_sdgm_profile(cp, longitudinal=True):
       return True
-    if is_volt_gateway_profile(cp) or is_volt_ascm_longitudinal(cp) or is_volt_cc_profile(cp):
+    if volt_cc_pedal_profile(cp) is not None or is_volt_gateway_profile(cp) or is_volt_ascm_longitudinal(cp) or is_volt_cc_profile(cp):
       return True
     if (len(cp.safetyConfigs) != 1 or cp.safetyConfigs[0].safetyModel != CarParams.SafetyModel.gm or
         cp.networkLocation != CarParams.NetworkLocation.fwdCamera or control_flags(cp) != 0):

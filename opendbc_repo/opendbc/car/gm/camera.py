@@ -1,9 +1,10 @@
 """Ordinary camera acceleration owner in normalized GM wire units."""
-from opendbc.car.gm.values import CAR, is_ordinary_camera_profile, camera_acc_pedal_profile
+from opendbc.car.gm.values import CAR, is_ordinary_camera_profile, camera_acc_pedal_profile, volt_cc_pedal_profile
 from opendbc.car.gm.longitudinal import GMOrdinaryLongitudinalPolicy, GMVoltLongitudinalPolicy, _GMDefaultStopPolicy, AscmStopEvidence
 import numpy as np
 
 from opendbc.car.gm.truck_longitudinal import GMTruckLongitudinalPolicy
+from opendbc.car.gm.conventional_pedal import GMConventionalPedalPolicy
 
 
 class CameraLongitudinalPolicy(GMOrdinaryLongitudinalPolicy):
@@ -25,6 +26,11 @@ class CameraPedalLongitudinalPolicy(CameraLongitudinalPolicy):
 
 
 def policy_for(cp):
+  cc_profile = volt_cc_pedal_profile(cp)
+  if cc_profile is not None and cc_profile.longitudinal:
+    policy = GMConventionalPedalPolicy(False)
+    policy.starting_speed = .75
+    return policy
   profile = camera_acc_pedal_profile(cp)
   if profile is not None and profile.longitudinal:
     return (GMVoltLongitudinalPolicy(gateway=profile.topology == "gateway")

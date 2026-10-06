@@ -3,6 +3,60 @@
 static uint8_t gm_pedal_crc(const CANPacket_t *msg);
 
 static bool gm_cc_pedal = false;
+static bool gm_cc_pedal_volt;
+static bool gm_cc_pedal_volt_f1;
+static bool gm_cc_pedal_volt_removed;
+static bool gm_cc_pedal_volt_stock;
+static bool gm_cc_pedal_volt_rejected;
+static uint16_t gm_cc_pedal_volt_seen;
+static uint32_t gm_cc_pedal_volt_us[10] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
+static bool gm_cc_pedal_volt_regen;
+
+static uint16_t gm_cc_pedal_volt_decode(uint16_t raw) {
+  gm_cc_pedal_volt = false;
+  gm_cc_pedal_volt_f1 = false;
+  gm_cc_pedal_volt_removed = false;
+  gm_cc_pedal_volt_stock = false;
+  gm_cc_pedal_volt_rejected = false;
+  uint16_t canonical = raw;
+  switch (raw) {
+    case 0xE600U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE601U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE602U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE603U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE604U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE605U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE606U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE607U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = false; canonical = 5U; break;
+    case 0xE610U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE611U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE612U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE613U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE614U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE615U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = false; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE616U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = false; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    case 0xE617U: gm_cc_pedal_volt = true; gm_cc_pedal_volt_f1 = true; gm_cc_pedal_volt_removed = true; gm_cc_pedal_volt_stock = true; canonical = 5U; break;
+    default:
+      if ((raw >= 0xE600U) && (raw <= 0xE6FFU)) { gm_cc_pedal_volt_rejected = true; canonical = 5U; }
+      break;
+  }
+#ifndef ALLOW_DEBUG
+  if (gm_cc_pedal_volt && !gm_cc_pedal_volt_stock) { gm_cc_pedal_volt_rejected = true; }
+#endif
+  return canonical;
+}
+
+static bool gm_cc_pedal_volt_current(void) {
+  bool current = true;
+  const uint32_t now = microsecond_timer_get();
+  const uint32_t limits[10] = {300000U, 100000U, 300000U, 300000U, 300000U, 300000U, 100000U, 300000U, 1000000U, 100000U};
+  for (uint8_t i = 0U; i < 10U; i++) {
+    if (!gm_cc_pedal_volt_stock || ((i != 6U) && (i != 8U))) {
+      current &= ((gm_cc_pedal_volt_seen & (1U << i)) != 0U) && (safety_get_ts_elapsed(now, gm_cc_pedal_volt_us[i]) <= limits[i]);
+    }
+  }
+  return current && !safety_rx_checks_invalid && !relay_malfunction;
+}
 // Silverado owns four complete selectors; it shares only the checked pedal codec.
 static bool gm_cc_pedal_silverado = false;
 static bool gm_cc_pedal_stock_only = false;
@@ -30,6 +84,8 @@ static bool gm_cc_pedal_tx_seen = false;
 static uint8_t gm_cc_pedal_tx_counter = 0U;
 
 static void gm_cc_pedal_reset(void) {
+  gm_cc_pedal_volt_seen = 0U; gm_cc_pedal_volt_regen = false;
+  for (uint8_t i = 0U; i < 10U; i++) { gm_cc_pedal_volt_us[i] = 0U; }
   gm_cc_pedal_silverado_seen = 0U;
   for (uint8_t i = 0U; i < 8U; i++) { gm_cc_pedal_silverado_us[i] = 0U; }
   gm_cc_pedal_main = false;
@@ -65,10 +121,10 @@ static bool gm_cc_pedal_silverado_current(void) {
 
 static bool gm_cc_pedal_current(void) {
   const uint32_t now = microsecond_timer_get();
-  return gm_cc_pedal_sensor_valid && gm_cc_pedal_main && gm_cc_pedal_forward &&
+  return (!gm_cc_pedal_volt || gm_cc_pedal_volt_current()) && gm_cc_pedal_sensor_valid && gm_cc_pedal_main && gm_cc_pedal_forward &&
          (safety_get_ts_elapsed(now, gm_cc_pedal_sensor_us) <= 100000U) &&
          (safety_get_ts_elapsed(now, gm_cc_pedal_main_us) <= 300000U) &&
-         (safety_get_ts_elapsed(now, gm_cc_pedal_gear_us) <= (gm_cc_pedal_silverado ? 300000U : 100000U)) &&
+         (safety_get_ts_elapsed(now, gm_cc_pedal_gear_us) <= (gm_cc_pedal_volt ? 1000000U : (gm_cc_pedal_silverado ? 300000U : 100000U))) &&
          (!gm_cc_pedal_silverado || gm_cc_pedal_silverado_current()) &&
          !safety_rx_checks_invalid && !relay_malfunction;
 }
@@ -76,6 +132,17 @@ static bool gm_cc_pedal_current(void) {
 static void gm_cc_pedal_rx(const CANPacket_t *msg) {
   if (gm_cc_pedal && (msg->bus == 0U)) {
     const uint32_t now = microsecond_timer_get();
+    if (gm_cc_pedal_volt) {
+      const uint16_t source_bits[10] = {1U, 2U, 4U, 8U, 16U, 32U, 64U, 128U, 256U, 512U};
+      const uint32_t addresses[10] = {0x184U, 0x34AU, 0x1E1U, gm_cc_pedal_volt_f1 ? 0xF1U : 0xBEU, 0x1C4U, 0xC9U, 0x201U, 0x3D1U, 0x1F5U, 0xBDU};
+      const uint8_t lengths[10] = {8U, 5U, 7U, 6U, 8U, 8U, 6U, 8U, 8U, 7U};
+      for (uint8_t i = 0U; i < 10U; i++) {
+        if ((msg->addr == addresses[i]) && ((GET_LEN(msg) == lengths[i]) || ((i == 3U) && !gm_cc_pedal_volt_f1 && ((GET_LEN(msg) == 7U) || (GET_LEN(msg) == 8U))))) {
+          gm_cc_pedal_volt_seen |= source_bits[i]; gm_cc_pedal_volt_us[i] = now;
+        }
+      }
+      if ((msg->addr == 0xBDU) && (GET_LEN(msg) == 7U)) { gm_cc_pedal_volt_regen = (msg->data[0] >> 4) != 0U; }
+    }
     if (gm_cc_pedal_silverado) {
       const uint32_t addresses[8] = {0x184U, 0x34AU, 0xC9U, 0x3D1U, 0x1E1U, 0x1C4U, 0x1F5U, 0x201U};
       const uint8_t lengths[8] = {8U, 5U, 8U, 8U, 7U, 8U, 8U, 6U};
@@ -97,8 +164,12 @@ static void gm_cc_pedal_rx(const CANPacket_t *msg) {
       gm_cc_pedal_sensor_seen = true;
       gm_cc_pedal_sensor_counter = counter;
       gm_cc_pedal_sensor_us = now;
-      gm_cc_pedal_sensor_gas = ((track1 + track2) / 2) > 595;
-      if (!gm_cc_pedal_sensor_valid) { controls_allowed = false; }
+      if (gm_cc_pedal_volt) {
+        gm_cc_pedal_sensor_gas = ((125677U * (uint32_t)track1) + (251976U * (uint32_t)track2)) > (uint32_t)198510000U;
+      } else {
+        gm_cc_pedal_sensor_gas = ((track1 + track2) / 2) > 595;
+      }
+      if (!gm_cc_pedal_sensor_valid && !gm_cc_pedal_volt_stock) { controls_allowed = false; }
     } else if ((msg->addr == 0x3D1U) && (GET_LEN(msg) == 8U)) {
       gm_cc_pedal_stock_active = GET_BIT(msg, 39U);
       gm_cc_pedal_stock_us = now;
@@ -114,7 +185,7 @@ static void gm_cc_pedal_rx(const CANPacket_t *msg) {
       const uint8_t gear = msg->data[3] & 0xFU;
       gm_cc_pedal_forward = ((gear == 4U) || (gear == 6U)) && !GET_BIT(msg, 41U);
       gm_cc_pedal_gear_us = now;
-      if (!gm_cc_pedal_forward) { controls_allowed = false; }
+      if (!gm_cc_pedal_forward && !gm_cc_pedal_volt_stock) { controls_allowed = false; }
     } else if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) {
       const uint8_t counter = msg->data[4] & 0x3U;
       const uint16_t checksum = 0xFFU + (counter * 0x4EFU);
@@ -139,8 +210,8 @@ static void gm_cc_pedal_rx(const CANPacket_t *msg) {
     } else {
       // Only exact selected PT sources change this owner state.
     }
-    gas_pressed = gm_cc_pedal_sensor_gas;
-    if (!gm_cc_pedal_main || !gm_cc_pedal_forward || !gm_cc_pedal_sensor_valid) { controls_allowed = false; }
+    if (!gm_cc_pedal_volt_stock) { gas_pressed = gm_cc_pedal_sensor_gas; }
+    if (!gm_cc_pedal_main || (!gm_cc_pedal_volt_stock && (!gm_cc_pedal_forward || !gm_cc_pedal_sensor_valid))) { controls_allowed = false; }
   }
 }
 
@@ -153,12 +224,12 @@ static bool gm_cc_pedal_tx(const CANPacket_t *msg) {
     const uint8_t counter = msg->data[4] & 0xFU;
     const bool enabled = GET_BIT(msg, 39U);
     const bool inactive = !enabled && (track1 == 0) && (track2 == 0);
-    const bool active = enabled && gm_cc_pedal_current() && get_longitudinal_allowed() && !brake_pressed_prev &&
+    const bool active = enabled && gm_cc_pedal_current() && get_longitudinal_allowed() && !brake_pressed_prev && (!gm_cc_pedal_volt || (!gm_cc_pedal_volt_regen && !gm_cc_pedal_sensor_gas)) &&
       (track1 >= 604) && (track1 <= 2633) && (track2 >= 304) && (track2 <= 1316) &&
       (pair_delta >= -16) && (pair_delta <= 16);
     allowed = !gm_cc_pedal_stock_only && (inactive || active) && ((msg->data[4] & 0x70U) == 0U) && (counter < 4U) &&
       (gm_pedal_crc(msg) == msg->data[5]) &&
-      (!gm_cc_pedal_tx_seen || (counter != gm_cc_pedal_tx_counter));
+      (!gm_cc_pedal_tx_seen || (gm_cc_pedal_volt ? (counter == ((gm_cc_pedal_tx_counter + 1U) & 3U)) : (counter != gm_cc_pedal_tx_counter)));
     if (allowed) {
       gm_cc_pedal_tx_seen = true;
       gm_cc_pedal_tx_counter = counter;
@@ -168,12 +239,13 @@ static bool gm_cc_pedal_tx(const CANPacket_t *msg) {
     const uint8_t counter = gm_cc_pedal_stock_only ? gm_cc_pedal_button_counter :
       (gm_cc_pedal_button_counter + 1U) % 4U;
     const uint16_t checksum = 0xFFU + (counter * 0x4EFU) - (5U << 4);
-    allowed = gm_cc_pedal_main && ((gm_cc_pedal_stock_only && !gm_cc_pedal_ordinary_stock) || gm_cc_pedal_stock_active) &&
+    allowed = gm_cc_pedal_main && ((gm_cc_pedal_stock_only && !gm_cc_pedal_ordinary_stock && !gm_cc_pedal_volt_stock) || gm_cc_pedal_stock_active) &&
       gm_cc_pedal_cancel_credit && (!gm_cc_pedal_ordinary_stock || !safety_rx_checks_invalid) &&
       (!gm_cc_pedal_silverado || gm_cc_pedal_silverado_current()) &&
+      (!gm_cc_pedal_volt || gm_cc_pedal_volt_current()) &&
       (safety_get_ts_elapsed(now, gm_cc_pedal_main_us) <= 300000U) &&
       (safety_get_ts_elapsed(now, gm_cc_pedal_stock_us) <= 300000U) &&
-      (safety_get_ts_elapsed(now, gm_cc_pedal_button_us) <= (gm_cc_pedal_silverado ? 100000U : 300000U)) &&
+      (safety_get_ts_elapsed(now, gm_cc_pedal_button_us) <= ((gm_cc_pedal_silverado || gm_cc_pedal_volt) ? 100000U : 300000U)) &&
       (!gm_cc_pedal_cancel_seen || (safety_get_ts_elapsed(now, gm_cc_pedal_cancel_us) > 40000U)) &&
       (msg->data[0] == 0U) && (msg->data[1] == 0U) && (msg->data[2] == 0U) &&
       (msg->data[3] == 1U) && (msg->data[4] == counter) &&

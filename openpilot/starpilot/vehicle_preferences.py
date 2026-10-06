@@ -110,8 +110,8 @@ class VehicleStartupPreferences:
             cp.dashcamOnly = True
 
   def _prepare_camera_pedal(self, cp) -> None:
-    from opendbc.car.gm.values import camera_acc_pedal_profile
-    if not self.gm_camera_pedal and camera_acc_pedal_profile(cp) is not None:
+    from opendbc.car.gm.values import camera_acc_pedal_profile, volt_cc_pedal_profile
+    if not self.gm_camera_pedal and (camera_acc_pedal_profile(cp) is not None or volt_cc_pedal_profile(cp) is not None):
       prepare_disable_longitudinal(cp, True)
 
   def prepare(self, cp, *, fingerprints=None):
@@ -150,14 +150,14 @@ class VehicleStartupPreferences:
 
   def configure_controller(self, ci) -> None:
     from opendbc.car.gm.values import (CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_gm_auto_hold,
-                                     is_volt_one_pedal, camera_acc_pedal_profile)
+                                     is_volt_one_pedal, camera_acc_pedal_profile, volt_cc_pedal_profile)
     cp = ci.CP
     if ci.CC is not None and is_volt_longitudinal(cp):
       ci.CC.volt_sng = self.volt_sng
     if ci.CC is not None and cp.brand == "gm":
       ci.CC.gm_auto_hold = self.gm_auto_hold and is_gm_auto_hold(cp)
       ci.CC.volt_one_pedal = self.volt_one_pedal and is_volt_one_pedal(cp)
-    pedal = camera_acc_pedal_profile(cp)
+    pedal = camera_acc_pedal_profile(cp) or volt_cc_pedal_profile(cp)
     if ci.CC is not None and (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or cp.carFingerprint == CAR.CHEVROLET_SUBURBAN or
                              pedal is not None and pedal.longitudinal):
       ci.CC.long_pitch = self.gm_long_pitch

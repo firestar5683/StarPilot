@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, ALT_ACCS
+from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, ALT_ACCS, volt_cc_pedal_profile
 """Finalized GM speed-control choices; existing native envelopes are retained."""
 
 from opendbc.car.gm.values import (is_volt_gateway_profile, is_volt_cc_profile, is_ordinary_cc_profile,
@@ -9,13 +9,20 @@ from opendbc.car.gm.values import (is_volt_ascm_longitudinal, is_volt_camera_lon
 
 
 def disable_long_supported(cp) -> bool:
-  return (camera_acc_pedal_profile(cp) is not None or is_conventional_cc_pedal_profile(cp) or
+  return (volt_cc_pedal_profile(cp) is not None or camera_acc_pedal_profile(cp) is not None or is_conventional_cc_pedal_profile(cp) or
           is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
           is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or is_volt_sdgm_profile(cp, longitudinal=True) or
           is_volt_camera_removed(cp, longitudinal=True) or is_lacrosse_gateway_profile(cp))
 
 
 def prepare_disable_longitudinal(cp, requested: bool) -> None:
+  cc_profile = volt_cc_pedal_profile(cp)
+  if requested and cc_profile is not None:
+    cp.safetyConfigs[0].safetyParam = 0xE610 + 4 * int(cc_profile.radar) + 2 * int(cc_profile.removed) + int(cc_profile.brake_source.value == "F1")
+    cp.openpilotLongitudinalControl = False
+    cp.pcmCruise = False
+    cp.autoResumeSng = False
+    return
   profile = camera_acc_pedal_profile(cp)
   if requested and profile is not None:
     stock_words = {0xE100: 0xE110, 0xE101: 0xE111, 0xE102: 0xE112, 0xE103: 0xE113}

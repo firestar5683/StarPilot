@@ -39,7 +39,6 @@ def volt_gateway_pedal_params(*, camera=True, be=True, pedal=True, gear=True, re
   return CarInterface.get_params(CAR.CHEVROLET_VOLT, fingerprint, [], alpha, release, False)
 
 
-
 def volt_ascm_pedal_params(*, be=True, radar=True, sascm=False, alpha=False, release=False, pedal=True, gear=True, be_length=6):
   from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
   fingerprint = gen_empty_fingerprint()
@@ -72,6 +71,24 @@ def volt_sdgm_pedal_params(*, be=True, radar=True, sascm=False, alpha=False, rel
   if radar:
     fingerprint[1][RADAR_HEADER_MSG] = 8
   return CarInterface.get_params(CAR.CHEVROLET_VOLT_2019, fingerprint, [], alpha, release, False)
+
+
+def volt_cc_pedal_params(*, be=True, radar=True, sascm=False, alpha=False, release=False, pedal=True, gear=True, be_length=6, removed=False):
+  from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0x1E1: 7, 0x1C4: 8, 0xC9: 8, 0xBD: 7, 0x232: 8, 0x3D1: 8})
+  fingerprint[0][0xBE if be else 0xF1] = be_length if be else 6
+  if pedal:
+    fingerprint[0][0x201] = 6
+  if gear:
+    fingerprint[0][0x1F5] = 8
+  if sascm:
+    fingerprint[0][0x2FF] = 8
+  if not removed:
+    fingerprint[2].update({0x320: 6, 0x180: 4})
+  if radar:
+    fingerprint[1][RADAR_HEADER_MSG] = 8
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_CC, fingerprint, [], alpha, release, False)
 
 
 @dataclass(frozen=True)
@@ -402,7 +419,6 @@ class TestVoltGatewayPedalProfiles(unittest.TestCase):
           self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE310 + index)
         self.assertTrue(volt_gateway_pedal_params(camera=camera, be=be, radar=False).dashcamOnly)
 
-
   def test_actual_parser_preserves_final_gateway_brake_sources(self):
     from opendbc.can import CANPacker
     from opendbc.car import Bus
@@ -443,7 +459,6 @@ class TestVoltGatewayPedalProfiles(unittest.TestCase):
               self.assertTrue(state.cruiseState.available)
               self.assertEqual(state.brakePressed, pressed)
               self.assertAlmostEqual(ci.CS.gm_auto_hold_brake, analog if be else analog / 208, places=6)
-
 
   def test_actual_stock_parser_and_cancel_use_fresh_neutral_counter(self):
     from opendbc.can import CANPacker
@@ -679,3 +694,83 @@ class TestVoltSdgmPedalProfiles(unittest.TestCase):
       self.assertEqual(config.continued_stop_speed, .25 if hold else .02)
       self.assertEqual(stopped_for_hold(state, config, True), hold)
       self.assertFalse(stopped_for_hold(state, config, False))
+
+
+class TestVoltCcPedalProfiles(unittest.TestCase):
+  def test_actual_factory_binds_direct_pedal_owner_and_stock_reduction(self):
+    from opendbc.car.gm.values import volt_cc_pedal_profile
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    for be in (True, False):
+      for radar in (False, True):
+        for removed in (False, True):
+          index = 4 * int(radar) + 2 * int(removed) + int(not be)
+          cp = volt_cc_pedal_params(be=be, radar=radar, removed=removed)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE600 + index)
+          self.assertIsNotNone(volt_cc_pedal_profile(cp))
+          self.assertEqual(cp.radarUnavailable, not radar)
+          prepare_disable_longitudinal(cp, True)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE610 + index)
+          self.assertFalse(cp.pcmCruise)
+          self.assertFalse(cp.openpilotLongitudinalControl)
+          self.assertIsNotNone(volt_cc_pedal_profile(cp))
+
+  def test_actual_parser_keeps_cc_engagement_and_pedal_telemetry_distinct(self):
+    from itertools import product
+    from opendbc.can import CANPacker, CANParser
+    from opendbc.car import Bus
+    from opendbc.car.gm import gmcan
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.starpilot.controller_extensions import configure_controller
+    for be, removed, radar, release in product((False, True), repeat=4):
+      with self.subTest(be=be, removed=removed, radar=radar, release=release), OpenpilotPrefix():
+        params = Params()
+        params.put_bool('OpenpilotEnabledToggle', True, block=True)
+        cp = volt_cc_pedal_params(be=be, removed=removed, radar=radar, release=release)
+        ci = CarInterface(cp)
+        configure_controller(ci, params)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        output = CANParser(DBC[cp.carFingerprint][Bus.pt], [('GAS_COMMAND', float('nan'))], 0)
+        command = structs.CarControl(enabled=True, longActive=not release)
+        command.actuators.accel = .5
+        loopback = []
+        for tick in range(104):
+          now = 1_000_000_000 + tick * 10_000_000
+          frames = [frame for frame in pt_frames(packer, counter=tick % 4, acc_cruise=6) if frame[0] not in (0xBE, 0xF1)]
+          frames.append(packer.make_can_msg('ECMAcceleratorPos' if be else 'EBCMBrakePedalPosition', 0, {}))
+          frames += [packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': 1, 'CruiseSetSpeed': 80}),
+                     packer.make_can_msg('EBCMRegenPaddle', 0, {})]
+          if not removed:
+            frames += [packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}),
+                       packer.make_can_msg('AEBCmd', 2, {})]
+          if not release and tick % 2 == 0:
+            sensor = bytearray.fromhex('0279012a0000')
+            sensor[4] = tick // 2 % 16
+            sensor[5] = gmcan.pedal_crc(sensor)
+            frames.append((0x201, bytes(sensor), 0))
+          state = ci.update([(now, frames + loopback)])
+          actuators, tx = ci.apply(command.as_reader(), now)
+          loopback = [(addr, data, 128) for addr, data, _ in tx if addr == 0x180]
+          keepalives = [addr for addr, _, _ in tx if addr in (0x409, 0x40A)]
+          if release:
+            self.assertEqual(keepalives, [])
+          if tick == 100:
+            self.assertTrue(state.canValid)
+            self.assertEqual(keepalives, [0x409, 0x40A] if removed and not release else [])
+          if tick == 60:
+            self.assertTrue(state.canValid)
+            self.assertTrue(state.cruiseState.enabled)
+            self.assertAlmostEqual(state.cruiseState.speed, 80 / 3.6, places=4)
+            self.assertFalse(state.accFaulted)
+            if release:
+              self.assertFalse(any(a == 0x200 for a, _, _ in tx))
+            else:
+              pedal = next(frame for frame in tx if frame[0] == 0x200)
+              output.update([(now, [pedal])])
+              self.assertGreater(actuators.gas, 0.)
+              self.assertEqual(actuators.brake, 0.)
+              self.assertAlmostEqual(output.vl['GAS_COMMAND']['GAS_COMMAND'] / 255., actuators.gas, delta=.001)
+            if removed:
+              self.assertNotIn(0x180, ci.can_parsers[Bus.pt].vl)
+              self.assertNotIn(0x180, ci.can_parsers[Bus.cam].vl)

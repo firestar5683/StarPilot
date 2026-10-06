@@ -1,4 +1,4 @@
-from opendbc.car.gm.values import camera_acc_pedal_profile
+from opendbc.car.gm.values import camera_acc_pedal_profile, volt_cc_pedal_profile
 from openpilot.starpilot.saved_source import read_saved
 
 
@@ -10,9 +10,10 @@ class CameraPedalPreference:
     self.enabled = False
 
   def update(self, now_ns):
-    profile = camera_acc_pedal_profile(self.cp)
+    cc_profile = volt_cc_pedal_profile(self.cp)
+    profile = camera_acc_pedal_profile(self.cp) or cc_profile
     if (type(now_ns) is not int or now_ns <= 0 or profile is None or not profile.longitudinal or
-        self.maneuver and not profile.volt):
+        self.maneuver and cc_profile is None and not profile.volt):
       self.enabled = False
       return False
     if now_ns < self.read_ns:

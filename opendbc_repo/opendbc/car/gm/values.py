@@ -143,6 +143,8 @@ VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
 
 def gm_control_word(cp: CarParams) -> int:
   word = int(cp.safetyConfigs[0].safetyParam)
+  if word in VOLT_CC_PEDAL_PROFILES and volt_cc_pedal_profile(cp) is not None:
+    return 5
   if word in CAMERA_ACC_PEDAL_PROFILES:
     profile = camera_acc_pedal_profile(cp)
     if profile is not None:
@@ -1046,3 +1048,41 @@ def is_silverado_cc_pedal_profile(cp):
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and int(cp.safetyConfigs[0].safetyParam) == word)
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
+
+
+@dataclass(frozen=True)
+class VoltCcPedalProfile:
+  longitudinal: bool
+  radar: bool
+  removed: bool
+  brake_source: BrakeSource
+
+
+VOLT_CC_PEDAL_PROFILES = MappingProxyType({
+  start + index: VoltCcPedalProfile(start == 0xE600, index >= 4, bool(index & 2),
+                                  BrakeSource.F1 if index & 1 else BrakeSource.BE)
+  for start in (0xE600, 0xE610) for index in range(8)
+})
+
+
+def volt_cc_pedal_profile(cp):
+  try:
+    if len(cp.safetyConfigs) != 1:
+      return None
+    profile = VOLT_CC_PEDAL_PROFILES.get(int(cp.safetyConfigs[0].safetyParam))
+    if profile is None:
+      return None
+    flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if profile.removed else 0) |
+                (GMFlags.NO_ACCELERATOR_POS_MSG if profile.brake_source == BrakeSource.F1 else 0))
+    if (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_VOLT_CC and
+        cp.transmissionType == CarParams.TransmissionType.direct and
+        cp.networkLocation == CarParams.NetworkLocation.fwdCamera and
+        not cp.passive and not cp.dashcamOnly and not cp.notCar and
+        int(cp.flags) & ~int(GMFlags.HAS_BSM) == flags and
+        cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+        cp.openpilotLongitudinalControl == profile.longitudinal and not cp.pcmCruise and
+        profile.radar != cp.radarUnavailable):
+      return profile
+  except (AttributeError, IndexError, TypeError, ValueError):
+    pass
+  return None

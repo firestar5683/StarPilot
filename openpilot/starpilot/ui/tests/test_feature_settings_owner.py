@@ -77,6 +77,21 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertIsNone(row.default_value)
     self.assertIsNone(row_default(row))
 
+  def test_volt_cc_pedal_setup_and_grade_compensation_follow_actual_owner(self):
+    from opendbc.car.gm.tests.test_volt_transitions import volt_cc_pedal_params
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    cp = volt_cc_pedal_params()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Automatic')
+    pitch = self._row('vehicle', 'LongPitch')
+    self.assertTrue(pitch.available)
+    request = replace(required_change(pitch), confirmation=True)
+    self.assertTrue(self.owner.apply(request))
+    prepare_disable_longitudinal(cp, True)
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Detected, inactive')
+    self.assertFalse(self.owner.apply(request))
+
   def test_source_profile_defaults_and_single_numeric_reset(self):
     self.params.put("StandardFollow", 2.8, block=True)
     row = self._row("standard", "StandardFollow")
