@@ -3,7 +3,7 @@ from opendbc.car.toyota.carstate import CarState
 from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, MIN_ACC_SPEED, \
-                                                  EPS_SCALE, ToyotaSafetyFlags, TOYOTA_AUTO_HOLD_CARS, TOYOTA_AUTO_HOLD_AEB_CARS
+                                                  EPS_SCALE, ToyotaSafetyFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -28,7 +28,7 @@ def apply_toyota_auto_hold(CP, enabled: bool) -> bool:
   admitted = enabled and toyota_auto_hold_supported(CP)
   if admitted:
     CP.flags |= int(ToyotaFlags.AUTO_BRAKE_HOLD)
-    CP.alternativeExperience |= (ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD if CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS
+    CP.alternativeExperience |= (ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD if uses_toyota_auto_hold_aeb(CP)
                                  else ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD)
   return bool(admitted)
 

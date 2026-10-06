@@ -592,7 +592,8 @@ class FeatureSettingsOwner:
               FeatureRow("", "Always On Lateral", "Keep steering assistance active independently of cruise control", page=FeaturePage.AOL, available=True),
               FeatureRow("", "Wheel Controls", "Assign steering-wheel buttons and cruise behavior", page=FeaturePage.WHEEL, available=True)]
       if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
-          self._pedal_setup_capability() is not None or self._gm_stop_capability("VoltSNG") is not None or
+          self._auto_hold_capability() is not None or self._pedal_setup_capability() is not None or
+          self._gm_stop_capability("VoltSNG") is not None or
           self._gm_stop_capability("GMAutoHold") is not None or self.tesla_screen.capability() is not None or self.gm_tune.capability() is not None):
         rows.append(FeatureRow("", "Vehicle Settings", "Configure features supported by your vehicle", page=FeaturePage.VEHICLE, available=True))
       rows.extend(FeatureRow("", name.title() + " Personality", "", page=name, available=True)
@@ -601,8 +602,8 @@ class FeatureSettingsOwner:
       title = "Vehicle Settings"
       capability = self._auto_hold_capability()
       allowed = configurable and capability is not None and self.authority("vehicle")
-      from opendbc.car.toyota.values import TOYOTA_AUTO_HOLD_AEB_CARS
-      stops = "manual stops" if capability is not None and capability[0] in TOYOTA_AUTO_HOLD_AEB_CARS else "manual and cruise-controlled stops"
+      from opendbc.car.toyota.values import uses_toyota_auto_hold_aeb
+      stops = "manual stops" if capability is not None and uses_toyota_auto_hold_aeb(self.vehicle_params()) else "manual and cruise-controlled stops"
       row = self._bool_row("ToyotaAutoHold", "Automatic Brake Hold", allowed,
                            f"Holds {stops} with cruise main on until you press the gas. Applies after the next startup.")
       rows = [replace(row, available=row.available and self._readable("ToyotaAutoHold"), capability=capability)] if capability is not None else []

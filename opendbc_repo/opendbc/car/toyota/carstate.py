@@ -9,7 +9,7 @@ from opendbc.car.interfaces import CarStateBase
 from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, parser_expiry, toyota_sign
 from opendbc.can.dbc import DBC as CANDBC
 from opendbc.car.toyota.prius_longitudinal import configured as prius_filter_configured
-from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, EPS_SCALE, TOYOTA_AUTO_HOLD_AEB_CARS
+from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, EPS_SCALE, uses_toyota_auto_hold_aeb
 
 ButtonType = structs.CarState.ButtonEvent.Type
 SteerControlType = structs.CarParams.SteerControlType
@@ -62,7 +62,7 @@ class CarState(CarStateBase):
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
 
-    if self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS:
+    if self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and uses_toyota_auto_hold_aeb(self.CP):
       self.pre_collision_2 = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
 
     ret = structs.CarState()
@@ -228,7 +228,7 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     dbc_name = DBC[CP.carFingerprint][Bus.pt]
     cam_messages = [("RSA1", math.nan)] if "RSA1" in CANDBC(dbc_name).name_to_msg else []
-    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS:
+    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and uses_toyota_auto_hold_aeb(CP):
       cam_messages.append(("PRE_COLLISION_2", 50))
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),

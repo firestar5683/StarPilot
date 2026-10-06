@@ -6,15 +6,16 @@ from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.carstate import CarState
 from opendbc.car.toyota.interface import CarInterface, apply_toyota_auto_hold, toyota_auto_hold_supported
-from opendbc.car.toyota.values import CAR, DBC, ToyotaFlags, ToyotaSafetyFlags, TOYOTA_AUTO_HOLD_CARS
+from opendbc.car.toyota.values import CAR, DBC, ToyotaFlags, ToyotaSafetyFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.safety import ALTERNATIVE_EXPERIENCE as AE
 
 
 def setup_hold(car=CAR.TOYOTA_COROLLA_TSS2, enabled=True, *, car_fw=()):
-  cp = CarInterface.get_params(car, {0: {}, 1: {}, 2: {}}, car_fw, False, False, False)
+  cp = CarInterface.get_params(car, {0: {}, 1: {}, 2: {}}, list(car_fw), False, False, False)
   apply_toyota_auto_hold(cp, enabled)
   state = CarState(cp)
   state.out = structs.CarState()
+  state.out.canValid = True
   state.out.standstill = True
   state.out.brakePressed = True
   state.out.cruiseState.available = True
@@ -50,6 +51,95 @@ def setup_cruise_hold(car=CAR.TOYOTA_COROLLA_TSS2, enabled=True, *, car_fw=()):
 
 
 class TestToyotaAutoHold(unittest.TestCase):
+  def test_invalid_can_withdraws_hold_and_requires_fresh_stop(self):
+    for car, hybrid in ((CAR.TOYOTA_CAMRY_TSS2, False), (CAR.TOYOTA_RAV4_TSS2, True),
+                         (CAR.TOYOTA_COROLLA_TSS2, False)):
+      for timeout in (False, True):
+        with self.subTest(car=car, timeout=timeout):
+          fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+          cp, owner, command, state = setup_hold(car, car_fw=fw)
+          for _ in range(101):
+            step_hold(owner, command, state)
+          self.assertTrue(owner.brake_hold_active)
+          if uses_toyota_auto_hold_aeb(cp):
+            frames = [frame for _ in range(2) for frame in step_hold(owner, command, state)]
+            held = next(frame for frame in frames if frame[0] == 0x344)
+            self.assertEqual(decode(cp, held, 'PRE_COLLISION_2')['DSS1GDRV'], -1.0)
+          else:
+            self.assert_acc_hold(tick_acc(cp, owner, command, state))
+          state.out.canValid = timeout
+          state.out.canTimeout = timeout
+          frames = [frame for _ in range(3) for frame in step_hold(owner, command, state)]
+          self.assertFalse(owner.brake_hold_active)
+          self.assertEqual(owner._brake_hold_counter, 0)
+          self.assertFalse(any(frame[0] == 0x344 for frame in frames))
+          for frame in frames:
+            if frame[0] == 0x343:
+              self.assertNotEqual(decode(cp, frame, 'ACC_CONTROL')['ACCEL_CMD'], -1.0)
+          state.out.canValid, state.out.canTimeout = True, False
+          state.out.brakePressed = False
+          for _ in range(105):
+            step_hold(owner, command, state)
+          self.assertFalse(owner.brake_hold_active)
+          state.out.brakePressed = True
+          for _ in range(100):
+            step_hold(owner, command, state)
+          self.assertFalse(owner.brake_hold_active)
+          step_hold(owner, command, state)
+          self.assertTrue(owner.brake_hold_active)
+
+  def test_detected_early_hybrid_uses_manual_aeb_hold(self):
+    for car, hybrid, aeb in ((CAR.TOYOTA_RAV4_TSS2, True, True),
+                             (CAR.TOYOTA_RAV4_TSS2, False, False),
+                             (CAR.TOYOTA_RAV4_TSS2_2022, True, False),
+                             (CAR.TOYOTA_CAMRY_TSS2, False, True)):
+      with self.subTest(car=car, hybrid=hybrid):
+        fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+        cp = CarInterface.get_params(car, {0: {0x3F6: 8}, 1: {}, 2: {}}, fw, True, False, False)
+        self.assertEqual(bool(cp.flags & ToyotaFlags.HYBRID), hybrid)
+        self.assertTrue(cp.flags & ToyotaFlags.HAS_BSM)
+        self.assertEqual(uses_toyota_auto_hold_aeb(cp), aeb)
+        admitted = apply_toyota_auto_hold(cp, True)
+        if car == CAR.TOYOTA_RAV4_TSS2_2022:
+          self.assertFalse(admitted)
+          self.assertFalse(cp.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
+          self.assertEqual(cp.alternativeExperience, 0)
+          self.assertNotIn('PRE_COLLISION_2', CarState.get_can_parsers(cp)[Bus.cam].vl)
+          continue
+        self.assertTrue(admitted)
+        self.assertEqual(cp.alternativeExperience, AE.TOYOTA_AEB_HOLD if aeb else AE.TOYOTA_AUTO_HOLD)
+        state = CarState(cp)
+        parsers = state.get_can_parsers(cp)
+        self.assertEqual('PRE_COLLISION_2' in parsers[Bus.cam].vl, aeb)
+        if not aeb:
+          continue
+        camera = CANPacker(DBC[car][Bus.pt]).make_can_msg('PRE_COLLISION_2', 2,
+          {'DSS1GDRV': -0.5, 'PBRTRGR': 1, 'DS1STAT2': 3})
+        parsers[Bus.cam].update([(1_000_000_000, [camera])])
+        state.update(parsers)
+        self.assertEqual(toyotacan.create_brake_hold_command(
+          CANPacker(DBC[car][Bus.pt]), 0, state.pre_collision_2, False)[1], camera[1])
+        state.out = structs.CarState(canValid=True)
+        state.out.standstill = state.out.brakePressed = state.out.cruiseState.available = True
+        state.out.gearShifter = structs.CarState.GearShifter.drive
+        owner = CarController(DBC[car], cp)
+        command = structs.CarControl()
+        state.out.cruiseState.enabled = command.longActive = True
+        for _ in range(105):
+          step_hold(owner, command, state)
+        self.assertFalse(owner.brake_hold_active)
+        state.out.cruiseState.enabled = command.longActive = False
+        for _ in range(100):
+          step_hold(owner, command, state)
+        self.assertFalse(owner.brake_hold_active)
+        frames = [frame for _ in range(2) for frame in step_hold(owner, command, state)]
+        self.assertTrue(owner.brake_hold_active)
+        frame = next(frame for frame in frames if frame[0] == 0x344)
+        self.assertEqual(decode(cp, frame, 'PRE_COLLISION_2')['DSS1GDRV'], -1.0)
+        state.out.gasPressed = True
+        step_hold(owner, command, state)
+        self.assertFalse(owner.brake_hold_active)
+
   def assert_acc_hold(self, values):
     self.assertEqual(values['ACCEL_CMD'], -1.0)
     self.assertEqual(values['PERMIT_BRAKING'], 1)
@@ -146,7 +236,7 @@ class TestToyotaAutoHold(unittest.TestCase):
     self.assert_acc_hold(tick_acc(cp, controller, command, state))
 
   def test_cruise_stop_blocks_planner_resume_until_gas(self):
-    for car, hybrid in ((CAR.TOYOTA_COROLLA_TSS2, False), (CAR.TOYOTA_RAV4_TSS2, True)):
+    for car, hybrid in ((CAR.TOYOTA_COROLLA_TSS2, False), (CAR.TOYOTA_RAV4_TSS2, False)):
       with self.subTest(car=car):
         car_fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
         cp, controller, command, state = setup_cruise_hold(car, car_fw=car_fw)

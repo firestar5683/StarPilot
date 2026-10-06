@@ -9,7 +9,7 @@ from opendbc.car.secoc import add_mac, build_sync_mac
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota import prius_longitudinal
-from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags, TOYOTA_AUTO_HOLD_CARS, TOYOTA_AUTO_HOLD_AEB_CARS
+from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.can import CANPacker
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 
@@ -43,7 +43,7 @@ def supports_toyota_auto_hold(CP):
   return (CP.carFingerprint in TOYOTA_AUTO_HOLD_CARS and CP.openpilotLongitudinalControl and
           not CP.flags & ToyotaFlags.SECOC and bool(CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD) and
           (CP.alternativeExperience & (ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD | ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD)) ==
-          (ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD if CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS else
+          (ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD if uses_toyota_auto_hold_aeb(CP) else
            ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD))
 
 
@@ -99,12 +99,12 @@ class CarController(CarControllerBase):
 
   def update_auto_hold_state(self, CS, cancel_requested=False, activation_frames=TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES, *,
                              long_active=False, stopping=False):
-    aeb_hold = self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS
+    aeb_hold = uses_toyota_auto_hold_aeb(self.CP)
     allowed = (not cancel_requested and CS.out.standstill and CS.out.cruiseState.available and
                not CS.out.gasPressed and (not CS.out.cruiseState.enabled or (long_active and not aeb_hold)) and
                CS.out.gearShifter not in (structs.CarState.GearShifter.park, structs.CarState.GearShifter.reverse))
     if aeb_hold:
-      # Camry retains its separate manual AEB hold behavior.
+      # Manual AEB hold requires a driver brake stop.
       if allowed and not self.brake_hold_active and CS.out.brakePressed:
         self._brake_hold_counter += 1
         self.brake_hold_active = self._brake_hold_counter > activation_frames
@@ -130,7 +130,7 @@ class CarController(CarControllerBase):
     return self.brake_hold_active
 
   def reset_auto_hold_state(self):
-    if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
+    if self.brake_hold_active and not uses_toyota_auto_hold_aeb(self.CP):
       self.standstill_req = False
     self._brake_hold_counter = 0
     self.brake_hold_active = False
@@ -235,10 +235,10 @@ class CarController(CarControllerBase):
     lead = hud_control.leadVisible or CS.out.vEgo < 12.  # at low speed we always assume the lead is present so ACC can be engaged
 
     # *** gas and brake ***
-    if supports_toyota_auto_hold(self.CP):
-      self.update_auto_hold_state(CS, pcm_cancel_cmd if self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS else False,
+    if supports_toyota_auto_hold(self.CP) and CS.out.canValid and not CS.out.canTimeout:
+      self.update_auto_hold_state(CS, pcm_cancel_cmd if not uses_toyota_auto_hold_aeb(self.CP) else False,
                                   long_active=long_active, stopping=stopping)
-      if (self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS and self.frame % 2 == 0 and
+      if (uses_toyota_auto_hold_aeb(self.CP) and self.frame % 2 == 0 and
           CS.out.standstill and CS.out.cruiseState.available and not CS.out.gasPressed):
         can_sends.append(toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active))
     else:
@@ -340,7 +340,7 @@ class CarController(CarControllerBase):
             pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo, lead)
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
-        if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
+        if self.brake_hold_active and not uses_toyota_auto_hold_aeb(self.CP):
           pcm_accel_cmd = TOYOTA_AUTO_HOLD_ACCEL
           self.permit_braking = True
           self.standstill_req = True
