@@ -1,6 +1,7 @@
 #pragma once
 
 static bool toyota_aol_enabled = false;
+static bool toyota_aol_stock = false;
 static bool toyota_aol_main = false;
 static bool toyota_aol_drive = false;
 static bool toyota_aol_doors_closed = false;
@@ -25,7 +26,7 @@ static uint8_t toyota_aol_request(void) {
   uint8_t request = 0U;
   if (heartbeat_engaged && aol_rx_healthy() && !relay_malfunction &&
       (safety_get_ts_elapsed(microsecond_timer_get(), aol_host_request_ts) <= AOL_HOST_REQUEST_TIMEOUT_US)) {
-    request = aol_host_axis_mask;
+    request = aol_host_axis_mask & (toyota_aol_stock ? 1U : 3U);
   }
   return request;
 }
@@ -40,7 +41,7 @@ static uint8_t toyota_aol_permission(void) {
   uint8_t permission = 0U;
   if (fresh && toyota_aol_main && toyota_aol_drive && toyota_aol_doors_closed && toyota_aol_eps) {
     permission = request & 1U;
-    if (controls_allowed && toyota_aol_belt && !gas_pressed && !brake_pressed) {
+    if (!toyota_aol_stock && controls_allowed && toyota_aol_belt && !gas_pressed && !brake_pressed) {
       permission |= request & 2U;
     }
   }
@@ -93,7 +94,9 @@ static void toyota_aol_observe(const CANPacket_t *msg) {
 
 static void toyota_aol_configure(uint16_t param) {
   toyota_aol_reset();
-  toyota_aol_enabled = (param == 73U) && ((alternative_experience == 32) || (alternative_experience == 160) || (alternative_experience == 288));
+  toyota_aol_stock = param == 585U;
+  toyota_aol_enabled = (toyota_aol_stock && (alternative_experience == 32)) ||
+                       ((param == 73U) && ((alternative_experience == 32) || (alternative_experience == 160) || (alternative_experience == 288)));
   if (toyota_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = toyota_aol_reset,

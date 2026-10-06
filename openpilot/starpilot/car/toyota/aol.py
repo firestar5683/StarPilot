@@ -1,11 +1,12 @@
 from dataclasses import replace
 
 from opendbc.car import structs
-from opendbc.car.toyota.values import CAR, ToyotaFlags, EPS_SCALE, uses_toyota_auto_hold_aeb
+from opendbc.car.toyota.values import CAR, ToyotaFlags, ToyotaSafetyFlags, EPS_SCALE, uses_toyota_auto_hold_aeb
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE
 
-AOL_WORDS = frozenset((73,))
+AOL_WORDS = frozenset((73, 585))
+RADAR_TORQUE_CARS = frozenset((CAR.TOYOTA_CHR_TSS2, CAR.TOYOTA_RAV4_TSS2_2022))
 CAMERA_TORQUE_CARS = frozenset((
   CAR.TOYOTA_ALPHARD_TSS2, CAR.TOYOTA_AVALON_TSS2, CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_COROLLA_TSS2,
   CAR.TOYOTA_HIGHLANDER_TSS2, CAR.TOYOTA_PRIUS_TSS2, CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_MIRAI,
@@ -15,8 +16,9 @@ CAMERA_TORQUE_CARS = frozenset((
 
 
 def qualified(cp, *, marked_only=False):
-  if (cp is None or cp.brand != 'toyota' or cp.carFingerprint not in CAMERA_TORQUE_CARS or
-      cp.notCar or cp.passive or cp.dashcamOnly or not cp.pcmCruise or not cp.openpilotLongitudinalControl or
+  if (cp is None or cp.brand != 'toyota' or cp.carFingerprint not in CAMERA_TORQUE_CARS | RADAR_TORQUE_CARS or
+      cp.notCar or cp.passive or cp.dashcamOnly or not cp.pcmCruise or
+      (cp.carFingerprint not in RADAR_TORQUE_CARS and not cp.openpilotLongitudinalControl) or
       cp.steerControlType != structs.CarParams.SteerControlType.torque or
       not cp.flags & ToyotaFlags.TSS2 or cp.flags & (ToyotaFlags.SECOC | ToyotaFlags.ANGLE_CONTROL | ToyotaFlags.UNSUPPORTED_DSU) or
       len(cp.safetyConfigs) != 1):
@@ -31,11 +33,18 @@ def qualified(cp, *, marked_only=False):
       hold and not toyota_auto_hold_supported(cp)):
     return False
   required_flags = ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.RAISED_ACCEL_LIMIT
+  radar = cp.carFingerprint in RADAR_TORQUE_CARS
+  if radar:
+    required_flags |= ToyotaFlags.RADAR_ACC
+    if cp.openpilotLongitudinalControl:
+      required_flags |= ToyotaFlags.DISABLE_RADAR
+    if hold:
+      return False
   allowed_flags = required_flags | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM
   if cp.flags & required_flags != required_flags or int(cp.flags) & ~int(allowed_flags | ToyotaFlags.AUTO_BRAKE_HOLD):
     return False
   config = cp.safetyConfigs[0]
-  expected = EPS_SCALE[cp.carFingerprint]
+  expected = EPS_SCALE[cp.carFingerprint] | (int(ToyotaSafetyFlags.STOCK_LONGITUDINAL) if radar and not cp.openpilotLongitudinalControl else 0)
   return config.safetyModel == structs.CarParams.SafetyModel.toyota and config.safetyParam == expected
 
 
