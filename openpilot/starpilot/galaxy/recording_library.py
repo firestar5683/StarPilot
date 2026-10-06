@@ -5,6 +5,7 @@ import stat
 import tarfile
 import tempfile
 import time
+from typing import BinaryIO
 
 from openpilot.starpilot.galaxy.drive_history import DIR_FLAGS, FILES, _same_directory
 from openpilot.starpilot.galaxy.recording_media import MAX_SOURCE_BYTES, MediaLease, VerifiedRecording, RecordingMediaChanged, RecordingMediaUnsupported
@@ -199,10 +200,10 @@ class LogArchive:
 
 
 class CheckedLogReader:
-  def __init__(self, opened, source, permitted, deadline):
+  def __init__(self, opened: BinaryIO, source, permitted, deadline):
     self.opened, self.source, self.permitted, self.deadline = opened, source, permitted, deadline
 
-  def read(self, size):
+  def read(self, size: int = -1) -> bytes:
     if not self.permitted() or not self.source.current() or time.monotonic() > self.deadline:
       raise RecordingMediaChanged('Log archive preparation interrupted')
     return self.opened.read(size)

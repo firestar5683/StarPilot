@@ -10,6 +10,7 @@ import stat
 import subprocess
 import tempfile
 import threading
+from typing import Protocol
 
 from openpilot.common.hardware.hw import Paths
 from openpilot.starpilot.galaxy.drive_history import DIR_FLAGS, MAX_SEGMENT_ENTRIES, SEGMENT_NAME, DriveHistory, DriveHistoryUnavailable
@@ -149,8 +150,14 @@ class VerifiedRoute:
     self.sources.clear()
 
 
+class MediaSource(Protocol):
+  def current(self) -> bool: ...
+
+  def close(self) -> None: ...
+
+
 class MediaLease:
-  def __init__(self, source: VerifiedRecording, video_fd: int):
+  def __init__(self, source: MediaSource, video_fd: int):
     self.source, self.video_fd = source, video_fd
     self.size = os.fstat(video_fd).st_size
 
