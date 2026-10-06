@@ -149,3 +149,54 @@ class TestVCruiseHelper(OpenpilotTestCase):
         self.enable(float(v_ego), experimental_mode)
         assert V_CRUISE_INITIAL <= self.v_cruise_helper.v_cruise_kph <= V_CRUISE_MAX
         assert self.v_cruise_helper.v_cruise_initialized
+
+
+class TestResumeInitialization(OpenpilotTestCase):
+  def test_card_preserves_resume_across_intervening_state(self):
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    from typing import Any, cast
+    from openpilot.selfdrive.car.card import Car
+
+    for stored in (92.8, 65 * CV.MPH_TO_KPH):
+      for explicit in (None, False, True):
+        owner = cast(Any, Car.__new__(Car))
+        owner.v_cruise_helper = VCruiseHelper(car.CarParams(pcmCruise=False))
+        owner.v_cruise_helper.v_cruise_kph = stored
+        owner.sm = {'carControl': SimpleNamespace(enabled=False)}
+        owner.CC_prev = SimpleNamespace(enabled=False)
+        owner.experimental_mode = False
+        owner.is_metric = False
+        owner.vehicle_startup = SimpleNamespace(consume_cruise_resume=lambda value=explicit: value)
+        release = car.CarState(cruiseState={'available': True}, buttonEvents=[
+          ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
+        empty = car.CarState(cruiseState={'available': True})
+        with patch('openpilot.selfdrive.car.cruise.monotonic_ns', return_value=1_000_000_000):
+          owner.update_cruise_speed(release)
+          owner.CS_prev = release
+          owner.update_cruise_speed(empty)
+          owner.CS_prev = empty
+          owner.sm['carControl'].enabled = True
+          owner.update_cruise_speed(empty)
+        expected = V_CRUISE_INITIAL if explicit is False else stored
+        self.assertAlmostEqual(owner.v_cruise_helper.v_cruise_kph, expected)
+        self.assertEqual(owner.v_cruise_helper.pending_resume_ns, 0)
+
+  def test_pending_resume_is_bounded_and_invalidated(self):
+    from unittest.mock import patch
+    for invalidation in ('expired', 'unavailable', 'set', 'cancel', 'main'):
+      helper = VCruiseHelper(car.CarParams(pcmCruise=False))
+      helper.v_cruise_kph = 65 * CV.MPH_TO_KPH
+      release = car.CarState(cruiseState={'available': True}, buttonEvents=[
+        ButtonEvent(type=ButtonType.accelCruise, pressed=False)])
+      with patch('openpilot.selfdrive.car.cruise.monotonic_ns', return_value=1_000_000_000):
+        helper.update_v_cruise(release, False, False)
+      state = car.CarState(cruiseState={'available': invalidation != 'unavailable'})
+      buttons = {'set': ButtonType.decelCruise, 'cancel': ButtonType.cancel, 'main': ButtonType.mainCruise}
+      if invalidation in buttons:
+        state.buttonEvents = [ButtonEvent(type=buttons[invalidation], pressed=True)]
+      with patch('openpilot.selfdrive.car.cruise.monotonic_ns',
+                 return_value=1_600_000_000 if invalidation == 'expired' else 1_010_000_000):
+        helper.update_v_cruise(state, False, False)
+        helper.initialize_v_cruise(car.CarState(), False)
+      self.assertEqual(helper.v_cruise_kph, V_CRUISE_INITIAL)
