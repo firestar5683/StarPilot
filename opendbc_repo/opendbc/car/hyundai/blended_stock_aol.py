@@ -43,10 +43,21 @@ class MixedStockLkasSources(ClassicSccLkasSources):
 
   @property
   def active(self):
-    return qualified(self.cp, marked_only=True)
+    return qualified(self.cp, marked_only=True) or qualified_alpha(self.cp, marked_only=True)
 
   def update(self, packets):
     if not self.active:
       return
     selected = [(stamp, [(address, data, 0) for address, data, bus in frames if bus == self.bus]) for stamp, frames in packets]
     super().update(selected)
+
+
+ALPHA_WORDS = frozenset((0x2004,))
+
+
+def qualified_alpha(cp, *, marked_only=False):
+  from opendbc.car.hyundai.blended_longitudinal import hdai_startup_qualified
+  return (hdai_startup_qualified(cp, allow_marked=True) and cp.alphaLongitudinalAvailable and
+          cp.openpilotLongitudinalControl and not cp.pcmCruise and
+          cp.safetyConfigs[0].safetyParam == 0x2004 and
+          cp.alternativeExperience in ((32,) if marked_only else (0, 32)))

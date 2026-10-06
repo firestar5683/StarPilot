@@ -28,7 +28,7 @@ inline bool hyundai_classic_long_aol_param(uint16_t param) {
 }
 
 inline bool hyundai_classic_aol_param(uint16_t param) {
-  return param == 0x2000U || hyundai_classic_long_aol_param(param) || hyundai_classic_scc_aol_param(param) || param == 0x1400U || param == 0x1C00U || param == 0x1440U || param == 0x1C40U ||
+  return param == 0x2000U || param == 0x2004U || hyundai_classic_long_aol_param(param) || hyundai_classic_scc_aol_param(param) || param == 0x1400U || param == 0x1C00U || param == 0x1440U || param == 0x1C40U ||
          param == 0x1402U || param == 0x1C02U || param == 0x1441U || param == 0x1C41U;
 }
 

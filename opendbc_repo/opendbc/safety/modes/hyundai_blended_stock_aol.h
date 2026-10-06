@@ -1,6 +1,10 @@
 #pragma once
 
 static bool blended_aol_enabled = false;
+static bool blended_aol_long = false;
+static bool blended_aol_main_seen = false;
+static bool blended_aol_main = false;
+static uint32_t blended_aol_main_ts = 0U;
 static bool blended_aol_token = false;
 static bool blended_aol_claimed = false;
 static bool blended_aol_session = false;
@@ -16,6 +20,9 @@ static bool blended_aol_owned[3] = {false, false, false};
 static uint32_t blended_aol_tx_ts[3] = {0U, 0U, 0U};
 
 static void blended_aol_clear(void) {
+  blended_aol_main_seen = false;
+  blended_aol_main = false;
+  blended_aol_main_ts = 0U;
   blended_aol_counter_seen = false;
   blended_aol_counter = 0U;
   blended_aol_token = false;
@@ -36,6 +43,7 @@ static void blended_aol_clear(void) {
 
 static void blended_aol_reset(void) {
   blended_aol_enabled = false;
+  blended_aol_long = false;
   blended_aol_counter_seen = false;
   blended_aol_counter = 0U;
   blended_aol_clear();
@@ -57,7 +65,14 @@ static uint8_t blended_aol_request_mask(void) {
     blended_aol_clear();
   } else if (heartbeat_engaged) {
     blended_aol_session = true;
-    result = aol_host_axis_mask & 1U;
+    if (blended_aol_long && controls_allowed && blended_aol_main_seen && blended_aol_main &&
+        (safety_get_ts_elapsed(now, blended_aol_main_ts) <= 100000U) && ((aol_host_axis_mask & 1U) != 0U)) {
+      // Normal paired enable can seed lateral; a lateral token never enables long.
+      blended_aol_token = true;
+      blended_aol_token_source = 0U;
+      blended_aol_token_ts = now;
+    }
+    result = aol_host_axis_mask & (blended_aol_long ? 3U : 1U);
     if ((result != 0U) && blended_aol_token) {
       blended_aol_claimed = true;
     }
@@ -72,8 +87,21 @@ static uint8_t blended_aol_permission_mask(void) {
     (safety_get_ts_elapsed(microsecond_timer_get(), blended_aol_source_ts[blended_aol_token_source]) <= 300000U);
   if (!aol_rx_healthy() || (blended_aol_token && !source_current)) {
     blended_aol_clear();
-  } else if ((blended_aol_request_mask() != 0U) && (controls_allowed || blended_aol_token)) {
+  } else if (((blended_aol_request_mask() & 1U) != 0U) && (controls_allowed || blended_aol_token)) {
     result = 1U;
+  } else {
+  }
+  if (blended_aol_long) {
+    const bool main_current = blended_aol_main_seen && blended_aol_main &&
+      (safety_get_ts_elapsed(microsecond_timer_get(), blended_aol_main_ts) <= 100000U);
+    if (!main_current) {
+      blended_aol_clear();
+      result = 0U;
+    } else if (aol_rx_healthy() && controls_allowed && !brake_pressed && !gas_pressed &&
+               ((blended_aol_request_mask() & 2U) != 0U)) {
+      result |= 2U;
+    } else {
+    }
   } else {
   }
   return result;
@@ -83,6 +111,15 @@ static void blended_aol_rx(const CANPacket_t *msg) {
   if (blended_aol_enabled) {
     const unsigned int pt = 0U;
     const uint32_t now = microsecond_timer_get();
+    if (blended_aol_long && msg_matches(msg, 0x394U, pt, 8U)) {
+      blended_aol_main_seen = true;
+      blended_aol_main = ((msg->data[5] >> 3U) & 3U) == 0U;
+      blended_aol_main_ts = now;
+      if (!blended_aol_main) {
+        blended_aol_token = false;
+        blended_aol_claimed = false;
+      }
+    }
     unsigned int source = 3U;
     bool pressed = false;
     if ((msg->bus == pt) && (msg->addr == 0x4F1U) && (GET_LEN(msg) == 4U)) {
@@ -123,7 +160,10 @@ static void blended_aol_rx(const CANPacket_t *msg) {
 
 static void blended_aol_configure(uint16_t param) {
   blended_aol_reset();
-  blended_aol_enabled = (param == 0x2000U) && ((unsigned int)alternative_experience == 32U);
+#ifdef ALLOW_DEBUG
+  blended_aol_long = param == 0x2004U;
+#endif
+  blended_aol_enabled = ((param == 0x2000U) || blended_aol_long) && ((unsigned int)alternative_experience == 32U);
   if (blended_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = blended_aol_reset,
@@ -190,7 +230,8 @@ static void blended_aol_tx(const CANPacket_t *msg, bool accepted) {
 }
 
 static bool blended_aol_fwd(int bus, int addr) {
-  bool blocked = false;
+  bool blocked = blended_aol_long && !blended_aol_enabled && (bus == 2) &&
+    ((addr == 0x340) || (addr == 0x364) || (addr == 0x485));
   if (blended_aol_enabled && (bus == 2) && aol_rx_healthy() && (controls_allowed || (blended_aol_permission_mask() != 0U))) {
     const uint32_t addresses[3] = {0x340U, 0x364U, 0x485U};
     for (unsigned int i = 0U; i < 3U; i++) {

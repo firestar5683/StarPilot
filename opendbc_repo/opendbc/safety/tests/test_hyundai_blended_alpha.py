@@ -180,3 +180,128 @@ class TestHyundaiBlendedAlpha(unittest.TestCase):
           self.assertTrue(self.safety.safety_rx_hook(self.button(4, 3)))
           self.assertTrue(self.safety.safety_rx_hook(self.button(0, 4)))
           self.assertTrue(self.safety.get_controls_allowed())
+
+
+class TestHyundaiBlendedAlphaAol(unittest.TestCase):
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.counter = 0
+    self.now = 1_000_000
+    self.packer = common.CANPackerSafety('hyundai_palisade_2023_generated')
+    self.release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
+
+  def tearDown(self):
+    self.safety.set_alternative_experience(0)
+
+  def reset(self, word=0x2004, experience=32):
+    self.safety.init_tests()
+    self.safety.set_alternative_experience(experience)
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, word), 0)
+    self.safety.set_timer(self.now)
+    self.safety.set_aol_test_heartbeat(True)
+
+  def request(self, mask):
+    self.safety.aol_set_host_request(mask)
+    return self.safety.aol_get_permission_mask()
+
+  def feed(self, *, button=0, lda=False, gas=False, brake=False, available=True, omit=None):
+    self.safety.set_timer(self.now)
+    c = self.counter
+    self.counter += 1
+    messages = (
+      ('EMS16', {'AliveCounter': c % 4, 'CF_Ems_AclAct': int(gas)}, True),
+      ('WHL_SPD11', {'WHL_SPD_AliveCounter_LSB': c % 4, 'WHL_SPD_AliveCounter_MSB': (c // 4) % 4}, True),
+      ('TCS13', {'AliveCounterTCS': c % 8, 'ACCEnable': 0 if available else 1,
+                 'DriverOverride': 2 if brake else 0}, True),
+      ('MDPS12', {'CR_Mdps_StrColTq': 0}, False),
+      ('CLU11', {'CF_Clu_AliveCnt1': c % 16, 'CF_Clu_CruiseSwState': button}, False),
+      ('BCM_PO_11', {'LDA_BTN': int(lda)}, False),
+    )
+    for name, values, checked in messages:
+      if name != omit:
+        self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety(
+          name, 0, values, fix_checksum=checksum if checked else None)))
+    self.now += 10_000
+
+  def warm(self):
+    for _ in range(8):
+      self.feed()
+
+  def test_token_is_lateral_only_and_long_enable_remains_physical(self):
+    self.reset()
+    self.warm()
+    self.feed(lda=True)
+    self.assertEqual(self.request(3), 0 if self.release else 1)
+    self.assertFalse(self.safety.get_controls_allowed())
+    if self.release:
+      return
+    self.feed(button=2)
+    self.feed()
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertEqual(self.request(3), 3)
+    self.assertEqual(self.request(2), 2)
+    self.feed(gas=True)
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertEqual(self.request(3), 1)
+    accel = self.packer.make_can_msg_safety('SCC11', 0, {'aReqRaw': 0.1, 'aReqValue': 0.1})
+    self.assertFalse(self.safety.safety_tx_hook(accel))
+    self.assertTrue(self.safety.safety_tx_hook(self.packer.make_can_msg_safety('SCC11', 0, {'aReqRaw': 0, 'aReqValue': 0})))
+    self.feed()
+    self.assertEqual(self.request(3), 3, 'Gas override pauses normal cruise without disarming it')
+    self.assertTrue(self.safety.safety_tx_hook(accel))
+    self.feed(brake=True)
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertEqual(self.request(3), 1)
+    self.feed()
+    self.assertEqual(self.request(3), 1, 'Releasing brake cannot restore normal long without an enable edge')
+
+  def test_dead_required_source_and_held_input_cannot_rearm(self):
+    self.reset()
+    self.warm()
+    self.feed(lda=True)
+    self.request(1)
+    for _ in range(40):
+      self.feed(lda=True, omit='TCS13')
+      self.request(1)
+    self.assertEqual(self.request(3), 0)
+    for _ in range(8):
+      self.feed(lda=True)
+    self.assertEqual(self.request(1), 0)
+    self.request(0)
+    self.feed()
+    self.feed(lda=True)
+    self.assertEqual(self.request(1), 0 if self.release else 1)
+
+  def test_mixed_crc_counter_and_accepted_forwarding(self):
+    self.reset()
+    self.warm()
+    self.feed(lda=True)
+    self.request(1)
+    if self.release:
+      self.assertFalse(self.safety.safety_tx_hook(self.packer.make_can_msg_safety('LKAS11', 0, {})))
+      return
+    from opendbc.car.hyundai.hyundaican import hyundai_checksum
+
+    def packet(counter, corrupt=False):
+      raw = self.packer.make_can_msg('LKAS11', 0, {'CR_Lkas_StrToqReq': 2, 'CF_Lkas_ActToi': 1,
+                                                  'CF_Lkas_MsgCount': counter})
+      data = bytearray(raw[1])
+      data[0] = hyundai_checksum(bytes(data[1:]))
+      if corrupt:
+        data[0] ^= 1
+      return common.make_msg(0, 0x340, dat=bytes(data))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x340), 0)
+    self.assertTrue(self.safety.safety_tx_hook(packet(0)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x340), -1)
+    self.assertFalse(self.safety.safety_tx_hook(packet(0)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x340), 0)
+    self.assertFalse(self.safety.safety_tx_hook(packet(1, corrupt=True)))
+
+  def test_hda2_and_foreign_experience_never_get_mixed_aol(self):
+    for word, experience in ((0x2014, 32), (0x2004, 0), (0x2004, 33)):
+      self.reset(word, experience)
+      self.assertEqual(self.request(3), 0)
+      if word == 0x2004 and not self.release:
+        for address in (0x340, 0x364, 0x485, 0x420, 0x421):
+          self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+          self.assertEqual(self.safety.safety_fwd_hook(0, address), 2)
