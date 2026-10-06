@@ -96,3 +96,36 @@ def test_actual_native_traffic_and_coast_callbacks_emit_owner_requests(native_se
   assert actions[FORCE_COAST].invoke()
   assert [str(messaging.log_from_bytes(raw).slcAction.kind) for _, raw in sender.events] == [
     'trafficModeToggle', 'forceCoastToggle']
+
+@pytest.mark.parametrize('vehicle,filtered', [('TOYOTA_PRIUS', True), ('TOYOTA_SIENNA_4TH_GEN', False)])
+def test_toyota_default_gap_callback_saves_personality_once(native_session, monkeypatch, vehicle, filtered):
+  from opendbc.car import structs
+  from opendbc.car.toyota.interface import CarInterface
+  from opendbc.car.toyota.values import CAR
+  runtime, session, ui, _, _ = native_session
+  rack = structs.CarParams.CarFw.new_message(ecu=structs.CarParams.Ecu.eps,
+                                            fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')
+  ui.CP = CarInterface.get_params(getattr(CAR, vehicle), {0: {0x2FF: 4} if filtered else {}, 1: {}, 2: {}},
+                                  [rack] if filtered else [], False, False, False)
+  ui.has_longitudinal_control = ui.CP.openpilotLongitudinalControl
+  ui.personality = 1
+  def save_personality(value):
+    ui.params.put('LongitudinalPersonality', value, block=True)
+    ui.personality = value
+    return True
+  session._native_favorite_actions = lambda: session.native_favorite_actions(lambda: True, save_personality, lambda: True)
+  queue = []
+  monkeypatch.setattr(runtime.messaging, 'recv_one_or_none', lambda _: queue.pop(0) if queue else None)
+  owner, publisher = WheelPublisher(), Publisher()
+  from openpilot.starpilot.controllers.tests.test_wheel_actions import state
+  owner.observe(ui.params, ui.CP, state(), now_ns=NOW - 20_000_000, drive_id=DRIVE)
+  owner.observe(ui.params, ui.CP, state(True), now_ns=NOW - 10_000_000, drive_id=DRIVE)
+  commands = owner.observe(ui.params, ui.CP, state(False), now_ns=NOW, drive_id=DRIVE)
+  assert commands == (('DistanceButtonControl', 1),)
+  assert owner.suppress_distance_release
+  owner.publish(commands, ui.CP, publisher, now_ns=NOW, drive_id=DRIVE, source_car_ns=NOW, source_control_ns=NOW)
+  queue.append(messaging.log_from_bytes(publisher.events[-1][1]))
+  session._poll_wheel(NOW)
+  assert ui.params.get('LongitudinalPersonality') == 0
+  session._poll_wheel(NOW)
+  assert ui.params.get('LongitudinalPersonality') == 0

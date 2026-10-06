@@ -209,10 +209,15 @@ class CarState(CarStateBase):
 
         buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
-    if self.CP.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT or self.CP.flags & ToyotaFlags.LONG_FILTER:
+    if self.CP.carFingerprint in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT) or self.CP.flags & ToyotaFlags.LONG_FILTER:
       prev_distance_button = self.distance_button
       self.distance_button = (cp.vl["SDSU"]["FD_BUTTON"] if self.CP.flags & ToyotaFlags.LONG_FILTER
                               else cp_acc.vl["ACC_CONTROL"]["DISTANCE"])
+      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
+    if self.CP.carFingerprint == CAR.TOYOTA_SIENNA_4TH_GEN:
+      prev_distance_button = self.distance_button
+      self.distance_button = cp.vl["PCM_CRUISE_4"]["DISTANCE"]
       buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
     ret.buttonEvents = buttonEvents
@@ -233,6 +238,9 @@ class CarState(CarStateBase):
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]
+
+    if CP.carFingerprint == CAR.TOYOTA_SIENNA_4TH_GEN:
+      pt_messages.append(("PCM_CRUISE_4", 1))
 
     if CP.flags & ToyotaFlags.LONG_FILTER:
       pt_messages.append(("SDSU", 50))
