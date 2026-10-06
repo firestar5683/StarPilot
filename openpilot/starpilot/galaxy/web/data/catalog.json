@@ -23,7 +23,7 @@
       "availability": "local-only"
     },
     {
-      "name": "Galaxy Tunnel",
+      "name": "Install Galaxy / Tunnel",
       "path": "/galaxy",
       "icon": "bi-globe2",
       "description": "Remote access and device pairing",

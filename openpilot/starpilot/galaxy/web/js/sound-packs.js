@@ -1,3 +1,4 @@
+import { GxIconButton } from "./icon-button.js"
 import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
@@ -123,7 +124,7 @@ export class SoundPacksFeed {
 }
 
 export const SoundPacks = {
-  components: { GxNotice },
+  components: { GxIconButton, GxNotice },
   props: { unauthorized: { type: Function, required: true }, disabled: { type: Boolean, default: false } },
   emits: ["installed"],
   setup(props, { emit }) {
@@ -155,7 +156,7 @@ export const SoundPacks = {
 
       </div>
       <div class="gx-settings__grid" style="padding: 16px">
-        <p v-if="state.status === 'loading'" role="status">Loading sound packs…</p>
+        <p v-if="state.status === 'loading'" role="status" class="gx-card gx-message">Loading sound packs…</p>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable'">Sound packs are unavailable.</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <p v-if="state.snapshot && !state.snapshot.packs.length" class="gx-note">No sound packs are available.</p>
@@ -163,7 +164,7 @@ export const SoundPacks = {
           <strong>{{ pack.name }}</strong>
           <div class="gx-settings__controls">
             <span v-if="pack.installed" class="gx-chip">Installed</span>
-            <button v-else type="button" class="gx-btn gx-btn--tonal" :disabled="!canDownload(pack)" @click="feed.download(pack.id)">Download</button>
+            <GxIconButton v-else :label="'Download ' + pack.name" icon="bi-download" :disabled="!canDownload(pack)" @click="feed.download(pack.id)" />
           </div>
         </div>
         <div v-if="job" role="status">

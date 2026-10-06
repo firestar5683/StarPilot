@@ -1,5 +1,4 @@
 import { GxNotice } from "./notice.js"
-import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 
 const HEX = /^[0-9a-f]{64}$/

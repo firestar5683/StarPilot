@@ -1,3 +1,4 @@
+import { MenuTile } from "./menu-tile.js"
 export const DRIVING_PAGES = Object.freeze({
   aol: "aol",
   conditional: "conditional",
@@ -32,6 +33,7 @@ export function drivingPage(path) {
 }
 
 export const DrivingPage = {
+  components: { MenuTile },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true } },
   data: () => ({ groups: DRIVING_GROUPS }),
   template: `
@@ -42,11 +44,8 @@ export const DrivingPage = {
       <template v-else>
         <section v-for="group in groups" :key="group.title" class="gx-driving__group">
           <h3>{{ group.title }}</h3>
-          <div class="gx-driving__grid">
-            <button v-for="item in group.items" :key="item.page" type="button" class="gx-card gx-driving__link"
-              @click="go('/driving/' + item.page)">
-              <span><strong>{{ item.title }}</strong><small>{{ item.detail }}</small></span><i class="bi bi-chevron-right" aria-hidden="true"></i>
-            </button>
+          <div class="gx-grid">
+            <MenuTile v-for="item in group.items" :key="item.page" icon="bi-sliders" :title="item.title" :description="item.detail" @select="go('/driving/' + item.page)" />
           </div>
         </section>
         <div class="gx-driving__extras"><button type="button" class="gx-btn gx-btn--tonal" @click="go('/driving/longitudinal-curves')">Edit longitudinal curves</button>

@@ -28,7 +28,7 @@ export const SETTINGS_SECTIONS = Object.freeze([
 export const isPipCropRow = (row) => row.label === "Visual camera crop editor" || /^Vehicle (left|right) crop/.test(row.label || "")
 
 const SECTION_LINKS = {
-  device: [{ label: "Display", page: "display" }, { label: "Data Uploads", page: "data" }],
+  device: [{ label: "Display", page: "display", value: "Adjust screen brightness and display timing" }, { label: "Data Uploads", page: "data", value: "Choose mobile-data uploads and usage-statistics sharing" }],
   visual: [{ label: "Driving Screen Widgets", page: "appearance" }, { label: "Colors & Layout", page: "ui_layout" }, { label: "Quick Select", page: "favorites" }, { label: "Blind Spot Camera and Preview", page: "pip" }],
 }
 
@@ -115,7 +115,7 @@ export class SettingsFeed {
         error.stale = true
         throw error
       }
-      if (!response.ok) throw new Error(response.status === 503 ? "Saved settings are unavailable." : "Settings request failed.")
+      if (!response.ok) throw new Error(response.status === 503 ? "The device could not read these preferences. Reconnecting automatically…" : "The device could not complete the settings request. Check your connection and try again.")
       const data = await response.json().catch(() => { throw new Error("Galaxy could not load settings. Refresh to reconnect.") })
       if (!this.active || generation !== this.generation || request.signal.aborted) return null
       return data
@@ -264,7 +264,7 @@ export const SettingsPage = {
       const inHub = this.initialPage === "hub" && this.state.data?.page === "hub"
       const section = this.activeSection
       const entries = inHub && SECTION_LINKS[section.id]
-        ? SECTION_LINKS[section.id].map((row, index) => ({ row: { ...row, available: true, action: false, value: "" }, index }))
+        ? SECTION_LINKS[section.id].map((row, index) => ({ row: { ...row, available: true, action: false, value: row.value || "Customize " + row.label.toLocaleLowerCase() }, index }))
         : rows.map((row, index) => ({ row, index })).filter(({ row }) => !inHub || section.pages.includes(row.page))
       return entries.filter(({ row }) => !isPipCropRow(row)).filter(({ row, index }) => {
         const previous = rows[index - 1]
@@ -349,9 +349,10 @@ export const SettingsPage = {
     <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
     <FavoritesPage ref="favoritesEditor" v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
     <section v-else class="gx-settings" :aria-label="title">
-      <div class="gx-settings__header"><div><h2>{{ title }}</h2></div></div>
+      <div v-if="initialPage !== 'hub' || atSectionRoot" class="gx-settings__header"><h2>{{ title }}</h2></div>
       <GxNotice v-if="state.data && state.data.page !== 'hub' && !state.data.parked && state.data.rows.some(row => !row.available)" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
-      <GxNotice v-if="initialPage === 'pip'" tone="info">Choose when to show the camera and adjust its saved crop. Use the crop editor for a live preview.</GxNotice>
+      <GxNotice v-if="state.developerOpen">Choose where cloud accounts and uploads go. Older comma recordings keep their comma links.</GxNotice>
+      <GxNotice v-else-if="initialPage === 'pip'" tone="info">Choose when to show the camera and adjust its saved crop. Use the crop editor for a live preview.</GxNotice>
       <GxNotice v-else-if="(state.data?.page || initialPage) === 'sounds'" tone="info">Adjust alert and chime volumes. Immediate warnings keep their safety volume ramp.</GxNotice>
       <GxNotice v-else-if="(state.data?.page || initialPage) === 'display'" tone="info">Adjust brightness and screen timing when custom display settings are on.</GxNotice>
       <GxNotice v-else-if="initialPage === 'appearance'" tone="info">Choose which driving information to show. Use Colors &amp; Layout to arrange widgets and change colors.</GxNotice>
@@ -359,7 +360,7 @@ export const SettingsPage = {
       <GxNotice v-else-if="state.data?.page === 'conditional' || state.data?.page.startsWith('conditional/')" tone="info">Choose when to switch between Chill and Experimental. Applies on supported vehicles when StarPilot controls acceleration and braking.</GxNotice>
       <GxNotice v-else-if="state.data?.page === 'profiles'" tone="info">Braking response works without saved personality curves. A selected personality braking preset or Traffic takes priority.</GxNotice>
       <GxNotice v-else-if="state.data?.page === 'traffic'" tone="info">Traffic follow and jerk blend toward saved Relaxed values at higher speeds. Saved curves require Use saved profiles and the Traffic profile switch.</GxNotice>
-      <GxNotice v-else-if="state.data?.page === 'aol'" tone="info">Keep StarPilot lateral control active without holding the steering wheel.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'aol'" tone="info">Keep steering assistance active independently of cruise control.</GxNotice>
       <GxNotice v-else-if="state.data?.page === 'torque'" tone="info">Tune how StarPilot applies steering torque.</GxNotice>
       <GxNotice v-else-if="state.data?.page === 'lane'" tone="info">Choose lane-centering behavior and alerts.</GxNotice>
       <GxNotice v-else-if="state.data?.page === 'curve'" tone="info">Set how the vehicle slows for curves ahead.</GxNotice>
@@ -370,16 +371,13 @@ export const SettingsPage = {
       <GxNotice v-else-if="initialPage === 'sentry'" tone="info">{{ state.data?.subtitle || "Checking motion monitor…" }}</GxNotice>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local settings are unavailable in preview.</div>
       <template v-else>
-        <div v-if="initialPage === 'hub'" class="gx-settings-tabs" aria-label="Settings sections">
+        <div v-if="initialPage === 'hub' && atSectionRoot" class="gx-settings-tabs" aria-label="Settings sections">
           <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" :disabled="busy" @click="selectSection(section)">{{ section.label }}</button>
         </div>
-        <section v-if="state.developerOpen" class="gx-card gx-settings__section gx-settings__developer" aria-label="Developer">
-          <div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div>
-          <div class="gx-settings__developer-body"><CloudProviderPage :mode="mode" :unauthorized="unauthorized" /></div>
-        </section>
+        <CloudProviderPage v-if="state.developerOpen" :mode="mode" :unauthorized="unauthorized" />
         <p v-if="state.status === 'saving' || state.status === 'updating'" class="gx-settings__save-status" role="status">Saving preference…</p>
-        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
-        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved settings are unavailable.</GxNotice>
+        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Reading your device’s saved preferences…</div>
+        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read these preferences. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
         <div v-if="state.data" class="gx-settings__body">

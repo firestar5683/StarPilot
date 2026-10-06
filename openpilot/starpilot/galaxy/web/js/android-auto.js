@@ -1,3 +1,4 @@
+import { GxIconButton } from "./icon-button.js"
 import { requestJson } from "./startup.js"
 import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
@@ -281,7 +282,7 @@ export class AndroidAutoFeed {
 }
 
 export const AndroidAutoPage = {
-  components: { GxNotice },
+  components: { GxIconButton, GxNotice },
   props: { mode: { type: String, required: true }, localAccess: { type: Boolean, required: true },
     unauthorized: { type: Function, required: true } },
   data: () => ({ setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
@@ -363,7 +364,7 @@ export const AndroidAutoPage = {
       <div class="gx-android-auto-setup">
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
         <div v-if="!setup && !error" class="gx-card gx-message" role="status">{{ error ? "Setup could not be loaded." : "Checking Android Auto setup…" }} </div>
-        <template v-else>
+        <template v-if="setup">
           <div class="gx-card gx-driving__intro"><h3>1. Prepare</h3>
             <p v-if="!setup.installReady" role="status">Android Auto display and encoder are not installed on this build. Projection setup is unavailable.</p>
             <p v-else-if="setup.enabled && !setup.serviceReady" role="status">Starting the Android Auto service. Pairing is unavailable until it is ready.</p>
@@ -376,7 +377,7 @@ export const AndroidAutoPage = {
               <ol>
                 <li>Open <a href="https://www.apkmirror.com/apk/google-inc/android-auto/" target="_blank" rel="noopener noreferrer">Android Auto by Google LLC on APKMirror</a>, a third-party download site.</li>
                 <li>Download the Android Auto app package to this phone or computer. Choose the app's APK or bundle download; you do not need the APKMirror Installer app.</li>
-                <li>Return here, choose the downloaded APK, XAPK, or APKM file, and press Upload Package. Leave bundles zipped.</li>
+                <li>Return here, choose the downloaded APK, XAPK, or APKM file, and use the upload button (or Enable &amp; upload). Leave bundles zipped.</li>
               </ol>
               <p>You do not install an Android app on the comma. Galaxy imports the information needed to connect to your car and checks that it is usable.</p>
             </details>
@@ -384,8 +385,9 @@ export const AndroidAutoPage = {
             <p v-if="setup.import?.state === 'running'" role="status">Checking your package…</p>
             <GxNotice tone="danger" v-if="setup.import?.state === 'failed'">Package verification failed: {{ setup.import.error || 'Try another package.' }}</GxNotice>
             <p v-if="setup.import?.state === 'done' && setup.identity.installed" role="status">Package verified and ready.</p>
-            <div class="gx-driving__actions"><input class="gx-field" type="file" accept=".apk,.xapk,.apkm" style="max-width:100%;min-width:0" aria-label="Android Auto APK, XAPK, or APKM" @change="choosePackage" />
-              <button class="gx-btn" :disabled="!!uploadReason" @click="upload">{{ setup.enabled ? 'Upload Package' : 'Enable and Upload Package' }}</button></div>
+            <div class="gx-driving__actions"><input class="gx-field" type="file" accept=".apk,.xapk,.apkm" aria-label="Android Auto APK, XAPK, or APKM" @change="choosePackage" />
+              <GxIconButton v-if="setup.enabled" label="Upload package" icon="bi-upload" :disabled="!!uploadReason" @click="upload" />
+              <button v-else class="gx-btn" :disabled="!!uploadReason" @click="upload">Enable &amp; upload</button></div>
             <p v-if="packageFile" role="status">Selected: {{ packageFile.name }} ({{ Math.ceil(packageFile.size / 1048576) }} MB).</p>
             <div v-if="uploadProgress" role="status" aria-live="polite">
               <progress :value="uploadProgress.loaded" :max="uploadProgress.total"></progress>

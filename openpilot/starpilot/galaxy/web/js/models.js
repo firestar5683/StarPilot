@@ -1,3 +1,6 @@
+import { GxSummary } from "./summary.js"
+import { GxIconButton } from "./icon-button.js"
+import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
@@ -313,7 +316,7 @@ export class ModelManagerFeed {
 
 export const ModelsPage = {
   name: "ModelsPage",
-  components: { GalaxySelect },
+  components: { GxSummary, GxIconButton, GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data() {
     return { loading: true, error: "", message: "", trackingProgress: false, busy: "", selectionUncertain: true, disposed: false,
@@ -432,9 +435,7 @@ export const ModelsPage = {
   template: `
     <div class="gx-view gx-model-manager">
       <div v-if="mode !== 'local'" class="gx-card gx-message">Model Manager is unavailable in the offline preview.</div>
-      <div v-else-if="loading" class="gx-card">
-        <div class="gx-loading" style="padding: var(--sp-4);">Loading models...</div>
-      </div>
+      <div v-else-if="loading" class="gx-card gx-message" role="status">Reading installed models and available downloads…</div>
 
       <template v-else>
         <section class="gx-card">
@@ -442,29 +443,13 @@ export const ModelsPage = {
             <i aria-hidden="true" class="bi bi-cpu"></i>
             <span class="gx-section__title">Model Manager</span>
           </div>
-          <div style="padding: var(--sp-3); display:flex; flex-wrap:wrap; gap:6px;">
-            <span class="gx-chip">{{ summary.installed }} installed</span>
-            <span class="gx-chip">{{ summary.missing }} missing</span>
-            <span class="gx-chip">{{ summary.total }} total</span>
-            <span class="gx-chip" style="background:var(--primary);color:var(--on-primary);">Selected: {{ currentLabel }}</span>
-          </div>
+          <GxSummary :items="[{label: 'Installed', value: summary.installed}, {label: 'Missing', value: summary.missing}, {label: 'Total', value: summary.total}]" />
+          <p class="gx-model-selection">Selected: <strong>{{ currentLabel }}</strong></p>
           <div style="padding: 0 var(--sp-3) var(--sp-3);">
             <p v-if="message" role="status">{{ message }}</p>
-            <div v-if="error" role="alert" class="gx-alert gx-alert--warn" style="border:none; margin:0 0 8px;">
-              <i aria-hidden="true" class="bi bi-exclamation-triangle-fill gx-alert__icon"></i>
-              <div class="gx-alert__body"><strong>Model Manager</strong><span>{{ error }}</span></div>
-            </div>
-            <div v-if="status.isOnroad" class="gx-alert gx-alert--warn" style="border:none; margin:0 0 8px;">
-              <i aria-hidden="true" class="bi bi-car-front-fill gx-alert__icon"></i>
-              <div class="gx-alert__body"><span>Model changes and downloads require parked device status.</span></div>
-            </div>
-            <div v-if="status.downloading" class="gx-alert gx-alert--info" style="border:none; margin:0;">
-              <i aria-hidden="true" class="bi bi-arrow-repeat gx-spin gx-alert__icon"></i>
-              <div class="gx-alert__body">
-                <strong>Downloading {{ downloadTargetLabel }}</strong>
-                <span v-if="status.progress">{{ status.progress }}</span>
-              </div>
-            </div>
+            <GxNotice v-if="error" tone="danger" title="Model Manager">{{ error }}</GxNotice>
+            <GxNotice v-if="status.isOnroad" tone="warn">Park the vehicle before changing or downloading models.</GxNotice>
+            <GxNotice v-if="status.downloading" :title="'Downloading ' + downloadTargetLabel">{{ status.progress || 'Keep the device connected until the download finishes.' }}</GxNotice>
           </div>
         </section>
 
@@ -606,7 +591,7 @@ export const ModelsPage = {
                 <button v-if="!m.builtin" type="button" class="gx-btn gx-btn--tonal" style="color:var(--error);" :disabled="!canAction('delete', m)" @click="runAction('delete', m)"><i aria-hidden="true" class="bi bi-trash"></i> Delete</button>
               </template>
               <template v-else>
-                <button type="button" class="gx-btn" :disabled="!canAction('download', m)" @click="runAction('download', m)"><i aria-hidden="true" class="bi bi-download"></i> Download</button>
+                <GxIconButton :label="'Download ' + m.label" icon="bi-download" :disabled="!canAction('download', m)" @click="runAction('download', m)" />
               </template>
             </div>
             </section>

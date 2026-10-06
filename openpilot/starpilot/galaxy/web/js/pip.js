@@ -178,8 +178,8 @@ export const PipPage = {
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
       <template v-else>
         <GxNotice v-if="state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
-        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
-        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved settings are unavailable.</GxNotice>
+        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Reading blind-spot camera preferences and crop positions…</div>
+        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read blind-spot camera preferences or crop positions. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
         <div v-if="state.data" class="gx-settings__body">

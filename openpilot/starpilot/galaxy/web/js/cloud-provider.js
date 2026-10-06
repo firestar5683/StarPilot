@@ -56,13 +56,13 @@ export const CloudProviderPage = {
   template: `<div class="gx-settings__developer-body">
     <section v-if="mode !== 'local'" class="gx-card gx-message">Open this Developer page on your device to choose a cloud provider.</section>
     <template v-else>
-      <p>Cloud accounts and uploads stay separate. Your older comma recordings keep their comma links.</p>
+      <section class="gx-card gx-settings__section"><div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div><div class="gx-row"><div class="gx-row__info">
       <label class="gx-settings__developer-provider">Cloud provider
         <GalaxySelect class="gx-field gx-field--full" aria-label="Cloud provider" :value="status?.selected || ''"
           :disabled="busy || !status?.canSelect" @change="select($event.target.value)">
           <option v-for="provider in status?.providers || []" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
         </GalaxySelect>
-      </label>
+      </label></div></div></section>
       <GxNotice v-if="selected" :tone="active && selected.id === active.id ? 'info' : 'warn'">
         {{ selected.label }}{{ active && selected.id === active.id ? ' is currently active.' : ' applies after the next reboot.' }}
       </GxNotice>

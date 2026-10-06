@@ -1,3 +1,4 @@
+import { BottomNav, NAV, primaryTab } from "./bottom-nav.js"
 import { GalaxyLoading } from "./loading-screen.js"
 import { GxNotice } from "./notice.js"
 import { createApp, reactive, defineAsyncComponent } from "../vendor/vue/vue.esm-browser.js"
@@ -31,7 +32,6 @@ const OnroadLayoutPage = page(() => import("./onroad-layout.js").then((module) =
 const GalaxyPage = page(() => import("./galaxy.js").then((module) => module.GalaxyPage))
 import { DevicePicker } from "./device-picker.js"
 import { DeviceState } from "./device-state.js"
-import { InstallApp } from "./install-app.js"
 import { spawnAmbientStars } from "./ambient-stars.js"
 
 function page(loader) {
@@ -65,19 +65,15 @@ const authState = reactive({ status: "checking", error: "", localAccess: false, 
 const authForm = reactive({ password: "" })
 const auth = new LocalAuth({ publish: (update) => Object.assign(authState, update) })
 
-const NAV = [
-  { name: "Home", path: "/", icon: "bi-house-fill" },
-  { name: "Toggles", path: "/settings", icon: "bi-toggle-on" },
-  { name: "Tools", path: "/tools", icon: "bi-tools" },
-  { name: "Recordings", path: "/recordings", icon: "bi-camera-reels" },
-]
+
 
 createApp({
-  components: { GalaxyLoading, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, InstallApp, MenuTile },
-  data: () => ({ state, authState, authForm, route, NAV }),
+  components: { BottomNav, GalaxyLoading, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, MenuTile },
+  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1 }),
   computed: {
     visibleTools() { return state.tools.filter(tool => tool.visibility !== "authenticated" ||
-      (state.monitorMode === "local" && authState.status === "authenticated")) },
+      (state.monitorMode === "local" && authState.status === "authenticated")).sort((a, b) =>
+        Number(a.path === "/galaxy") - Number(b.path === "/galaxy")) },
     currentTool() { return state.tools.find((tool) => route.path === tool.path || route.path.startsWith(tool.path + "/")) },
     drivingSettingsPage() { return drivingPage(route.path) },
     deviceSettingsPage() { return devicePage(route.path) },
@@ -93,13 +89,16 @@ createApp({
     },
   },
   errorCaptured() { state.pageError = "This page could not finish loading."; return false },
-  watch: { 'route.path'() { state.pageError = "" } },
+  watch: { 'route.path'(path, previous) {
+    state.pageError = ""
+    this.routeDirection = primaryTab(path) < primaryTab(previous) ? -1 : 1
+  } },
   methods: {
+    setPageActive(element, active) { element.inert = !active; element.setAttribute("aria-hidden", String(!active)) },
     reloadPage() { location.reload() },
     go(path) { navigate(path, () => { state.drawerOpen = false; state.searchPage = "" }) },
     openSearchHit(hit) { navigate("/settings", () => { state.drawerOpen = false; state.searchPage = hit.page }) },
     returnFromSearch() { state.searchPage = "" },
-    returnToCameras() { this.go("/cameras") },
     returnToDriving() { this.go("/driving") },
     returnToDevice() { this.go("/device-preferences") },
     routeBack() { state.drawerOpen = false; navigateBack() },
@@ -157,13 +156,15 @@ createApp({
         </div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Recordings</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="go('/recordings')"><i class="bi bi-camera-reels"></i><span>Recordings</span></button></div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Tools</div>
-          <button v-for="tool in visibleTools" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="go(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
+          <button v-for="tool in visibleTools.filter(tool => tool.path !== '/galaxy')" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="go(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
 
         </div>
-        <InstallApp />
-        <DevicePicker />
+        <div class="gx-nav-footer"><DevicePicker />
+          <button type="button" class="gx-nav-item" :class="{active:isActive('/galaxy')}" @click="go('/galaxy')"><i class="bi bi-globe"></i><span>Install Galaxy / Tunnel</span></button>
+        </div>
       </aside>
-      <main class="gx-content">
+      <main class="gx-content" :style="{'--route-direction': routeDirection}"><div class="gx-route-stage">
+        <Transition name="gx-route" @before-enter="setPageActive($event, true)" @before-leave="setPageActive($event, false)"><div class="gx-route" :key="route.path">
         <template v-if="state.loading && !state.error"><GalaxyLoading v-if="state.startupPending" message="Connecting to your device…" /></template>
         <GxNotice v-else-if="state.error" tone="danger">{{ state.error }}</GxNotice>
         <section v-else-if="state.monitorMode === 'local' && authState.status !== 'authenticated'" class="gx-card gx-auth" aria-label="Galaxy sign in">
@@ -180,8 +181,7 @@ createApp({
         <Home v-else-if="route.path === '/'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <LocalRecordingsPage v-else-if="route.path === '/recordings'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <CamerasPage v-else-if="route.path === '/cameras'" :mode="state.monitorMode" :go="go" :unauthorized="sessionExpired" />
-        <SentryEventsPage v-else-if="route.path === '/cameras/events'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <SettingsPage ref="activeSettings" v-else-if="route.path === '/cameras/sentry-settings'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="sentry" title="Sentry motion settings" :return-to="returnToCameras" />
+        <SentryEventsPage v-else-if="['/cameras/events', '/cameras/sentry-settings'].includes(route.path)" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <PipPage v-else-if="route.path === '/cameras/pip'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <VasmPage v-else-if="route.path === '/cameras/vasm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <Tools v-else-if="route.path === '/tools'" :tools="visibleTools" :mode="state.monitorMode" />
@@ -215,8 +215,8 @@ createApp({
         <PlotsPage v-else-if="route.path === '/tuning/plots'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <div v-else class="gx-card gx-message" role="status"><h2>{{ pageName }}</h2><p>This capability is unavailable in this build. No operation was attempted.</p></div>
-      </main>
-      <nav v-if="route.path !== '/navigation'" class="blur-nav" aria-label="Primary navigation"><button v-for="item in NAV" :key="item.path" type="button" class="nav-item" :class="{active:isActive(item.path)}" @click="go(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button></nav>
+      </div></Transition></div></main>
+      <BottomNav v-if="route.path !== '/navigation'" :path="route.path" @navigate="go" />
     </div>
   `,
 }).component("GxNotice", GxNotice).mount("#galaxy-app")

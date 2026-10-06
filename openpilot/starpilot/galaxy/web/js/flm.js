@@ -240,7 +240,7 @@ export const FlmPage = {
     <p v-if="mode !== 'local'" class="gx-card gx-message">Offline analysis requires authenticated local Galaxy access.</p>
     <template v-else>
 
-      <p v-if="inventoryStatus === 'loading'" role="status">Reading local recordings…</p><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
+      <p v-if="inventoryStatus === 'loading'" role="status" class="gx-card gx-message">Reading local recordings…</p><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
       <p v-if="inventory?.scanIncomplete" role="status">This recording scan was incomplete. More local segments may exist.</p>
       <section class="gx-card gx-flm__panel"><h3>Choose Full Logs</h3><p class="gx-note">Select 1–5 closed local segments. Quick logs alone cannot provide this report.</p>
 <div class="gx-flm__actions" style="position:sticky;top:0;z-index:1;background:var(--gx-surface, #181526);padding:0.75rem 0;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">

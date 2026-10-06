@@ -19,7 +19,7 @@ assert.match(SentryEventsPage.template, /<img[^>]*event.images[^>]*api\/sentry\/
 assert.doesNotMatch(SentryEventsPage.template, /v-html|deleteEvent|Download/)
 assert.match(CamerasPage.template, /View motion events/)
 const app = readFileSync(new URL('../web/js/app.js', import.meta.url), 'utf8')
-assert.match(app, /route\.path === '\/cameras\/events'/)
+assert.match(app, /SentryEventsPage[^>]*\/cameras\/events[^>]*\/cameras\/sentry-settings/)
 
 function fixture() {
   const requests = [], states = [], timers = new Map()

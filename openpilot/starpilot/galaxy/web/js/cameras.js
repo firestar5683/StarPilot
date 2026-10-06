@@ -1,3 +1,4 @@
+import { MenuTile } from "./menu-tile.js"
 import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
@@ -62,7 +63,7 @@ export class CameraSnapshotFeed {
 
 export const CamerasPage = {
   name: "CamerasPage",
-  components: { GxNotice, GalaxySelect },
+  components: { GxNotice, GalaxySelect, MenuTile },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true },
     unauthorized: { type: Function, required: true } },
   data: () => ({ camera: "cabin", image: "", capturing: false, error: "" }),
@@ -77,23 +78,12 @@ export const CamerasPage = {
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.snapshots.stop() },
   watch: { mode() { this.snapshots.stop() } },
   template: `
-    <div class="gx-view gx-home" aria-label="Cameras and Monitoring">
-      <div class="gx-home__hero"><div><h1>Cameras &amp; Monitoring</h1>
-        <p class="gx-note">Camera preferences and availability</p></div></div>
-      <div class="gx-home__grid">
-        <section class="gx-card gx-home__card"><h2><i class="bi bi-camera-video"></i> Blind Spot Camera and Preview</h2>
-          <p>Adjust the camera crop with a live cabin preview.</p>
-          <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/pip')">Open saved preferences <i class="bi bi-arrow-right"></i></button>
-          <small v-else>Saved preferences are unavailable in preview.</small></section>
-        <section class="gx-card gx-home__card"><h2><i class="bi bi-shield"></i> Sentry</h2>
-          <p>View captured motion events and configure Sentry notifications.</p>
-          <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/events')">View motion events <i class="bi bi-arrow-right"></i></button>
-          <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/sentry-settings')">Saved motion settings <i class="bi bi-arrow-right"></i></button>
-          <small v-else>Motion events are unavailable in preview.</small></section>
-        <section class="gx-card gx-home__card"><h2><i class="bi bi-eye"></i> V-ASM</h2>
-          <p>Preview the cabin camera, draw window regions, and adjust visual spot-monitoring choices.</p>
-          <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/vasm')">Open saved settings <i class="bi bi-arrow-right"></i></button>
-          <small v-else>Saved settings are unavailable in preview.</small></section>
+    <div class="gx-view" aria-label="Cameras and Monitoring">
+      <h2>Cameras &amp; Monitoring</h2>
+      <div class="gx-grid">
+        <MenuTile icon="bi-camera-video" title="Blind Spot Camera and Preview" description="Adjust the camera crop with a live cabin preview." :disabled="mode !== 'local'" @select="go('/cameras/pip')" />
+        <MenuTile icon="bi-shield" title="Sentry" description="View motion events, configure saved motion settings, and manage notifications." :disabled="mode !== 'local'" @select="go('/cameras/events')" />
+        <MenuTile icon="bi-eye" title="V-ASM" description="Preview the cabin camera, draw window regions, and adjust visual spot-monitoring choices." :disabled="mode !== 'local'" @select="go('/cameras/vasm')" />
       </div>
       <section class="gx-card gx-home__card"><h2>Camera Snapshot</h2>
         <p>Turn off the vehicle, choose a camera, then take a snapshot.</p>
