@@ -3,7 +3,7 @@ import pytest
 from opendbc.car import gen_empty_fingerprint, structs
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.stock_aol import CLASSIC_BOSCH, NIDEC, RADARLESS, qualified, temporary_restriction
-from opendbc.car.honda.values import CAR
+from opendbc.car.honda.values import CAR, HondaFlags
 from openpilot.starpilot.aol.intent import AolSettings, AOL_TOGGLE
 from openpilot.starpilot.car.honda.aol import policy_for, create_intent, native_accepts_cp
 
@@ -12,18 +12,22 @@ AUTO_188 = frozenset((CAR.ACURA_RDX, CAR.HONDA_CRV_SA, CAR.HONDA_ACCORD_9G))
 IDENTITIES = tuple(sorted(CLASSIC_BOSCH | NIDEC | RADARLESS, key=str))
 
 
-def final_cp(identity, alpha=False, release=False):
+def final_cp(identity, alpha=False, release=False, *, hybrid=False):
   fingerprint = gen_empty_fingerprint()
   pt = 1 if identity in CLASSIC_BOSCH else 0
   address, length = (0x188, 6) if identity in AUTO_188 else (0x1A3, 8)
   fingerprint[pt][address] = length
+  if hybrid:
+    fingerprint[pt][0x184] = 8
   return CarInterface.get_params(identity, fingerprint, [], alpha, release, False)
 
 
 @pytest.mark.parametrize("identity", IDENTITIES)
 @pytest.mark.parametrize("alpha,release", ((False, False), (True, False), (True, True)))
-def test_actual_factory_admission_and_marker(identity, alpha, release):
-  cp = final_cp(identity, alpha, release)
+@pytest.mark.parametrize("hybrid", (False, True))
+def test_actual_factory_admission_and_marker(identity, alpha, release, hybrid):
+  cp = final_cp(identity, alpha, release, hybrid=hybrid)
+  assert bool(cp.flags & HondaFlags.HYBRID) == hybrid
   expected = not (identity in CLASSIC_BOSCH and cp.openpilotLongitudinalControl)
   assert qualified(cp) == expected
   if not expected:
@@ -49,20 +53,21 @@ def test_actual_factory_admission_and_marker(identity, alpha, release):
 
 
 @pytest.mark.parametrize("identity", IDENTITIES)
-def test_manual_unknown_namespace_and_extra_panda_denied(identity):
-  cp = final_cp(identity)
+@pytest.mark.parametrize("hybrid", (False, True))
+def test_manual_unknown_namespace_and_extra_panda_denied(identity, hybrid):
+  cp = final_cp(identity, hybrid=hybrid)
   cp.fingerprintSource = structs.CarParams.FingerprintSource.fixed
   assert not qualified(cp)
-  cp = final_cp(identity)
+  cp = final_cp(identity, hybrid=hybrid)
   cp.transmissionType = structs.CarParams.TransmissionType.manual
   assert not qualified(cp)
-  cp = final_cp(identity)
+  cp = final_cp(identity, hybrid=hybrid)
   cp.flags |= 1 << 31
   assert not qualified(cp)
-  cp = final_cp(identity)
+  cp = final_cp(identity, hybrid=hybrid)
   cp.safetyConfigs[0].safetyParam |= 0x4000
   assert not qualified(cp)
-  cp = final_cp(identity)
+  cp = final_cp(identity, hybrid=hybrid)
   cp.safetyConfigs = [structs.CarParams.SafetyConfig(safetyModel="noOutput"), cp.safetyConfigs[0]]
   assert not qualified(cp)
 
