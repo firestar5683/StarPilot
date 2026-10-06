@@ -40,6 +40,8 @@ def probe(output, reference_method=None):
     # Allocate just the state_control dependencies. Native controllers and SubMaster
     # are independent; Params, publication, pose calibration and manager are not run.
     control = Controls.__new__(Controls)
+    from openpilot.starpilot.lateral.pause import LateralPause, PauseSettings
+    control.lateral_pause = LateralPause(PauseSettings())
     attach_inputs(control)
     control.lateral_gain_owner = None
     control.aol_replay = False

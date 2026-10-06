@@ -13,6 +13,7 @@ from dataclasses import replace
 from typing import Any
 import json
 import math
+from openpilot.starpilot.lateral.pause import KEYS as LATERAL_PAUSE_KEYS
 from openpilot.starpilot.lateral.lane_centering import STRENGTH_BASELINE, STRENGTH_MAX
 
 from opendbc.car.structs import car
@@ -73,6 +74,7 @@ BOOL_DEFAULTS = {
   "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": False,
   "SLCConfirmation": False, "SLCConfirmationHigher": False, "SLCConfirmationLower": False,
+  "PauseLateralOnSignal": False,
   "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
   "CustomPersonalities": False, PLANNER_SELECTION_KEY: True,
   LEAD_APPROACH_KEY: False,
@@ -535,6 +537,73 @@ class FeatureSettingsOwner:
     saved = read_document_value(self.params)
     return saved.value if isinstance(saved.value, dict) else None, saved.raw, saved.valid
 
+  def _lateral_pause_capability(self) -> tuple | None:
+    try:
+      cp = self.vehicle_params()
+      if (cp is None or cp.notCar or cp.passive or cp.dashcamOnly or not cp.carFingerprint or
+          not any(c.safetyModel not in (car.CarParams.SafetyModel.silent, car.CarParams.SafetyModel.noOutput,
+                                       car.CarParams.SafetyModel.allOutput) for c in cp.safetyConfigs)):
+        return None
+      return (str(cp.carFingerprint), str(cp.steerControlType),
+              tuple((str(c.safetyModel), int(c.safetyParam)) for c in cp.safetyConfigs))
+    except (AttributeError, TypeError, ValueError):
+      return None
+
+  def _lateral_pause_rows(self, configurable: bool) -> list[FeatureRow]:
+    capability = self._lateral_pause_capability()
+    allowed = configurable and self.authority("preferences") and capability is not None
+    units, unit_raw, unit_valid = self._value("IsMetric")
+    unit_valid = unit_valid and units in ("0", "1") and self._readable("IsMetric")
+    common = FeatureRow("", "", "", capability=capability, vehicle_fingerprint=self.vehicle_fingerprint(),
+                        dependencies=(("IsMetric", unit_raw),))
+    rows = []
+    for key, label, maximum, step, unit in (("PauseLateralSpeed", "Pause steering below", 100., 1., "km/h" if units == "1" else "mph"),
+                                            ("LateralResumeDelay", "Steering resume delay", 5., .1, "s")):
+      value, raw, valid = self._value(key)
+      try:
+        number = float(value)
+        valid = valid and self._readable(key) and math.isfinite(number) and 0 <= number <= maximum
+      except ValueError:
+        valid, number = False, 0.
+      rows.append(replace(common, key=key, label=label, value=f"{number:g}" if valid else "Invalid saved value", source=raw,
+                             step=step if valid else 0., minimum=0., maximum=maximum, unit=unit,
+                             available=allowed and unit_valid and (valid or self.authority("parked_preferences") and self._readable(key)),
+                             repair_value="0" if not valid else "", default_value="0", display_unit=unit,
+                             reason="Zero speed disables steering pause. Applies within one second." if key == "PauseLateralSpeed" else
+                                    "After signaling off, only when speed went below half the pause threshold. Applies within one second."))
+    toggle = self._bool_row("PauseLateralOnSignal", "Pause only while signaling", allowed and unit_valid)
+    if not toggle.choices and self._readable("PauseLateralOnSignal") and self.authority("parked_preferences"):
+      toggle = replace(toggle, available=allowed and unit_valid, repair_value="Off")
+    rows.insert(1, replace(toggle, capability=common.capability, vehicle_fingerprint=common.vehicle_fingerprint,
+                           dependencies=common.dependencies,
+                           reason="Otherwise pauses below the threshold with or without a signal. Applies within one second."))
+    return rows
+
+  def _apply_lateral_pause(self, request: FeatureSettingsRequest) -> bool:
+    def authorized():
+      row = next(row for row in self._lateral_pause_rows(self.authority("preferences")) if row.key == request.key)
+      return (row.available and (not row.repair_value or request.value == row.repair_value) and
+              row.capability == request.capability and row.vehicle_fingerprint == request.vehicle_fingerprint and
+              row.dependencies == request.dependencies and row.source == request.expected and
+              row.display_unit == request.display_unit and request.related_source is None and not request.direction)
+    if not authorized():
+      return False
+    if request.key == "PauseLateralOnSignal":
+      if request.value not in ("Off", "On"):
+        return False
+      raw = b"1" if request.value == "On" else b"0"
+    else:
+      try:
+        number = float(request.value)
+      except ValueError:
+        return False
+      if not math.isfinite(number) or not 0 <= number <= (100 if request.key == "PauseLateralSpeed" else 5):
+        return False
+      raw = str(number).encode()
+    result = commit_exact(self.params, key=request.key, max_bytes=128, raw=raw, expected=request.expected,
+                          authorized=authorized, temp_prefix=".lateral-pause-")
+    return result.committed and result.verified
+
   def _turn_assist_row(self, configurable: bool) -> FeatureRow:
     from openpilot.starpilot.lateral.controller_selection import turn_assist_supported
     cp = self.vehicle_params()
@@ -720,6 +789,7 @@ class FeatureSettingsOwner:
                              vehicle_fingerprint=self.vehicle_fingerprint(), dependencies=learning.sources))
     elif page == FeaturePage.TORQUE:
       title = "Steering and Torque"
+      rows.extend(self._lateral_pause_rows(configurable))
       controller_row = self.controller.row()
       if controller_row is not None:
         rows.append(controller_row)
@@ -1039,6 +1109,8 @@ class FeatureSettingsOwner:
       return self.output_maximum.apply(request)
     if key == "ReverseCruise":
       return self._apply_reverse_cruise(replace(request, confirmation=False) if request.confirmation and request.value == "Off" else request)
+    if key in LATERAL_PAUSE_KEYS:
+      return self._apply_lateral_pause(request)
     if key == "TurnAssist":
       return self._apply_turn_assist(request)
     if key == 'LateralControllerSelection':
