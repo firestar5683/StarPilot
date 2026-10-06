@@ -24,6 +24,7 @@ from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET, Alert, Priority as AlertPriority
 from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState, EVENT_TYPE as FORCE_STOP_HOLD
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
+from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
@@ -214,6 +215,16 @@ class SelfdriveD:
       set_offroad_alert("Offroad_CarUnrecognized", True)
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
+
+  def update_process_health(self) -> bool:
+    not_running = driving_process_failures(self.sm['managerState'].processes)
+    if self.sm.recv_frame['managerState'] and not_running:
+      if not_running != self.not_running_prev:
+        cloudlog.event("process_not_running", not_running=not_running, error=True)
+      self.not_running_prev = not_running
+      self.events.add(EventName.processNotRunning)
+      return True
+    return False
 
   def update_big_model_status(self) -> bool:
     big_active = self.params.get("ChestnutActive")
@@ -448,14 +459,7 @@ class SelfdriveD:
     if self.big_model_active and big_failed:
       self.events.add(EventName.bigModelFailed)
 
-    not_running = {p.name for p in self.sm['managerState'].processes if not p.running and p.shouldBeRunning}
-    if self.sm.recv_frame['managerState'] and len(not_running):
-      if not_running != self.not_running_prev:
-        cloudlog.event("process_not_running", not_running=not_running, error=True)
-      self.not_running_prev = not_running
-    if self.sm.recv_frame['managerState'] and not_running:
-      self.events.add(EventName.processNotRunning)
-    else:
+    if not self.update_process_health():
       if not SIMULATION and not self.rk.lagging:
         if not self.sm.all_alive(self.camera_packets):
           self.events.add(EventName.cameraMalfunction)
