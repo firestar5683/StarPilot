@@ -1,10 +1,11 @@
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
+import { InstallApp } from "./install-app.js"
 import { LocalAccess } from "./local-access.js"
 
 export const GalaxyPage = {
   name: "GalaxyPage",
-  components: { GxNotice, LocalAccess },
+  components: { GxNotice, LocalAccess, InstallApp },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "" }),
@@ -56,8 +57,8 @@ export const GalaxyPage = {
     },
   },
   template: `
-    <div class="gx-settings gx-tunnel"><h2>Galaxy Tunnel</h2>
-      <GxNotice tone="info" title="Your comma, wherever you are">Pair your device for secure remote Galaxy access.</GxNotice>
+    <div class="gx-settings gx-tunnel"><h2>Install Galaxy / Tunnel</h2>
+      <GxNotice tone="info" title="Your StarPilot, wherever you are">Pair your device for secure remote Galaxy access.</GxNotice>
       <section v-if="mode !== 'local'" class="gx-card gx-message">Pairing is available on your comma.</section>
       <section v-else-if="loading" class="gx-card gx-message">Checking pairing status…</section>
       <section v-else class="gx-card" style="padding:var(--sp-4)">
@@ -80,7 +81,7 @@ export const GalaxyPage = {
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       </section>
       <section class="gx-card gx-info-card">
-        <h3><i class="bi bi-phone" aria-hidden="true"></i> Install Galaxy</h3>
+        <h3><i class="bi bi-phone" aria-hidden="true"></i> Install Galaxy</h3><InstallApp />
         <p>Open your paired link, then choose <strong>Install app</strong> or <strong>Add to Home Screen</strong>.</p>
         <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>
         <p class="gx-note">Galaxy is a Progressive Web App and needs an active connection.</p>

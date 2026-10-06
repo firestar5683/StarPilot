@@ -1,4 +1,4 @@
-// One submenu entry used by Tools, Logs & Diagnostics and Plots & Analysis so
+// Shared submenu entry for tool groups, driving preferences and cameras so
 // the icon alignment, hover and press feedback are identical everywhere.
 export const MenuTile = {
   name: "MenuTile",

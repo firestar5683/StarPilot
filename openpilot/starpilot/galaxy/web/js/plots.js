@@ -1,3 +1,4 @@
+import { GxIconButton } from "./icon-button.js"
 // Bounded, read-only local control history. No layout or telemetry is persisted.
 export const MAX_POINTS = 240
 export const POLL_MS = 750
@@ -188,7 +189,7 @@ export const PlotGraph = {
 
 export const PlotsPage = {
   name: 'PlotsPage',
-  components: { PlotGraph },
+  components: { PlotGraph, GxIconButton },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: 'idle', data: null, history: [], error: '', paused: false, advanced: false }),
   created() { this.feed = new PlotsFeed({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
@@ -225,7 +226,7 @@ export const PlotsPage = {
       <a class="gx-btn gx-btn--tonal" href="#/tuning/flm">Offline tracking analysis</a>
       <div v-if="mode !== 'local'" class="gx-card gx-message">Live plots require the authenticated local Galaxy service.</div>
       <template v-else>
-        <div class="gx-plots__toolbar"><button type="button" class="gx-btn gx-btn--tonal" @click="togglePause">{{ paused ? 'Resume' : 'Pause' }}</button>
+        <div class="gx-plots__toolbar"><GxIconButton :label="paused ? 'Resume live plots' : 'Pause live plots'" :icon="paused ? 'bi-play-fill' : 'bi-pause-fill'" @click="togglePause" />
           <button type="button" class="gx-btn gx-btn--tonal" :aria-pressed="advanced" @click="advanced=!advanced">{{ advanced ? 'Hide' : 'Show' }} controller terms</button>
           <span role="status">{{ paused ? 'Paused' : data?.bootStabilizing ? 'Starting vehicle systems' : status === 'current' ? 'Live' : status === 'stale' ? 'Reconnecting · last received values' : status === 'unavailable' ? 'Unavailable' : 'Connecting' }}</span></div>
         <p class="gx-note" role="status" style="min-height:2.8em">{{ !paused && error ? error : 'Missing samples leave a gap in the graph.' }}</p>

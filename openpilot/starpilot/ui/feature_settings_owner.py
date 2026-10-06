@@ -582,19 +582,19 @@ class FeatureSettingsOwner:
                              "Send StarPilot your branch, device, vehicle, driving model, regional location, and feature settings " +
                              "while offroad. Excludes passwords, precise GPS, recordings, and VIN.")]
     elif page == FeaturePage.HUB:
-      rows = [FeatureRow("", "Speed Limit Controller", "Saved settings", page=FeaturePage.SLC, available=True),
-              FeatureRow("", "Lane Centering", "Saved settings", page=FeaturePage.LANE, available=True),
-              FeatureRow("", "Lane Changes", "Lane change settings", page=FeaturePage.LANE_CHANGE, available=True),
-              FeatureRow("", "Long Planner", "Saved profiles", page=FeaturePage.PROFILES, available=True),
-              FeatureRow("", "Conditional Driving Modes", "Saved settings", page=FeaturePage.CONDITIONAL, available=True),
-              FeatureRow("", "Curve Speed Controller", "Saved settings", page=FeaturePage.CURVE, available=True),
-              FeatureRow("", "Steering and Torque", "Saved settings", page=FeaturePage.TORQUE, available=True),
-              FeatureRow("", "Always On Lateral", "Saved settings", page=FeaturePage.AOL, available=True),
-              FeatureRow("", "Wheel Controls", "Button assignments", page=FeaturePage.WHEEL, available=True)]
+      rows = [FeatureRow("", "Speed Limit Controller", "Choose speed-limit sources, offsets, and confirmation behavior", page=FeaturePage.SLC, available=True),
+              FeatureRow("", "Lane Centering", "Adjust lane positioning, lane detection, and steering alerts", page=FeaturePage.LANE, available=True),
+              FeatureRow("", "Lane Changes", "Configure lane-change speed, automatic timing, and driver nudges", page=FeaturePage.LANE_CHANGE, available=True),
+              FeatureRow("", "Long Planner", "Tune acceleration, braking, and following distances", page=FeaturePage.PROFILES, available=True),
+              FeatureRow("", "Conditional Driving Modes", "Choose when to switch between Chill and Experimental", page=FeaturePage.CONDITIONAL, available=True),
+              FeatureRow("", "Curve Speed Controller", "Adjust how speed is reduced for curves ahead", page=FeaturePage.CURVE, available=True),
+              FeatureRow("", "Steering and Torque", "Select the steering controller and tune its response", page=FeaturePage.TORQUE, available=True),
+              FeatureRow("", "Always On Lateral", "Keep steering assistance active independently of cruise control", page=FeaturePage.AOL, available=True),
+              FeatureRow("", "Wheel Controls", "Assign steering-wheel buttons and cruise behavior", page=FeaturePage.WHEEL, available=True)]
       if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
           self._pedal_setup_capability() is not None or self._gm_stop_capability("VoltSNG") is not None or
           self._gm_stop_capability("GMAutoHold") is not None or self.tesla_screen.capability() is not None):
-        rows.append(FeatureRow("", "Vehicle Settings", "Saved preferences", page=FeaturePage.VEHICLE, available=True))
+        rows.append(FeatureRow("", "Vehicle Settings", "Configure features supported by your vehicle", page=FeaturePage.VEHICLE, available=True))
       rows.extend(FeatureRow("", name.title() + " Personality", "", page=name, available=True)
                   for name in (*PROFILE_NAMES, "traffic"))
     elif page == FeaturePage.VEHICLE:

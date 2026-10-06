@@ -62,7 +62,7 @@ const canceling=download.feed.action('cancel');assert.equal(download.requests[3]
 await download.reply(3,{message:'Cancelling'});await download.reply(4,p);await canceling;download.feed.stop()
 assert.ok(LaboratoryPage.template.indexOf('Available models')<LaboratoryPage.template.indexOf('Compose a pair'))
 assert.match(LaboratoryPage.template,/GalaxySelect/)
-assert.match(LaboratoryPage.template,/catalog models/)
+assert.match(LaboratoryPage.template,/Catalog models/)
 assert.match(LaboratoryPage.template,/modelLabReason/)
 assert.equal(laboratoryStatusLabel({modelLabStatus:"runtime-unavailable"}), "Downloaded")
 assert.equal(laboratoryStatusLabel({modelLabStatus:"unsupported"}), "Not supported")

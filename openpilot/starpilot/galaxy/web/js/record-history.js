@@ -1,3 +1,4 @@
+import { GxIconButton } from "./icon-button.js"
 import { GxNotice } from "./notice.js"
 import { SnapshotFeed } from "./snapshot-feed.js"
 import { RecordingActions } from "./recording-actions.js"
@@ -103,7 +104,7 @@ export class LocalHistoryFeed extends SnapshotFeed {
 
 export const LocalRecordingsPage = {
   name: "LocalRecordingsPage",
-  components: { GxNotice, RecordingActions, GalaxySelect },
+  components: { GxIconButton, GxNotice, RecordingActions, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ sortOrder: "newest", logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
     details: null, detailsName: null, detailsStatus: "idle", detailsError: "", detailsGeneration: 0 }),
@@ -285,7 +286,7 @@ export const LocalRecordingsPage = {
             <div class="gx-recordings__tabs" aria-label="Filter recordings"><button class="gx-btn gx-btn--tonal" :aria-pressed="!preservedOnly" @click="preservedOnly=false">All</button><button class="gx-btn gx-btn--tonal" :aria-pressed="preservedOnly" @click="preservedOnly=true">Preserved · {{ stats.preserved }}</button></div>
           </div>
         </section>
-        <p v-if="status === 'loading'" role="status">Finding local drives…</p><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
+        <p v-if="status === 'loading'" role="status" class="gx-card gx-message">Finding local drives…</p><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
           <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local segments may exist.</p>
           <section class="gx-card gx-recordings__list">
@@ -311,9 +312,9 @@ export const LocalRecordingsPage = {
             </li></ul>
           </section>
           <section v-if="detailsName" ref="detailsPanel" class="gx-card gx-recordings__details" aria-label="Recorded segment details">
-            <div class="gx-recordings__player-head"><h3>Recorded Segment Details</h3><button type="button" class="gx-btn gx-btn--tonal" @click="closeDetails">Close</button></div>
+            <div class="gx-recordings__player-head"><h3>Recorded Segment Details</h3><GxIconButton label="Close segment details" icon="bi-x-lg" @click="closeDetails" /></div>
             <p class="gx-note">{{ detailsName }} · For this saved segment only. Distance is estimated from recorded speed.</p>
-            <p v-if="detailsStatus === 'loading'" role="status">Reading closed full log…</p>
+            <p v-if="detailsStatus === 'loading'" role="status" class="gx-card gx-message">Reading closed full log…</p>
             <GxNotice tone="danger" v-if="detailsStatus === 'unavailable'">{{ detailsError }}</GxNotice>
             <div v-if="detailsStatus === 'ready' && details" class="gx-recordings__metrics">
               <div><strong>{{ detailMetric(details.observedCarSpanSeconds) }}</strong><span>Recorded time span</span></div>
@@ -331,16 +332,16 @@ export const LocalRecordingsPage = {
           <p class="gx-note">Duration is approximate from saved one-minute segments. Older footage may have been removed to free space.</p>
           <Teleport to="body"><dialog v-if="playing" ref="playerPanel" class="gx-card gx-recordings__player" aria-label="Camera recording player" @cancel.prevent="closePlayer">
             <div class="gx-recordings__player-head"><div><h3>{{ cameraLabel(playing.camera) }}</h3><p class="gx-note">{{ playing.camera === "qcamera" ? "Quick preview" : "Full-resolution recording" }} · {{ playing.routeId }} · segment {{ playing.segments[playing.index].number }}</p></div>
-              <button type="button" class="gx-btn gx-btn--tonal" @click="closePlayer">Close</button></div>
+              <GxIconButton label="Close recording player" icon="bi-x-lg" @click="closePlayer" /></div>
             <div class="gx-recordings__actions"><button v-for="camera in playerCameras" :key="camera" class="gx-btn gx-btn--tonal"
               :aria-pressed="playing.camera === camera" @click="selectCamera(camera)">{{ cameraLabel(camera) }}</button></div>
             <video :key="playerGeneration" ref="quickVideo" :data-player-generation="playerGeneration" controls playsinline autoplay preload="metadata" :src="playing.url" @error="videoError($event)" @ended="chooseSegment(1)"></video>
             <GxNotice tone="danger" v-if="playerError">{{ playerError }}</GxNotice>
             <div class="gx-recordings__actions"><a class="gx-btn gx-btn--tonal" :href="playing.url" :download="playing.routeId + '-' + playing.camera + '-' + playing.segments[playing.index].number + '.mp4'">Download segment</a>
-            <a class="gx-btn gx-btn--tonal" :href="driveVideoUrl(playing.routeId, playing.camera)" :download="playing.routeId + '-' + playing.camera + '.mp4'">Download drive video</a></div>
-            <div class="gx-recordings__player-controls"><button type="button" class="gx-btn gx-btn--tonal" :disabled="playing.index === 0" @click="chooseSegment(-1)">Previous segment</button>
-              <GalaxySelect class="gx-field" aria-label="Video segment" :value="String(playing.index)" @change="chooseSegment(Number($event.target.value) - playing.index)"><option v-for="(segment, index) in playing.segments" :key="segment.number" :value="String(index)">Segment {{ segment.number }} · {{ index + 1 }} of {{ playing.segments.length }}</option></GalaxySelect>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="playing.index === playing.segments.length - 1" @click="chooseSegment(1)">Next segment</button></div>
+            <a class="gx-btn gx-btn--tonal" :href="driveVideoUrl(playing.routeId, playing.camera)" :download="playing.routeId + '-' + playing.camera + '.mp4'">Download drive</a></div>
+            <div class="gx-recordings__player-controls"><GxIconButton label="Previous segment" icon="bi-skip-backward-fill" :disabled="playing.index === 0" @click="chooseSegment(-1)" />
+              <GalaxySelect class="gx-field" aria-label="Video segment" :value="String(playing.index)" @change="chooseSegment(Number($event.target.value) - playing.index)"><option v-for="(segment, index) in playing.segments" :key="segment.number" :value="String(index)" :data-collapsed-label="'Segment ' + segment.number">Segment {{ segment.number }} · {{ index + 1 }} of {{ playing.segments.length }}</option></GalaxySelect>
+              <GxIconButton label="Next segment" icon="bi-skip-forward-fill" :disabled="playing.index === playing.segments.length - 1" @click="chooseSegment(1)" /></div>
           </dialog></Teleport>
 
         </template>

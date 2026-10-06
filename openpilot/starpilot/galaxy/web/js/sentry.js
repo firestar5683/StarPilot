@@ -1,3 +1,4 @@
+import { SettingsPage } from "./settings.js"
 import { GxNotice } from "./notice.js"
 import { SentryNotifications } from "./sentry-notifications.js"
 import { SnapshotFeed } from "./snapshot-feed.js"
@@ -34,7 +35,7 @@ export class SentryEventsFeed extends SnapshotFeed {
 
 export const SentryEventsPage = {
   name: "SentryEventsPage",
-  components: { GxNotice, SentryNotifications },
+  components: { GxNotice, SentryNotifications, SettingsPage },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, error: "" }),
@@ -52,11 +53,12 @@ export const SentryEventsPage = {
         <p class="gx-note">Local motion records only · System clock times may be inaccurate</p></div>
         </div>
 
+      <SettingsPage :mode="mode" :unauthorized="unauthorized" initial-page="sentry" title="Motion monitoring settings" />
       <SentryNotifications :mode="mode" :unauthorized="unauthorized" />
       <p v-if="mode !== 'local'" class="gx-card gx-message">Local motion records are unavailable in preview.</p>
       <template v-else>
 
-        <p v-if="status === 'loading'" role="status">Reading local motion events…</p>
+        <p v-if="status === 'loading'" role="status" class="gx-card gx-message">Reading local motion events…</p>
         <GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
           <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local motion events may exist.</p>

@@ -1,4 +1,3 @@
-import { connectionError } from "./polling.js"
 const ROUTE = /^[a-zA-Z0-9_+|.-]{1,128}$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0

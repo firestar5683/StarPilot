@@ -10,7 +10,7 @@ assert.ok(ids.every(id => recordArt(id).every(path => typeof path === "string" &
 assert.ok(recordArt("futureRecord").length)
 assert.ok(Home.template.includes('recordArt(record.id)'))
 assert.ok(Home.template.includes('aria-hidden="true"><svg'))
-assert.ok(GalaxyPage.template.includes('>Galaxy Tunnel</h2>'))
+assert.ok(GalaxyPage.template.includes('>Install Galaxy / Tunnel</h2>'))
 assert.ok(!GalaxyPage.template.includes('Galaxy & App Install'))
 assert.ok(GalaxyPage.template.includes('Progressive Web App'))
 assert.ok(DriveStatePanel.template.includes('gx-card gx-force-drive'))

@@ -233,7 +233,7 @@ await disabledRandomizer
 randomManagement.manager.stop()
 console.log('Randomizer and exclusion interactions passed')
 
-assert.match(ModelsPage.template, /Model changes and downloads require parked device status/)
+assert.match(ModelsPage.template, /Park the vehicle before changing or downloading models/)
 assert.doesNotMatch(ModelsPage.template, /Onroad: switching/)
 assert.equal((ModelsPage.template.match(/gx-row gx-model-control/g) || []).length, 4)
 const feedbackPage = { ...ModelsPage.data(), unauthorized() {}, canAction() { return true } }

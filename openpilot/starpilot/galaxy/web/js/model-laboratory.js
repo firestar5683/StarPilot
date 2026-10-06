@@ -1,3 +1,4 @@
+import { GxSummary } from "./summary.js"
 import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { ModelManagerFeed } from "./models.js"
@@ -95,7 +96,7 @@ export class LaboratoryFeed extends ModelManagerFeed {
 }
 
 export const LaboratoryPage = {
-  components: { GxNotice, GalaxySelect },
+  components: { GxSummary, GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, status: null, error: "", message: "", busy: false, dirty: false, trackingProgress: false,
     configuration: { enabled: false, lateralModel: "", longitudinalModel: "" } }),
@@ -159,13 +160,14 @@ export const LaboratoryPage = {
         <div class="gx-section__header"><i class="bi bi-bezier2"></i><span class="gx-section__title">Model Laboratory</span></div>
         <div style="padding:var(--sp-4);display:grid;gap:var(--sp-3)"><span class="gx-row__desc">Use lateral judgment from one model and longitudinal judgment from another.</span><div style="display:flex;gap:8px;flex-wrap:wrap"><span class="gx-chip">{{ status ? (status.chestnutReady ? 'Chestnut ready' : 'Chestnut required') : 'Waiting for device status' }}</span><span v-if="status" class="gx-chip">{{ status.isOnroad ? 'Onroad' : 'Parked' }}</span></div></div>
         <p v-if="mode !== 'local'" class="gx-note" style="margin:var(--sp-4)">Model Laboratory is available on the device. Preview does not configure a pair.</p>
-        <p v-else-if="loading" class="gx-note" style="margin:var(--sp-4)">Loading Model Laboratory…</p>
+        <p v-else-if="loading" class="gx-card gx-message" role="status">Loading Model Laboratory…</p>
         <GxNotice tone="danger" v-if="error" style="margin:var(--sp-4)">{{ error }}</GxNotice>
         <p v-if="status?.configurationError" class="gx-note gx-note--danger">{{ status.configurationError }}</p>
         <p v-if="message" class="gx-note" style="margin:var(--sp-4)" role="status">{{ message }}</p>
       </section>
       <section class="gx-card">
-        <div class="gx-section__header"><i class="bi bi-download"></i><span class="gx-section__title">Available models</span><span class="gx-chip">{{ availableModels.length }} catalog models · {{ status?.summary?.published || 0 }} Chestnut versions published · {{ readyModels.length }} downloads verified</span></div>
+        <div class="gx-section__header"><i class="bi bi-download"></i><span class="gx-section__title">Available models</span></div>
+        <GxSummary :items="[{label: 'Catalog models', value: availableModels.length}, {label: 'Published versions', value: status?.summary?.published || 0}, {label: 'Verified downloads', value: readyModels.length}]" />
         <p class="gx-note" style="margin:var(--sp-4)">Browse Small and Big models here. Combining models requires compatible Chestnut downloads and support for running them together.</p>
         <p v-if="status && !availableModels.length" class="gx-note" style="margin:var(--sp-4)">The model catalog is unavailable. Refresh to retry.</p>
         <article v-for="m in availableModels" :key="m.value" class="gx-row" style="flex-wrap:wrap;gap:12px"><div class="gx-row__info" style="flex:1 1 180px;min-width:0"><span class="gx-row__label">{{ m.label }}</span><span class="gx-row__desc">{{ m.value }} · {{ m.small ? 'Small' : 'Big' }} · {{ m.series || 'Unknown series' }} · {{ m.version }}</span><span class="gx-row__desc">{{ m.modelLabReason || 'Pair artifact status unavailable' }}</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0"><span class="gx-chip">{{ statusLabel(m) }}</span><button v-if="m.small && m.modelLabEligible && m.modelLabArtifactAvailable && !m.modelLabArtifactInstalled" class="gx-btn gx-btn--tonal" :disabled="!can('download',m)" @click="act('download',m)">Download eGPU variant</button><button v-else-if="m.modelLabArtifactInstalled" class="gx-btn gx-btn--tonal" :disabled="!can('delete',m)" @click="act('delete',m)">Delete eGPU variant</button></div></article>

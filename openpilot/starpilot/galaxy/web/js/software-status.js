@@ -435,7 +435,7 @@ export const SoftwarePage = {
       <template v-else>
         <div class="gx-software-actions">
           <button type="button" class="gx-btn" :disabled="actionDisabled || !operations?.canCheck" @click="feed.action('check')">Check for updates</button></div>
-        <p v-if="status === 'loading' && !data" role="status">Loading software updates…</p>
+        <p v-if="status === 'loading' && !data" role="status" class="gx-card gx-message">Loading software updates…</p>
         <GxNotice tone="danger" v-if="error">{{ error }}
           </GxNotice>
         <p v-if="notice" class="gx-card gx-message" role="status">{{ notice }}</p>

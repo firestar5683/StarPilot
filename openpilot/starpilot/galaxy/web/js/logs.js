@@ -58,7 +58,7 @@ export const Logs = {
         <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"></div>
         <p v-if="crashes.scanIncomplete" class="gx-note">Directory scan is incomplete; newer reports may be omitted.</p>
         <p v-else-if="crashes.listLimited" class="gx-note">Showing the 200 newest reports; older reports are omitted.</p>
-        <p v-if="crashes.status === 'loading'">Loading crash reports…</p>
+        <p v-if="crashes.status === 'loading'" class="gx-card gx-message" role="status">Loading crash reports…</p>
         <GxNotice tone="danger" v-else-if="crashes.status === 'unavailable' && !crashes.error">Crash reports are unavailable.</GxNotice>
         <p v-else-if="crashes.status === 'ready' && !visibleReports.length">{{ search ? 'No matching reports.' : 'No crash reports.' }}</p>
         <div v-if="crashes.status === 'ready'" class="gx-crash-list">

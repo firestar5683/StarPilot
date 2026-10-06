@@ -38,7 +38,7 @@ export const SystemMonitor = {
       <p v-if="mode === 'sample'" class="gx-note">Illustrative values only. No device was read.</p>
       <p v-else class="gx-note">Read-only system activity. Updates every few seconds.</p>
       <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-      <div v-else-if="!snapshot" class="gx-loading">Loading system activity…</div>
+      <div v-else-if="!snapshot" class="gx-card gx-message" role="status">Loading system activity…</div>
       <template v-else>
         <div class="gx-monitor__summary">
           <section class="gx-card gx-monitor__metric"><span>CPU</span><strong>{{ number(snapshot.cpuPercent, '%') }}</strong><small>{{ snapshot.cores.length }} cores · overall usage</small></section>
