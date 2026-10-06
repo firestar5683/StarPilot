@@ -153,8 +153,8 @@ class FeatureSettingsOwner:
 
   def aol_settings_policy(self, cp):
     if self.configuration_vehicle():
-      from openpilot.starpilot.car.hyundai.settings import configuration_wheel_policy
-      configured = configuration_wheel_policy(cp)
+      from openpilot.starpilot.aol.vehicle import configuration_settings_policy
+      configured = configuration_settings_policy(cp)
       if configured is not None:
         return configured
     return aol_policy_for(cp)

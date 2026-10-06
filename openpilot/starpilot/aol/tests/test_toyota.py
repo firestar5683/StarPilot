@@ -41,6 +41,42 @@ class TestHighlanderAol(unittest.TestCase):
           cp.openpilotLongitudinalControl = False
           self.assertFalse(qualified(cp))
 
+  def test_prius_filter_exact_profile_and_startup_transport(self):
+    from opendbc.car.toyota.prius_longitudinal import prepare_stock
+    for car in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT):
+      fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.eps,
+             fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')]
+      cp = CarInterface.get_params(car, {0: {0x2FF: 4}, 1: {}, 2: {}}, fw, False, False, False)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, 4169)
+      self.assertTrue(qualified(cp))
+      for reduced in (False, True):
+        selected = cp.as_reader().as_builder()
+        if reduced:
+          self.assertTrue(prepare_stock(selected))
+        selected.alternativeExperience = 32
+        self.assertTrue(qualified(selected, marked_only=True))
+        self.assertEqual(selected.safetyConfigs[0].safetyParam, 4681 if reduced else 4169)
+        for mutation in ('identity', 'flags', 'word', 'long', 'experience', 'passive', 'model'):
+          bad = selected.as_reader().as_builder()
+          if mutation == 'identity':
+            bad.carFingerprint = CAR.TOYOTA_PRIUS_TSS2
+          elif mutation == 'flags':
+            bad.flags |= int(ToyotaFlags.TSS2)
+          elif mutation == 'word':
+            bad.safetyConfigs[0].safetyParam = 73
+          elif mutation == 'long':
+            bad.openpilotLongitudinalControl = not selected.openpilotLongitudinalControl
+          elif mutation == 'experience':
+            bad.alternativeExperience = 160
+          elif mutation == 'passive':
+            bad.passive = True
+          else:
+            bad.safetyConfigs[0].safetyModel = structs.CarParams.SafetyModel.noOutput
+          self.assertFalse(qualified(bad, marked_only=True), mutation)
+      for disabled, late in ((False, False), (True, False), (False, True)):
+        self._assert_card_full_axis_transport(car, True, prepared_cp=cp,
+                                             filter_disabled=disabled, late_disable=late)
+
   def test_radar_torque_factory_stock_and_alpha_transport(self):
     from opendbc.car.toyota.carcontroller import CarController
     from opendbc.car.toyota.carstate import CarState
@@ -162,7 +198,8 @@ class TestHighlanderAol(unittest.TestCase):
         with self.subTest(car=car, hybrid=hybrid):
           self._assert_card_full_axis_transport(car, hybrid)
 
-  def _assert_card_full_axis_transport(self, car, hybrid, *, alpha=False, radar=False):
+  def _assert_card_full_axis_transport(self, car, hybrid, *, alpha=False, radar=False, prepared_cp=None,
+                                       filter_disabled=False, late_disable=False):
     import os
     from types import SimpleNamespace
     from unittest.mock import patch
@@ -171,7 +208,7 @@ class TestHighlanderAol(unittest.TestCase):
     from openpilot.selfdrive.car.card import Car
     from openpilot.selfdrive.controls.controlsd import Controls
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
-    for hold in ((False,) if radar else (False, True)):
+    for hold in ((False,) if radar or prepared_cp is not None else (False, True)):
       for enabled in (False, True):
         with self.subTest(hold=hold, enabled=enabled), OpenpilotPrefix(), \
              patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
@@ -179,11 +216,16 @@ class TestHighlanderAol(unittest.TestCase):
           for key, value in (('OpenpilotEnabledToggle', True), ('AlwaysOnLateral', enabled),
                              ('ToyotaAutoHold', hold), ('SafeMode', False)):
             saved.put_bool(key, value, block=True)
-          cp = CarInterface.get_params(car, gen_empty_fingerprint(),
-            [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else [], alpha, False, False)
+          saved.put_bool('DisableOpenpilotLongitudinal', filter_disabled, block=True)
+          cp = (prepared_cp.as_reader().as_builder() if prepared_cp is not None else
+                CarInterface.get_params(car, gen_empty_fingerprint(),
+                  [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else [], alpha, False, False))
 
-          def discover(*args, pre_create_hook, cp=cp, **kwargs):
-            return CarInterface(pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
+          def discover(*args, pre_create_hook, cp=cp, saved=saved, **kwargs):
+            ci = CarInterface(pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
+            if late_disable:
+              saved.put_bool('DisableOpenpilotLongitudinal', True, block=True)
+            return ci
           with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
                patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
             selected = Car()
@@ -191,6 +233,10 @@ class TestHighlanderAol(unittest.TestCase):
           self.assertEqual(selected.CP.alternativeExperience, 288 if hold and aeb_hold else 160 if hold else 32)
           self.assertEqual(bool(selected.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD), hold)
           self.assertTrue(qualified(selected.CP, marked_only=True))
+          if prepared_cp is not None:
+            self.assertEqual(selected.CP.safetyConfigs[0].safetyParam, 4681 if filter_disabled or late_disable else 4169)
+            self.assertEqual(selected.CP.openpilotLongitudinalControl, not (filter_disabled or late_disable))
+            self.assertFalse(selected.CP.autoResumeSng)
           with structs.CarParams.from_bytes(saved.get('CarParams')) as published:
             self.assertEqual(published.to_dict(), selected.CP.to_dict())
           controls = Controls()

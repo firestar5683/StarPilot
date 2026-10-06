@@ -31,6 +31,43 @@ def required_document(raw: object) -> dict:
 
 
 class FeatureSettingsOwnerTests(unittest.TestCase):
+  def test_prius_retrofit_manual_settings_do_not_grant_runtime(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    from opendbc.car.toyota.interface import CarInterface
+    from opendbc.car.toyota.values import CAR
+    from openpilot.starpilot.aol.vehicle import policy_for
+    self.params.put_bool('AlwaysOnLateral', False, block=True)
+    cp = CarInterface.get_params(CAR.TOYOTA_PRIUS_RETROFIT, gen_empty_fingerprint(), [], False, False, False)
+    original = cp.to_bytes()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.owner.configuration_vehicle = lambda: True
+    row = self._row('aol', 'AlwaysOnLateral')
+    self.assertTrue(row.available)
+    self.assertIn('next startup', row.reason)
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertTrue(self.params.get_bool('AlwaysOnLateral'))
+    self.assertEqual(cp.to_bytes(), original)
+    self.assertFalse(policy_for(cp).runtime_supported)
+    self.assertFalse(policy_for(cp).intent_supported)
+    self.owner.configuration_vehicle = lambda: False
+    self.assertTrue(self.owner.apply(required_change(self._row('aol', 'AlwaysOnLateral'))))
+    self.assertFalse(self.params.get_bool('AlwaysOnLateral'))
+    self.assertFalse(self._row('aol', 'AlwaysOnLateral').available)
+    ordinary = CarInterface.get_params(CAR.TOYOTA_PRIUS, gen_empty_fingerprint(), [], False, False, False)
+    self.owner.vehicle_params = lambda: ordinary
+    self.fingerprint = ordinary.carFingerprint
+    self.owner.configuration_vehicle = lambda: True
+    self.assertFalse(self._row('aol', 'AlwaysOnLateral').available)
+    fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.eps,
+          fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')]
+    actual = CarInterface.get_params(CAR.TOYOTA_PRIUS, {0: {0x2FF: 4}, 1: {}, 2: {}}, fw, False, False, False)
+    self.owner.vehicle_params = lambda: actual
+    self.fingerprint = actual.carFingerprint
+    self.owner.configuration_vehicle = lambda: False
+    self.assertTrue(self._row('aol', 'AlwaysOnLateral').available)
+    self.assertTrue(policy_for(actual).runtime_supported)
+
   def test_toyota_hold_is_reachable_from_hub_with_correct_stop_description(self):
     from opendbc.car import structs
     from opendbc.car.toyota.interface import CarInterface
