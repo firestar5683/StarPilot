@@ -56,12 +56,14 @@ class ToyotaSafetyFlags(IntFlag):
   STOCK_LONGITUDINAL = (2 << 8)
   LTA = (4 << 8)
   SECOC = (8 << 8)
+  LONG_FILTER = (16 << 8)
 
 
 class ToyotaFlags(IntFlag):
   # Detected flags
   HYBRID = 1
   HAS_BSM = 2  # blind spot monitoring
+  LONG_FILTER = 8192
   DISABLE_RADAR = 4
 
   # Static flags
@@ -248,7 +250,7 @@ class CAR(Platforms):
     dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
   )
   TOYOTA_PRIUS_RETROFIT = PlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Prius 2016-20", package="TSS2 EPS retrofit; stock longitudinal")],
+    [ToyotaCommunityCarDocs("Toyota Prius 2016-20", package="TSS2 EPS retrofit; smartDSU required for openpilot longitudinal")],
     TOYOTA_PRIUS.specs,
     dbc_dict("toyota_nodsu_pt_generated", "toyota_adas"),
   )

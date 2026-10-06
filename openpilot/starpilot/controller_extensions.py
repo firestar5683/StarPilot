@@ -110,6 +110,15 @@ class ResumePlanInputs:
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
+  from opendbc.car.toyota.prius_longitudinal import enabled as prius_filter_enabled, prepare_stock as prepare_prius_stock
+  if prius_filter_enabled(cp):
+    from openpilot.starpilot.car.toyota.prius_preferences import PriusFilterPreference, filter_preference_enabled
+    if not filter_preference_enabled(params):
+      prepare_prius_stock(cp)
+      if controller is not None:
+        controller.prius_longitudinal = False
+    elif controller is not None:
+      controller.prius_filter_input = PriusFilterPreference(cp, params)
   from opendbc.car.gm.values import is_gm_auto_hold, is_volt_one_pedal, is_bolt_pedal_profile, camera_acc_pedal_profile, volt_cc_pedal_profile
   cc_pedal = volt_cc_pedal_profile(cp)
   camera_pedal = camera_acc_pedal_profile(cp) or cc_pedal

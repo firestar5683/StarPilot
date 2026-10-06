@@ -25,6 +25,56 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     else:
       path.write_bytes(value)
 
+  def test_prius_filter_card_rechecks_final_preferences_without_stock_promotion(self):
+    observed = gen_empty_fingerprint()
+    observed[0][0x2FF] = 4
+    eps = structs.CarParams.CarFw.new_message(
+      ecu=structs.CarParams.Ecu.eps, fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')
+    for key in ('OpenpilotEnabledToggle', 'SafeMode', 'DisableOpenpilotLongitudinal'):
+      for initially_stock in (False, True):
+        with self.subTest(key=key, initially_stock=initially_stock):
+          self.raw('SafeMode', b'0')
+          self.raw('DisableOpenpilotLongitudinal', b'1' if initially_stock else b'0')
+
+          def change(ci, key=key, initially_stock=initially_stock):
+            self.raw(key, b'0' if key == 'OpenpilotEnabledToggle' else b'1')
+            if initially_stock:
+              self.raw('OpenpilotEnabledToggle', b'1')
+              self.raw('SafeMode', b'0')
+              self.raw('DisableOpenpilotLongitudinal', b'0')
+
+          host, constructed, published = self.start(
+            CAR.TOYOTA_PRIUS_RETROFIT, observed=observed, car_fw=[eps],
+            key='LongPitch', requested=True, after_construct=change,
+            capture=lambda ci: int(ci.CP.safetyConfigs[0].safetyParam))
+          self.assertEqual(constructed, [4681 if initially_stock else 4169])
+          self.assertEqual(published.safetyConfigs[0].safetyParam, 4681)
+          self.assertTrue(published.pcmCruise)
+          self.assertFalse(published.openpilotLongitudinalControl)
+          self.assertFalse(host.CI.CC.prius_longitudinal)
+          self.assertIsNone(host.CI.CC.prius_filter_input)
+
+  def test_prius_filter_live_preference_withdraws_at_read_deadline(self):
+    from opendbc.car.toyota.interface import CarInterface
+    from openpilot.starpilot.car.toyota.prius_preferences import PriusFilterPreference
+    observed = gen_empty_fingerprint()
+    observed[0][0x2FF] = 4
+    eps = structs.CarParams.CarFw.new_message(
+      ecu=structs.CarParams.Ecu.eps, fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')
+    cp = CarInterface.get_params(CAR.TOYOTA_PRIUS_RETROFIT, observed, [eps], False, False, False)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 4169)
+    for key in ('OpenpilotEnabledToggle', 'SafeMode', 'DisableOpenpilotLongitudinal'):
+      with self.subTest(key=key):
+        self.raw('OpenpilotEnabledToggle', b'1')
+        self.raw('SafeMode', b'0')
+        self.raw('DisableOpenpilotLongitudinal', b'0')
+        preference = PriusFilterPreference(cp, self.params)
+        self.assertTrue(preference.update(1_000_000_000))
+        self.raw(key, b'0' if key == 'OpenpilotEnabledToggle' else b'1')
+        self.assertTrue(preference.update(1_249_999_999))
+        self.assertFalse(preference.update(1_250_000_000))
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 4169)
+
   def test_gm_stop_preferences_require_strict_saved_opt_in(self):
     from openpilot.common.params import ParamKeyType
     for key, name in (("VoltSNG", "volt_sng"), ("GMAutoHold", "gm_auto_hold"), ("VoltOnePedalMode", "volt_one_pedal")):
@@ -268,17 +318,20 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     path.symlink_to("SafeMode")
     self.assertFalse(VehicleStartupPreferences.read(self.params, enabled=True).toyota_auto_hold)
 
-  def start(self, candidate, *, enabled=True, requested=True, change_saved=False, key="ToyotaAutoHold", observed=None, capture=None):
+  def start(self, candidate, *, enabled=True, requested=True, change_saved=False, key="ToyotaAutoHold", observed=None,
+            capture=None, car_fw=None, after_construct=None):
     self.raw(key, b"1" if requested else b"0")
     self.params.put_bool("OpenpilotEnabledToggle", enabled, block=True)
     snapshots = []
 
     def fingerprint(*args, **kwargs):
-      return candidate, observed if observed is not None else gen_empty_fingerprint(), "0" * 17, [], structs.CarParams.FingerprintSource.can, True
+      return candidate, observed if observed is not None else gen_empty_fingerprint(), "0" * 17, car_fw or [], structs.CarParams.FingerprintSource.can, True
 
     def create(*args, **kwargs):
       ci = car_helpers.get_car(*args, **kwargs)
       snapshots.append(capture(ci) if capture is not None else (bool(ci.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD), int(ci.CP.alternativeExperience)))
+      if after_construct is not None:
+        after_construct(ci)
       if change_saved:
         self.raw(key, b"0")
       return ci

@@ -28,6 +28,7 @@ class VehicleStartupPreferences:
   tesla_screen: bool = False
   tesla_screen_brake: bool = False
   gm_camera_pedal: bool = True
+  toyota_filter: bool = True
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -55,7 +56,7 @@ class VehicleStartupPreferences:
                             readable and safe in (None, b"0"))
     except (OSError, TypeError, ValueError):
       return cls(disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock,
-                 gm_camera_pedal=False)
+                 gm_camera_pedal=False, toyota_filter=False)
     try:
       pitch, pitch_readable = read_saved(params, "LongPitch", 8)
       pitch_enabled = not (enabled and pitch_readable and pitch == b"0" and readable and safe in (None, b"0"))
@@ -73,6 +74,7 @@ class VehicleStartupPreferences:
     return cls(tesla_screen=screen, tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
                volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
                gm_camera_pedal=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
+               toyota_filter=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
                gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock)
 
@@ -121,6 +123,9 @@ class VehicleStartupPreferences:
     from opendbc.car.tesla.screen_button import apply_screen_button
     apply_screen_button(cp, self.tesla_screen, self.tesla_screen_brake)
     self._prepare_honda_radar(cp)
+    if not self.toyota_filter:
+      from opendbc.car.toyota.prius_longitudinal import prepare_stock as prepare_prius_stock
+      prepare_prius_stock(cp)
     self._prepare_bolt(cp, fingerprints)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
     self._prepare_camera_pedal(cp)
@@ -139,6 +144,9 @@ class VehicleStartupPreferences:
     from opendbc.car.tesla.screen_button import apply_screen_button
     apply_screen_button(cp, self.tesla_screen, self.tesla_screen_brake)
     self._prepare_honda_radar(cp)
+    if not self.toyota_filter:
+      from opendbc.car.toyota.prius_longitudinal import prepare_stock as prepare_prius_stock
+      prepare_prius_stock(cp)
     self._prepare_bolt(cp)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
     self._prepare_camera_pedal(cp)
