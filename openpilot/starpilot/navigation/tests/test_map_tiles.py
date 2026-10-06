@@ -75,3 +75,72 @@ def test_oversize_response_releases_slot(tmp_path):
   with pytest.raises(ValidationError, match='request limit'):
     owner.map_tile(0, 0, 0)
   assert owner._tile_slots.acquire(False)
+
+
+def test_cache_reuses_validated_tiles_and_expires(tmp_path, monkeypatch):
+  now = [100.0]
+  monkeypatch.setattr('openpilot.starpilot.navigation.owner.time.monotonic', lambda: now[0])
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  assert owner.map_tile(0, 0, 0) == PNG
+  assert owner.map_tile(0, 0, 0) == PNG
+  assert len(provider.calls) == 1
+  now[0] += 61
+  assert owner.map_tile(0, 0, 0) == PNG
+  assert len(provider.calls) == 2
+
+
+def test_cache_hit_rechecks_key_and_changed_key_invalidates(tmp_path):
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  owner.map_tile(0, 0, 0)
+  reads = iter(['pk.fixture', ''])
+  owner.read = lambda: {'token': next(reads)}
+  with pytest.raises(ValidationError, match='key changed'):
+    owner.map_tile(0, 0, 0)
+  owner.read = lambda: {'token': 'pk.new'}
+  owner.map_tile(0, 0, 0)
+  assert len(provider.calls) == 2
+  assert provider.calls[-1][1]['params']['access_token'] == 'pk.new'
+
+
+def test_cache_bounds_and_failed_responses_are_not_cached(tmp_path, monkeypatch):
+  monkeypatch.setattr('openpilot.starpilot.navigation.owner.TILE_CACHE_BYTES', len(PNG) * 2)
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  for x in range(3):
+    owner.map_tile(2, x, 0)
+  assert owner._tile_bytes == len(PNG) * 2
+  owner.map_tile(2, 0, 0)
+  assert len(provider.calls) == 4
+  provider.chunks = [b'not png']
+  for _ in range(2):
+    with pytest.raises(ValidationError, match='Invalid map tile'):
+      owner.map_tile(2, 3, 0)
+  assert len(provider.calls) == 6
+  monkeypatch.setattr('openpilot.starpilot.navigation.owner.TILE_CACHE_ENTRIES', 1)
+  provider.chunks = [PNG]
+  owner.map_tile(2, 3, 0)
+  assert len(owner._tiles) == 1
+
+
+def test_provider_runs_without_cache_metadata_lock(tmp_path):
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  def during_request():
+    assert owner._tile_lock.acquire(False)
+    owner._tile_lock.release()
+  provider.mutate = during_request
+  owner.map_tile(0, 0, 0)
+
+
+def test_authorized_key_change_clears_cache_even_when_key_restored(tmp_path):
+  provider = Provider()
+  owner = NavigationOwner(tmp_path, runtime_source=lambda: None, session=provider)
+  saved = owner.configure({'token': 'pk.first'}, '0', True)
+  owner.map_tile(0, 0, 0)
+  saved = owner.configure({'token': 'pk.second'}, saved['revision'], True)
+  assert not owner._tiles
+  owner.configure({'token': 'pk.first'}, saved['revision'], True)
+  owner.map_tile(0, 0, 0)
+  assert len(provider.calls) == 2

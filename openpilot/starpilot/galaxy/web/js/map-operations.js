@@ -304,8 +304,8 @@ export const MapOperationsPanel = {
         <p class="gx-note">Choose a region to download for offline use. Downloading another region replaces the selected map.</p>
         <p v-if="mode !== 'local'">Parked map management is unavailable in the offline preview.</p>
         <template v-else>
-          <template v-if="setup"><p role="status">{{ setup.packageReady ? 'Map service ready.' : 'Map service setup required.' }} {{ setup.snapshotReady ? 'A downloaded map is selected.' : 'Choose a region after setup to download its maps.' }}</p>
-            <p v-if="!setup.packageReady" class="gx-note">{{ setup.packageState === 'invalid_package' ? 'The installed map service does not match this software’s verified source package.' : 'The verified map service package is missing.' }} Install a matching Mapd package through the device software update, then retry maps. Saved map selection is retained.</p>
+          <template v-if="setup"><p role="status">{{ setup.packageReady ? 'Map service ready.' : 'Map service setup required.' }} {{ setup.snapshotReady ? 'A downloaded map is selected.' : setup.packageReady ? 'Choose a region to download its maps.' : 'Update device software to set up offline maps.' }}</p>
+            <p v-if="!setup.packageReady" class="gx-note">The offline map service is unavailable. Update device software, then retry maps. Your saved map selection is retained.</p>
             <p class="gx-note">{{ formatBytes(setup.freeDiskBytes) }} available storage. {{ setup.parked ? 'Parked downloads available.' : 'Park to download maps.' }}</p></template>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
 
