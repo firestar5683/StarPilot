@@ -294,8 +294,8 @@ class SystemSettingsManagerView(PanelManagerView):
         "subtitle": "",
         "get_state": lambda: self._controller._params.get_bool("HigherBitrate"),
         "set_state": self._controller._on_higher_bitrate_toggle,
-        "is_enabled": lambda: not self._controller._params.get_bool("DisableOnroadUploads") and not self._controller._params.get_bool("NoUploads"),
-        "disabled_label": tr("Uploads must stay enabled"),
+        "is_enabled": lambda: self._controller._params.get_bool("NoUploads") and not self._controller._params.get_bool("DisableOnroadUploads"),
+        "disabled_label": tr("Requires Disable Uploads (onroad uploads off)"),
       },
     ]
 
