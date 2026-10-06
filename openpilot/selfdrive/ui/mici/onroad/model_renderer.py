@@ -237,8 +237,9 @@ class ModelRenderer(Widget):
     """Update raw 3D points from model data"""
     self._path.raw_points = np.array([model.position.x, model.position.y, model.position.z], dtype=np.float32).T
 
-    for i, lane_line in enumerate(model.laneLines):
-      self._lane_lines[i].raw_points = np.array([lane_line.x, lane_line.y, lane_line.z], dtype=np.float32).T
+    # Older logs may append lane centers after the four boundaries.
+    for points, lane_line in zip(self._lane_lines, model.laneLines, strict=False):
+      points.raw_points = np.array([lane_line.x, lane_line.y, lane_line.z], dtype=np.float32).T
 
     for i, road_edge in enumerate(model.roadEdges):
       self._road_edges[i].raw_points = np.array([road_edge.x, road_edge.y, road_edge.z], dtype=np.float32).T
