@@ -12,7 +12,9 @@ from functools import partial
 
 import numpy as np
 from tinygrad import Device, TinyJit, Context, Tensor
-from tinygrad.dtype import _to_np_dtype
+from tinygrad.dtype import _to_np_dtype, dtypes
+from tinygrad.device import Buffer, BufferSpec
+from tinygrad.uop.ops import UOp
 from tinygrad_repo.examples.openpilot.helpers import dump_pickle, load_pickle
 
 COMPILER_REVISION = "9d0446a4ba8a532c8b674fb6ad795af015cd9dcf"
@@ -438,6 +440,11 @@ def make_stateful_input_queues(metadata, device):
   npy.update({name: value.reshape(shape) for (name, shape), value in
               zip(shapes.items(), np.split(packed, np.cumsum(sizes[:-1])), strict=True)})
   queues['packed_npy_inputs'] = Tensor(packed, device='NPY').realize()
+  if metadata.get('mapped_image_input', False):
+    image_shape = tuple(metadata['input_shapes']['new_img'])
+    buffer = Buffer(device, math.prod(image_shape), dtypes.uint8,
+                    options=BufferSpec(cpu_access=True), preallocate=True)
+    queues['mapped_gpu_image'] = Tensor(UOp.from_buffer(buffer)).reshape(image_shape)
   for name in metadata['state_pairs']:
     queues[name] = Tensor(np.zeros(metadata['input_shapes'][name], dtype=metadata['input_dtypes'][name]),
                           device=device).contiguous().realize()
@@ -448,11 +455,16 @@ def make_run_stateful_supercombo(model_runner, metadata):
   shapes = stateful_host_shapes(metadata)
   sizes = [math.prod(shape) for shape in shapes.values()]
 
-  def run_policy(warped, packed_npy_inputs, **state):
+  def run_policy(warped, packed_npy_inputs, mapped_gpu_image=None, **state):
     packed = packed_npy_inputs.to(Device.DEFAULT).realize()
     inputs = {name: value.reshape(shape).cast(model_runner.graph_inputs[name].dtype)
               for (name, shape), value in zip(shapes.items(), packed.split(sizes), strict=True)}
-    inputs['new_img'] = warped.to(Device.DEFAULT).cast(model_runner.graph_inputs['new_img'].dtype)
+    image = warped.to(Device.DEFAULT)
+    if metadata.get('mapped_image_input', False):
+      if mapped_gpu_image is None:
+        raise ValueError('Mapped stateful image queue is missing')
+      image = mapped_gpu_image.assign(image).realize()
+    inputs['new_img'] = image.cast(model_runner.graph_inputs['new_img'].dtype)
     outputs = {name: value.contiguous() for name, value in model_runner(inputs | state).items()}
     for name, next_name in metadata['state_pairs'].items():
       if outputs[next_name].dtype != state[name].dtype:
@@ -591,11 +603,12 @@ def main():
       for name, next_name in metadata['state_pairs'].items():
         if policy_shapes[name] != metadata['output_shapes'][next_name]:
           raise ValueError(f'State shape mismatch: {name} -> {next_name}')
+      metadata['mapped_image_input'] = True
       frame_skip = 1
       make_policy_queues = partial(make_stateful_input_queues, metadata)
       run_policy = make_run_stateful_supercombo(model_runner, metadata)
       image_shapes = stateful_image_shapes(metadata)
-      policy_input_keys = ('packed_npy_inputs', *metadata['state_pairs'])
+      policy_input_keys = ('packed_npy_inputs', 'mapped_gpu_image', *metadata['state_pairs'])
     else:
       frame_skip = args.frame_skip or derive_frame_skip(policy_shapes)
       make_policy_queues = partial(make_supercombo_input_queues, policy_shapes, frame_skip)

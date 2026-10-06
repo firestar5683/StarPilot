@@ -81,6 +81,55 @@ class CompileTest(unittest.TestCase):
           compile_jit(TinyJit(run, prune=True), partial(make_random_images, ["warped"], (2, 6, 2, 2)),
                       FAST_POLICY_INPUTS, queues, validation_runs=5)
 
+  def test_mapped_stateful_image_queue_survives_jit_reload_and_reset(self):
+    from types import SimpleNamespace
+    from tinygrad import Context, Device, Tensor, TinyJit
+    from tinygrad.dtype import dtypes
+    from openpilot.starpilot.models.compile import compile_jit, make_run_stateful_supercombo, make_stateful_input_queues
+
+    metadata = {"input_shapes": {"new_img": (2, 6, 4, 8), "action_t": (1, 2), "history": (1, 2)},
+                "state_pairs": {"history": "next_history"}, "input_dtypes": {"history": "float32"},
+                "mapped_image_input": True}
+
+    class Model:
+      graph_inputs = {"new_img": SimpleNamespace(dtype=dtypes.uint8), "action_t": SimpleNamespace(dtype=dtypes.float32)}
+
+      def __call__(self, inputs):
+        state = inputs["history"] + inputs["new_img"].float().mean() + inputs["action_t"]
+        return {"outputs": state, "next_history": state}
+
+    with Context(DEV="CPU:LLVM", IMAGE=0, FLOAT16=0, JIT_BATCH_SIZE=0):
+      queues, _ = make_stateful_input_queues(metadata, Device.DEFAULT)
+      image_buffer = queues["mapped_gpu_image"].uop.base.buffer
+      self.assertTrue(image_buffer.options.cpu_access)
+      self.assertIsNotNone(image_buffer.get_storage().host)
+      run = make_run_stateful_supercombo(Model(), metadata)
+      with self.assertRaisesRegex(ValueError, "Mapped stateful image queue is missing"):
+        run(Tensor(np.zeros((2, 6, 4, 8), dtype=np.uint8)), queues["packed_npy_inputs"], history=queues["history"])
+      compile_jit(TinyJit(run, prune=True),
+                  lambda rng: {"warped": Tensor(rng.integers(0, 256, (2, 6, 4, 8), dtype=np.uint8), device="NPY").realize()},
+                  ("packed_npy_inputs", "mapped_gpu_image", "history"),
+                  partial(make_stateful_input_queues, metadata), validation_runs=3)
+
+  def test_legacy_stateful_queue_layout_and_values_remain_unchanged(self):
+    from tinygrad import Context, Device
+    from openpilot.starpilot.models.compile import make_stateful_input_queues
+    metadata = {"input_shapes": {"new_img": (2, 6, 4, 8), "action_t": (1, 2), "history": (1, 2)},
+                "state_pairs": {"history": "next_history"}, "input_dtypes": {"history": "float32"}}
+    with Context(DEV="CPU:LLVM"):
+      queues, host = make_stateful_input_queues(metadata, Device.DEFAULT)
+      self.assertEqual(tuple(queues), ("img_q", "big_img_q", "tfm", "big_tfm", "packed_npy_inputs", "history"))
+      self.assertEqual(tuple(host), ("tfm", "big_tfm", "action_t"))
+      expected_shapes = {"img_q": (1, 6, 4, 8), "big_img_q": (1, 6, 4, 8), "tfm": (3, 3), "big_tfm": (3, 3),
+                         "packed_npy_inputs": (2,), "history": (1, 2)}
+      for name, value in queues.items():
+        with self.subTest(queue=name):
+          self.assertEqual(value.shape, expected_shapes[name])
+          self.assertFalse(value.uop.base.buffer.options.cpu_access)
+          np.testing.assert_array_equal(value.numpy(), np.zeros(expected_shapes[name]))
+      for value in host.values():
+        np.testing.assert_array_equal(value, np.zeros(value.shape))
+
   def test_source_selection_rejects_ambiguity_and_missing_split_component(self):
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
@@ -115,8 +164,18 @@ class CompileTest(unittest.TestCase):
       root = Path(temporary)
       source = root / "driving_supercombo.onnx"
       source.write_bytes(stateful_onnx())
+      child_run = subprocess.run
+      scratch_paths = []
       def compile_stub(command, **kwargs):
-        Path(command[command.index("--output") + 1]).write_bytes(b"compiled bytes")
+        staged = Path(command[command.index("--output") + 1])
+        result = child_run([sys.executable, "-c", "import tempfile; print(tempfile.mkdtemp(prefix='validation-'))"],
+                           env=kwargs["env"], capture_output=True, text=True, check=True)
+        scratch = Path(result.stdout.strip())
+        self.assertEqual(scratch.parent, staged.parent)
+        self.assertEqual(staged.parent.parent, root.resolve())
+        scratch_paths.append(scratch)
+        (scratch / "checkpoint").write_bytes(b"validation bytes")
+        staged.write_bytes(b"compiled bytes")
       with patch.object(model_compiler.subprocess, "run", side_effect=compile_stub):
         model_compiler.main(["--model", "test", "--version", "v16", "--input-dir", str(root), "--output-dir", str(root)])
       output = root / "test_driving_tinygrad.pkl"
@@ -124,6 +183,8 @@ class CompileTest(unittest.TestCase):
       self.assertEqual(receipt["source_sha256"], {source.name: model_compiler.sha256_file(source)})
       self.assertEqual(receipt["artifact_sha256"], model_compiler.sha256_file(output))
       self.assertEqual(receipt["artifact_abi"], "tinygrad_single_v1_arena")
+      self.assertEqual(len(scratch_paths), 1)
+      self.assertFalse(scratch_paths[0].parent.exists())
 
   def test_stateful_onnx_compiles_warp_and_replays_arena_on_cpu(self):
     with tempfile.TemporaryDirectory() as temporary:
