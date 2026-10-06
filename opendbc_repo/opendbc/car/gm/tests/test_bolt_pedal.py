@@ -154,6 +154,7 @@ class TestBoltPedalMessages(unittest.TestCase):
         state.cruiseState.available = True
         cs = SimpleNamespace(out=state.as_reader(), pedal_sensor_healthy=True,
                              pedal_sensor_ts_nanos=950_000_000, stock_acc_status_ts_nanos=950_000_000,
+                             bolt_pedal_gear_ts_nanos=950_000_000, bolt_pedal_main_ts_nanos=950_000_000,
                              cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
                              loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
                              buttons_counter=0)
@@ -202,7 +203,8 @@ class TestBoltPedalMessages(unittest.TestCase):
         state.vEgo = 12.
         state.cruiseState.available = True
         cs = SimpleNamespace(pedal_sensor_healthy=True, pedal_sensor_ts_nanos=950_000_000,
-                             stock_acc_status_ts_nanos=950_000_000, cam_lka_steering_cmd_counter=0,
+                             stock_acc_status_ts_nanos=950_000_000,
+                             bolt_pedal_gear_ts_nanos=950_000_000, bolt_pedal_main_ts_nanos=950_000_000, cam_lka_steering_cmd_counter=0,
                              loopback_lka_steering_cmd_updated=False, loopback_lka_steering_cmd_ts_nanos=1_000_000_000,
                              pt_lka_steering_cmd_counter=0, buttons_counter=0)
         for gear, driver_paddle in ((structs.CarState.GearShifter.park, False),
@@ -217,7 +219,10 @@ class TestBoltPedalMessages(unittest.TestCase):
           _, commands = controller.update(control.as_reader(), cs, 1_000_000_000)
           owned = [msg for msg in commands if msg[0] in (0x200, 0x1F5, 0xBD)]
           self.assertEqual([msg[0] for msg in owned], [0x200])
-          self.assertEqual(owned[0][1][0:4], b"\x00" * 4)
+          if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and gear == structs.CarState.GearShifter.drive:
+            self.assertGreater(controller.pedal_steady, 0.)
+          else:
+            self.assertEqual(owned[0][1][0:4], b"\x00" * 4)
         controller.frame = 4
         state.gearShifter = structs.CarState.GearShifter.low
         state.regenBraking = False
@@ -390,7 +395,7 @@ class TestBoltPaddleModes(unittest.TestCase):
           override = next((value for start, value in withdrawals.items() if start <= tick < start + 4), None)
           values = {
             'ECMEngineStatus': {'CruiseMainOn': int(override != 'main'), 'BrakePressed': int(override == 'brake')},
-            'ECMPRDNL2': {'PRNDL2': 4 if override == 'gear' else 6},
+            'ECMPRDNL2': {'PRNDL2': 3 if override == 'gear' else 6},
             'AcceleratorPedal2': {'AcceleratorPedal2': 30 if override == 'gas' else 0,
                                  'CruiseState': int(override == 'stock')},
             'ECMAcceleratorPos': {'BrakePedalPos': 12 if override == 'brake' else 0},

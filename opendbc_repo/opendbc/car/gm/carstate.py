@@ -56,6 +56,8 @@ class CarState(CarStateBase):
     self.distance_button = 0
     self.pedal_sensor_healthy = False
     self.pedal_sensor_ts_nanos = 0
+    self.bolt_pedal_gear_ts_nanos = 0
+    self.bolt_pedal_main_ts_nanos = 0
     self.pedal_sensor_counter = None
     self.pedal_packer = CANPacker(DBC[CP.carFingerprint][Bus.pt]) if CP.flags & GMFlags.PEDAL_LONG.value else None
     self.stock_acc_status_ts_nanos = 0
@@ -103,6 +105,9 @@ class CarState(CarStateBase):
 
     ret = structs.CarState()
     pedal_stock_no_acc = self.CP.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_profile(self.CP, stock_only=True)
+    if is_bolt_pedal_profile(self.CP):
+      self.bolt_pedal_gear_ts_nanos = pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"]
+      self.bolt_pedal_main_ts_nanos = pt_cp.ts_nanos["ECMEngineStatus"]["CruiseMainOn"]
 
     if self.camera_pedal_profile is not None:
       analog = (("ECMAcceleratorPos", "BrakePedalPos") if self.camera_pedal_profile.brake_source == BrakeSource.BE else

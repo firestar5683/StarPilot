@@ -313,7 +313,14 @@ class CarController(CarControllerBase):
                    (CS.stock_acc_status_ts_nanos > 0 and 0 <= stock_age <= STOCK_ACC_STATUS_TIMEOUT_NS and
                     not CS.out.cruiseState.enabled))
     in_regen_gear = CS.out.gearShifter == structs.CarState.GearShifter.low
-    active = (CC.longActive and sensor_ready and in_regen_gear and not CS.out.brakePressed and
+    drive_ready = in_regen_gear or (stock_acc and CS.out.gearShifter == structs.CarState.GearShifter.drive)
+    if stock_acc:
+      gear_ns = getattr(CS, "bolt_pedal_gear_ts_nanos", 0)
+      main_ns = getattr(CS, "bolt_pedal_main_ts_nanos", 0)
+      drive_ready = (drive_ready and gear_ns > 0 and 0 <= now_nanos - gear_ns <= 100_000_000 and
+                     main_ns > 0 and 0 <= now_nanos - main_ns <= 300_000_000)
+
+    active = (CC.longActive and sensor_ready and drive_ready and not CS.out.brakePressed and
               not CS.out.gasPressed and not CS.out.regenBraking and owner_clear and
               (not stock_acc or CS.out.cruiseState.available))
     return active, owner_clear, in_regen_gear
@@ -602,7 +609,7 @@ class CarController(CarControllerBase):
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 4))
     elif self.CP.flags & GMFlags.PEDAL_LONG.value and self.CP.openpilotLongitudinalControl and self.camera_pedal_profile is None:
       active, stock_ownership_clear, in_regen_gear = self.bolt_pedal_admission(CC, CS, now_nanos)
-      if not active or self.maneuver_paddle_mode == "off":
+      if not active or not in_regen_gear or self.maneuver_paddle_mode == "off":
         self.bolt_regen_hold = False
       elif self.maneuver_paddle_mode == "force":
         self.bolt_regen_hold = actuators.accel < -.02
@@ -616,7 +623,9 @@ class CarController(CarControllerBase):
       if self.frame % 4 == 0:
         stock_acc_variant = self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
         friction_variant = stock_acc_variant and bool(self.CP.flags & GMFlags.PEDAL_LONG.value)
-        friction_main_on = friction_variant and CS.out.cruiseState.available and stock_ownership_clear
+        main_ns = getattr(CS, "bolt_pedal_main_ts_nanos", 0)
+        friction_main_on = (friction_variant and CS.out.cruiseState.available and stock_ownership_clear and
+                            main_ns > 0 and 0 <= now_nanos - main_ns <= 300_000_000)
         if friction_variant:
           if active and friction_main_on:
             self.apply_brake, self.bolt_acc_pedal_friction_low_speed_active = bolt_acc_pedal_friction_brake(
@@ -625,7 +634,7 @@ class CarController(CarControllerBase):
           else:
             self.apply_brake = 0
             self.bolt_acc_pedal_friction_low_speed_active = False
-        paddle_pressed = self.update_bolt_paddle(actuators.accel, CS.out.aEgo, CS.out.vEgo, active)
+        paddle_pressed = self.update_bolt_paddle(actuators.accel, CS.out.aEgo, CS.out.vEgo, active and in_regen_gear)
         paddle_switched = self.bolt_paddle_switched
         if active:
           target = bolt_pedal_fraction(actuators.accel, CS.out.vEgo, paddle_pressed)
@@ -650,7 +659,7 @@ class CarController(CarControllerBase):
           can_sends.append(gmcan.create_bolt_regen_paddle(self.packer_pt, spoof_pressed))
         self.apply_gas = self.pedal_steady
         if friction_variant:
-          if not stock_ownership_clear:
+          if not friction_main_on:
             self.bolt_acc_pedal_friction_release_frames = 0
           elif self.apply_brake > 0:
             self.bolt_acc_pedal_friction_release_frames = BOLT_ACC_PEDAL_FRICTION_RELEASE_FRAMES

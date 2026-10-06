@@ -56,6 +56,82 @@ class TestGmBoltPedalSafety(unittest.TestCase):
       result.append((packet.addr, packet.bus, bytes(packet.data[0:7 if packet.addr == 0xBD else 8])))
     return result
 
+  def test_actual_parser_acc_drive_admission_keeps_paddle_low_only(self):
+    for candidate in PEDAL_BOLT_CAR:
+      cp = params(candidate, True, True)
+      packer = CANPacker(DBC[candidate][Bus.pt])
+      cs = CarState(cp)
+      parsers = cs.get_can_parsers(cp)
+      controller = CarController(DBC[candidate], cp)
+      cc = structs.CarControl(longActive=True)
+      for tick, (gear, manual) in enumerate(((4, 0), (6, 0), (4, 1), (0, 0), (1, 0), (2, 0), (3, 0)), start=1):
+        with self.subTest(candidate=candidate, gear=gear, manual=manual):
+          raw = bytearray.fromhex("0264011d0100")
+          raw[5] = pedal_crc(raw)
+          frames = [(0x201, bytes(raw), 0),
+                    packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": gear, "ManualMode": manual}),
+                    packer.make_can_msg("AcceleratorPedal2", 0, {"CruiseState": 0}),
+                    packer.make_can_msg("ECMEngineStatus", 0, {"CruiseMainOn": 1})]
+          now = 1_000_000_000 + tick * 600_000_000
+          raw[4] = tick % 16
+          raw[5] = pedal_crc(raw)
+          frames[0] = (0x201, bytes(raw), 0)
+          parsers[Bus.pt].update([(now, frames)])
+          cs.out = cs.update(parsers)
+          active, _, low = controller.bolt_pedal_admission(cc, cs, now + 1)
+          expected = not manual and (gear == 6 or (candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and gear == 4))
+          self.assertEqual(active, expected)
+          self.assertEqual(low, not manual and gear == 6)
+          self.assertFalse(controller.bolt_pedal_admission(cc, cs, now + 100_000_001)[0])
+          raw[4] = (tick + 8) % 16
+          raw[5] = pedal_crc(raw)
+          parsers[Bus.pt].update([(now + 110_000_000, [(0x201, bytes(raw), 0), frames[2], frames[3]])])
+          cs.out = cs.update(parsers)
+          self.assertTrue(cs.pedal_sensor_healthy)
+          self.assertEqual(controller.bolt_pedal_admission(cc, cs, now + 110_000_001)[0],
+                           expected and candidate != CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+          if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and expected:
+            raw[4] = (tick + 9) % 16
+            raw[5] = pedal_crc(raw)
+            parsers[Bus.pt].update([(now + 420_000_000, [(0x201, bytes(raw), 0), frames[1], frames[2]])])
+            cs.out = cs.update(parsers)
+            self.assertTrue(cs.pedal_sensor_healthy)
+            self.assertTrue(cs.out.cruiseState.available)
+            self.assertFalse(controller.bolt_pedal_admission(cc, cs, now + 420_000_001)[0])
+
+  def test_acc_pedal_forward_gear_preserves_low_only_spoofing(self):
+    variants = (GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_2017,
+                GMSafetyFlags.NO_ACC,
+                GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_GEN2,
+                GMSafetyFlags.BOLT_ACC_PEDAL | GMSafetyFlags.BOLT_GEN2)
+    for variant in variants:
+      acc = bool(variant & GMSafetyFlags.BOLT_ACC_PEDAL)
+      gen2 = bool(variant & GMSafetyFlags.BOLT_GEN2)
+      for gear, manual in ((4, 0), (6, 0), (4, 1), (6, 1), (0, 0), (1, 0), (2, 0), (3, 0)):
+        with self.subTest(variant=variant, gear=gear, manual=manual):
+          self.init_mode(variant)
+          self.safety.set_timer(1_000_000)
+          self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": gear, "ManualMode": manual}))
+          self.safety.safety_rx_hook(self.stock("AcceleratorPedal2", {"CruiseState": 0}))
+          self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 1}))
+          raw = bytearray.fromhex("0264011d0000")  # Recorded independent ADC tracks 612/285.
+          raw[5] = pedal_crc(raw)
+          self.safety.safety_rx_hook(self.packet((0x201, bytes(raw), 0)))
+          self.safety.set_controls_allowed(True)
+          allowed = not manual and (gear == 6 or (acc and gear == 4))
+          self.assertEqual(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 1))), allowed)
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(create_bolt_regen_paddle(self.packer, True))))
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(create_bolt_regen_gear(self.packer, True, gen2))))
+          self.safety.safety_rx_hook(self.stock("EBCMRegenPaddle", {"RegenPaddle": 0}))
+          self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": gear, "ManualMode": manual}))
+          self.assertEqual(bool(self.recorded()), not manual and gear == 6)
+          self.safety.safety_rx_hook(self.stock("EBCMRegenPaddle", {"RegenPaddle": 1}))
+          self.safety.set_controls_allowed(True)
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 2))))
+          self.safety.set_timer(1_100_001)
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 2))))
+          self.assertTrue(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, 0., 2))))
+
   def test_adc_sensor_fault_checksum_counter_and_timeout(self):
     self.safety.safety_rx_hook(self.low_gear())
     self.safety.set_controls_allowed(True)
@@ -201,16 +277,33 @@ class TestGmBoltPedalSafety(unittest.TestCase):
     self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
     self.assertEqual(self.safety.safety_fwd_hook(2, 0x2CB), 0)
 
-    self.safety.safety_rx_hook(self.low_gear())
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 4, "ManualMode": 0}))
     self.safety.safety_rx_hook(self.sensor(1))
     self.safety.safety_rx_hook(self.stock("AcceleratorPedal2", {"CruiseState": 0}))
-    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
     self.safety.set_controls_allowed(True)
     self.assertFalse(self.safety.safety_tx_hook(brake(100, 0)))
-    self.assertTrue(self.safety.safety_tx_hook(brake(0, 0)))
+    self.assertFalse(self.safety.safety_tx_hook(brake(0, 0)))
     self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 1}))
     self.assertTrue(self.safety.safety_tx_hook(brake(100, 1)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
     self.assertFalse(self.safety.safety_tx_hook(brake(100, 1)))
+    self.safety.set_timer(100001)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    self.assertFalse(self.safety.safety_tx_hook(brake(100, 2, mode=1)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    self.assertTrue(self.safety.safety_tx_hook(brake(0, 2)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+    self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 0}))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 1}))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
+    self.assertTrue(self.safety.safety_tx_hook(brake(0, 3)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+    self.safety.safety_rx_hook(self.sensor(2))
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 4, "ManualMode": 0}))
+    self.safety.set_controls_allowed(True)
+
     self.assertFalse(self.safety.safety_tx_hook(brake(401, 2)))
     self.assertTrue(self.safety.safety_tx_hook(brake(0, 2, mode=9)))
     self.assertFalse(self.safety.safety_tx_hook(brake(100, 3, mode=1)))
@@ -230,7 +323,8 @@ class TestGmBoltPedalSafety(unittest.TestCase):
     self.safety.safety_rx_hook(self.stock("AcceleratorPedal2", {"CruiseState": 0}))
     self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 0, "BrakePressed": 1}))
     self.assertFalse(self.safety.safety_tx_hook(brake(100, 3)))
-    self.assertTrue(self.safety.safety_tx_hook(brake(0, 3)))
+    self.assertFalse(self.safety.safety_tx_hook(brake(0, 3)))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), 0)
     self.safety.set_timer(300001)
     self.assertFalse(self.safety.safety_tx_hook(brake(100, 0)))
     self.assertFalse(self.safety.safety_tx_hook(brake(0, 0)))
@@ -368,6 +462,8 @@ class TestGmBoltPedalSafety(unittest.TestCase):
         cs = SimpleNamespace(out=out.as_reader(), pedal_sensor_healthy=car_state.pedal_sensor_healthy,
                              pedal_sensor_ts_nanos=car_state.pedal_sensor_ts_nanos,
                              stock_acc_status_ts_nanos=car_state.stock_acc_status_ts_nanos,
+                             bolt_pedal_gear_ts_nanos=car_state.bolt_pedal_gear_ts_nanos,
+                             bolt_pedal_main_ts_nanos=car_state.bolt_pedal_main_ts_nanos,
                              cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
                              loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
                              buttons_counter=0)

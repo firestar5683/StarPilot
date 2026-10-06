@@ -122,6 +122,7 @@ class TestBoltPedalSlew(unittest.TestCase):
             state.cruiseState.available = True
             cs = SimpleNamespace(out=state.as_reader(), pedal_sensor_healthy=True,
                                  pedal_sensor_ts_nanos=1_000_000_000, stock_acc_status_ts_nanos=1_000_000_000,
+                                 bolt_pedal_gear_ts_nanos=1_000_000_000, bolt_pedal_main_ts_nanos=1_000_000_000,
                                  cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
                                  loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
                                  buttons_counter=0,
@@ -139,6 +140,8 @@ class TestBoltPedalSlew(unittest.TestCase):
               controller.last_steer_frame = controller.frame
               cs.pedal_sensor_ts_nanos = now - getattr(cs, "sensor_age", 0)
               cs.stock_acc_status_ts_nanos = now
+              cs.bolt_pedal_gear_ts_nanos = now
+              cs.bolt_pedal_main_ts_nanos = now
               cs.out = state.as_reader()
               return controller.update(cc.as_reader(), cs, now)[1]
 
@@ -153,20 +156,29 @@ class TestBoltPedalSlew(unittest.TestCase):
               self.assertEqual(next(m[1] for m in messages if m[0] == 0x200), pedal_wire(expected, tick))
               self.assertNotIn(0x2CB, [m[0] for m in messages])
 
-            for override in ('inactive', 'sensor', 'stale', 'future', 'drive', 'gas', 'brake', 'regen', 'stock_acc'):
+            for override in ('inactive', 'sensor', 'stale', 'future', 'drive', 'neutral', 'gas', 'brake', 'regen', 'stock_acc'):
               if override == 'stock_acc' and candidate.name != 'CHEVROLET_BOLT_ACC_2022_2023_PEDAL':
                 continue
               cc.longActive = override != 'inactive'
               cs.pedal_sensor_healthy = override != 'sensor'
-              state.gearShifter = structs.CarState.GearShifter.drive if override == 'drive' else structs.CarState.GearShifter.low
+              state.gearShifter = (structs.CarState.GearShifter.drive if override == 'drive' else
+                                  structs.CarState.GearShifter.neutral if override == 'neutral' else structs.CarState.GearShifter.low)
               cs.sensor_age = 100_000_001 if override == 'stale' else -1 if override == 'future' else 0
               state.regenBraking = override == 'regen'
               state.gasPressed = override == 'gas'
               state.brakePressed = override == 'brake'
               state.cruiseState.enabled = override == 'stock_acc'
+              previous = controller.pedal_steady
               messages = update()
-              self.assertEqual(controller.pedal_steady, 0., override)
-              self.assertEqual(next(m[1][:4] for m in messages if m[0] == 0x200), b'\x00' * 4)
+              if override == 'drive' and candidate.name == 'CHEVROLET_BOLT_ACC_2022_2023_PEDAL':
+                expected_drive = pedal_step(positive_target(cc.as_reader().actuators.accel, speed), previous,
+                                           cc.as_reader().actuators.accel, speed)
+                self.assertAlmostEqual(controller.pedal_steady, expected_drive, places=10)
+                self.assertEqual(next(m[1] for m in messages if m[0] == 0x200), pedal_wire(expected_drive, tick))
+                self.assertFalse(any(m[0] in (0x1F5, 0xBD) for m in messages))
+              else:
+                self.assertEqual(controller.pedal_steady, 0., override)
+                self.assertEqual(next(m[1][:4] for m in messages if m[0] == 0x200), b'\x00' * 4)
               cc.longActive = True
               cs.pedal_sensor_healthy = True
               state.gearShifter = structs.CarState.GearShifter.low
