@@ -185,6 +185,7 @@ class PiPStream:
     self._received_at: float | None = None
     self._capture_eof_ns: int | None = None
     self._last_attempt: float | None = None
+    self._connected_at: float | None = None
     self._active = False
     self._require_boot_eof = require_boot_eof
     self._generation = 0
@@ -230,6 +231,7 @@ class PiPStream:
     self._frame_id = None
     self._received_at = None
     self._capture_eof_ns = None
+    self._connected_at = None
     self._client = None
 
   def poll(self, now: float, *, now_boot_ns: int | None = None) -> object | None:
@@ -253,6 +255,7 @@ class PiPStream:
       except (OSError, RuntimeError):
         return None
       self._client = client
+      self._connected_at = now
       self._generation += 1
     assert self._client is not None
     try:
@@ -279,6 +282,12 @@ class PiPStream:
           self._release()
           return None
         self._capture_eof_ns = eof
+    if self._received_at is None:
+      # A new conflated subscriber has nothing queued until the next capture, so
+      # an empty first recv is normal. Allow one staleness window for it to arrive.
+      if self._connected_at is None or not 0 <= now - self._connected_at <= FRAME_STALE_SECONDS:
+        self._release()
+      return None
     # Connect and recv can cross a camera capture. Measure automatic BOOTTIME
     # only after receiving, so a newly captured frame is not misread as future.
     if self._require_boot_eof and now_boot_ns is None:

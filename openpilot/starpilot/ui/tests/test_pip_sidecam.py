@@ -421,6 +421,25 @@ def test_stream_lazy_connect_nonblocking_frame_expiry_and_release():
   assert stream.poll(2.0) is None
 
 
+def test_stream_keeps_new_client_until_first_frame_or_stale_window():
+  client = _Client([None, None, _Frame(4)])
+  stream = PiPStream(lambda: client, require_boot_eof=False)
+  stream.set_active(True)
+  assert stream.poll(1.0) is None  # nothing queued yet right after connect
+  assert stream.connected
+  assert stream.poll(1.2) is None
+  assert stream.poll(1.3) == _Frame(4)
+  assert client.connect_calls == 1
+
+  silent = _Client()
+  stream = PiPStream(lambda: silent, require_boot_eof=False)
+  stream.set_active(True)
+  assert stream.poll(1.0) is None
+  assert stream.poll(1.5) is None and stream.connected
+  assert stream.poll(1.51) is None
+  assert not stream.connected
+
+
 def test_stream_disconnect_reconnect_and_nonincreasing_frame_id():
   first = _Client([_Frame(10), _Frame(10)])
   second = _Client([_Frame(1)])
