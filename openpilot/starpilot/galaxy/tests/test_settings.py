@@ -136,10 +136,11 @@ class SettingsGatewayTest(unittest.TestCase):
 
   def test_limit_sign_visual_preference_without_longitudinal_authority(self):
     cp = self.context.value.cp
-    contexts = ((None, None),
-                (SimpleNamespace(**{**vars(cp), "openpilotLongitudinalControl": True, "pcmCruise": True}), b"pcm"),
-                (cp, b"op-long"))
-    for vehicle, raw in contexts:
+    contexts = ((None, None, False),
+                (SimpleNamespace(**{**vars(cp), "openpilotLongitudinalControl": False, "pcmCruise": True}), b"stock-pcm", False),
+                (SimpleNamespace(**{**vars(cp), "openpilotLongitudinalControl": True, "pcmCruise": True}), b"op-long-pcm", True),
+                (cp, b"op-long", True))
+    for vehicle, raw, can_control in contexts:
       with self.subTest(vehicle=raw):
         self.context.value = AuthorityContext(True, vehicle, raw)
         self.params.put_bool("ShowSpeedLimits", False, block=True)
@@ -147,8 +148,7 @@ class SettingsGatewayTest(unittest.TestCase):
         signs = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Show speed limit signs")
         control = next(row for row in page["rows"] if row["label"] == "Speed Limit Controller")
         self.assertTrue(page["rows"][signs]["available"])
-        if raw != b"op-long":
-          self.assertFalse(control["available"])
+        self.assertEqual(control["available"], can_control)
         intent = self.gateway.preview(page["view"], signs, 1, self.session, self.generation)
         self.context.value = AuthorityContext(False, vehicle, raw)
         self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
@@ -1042,23 +1042,11 @@ class SettingsGatewayTest(unittest.TestCase):
       self.assertIsNone(self.params.get("RecordFront"))
       self.assertIsNone(self.params.get("RecordFrontLock"))
 
-  def test_usage_statistics_default_and_opt_out_are_vehicle_independent(self):
+  def test_data_page_has_only_upload_preference(self):
     self.context.value = AuthorityContext(False, None, None)
-    self.params.remove("ShareUsageStats")
     page = self.page("data")
-    index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Share Usage Statistics")
-    row = page["rows"][index]
-    self.assertEqual(row["value"], "On")
-    self.assertTrue(row["available"])
-    self.assertIn("precise GPS", row["reason"])
-    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value="Off")
-    self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
-    self.assertFalse(self.params.get_bool("ShareUsageStats"))
-    self.gateway = SettingsGateway(self.params, self.context, clock=lambda: 100.0)
-    page = self.page("data")
-    row = next(row for row in page["rows"] if row["label"] == "Share Usage Statistics")
-    self.assertEqual(row["value"], "Off")
-    self.assertFalse(self.params.get_bool("ShareUsageStats"))
+    self.assertEqual([row["label"] for row in page["rows"]], ["Always Allow Uploads"])
+    self.assertTrue(page["rows"][0]["available"])
 
   def test_force_stop_off_onroad_with_master_off_and_session_vehicle_guards(self):
     cp = self.context.value.cp

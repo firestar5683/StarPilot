@@ -43,7 +43,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ReverseCruise", {PERSISTENT, BOOL, "0"}},
     {"ForceStops", {PERSISTENT, BOOL, "0"}},
     {"AlwaysAllowUploads", {PERSISTENT, BOOL, "0"}},
-    {"ShareUsageStats", {PERSISTENT, BOOL, "1"}},
     {"UsageStatsState", {PERSISTENT | DONT_LOG, JSON}},
     {"UsageStatsStatus", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},
     {"TeslaAOLScreenTap", {PERSISTENT, BOOL, "0"}},

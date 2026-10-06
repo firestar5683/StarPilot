@@ -24,7 +24,7 @@ class Source:
 
 
 def worker():
-  values = {'ShareUsageStats': True, 'IsOffroad': True}
+  values = {'IsOffroad': True}
   params = Mock()
   params.get.side_effect = values.get
   params.get_bool.side_effect = lambda key: values.get(key, False)
@@ -39,7 +39,7 @@ def worker():
   return obj, values, source, clock, client
 
 
-def test_initial_send_and_consent_rechecked_at_transport():
+def test_initial_send_and_offroad_rechecked_at_transport():
   obj, values, source, clock, client = worker()
   obj.poll_once()
   assert client.send.call_count == 1
@@ -47,7 +47,7 @@ def test_initial_send_and_consent_rechecked_at_transport():
   source.data['deviceState'].started = True
   assert not gate()
   source.data['deviceState'].started = False
-  values['ShareUsageStats'] = False
+  values['IsOffroad'] = False
   assert not gate()
 
 
@@ -94,7 +94,7 @@ def test_failures_have_finite_parked_retry_budget_and_bounded_stop():
   assert not obj.thread.is_alive()
 
 
-def test_startup_onroad_and_disabled_sharing_never_contact_transport():
+def test_startup_onroad_never_contacts_transport():
   obj, values, source, clock, client = worker()
   source.data['deviceState'].started = True
   values['IsOffroad'] = False
@@ -102,9 +102,8 @@ def test_startup_onroad_and_disabled_sharing_never_contact_transport():
   client.send.assert_not_called()
   source.data['deviceState'].started = False
   values['IsOffroad'] = True
-  values['ShareUsageStats'] = False
   obj.poll_once()
-  client.send.assert_not_called()
+  assert client.send.call_count == 1
 
 
 def test_host_optional_hook_does_not_construct_network_worker():
@@ -133,7 +132,6 @@ def test_registered_native_params_roundtrip_and_restart_context():
     params = Params(str(Path(directory) / 'params'))
     storage = Path(directory) / 'recovery'
     prepare_manager_start(params, storage)
-    params.put_bool('ShareUsageStats', False, block=True)
     params.put_bool('IsOffroad', True, block=True)
     source = Source()
     obj = AnalyticsWorker(params, source, collector=lambda *a: {}, client=Mock(), token_reader=lambda: None,
@@ -145,23 +143,21 @@ def test_registered_native_params_roundtrip_and_restart_context():
     prepare_manager_start(params, storage, dry_run=True)
     prepare_manager_start(params, storage)
     assert params.get('UsageStatsState') == saved
-    assert params.get('ShareUsageStats') is False
     restored = AnalyticsWorker(params, source, collector=lambda *a: {}, client=Mock(), token_reader=lambda: None,
                                monotonic=lambda: 1.0, clock_valid=lambda: True)
     assert restored.context['driving_model'] == 'verified'
     assert restored.metadata['dongle_id'] == obj.metadata['dongle_id']
     restored.poll_once()
     restored.client.send.assert_not_called()
+    del restored, obj, params
 
 
-def test_enabling_consent_while_parked_schedules_report():
+def test_legacy_sharing_value_cannot_disable_automatic_report():
   obj, values, source, clock, client = worker()
   values['ShareUsageStats'] = False
   obj.poll_once()
-  client.send.assert_not_called()
-  values['ShareUsageStats'] = True
-  obj.poll_once()
   assert client.send.call_count == 1
+  assert obj.allowed()
 
 
 def test_executed_model_reports_verified_fallback_not_saved_request():

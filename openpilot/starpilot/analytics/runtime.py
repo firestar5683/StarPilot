@@ -99,7 +99,6 @@ class AnalyticsWorker:
     self.last_poll = self.monotonic()
     self.last_persist = self.last_poll
     self.pending, self.initial_sent = False, False
-    self.previous_consent = False
     self.attempts, self.retry_at = 0, 0.0
 
   def fresh(self, service, max_age=2.0):
@@ -109,7 +108,7 @@ class AnalyticsWorker:
 
   def allowed(self):
     self.source.update(0)
-    return (not self.stop_event.is_set() and self.params.get_bool('ShareUsageStats') and
+    return (not self.stop_event.is_set() and
             self.params.get_bool('IsOffroad') and self.fresh('deviceState') and not self.source['deviceState'].started)
 
   def persist(self):
@@ -188,13 +187,6 @@ class AnalyticsWorker:
     self.previous_started = started
     if now - self.last_persist >= 60:
       self.persist()
-    consent = self.params.get_bool('ShareUsageStats')
-    if consent and not self.previous_consent and not started:
-      self.pending, self.attempts, self.retry_at = True, 0, now
-    self.previous_consent = consent
-    if not consent:
-      self.pending = False
-      return
     if not self.pending or self.attempts >= 5 or now < self.retry_at or not self.clock_valid() or not self.allowed():
       return
     token = self.token_reader()
