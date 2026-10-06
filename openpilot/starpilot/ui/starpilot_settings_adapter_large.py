@@ -27,6 +27,7 @@ class StarPilotSettingsAdapterLarge(Widget):
     self.sidebar_expanded = True
     self.origin = (0, 0)
     self.items = {}
+    self._touch_time: float | None = None
 
   def show_event(self):
     self.scroll = 0
@@ -135,13 +136,15 @@ class StarPilotSettingsAdapterLarge(Widget):
     return pos.x - self.origin[0], pos.y - self.origin[1]
 
   def _handle_mouse_press(self, pos):
+    self._touch_time = None
     self.input.press(*self._position(pos), self.snapshot())
 
   def _handle_mouse_event(self, mouse_event: MouseEvent):
-    self.input.move(*self._position(mouse_event.pos), self.snapshot())
+    self._touch_time = mouse_event.t
+    self.input.move(*self._position(mouse_event.pos), self.snapshot(), mouse_event.t if mouse_event.left_down else None)
 
   def _handle_mouse_release(self, pos):
-    self.input.release(*self._position(pos), self.snapshot())
+    self.input.release(*self._position(pos), self.snapshot(), self._touch_time)
 
   def _emit(self, request):
     if not self.active:

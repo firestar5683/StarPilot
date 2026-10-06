@@ -206,7 +206,7 @@ class ShellInput:
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
         self.models.press(x, y, snapshot.models)
 
-  def move(self, x: float, y: float, now: float, snapshot: ShellSnapshot) -> None:
+  def move(self, x: float, y: float, now: float | None, snapshot: ShellSnapshot) -> None:
     self._sync(snapshot)
     if self._pane is None:
       return
@@ -226,17 +226,17 @@ class ShellInput:
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.TOGGLES:
         self.toggles.move(x, y, snapshot.toggles)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_CONTROLS:
-        self.features.move(x, y, snapshot.features)
+        self.features.move(x, y, snapshot.features, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOUNDS:
-        self.sounds.move(x, y, snapshot.sounds)
+        self.sounds.move(x, y, snapshot.sounds, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.APPEARANCE:
-        self.appearance.move(x, y, snapshot.appearance)
+        self.appearance.move(x, y, snapshot.appearance, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SYSTEM:
-        self.display.move(x, y, snapshot.display)
+        self.display.move(x, y, snapshot.display, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
-        self.models.move(x, y, snapshot.models)
+        self.models.move(x, y, snapshot.models, now)
 
-  def release(self, x: float, y: float, now: float, snapshot: ShellSnapshot) -> None:
+  def release(self, x: float, y: float, now: float | None, snapshot: ShellSnapshot) -> None:
     self._sync(snapshot)
     if self._pane is None:
       return
@@ -258,13 +258,13 @@ class ShellInput:
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.TOGGLES:
           self.toggles.release(x, y, snapshot.toggles)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_CONTROLS:
-          self.features.release(x, y, snapshot.features)
+          self.features.release(x, y, snapshot.features, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOUNDS:
-          self.sounds.release(x, y, snapshot.sounds)
+          self.sounds.release(x, y, snapshot.sounds, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.APPEARANCE:
-          self.appearance.release(x, y, snapshot.appearance)
+          self.appearance.release(x, y, snapshot.appearance, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.SYSTEM:
-          self.display.release(x, y, snapshot.display)
+          self.display.release(x, y, snapshot.display, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
-          self.models.release(x, y, snapshot.models)
+          self.models.release(x, y, snapshot.models, now)
     self.cancel()

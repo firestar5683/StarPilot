@@ -27,6 +27,7 @@ from openpilot.starpilot.ui.settings_state import Destination, SettingsAction, S
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellRequest, ShellView
 from openpilot.starpilot.ui.software_state import SoftwareAction, SoftwareRequest
 from openpilot.starpilot.ui.tests.test_runtime_snapshot import BOOT_OFFSET_NS, NOW, ui_fake
+from openpilot.system.ui.lib.application import gui_app, MouseEvent, MousePos
 from openpilot.starpilot.galaxy.access import AccessStatus, GalaxyAccessOwner
 from openpilot.starpilot.ui.galaxy_access import GalaxyAccessFlow, connection_url
 from pathlib import Path
@@ -417,7 +418,21 @@ class TestRuntimePanelActions(unittest.TestCase):
             self.assertEqual(getattr(session, offset), before)
             self.assertTrue(session.release(ShellMode.SETTINGS, end, 200))
             self.assertEqual(getattr(session, offset), expected)
-          self.assertEqual([call.args[0].action.kind for call in emit.call_args_list], ["scroll"] * 4)
+          widget = runtime_app.StarShellPage(session, ShellMode.SETTINGS)
+          bounds = runtime_app.rl.Rectangle(0, 0, 2160, 1080)
+          with (patch.object(widget, "_render"), patch.object(gui_app, "_show_touches", False),
+                patch("openpilot.system.ui.widgets.device", NS(awake=True)), patch.object(gui_app, "_mouse_events", [])):
+            widget.render(bounds)
+            for start, direction, duration, last_down, expected in ((2000, 1, .075, 80, 5), (1800, -1, .075, 80, 0),
+                                                                   (2000, 1, .5, 80, 0), (2000, 1, .075, 55, 0)):
+              events = [MouseEvent(MousePos(start - direction * distance, 200), 0,
+                                   index == 0, index == 3, index != 3, 1 + timestamp)
+                        for index, (timestamp, distance) in enumerate(((0, 0), (duration / 2, last_down / 2),
+                                                                      (duration, last_down), (duration + .01, 80)))]
+              with patch.object(gui_app, "_mouse_events", events):
+                widget.render(bounds)
+              self.assertEqual(getattr(session, offset), expected)
+          self.assertEqual([call.args[0].action.kind for call in emit.call_args_list], ["scroll"] * 6)
           changes = [("sidebar_expanded", not expanded), (offset, 5)]
           if prefix in ("feature", "appearance"):
             changes.append((prefix + "_page", "other"))
@@ -429,7 +444,7 @@ class TestRuntimePanelActions(unittest.TestCase):
               session.move(ShellMode.SETTINGS, 1700, 200)
               self.assertFalse(session.release(ShellMode.SETTINGS, 1700, 200))
               build.assert_not_called()
-            self.assertEqual(emit.call_count, 4)
+            self.assertEqual(emit.call_count, 6)
             setattr(session, attribute, before)
 
   def _adapter(self, owner=None):

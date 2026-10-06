@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 import math
+from collections import deque
 from collections.abc import Callable
 
 FEATURE_HEADER_HEIGHT = 88
@@ -17,6 +18,10 @@ FEATURE_BUTTON_HEIGHT = 80
 FEATURE_ACTION_MARGIN = 36
 FEATURE_TAP_SLOP = 36
 FEATURE_SWIPE_DISTANCE = 120
+FEATURE_FLICK_DISTANCE = 60
+FEATURE_FLICK_VELOCITY = 800
+FEATURE_FLICK_WINDOW = 0.1
+FEATURE_FLICK_PAUSE = 0.06
 
 
 def is_long_confirm_action(key: str) -> bool:
@@ -156,6 +161,7 @@ class FeatureInput:
   def __init__(self, emit: Callable[[FeatureUiAction], None]):
     self.emit = emit
     self.held: tuple[float, float, FeatureUiAction | None, int, str, bool] | None = None
+    self._samples: deque[tuple[float, float]] = deque(maxlen=16)
 
   @staticmethod
   def _in_body(x: float, y: float, state: FeatureSettingsState) -> bool:
@@ -209,10 +215,11 @@ class FeatureInput:
     return None
 
   def press(self, x: float, y: float, state: FeatureSettingsState) -> None:
+    self.cancel()
     target = self.target(x, y, state)
     self.held = (x, y, target, state.scroll, state.page, state.sidebar_expanded) if target is not None or self._in_body(x, y, state) else None
 
-  def move(self, x: float, y: float, state: FeatureSettingsState) -> None:
+  def move(self, x: float, y: float, state: FeatureSettingsState, now: float | None = None) -> None:
     if self.held is not None:
       px, py, action, scroll, page, sidebar = self.held
       if state.scroll != scroll or state.page != page or state.sidebar_expanded != sidebar:
@@ -226,15 +233,37 @@ class FeatureInput:
         return
       if action is not None and (moved or self.target(x, y, state) != action):
         self.held = (px, py, None, scroll, page, sidebar) if body else None
+      if body and now is not None:
+        if self._samples and now <= self._samples[-1][0]:
+          self._samples.clear()
+        self._samples.append((now, x))
+        while now - self._samples[0][0] > FEATURE_FLICK_WINDOW:
+          self._samples.popleft()
 
-  def release(self, x: float, y: float, state: FeatureSettingsState) -> None:
+  def _is_flick(self, px: float, dx: float, now: float | None) -> bool:
+    samples = self._samples
+    if (now is None or len(samples) < 3 or not 0 <= now - samples[-1][0] <= FEATURE_FLICK_PAUSE or
+        samples[-1][0] - samples[0][0] < 0.01):
+      return False
+    travel = samples[-1][1] - px
+    reversal = samples[-1][1] - min(x for _, x in samples) if dx < 0 else max(x for _, x in samples) - samples[-1][1]
+    if abs(travel) < FEATURE_FLICK_DISTANCE or travel * dx <= 0 or reversal > FEATURE_TAP_SLOP:
+      return False
+    # Fit recent movement to reduce polling jitter; release positions are never sampled.
+    mean_t = sum(t for t, _ in samples) / len(samples)
+    mean_x = sum(x for _, x in samples) / len(samples)
+    velocity = sum((t - mean_t) * (x - mean_x) for t, x in samples) / sum((t - mean_t) ** 2 for t, _ in samples)
+    return abs(velocity) >= FEATURE_FLICK_VELOCITY and velocity * dx > 0
+
+  def release(self, x: float, y: float, state: FeatureSettingsState, now: float | None = None) -> None:
     self.move(x, y, state)
     action = None
     if self.held is not None:
       px, py, action, *_ = self.held
       dx, dy = x - px, abs(y - py)
       direction = 1 if dx < 0 else -1
-      if (self._in_body(px, py, state) and abs(dx) >= FEATURE_SWIPE_DISTANCE and abs(dx) >= 2 * dy and
+      swipe = abs(dx) >= FEATURE_SWIPE_DISTANCE or (abs(dx) >= FEATURE_FLICK_DISTANCE and self._is_flick(px, dx, now))
+      if (self._in_body(px, py, state) and swipe and abs(dx) >= 2 * dy and
           feature_scroll(state.scroll, direction, len(state.rows)) != state.scroll):
         action = FeatureUiAction("scroll", direction=direction)
     self.cancel()
@@ -243,6 +272,7 @@ class FeatureInput:
 
   def cancel(self) -> None:
     self.held = None
+    self._samples.clear()
 
 
 def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | None:
