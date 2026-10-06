@@ -1,3 +1,4 @@
+import { connectionError } from "./polling.js"
 const ROUTE = /^[a-zA-Z0-9_+|.-]{1,128}$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const number = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -106,9 +107,9 @@ export class DriveStatsFeed {
     this.controller = controller
     if (this.poll !== null) this.cancelTimer(this.poll)
     this.poll = null
-    this.status = this.data ? "ready" : "loading"
+    this.status = this.data ? "ready" : this.error ? "unavailable" : "loading"
     this.busy = body !== null
-    this.error = ""
+    if (body !== null) this.error = ""
     this.emit()
     this.timeout = this.later(() => {
       if (!this.active || generation !== this.generation || this.controller !== controller) return
@@ -147,6 +148,7 @@ export class DriveStatsFeed {
       if (!this.active || generation !== this.generation || controller.signal.aborted) return null
       if (!validDriveStats(data)) throw new Error("Drive history is unavailable. Refresh to try again.")
       this.data = data
+      this.error = ""
       this.status = "ready"
       this.emit()
       return data

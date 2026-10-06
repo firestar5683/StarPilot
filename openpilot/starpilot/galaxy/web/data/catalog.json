@@ -12,7 +12,7 @@
       "name": "Cameras & Monitoring",
       "path": "/cameras",
       "icon": "bi-camera-video",
-      "description": "Saved Side Camera, Sentry motion, and V-ASM choices; live camera tools pending",
+      "description": "Live cabin previews, Side Camera, Sentry motion, and V-ASM settings",
       "availability": "local-only"
     },
     {
@@ -84,6 +84,14 @@
       "icon": "bi-car-front",
       "description": "Parked Auto or manual next-start vehicle selection",
       "availability": "local-only"
+    },
+    {
+      "name": "Android Auto",
+      "path": "/android-auto",
+      "icon": "bi-phone",
+      "description": "Phone projection and connection settings",
+      "availability": "local-only",
+      "visibility": "authenticated"
     }
   ]
 }

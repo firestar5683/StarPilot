@@ -1,9 +1,11 @@
+import { GxNotice } from "./notice.js"
 export const validDriveState = (value) => !!value && ["auto", "offroad", "onroad"].includes(value.mode) &&
   typeof value.available === "boolean" && typeof value.overrideAllowed === "boolean" &&
   (value.revision === null || typeof value.revision === "string" && /^[0-9a-f]{32}$/.test(value.revision)) &&
   [null, "offroad", "onroad"].includes(value.effective)
 
 export const DriveStatePanel = {
+  components: { GxNotice },
   data: () => ({ state: null, error: "", busy: false }),
   computed: {
     pending() { return this.state?.mode !== "auto" && this.state?.effective !== this.state?.mode },
@@ -59,10 +61,10 @@ export const DriveStatePanel = {
     <p v-if="pending" role="status">Waiting for the device to switch {{ state.mode }}…</p>
     <p>Auto follows the car. Force Offroad stops driving services even when the device is on-road. Disengage and stop safely before forcing Offroad; Force Onroad requires Park and valid vehicle data. Return to Auto restores normal operation.</p>
     <p v-if="state?.available && !state.overrideAllowed" role="status">Force Onroad needs fresh parked, disengaged vehicle data. Force Offroad remains available to stop driving services.</p>
-    <p v-if="state && !state.available" role="alert">The drive-state manager is unavailable. Reconnect to check again.</p>
+    <GxNotice tone="danger" v-if="state && !state.available">The drive-state manager is unavailable. Reconnect to check again.</GxNotice>
     <div class="gx-force-drive__actions"><button v-for="mode in ['offroad', 'onroad', 'auto']" :key="mode" type="button"
       class="gx-btn" :class="state?.mode === mode ? '' : 'gx-btn--tonal'"
       :disabled="busy || !state?.available || (mode === 'onroad' && !state.overrideAllowed)"
       :aria-pressed="state?.mode === mode" @click="change(mode)">{{ mode === 'auto' ? 'Return to Auto' : mode === 'onroad' ? 'Onroad' : 'Offroad' }}</button></div>
-    <p v-if="error" role="alert">{{ error }}</p></section>`,
+    <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice></section>`,
 }

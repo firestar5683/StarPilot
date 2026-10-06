@@ -1,15 +1,18 @@
+import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
 export class CameraSnapshotFeed {
   constructor({ publish, unauthorized, fetcher = (...args) => fetch(...args),
                 createURL = (blob) => URL.createObjectURL(blob), revokeURL = (url) => URL.revokeObjectURL(url),
-                later = setTimeout, cancelTimer = clearTimeout }) {
+                later = (fn, ms) => setTimeout(fn, ms), cancelTimer = id => clearTimeout(id) }) {
     Object.assign(this, { publish, unauthorized, fetcher, createURL, revokeURL, later, cancelTimer })
     this.request = null
     this.url = ""
     this.timer = null
   }
   stop() {
+    this.rejectRequest?.(new Error("Snapshot canceled"))
+    this.rejectRequest = null
     this.request?.abort()
     this.request = null
     if (this.timer !== null) this.cancelTimer(this.timer)
@@ -23,20 +26,21 @@ export class CameraSnapshotFeed {
     const request = new AbortController()
     this.request = request
     this.publish({ image: "", capturing: true, error: "" })
+    let expire
+    const deadline = new Promise((_, reject) => { this.rejectRequest = expire = reject })
     this.timer = this.later(() => {
       if (this.request !== request) return
-      this.stop()
-      this.publish({ image: "", capturing: false, error: "Snapshot timed out. Turn off the vehicle and try again." })
+      expire(new Error("Snapshot timed out. Turn off the vehicle and try again."))
     }, 13500)
     try {
-      const response = await this.fetcher("./api/cameras/snapshot", { method: "POST", credentials: "same-origin",
-        cache: "no-store", signal: request.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ camera }) })
+      const response = await Promise.race([this.fetcher("./api/cameras/snapshot", { method: "POST", credentials: "same-origin",
+        cache: "no-store", signal: request.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ camera }) }), deadline])
       if (this.request !== request || request.signal.aborted) return
       if (response.status === 401) { this.stop(); this.unauthorized(); return }
       if (!response.ok) throw new Error(response.status === 409 ? "Turn the vehicle off before taking a snapshot." :
         "Turn off the vehicle and open its camera preview, then try again.")
       if (response.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "image/jpeg") throw new Error("Camera image is unavailable.")
-      const blob = await response.blob()
+      const blob = await Promise.race([response.blob(), deadline])
       if (this.request !== request || request.signal.aborted) return
       if (!blob.size || blob.size > 1000000) throw new Error("Camera image is unavailable.")
       this.url = this.createURL(blob)
@@ -46,7 +50,9 @@ export class CameraSnapshotFeed {
         this.publish({ image: "", capturing: false, error: error.message || "Camera image is unavailable." })
     } finally {
       if (this.request === request) {
+        request.abort()
         this.request = null
+        this.rejectRequest = null
         this.cancelTimer(this.timer)
         this.timer = null
       }
@@ -56,7 +62,7 @@ export class CameraSnapshotFeed {
 
 export const CamerasPage = {
   name: "CamerasPage",
-  components: { GalaxySelect },
+  components: { GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true },
     unauthorized: { type: Function, required: true } },
   data: () => ({ camera: "cabin", image: "", capturing: false, error: "" }),
@@ -85,7 +91,7 @@ export const CamerasPage = {
           <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/sentry-settings')">Saved motion settings <i class="bi bi-arrow-right"></i></button>
           <small v-else>Motion events are unavailable in preview.</small></section>
         <section class="gx-card gx-home__card"><h2><i class="bi bi-eye"></i> V-ASM</h2>
-          <p>Draw saved camera window regions and adjust visual warning choices. A live camera image and current warning status are unavailable here.</p>
+          <p>Preview the cabin camera, draw window regions, and adjust visual spot-monitoring choices.</p>
           <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/vasm')">Open saved settings <i class="bi bi-arrow-right"></i></button>
           <small v-else>Saved settings are unavailable in preview.</small></section>
       </div>
@@ -98,10 +104,82 @@ export const CamerasPage = {
             </GalaxySelect></label>
           <button class="gx-btn" type="button" :disabled="capturing" @click="snapshots.capture(camera)">{{ capturing ? 'Capturing…' : 'Take snapshot' }}</button>
           <button v-if="image || capturing" class="gx-btn gx-btn--tonal" type="button" @click="snapshots.stop()">{{ capturing ? 'Cancel' : 'Clear snapshot' }}</button>
-          <p v-if="error" role="alert">{{ error }}</p>
+          <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
           <img v-if="image" :src="image" :alt="camera + ' camera snapshot'" style="display:block;max-width:100%;height:auto;margin-top:1rem;" />
         </template>
         <p v-else>Camera snapshots are available on the connected device.</p>
         <small>Snapshots are not saved.</small></section>
     </div>`,
+}
+
+// Shared owner for live editor frames, including bounded capture and image decode.
+export class LiveCameraPreview {
+  constructor({ publish, unauthorized, redraw, enabled, imageFactory = () => new Image() }) {
+    Object.assign(this, { publish, redraw, enabled, imageFactory })
+    this.image = null
+    this.generation = 0
+    this.stopped = true
+    this.snapshots = new CameraSnapshotFeed({ unauthorized, publish: update => this.receive(update) })
+    this.visibility = () => {
+      if (document.hidden) this.clear()
+      else { clearTimeout(this.timer); this.poll() }
+    }
+  }
+  clear() {
+    this.generation++
+    clearTimeout(this.decodeTimer)
+    this.snapshots.stop()
+    if (this.image) this.image.src = ""
+    this.image = null
+    this.publish({ imageName: "" })
+    this.redraw()
+  }
+  receive(update) {
+    if (update.error) {
+      this.generation++
+      clearTimeout(this.decodeTimer)
+      this.image = null
+      this.publish({ imageName: "", cameraError: update.error })
+      this.redraw()
+    }
+    if (!update.image) return
+    const generation = ++this.generation
+    const image = this.imageFactory()
+    const failed = () => {
+      if (this.stopped || generation !== this.generation) return
+      clearTimeout(this.decodeTimer)
+      this.generation++
+      this.image = null
+      this.publish({ imageName: "", cameraError: "Camera frame could not be displayed." })
+      this.redraw()
+    }
+    image.onload = () => {
+      if (this.stopped || generation !== this.generation) return
+      clearTimeout(this.decodeTimer)
+      this.image = image
+      this.publish({ imageName: "Live cabin camera", cameraError: "" })
+      this.redraw()
+    }
+    image.onerror = failed
+    clearTimeout(this.decodeTimer)
+    this.decodeTimer = setTimeout(failed, 4000)
+    image.src = update.image
+  }
+  start() {
+    this.stopped = false
+    document.addEventListener("visibilitychange", this.visibility)
+    this.poll()
+  }
+  async poll() {
+    if (this.stopped) return
+    const generation = this.pollGeneration = (this.pollGeneration || 0) + 1
+    if (this.enabled() && !document.hidden) await this.snapshots.capture("cabin")
+    if (!this.stopped && generation === this.pollGeneration) this.timer = setTimeout(() => this.poll(), 1500)
+  }
+  stop() {
+    this.stopped = true
+    clearTimeout(this.timer)
+    document.removeEventListener("visibilitychange", this.visibility)
+    this.clear()
+  }
 }

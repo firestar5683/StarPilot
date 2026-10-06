@@ -1,3 +1,6 @@
+import { GxNotice } from "./notice.js"
+import { requestJson } from "./startup.js"
+import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { LocalAccess } from "./local-access.js"
 
@@ -48,21 +51,18 @@ export class DiagnosticFeed {
     if (this.timer !== null) this.cancel(this.timer)
     this.timer = null
     const generation = ++this.generation, request = new AbortController()
-    this.request = request; this.publish({ loading: !this.data, error: "" })
-    const deadline = this.later(() => request.abort(), 4000)
+    this.request = request; this.publish({ loading: !this.data })
     try {
-      const response = await this.fetcher(this.endpoint, { credentials: "same-origin", cache: "no-store", signal: request.signal })
+      const data = await requestJson(this.endpoint, { fetcher: this.fetcher, timeout: 4000, later: this.later, cancel: this.cancel, request: { signal: request.signal } })
       if (!this.active || generation !== this.generation) return
-      if (response.status === 401) { this.stop(); this.unauthorized(); return }
-      const data = await response.json()
-      if (!this.active || generation !== this.generation) return
-      if (!response.ok || !this.validate(data)) throw new Error("Unsupported diagnostic response")
+      if (!this.validate(data)) throw new Error("Unsupported diagnostic response")
       this.data = data; this.publish({ data, error: "" })
     } catch (error) {
-      if (this.active && generation === this.generation)
-        this.publish({ error: error.name === "AbortError" ? "Reading the tool timed out. Try Refresh." : "This tool is unavailable. Try Refresh or local access." })
+      if (this.active && generation === this.generation) {
+        if (error.status === 401 || ["setup_required", "access_unavailable"].includes(error.code)) { this.stop(); this.unauthorized(); return }
+        this.publish({ error: connectionError(error) })
+      }
     } finally {
-      this.cancel(deadline)
       if (this.active && generation === this.generation) {
         this.request = null; this.publish({ loading: false })
         if (this.interval && this.live && this.visible) this.timer = this.later(() => { this.timer = null; this.refresh() }, this.interval)
@@ -75,7 +75,7 @@ const props = { mode: { type: String, required: true }, unauthorized: { type: Fu
 function setup(props, consoleTail) {
   const state = reactive({ loading: false, live: true, data: null, error: "", notice: "" })
   const feed = new DiagnosticFeed({ endpoint: consoleTail ? "./api/tmux/live" : "./api/troubleshoot",
-    validate: consoleTail ? validTmux : validTroubleshoot, interval: consoleTail ? 2000 : 0,
+    validate: consoleTail ? validTmux : validTroubleshoot, interval: consoleTail ? 2000 : 10000,
     publish: update => Object.assign(state, update), unauthorized: props.unauthorized })
   return { state, feed }
 }
@@ -92,23 +92,23 @@ const methods = {
     const link = document.createElement("a"); link.href = url; link.download = "starpilot-console.txt"; link.click(); URL.revokeObjectURL(url) },
 }
 export const TroubleshootPage = {
-  components: { LocalAccess }, props, emits: ["navigate"], ...lifecycle,
+  components: { GxNotice, LocalAccess }, props, emits: ["navigate"], ...lifecycle,
   setup: props => setup(props, false), methods: { ...methods, report: troubleshootReport },
   template: `<section class="gx-settings"><div class="gx-settings__header"><h2>Troubleshoot</h2><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs')">Logs &amp; Diagnostics</button></div>
     <p>Read-only device, vehicle and selected settings. Change settings in Toggles.</p>
-    <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" :disabled="mode !== 'local' || state.loading" @click="feed.refresh()">Refresh</button><button class="gx-btn gx-btn--tonal" :disabled="!state.data" @click="copyText(report(state.data))">Copy Report</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/settings')">Toggles</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/monitor')">System Monitor</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/crashes')">Crash Reports</button></div>
-    <p v-if="state.loading" role="status">Loading report…</p><p v-if="state.error" role="alert">{{ state.error }}</p><p v-if="state.notice" role="status">{{ state.notice }}</p>
+    <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" :disabled="!state.data" @click="copyText(report(state.data))">Copy Report</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/settings')">Toggles</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/monitor')">System Monitor</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/crashes')">Crash Reports</button></div>
+    <p v-if="state.loading" role="status">Loading report…</p><GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice><p v-if="state.notice" role="status">{{ state.notice }}</p>
     <template v-if="state.data"><section class="gx-card" style="padding:var(--sp-4)"><h3>Device Snapshot</h3><p>State: {{ state.data.device.state || 'Unavailable' }}</p><p>Vehicle: {{ state.data.vehicle.available ? state.data.vehicle.fingerprint : 'Unavailable' }}</p><p>Brand: {{ state.data.vehicle.brand || 'Unavailable' }} · Longitudinal: {{ state.data.vehicle.longitudinal ? 'Available' : 'Unavailable' }} · Steering: {{ state.data.vehicle.steering || 'Unavailable' }}</p><dl><template v-for="row in state.data.snapshot" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></template></dl></section>
       <section v-for="section in state.data.sections" :key="section.title" class="gx-card" style="padding:var(--sp-4)"><h3>{{ section.title }}</h3><dl><template v-for="row in section.rows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></template></dl></section><p class="gx-note">{{ state.data.note }}</p></template>
     <LocalAccess v-if="state.error" :mode="mode" :on-unauthorized="unauthorized" /></section>`,
 }
 export const TmuxPage = {
-  components: { LocalAccess }, props, emits: ["navigate"], ...lifecycle,
+  components: { GxNotice, LocalAccess }, props, emits: ["navigate"], ...lifecycle,
   setup: props => setup(props, true), methods,
   template: `<section class="gx-settings"><div class="gx-settings__header"><h2>tmux Live View</h2><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs')">Logs &amp; Diagnostics</button></div>
     <p>Read-only launcher console tail. No commands or keyboard input are sent to the comma.</p>
-    <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" :disabled="mode !== 'local'" @click="feed.setLive(!state.live)">{{ state.live ? 'Pause' : 'Resume' }}</button><button class="gx-btn gx-btn--tonal" :disabled="mode !== 'local' || state.loading" @click="feed.refresh()">Refresh</button><button class="gx-btn gx-btn--tonal" :disabled="!state.data?.text" @click="copyText(state.data.text)">Copy Visible Text</button><button class="gx-btn gx-btn--tonal" :disabled="!state.data?.text" @click="saveText(state.data.text)">Save Visible Text</button></div>
-    <p role="status">{{ state.live ? 'Live · updates every 2 seconds while visible' : 'Paused' }}</p><p v-if="state.loading" role="status">Loading console…</p><p v-if="state.error" role="alert">{{ state.error }}</p><p v-if="state.notice" role="status">{{ state.notice }}</p>
+    <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" :disabled="mode !== 'local'" @click="feed.setLive(!state.live)">{{ state.live ? 'Pause' : 'Resume' }}</button><button class="gx-btn gx-btn--tonal" :disabled="!state.data?.text" @click="copyText(state.data.text)">Copy Visible Text</button><button class="gx-btn gx-btn--tonal" :disabled="!state.data?.text" @click="saveText(state.data.text)">Save Visible Text</button></div>
+    <p role="status">{{ state.live ? 'Live · updates every 2 seconds while visible' : 'Paused' }}</p><p v-if="state.loading" role="status">Loading console…</p><GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice><p v-if="state.notice" role="status">{{ state.notice }}</p>
     <section v-if="state.data" class="gx-card gx-crash-preview" style="padding:var(--sp-4)"><p v-if="!state.data.available">{{ state.data.reason }}</p><p v-else>Pane: {{ state.data.pane }}</p><p v-if="state.data.truncated" class="gx-note">Console tail is limited to 300 lines and 64 KiB.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ state.data.text }}</pre></section>
     <LocalAccess v-if="state.error || state.data?.available === false" :mode="mode" :on-unauthorized="unauthorized" /></section>`,
 }

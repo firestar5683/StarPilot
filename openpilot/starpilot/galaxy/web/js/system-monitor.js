@@ -1,10 +1,11 @@
+import { GxNotice } from "./notice.js"
 import { displayNumber, processFeature, processRows, processState, vital } from "./system-monitor-data.js"
 import { MonitorFeed } from "./monitor-feed.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
 export const SystemMonitor = {
   name: "SystemMonitor",
-  components: { GalaxySelect },
+  components: { GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ snapshot: null, status: "loading", error: "", query: "", scope: "comma", sort: "cpu", descending: true }),
   mounted() {
@@ -36,7 +37,7 @@ export const SystemMonitor = {
       <div class="gx-monitor__toolbar"><div><h2>System Monitor</h2><div class="gx-note">{{ mode === 'sample' ? 'Synthetic sample' : 'Local system' }} · Captured {{ captured }}</div></div><span class="gx-chip">{{ mode === 'sample' ? 'Offline preview' : status === 'current' ? 'Live' : 'Unavailable' }}</span></div>
       <p v-if="mode === 'sample'" class="gx-note">Illustrative values only. No device was read.</p>
       <p v-else class="gx-note">Read-only system activity. Updates every few seconds.</p>
-      <p v-if="error" class="gx-note gx-note--danger" role="alert">{{ error }}</p>
+      <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       <div v-else-if="!snapshot" class="gx-loading">Loading system activity…</div>
       <template v-else>
         <div class="gx-monitor__summary">

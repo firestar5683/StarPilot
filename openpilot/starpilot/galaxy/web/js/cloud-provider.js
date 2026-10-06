@@ -1,3 +1,5 @@
+import { PollTimer, connectionError } from "./polling.js"
+import { requestJson } from "./startup.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
 
@@ -14,8 +16,8 @@ export const CloudProviderPage = {
   components: { GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: null, busy: false, error: "", request: null }),
-  mounted() { this.load() },
-  beforeUnmount() { this.request?.abort() },
+  mounted() { this.activePage = true; this.poller = new PollTimer({ read: () => this.load() }); this.poller.start(); this.load() },
+  beforeUnmount() { this.activePage = false; this.poller.stop(); this.request?.abort() },
   computed: {
     active() { return this.status?.providers.find(p => p.id === this.status.active) },
     selected() { return this.status?.providers.find(p => p.id === this.status.selected) },
@@ -25,23 +27,20 @@ export const CloudProviderPage = {
       this.request?.abort()
       const controller = new AbortController()
       this.request = controller
-      const timer = setTimeout(() => controller.abort(), 8000)
       try {
-        const response = await fetch("./api/connect/provider", { cache: "no-store", credentials: "same-origin",
-          signal: controller.signal, ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) })
-        if (response.status === 401) this.unauthorized()
-        const value = await response.json()
-        if (!response.ok) throw new Error(value.error || "Cloud provider request failed")
+        const value = await requestJson("./api/connect/provider", { request: { signal: controller.signal,
+          ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) } })
+        if (this.request !== controller || !this.activePage) return
         if (!validProviderStatus(value)) throw new Error("Cloud provider status is unavailable")
+        this.error = ""
         this.status = value
       } finally {
-        clearTimeout(timer)
         if (this.request === controller) this.request = null
       }
     },
     async load() {
-      if (this.mode !== "local") return
-      try { await this.call() } catch (error) { this.error = error.message }
+      if (this.mode !== "local" || this.busy || this.request) return
+      try { await this.call() } catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
     },
     async select(name) {
       if (!this.status?.canSelect || this.busy || !this.status.providers.some(p => p.id === name)) return
@@ -50,7 +49,7 @@ export const CloudProviderPage = {
       this.busy = true
       this.error = ""
       try { await this.call({ provider: name, revision: this.status.revision, confirmed: true }) }
-      catch (error) { this.error = error.message }
+      catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
       finally { this.busy = false }
     },
   },
@@ -69,7 +68,7 @@ export const CloudProviderPage = {
       </GxNotice>
       <p v-if="status?.restartRequired">Restart required. No automatic reboot will occur.</p>
       <p v-if="status && !status.canSelect">Turn off the vehicle to change this Developer setting.</p>
-      <button class="gx-btn gx-btn--tonal" @click="load" :disabled="busy">Refresh</button>
-      <p v-if="error" class="gx-note gx-note--danger" role="alert">{{ error }}</p>
+
+      <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
     </template></div>`,
 }

@@ -1,3 +1,5 @@
+import { GxNotice } from "./notice.js"
+import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 
 const HEX = /^[0-9a-f]{64}$/
@@ -106,6 +108,7 @@ export class ControllersFeed {
 }
 
 export const ControllersPage = {
+  components: { GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: null, busy: false, error: "", draft: null })
@@ -163,7 +166,7 @@ export const ControllersPage = {
       <p>Assign physical USB or Bluetooth buttons to Quick Select and available driving screen actions. Turn off the vehicle to edit.</p>
       <p v-if="mode !== 'local'" class="gx-note">Connect to local Galaxy to manage controller buttons.</p>
       <template v-else>
-        <p v-if="state.error" class="gx-note" role="alert">{{ state.error }}</p>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <p v-if="!state.status" class="gx-note">Checking attached controllers…</p>
         <template v-else>
           <p v-if="!state.status.available" class="gx-note">Controller Buttons are unavailable. Reload to try again.</p>

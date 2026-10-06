@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { decodeLayoutBackup, encodeLayoutBackup, MAX_LAYOUT_BACKUP_BYTES } from "./layout-backup.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
@@ -255,7 +256,7 @@ export class SoftwareStatusFeed {
 }
 
 export const SoftwarePage = {
-  components: { GalaxySelect },
+  components: { GxNotice, GalaxySelect },
   name: "SoftwarePage",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, busy: false, uncertain: false, notice: "", error: "",
@@ -432,11 +433,11 @@ export const SoftwarePage = {
       <p class="gx-note">Turn off the vehicle before checking, downloading or installing updates. Selecting a branch saves the target for the next check.</p>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Software updates are unavailable in preview.</div>
       <template v-else>
-        <div class="gx-software-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="feed.load()">Refresh status</button>
+        <div class="gx-software-actions">
           <button type="button" class="gx-btn" :disabled="actionDisabled || !operations?.canCheck" @click="feed.action('check')">Check for updates</button></div>
         <p v-if="status === 'loading' && !data" role="status">Loading software updates…</p>
-        <div v-if="error" class="gx-card gx-message" role="alert">{{ error }}
-          <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="feed.load()">Refresh</button></div>
+        <GxNotice tone="danger" v-if="error">{{ error }}
+          </GxNotice>
         <p v-if="notice" class="gx-card gx-message" role="status">{{ notice }}</p>
         <template v-if="data">
           <section class="gx-card gx-software-card"><h3>Installed Build</h3>
@@ -488,7 +489,7 @@ export const SoftwarePage = {
               <input ref="layoutFile" type="file" accept=".json,application/json" :disabled="layoutBusy" class="gx-sr-only" tabindex="-1" aria-label="Choose visual layout backup" @change="chooseLayoutFile">
             </div>
             <p v-if="layoutNotice" role="status">{{ layoutNotice }}</p>
-            <p v-if="layoutError" role="alert">{{ layoutError }}</p>
+            <GxNotice tone="danger" v-if="layoutError">{{ layoutError }}</GxNotice>
           </section>
           <section v-if="operations.history" class="gx-card gx-software-card">
             <h3>Release Notes &amp; History</h3>

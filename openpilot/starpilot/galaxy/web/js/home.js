@@ -1,3 +1,4 @@
+import { GxNotice } from "./notice.js"
 import { LocalAccess } from "./local-access.js"
 import { MonitorFeed } from "./monitor-feed.js"
 import { SoftwareStatusFeed } from "./software-status.js"
@@ -115,7 +116,7 @@ export function homeSummary(monitor, model, software) {
 
 export const Home = {
   name: "Home",
-  components: { LocalAccess },
+  components: { GxNotice, LocalAccess },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   data: () => ({
@@ -159,14 +160,6 @@ export const Home = {
       this.monitor.snapshot = null
       this.monitor.status = "idle"
     },
-    refresh() {
-      if (this.mode !== "local" || document.hidden) return
-      this.monitorFeed.refresh()
-      this.modelFeed.load()
-      this.softwareFeed.load()
-      this.driveFeed.load()
-      this.$refs.localAccess?.feed?.refresh()
-    },
     ignoreDrive(drive) {
       if (this.mode !== "local" || document.hidden || this.drives.busy) return
       return this.driveFeed.ignore(drive.routeId, !drive.ignored)
@@ -176,7 +169,7 @@ export const Home = {
     <div class="gx-view gx-home">
       <div class="gx-home__hero">
         <div><h1>Dashboard</h1><p class="gx-note">Your saved drives and current device</p></div>
-        <button v-if="mode === 'local'" type="button" class="gx-btn gx-btn--tonal" @click="refresh"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+
       </div>
       <p v-if="mode !== 'local'" class="gx-card gx-message">Dashboard information is available on your device.</p>
       <template v-else>
@@ -228,7 +221,7 @@ export const Home = {
                 <button type="button" class="gx-home__link" :disabled="drives.busy" @click="ignoreDrive(drive)">
                   {{ drive.ignored ? 'Include in stats' : 'Ignore drive stats' }}</button></div>
             </div>
-            <p v-if="drives.error" role="alert">{{ drives.error }}</p>
+            <GxNotice tone="danger" v-if="drives.error">{{ drives.error }}</GxNotice>
           </section>
           <section class="gx-card gx-home__models"><h2>Recorded Models</h2>
             <p v-if="!driving.models.length" class="gx-home__subtle">Recorded models will appear as drives are saved.</p>
@@ -239,7 +232,7 @@ export const Home = {
           </section>
         </template>
         <div class="gx-home__section-title"><span></span>Your device</div>
-        <LocalAccess ref="localAccess" :mode="mode" :on-unauthorized="unauthorized" :show-refresh="false" />
+        <LocalAccess ref="localAccess" :mode="mode" :on-unauthorized="unauthorized" />
         <div class="gx-home__grid">
           <section class="gx-card gx-home__card">
             <h2><i class="bi bi-activity"></i> System</h2>

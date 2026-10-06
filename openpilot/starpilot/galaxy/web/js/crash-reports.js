@@ -1,7 +1,11 @@
+import { PollTimer, connectionError } from "./polling.js"
+import { requestJson } from "./startup.js"
 // Read-only local crash reports. State is cleared on navigation and sign-out.
 export class CrashReportsFeed {
-  constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args) }) {
+  constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args), later = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id) }) {
     Object.assign(this, { publish, unauthorized, fetcher })
+    Object.assign(this, { later, cancel })
+    this.poller = new PollTimer({ read: () => this.load(true), interval: 30000, later, cancel })
     this.active = false
     this.generation = 0
     this.request = null
@@ -14,6 +18,7 @@ export class CrashReportsFeed {
   }
 
   stop() {
+    this.poller.stop()
     this.active = false
     this.generation++
     this.request?.abort()
@@ -24,41 +29,28 @@ export class CrashReportsFeed {
   start() {
     this.stop()
     this.active = true
+    this.poller.start()
     return this.load()
   }
 
   async requestJson(url, generation, request) {
-    const response = await this.fetcher(url, { signal: request.signal, cache: "no-store" })
-    if (!this.active || generation !== this.generation || request.signal.aborted) return null
-    if (response.status === 401) {
-      this.stop()
-      this.unauthorized()
-      return null
+    try {
+      const body = await requestJson(url, { fetcher: this.fetcher, later: this.later, cancel: this.cancel, request: { signal: request.signal } })
+      return this.active && generation === this.generation && !request.signal.aborted ? body : null
+    } catch (error) {
+      if (!this.active || generation !== this.generation) return null
+      if (error.status === 401 || ["access_unavailable", "setup_required"].includes(error.code)) { this.stop(); this.unauthorized(); return null }
+      throw error
     }
-    if (response.status === 503) {
-      const body = await response.json().catch(() => null)
-      if (!this.active || generation !== this.generation || request.signal.aborted) return null
-      if (["access_unavailable", "setup_required"].includes(body?.code)) {
-        this.stop()
-        this.unauthorized()
-        return null
-      }
-      throw new Error("Crash reports are unavailable")
-    }
-    if (!response.ok) throw new Error(response.status === 409 ? "Report changed; refresh the list" : "Report unavailable")
-    const body = await response.json()
-    if (!this.active || generation !== this.generation || request.signal.aborted) return null
-    return body
   }
 
-  async load() {
-    if (!this.active) return
+  async load(background = false) {
+    if (!this.active || background && this.request) return
     const generation = ++this.generation
     this.request?.abort()
     const request = new AbortController()
     this.request = request
-    this.reports = []
-    this.publish({ reports: [], scanIncomplete: false, listLimited: false, status: "loading", error: "", selected: null, preview: null, previewStatus: "idle" })
+    if (!background) this.publish({ status: "loading" })
     try {
       const data = await this.requestJson("./api/crash-reports", generation, request)
       if (!data) return
@@ -71,9 +63,9 @@ export class CrashReportsFeed {
         throw new Error("Invalid crash report list")
       }
       this.reports = data.reports
-      this.publish({ reports: data.reports, scanIncomplete: data.scanIncomplete, listLimited: data.listLimited, status: "ready", error: "", selected: null, preview: null, previewStatus: "idle" })
+      this.publish({ reports: data.reports, scanIncomplete: data.scanIncomplete, listLimited: data.listLimited, status: "ready", error: "" })
     } catch (error) {
-      if (this.active && generation === this.generation) this.publish({ reports: [], scanIncomplete: false, listLimited: false, status: "unavailable", error: error.message, selected: null, preview: null, previewStatus: "idle" })
+      if (this.active && generation === this.generation) this.publish({ reports: [], scanIncomplete: false, listLimited: false, status: "unavailable", error: connectionError(error), selected: null, preview: null, previewStatus: "idle" })
     } finally {
       if (generation === this.generation) this.request = null
     }
@@ -94,7 +86,7 @@ export class CrashReportsFeed {
       }
       this.publish({ selected: report.id, preview: data, previewStatus: "ready", error: "" })
     } catch (error) {
-      if (this.active && generation === this.generation) this.publish({ selected: null, preview: null, previewStatus: "unavailable", error: error.message })
+      if (this.active && generation === this.generation) this.publish({ selected: null, preview: null, previewStatus: "unavailable", error: connectionError(error) })
     } finally {
       if (generation === this.generation) this.request = null
     }

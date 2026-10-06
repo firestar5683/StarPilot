@@ -1,3 +1,5 @@
+import { GxNotice } from "./notice.js"
+import { connectionError } from "./polling.js"
 import "./navigation-style.js"
 import { NavigationMap } from "./navigation-map.js"
 import { MapOperationsPanel } from "./map-operations.js"
@@ -116,7 +118,7 @@ export class NavigationClient {
     const controller = new AbortController()
     this.controller = controller
     this.busy = operation !== "status"
-    this.error = ""
+    if (operation !== "status") this.error = ""
     this.emit()
     const deadline = this.later(() => controller.abort(), operation === "search" ? 24000 : operation === "action" && body?.action === "selectPlace" ? 12000 : 4000)
     try {
@@ -132,6 +134,7 @@ export class NavigationClient {
         this.stop(); this.unauthorized(); return null
       }
       if (!response.ok) throw new Error(payload?.error || "Navigation could not complete this request.")
+      this.error = ""
       if (operation === "search") {
         if (!Array.isArray(payload.results) || payload.results.length > 20 || !payload.results.every(validSearchResult))
           throw new Error("Search results could not be read.")
@@ -150,7 +153,7 @@ export class NavigationClient {
       return payload
     } catch (error) {
       if (this.active && generation === this.generation) {
-        this.error = controller.signal.aborted ? "Navigation did not respond. Reconnecting…" : error.message
+        this.error = controller.signal.aborted ? "Navigation did not respond. Reconnecting…" : connectionError(error)
         if (operation !== "search") this.stale = true
       }
       return null
@@ -168,7 +171,7 @@ export class NavigationClient {
 
 export const NavigationPage = {
   name: "NavigationPage",
-  components: { MapOperationsPanel, NavigationMap },
+  components: { GxNotice, MapOperationsPanel, NavigationMap },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null } },
   data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", favoritesOpen: false, query: "", token: "", searched: false }),
@@ -215,7 +218,7 @@ export const NavigationPage = {
       <MapOperationsPanel v-if="tab === 'maps'" :mode="mode" :unauthorized="unauthorized" />
       <template v-else>
         <p v-if="mode !== 'local'" class="gx-note">Connect to your comma to set up navigation and choose a destination.</p>
-        <p v-if="error" class="gx-note gx-note--danger" role="alert">{{ error }}</p>
+        <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
         <p v-if="stale && data" class="gx-note">Showing the last received route. Reconnecting before accepting changes.</p>
         <template v-if="tab === 'setup'">
           <section class="gx-card gx-navigation__section">

@@ -1,5 +1,6 @@
+import { GxNotice } from "./notice.js"
 import { SentryNotifications } from "./sentry-notifications.js"
-import { LocalHistoryFeed } from "./record-history.js"
+import { SnapshotFeed } from "./snapshot-feed.js"
 
 // Historical motion records and independently configured notifications.
 const ID = /^[0-9a-f]{32}$/
@@ -23,7 +24,7 @@ export function validSentryEvents(value) {
 export const systemTime = (milliseconds) => Number.isSafeInteger(milliseconds) && milliseconds > 0 && milliseconds <= 8_640_000_000_000_000
   ? new Date(milliseconds).toLocaleString() : "Unavailable"
 
-export class SentryEventsFeed extends LocalHistoryFeed {
+export class SentryEventsFeed extends SnapshotFeed {
   static endpoint = "./api/sentry/events"
   static valid = validSentryEvents
   static subject = "local motion events"
@@ -33,7 +34,7 @@ export class SentryEventsFeed extends LocalHistoryFeed {
 
 export const SentryEventsPage = {
   name: "SentryEventsPage",
-  components: { SentryNotifications },
+  components: { GxNotice, SentryNotifications },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, error: "" }),
@@ -54,9 +55,9 @@ export const SentryEventsPage = {
       <SentryNotifications :mode="mode" :unauthorized="unauthorized" />
       <p v-if="mode !== 'local'" class="gx-card gx-message">Local motion records are unavailable in preview.</p>
       <template v-else>
-        <button type="button" class="gx-btn gx-btn--tonal" :disabled="status === 'loading'" @click="feed.load()">Refresh events</button>
+
         <p v-if="status === 'loading'" role="status">Reading local motion events…</p>
-        <p v-if="status === 'unavailable'" role="alert">{{ error }}</p>
+        <GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
           <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local motion events may exist.</p>
           <p v-if="!data.events.length" role="status">No local motion events found in this scan.</p>

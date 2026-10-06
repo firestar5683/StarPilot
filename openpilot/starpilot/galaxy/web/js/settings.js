@@ -1,3 +1,4 @@
+import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { GalaxySettingRow, settingControl } from "./galaxy-setting-row.js"
 import { OnroadLayoutPage } from "./onroad-layout.js"
@@ -31,6 +32,8 @@ const SECTION_LINKS = {
   visual: [{ label: "Driving Screen Widgets", page: "appearance" }, { label: "Colors & Layout", page: "ui_layout" }, { label: "Quick Select", page: "favorites" }, { label: "Blind Spot Camera and Preview", page: "pip" }],
 }
 
+const activeSettings = new Set()
+
 export class SettingsFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
@@ -45,9 +48,11 @@ export class SettingsFeed {
     this.page = "hub"
     this.data = null
     this.pending = null
+    this.error = ""
   }
 
   stop() {
+    activeSettings.delete(this)
     this.active = false
     this.generation++
     this.request?.abort()
@@ -58,12 +63,14 @@ export class SettingsFeed {
     this.saving = false
     this.data = null
     this.pending = null
+    this.error = ""
     this.publish({ status: "idle", data: null, pending: null, error: "" })
   }
 
   start(page = "hub") {
     this.stop()
     this.active = true
+    activeSettings.add(this)
     this.page = page
     return this.load(page)
   }
@@ -79,6 +86,7 @@ export class SettingsFeed {
     this.request = request
     this.saving = saving
     this.polling = background
+    let failed = false
     this.timer = this.later(() => {
       if (!this.active || generation !== this.generation || this.request !== request) return
       request.abort()
@@ -88,9 +96,9 @@ export class SettingsFeed {
       this.polling = false
       if (!background) this.data = this.pending = null
       else this.expireMonitorStatus()
-      this.publish({ status: background && this.data ? "ready" : "unavailable", data: this.data, pending: this.pending,
-        error: saving ? "Saving timed out. The result is unknown. Refresh saved values before trying again." :
-                        "Reading settings timed out. Refresh to try again." })
+      this.error = saving ? "Saving timed out. Checking saved values before another change." : "Settings could not connect. Reconnecting automatically…"
+      this.publish({ status: background && this.data ? "ready" : "unavailable", data: this.data, pending: this.pending, error: this.error })
+      this.scheduleParkedRefresh()
     }, 4000)
     try {
       const response = await operation(request.signal)
@@ -112,12 +120,13 @@ export class SettingsFeed {
       if (!this.active || generation !== this.generation || request.signal.aborted) return null
       return data
     } catch (error) {
+      failed = true
       if (this.active && generation === this.generation && !request.signal.aborted) {
         this.pending = null
         this.expireMonitorStatus()
         if (error?.stale) this.data = null
         this.publish({ status: this.data ? "ready" : "unavailable", data: this.data, pending: null,
-          error: error?.message || "Settings request failed." })
+          error: this.error = connectionError(error) })
       }
       return null
     } finally {
@@ -126,24 +135,23 @@ export class SettingsFeed {
         this.request = this.timer = null
         this.saving = false
         this.polling = false
+        if (failed) this.scheduleParkedRefresh()
       }
     }
   }
 
   expireMonitorStatus() {
-    if (this.data?.page === "sentry") this.data = { ...this.data, subtitle: "Motion monitor status is unavailable. Refresh to check again." }
+    if (this.data?.page === "sentry") this.data = { ...this.data, subtitle: "Motion monitor status is unavailable. Reconnecting automatically…" }
   }
 
   scheduleParkedRefresh() {
-    if (!this.active || this.pending || this.request || this.saving || this.pollTimer !== null ||
-        (this.data?.parked !== false && this.page !== "sentry") || this.data?.page !== this.page || typeof this.data.view !== "string" ||
-        !Array.isArray(this.data.rows)) return
+    if (!this.active || this.pending || this.request || this.saving || this.pollTimer !== null) return
     const generation = this.generation
     this.pollTimer = this.later(() => {
       this.pollTimer = null
-      if (this.active && this.generation === generation && !this.pending && !this.request && !this.saving && (this.data?.parked === false || this.page === "sentry"))
+      if (this.active && this.generation === generation && !this.pending && !this.request && !this.saving)
         this.load(this.page, { keepData: true, quiet: true })
-    }, 1000)
+    }, this.error ? 3000 : 1500)
   }
 
   async load(page = this.page, { keepData = page === this.page && this.data !== null, quiet = keepData } = {}) {
@@ -151,16 +159,17 @@ export class SettingsFeed {
     this.page = page
     this.pending = null
     if (!keepData) this.data = null
-    this.publish({ status: quiet ? "ready" : keepData ? "saving" : "loading", data: this.data, pending: null, error: "" })
+    if (!quiet) this.publish({ status: keepData ? "saving" : this.error ? "unavailable" : "loading", data: this.data, pending: null, error: this.error })
     const operation = this.run((signal) => this.fetcher(`./api/settings/pages/${encodeURIComponent(page)}`,
       { credentials: "same-origin", cache: "no-store", signal }), { background: quiet })
     const attempt = this.generation
     const data = await operation
     if (data && this.active && this.generation === attempt && this.page === page) {
       this.data = data
+      this.error = ""
       this.publish({ status: "ready", data, pending: null, error: "" })
-      this.scheduleParkedRefresh()
     }
+    this.scheduleParkedRefresh()
   }
 
   async preview(row, direction, draft = null) {
@@ -176,11 +185,12 @@ export class SettingsFeed {
   async resetDefault(row) {
     if (!this.active || !this.data?.view || !this.data.rows?.[row]?.resetAvailable ||
         this.pending || (this.request && !this.polling)) return
+    this.publish({ status: "updating", data: this.data, pending: null, error: "" })
     const data = await this.run((signal) => post(this.fetcher, "./api/settings/reset-default",
       { view: this.data.view, row }, signal))
     if (data) {
       this.pending = data
-      this.publish({ status: "ready", data: this.data, pending: data, error: "" })
+      await this.confirm()
     }
   }
 
@@ -211,6 +221,11 @@ export class SettingsFeed {
       { intent, confirmed: true }, signal), { saving: true })
     const attempt = this.generation
     const result = await operation
+    if (result?.saved === true) {
+      for (const feed of activeSettings) {
+        if (feed !== this && !feed.pending && !feed.saving) feed.load(feed.page, { keepData: true, quiet: true })
+      }
+    }
     if (this.active && this.generation === attempt) {
       const reload = this.load(page, { keepData: true, quiet: false })
       const refreshed = this.generation
@@ -281,7 +296,7 @@ export const SettingsPage = {
       else this.state.query = ""
     },
     async openCropEditor() { (await import("./router.js")).navigate("/cameras/pip") },
-    rowKey(row, index) { return JSON.stringify([this.state.data.page, index, row.revision ?? this.state.data.view, row]) },
+    rowKey(row, index) { return `${this.state.data.page}:${row.key || row.page || index}` },
     closeLayout() { this.state.layoutOpen = false; this.state.section = "visual"; this.feed.start(this.initialPage) },
     closeFavorites() { this.state.favoritesOpen = false; this.state.section = "visual"; this.feed.start("hub") },
     selectSection(section) {
@@ -364,9 +379,9 @@ export const SettingsPage = {
         </section>
         <p v-if="state.status === 'saving' || state.status === 'updating'" class="gx-settings__save-status" role="status">Saving preference…</p>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
-        <div v-else-if="state.status === 'unavailable'" class="gx-card gx-message" role="alert">Saved settings are unavailable.</div>
-        <div v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}
-          <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="feed.load()">Refresh</button></div>
+        <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved settings are unavailable.</GxNotice>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}
+          </GxNotice>
         <div v-if="state.data" class="gx-settings__body">
           <div v-if="state.data.page === 'appearance' || state.data.page === 'pip'" class="gx-settings__actions">
             <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Open Colors &amp; Layout</button>
@@ -375,10 +390,10 @@ export const SettingsPage = {
           <section class="gx-card gx-settings__section">
             <div class="gx-section__header"><i class="bi" :class="activeSection.icon" aria-hidden="true"></i><span class="gx-section__title">{{ state.data.page === 'hub' ? activeSection.label : state.data.title }}</span>
               <button v-if="state.data.page !== 'hub' && state.data.rows.length" type="button" class="gx-icon-btn" :aria-label="state.searchOpen ? 'Close page search' : 'Search within this page'" :aria-pressed="state.searchOpen" @click="togglePageSearch"><i class="bi" :class="state.searchOpen ? 'bi-x-lg' : 'bi-search'" aria-hidden="true"></i></button>
-              <button v-if="state.data.page === 'hub'" type="button" class="gx-icon-btn" aria-label="Refresh settings" :disabled="busy" @click="feed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button></div>
+              </div>
             <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
             <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
-              :disabled="busy || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
+              :disabled="busy || !!state.error || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
               @open="open" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
             <div v-if="!visibleRows.length" class="gx-empty">No matching settings.</div>
           </section>

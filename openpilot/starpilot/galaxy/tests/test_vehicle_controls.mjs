@@ -15,7 +15,7 @@ function fixture() {
   const requests = [], states = [], timers = new Map()
   let nextTimer = 0, unauthorized = 0
   const feed = new VehicleSelectionFeed({ publish: (state) => states.push(state), unauthorized: () => { unauthorized++ },
-    later: (fn, ms) => { assert.ok([1000, 8000].includes(ms)); const id = ++nextTimer; timers.set(id, { fn, ms }); return id },
+    later: (fn, ms) => { assert.ok([2000, 8000].includes(ms)); const id = ++nextTimer; timers.set(id, { fn, ms }); return id },
     cancelTimer: (id) => timers.delete(id),
     fetcher: (url, options) => new Promise((resolve) => requests.push({ url, options, resolve })) })
   async function reply(index, body, status = 200) {
@@ -92,12 +92,12 @@ assert.equal(awaitingParked.feed.data.parked, false)
 assert.equal(awaitingParked.timers.size, 1)
 await awaitingParked.feed.preview("KIA_CEED")
 assert.equal(awaitingParked.requests.length, 1)
-awaitingParked.fire(1000)
+awaitingParked.fire(2000)
 assert.equal(awaitingParked.requests[1].url, "./api/vehicle-selection")
 assert.equal(awaitingParked.states.at(-1).status, "ready") // Keep the visible catalog steady while rechecking.
 await awaitingParked.reply(1, { ...page, parked: true, view: "parked-view" })
 assert.equal(awaitingParked.feed.data.parked, true)
-assert.equal(awaitingParked.timers.size, 0)
+assert.equal(awaitingParked.timers.size, 1)
 awaitingParked.feed.preview("KIA_CEED")
 assert.deepEqual(JSON.parse(awaitingParked.requests[2].options.body), { view: "parked-view", platform: "KIA_CEED" })
 awaitingParked.feed.stop()

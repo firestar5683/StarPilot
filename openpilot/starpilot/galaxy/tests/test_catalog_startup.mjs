@@ -67,7 +67,7 @@ const raced = new Function("loadCatalog", "state", "authState", "auth", `${initi
 const old = raced(), current = raced()
 queued[0]({ tools: [], mode: "sample" })
 await old
-assert.equal(state.loading, true)
+assert.equal(state.loading, false) // Existing tools remain mounted during a reconnect.
 queued[1](loaded)
 await current
 assert.equal(state.loading, false)

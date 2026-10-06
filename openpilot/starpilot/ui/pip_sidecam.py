@@ -138,13 +138,13 @@ class Signals:
 
 def selected_sides(mask: Mask | None, signals: Signals, *, started: bool, enabled: bool,
                    on_blinker: bool, on_bsm: bool) -> tuple[str, ...]:
-  """Map image-relative mask centers to vehicle-relative warning signals."""
+  """Select saved camera crops using PiP blinker and OEM blind-spot triggers."""
   if not (started and enabled and signals.car_state_fresh and mask is not None):
     return ()
   sides: list[str] = []
   for vehicle_side, blinker, blindspot in (
-    ("right", signals.right_blinker, signals.right_blindspot or signals.vasm_right),
-    ("left", signals.left_blinker, signals.left_blindspot or signals.vasm_left),
+    ("right", signals.right_blinker, signals.right_blindspot),
+    ("left", signals.left_blinker, signals.left_blindspot),
   ):
     if mask.crop(vehicle_side) is not None and ((on_blinker and blinker) or (on_bsm and blindspot)):
       sides.append(vehicle_side)

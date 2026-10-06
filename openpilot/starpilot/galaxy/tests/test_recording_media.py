@@ -53,6 +53,33 @@ class RecordingMediaTest(unittest.TestCase):
       finally:
         media.close()
 
+  def test_full_camera_segments_and_combined_video_keep_resolution_and_frames(self):
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      route = NAME.rsplit('--', 1)[0]
+      fixture = Path(__file__).with_name('fixtures') / 'tiny-camera.hevc.bin'
+      for number in range(2):
+        segment = root / f'{route}--{number}'
+        segment.mkdir()
+        make_h264(segment / 'qcamera.ts')
+        for camera in ('fcamera', 'dcamera', 'ecamera'):
+          (segment / f'{camera}.hevc').write_bytes(fixture.read_bytes())
+      media = RecordingMedia(root)
+      try:
+        for camera in ('qcamera', 'fcamera', 'dcamera', 'ecamera'):
+          for combined in (False, True):
+            lease = media.open_route(route, camera=camera) if combined else media.open(NAME, camera=camera)
+            try:
+              decoded = subprocess.run([str(_ffmpeg_binary()), '-nostdin', '-hide_banner', '-loglevel', 'error',
+                                        '-i', str(media._cache_path), '-fps_mode', 'passthrough', '-f', 'rawvideo',
+                                        '-pix_fmt', 'rgb24', 'pipe:1'], capture_output=True, timeout=10, check=True)
+              self.assertEqual(len(decoded.stdout), 64 * 48 * 3 * (8 if combined else 4))
+              self.assertTrue(lease.source.current())
+            finally:
+              lease.close()
+      finally:
+        media.close()
+
   def test_closed_source_range_and_in_place_change(self):
     with tempfile.TemporaryDirectory() as directory:
       root = Path(directory)

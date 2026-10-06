@@ -18,7 +18,7 @@ assert.equal(validOperation(status), true)
 assert.equal(validOperation({ ...status, operationId: 's1:1', state: 'transferring' }), true)
 assert.equal(NavigationPage.components.MapOperationsPanel, MapOperationsPanel)
 assert.match(MapOperationsPanel.template, /Start download/)
-assert.match(MapOperationsPanel.template, /Retry maps/)
+assert.doesNotMatch(MapOperationsPanel.template, /Retry maps/)
 assert.match(MapOperationsPanel.template, /next map service start/)
 assert.doesNotMatch(MapOperationsPanel.template, /v-html/)
 const panel = { $data: {}, review: { region }, unauthorized: () => { panel.revoked = true } }

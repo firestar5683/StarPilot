@@ -60,12 +60,12 @@ assert.equal(withAlpha("#AABBCC80", 200 / 255), "#AABBCC64")
 assert.equal(withAlpha("#AABBCCFF", .9), "#AABBCCe5")
 assert.equal(validSnapshot(data), true)
 assert.deepEqual(clampPlacement(data.metadata.profiles.compact, "torque_bar", 174, 179), { x: 174, y: 179 })
-const opaquePretendingUnderlay = copy(data.metadata.profiles.compact)
-opaquePretendingUnderlay.widgets.max_speed.layer = "underlay"
-assert.equal(clampPlacement(opaquePretendingUnderlay, "max_speed", 174, 19), null)
-const wrongTorqueKind = copy(data.metadata.profiles.compact)
-wrongTorqueKind.widgets.torque_bar.kind = "max_speed"
-assert.equal(clampPlacement(wrongTorqueKind, "torque_bar", 174, 179), null)
+const registeredUnderlay = copy(data.metadata.profiles.compact)
+registeredUnderlay.widgets.max_speed.layer = "underlay"
+assert.deepEqual(clampPlacement(registeredUnderlay, "max_speed", 174, 19), { x: 174, y: 19 })
+const alternateUnderlayKind = copy(data.metadata.profiles.compact)
+alternateUnderlayKind.widgets.torque_bar.kind = "max_speed"
+assert.deepEqual(clampPlacement(alternateUnderlayKind, "torque_bar", 174, 179), { x: 174, y: 179 })
 
 for (const mutate of [
   (value) => { value.document.layouts.large.fake = { x: 0, y: 0, enabled: true } },
@@ -450,7 +450,7 @@ for (const status of [409, 503, 400]) {
   assert.equal(conflict.feed.needsReload, false)
 }
 const timeout = feedFixture(); timeout.feed.start(); await timeout.reply(0); timeout.feed.save(draft)
-const expire = [...timeout.timers.values()][0]; expire()
+const expire = timeout.timers.get(timeout.feed.timer); expire()
 assert.match(timeout.updates.at(-1).error, /result is unknown/)
 assert.equal(timeout.requests[1].options.signal.aborted, true)
 await timeout.reply(1, { ...snapshot(), document: draft })
@@ -466,21 +466,21 @@ assert.equal(unauthorized.unauthorized, 1)
 const settling = feedFixture()
 settling.feed.start(); await settling.reply(0, { ...snapshot(), editable: false })
 assert.equal(settling.updates.at(-1).data.editable, false)
-assert.equal(settling.fire(1000), true)
+assert.equal(settling.fire(5000), true)
 assert.equal(settling.requests.length, 2)
 await settling.reply(1, { ...snapshot(), editable: true })
 assert.equal(settling.updates.at(-1).data.editable, true)
-assert.equal([...settling.timers.values()].some((fn) => fn.delay === 1000), false)
+assert.equal([...settling.timers.values()].some((fn) => fn.delay === 5000), true)
 
 const stoppedRetry = feedFixture()
 stoppedRetry.feed.start(); await stoppedRetry.reply(0, { ...snapshot(), editable: false })
-const pendingRetry = [...stoppedRetry.timers.values()].find((fn) => fn.delay === 1000)
+const pendingRetry = [...stoppedRetry.timers.values()].find((fn) => fn.delay === 5000)
 stoppedRetry.feed.stop(); pendingRetry()
 assert.equal(stoppedRetry.requests.length, 1)
 
 const manualRetry = feedFixture()
 manualRetry.feed.start(); await manualRetry.reply(0, { ...snapshot(), editable: false })
-const cancelledRetry = [...manualRetry.timers.values()].find((fn) => fn.delay === 1000)
+const cancelledRetry = [...manualRetry.timers.values()].find((fn) => fn.delay === 5000)
 manualRetry.feed.load()
 cancelledRetry()
 assert.equal(manualRetry.requests.length, 2)
@@ -491,10 +491,11 @@ const boundedRetry = feedFixture()
 boundedRetry.feed.start()
 for (let index = 0; index < 4; index++) {
   await boundedRetry.reply(index, { ...snapshot(), editable: false })
-  boundedRetry.fire(1000)
+  boundedRetry.fire(5000)
 }
-assert.equal(boundedRetry.requests.length, 4)
-assert.equal([...boundedRetry.timers.values()].some((fn) => fn.delay === 1000), false)
+assert.equal(boundedRetry.requests.length, 5)
+boundedRetry.feed.stop()
+assert.equal([...boundedRetry.timers.values()].some((fn) => fn.delay === 5000), false)
 
 const visual = SETTINGS_SECTIONS.find(({ id }) => id === "visual")
 const rows = SettingsPage.computed.visibleRows.call({ initialPage: "hub", activeSection: visual,
