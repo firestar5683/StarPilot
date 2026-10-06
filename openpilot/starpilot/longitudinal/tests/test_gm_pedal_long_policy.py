@@ -54,6 +54,8 @@ def controller_step(cp, demand, *, frame=4, controller=None, stock_acc=False, lo
     pedal_sensor_healthy=True,
     pedal_sensor_ts_nanos=now_ns - 50_000_000,
     stock_acc_status_ts_nanos=now_ns - 50_000_000,
+    bolt_pedal_gear_ts_nanos=now_ns - 50_000_000,
+    bolt_pedal_main_ts_nanos=now_ns - 50_000_000,
     cam_lka_steering_cmd_counter=0,
     loopback_lka_steering_cmd_updated=False,
     loopback_lka_steering_cmd_ts_nanos=now_ns,

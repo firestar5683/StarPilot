@@ -48,6 +48,8 @@ def controller_messages(cp, frame, controller=None, *, stock_acc_enabled=False, 
   cs.pedal_sensor_healthy = True
   cs.pedal_sensor_ts_nanos = now_nanos - 50_000_000
   cs.stock_acc_status_ts_nanos = now_nanos - 50_000_000
+  cs.bolt_pedal_gear_ts_nanos = now_nanos - 50_000_000
+  cs.bolt_pedal_main_ts_nanos = now_nanos - 50_000_000
   cs.cam_lka_steering_cmd_counter = 0
   cs.loopback_lka_steering_cmd_updated = False
   cs.loopback_lka_steering_cmd_ts_nanos = now_nanos

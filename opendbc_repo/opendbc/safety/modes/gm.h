@@ -45,6 +45,8 @@ static bool gm_pedal_tx_counter_seen = false;
 static uint8_t gm_pedal_tx_counter_last = 0U;
 static bool gm_pedal_brake_counter_seen = false;
 static uint8_t gm_pedal_brake_counter_last = 0U;
+static bool gm_pedal_brake_producer_seen = false;
+static uint32_t gm_pedal_brake_producer_us = 0U;
 static bool gm_bolt_2017 = false;
 static bool gm_paddle_sched = false;
 static bool gm_bolt_gen2 = false;
@@ -118,6 +120,8 @@ static uint32_t gm_acc_status_last_us = 0U;
 static bool gm_pedal_main_seen = false;
 static uint32_t gm_pedal_main_last_us = 0U;
 static bool gm_regen_gear_ready = false;
+static bool gm_pedal_forward_gear_ready = false;
+static bool gm_acc_pedal_forward_owner = false;
 static uint32_t gm_regen_gear_last_us = 0U;
 static bool gm_paddle_internal_tx = false;
 
@@ -139,8 +143,13 @@ static bool gm_pedal_owns_longitudinal(void) {
                            safety_get_ts_elapsed(microsecond_timer_get(), gm_acc_status_last_us) <= 300000U);
 }
 
-static bool gm_pedal_drive_ready(void) {
+static bool gm_pedal_regen_gear_ready(void) {
   return gm_regen_gear_ready && safety_get_ts_elapsed(microsecond_timer_get(), gm_regen_gear_last_us) <= 100000U;
+}
+
+static bool gm_pedal_drive_ready(void) {
+  return (gm_acc_pedal_forward_owner ? gm_pedal_forward_gear_ready : gm_regen_gear_ready) &&
+         safety_get_ts_elapsed(microsecond_timer_get(), gm_regen_gear_last_us) <= 100000U;
 }
 
 static bool gm_pedal_main_ready(void) {
@@ -148,12 +157,20 @@ static bool gm_pedal_main_ready(void) {
          safety_get_ts_elapsed(microsecond_timer_get(), gm_pedal_main_last_us) <= 300000U;
 }
 
+static bool gm_pedal_brake_producer_current(void) {
+  if (!gm_pedal_main_ready() || !gm_pedal_owns_longitudinal() ||
+      (safety_get_ts_elapsed(microsecond_timer_get(), gm_pedal_brake_producer_us) > 100000U)) {
+    gm_pedal_brake_producer_seen = false;
+  }
+  return gm_pedal_brake_producer_seen;
+}
+
 static void gm_emit_paddle_after_stock(uint32_t now_us, uint32_t addr, uint8_t dlc, GmPaddleFeed *feed) {
   // No output before a host feed or more than four 25 Hz frames after it.
   if (gm_paddle_sched && feed->valid) {
     const bool expired = safety_get_ts_elapsed(now_us, feed->last_feed_us) > 100000U;
     feed->valid = false;  // A matching stock packet consumes the feed even if TX is denied.
-    if (!expired && gm_pedal_drive_ready() && !regen_braking &&
+    if (!expired && gm_pedal_regen_gear_ready() && !regen_braking &&
         (!gm_pedal_acc || gm_pedal_main_ready())) {
       CANPacket_t packet = {0};
       packet.addr = addr;
@@ -171,6 +188,7 @@ static void gm_emit_paddle_after_stock(uint32_t now_us, uint32_t addr, uint8_t d
 }
 
 static void gm_rx_hook(const CANPacket_t *msg) {
+  if (gm_pedal_acc) { (void)gm_pedal_brake_producer_current(); }
   const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
 
   gm_camera_pedal_rx(msg);
@@ -326,7 +344,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
         acc_main_on = GET_BIT(msg, 29U);
         gm_pedal_main_seen = true;
         gm_pedal_main_last_us = microsecond_timer_get();
-        if (!acc_main_on) { controls_allowed = false; }
+        if (!acc_main_on) { controls_allowed = false; gm_pedal_brake_producer_seen = false; }
       }
     }
 
@@ -343,6 +361,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
         cruise_engaged_prev = (msg->data[1] >> 5) != 0U;
         gm_acc_status_seen = true;
         gm_acc_status_last_us = microsecond_timer_get();
+        if (cruise_engaged_prev) { gm_pedal_brake_producer_seen = false; }
       } else {
         // This configuration does not derive cruise state from ACC status.
       }
@@ -364,6 +383,8 @@ static void gm_rx_hook(const CANPacket_t *msg) {
     if (msg_matches(msg, 0x1F5U, 0U)) {
       // The release command itself is L. Never spoof over P/R/D or driver manual mode.
       gm_regen_gear_ready = ((msg->data[3] & 0xFU) == 6U) && ((msg->data[5] & 0x2U) == 0U);
+      gm_pedal_forward_gear_ready = (((msg->data[3] & 0xFU) == 4U) || ((msg->data[3] & 0xFU) == 6U)) &&
+                                    ((msg->data[5] & 0x2U) == 0U);
       gm_regen_gear_last_us = microsecond_timer_get();
       gm_emit_paddle_after_stock(microsecond_timer_get(), 0x1F5U, 8U, &gm_gear_feed);
     }
@@ -387,7 +408,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
     }
 
     if (gm_pedal_long && (!controls_allowed || brake_pressed || gas_pressed || regen_braking ||
-                          !gm_pedal_owns_longitudinal() || !gm_pedal_drive_ready())) {
+                          !gm_pedal_owns_longitudinal() || !gm_pedal_regen_gear_ready())) {
       if (gm_bd_feed.bytes[0] == 0x20U) { gm_bd_feed.valid = false; }
       if (gm_gear_feed.bytes[5] == 2U) { gm_gear_feed.valid = false; }
     }
@@ -439,6 +460,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     }
     if (gm_auto_hold && get_longitudinal_allowed()) { gm_hold_counter_seen = false; gm_hold_accepted = false; }
     if (gm_pedal_acc) {
+      (void)gm_pedal_brake_producer_current();
       const uint8_t mode = msg->data[0] >> 4;
       const uint8_t counter = msg->data[4] & 0x3U;
       const uint16_t checksum = ((uint16_t)msg->data[2] << 8) | msg->data[3];
@@ -450,7 +472,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
                          gm_pedal_main_ready() && gm_pedal_drive_ready() && get_longitudinal_allowed() &&
                          !brake_pressed_prev && !regen_braking;
       const bool active = (brake > 0) && ((mode == 0xAU) || (mode == 0xDU)) && owned;
-      const bool inactive = (brake == 0) && (((mode == 1U) && gm_pedal_owns_longitudinal()) ||
+      const bool inactive = (brake == 0) && (((mode == 1U) && gm_pedal_owns_longitudinal() && gm_pedal_main_ready()) ||
                                               ((mode == 9U) && owned));
       if (!(active || inactive) || (checksum != expected) || ((msg->data[4] & 0xFCU) != 0U) ||
           (gm_pedal_brake_counter_seen && (counter == gm_pedal_brake_counter_last))) {
@@ -459,6 +481,8 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
       if (tx) {
         gm_pedal_brake_counter_seen = true;
         gm_pedal_brake_counter_last = counter;
+        gm_pedal_brake_producer_seen = true;
+        gm_pedal_brake_producer_us = microsecond_timer_get();
       }
     }
   }
@@ -514,7 +538,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     const bool inactive = !enabled && (track1 == 0) && (track2 == 0);
     const bool active = enabled && gm_pedal_sensor_current() && gm_pedal_owns_longitudinal() && gm_pedal_drive_ready() &&
                         (!gm_pedal_acc || gm_pedal_main_ready()) &&
-                        get_longitudinal_allowed() && !brake_pressed_prev &&
+                        get_longitudinal_allowed() && !brake_pressed_prev && !regen_braking &&
                         (track1 >= 604) && (track1 <= 2633) && (track2 >= 304) && (track2 <= 1316) &&
                         (pair_delta >= -16) && (pair_delta <= 16);
     if (!(inactive || active) || (gm_pedal_crc(msg) != msg->data[5]) ||
@@ -532,7 +556,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     for (uint8_t i = 1U; i < 7U; i++) { if (msg->data[i] != 0U) { tx = false; } }
     if (!shape || (applied && !(gm_pedal_sensor_current() && gm_pedal_owns_longitudinal() &&
                                (!gm_pedal_acc || gm_pedal_main_ready()) &&
-                               gm_pedal_drive_ready() && !regen_braking && get_longitudinal_allowed()))) {
+                               gm_pedal_regen_gear_ready() && !regen_braking && get_longitudinal_allowed()))) {
       tx = false;
     }
     if (!gm_paddle_internal_tx) {
@@ -553,7 +577,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
                        (msg->data[7] == 0U) && (applied || released);
     if (!shape || (applied && !(gm_pedal_sensor_current() && gm_pedal_owns_longitudinal() &&
                                (!gm_pedal_acc || gm_pedal_main_ready()) &&
-                               gm_pedal_drive_ready() && !regen_braking && get_longitudinal_allowed()))) {
+                               gm_pedal_regen_gear_ready() && !regen_braking && get_longitudinal_allowed()))) {
       tx = false;
     }
     if (!gm_paddle_internal_tx) {
@@ -693,6 +717,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
 }
 
 static bool gm_fwd_hook(int bus_num, int addr) {
+  if (gm_pedal_acc) { (void)gm_pedal_brake_producer_current(); }
   // SDGM replaces the PT PSCM status at the camera. Frozen SDGM topology
   // blocks this direction without treating camera PSCM traffic as a relay fault.
   return (gm_camera_gateway && gm_camera_gateway_removed && (bus_num == 0) && (addr == 0x184)) ||
@@ -707,7 +732,8 @@ static bool gm_fwd_hook(int bus_num, int addr) {
           (gm_volt_removed_long && ((addr == 0x315) || (addr == 0x2CB) || (addr == 0x370) || (addr == 0x2CD))))) ||
          (gm_sdgm && (bus_num == 0) && (addr == 0x184)) ||
          ((gm_volt_sdgm_long || gm_ordinary_sdgm_long) && (bus_num == 2) && ((addr == 0x315) || (addr == 0x2CD))) ||
-         (gm_pedal_acc && (bus_num == 2) && (addr == 0x315) && gm_pedal_owns_longitudinal());
+         (gm_pedal_acc && (bus_num == 2) && (addr == 0x315) && gm_pedal_owns_longitudinal() && gm_pedal_main_ready() &&
+          gm_pedal_brake_producer_current());
 }
 
 static safety_config gm_init(uint16_t safety_param) {
@@ -1168,6 +1194,8 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_pedal_tx_counter_last = 0U;
   gm_pedal_brake_counter_seen = false;
   gm_pedal_brake_counter_last = 0U;
+  gm_pedal_brake_producer_seen = false;
+  gm_pedal_brake_producer_us = 0U;
   gm_paddle_sched = gm_pedal_long && GET_FLAG(param, GM_PARAM_PADDLE_SCHED);
   gm_bolt_gen2 = gm_pedal_long && GET_FLAG(param, GM_PARAM_BOLT_GEN2);
   gm_ascm_intercept = (gm_hw == GM_CAM) && !gm_pedal_long && !gm_no_acc && GET_FLAG(param, GM_PARAM_ASCM_INTERCEPT);
@@ -1191,6 +1219,8 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_pedal_main_seen = false;
   gm_pedal_main_last_us = 0U;
   gm_regen_gear_ready = false;
+  gm_pedal_forward_gear_ready = false;
+  gm_acc_pedal_forward_owner = param == 0x1CDU;
   gm_regen_gear_last_us = 0U;
   gm_paddle_internal_tx = false;
   gm_bd_feed.valid = false;

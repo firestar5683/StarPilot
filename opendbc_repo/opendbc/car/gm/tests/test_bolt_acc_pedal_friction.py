@@ -44,6 +44,7 @@ class TestBoltAccPedalFriction(unittest.TestCase):
     state.cruiseState.available = True
     cs = SimpleNamespace(out=state.as_reader(), pedal_sensor_healthy=True,
                          pedal_sensor_ts_nanos=950_000_000, stock_acc_status_ts_nanos=950_000_000,
+                         bolt_pedal_gear_ts_nanos=950_000_000, bolt_pedal_main_ts_nanos=950_000_000,
                          cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
                          loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
                          buttons_counter=0,
@@ -97,14 +98,14 @@ class TestBoltAccPedalFriction(unittest.TestCase):
     self.assertEqual(brake_frames(self.step(fixture, 28)), [])
 
   def test_no_friction_when_owner_or_driver_gate_is_lost(self):
-    for gate in ("stale_stock", "not_low", "brake", "regen", "no_main"):
+    for gate in ("stale_stock", "neutral", "brake", "regen", "no_main"):
       with self.subTest(gate=gate):
         fixture = self.fixture()
         _, _, state, cs = fixture
         if gate == "stale_stock":
           cs.stock_acc_status_ts_nanos = 600_000_000
-        elif gate == "not_low":
-          state.gearShifter = structs.CarState.GearShifter.drive
+        elif gate == "neutral":
+          state.gearShifter = structs.CarState.GearShifter.neutral
         elif gate == "brake":
           state.brakePressed = True
         elif gate == "regen":
@@ -113,6 +114,13 @@ class TestBoltAccPedalFriction(unittest.TestCase):
           state.cruiseState.available = False
         messages = self.step(fixture, 4)
         self.assertFalse(any(brake_fields(m)[1] > 0 for m in brake_frames(messages)))
+
+  def test_drive_keeps_friction_without_gear_or_paddle_spoof(self):
+    fixture = self.fixture()
+    fixture[2].gearShifter = structs.CarState.GearShifter.drive
+    messages = self.step(fixture, 4)
+    self.assertGreater(brake_fields(brake_frames(messages)[0])[1], 0)
+    self.assertFalse(any(m[0] in (0x1F5, 0xBD) for m in messages))
 
   def test_stock_acc_return_stops_host_brake_and_unwind(self):
     fixture = self.fixture()
