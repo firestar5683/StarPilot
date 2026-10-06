@@ -33,14 +33,17 @@ class TestStopCommitTransport(unittest.TestCase):
     self.params.put(DOCUMENT_KEY, json.loads(encode_preferences(SavedPreferences(mode=choice))), block=True)
 
   def sample(self, *, invalid=False, lead=False, horizon=20., manual=ManualIntent.NONE, alive=True, gas=False,
-             unavailable=None, traffic_verdict=None, traffic_owner_present=None, cp=CP):
+             unavailable=None, traffic_verdict=None, traffic_owner_present=None, cp=CP, standstill=False,
+             model_should_stop=True, enabled=True):
     now = MONO + self.tick * 50_000_000
     self.tick += 1
     payloads = serialized_scene(stamp=BOOT+now-MONO-2_000_000, horizon=horizon, speed=4.27,
-                                lead_present=lead, lead_distance=50., lead_speed=4.27, gas_pressed=gas)
+                                lead_present=lead, lead_distance=50., lead_speed=4.27, gas_pressed=gas,
+                                standstill=standstill)
     event = messaging.new_message('modelV2', valid=True)
     event.modelV2 = payloads['modelV2']
     event.modelV2.orientationRate.z = [0.] * 33
+    event.modelV2.action.shouldStop = model_should_stop
     if invalid:
       values = list(event.modelV2.position.x)
       values[-2] = values[-1] + .015308380126953125
@@ -51,6 +54,10 @@ class TestStopCommitTransport(unittest.TestCase):
     controls.controlsState = payloads['controlsState']
     controls.controlsState.curvature = 0.
     payloads['controlsState'] = messaging.log_from_bytes(controls.to_bytes()).controlsState
+    state = messaging.new_message('selfdriveState', valid=True)
+    state.selfdriveState = payloads['selfdriveState']
+    state.selfdriveState.enabled = enabled
+    payloads['selfdriveState'] = messaging.log_from_bytes(state.to_bytes()).selfdriveState
     sm = FakeSubMaster(payloads, now-2_000_000)
     sm.alive['modelV2'] = alive
     if unavailable is not None:
@@ -104,7 +111,7 @@ class TestStopCommitTransport(unittest.TestCase):
         self.assertTrue(result.accepted and result.experimental)
       self.assertEqual(proposal.choice, choice)
     for _ in range(30):
-      proposal, result = self.sample(horizon=192.)
+      proposal, result = self.sample(horizon=192., model_should_stop=False)
     self.assertFalse(result.experimental)
     self.assertFalse(self.host.projector.stop_detector.committed)
 
@@ -118,18 +125,21 @@ class TestStopCommitTransport(unittest.TestCase):
     self.prime()
     _, result = self.sample(alive=False)
     self.assertFalse(result.experimental)
-    self.assertFalse(self.host.projector.stop_detector.committed)
+    self.assertTrue(self.host.projector.stop_detector.committed)
     self.prime()
     _, result = self.sample(gas=True)
     self.assertFalse(self.host.projector.stop_detector.committed)
 
-  def test_dead_control_or_selfdrive_authority_cannot_revive_previous_commit(self):
+  def test_unknown_authority_preserves_memory_but_cannot_publish_permission(self):
     for service in ('carControl', 'selfdriveState'):
       self.prime()
       _, result = self.sample(unavailable=service)
       self.assertFalse(result.experimental)
-      self.assertFalse(self.host.projector.stop_detector.committed)
+      self.assertTrue(self.host.projector.stop_detector.committed)
       _, result = self.sample(invalid=True)
+      self.assertTrue(result.experimental)
+      self.assertTrue(self.host.projector.stop_detector.committed)
+      _, result = self.sample(enabled=False)
       self.assertFalse(result.experimental)
       self.assertFalse(self.host.projector.stop_detector.committed)
 
@@ -161,7 +171,7 @@ class TestStopCommitTransport(unittest.TestCase):
     self.assertEqual(held.source_boot_ns, 0)
     _, result = self.sample(traffic_verdict=held, traffic_owner_present=True, unavailable='carControl')
     self.assertFalse(result.experimental)
-    self.assertFalse(self.host.projector.stop_detector.committed)
+    self.assertTrue(self.host.projector.stop_detector.committed)
 
   def test_optional_absent_traffic_owner_does_not_prevent_cold_cem_stop(self):
     for _ in range(40):
@@ -169,7 +179,7 @@ class TestStopCommitTransport(unittest.TestCase):
     self.assertTrue(self.host.projector.stop_detector.committed)
     self.assertTrue(result.accepted and result.experimental)
     self.sample(traffic_owner_present=False, alive=False)
-    self.assertFalse(self.host.projector.stop_detector.committed)
+    self.assertTrue(self.host.projector.stop_detector.committed)
 
   def test_unsupported_optional_traffic_owner_does_not_block_actual_other_factory_cem(self):
     from opendbc.car.honda.interface import CarInterface
@@ -190,4 +200,4 @@ class TestStopCommitTransport(unittest.TestCase):
     self.assertTrue(self.host.projector.stop_detector.committed)
     self.assertTrue(result.accepted and result.experimental)
     self.sample(traffic_verdict=verdict, traffic_owner_present=True, cp=cp, unavailable='carControl')
-    self.assertFalse(self.host.projector.stop_detector.committed)
+    self.assertTrue(self.host.projector.stop_detector.committed)

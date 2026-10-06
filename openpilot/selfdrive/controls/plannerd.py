@@ -143,6 +143,39 @@ def conditional_handoff_for_frame(host: ConditionalPlannerHost | None, sm, CP, n
   return snapshot.owner_token, snapshot.revision, drive_id, verdict.selection.choice.value
 
 
+def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: int, *, now_boot_ns: int | None = None) -> bool:
+  if (host is None or not CP.openpilotLongitudinalControl or CP.passive or CP.dashcamOnly or
+      not 0 < drive_id <= now_ns or host.mode.drive_id != drive_id or
+      not host.mode.projector.stop_detector.standstill_committed):
+    return False
+  settings = host.settings.verdict(host.settings.current, now_mono_ns=now_ns, drive_id=drive_id)
+  if settings.safe_mode is True:
+    host.mode.projector.stop_detector.reset()
+  if settings.status != 'ready' or settings.safe_mode is not False:
+    return False
+  if not all(host._fresh_service(sm, name, drive_id, now_ns)
+             for name in ('carState', 'carControl', 'selfdriveState')):
+    return False
+  state, control, vehicle = sm['selfdriveState'], sm['carControl'], sm['carState']
+  if not vehicle.canValid or vehicle.canTimeout:
+    return False
+  if not state.enabled or not control.enabled or not control.longActive or vehicle.brakePressed or vehicle.gasPressed:
+    host.mode.projector.stop_detector.reset()
+    return False
+  if not host._fresh_service(sm, 'modelV2', drive_id, now_ns):
+    return False
+  if (now_boot_ns is None or now_boot_ns < now_ns or not sm.all_checks(NATIVE_PLAN_INPUTS) or
+      not 0 < sm['modelV2'].timestampEof <= now_boot_ns or
+      now_boot_ns - sm['modelV2'].timestampEof > 150_000_000):
+    return False
+  if (now_ns - sm.logMonoTime['modelV2'] > 150_000_000 or
+      now_ns - int(sm.recv_time['modelV2'] * 1e9) > 150_000_000):
+    return False
+  planner.output_should_stop = True
+  planner.output_a_target = min(planner.output_a_target, 0.)
+  return True
+
+
 def lead_approach_for_frame(preferences: LeadApproachPreferences | None, sm, CP, now_ns: int) -> LeadApproachKey | None:
   if preferences is None:
     return None
@@ -535,6 +568,9 @@ def starpilot_main():
               drive_id=current_start_ns, model_ns=int(sm.logMonoTime['modelV2']),
               car_state_ns=int(sm.logMonoTime['carState']),
             )
+        apply_conditional_stop_hold(conditional_host, longitudinal_planner, sm, CP,
+                                    clock_pair[0] if clock_pair is not None else now_ns, current_start_ns,
+                                    now_boot_ns=clock_pair[1] if clock_pair is not None else None)
         if traffic_owner is not None:
           traffic_profile_ready, traffic_profile_reason = traffic_profile_status(
             traffic_mode, profile_tuning, longitudinal_planner.last_profile,

@@ -249,7 +249,7 @@ class SceneProjector:
   def _empty(self) -> ProjectedScene:
     self.curve_detector.reset()
     self.lead_detector.reset()
-    self.stop_detector.reset()
+    self.stop_detector.invalidate()
     self.slower_lead_detector.reset()
     self.chill_detector.reset()
     self.signal_lane_tracker.reset()
@@ -541,6 +541,7 @@ class SceneProjector:
       dashboard_stop_sign=dashboard_sign,
       pedal_override=pedal,
       model_tick_mono_s=model_stamp / 1e9 if model_stamp is not None else None,
+      model_should_stop=current_stop,
     )
     if repeated_model:
       stop_frame = replace(stop_frame, observed_mono_s=self.last_stop_stamp_s or 0.0)
