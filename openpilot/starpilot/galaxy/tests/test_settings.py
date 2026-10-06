@@ -867,7 +867,7 @@ class SettingsGatewayTest(unittest.TestCase):
       def get_param_path(self, key):
         return str(root / key)
       def get_default_value(self, key):
-        return 1.0 if key == "LaneCenteringStrength" else registered.get_default_value(key)
+        return 1.5 if key == "LaneCenteringStrength" else registered.get_default_value(key)
       def put(self, key, value, block=True):
         (root / key).write_bytes(str(value).encode())
       def put_bool(self, key, value, block=True):
@@ -903,7 +903,7 @@ class SettingsGatewayTest(unittest.TestCase):
                                  ("LaneCenteringPauseOnSignal", "Off", b"0"),
                                  ("LaneCenterOffset", 0.15, b"0.15"),
                                  ("LaneCenteringE2EAuthority", 75, b"0.75"),
-                                 ("LaneCenteringStrength", 125, b"1.25")):
+                                 ("LaneCenteringStrength", 105, b"1.575")):
       with self.subTest(key=key):
         page = self.page("lane")
         labels = {"LaneCentering": "Enable Lane Centering", "LaneCenteringPauseOnSignal": "Pause on signal",
@@ -940,18 +940,18 @@ class SettingsGatewayTest(unittest.TestCase):
     tagged, root = self._live_lane_context()
     page = self.page("lane")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Lane Centering Strength")
-    for value in (49, 151, float("nan")):
+    for value in (32, 106, float("nan")):
       with self.subTest(value=value), self.assertRaises(SettingsChanged):
         self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=value)
     with self.assertRaises(SettingsChanged):
-      self.gateway.preview(page["view"], index, 0, "other-session", self.generation, value=125)
-    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=125)
+      self.gateway.preview(page["view"], index, 0, "other-session", self.generation, value=105)
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=105)
     self.context.value = AuthorityContext(False, tagged, b"changed-cp")
     with self.assertRaises(SettingsChanged):
       self.gateway.confirm(intent["intent"], self.session, self.generation)
     self.context.value = AuthorityContext(False, tagged, tagged.as_reader().as_builder().to_bytes())
     page = self.page("lane")
-    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=125)
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=105)
     (root / "LaneCenteringStrength").write_bytes(b"1.1")
     self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
     self.assertEqual((root / "LaneCenteringStrength").read_bytes(), b"1.1")
@@ -965,7 +965,7 @@ class SettingsGatewayTest(unittest.TestCase):
       def get_param_path(self, key):
         return str(root / key)
       def get_default_value(self, key):
-        return 1.0 if key == "LaneCenteringStrength" else registered.get_default_value(key)
+        return 1.5 if key == "LaneCenteringStrength" else registered.get_default_value(key)
       def put(self, key, value, block=True):
         (root / key).write_bytes(str(value).encode())
     self.gateway = SettingsGateway(Files(), self.context, clock=lambda: 100.0)
@@ -975,10 +975,10 @@ class SettingsGatewayTest(unittest.TestCase):
     self.context.value = AuthorityContext(True, tagged, tagged.as_reader().as_builder().to_bytes())
     page = self.page("lane")
     self.assertTrue(page["rows"][index]["available"])
-    self.assertEqual((page["rows"][index]["minimum"], page["rows"][index]["maximum"]), (50, 150))
-    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=125)
+    self.assertEqual((page["rows"][index]["minimum"], page["rows"][index]["maximum"]), (33, 105))
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=105)
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
-    self.assertEqual((root / "LaneCenteringStrength").read_bytes(), b"1.25")
+    self.assertEqual((root / "LaneCenteringStrength").read_bytes(), b"1.575")
     self.assertIsNone(self.params.get("LaneCenteringE2EAuthority"))
 
   def test_uploads_missing_default_off_saved_values_and_vehicle_independence(self):

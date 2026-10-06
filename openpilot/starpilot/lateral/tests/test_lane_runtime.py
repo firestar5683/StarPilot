@@ -102,17 +102,21 @@ class LaneRuntimeTests(unittest.TestCase):
       root = Path(temporary)
       params = SimpleNamespace(get_param_path=lambda key: str(root / key))
       (root / 'LaneCentering').write_bytes(b'1')
+      self.assertEqual(read_settings(params).strength, 1.5)
+      (root / 'LaneCenteringStrength').write_bytes(b'1.0')
       self.assertEqual(read_settings(params).strength, 1.0)
+      self.assertEqual((root / 'LaneCenteringStrength').read_bytes(), b'1.0')
+      (root / 'LaneCenteringStrength').unlink()
       host = LaneCenteringHost(params)
       now = 10_000_000_000
       first = host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
-      self.assertEqual(first.settings.strength, 1.0)
+      self.assertEqual(first.settings.strength, 1.5)
       (root / 'LaneCenteringStrength').write_bytes(b'1.5')
       now += host.REFRESH_NS
       updated = host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
       self.assertEqual(updated.settings.strength, 1.5)
       self.assertTrue(updated.time_discontinuity)
-      for invalid in (b'nan', b'0.49', b'1.51', b'true'):
+      for invalid in (b'nan', b'0.49', b'1.576', b'true'):
         (root / 'LaneCenteringStrength').write_bytes(invalid)
         self.assertFalse(read_settings(params).enabled)
         now += host.REFRESH_NS
