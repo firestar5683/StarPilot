@@ -710,30 +710,37 @@ export const AndroidAutoPage = {
           <ul>
             <li><strong>Connecting to car / Finding Android Auto:</strong> the comma is reaching the car over Bluetooth. Make sure the car is on and was paired in step 2.</li>
             <li><strong>Starting wireless setup / Waiting for car:</strong> the comma asked the car to start Android Auto. If it stops here, wireless Android Auto is probably turned off in the car, or the car is busy with your phone.</li>
-            <li><strong>Getting car Wi‑Fi / Joining car Wi‑Fi:</strong> the car is sharing its private Wi‑Fi with the comma. If it keeps failing here, turn the car off and on.</li>
-            <li><strong>Authenticating:</strong> the car is checking the Android Auto certificate. If it fails here, update the package in step 1.</li>
+            <li><strong>Getting car Wi‑Fi / Joining car Wi‑Fi:</strong> the car is sharing its private Wi‑Fi with the comma. If it keeps failing here, try turning the car off and on.</li>
+            <li><strong>Authenticating:</strong> the car is checking the Android Auto certificate. If it fails here, updating the package in step 1 may help.</li>
             <li><strong>Projecting:</strong> everything is working.</li>
-            <li><strong>Car showing its own screen:</strong> you switched to the radio, map, or another car screen. Tap the Android Auto icon on the car’s screen to come back.</li>
+            <li><strong>Car showing its own screen:</strong> the car switched to one of its own screens, often because the radio, map, or another car screen was opened. Tapping the Android Auto icon on the car’s screen usually brings it back.</li>
             <li><strong>Retrying:</strong> something interrupted the connection. The comma tries again by itself, so give it a moment.</li>
           </ul>
         </details>
         <details class="gx-aa-wiki"><summary>It won’t connect automatically when other phones are paired to my car</summary>
-          <p>When you start the car, it reconnects to the phones it knows, usually starting with its favorite or the one used most recently. Android Auto only runs on one device at a time, so whichever device gets there first usually wins. If that’s a phone, the comma has to wait.</p>
-          <p>The comma doesn’t give up. It keeps asking about every 30 seconds while you drive, so it takes over within about half a minute once the screen is free.</p>
-          <p><strong>To make the car pick the comma:</strong></p>
+          <p>When you start the car, it reconnects to the phones it knows, usually starting with its favorite or the one used most recently. Most cars run Android Auto on only one device at a time, so whichever device gets there first usually wins. If that’s a phone, the comma may have to wait.</p>
+          <p>The comma keeps asking about every 30 seconds while you drive, so it can usually take over within about half a minute once the screen is free.</p>
+          <p><strong>Things that may help the car pick the comma:</strong></p>
           <ol>
             <li><strong>Make the comma the car’s preferred device.</strong> Many cars have a setting for this in the phone or Bluetooth menu, called something like “Preferred device,” “Priority phone,” or “Primary device.”</li>
             <li><strong>Turn off wireless Android Auto on the phones.</strong> On each phone paired to the car, including other drivers’ phones, open <strong>Settings → Android Auto</strong> and turn off wireless Android Auto for this car, or remove the car from its list of connected cars.</li>
             <li><strong>Make room for the comma.</strong> Some cars only keep two phones connected at once. If two are already connected, there may be no room left for the comma. Turn off Bluetooth on one phone, or delete old phones the car no longer needs.</li>
-            <li><strong>Using a wireless adapter?</strong> The adapter chooses which phone to use, not the car. Remove the adapter from your phone’s Bluetooth list, or set the comma as the main device in the adapter’s app.</li>
+            <li><strong>Using a wireless adapter?</strong> Usually the adapter chooses which phone to use, not the car. Try removing the adapter from your phone’s Bluetooth list, or setting the comma as the main device in the adapter’s app.</li>
           </ol>
-          <p>Your phone can stay paired over regular Bluetooth, so calls and music keep working.</p>
+          <p>Your phone may be able to stay connected for music. See “Can I still take calls and play music from my phone?” below.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Can I still take calls and play music from my phone?</summary>
-          <p>Yes. The comma never handles calls or audio. Keep your phone connected to the car over regular Bluetooth like you always do. The car’s screen shows StarPilot, and your phone keeps doing calls and music. Most cars allow two phones to be connected at once, so the comma and your phone can both be connected.</p>
+          <p>It depends on your car. The comma never handles calls or audio itself, but to show StarPilot it connects to the car as a phone.</p>
+          <p>Some cars treat the phone and Android Auto as one device. In those cars, choosing your real phone as the car’s phone can move Android Auto to that phone and disconnect the comma. Other cars may let both stay connected.</p>
+          <p><strong>If the comma disconnects when your phone connects, try this:</strong></p>
+          <ul>
+            <li><strong>For music:</strong> if your car lets you, connect your phone for <strong>audio only</strong> (sometimes called “media audio” or “music”) in the car’s Bluetooth device list, not as the phone. Then choose Bluetooth Audio as the car’s sound source.</li>
+            <li><strong>For a call:</strong> switch the car’s phone to your real phone. The comma will likely disconnect. When you switch back, it usually reconnects within about half a minute.</li>
+          </ul>
+          <p>The comma can’t pass calls through to your phone yet.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Will this work with my car?</summary>
-          <p>It works with cars that have <strong>wireless Android Auto</strong> built in. If your car only has wired Android Auto through a USB cable, add a <strong>wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit, and similar). A direct USB cable from the comma isn’t supported yet.</p>
+          <p>It’s made for cars that have <strong>wireless Android Auto</strong> built in, though not every car has been tested. If your car only has wired Android Auto through a USB cable, a <strong>wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit, and similar) may work. A direct USB cable from the comma isn’t supported yet.</p>
           <p>Every car brand does things a little differently. If yours gives you trouble, a log from your car helps get it fixed. You can download one from <strong>Connection Logs</strong> at the bottom of this page.</p>
         </details>
 
@@ -750,10 +757,10 @@ export const AndroidAutoPage = {
           <p>If it happens often, a phone may be taking the screen back. See “It won’t connect automatically when other phones are paired” above. If it keeps happening, download your <strong>Connection Logs</strong> at the bottom of this page so it can be looked at.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Does it start by itself, or do I tap Connect every time?</summary>
-          <p>With <strong>Automatic Connection</strong> turned on, it connects every time you start driving. You don’t need to open this page.</p>
+          <p>With <strong>Automatic Connection</strong> turned on, it tries to connect each time you start driving, so you usually don’t need to open this page.</p>
           <ul>
             <li>If you tap <strong>Disconnect</strong>, it stays off for the rest of that drive and starts again on your next one.</li>
-            <li>It ends by itself about a minute after you turn the car off.</li>
+            <li>It usually ends by itself about a minute after you turn the car off.</li>
           </ul>
         </details>
         <details class="gx-aa-wiki"><summary>Why are some buttons grayed out?</summary>

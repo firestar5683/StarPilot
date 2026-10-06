@@ -120,3 +120,10 @@ def test_actual_configure_loads_typed_factors_without_startup_rewrite():
       time.sleep(0.01)
     assert saved.get("HondaGasFactorParams") == pytest.approx(1.1)
     assert saved.get("HondaWindFactorParams") == pytest.approx(0.9)
+    writes = []
+    learning.params = SimpleNamespace(put=lambda *args: writes.append(args))
+    learning.persist(12000)
+    assert writes == []
+    learning.owner.set_factors(1.2, 0.9)
+    learning.persist(18000)
+    assert writes == [("HondaGasFactorParams", 1.2), ("HondaWindFactorParams", 0.9)]
