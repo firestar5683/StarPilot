@@ -17,7 +17,8 @@ STAGES = ('build', 'source', 'host', 'native', 'vehicles', 'recorded', 'replay')
 
 def commands(output, cache, download=False):
   python = sys.executable
-  source = [('lint', ['bash', 'scripts/lint/lint.sh']),
+  source = [('mapd-package', [python, 'tools/release/stage_mapd_provider.py', '--source', str(ROOT), '--require-tracked']),
+            ('lint', ['bash', 'scripts/lint/lint.sh']),
             ('dependencies', [python, 'tools/vendor/check.py', '--revision', 'HEAD']),
             ('schemas', [python, 'tools/ci/schema_policy.py'])]
   for name, path in (('vendor', 'tools/vendor/tests'), ('packaging', 'tools/release/tests'),
