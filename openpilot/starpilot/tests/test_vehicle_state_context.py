@@ -96,6 +96,18 @@ class TestVehicleStateContext(unittest.TestCase):
       return min(line for line, function in calls if function == name)
     self.assertLess(position('self.CI.update'), position('self.sm.update'))
     self.assertLess(position('self.sm.update'), position('self.update_vehicle_state_context'))
-    self.assertLess(position('self.update_vehicle_state_context'), position('self.v_cruise_helper.update_v_cruise'))
+    self.assertLess(position('self.update_vehicle_state_context'), position('self.update_cruise_speed'))
+    helper = ast.parse(textwrap.dedent(inspect.getsource(card.Car.update_cruise_speed)))
+    helper_calls = {ast.unparse(node.func): node for node in ast.walk(helper) if isinstance(node, ast.Call)}
+    update = helper_calls['self.v_cruise_helper.update_v_cruise']
+    initialize = helper_calls['self.v_cruise_helper.initialize_v_cruise']
+    self.assertLess(update.lineno, initialize.lineno)
+    self.assertEqual(ast.unparse(update.args[0]), 'CS')
+    self.assertEqual(ast.unparse(initialize.args[0]), 'self.CS_prev')
+    self.assertEqual(ast.unparse(initialize.keywords[0].value), 'self.vehicle_startup.consume_cruise_resume()')
+    enable_edge = next(node for node in ast.walk(helper) if isinstance(node, ast.If))
+    self.assertEqual(ast.unparse(enable_edge.test), "self.sm['carControl'].enabled and (not self.CC_prev.enabled)")
+    self.assertIn(initialize, list(ast.walk(enable_edge)))
     step = inspect.getsource(card.Car.step)
     self.assertLess(step.index('self.state_update()'), step.index('self.state_publish('))
+    self.assertLess(step.index('self.state_publish('), step.index('self.CS_prev = CS'))

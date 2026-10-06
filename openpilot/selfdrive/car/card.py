@@ -429,11 +429,7 @@ class Car:
       pending = slc_physical.pending_confirmation(
         self.sm, observation, self.slc_producer_session, now_ns,
         long_active=slc_long_active, pcm_cruise=bool(self.CP.pcmCruise))
-    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, pending)
-    if self.sm['carControl'].enabled and not self.CC_prev.enabled:
-      # Initialization owns this edge; evaluate commands against its final speed.
-      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode,
-                                            resume=self.vehicle_startup.consume_cruise_resume())
+    self.update_cruise_speed(CS, pending)
     if self.controller_cruise_sock is not None:
       for _ in range(8):
         request = messaging.recv_one_or_none(self.controller_cruise_sock)
@@ -612,6 +608,13 @@ class Car:
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, RD
+
+  def update_cruise_speed(self, CS, pending=None):
+    self.v_cruise_helper.update_v_cruise(CS, self.sm['carControl'].enabled, self.is_metric, pending)
+    if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+      # Initialization owns this edge; evaluate commands against its final speed.
+      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode,
+                                            resume=self.vehicle_startup.consume_cruise_resume())
 
   def observe_aol_calibration(self, CS, now_ns: int, standard_enabled: bool) -> None:
     calibration_events = None

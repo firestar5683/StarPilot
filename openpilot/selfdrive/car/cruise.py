@@ -1,4 +1,5 @@
 import math
+from time import monotonic_ns
 from dataclasses import dataclass
 import numpy as np
 
@@ -50,6 +51,7 @@ class VCruiseHelper:
     self.v_cruise_kph = V_CRUISE_UNSET
     self.v_cruise_cluster_kph = V_CRUISE_UNSET
     self.v_cruise_kph_last = 0
+    self.pending_resume_ns = 0
     self.button_timers = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0}
     self.button_change_states = {btn: {"standstill": False, "enabled": False} for btn in self.button_timers}
     # Set only by the non-PCM button path that actually changes vCruise.
@@ -70,6 +72,15 @@ class VCruiseHelper:
     self.slc_released_suppressed = False
     self.slc_released_owner = {}
     self.v_cruise_kph_last = self.v_cruise_kph
+    now_ns = monotonic_ns()
+    if not CS.cruiseState.available or now_ns - self.pending_resume_ns > 500_000_000:
+      self.pending_resume_ns = 0
+    if not self.CP.pcmCruise:
+      for button in CS.buttonEvents:
+        self.pending_resume_ns = 0
+        if (not enabled and CS.cruiseState.available and not button.pressed and
+            button.type in (ButtonType.accelCruise, ButtonType.resumeCruise) and self.v_cruise_initialized):
+          self.pending_resume_ns = now_ns
 
     if not self.CP.pcmCruise:
       self._update_slc_button_latches(CS, enabled, slc_pending)
@@ -211,7 +222,10 @@ class VCruiseHelper:
 
     # A car-owned acknowledgment can outlive the physical button event.
     if resume is None:
-      resume = any(b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents)
+      age = monotonic_ns() - self.pending_resume_ns
+      resume = (0 < self.pending_resume_ns and 0 <= age <= 500_000_000) or any(
+        b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents)
+    self.pending_resume_ns = 0
     if resume and self.v_cruise_initialized:
       self.v_cruise_kph = self.v_cruise_kph_last
     else:
