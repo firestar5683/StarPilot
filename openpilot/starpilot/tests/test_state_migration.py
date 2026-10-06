@@ -78,6 +78,64 @@ class TestStateMigration(unittest.TestCase):
         prepare_manager_start(self.params, self.storage, dry_run=True)
       self.assertEqual(self.tree_bytes(), before)
 
+  def test_initialized_unknown_keys_retire_without_changing_known_state(self):
+    from openpilot.cereal import messaging
+    prepare_manager_start(self.params, self.storage)
+    known = {'AlwaysOnLateral': b'1', 'IsMetric': b'0', 'OpenpilotEnabledToggle': b'1',
+             'DongleId': b'retained-identity', 'BluetoothEnabled': b'1', 'SecOCKey': bytes(range(16))}
+    for key, raw in known.items():
+      self.raw(key, raw)
+    put_cache(self.params, 'CalibrationParams', messaging.new_message('extrinsicsCalibration'), block=True)
+    put_cache(self.params, 'CarParamsPersistent', car.CarParams.new_message(), block=True)
+    known.update({key: (self.namespace / key).read_bytes() for key in ('CalibrationParams', 'CarParamsPersistent')})
+    identities = {key: ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns) for key in known}
+    retired = {'ShareUsageStats': b'1', 'RetiredUnknownSetting': b'\xff\x00not a bool or JSON'}
+    registered = {key.decode() if isinstance(key, bytes) else key for key in self.params.all_keys()}
+    self.assertFalse(registered & retired.keys())
+    for key, raw in retired.items():
+      self.raw(key, raw)
+    marker, = (self.storage / 'profiles').iterdir()
+    marker_bytes = marker.read_bytes()
+    before = dict(known, **retired)
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    snapshot, = (self.storage / 'snapshots').iterdir()
+    self.assertEqual(load_snapshot(snapshot), before)
+    self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, known)
+    self.assertEqual({key: ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns) for key in known}, identities)
+    self.assertEqual(marker.read_bytes(), marker_bytes)
+    receipt = json.loads((snapshot / 'migration.json').read_bytes())
+    self.assertEqual(set(receipt['actions']), set(retired))
+    self.assertEqual(receipt['status'], 'migrated')
+    prepare_manager_start(self.params, self.storage, dry_run=True)
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    self.assertEqual(list((self.storage / 'snapshots').iterdir()), [snapshot])
+
+  def test_initialized_unknown_retirement_fails_before_deletion(self):
+    prepare_manager_start(self.params, self.storage)
+    self.params.put('AlwaysOnLateral', True, block=True)
+    self.raw('ShareUsageStats', b'1')
+    before = self.tree_bytes()
+    with patch('openpilot.starpilot.state_migration._write', side_effect=OSError('disk full')):
+      with self.assertRaises(OSError):
+        prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    self.assertEqual((self.namespace / 'ShareUsageStats').read_bytes(), b'1')
+    self.assertEqual((self.namespace / 'AlwaysOnLateral').read_bytes(), b'1')
+    self.assertEqual({key: value for key, value in self.tree_bytes().items() if value[0] or value[1] is not None},
+                     {key: value for key, value in before.items() if value[0] or value[1] is not None})
+    self.assertEqual(list((self.storage / 'snapshots').iterdir()), [])
+
+  def test_initialized_unknown_keys_do_not_admit_invalid_known_state(self):
+    prepare_manager_start(self.params, self.storage)
+    self.raw('ShareUsageStats', b'1')
+    for key, raw in (('AlwaysOnLateral', b'true'), ('CalibrationParams', b'invalid retained calibration')):
+      with self.subTest(key=key):
+        self.raw(key, raw)
+        before = {entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}
+        with self.assertRaises(MigrationRequired):
+          prepare_manager_start(self.params, self.storage, auto_migrate=True)
+        self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, before)
+        (self.namespace / key).unlink()
+
   def raw(self, key, value):
     (self.namespace / key).write_bytes(value)
 
