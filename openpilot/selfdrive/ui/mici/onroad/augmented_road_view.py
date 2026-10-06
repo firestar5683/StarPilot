@@ -8,6 +8,7 @@ from openpilot.selfdrive.ui.mici.onroad import SIDE_PANEL_WIDTH
 from openpilot.selfdrive.ui.mici.onroad.alert_renderer import AlertRenderer
 from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
+from openpilot.selfdrive.ui.mici.onroad.long_indicator import LongIndicator
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
@@ -214,6 +215,7 @@ class AugmentedRoadView(CameraView):
 
     self._model_renderer = ModelRenderer()
     self._hud_renderer = HudRenderer()
+    self._long_indicator = LongIndicator()
     self._alert_renderer = AlertRenderer()
     self._driver_state_renderer = DriverStateRenderer()
     self._confidence_ball = ConfidenceBall()
@@ -257,9 +259,11 @@ class AugmentedRoadView(CameraView):
       gui_app.measure_frame_phase("model", self._model_renderer.render_with_lead, rect, lead_indicator,
                                   lead_info_mode, lead_info_metric, lateral_active=lateral_active, paint=paint)
 
-  def render_model_source_layer(self, rect: rl.Rectangle) -> None:
+  def render_model_source_layer(self, rect: rl.Rectangle, *, show_long_indicator: bool = False) -> None:
     self._hud_renderer._update_state()
     self._hud_renderer._draw_model_source(rect)
+    self._long_indicator.set_should_draw(show_long_indicator)
+    self._long_indicator.render(rect)
 
   def render_stock_confidence_layer(self, rect: rl.Rectangle, *, lateral_active: bool = False) -> None:
     self._confidence_ball.render_with_lateral(rect, lateral_active)
@@ -336,6 +340,8 @@ class AugmentedRoadView(CameraView):
     self._driver_state_renderer.set_should_draw(should_draw_dmoji)
     self._driver_state_renderer.set_position(self._rect.x + 16, self._rect.y + 10)
     self._driver_state_renderer.render()
+    self._long_indicator.set_should_draw(not self._hud_renderer.drawing_top_icons())
+    self._long_indicator.render(self._content_rect)
 
     self._hud_renderer.set_can_draw_top_icons(alert_to_render is None)
     self._hud_renderer.set_wheel_critical_icon(alert_to_render is not None and not not_animating_out and

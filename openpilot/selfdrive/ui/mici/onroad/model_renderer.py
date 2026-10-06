@@ -277,8 +277,7 @@ class ModelRenderer(Widget):
 
     ss, cs = sm['selfdriveState'], sm['carState']
     available = ss.enabled or ss.engageable or cs.brakePressed or getattr(self, '_render_lateral_active', False)
-    left, right = self._lane_lines[1].raw_points, self._lane_lines[2].raw_points
-    lane = (left + right) / 2 if left.shape == right.shape else np.empty((0, 3))
+    lane = self._path.raw_points
     geometry_valid = len(lane) > 0 and len(self._path.raw_points) > 0 and np.isfinite(lane).all() and np.isfinite(self._path.raw_points).all()
     opacity = 0.4 if self._visual_status() == UIStatus.DISENGAGED else 0.8
     for lead, (present, d_rel, y_rel, info) in zip(self._lead_vehicles, leads, strict=True):

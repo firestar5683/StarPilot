@@ -177,7 +177,10 @@ class StarShellSession:
       if profile == Profile.COMPACT:
         self.view.onroad.stock_confidence_layer = lambda rect, state: render_stock_confidence(camera_owner, rect, state)
         self.view.onroad.stock_confidence_reset = camera_owner.reset_stock_confidence_layer
-        self.view.onroad.extra_overlays = lambda rect, state: camera_owner.render_model_source_layer(rect)
+        self.view.onroad.extra_overlays = lambda rect, state: camera_owner.render_model_source_layer(
+          rect, show_long_indicator=state.alert.size == AlertSize.NONE and
+                                   state.appearance.camera_view != CameraViewChoice.DRIVER and not state.reverse_driver_camera and
+                                   self.view.onroad.compact_hud._set_speed_alpha.x <= 1e-2)
     except Exception:
       self.fonts.close()
       raise
