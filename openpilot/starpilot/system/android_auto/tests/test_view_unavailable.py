@@ -104,3 +104,14 @@ def test_stalled_renderer_output_is_captured_before_restart(tmp_path):
     assert source.view == 'car'
   finally:
     source.close()
+
+
+def test_unavailable_frame_draws_the_logo():
+  from openpilot.starpilot.system.android_auto.supervisor import Supervisor
+  req = request()
+  frame = Supervisor._unavailable_frame(req, 'Starting StarPilot')
+  assert len(frame) == req.width * req.height * 4
+  # The logo is purple; without it the frame is only the dark background and white text.
+  pixels = memoryview(frame).cast('B')
+  purple = sum(1 for i in range(0, len(frame), 4 * 97) if pixels[i + 2] > 120 and pixels[i + 2] > pixels[i + 1] + 60)
+  assert purple > 100
