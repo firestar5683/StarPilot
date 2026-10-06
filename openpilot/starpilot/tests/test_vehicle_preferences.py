@@ -13,6 +13,38 @@ from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
 
 
 class TestVehicleStartupPreferences(unittest.TestCase):
+  def test_gm_tune_startup_requires_exact_saved_selection(self):
+    for raw, expected in ((None, 0), (b"0", 0), (b"1", 1), (b"2", 2),
+                          (b"3", 0), (b"1\n", 0), (b"true", 0)):
+      self.raw("GMLongitudinalTune", raw)
+      self.raw("SafeMode", b"0")
+      selected = VehicleStartupPreferences.read(self.params, enabled=True)
+      self.assertEqual(selected.gm_longitudinal_tune, expected)
+      self.assertEqual(VehicleStartupPreferences.read(self.params, enabled=False).gm_longitudinal_tune, 0)
+      self.raw("SafeMode", b"1")
+      self.assertEqual(VehicleStartupPreferences.read(self.params, enabled=True).gm_longitudinal_tune, 0)
+      self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes() if raw is not None else None, raw)
+
+  def test_gm_acc_tune_provider_deadline_and_frozen_vehicle(self):
+    from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
+    from opendbc.car.gm.values import CAR as GM_CAR
+    from openpilot.starpilot.car.gm.tune_preferences import AccTunePreference
+    cp = ordinary_params(GM_CAR.CHEVROLET_SUBURBAN, radar=True)
+    original = cp.to_dict()
+    for key, raw in (("OpenpilotEnabledToggle", b"0"), ("SafeMode", b"1"),
+                     ("DisableOpenpilotLongitudinal", b"1"), ("GMLongitudinalTune", b"2")):
+      self.raw("OpenpilotEnabledToggle", b"1")
+      self.raw("SafeMode", b"0")
+      self.raw("DisableOpenpilotLongitudinal", b"0")
+      self.raw("GMLongitudinalTune", b"1")
+      preference = AccTunePreference(cp, self.params)
+      self.assertTrue(preference.update(1_000_000_000))
+      self.raw(key, raw)
+      self.assertTrue(preference.update(1_499_999_999))
+      self.assertFalse(preference.update(1_500_000_000))
+      self.assertEqual(cp.to_dict(), original)
+    self.assertFalse(preference.update(999_999_999))
+
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)

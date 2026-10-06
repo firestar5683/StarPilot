@@ -29,9 +29,11 @@ class VehicleStartupPreferences:
   tesla_screen_brake: bool = False
   gm_camera_pedal: bool = True
   toyota_filter: bool = True
+  gm_longitudinal_tune: int = 0
 
   @classmethod
   def read(cls, params, *, enabled: bool):
+    from openpilot.starpilot.car.gm.tune_preferences import selected_tune
     from openpilot.starpilot.car.tesla.preap_preferences import stock_configuration
     preap_stock = stock_configuration(params)
     try:
@@ -72,6 +74,7 @@ class VehicleStartupPreferences:
                   read_saved(params, 'TeslaAOLScreenTap', 8) == (b'1', True))
     screen_brake = read_saved(params, 'TeslaAOLDisengageOnBrake', 8) == (b'1', True)
     return cls(tesla_screen=screen, tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
+               gm_longitudinal_tune=selected_tune(params, enabled=enabled),
                volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
                gm_camera_pedal=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                toyota_filter=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),

@@ -59,6 +59,8 @@ def button_request(speed: float, stock_speed: float, target: float, cruise_kph: 
 
 
 class VoltCcStopPolicy:
+  evidence_type = VoltCcEvidence
+
   def __init__(self):
     self.reset()
 

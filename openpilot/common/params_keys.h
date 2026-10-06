@@ -140,6 +140,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LongCancelButtonControl", {PERSISTENT, INT, "0"}},
     {"VeryLongCancelButtonControl", {PERSISTENT, INT, "0"}},
     {"LongPitch", {PERSISTENT, BOOL, "1"}},
+    {"GMLongitudinalTune", {PERSISTENT, INT, "0"}},
     {"LongitudinalMaxOutputAcceleration", {PERSISTENT, FLOAT, "4.0"}},
     {"TuningPreparationState", {PERSISTENT, JSON, ""}},
     {"TurnAssist", {PERSISTENT, BOOL, "1"}},

@@ -25,12 +25,14 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
                                    is_ordinary_camera_profile, is_ordinary_camera_removed,
                                    is_ordinary_sdgm_profile,
                                    is_volt_camera_longitudinal, is_volt_camera_stock, is_volt_sdgm_profile, is_volt_camera_removed,
-                                   is_bolt_euv_longitudinal, is_volt_cc_longitudinal, is_volt_cc_profile, is_ordinary_cc_profile,
+                                   NO_ACC_BOLT_CAR, is_bolt_pedal_profile, is_bolt_euv_longitudinal,
+                                   is_volt_cc_longitudinal, is_volt_cc_profile, is_ordinary_cc_profile,
                                    CC_GATEWAY_STOCK_CAR, uses_camera_stock_controls, CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarControllerBase
 
 from opendbc.car.gm.bolt_cc import BoltCcOwner, BoltCcProfile, auxiliary_messages
 from opendbc.car.gm.volt_cc_pedal import VoltCcPedalCommand
+from opendbc.car.gm.long_tune import acc_tune_limits
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 NetworkLocation = structs.CarParams.NetworkLocation
@@ -54,8 +56,26 @@ VOLT_EV_THRESHOLD_V = [0.0, -0.14, -0.16, -0.18, -0.215, -0.255, -0.32, -0.41,
                        -0.5, -0.72, -0.895, -1.125, -1.145, -1.16]
 
 
+def bolt_pedal_launch_gas(accel, speed, orientation, cp, *, acc_tune=False):
+  pitch = 0.
+  stop_speed = .35 if cp.carFingerprint == CAR.CHEVROLET_BOLT_CC_2022_2023 else .25
+  if speed > stop_speed and orientation is not None and len(orientation) == 3 and math.isfinite(orientation[1]):
+    pitch = math.sin(orientation[1]) * ACCELERATION_DUE_TO_GRAVITY
+    pitch = 0. if pitch > 0. and accel > 0. else min(pitch, .20)
+  radius = .075 * cp.wheelbase + .1453
+  drag = .5 * .30 * (1.05 * cp.wheelbase + .0679) * 1.225 * speed ** 2
+  maximum, switch = acc_tune_limits(speed, 2., float(np.interp(speed, [.5, 10.], [6150, 5500])), 6150)
+  if not acc_tune:
+    maximum = 2.
+    switch = float(np.interp(speed, [.5, 10.], [6150, 5500]))
+  scaled = radius * (cp.mass * float(np.clip(accel + pitch, -4., maximum)) + drag) + 6150
+  gas = int(round(np.clip(scaled, 5500, 7168)))
+  brake = int(round(np.interp(min((scaled - switch) / (radius * cp.mass), 0.), [-4., 0.], [400., 0.])))
+  return gas > 5500 and brake == 0
+
+
 def bolt_euv_demands(accel: float, speed: float, orientation_ned, mass: float,
-                     wheelbase: float, max_brake: int) -> tuple[int, int]:
+                     wheelbase: float, max_brake: int, *, acc_tune=False) -> tuple[int, int]:
   """Original ordinary camera Bolt torque/grade law in current DBC engineering units."""
   pitch_accel = 0.0
   if speed > 0.25 and orientation_ned is not None and len(orientation_ned) == 3:
@@ -68,9 +88,12 @@ def bolt_euv_demands(accel: float, speed: float, orientation_ned, mass: float,
         pitch_accel = min(pitch_accel, 0.20)
   tire_radius = 0.075 * wheelbase + 0.1453
   drag = 0.5 * 0.30 * (1.05 * wheelbase + 0.0679) * 1.225 * speed ** 2
-  scaled_torque = tire_radius * (mass * float(np.clip(accel + pitch_accel, -4.0, 2.0)) + drag) + 6150
+  maximum = acc_tune_limits(speed, 2., 6150, 6150)[0] if acc_tune else 2.
+  scaled_torque = tire_radius * (mass * float(np.clip(accel + pitch_accel, -4.0, maximum)) + drag) + 6150
   gas = int(round(np.clip(scaled_torque, 5610, 8848))) - 6150
   brake_switch = int(round(np.interp(speed, [0.5, 10.0], [6150, 5610])))
+  if acc_tune:
+    brake_switch = acc_tune_limits(speed, 2., brake_switch, 6150)[1]
   brake_accel = min((scaled_torque - brake_switch) / (tire_radius * mass), 0.0)
   brake = int(round(np.interp(brake_accel, [-4.0, 0.0], [max_brake, 0])))
   return (-500 if brake > 0 else gas), brake
@@ -159,13 +182,16 @@ def bolt_pedal_slew(target: float, steady: float, accel: float, speed: float) ->
 
 
 def bolt_acc_pedal_friction_brake(accel: float, speed: float, stopping: bool, low_speed_active: bool,
-                                  mass: float, wheelbase: float, max_brake: int) -> tuple[int, bool]:
+                                  mass: float, wheelbase: float, max_brake: int, *, acc_tune=False) -> tuple[int, bool]:
   tire_radius = 0.075 * wheelbase + 0.1453
   frontal_area = 1.05 * wheelbase + 0.0679
   aero_drag_force = 0.5 * 0.30 * frontal_area * 1.225 * speed ** 2
-  accel_cmd = float(np.clip(accel, -4.0, 2.0))
+  maximum = acc_tune_limits(speed, 2., 6150, 6150)[0] if acc_tune else 2.
+  accel_cmd = float(np.clip(accel, -4.0, maximum))
   scaled_torque = tire_radius * (mass * accel_cmd + aero_drag_force) + 6150
   stock_switch = int(round(np.interp(speed, [0.5, 10.0], [6150, 5500])))
+  if acc_tune:
+    stock_switch = acc_tune_limits(speed, 2., stock_switch, 6150)[1]
   planner_limit = float(np.interp(speed, [0.0, 1.5, 4.0, 8.0, 15.0, 30.0],
                                   [-0.93, -1.28, -1.98, -2.58, -2.86, -2.95]))
   planner_switch = int(round(tire_radius * (mass * planner_limit + aero_drag_force) + 6150))
@@ -198,7 +224,7 @@ def bolt_acc_pedal_friction_brake(accel: float, speed: float, stopping: bool, lo
   return brake, True
 
 
-def suburban_gateway_demands(accel, speed, orientation, cp):
+def suburban_gateway_demands(accel, speed, orientation, cp, *, acc_tune=False):
   """Normal Suburban gateway demand, converted to current gas units."""
   pitch = 0.0
   if orientation is not None and len(orientation) == 3 and speed > 0.5 and math.isfinite(orientation[1]):
@@ -206,7 +232,8 @@ def suburban_gateway_demands(accel, speed, orientation, cp):
     pitch = 0.0 if pitch > 0.0 and accel > 0.0 else min(pitch, 0.20)
   radius = 0.075 * cp.wheelbase + 0.1453
   frontal = 1.05 * cp.wheelbase + 0.0679
-  demand = float(np.clip(accel + pitch, -4.0, 2.0))
+  maximum = acc_tune_limits(speed, 2., 6150, 6150)[0] if acc_tune else 2.
+  demand = float(np.clip(accel + pitch, -4.0, maximum))
   torque = radius * (cp.mass * demand + 0.5 * 0.30 * frontal * 1.225 * speed ** 2)
   gas = int(round(np.clip(torque + 6150, 5500, 7168))) - 6150
   brake = int(round(np.interp(min(torque / (radius * cp.mass), 0), [-4.0, 0.0], [400, 0])))
@@ -217,6 +244,8 @@ class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
     self.long_pitch = True
+    self.gm_acc_tune_input = None
+    self.gm_acc_tune = False
     self.start_time = 0.
     self.apply_torque_last = 0
     self.apply_gas = 0
@@ -420,6 +449,7 @@ class CarController(CarControllerBase):
         self.volt_one_pedal_state.observe(eligible=one_pedal_ready and self.gm_auto_hold_state.drive_ns >= 3_000_000_000 and
                                           not CC.longActive, gas_pressed=CS.out.gasPressed,
                                           speed=CS.out.vEgo)
+    self.gm_acc_tune = (self.gm_acc_tune_input is not None and self.gm_acc_tune_input.update(now_nanos))
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
@@ -630,13 +660,19 @@ class CarController(CarControllerBase):
           if active and friction_main_on:
             self.apply_brake, self.bolt_acc_pedal_friction_low_speed_active = bolt_acc_pedal_friction_brake(
               actuators.accel, CS.out.vEgo, actuators.longControlState == LongCtrlState.stopping,
-              self.bolt_acc_pedal_friction_low_speed_active, self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE)
+              self.bolt_acc_pedal_friction_low_speed_active, self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE, acc_tune=self.gm_acc_tune)
           else:
             self.apply_brake = 0
             self.bolt_acc_pedal_friction_low_speed_active = False
-        paddle_pressed = self.update_bolt_paddle(actuators.accel, CS.out.aEgo, CS.out.vEgo, active and in_regen_gear)
-        paddle_switched = self.bolt_paddle_switched
-        if active:
+        fixed_stop = (active and is_bolt_pedal_profile(self.CP) and self.CP.carFingerprint in NO_ACC_BOLT_CAR and
+                      CS.out.vEgo < .25 and actuators.longControlState == LongCtrlState.stopping and
+                      not CC.cruiseControl.resume)
+        paddle_pressed = False if fixed_stop else self.update_bolt_paddle(
+          actuators.accel, CS.out.aEgo, CS.out.vEgo, active and in_regen_gear)
+        paddle_switched = False if fixed_stop else self.bolt_paddle_switched
+        if fixed_stop:
+          pass
+        elif active:
           target = bolt_pedal_fraction(actuators.accel, CS.out.vEgo, paddle_pressed)
           if self.pedal_active_last and not (paddle_switched and CS.out.vEgo > 1.0):
             self.pedal_steady = bolt_pedal_slew(target, self.pedal_steady, actuators.accel, CS.out.vEgo)
@@ -646,7 +682,23 @@ class CarController(CarControllerBase):
         else:
           self.pedal_steady = 0.0
           self.pedal_active_last = False
-        can_sends.append(gmcan.create_pedal_command(self.packer_pt, self.pedal_steady, (self.frame // 4) % 16))
+        pedal = 0. if fixed_stop else self.pedal_steady
+        if (is_bolt_pedal_profile(self.CP) and self.CP.carFingerprint in NO_ACC_BOLT_CAR and
+            CS.out.cruiseState.standstill):
+          stamp = getattr(CS, "bolt_pedal_standstill_ts_nanos", 0)
+          main_stamp = getattr(CS, "bolt_pedal_main_ts_nanos", 0)
+          gear_stamp = getattr(CS, "bolt_pedal_gear_ts_nanos", 0)
+          cutoff = .35 if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2022_2023 else .3
+          if (active and CS.out.cruiseState.available and CS.out.cruiseState.standstill and
+              0 < stamp <= now_nanos and now_nanos - stamp <= STOCK_ACC_STATUS_TIMEOUT_NS and
+              0 < main_stamp <= now_nanos and now_nanos - main_stamp <= 300_000_000 and
+              0 < gear_stamp <= now_nanos and now_nanos - gear_stamp <= 100_000_000 and
+              (CS.out.standstill or math.isfinite(CS.out.vEgo) and CS.out.vEgo < cutoff) and
+              actuators.longControlState != LongCtrlState.stopping and
+              bolt_pedal_launch_gas(actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+                                    self.CP, acc_tune=self.gm_acc_tune)):
+            pedal = 18. / 255.
+        can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 16))
         if CC.enabled:
           self.paddle_handoff_frames = 2
         feed_release = bool(self.paddle_handoff_frames)
@@ -657,7 +709,7 @@ class CarController(CarControllerBase):
           gen2 = self.CP.carFingerprint in (CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
           can_sends.append(gmcan.create_bolt_regen_gear(self.packer_pt, spoof_pressed, gen2))
           can_sends.append(gmcan.create_bolt_regen_paddle(self.packer_pt, spoof_pressed))
-        self.apply_gas = self.pedal_steady
+        self.apply_gas = pedal
         if friction_variant:
           if not friction_main_on:
             self.bolt_acc_pedal_friction_release_frames = 0
@@ -696,22 +748,24 @@ class CarController(CarControllerBase):
             self.apply_brake = stop_brake
           else:
             if self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN:
-              self.apply_gas, self.apply_brake = suburban_gateway_demands(actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP)
+              self.apply_gas, self.apply_brake = suburban_gateway_demands(
+                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP, acc_tune=self.gm_acc_tune)
             elif self.ordinary_camera_long:
               self.apply_gas, self.apply_brake = ascm_demands(
                 actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP,
-                min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.0)
+                min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.0, acc_tune=self.gm_acc_tune)
             elif self.ordinary_sdgm_long:
               self.apply_gas, self.apply_brake = ascm_demands(
                 actuators.accel, CS.out.vEgo, CC.orientationNED, self.CP,
                 min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.0,
-                stop_speed=0.35 if self.CP.carFingerprint == CAR.CHEVROLET_BLAZER else 0.25)
+                stop_speed=0.35 if self.CP.carFingerprint == CAR.CHEVROLET_BLAZER else 0.25, acc_tune=self.gm_acc_tune)
             elif self.ordinary_ascm_long:
               self.apply_gas, self.apply_brake = ascm_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP)
+                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP, acc_tune=self.gm_acc_tune)
             elif self.bolt_euv_long:
               self.apply_gas, self.apply_brake = bolt_euv_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE)
+                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+                self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE, acc_tune=self.gm_acc_tune)
             elif self.volt_gateway_long or self.volt_ascm_long or self.volt_camera_long or self.volt_sdgm_long:
               self.apply_gas, self.apply_brake = volt_demands(
                 actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
@@ -721,7 +775,8 @@ class CarController(CarControllerBase):
                 max_gas=2698 if self.volt_camera_long or self.volt_sdgm_long else 2041,
                 inactive_gas=-500 if self.volt_camera_long or self.volt_sdgm_long else -650)
             else:
-              gas_demand = brake_demand = actuators.accel
+              gas_demand = brake_demand = (min(actuators.accel, acc_tune_limits(CS.out.vEgo, self.params.ACCEL_MAX, 6150, 6150)[0])
+                                           if self.gm_acc_tune else actuators.accel)
               if self.CP.carFingerprint in VOLT_GRADE_CAR:
                 gas_demand, brake_demand = volt_grade_demands(
                   actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
