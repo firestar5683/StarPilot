@@ -30,6 +30,43 @@ class HondaFamilyQualificationTests(unittest.TestCase):
     # Some upstream interfaces set this shared table while constructing CP.
     self.addCleanup(setattr, CarControllerParams, 'BOSCH_GAS_LOOKUP_V', list(CarControllerParams.BOSCH_GAS_LOOKUP_V))
 
+  def test_stock_cruise_off_disables_standard_state_without_disarming_aol(self):
+    from openpilot.selfdrive.car.car_events import CarEvents
+    from openpilot.selfdrive.selfdrived.events import ET
+    from openpilot.selfdrive.selfdrived.state import StateMachine, State
+    from openpilot.starpilot.aol.intent import disarming_fault
+    from opendbc.car.honda.stock_aol import qualified
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[1][0x1A3] = 8
+    cp = CarInterface.get_params(CAR.HONDA_ACCORD, fingerprint, [], False, False, False)
+    cp.alternativeExperience = 32
+    self.assertTrue(qualified(cp, marked_only=True))
+    for speed, name in ((20., log.OnroadEvent.EventName.cruiseDisabled),
+                        (0., log.OnroadEvent.EventName.speedTooLow)):
+      with self.subTest(speed=speed):
+        state = car_state()
+        state.vEgo = speed
+        state.cruiseState.available = True
+        events = CarEvents(cp).update(state, state, car.CarControl())
+        event = next(event for event in events.to_msg() if event.name == name)
+        self.assertTrue(event.userDisable)
+        self.assertFalse(event.immediateDisable)
+        self.assertFalse(disarming_fault([event], state))
+        machine = StateMachine()
+        machine.state = State.enabled
+        machine.update(events)
+        self.assertEqual(machine.state, State.disabled)
+        for fault in (log.OnroadEvent.EventName.accFaulted, log.OnroadEvent.EventName.canError,
+                      log.OnroadEvent.EventName.steerUnavailable):
+          guarded = CarEvents(cp).update(state, state, car.CarControl())
+          guarded.add(fault)
+          self.assertTrue(disarming_fault(guarded.to_msg(), state))
+        cp.alternativeExperience = 0
+        ordinary = CarEvents(cp).update(state, state, car.CarControl())
+        self.assertTrue(ordinary.contains(ET.IMMEDIATE_DISABLE))
+        self.assertTrue(disarming_fault(ordinary.to_msg(), state))
+        cp.alternativeExperience = 32
+
   def test_exact_classic_bosch_cp_family_and_rejections(self):
     self.assertEqual(len(CLASSIC_BOSCH_AOL_CARS), 10)
     all_honda = tuple(candidate for candidate in CAR if candidate.config.flags & HondaFlags.BOSCH)
