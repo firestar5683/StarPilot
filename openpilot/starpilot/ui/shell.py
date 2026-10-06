@@ -84,7 +84,7 @@ class ShellView:
       self.settings.prepare()
       acquired.pop_all()
 
-  def render(self, snapshot: ShellSnapshot) -> None:
+  def render(self, snapshot: ShellSnapshot, drag_x: float = 0.0) -> None:
     if snapshot.mode != ShellMode.ONROAD and self.profile == Profile.LARGE:
       self.onroad.unified_speed.collapse_sources()
     if snapshot.mode == ShellMode.HOME:
@@ -101,19 +101,19 @@ class ShellView:
       self.toggles.render(snapshot.toggles)
       self.settings.render_rail(snapshot.settings, selected=Destination.TOGGLES)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_CONTROLS:
-      self.features.render(snapshot.features)
+      self.features.render(snapshot.features, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOUNDS:
-      self.sounds.render(snapshot.sounds)
+      self.sounds.render(snapshot.sounds, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.APPEARANCE:
-      self.appearance.render(snapshot.appearance)
+      self.appearance.render(snapshot.appearance, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.SYSTEM:
-      self.display.render(snapshot.display)
+      self.display.render(snapshot.display, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
-      self.models.render(snapshot.models)
+      self.models.render(snapshot.models, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.NETWORK:
       rail_width = 500 if snapshot.settings.sidebar_expanded else 0

@@ -17,6 +17,105 @@ from openpilot.starpilot.ui.toggles_state import Personality, ToggleKey, Toggles
 
 
 class ShellActionTests(unittest.TestCase):
+  def test_runtime_transition_interruptions_preserve_row_bindings_for_every_feature_pane(self):
+    from openpilot.starpilot.ui import runtime_app
+    from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
+    from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
+
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.profile = Profile.LARGE
+    session.favorites = Mock()
+    session.view = SimpleNamespace(onroad=Mock())
+    requests = []
+    session.input = ShellInput(Profile.LARGE, requests.append)
+    rows = (FeatureRow("action", "Action", "", actions=(("OPEN", True),), available=True),) * 15
+    start = FeatureSettingsState(rows=rows)
+    end = replace(start, scroll=5)
+    base = ShellSnapshot(ShellMode.SETTINGS, reference_state(), SettingsState(),
+                         OnroadState(False, False, None, None, SpeedLimitObservation()))
+    with patch("openpilot.starpilot.ui.feature_settings.time.monotonic", return_value=0):
+      for destination, (state_name, _, input_name) in runtime_app._FEATURE_SETTINGS_PANES.items():
+        with self.subTest(destination=destination):
+          feature_view = FeatureSettingsView(SimpleNamespace(profile=Profile.LARGE))
+          setattr(session.view, state_name, feature_view)
+          snapshot = replace(base, selected=destination, **{state_name: end})
+          session.selected = destination
+          session._settings_press_snapshot = Mock(return_value=snapshot)
+          session._settings_gesture_snapshot = Mock(return_value=snapshot)
+          feature_view._page_frame(start, 0, False)
+          feature_view._page_frame(end, 0, False)
+          requests.clear()
+          session.press(ShellMode.SETTINGS, 1930, 200)
+          session.release(ShellMode.SETTINGS, 1930, 200)
+          self.assertFalse(requests)
+          self.assertIsNone(getattr(session.input, input_name).held)
+          self.assertIsNone(feature_view._transition)
+          feature_view._page_frame(end, 0, False)
+          session.press(ShellMode.SETTINGS, 1930, 200)
+          session.release(ShellMode.SETTINGS, 1930, 200)
+          self.assertEqual([(request.source, request.action.kind) for request in requests], [(input_name, "action")])
+          for direction in (1, -1):
+            for distance, duration, accepted in ((200, .5, True), (80, .075, True), (80, .5, False)):
+              with self.subTest(direction=direction, distance=distance, duration=duration):
+                requests.clear()
+                feature_view.reset()
+                feature_view._page_frame(replace(start, scroll=0 if direction == 1 else 10), 0, False)
+                feature_view._page_frame(end, 0, False)
+                self.assertIsNotNone(feature_view._transition)
+                x = 1930 if direction == 1 else 1800
+                session.press(ShellMode.SETTINGS, x, 200)
+                for timestamp, fraction in ((0, 0), (duration / 2, .5), (duration, 1)):
+                  session.move(ShellMode.SETTINGS, x - direction * distance * fraction, 200, timestamp=timestamp)
+                session.release(ShellMode.SETTINGS, x - direction * distance, 200, timestamp=duration + .01)
+                self.assertEqual([(request.source, request.action.kind, request.action.direction) for request in requests],
+                                 [(input_name, "scroll", direction)] if accepted else [])
+          feature_view._page_frame(start, 0, False)
+          feature_view._page_frame(end, 0, False)
+          session.cancel()
+          self.assertIsNone(feature_view._last_state)
+
+  def test_runtime_and_shared_feature_view_forward_selected_drag(self):
+    import pyray as rl
+    from openpilot.starpilot.ui import runtime_app
+    from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
+    from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsState
+
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.profile = Profile.LARGE
+    session.favorites, session.pip_warning = Mock(), Mock()
+    session.notice = ""
+    session.settings_layer = session.network_layer = None
+    session.input = ShellInput(Profile.LARGE, Mock())
+    session.view = ShellView.__new__(ShellView)
+    session.view.profile = Profile.LARGE
+    session.view.onroad, session.view.settings, session.view.device = Mock(), Mock(), Mock()
+    panes = runtime_app._FEATURE_SETTINGS_PANES
+    for state_name, _, _ in panes.values():
+      setattr(session.view, state_name, FeatureSettingsView(SimpleNamespace(profile=Profile.LARGE)))
+    base = ShellSnapshot(ShellMode.SETTINGS, reference_state(), SettingsState(),
+                         OnroadState(False, False, None, None, SpeedLimitObservation()))
+    # Each controller carries a distinct displacement so a wrong pane cannot pass.
+    for index, (_state_name, _, input_name) in enumerate(panes.values()):
+      controller = getattr(session.input, input_name)
+      controller.press(1000, 200, FeatureSettingsState())
+      controller.move(920 - index, 200, FeatureSettingsState())
+    with patch.object(runtime_app, "placed_at"), patch.object(FeatureSettingsView, "render", autospec=True) as feature_render, \
+         patch.object(ShellView, "render", autospec=True, side_effect=ShellView.render) as shell_render:
+      for destination, (state_name, _, input_name) in panes.items():
+        with self.subTest(destination=destination):
+          snapshot = replace(base, selected=destination)
+          session.snapshot = Mock(return_value=snapshot)
+          session.render(ShellMode.SETTINGS, rl.Rectangle(0, 0, 2160, 1080))
+          drag = getattr(session.input, input_name).drag_x
+          self.assertEqual(shell_render.call_args.kwargs["drag_x"], drag)
+          feature_render.assert_called_with(getattr(session.view, state_name), getattr(snapshot, state_name), drag)
+      feature_render.reset_mock()
+      for destination in (Destination.STAR, Destination.DEVICE):
+        session.snapshot = Mock(return_value=replace(base, selected=destination))
+        session.render(ShellMode.SETTINGS, rl.Rectangle(0, 0, 2160, 1080))
+        self.assertEqual(shell_render.call_args.kwargs["drag_x"], 0)
+      feature_render.assert_not_called()
+
   def test_toggle_request_needs_same_displayed_value_on_release(self) -> None:
     requests = []
     touch = TogglesInput(requests.append)

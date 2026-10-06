@@ -16,6 +16,7 @@ FEATURE_CONTROL_RIGHT = 2118
 FEATURE_BUTTON_TOP = 64
 FEATURE_BUTTON_HEIGHT = 80
 FEATURE_ACTION_MARGIN = 36
+FEATURE_PAGE_COUNTER_WIDTH = 160
 FEATURE_TAP_SLOP = 36
 FEATURE_SWIPE_DISTANCE = 120
 FEATURE_FLICK_DISTANCE = 60
@@ -98,6 +99,11 @@ def feature_row_top(state: FeatureSettingsState) -> int:
   return FEATURE_ROW_TOP + (52 if state.subtitle else 0)
 
 
+def feature_page_counter_left(state: FeatureSettingsState) -> float:
+  left = 520 if state.sidebar_expanded else 20
+  return (left + 25 + 2120 - FEATURE_PAGE_COUNTER_WIDTH) / 2
+
+
 def feature_parent_page(page: str) -> str | None:
   if page == FeaturePage.HUB:
     return None
@@ -162,6 +168,11 @@ class FeatureInput:
     self.emit = emit
     self.held: tuple[float, float, FeatureUiAction | None, int, str, bool] | None = None
     self._samples: deque[tuple[float, float]] = deque(maxlen=16)
+    self._drag_x = 0.0
+
+  @property
+  def drag_x(self) -> float:
+    return self._drag_x
 
   @staticmethod
   def _in_body(x: float, y: float, state: FeatureSettingsState) -> bool:
@@ -179,6 +190,9 @@ class FeatureInput:
     if 12 + FEATURE_HEADER_HEIGHT < y < row_top:
       return FeatureUiAction("details") if state.subtitle else None
     if 980 <= y <= 1050:
+      counter_left = feature_page_counter_left(state)
+      if counter_left <= x <= counter_left + FEATURE_PAGE_COUNTER_WIDTH:
+        return None
       return FeatureUiAction("scroll", direction=-1 if x < 1320 else 1)
     if not row_top <= y < row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT:
       return None
@@ -219,6 +233,12 @@ class FeatureInput:
     target = self.target(x, y, state)
     self.held = (x, y, target, state.scroll, state.page, state.sidebar_expanded) if target is not None or self._in_body(x, y, state) else None
 
+  def cancel_tap(self) -> None:
+    """Suppress the held control action while preserving the pagination gesture."""
+    if self.held is not None:
+      x, y, _, scroll, page, sidebar = self.held
+      self.held = (x, y, None, scroll, page, sidebar)
+
   def move(self, x: float, y: float, state: FeatureSettingsState, now: float | None = None) -> None:
     if self.held is not None:
       px, py, action, scroll, page, sidebar = self.held
@@ -233,6 +253,8 @@ class FeatureInput:
         return
       if action is not None and (moved or self.target(x, y, state) != action):
         self.held = (px, py, None, scroll, page, sidebar) if body else None
+      signed_dx = x - px
+      self._drag_x = signed_dx if body and dx > FEATURE_TAP_SLOP and dx >= 2 * dy else 0.0
       if body and now is not None:
         if self._samples and now <= self._samples[-1][0]:
           self._samples.clear()
@@ -273,6 +295,7 @@ class FeatureInput:
   def cancel(self) -> None:
     self.held = None
     self._samples.clear()
+    self._drag_x = 0.0
 
 
 def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | None:

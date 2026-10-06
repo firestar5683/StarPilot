@@ -21,6 +21,7 @@ with patch.object(Params, "__init__", lambda self, d="": _original_params_init(s
   from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
 
 from openpilot.starpilot.ui.device_state import DeviceAction, DeviceRequest
+from openpilot.starpilot.ui.feature_settings import FeatureSettingsView
 from openpilot.starpilot.ui.feature_settings_state import FEATURE_ROW_HEIGHT, FEATURE_ROW_TOP, FeaturePage, FeatureUiAction
 from openpilot.starpilot.ui.toggles_state import ToggleRequest, ToggleKey
 from openpilot.starpilot.ui.settings_state import Destination, SettingsAction, SettingsActionKind, tile_rects
@@ -75,6 +76,7 @@ class TestRuntimePanelActions(unittest.TestCase):
     session._on_destination_change = Mock()
     session._on_compact_destination = Mock()
     session.input = ShellInput(session.profile, session._emit)
+    session.view = NS(features=FeatureSettingsView(NS(profile=runtime_app.Profile.LARGE)))
     session.feature_owner = runtime_app.FeatureSettingsOwner(self.ui.params, session._feature_authority,
                                                            vehicle_fingerprint=lambda: getattr(self.ui.CP, "carFingerprint", None),
                                                            vehicle_params=lambda: self.ui.CP)
@@ -269,7 +271,7 @@ class TestRuntimePanelActions(unittest.TestCase):
         view = ShellView.__new__(ShellView)
         view.profile, view.onroad, view.settings, view.features = session.profile, Mock(), Mock(), Mock()
         view.render(shown)
-        view.features.render.assert_called_once_with(shown.features)
+        view.features.render.assert_called_once_with(shown.features, 0.0)
         view.settings.render.assert_not_called()
         view.settings.render_rail.assert_called_once_with(shown.settings, selected=Destination.STAR)
         left = 520 if sidebar_expanded else 20
@@ -402,7 +404,9 @@ class TestRuntimePanelActions(unittest.TestCase):
           session.appearance_page = "appearance"
           session._snapshot_cache = None
           session.confirmed_offroad = Mock(return_value=True)
-          session.favorites = session.view = Mock()
+          session.favorites = Mock()
+          session.view = NS(onroad=Mock(), **{name: FeatureSettingsView(NS(profile=session.profile))
+                                             for name, _, _ in runtime_app._FEATURE_SETTINGS_PANES.values()})
           session.pip_warning = Mock()
           session.settings_layer = None
           session.notice = ""
