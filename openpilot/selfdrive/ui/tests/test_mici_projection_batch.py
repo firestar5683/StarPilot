@@ -8,6 +8,31 @@ import pytest
 
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer as LargeModelRenderer
+from openpilot.selfdrive.ui.onroad.model_renderer import ModelPoints
+
+
+@pytest.mark.parametrize("renderer_class", [ModelRenderer, LargeModelRenderer])
+@pytest.mark.parametrize("lane_count", [4, 6])
+def test_legacy_adjacent_centers_preserve_the_four_lane_boundaries(renderer_class, lane_count):
+  view = object.__new__(renderer_class)
+  view._path = ModelPoints()
+  view._lane_lines = [ModelPoints() for _ in range(4)]
+  view._road_edges = [ModelPoints() for _ in range(2)]
+  def line(y):
+    return SimpleNamespace(x=[10.0, 20.0], y=[y, y], z=[1.0, 1.0])
+  model = SimpleNamespace(position=line(0), laneLines=[line(i) for i in range(lane_count)],
+                          roadEdges=[line(-i) for i in range(2)],
+                          laneLineProbs=[0.1, 0.2, 0.3, 0.4], roadEdgeStds=[0.5, 0.6],
+                          acceleration=SimpleNamespace(x=[0.0, 1.0]))
+
+  view._update_raw_points(model)
+
+  for i, points in enumerate(view._lane_lines):
+    np.testing.assert_array_equal(points.raw_points, [[10, i, 1], [20, i, 1]])
+  for i, points in enumerate(view._road_edges):
+    np.testing.assert_array_equal(points.raw_points, [[10, -i, 1], [20, -i, 1]])
+  np.testing.assert_allclose(view._lane_line_probs, model.laneLineProbs)
+  np.testing.assert_allclose(view._road_edge_stds, model.roadEdgeStds)
 
 
 @pytest.fixture

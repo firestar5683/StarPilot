@@ -156,7 +156,8 @@ class SelfdriveD:
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'deviceMotion', 'lateralDelay',
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark',
-                                   'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan'] + (['aolIntentWire'] if self.aol_replay else []) +
+                                   'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan'] +
+                                  (['aolIntentWire'] if self.aol_replay else []) +
                                    (['aolSafetyWire'] if self.axis_transport_required else []) +
                                    (['slcState'] if self.conditional_replay or self.switchback_capable else []) + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
