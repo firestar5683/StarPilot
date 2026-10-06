@@ -15,19 +15,22 @@ import random
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from urllib.request import urlopen
 
 from openpilot.starpilot.models.catalog import (
   ARTIFACT_ABI, BUNDLED_CURRENT, BY_ID, CATALOG_PATH, COMPILER_REVISION, DEFAULT_SMALL, DEFAULT_SMALL_SHA256,
-  DEFAULT_SMALL_SIZE, GENERATION,
+  DEFAULT_SMALL_SIZE, GENERATION, model_entries,
 )
 
 RESOURCE_URL = "https://huggingface.co/buckets/StarPilot-Driving/StarPilot-Resources/resolve"
 ROOT = Path("/data/models") / GENERATION
 MAX_MANIFEST = 2 * 1024 * 1024
 MAX_ARTIFACT = 2 * 1024 * 1024 * 1024
+MODEL_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+SUPPORTED_VERSIONS = {f"v{version}" for version in range(8, 17)}
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 SHIPPED_MODELS = Path(__file__).resolve().parents[2] / "selfdrive/modeld/models"
 MODEL_RUNNER_REVISION = 2
@@ -71,8 +74,8 @@ def state_lock(root: Path):
     yield
 
 
-def validate_manifest(data: dict) -> dict[str, dict]:
-  if (data.get("generation") != GENERATION or data.get("compiler_revision") != COMPILER_REVISION or
+def validate_manifest(data: object) -> dict[str, dict]:
+  if (not isinstance(data, dict) or data.get("generation") != GENERATION or data.get("compiler_revision") != COMPILER_REVISION or
       data.get("artifact_abi") != ARTIFACT_ABI or not isinstance(data.get("models"), list)):
     raise ModelError("The model catalog targets a different runtime")
   rows = {}
@@ -80,16 +83,29 @@ def validate_manifest(data: dict) -> dict[str, dict]:
     if not isinstance(entry, dict):
       raise ModelError("Invalid model entry")
     model_id = entry.get("id")
-    if not isinstance(model_id, str) or model_id not in BY_ID or model_id == BUNDLED_CURRENT or model_id in rows:
+    if not isinstance(model_id, str) or not MODEL_ID.fullmatch(model_id) or model_id == BUNDLED_CURRENT or model_id in rows:
       raise ModelError("Unknown or duplicate model")
-    known = BY_ID[model_id]
-    if entry.get("version") != known.version or bool(entry.get("uses_external_gpu", False)) != known.uses_external_gpu:
+    name = entry.get("name")
+    if (not isinstance(name, str) or not name.strip() or len(name) > 128 or
+        any(ord(char) < 32 or ord(char) == 127 for char in name) or
+        not isinstance(entry.get("version"), str) or entry["version"] not in SUPPORTED_VERSIONS or type(entry.get("uses_external_gpu", False)) is not bool):
+      raise ModelError("Invalid model identity or behavior")
+    for key in ("series", "released"):
+      if key in entry and (not isinstance(entry[key], str) or len(entry[key]) > 128 or
+                           any(ord(char) < 32 for char in entry[key])):
+        raise ModelError("Invalid model display metadata")
+    for key in ("community_favorite", "model_lab_eligible"):
+      if key in entry and type(entry[key]) is not bool:
+        raise ModelError("Invalid model capability metadata")
+    known = BY_ID.get(model_id)
+    if known is not None and (entry["version"] != known.version or
+                              entry.get("uses_external_gpu", False) != known.uses_external_gpu):
       raise ModelError("Model behavior or hardware changed")
     variants = entry.get("accelerator_artifacts", {})
     if not isinstance(variants, dict) or set(variants) - {"amd"}:
       raise ModelError("Unknown model accelerator")
     amd = variants.get("amd")
-    if amd is not None and (not isinstance(amd, dict) or known.uses_external_gpu or
+    if amd is not None and (not isinstance(amd, dict) or entry.get("uses_external_gpu", False) or
                             entry.get("model_lab_eligible") is not True or amd.get("execution_device") != "AMD" or
                             amd.get("compiler_revision") != COMPILER_REVISION):
       raise ModelError("Invalid laboratory artifact hardware or runtime")
@@ -118,6 +134,8 @@ def validate_manifest(data: dict) -> dict[str, dict]:
     if compatible:
       selected = max(compatible, key=lambda artifact: artifact["min_runner_revision"])
       row.update({key: value for key, value in selected.items() if key != "min_runner_revision"})
+    if known is None and "artifact_sha256" not in row:
+      raise ModelError("New models require a compatible compiled artifact")
     rows[model_id] = row
   return rows
 
@@ -136,14 +154,15 @@ def preferences(root: Path = ROOT) -> dict:
              "randomizer": False, "blacklistedModels": []}
   try:
     saved = read_json(root / "preferences.json", 16384)
+    entries = model_entries(root)
     for profile in ("small", "big"):
       mid = saved.get(profile)
       if isinstance(mid, str) and (mid == BUNDLED_CURRENT or (profile == "big" and mid == "") or (
-          mid in BY_ID and BY_ID[mid].uses_external_gpu == (profile == "big"))):
+          mid in entries and entries[mid].uses_external_gpu == (profile == "big"))):
         default[profile] = (DEFAULT_SMALL if profile == "small" else "") if mid == BUNDLED_CURRENT else mid
     for key in ("userFavorites", "blacklistedModels"):
       if isinstance(saved.get(key), list):
-        default[key] = list(dict.fromkeys(x for x in saved[key] if isinstance(x, str) and x in BY_ID))
+        default[key] = list(dict.fromkeys(x for x in saved[key] if isinstance(x, str) and x in entries))
     if type(saved.get("randomizer")) is bool:
       default["randomizer"] = saved["randomizer"]
     if saved.get("sortMode") in ("name", "date", "date_oldest", "community", "series", "favorites", "released"):
@@ -154,9 +173,10 @@ def preferences(root: Path = ROOT) -> dict:
 
 
 def artifact_path(model_id: str, root: Path = ROOT, variant: str = "standard") -> Path:
-  if not isinstance(model_id, str) or model_id not in BY_ID or model_id == BUNDLED_CURRENT:
+  entries = model_entries(root)
+  if not isinstance(model_id, str) or model_id not in entries or model_id == BUNDLED_CURRENT:
     raise ModelError("Unknown downloadable model")
-  if variant not in ("standard", "amd") or (variant == "amd" and BY_ID[model_id].uses_external_gpu):
+  if variant not in ("standard", "amd") or (variant == "amd" and entries[model_id].uses_external_gpu):
     raise ModelError("Unknown model artifact variant")
   suffix = "amd_" if variant == "amd" else ""
   return root / model_id / f"{model_id}_driving_{suffix}tinygrad.pkl"
@@ -224,7 +244,7 @@ def randomize_next_start(chestnut_available: bool, *, root: Path = ROOT, chooser
     entries = catalog(root)
     blocked = set(prefs["blacklistedModels"])
     choices = [mid for mid in entries if mid not in blocked and
-               BY_ID[mid].uses_external_gpu == (profile == "big") and verified_artifact(mid, entries, root) is not None]
+               entries[mid].get("uses_external_gpu", False) == (profile == "big") and verified_artifact(mid, entries, root) is not None]
     if profile == "small" and DEFAULT_SMALL not in blocked and DEFAULT_SMALL not in choices and shipped_default() is not None:
       choices.append(DEFAULT_SMALL)
     alternatives = [mid for mid in choices if mid != prefs[profile]]
@@ -249,16 +269,18 @@ def resolve_runtime(chestnut_available: bool, *, root: Path = ROOT, randomize: b
     raise ModelError("Shipped RDFv4 is missing or corrupt; reinstall the validated model package")
   big_path = verified_artifact(big, entries, root) if big not in ("", BUNDLED_CURRENT) and chestnut_available else None
   allow_big = chestnut_available and big_path is not None
-  return RuntimeSelection(small, small_path, BY_ID[small].version, big, big_path,
-                          BY_ID[big].version if big in BY_ID else "current", allow_big,
+  return RuntimeSelection(small, small_path, entries[small]["version"], big, big_path,
+                          entries[big]["version"] if big in entries else "current", allow_big,
                           (DEFAULT_SMALL_SHA256 if shipped else entries[small]["artifact_sha256"]) if small_path is not None else None,
                           entries[big]["artifact_sha256"] if big_path is not None else None)
 
 
 class ModelManager:
   def __init__(self, *, root: Path = ROOT, parked: Callable[[], bool] | None = None,
-               gpu_present: Callable[[], bool] | None = None, opener=urlopen, jetlink=None):
+               gpu_present: Callable[[], bool] | None = None, opener=urlopen, jetlink=None, refresh_catalog: bool = False):
     self.root, self.opener = root, opener
+    self.refresh_catalog = refresh_catalog
+    self.last_refresh_attempt: float | None = None
     self.jetlink = jetlink
     self.parked = parked or (lambda: False)
     if gpu_present is None:
@@ -278,12 +300,26 @@ class ModelManager:
     self.verify_worker: threading.Thread | None = None
     self.verify_closed = False
 
+  def _refresh_if_needed(self) -> None:
+    if not self.refresh_catalog or not self.parked():
+      return
+    now = time.monotonic()
+    if self.last_refresh_attempt is not None and now - self.last_refresh_attempt < 300:
+      return
+    if self.worker is not None and self.worker.is_alive():
+      return
+    self.last_refresh_attempt = now
+    try:
+      self.action("refresh_manifest", {})
+    except (OSError, ModelError):
+      pass
+
   def _read_job(self) -> dict:
     try:
       job = read_json(self.root / ".download-job.json", 16384)
       if (job.get("schemaVersion") == 1 and isinstance(job.get("jobId"), str) and
           re.fullmatch(r"[0-9a-f]{32}", job["jobId"]) and job.get("state") in ("running", "completed", "failed", "interrupted") and
-          job.get("model") in ("", *BY_ID) and isinstance(job.get("progress"), str) and
+          job.get("model") in ("", *catalog(self.root)) and isinstance(job.get("progress"), str) and
           type(job.get("downloadAll")) is bool and type(job.get("cancelRequested")) is bool and
           job.get("variant", "standard") in ("standard", "amd")):
         return job
@@ -433,6 +469,7 @@ class ModelManager:
 
   def snapshot(self) -> dict:
     with self.lock:
+      self._refresh_if_needed()
       entries, prefs = catalog(self.root), preferences(self.root)
       parked, gpu = self.parked(), self.gpu_present()
       job = self._job_status()
@@ -495,7 +532,8 @@ class ModelManager:
           raise ModelError("Invalid model preferences")
         for key in ("userFavorites", "blacklistedModels"):
           values = payload.get(key, [])
-          if not isinstance(values, list) or len(values) > len(BY_ID) or any(not isinstance(x, str) or x not in BY_ID for x in values):
+          if (not isinstance(values, list) or len(values) > len(model_entries(self.root)) or
+              any(not isinstance(x, str) or x not in model_entries(self.root) for x in values)):
             raise ModelError("Unknown model preference")
         changes_selection = bool(set(payload) & {"randomizer", "blacklistedModels"})
         if "randomizer" in payload and type(payload["randomizer"]) is not bool:
@@ -516,7 +554,7 @@ class ModelManager:
         if self.worker is not None and self.worker.is_alive():
           raise ModelError("A model download is already running")
         if action == "download" and (set(payload) - {"model", "allowGpuWithoutGpu", "variant"} or
-                                     not isinstance(payload.get("model"), str) or payload["model"] not in BY_ID):
+                                     not isinstance(payload.get("model"), str) or payload["model"] not in catalog(self.root)):
           raise ModelError("Unknown model download")
         if action != "download" and set(payload) - {"allowGpuWithoutGpu"}:
           raise ModelError("Invalid download request")
@@ -527,7 +565,7 @@ class ModelManager:
           raise ModelError("Unknown model artifact variant")
         if variant == "amd" and not artifact_entry(payload["model"], catalog(self.root), "amd").get("artifact_sha256"):
           raise ModelError("This model has no eGPU variant for this software version yet")
-        if (action == "download" and BY_ID[payload["model"]].uses_external_gpu and
+        if (action == "download" and catalog(self.root)[payload["model"]].get("uses_external_gpu", False) and
             not self.gpu_present() and not payload.get("allowGpuWithoutGpu")):
           raise ModelError("Connect Chestnut or choose to download for later")
         with state_lock(self.root):
@@ -573,7 +611,7 @@ class ModelManager:
           raise ModelError("Turn Model Randomizer off before choosing a model")
         mid, profile = payload["model"], payload["profile"]
         if mid != BUNDLED_CURRENT and not (profile == "big" and mid == ""):
-          if mid not in BY_ID or BY_ID[mid].uses_external_gpu != (profile == "big"):
+          if mid not in catalog(self.root) or catalog(self.root)[mid].get("uses_external_gpu", False) != (profile == "big"):
             raise ModelError("Model does not match the selected hardware profile")
           if not self._installed(mid, catalog(self.root)):
             raise ModelError("Download and verify this model first")
@@ -648,6 +686,7 @@ class ModelManager:
     if shutil.disk_usage(self.root).free < size + 256 * 1024 * 1024:
       raise ModelError("Not enough storage for this model")
     filename = destination.name
+    display_name = catalog(self.root)[mid]["name"]
     pieces = [filename] if chunks == 0 else [f"{filename}.chunk{i:02d}of{chunks:02d}" for i in range(1, chunks+1)]
     fd, temp = tempfile.mkstemp(prefix=".download-", dir=destination.parent)
     try:
@@ -662,7 +701,7 @@ class ModelManager:
                 raise ModelError("Model exceeds its declared size")
               out.write(data)
               digest.update(data)
-              progress = f"{BY_ID[mid].name}: {received * 100 // size}%"
+              progress = f"{display_name}: {received * 100 // size}%"
               if progress != self.progress:
                 self._publish_job(progress=progress)
         out.flush()

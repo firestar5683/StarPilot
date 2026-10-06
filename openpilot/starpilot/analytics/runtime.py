@@ -19,14 +19,15 @@ def executed_model(sm, params, now):
   from openpilot.starpilot.models.jetlink_adapter import runtime_status
   from openpilot.starpilot.models.runtime import snapshot
   from openpilot.starpilot.models.status import ModelHealth
-  from openpilot.starpilot.models.catalog import BY_ID
+  from openpilot.starpilot.models.catalog import model_entries
   remote = runtime_status()
   if remote.get('active') and bool(sm['modelV2'].big):
     digest = remote['artifact_sha256']
     return {'driving_model': 'jetlink:' + digest[:16], 'metrics': {'model_sha256': digest, 'model_variant': 'jetlink'}}
   status = snapshot(sm, params, now)
-  if status.health == ModelHealth.ACTIVE and status.loaded_id in BY_ID:
-    return {'driving_model': BY_ID[status.loaded_id].name, 'metrics': {'model_sha256': status.artifact_sha256, 'model_variant': str(status.variant)}}
+  entries = model_entries()
+  if status.health == ModelHealth.ACTIVE and status.loaded_id in entries:
+    return {'driving_model': entries[status.loaded_id].name, 'metrics': {'model_sha256': status.artifact_sha256, 'model_variant': str(status.variant)}}
   return {}
 
 
