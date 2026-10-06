@@ -16,6 +16,8 @@ static inline bool hyundai_canfd_stock_torque_aol_param(uint16_t param) {
          (!carnival || (alternate && (gas != 1U)));
 }
 
+#ifdef ALLOW_DEBUG
 static inline bool hyundai_canfd_torque_long_aol_param(uint16_t param) {
   return (param == 0x0815U) || (param == 0x0895U);
 }
+#endif

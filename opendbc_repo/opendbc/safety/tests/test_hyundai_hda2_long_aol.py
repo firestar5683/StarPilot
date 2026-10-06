@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from opendbc.can import CANPacker
 from opendbc.car import structs
 from opendbc.car.hyundai.hyundaicanfd import create_steering_messages
-from opendbc.car.hyundai.values import HyundaiFlags
+from opendbc.car.hyundai.values import CAR, HyundaiFlags
 from opendbc.car.hyundai.canfd_stock_aol import STOCK_EV_CARS
 from openpilot.starpilot.aol.tests.test_canfd_stock_profiles import params
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -61,7 +61,7 @@ class TestHyundaiHda2LongAol(unittest.TestCase):
     flags = HyundaiFlags.CANFD_LKA_STEER_MSG
     if self.word & 0x80:
       flags |= HyundaiFlags.CANFD_LKA_STEER_MSG_ALT
-    layout = SimpleNamespace(flags=int(flags), openpilotLongitudinalControl=True)
+    layout = SimpleNamespace(carFingerprint=CAR.HYUNDAI_IONIQ_5, flags=int(flags), openpilotLongitudinalControl=True)
     return create_steering_messages(self.packer, layout, SimpleNamespace(ECAN=1, ACAN=0), True, torque != 0, torque)
 
   def accel(self, raw=0., value=0., bus=1):
