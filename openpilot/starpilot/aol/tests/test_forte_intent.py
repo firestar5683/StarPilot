@@ -131,6 +131,28 @@ class TestForteIntent(unittest.TestCase):
     managed.update(state(main=True), now_ns=8)
     self.assertTrue(managed.allowed_latch)
 
+  def test_transient_fault_preserves_released_input_without_replaying_held_input(self):
+    for fault in ('invalid', 'fatal', 'rejected'):
+      for held in (False, True):
+        with self.subTest(fault=fault, held=held):
+          intent = create_intent(params(), settings())
+          intent.update(state(events=((Button.lkas, False),)), now_ns=1)
+          if held:
+            intent.update(state(events=((Button.lkas, True),)), now_ns=2)
+            self.assertTrue(intent.allowed_latch)
+          failed = state()
+          failed.canValid = fault != 'invalid'
+          intent.update(failed, now_ns=3, fault_active=fault == 'fatal', native_rejection_ns=3 if fault == 'rejected' else 0)
+          self.assertFalse(intent.allowed_latch)
+          intent.update(state(), now_ns=4, fault_active=False)
+          self.assertFalse(intent.allowed_latch)
+          intent.update(state(events=((Button.lkas, True),)), now_ns=5, fault_active=False)
+          self.assertEqual(intent.allowed_latch, not held)
+          if held:
+            intent.update(state(events=((Button.lkas, False),)), now_ns=6, fault_active=False)
+            intent.update(state(events=((Button.lkas, True),)), now_ns=7, fault_active=False)
+            self.assertTrue(intent.allowed_latch)
+
   def test_actual_ci_ordered_physical_or_and_held_initialization(self):
     for car in FORTE_IDS:
       cp = params(car)
