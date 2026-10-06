@@ -50,6 +50,25 @@ class Frame:
     return self.state
 
 
+def publish_corolla_params(params):
+  """Use Card's real startup admission and serialized full-axis configuration."""
+  from openpilot.selfdrive.car.card import Car
+  params.put_bool('OpenpilotEnabledToggle', True, block=True)
+  params.put_bool('SafeMode', False, block=True)
+  cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+
+  def discover(*args, pre_create_hook, **kwargs):
+    return interfaces[cp.carFingerprint](pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
+
+  with mock.patch.dict(os.environ, {'SIMULATION': '1'}), \
+       mock.patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
+       mock.patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
+    selected = Car()
+  final = selected.CP.as_reader().as_builder()
+  assert final.alternativeExperience == 32
+  return final
+
+
 def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, override=False, signal=False, model_age=0,
          can_valid=True, can_timeout=False, aol_lat_only=False, native_session='lane-aol-session'):
   events = []
@@ -93,6 +112,21 @@ def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, o
       1, True, timestamp, timestamp + 200_000_000, int(car.CarParams.SafetyModel.hondaBosch),
       controls.CP.safetyConfigs[-1].safetyParam, True, False, True, False,
       'lane-test-panda', native_session))
+  elif controls.aol_replay and controls.CP.brand == 'toyota':
+    from openpilot.starpilot.car.toyota.aol import qualified
+    assert qualified(controls.CP, marked_only=True)
+    axis = msg('aolAxisState')
+    axis.qualified = axis.nativeAcknowledged = True
+    axis.desiredLateral = axis.lateralActive = active and enabled
+    axis.desiredLongitudinal = axis.longitudinalActive = enabled
+    axis.sessionId = native_session
+    axis.observedMonoTime = timestamp
+    axis.validUntilMonoTime = timestamp + 30_000_000
+    msg('aolSafetyWire', 0)
+    events[-1].aolSafetyWire = encode_safety(SafetyState(
+      1, True, timestamp, timestamp + 200_000_000, int(controls.CP.safetyConfigs[0].safetyModel.raw),
+      controls.CP.safetyConfigs[0].safetyParam, can_valid and not can_timeout and not fault, can_valid and not can_timeout,
+      active and enabled, enabled, 'lane-test-panda', native_session))
   controls.sm.update_msgs(timestamp / 1e9, [event.as_reader() for event in events])
 
 
@@ -310,8 +344,7 @@ class LaneRuntimeTests(unittest.TestCase):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'AOL_REPLAY_RUNTIME': '0', 'REPLAY': '1'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
       params = Params()
-      cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
-      params.put('CarParams', cp.to_bytes(), block=True)
+      publish_corolla_params(params)
       for scenario in scenarios:
         with self.subTest(scenario=scenario):
           params.put_bool('LaneCentering', scenario != 'disabled_setting', block=True)

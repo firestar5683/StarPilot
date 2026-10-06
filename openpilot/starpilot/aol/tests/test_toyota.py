@@ -1,12 +1,21 @@
 import unittest
 
-from opendbc.car import gen_empty_fingerprint, structs
+from opendbc.car import Bus, gen_empty_fingerprint, structs
+from opendbc.can import CANPacker
 from opendbc.car.toyota.interface import CarInterface
-from opendbc.car.toyota.values import CAR, ToyotaFlags
+from opendbc.car.toyota.values import CAR, DBC, ToyotaFlags
 from openpilot.starpilot.aol.intent import AolSettings
 from openpilot.starpilot.aol.vehicle import policy_for
 from openpilot.starpilot.car.toyota.aol import qualified, ToyotaCardIntent
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+
+
+CAMERA_TORQUE_CASES = (
+  CAR.TOYOTA_ALPHARD_TSS2, CAR.TOYOTA_AVALON_TSS2, CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_COROLLA_TSS2,
+  CAR.TOYOTA_HIGHLANDER_TSS2, CAR.TOYOTA_PRIUS_TSS2, CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_MIRAI,
+  CAR.LEXUS_ES_TSS2, CAR.LEXUS_NX_TSS2, CAR.LEXUS_LC_TSS2, CAR.LEXUS_RX_TSS2,
+  CAR.LEXUS_IS_TSS2, CAR.LEXUS_RC_TSS2,
+)
 
 
 class TestHighlanderAol(unittest.TestCase):
@@ -32,6 +41,69 @@ class TestHighlanderAol(unittest.TestCase):
           cp.openpilotLongitudinalControl = False
           self.assertFalse(qualified(cp))
 
+  def test_camera_torque_factory_and_exact_hold_experience(self):
+    for car in CAMERA_TORQUE_CASES:
+      for hybrid in (False, True):
+        for hold in (False, True):
+          with self.subTest(car=car, hybrid=hybrid, hold=hold):
+            fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+            cp = CarInterface.get_params(car, gen_empty_fingerprint(), fw, False, False, False)
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, 73)
+            self.assertTrue(cp.openpilotLongitudinalControl and cp.pcmCruise)
+            self.assertEqual(bool(cp.flags & ToyotaFlags.HYBRID), hybrid)
+            self.assertEqual(cp.steerControlType, structs.CarParams.SteerControlType.torque)
+            self.assertEqual(DBC[car][Bus.pt], 'toyota_nodsu_pt_generated')
+            preferences = VehicleStartupPreferences(toyota_auto_hold=hold)
+            preferences.prepare(cp)
+            self.assertTrue(qualified(cp))
+            policy = policy_for(cp)
+            self.assertTrue(policy.full_axis_runtime_required)
+            cp.alternativeExperience |= policy.alternative_experience_addition
+            preferences.finalize(cp)
+            expected = 288 if hold and (car == CAR.TOYOTA_CAMRY_TSS2 or hybrid and car == CAR.TOYOTA_RAV4_TSS2) else 160 if hold else 32
+            self.assertEqual(cp.alternativeExperience, expected)
+            self.assertTrue(qualified(cp, marked_only=True))
+            for experience in (33, 416, 288 if expected != 288 else 160):
+              bad = cp.as_reader().as_builder()
+              bad.alternativeExperience = experience
+              self.assertFalse(qualified(bad, marked_only=True))
+            for flag in (ToyotaFlags.RADAR_ACC, ToyotaFlags.SECOC, ToyotaFlags.ANGLE_CONTROL, ToyotaFlags.LONG_FILTER):
+              bad = cp.as_reader().as_builder()
+              bad.flags |= int(flag)
+              self.assertFalse(qualified(bad, marked_only=True))
+            bad = cp.as_reader().as_builder()
+            bad.safetyConfigs[0].safetyParam = 585
+            bad.openpilotLongitudinalControl = False
+            self.assertFalse(qualified(bad))
+    for car in (CAR.LEXUS_IS, CAR.LEXUS_RC, CAR.TOYOTA_RAV4_TSS2_2022,
+                CAR.TOYOTA_RAV4_TSS2_2023, CAR.TOYOTA_RAV4_PRIME, CAR.TOYOTA_SIENNA_4TH_GEN):
+      cp = CarInterface.get_params(car, gen_empty_fingerprint(), [], True, False, False)
+      self.assertFalse(qualified(cp))
+
+  def test_camera_torque_group_consumes_same_physical_sources(self):
+    for car in CAMERA_TORQUE_CASES:
+      for hybrid in (False, True):
+        with self.subTest(car=car, hybrid=hybrid):
+          fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+          cp = CarInterface.get_params(car, gen_empty_fingerprint(), fw, False, False, False)
+          ci = CarInterface(cp)
+          ci.update([])
+          packer = CANPacker(DBC[car][Bus.pt])
+          values: dict[str, dict[str, float]] = {
+            'PCM_CRUISE': {'GAS_RELEASED': 1}, 'PCM_CRUISE_2': {'MAIN_ON': 1},
+            'GEAR_PACKET': {'GEAR': 0}, 'EPS_STATUS': {'LKA_STATE': 1}, 'BODY_CONTROL_STATE': {},
+          }
+          tracked = {bus: list(parser.vl) for bus, parser in ci.can_parsers.items()}
+          frames = [packer.make_can_msg(name, 0 if bus == Bus.pt else 2, values.get(name, {}))
+                    for bus, names in tracked.items() for name in names]
+          self.assertTrue({0x1D3, 0x3BC, 0x620, 0x262}.issubset({address for address, _, bus in frames if bus == 0}))
+          for tick in range(8):
+            state = ci.update([(1_000_000_000 + tick * 10_000_000, frames)])
+          self.assertTrue(state.canValid)
+          self.assertTrue(state.cruiseState.available)
+          self.assertEqual(state.gearShifter, structs.CarState.GearShifter.drive)
+          self.assertFalse(state.doorOpen or state.seatbeltUnlatched or state.steerFaultPermanent)
+
   def test_main_derived_intent_does_not_use_unreached_lkas_mapping(self):
     settings = AolSettings(True, 0., 9, 9, (0, 0, 0), (0, 0, 0))
     owner = ToyotaCardIntent(settings)
@@ -49,6 +121,12 @@ class TestHighlanderAol(unittest.TestCase):
     self.assertFalse(owner.allowed_latch)
 
   def test_actual_card_hold_and_master_off_preserve_full_axis_transport(self):
+    for car in CAMERA_TORQUE_CASES:
+      for hybrid in (False, True):
+        with self.subTest(car=car, hybrid=hybrid):
+          self._assert_card_full_axis_transport(car, hybrid)
+
+  def _assert_card_full_axis_transport(self, car, hybrid):
     import os
     from types import SimpleNamespace
     from unittest.mock import patch
@@ -65,14 +143,16 @@ class TestHighlanderAol(unittest.TestCase):
           for key, value in (('OpenpilotEnabledToggle', True), ('AlwaysOnLateral', enabled),
                              ('ToyotaAutoHold', hold), ('SafeMode', False)):
             saved.put_bool(key, value, block=True)
-          cp = CarInterface.get_params(CAR.TOYOTA_HIGHLANDER_TSS2, gen_empty_fingerprint(), [], False, False, False)
+          cp = CarInterface.get_params(car, gen_empty_fingerprint(),
+            [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else [], False, False, False)
 
           def discover(*args, pre_create_hook, cp=cp, **kwargs):
             return CarInterface(pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
           with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
                patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
             selected = Car()
-          self.assertEqual(selected.CP.alternativeExperience, 160 if hold else 32)
+          aeb_hold = car == CAR.TOYOTA_CAMRY_TSS2 or hybrid and car == CAR.TOYOTA_RAV4_TSS2
+          self.assertEqual(selected.CP.alternativeExperience, 288 if hold and aeb_hold else 160 if hold else 32)
           self.assertEqual(bool(selected.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD), hold)
           self.assertTrue(qualified(selected.CP, marked_only=True))
           with structs.CarParams.from_bytes(saved.get('CarParams')) as published:

@@ -12,7 +12,7 @@ from openpilot.common.params import ParamKeyFlag, Params
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator
-from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
+from openpilot.starpilot.lateral.tests.test_lane_runtime import feed, publish_corolla_params
 from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as CONTROLLER_KEY, ControllerMode, replace_mode
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, development_enabled, read_settings
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource
@@ -189,8 +189,8 @@ class TorqueRuntimeTests(unittest.TestCase):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0',
                                                          'LANE_CENTERING_REPLAY_RUNTIME': '0'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
-      params, cp = Params(), corolla()
-      params.put('CarParams', cp.to_bytes(), block=True)
+      params = Params()
+      publish_corolla_params(params)
       with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '0'}):
         baseline = Controls()
       with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '1'}):
@@ -249,9 +249,9 @@ class TorqueRuntimeTests(unittest.TestCase):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'REPLAY': '1', 'TORQUE_REPLAY_RUNTIME': '1',
                                                          'AOL_REPLAY_RUNTIME': '0', 'LANE_CENTERING_REPLAY_RUNTIME': '0'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
-      params, cp = Params(), corolla()
+      params = Params()
+      cp = publish_corolla_params(params)
       Path(params.get_param_path(CONTROLLER_KEY)).write_bytes(replace_mode(None, cp, ControllerMode.STANDARD))
-      params.put('CarParams', cp.to_bytes(), block=True)
       controls = Controls()
       base = controls.torque_host.vehicle
       target = base.lat_accel_factor * 1.1

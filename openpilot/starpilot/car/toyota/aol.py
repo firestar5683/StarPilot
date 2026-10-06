@@ -1,31 +1,41 @@
 from dataclasses import replace
 
 from opendbc.car import structs
-from opendbc.car.toyota.values import CAR, ToyotaFlags, EPS_SCALE
+from opendbc.car.toyota.values import CAR, ToyotaFlags, EPS_SCALE, uses_toyota_auto_hold_aeb
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE
 
 AOL_WORDS = frozenset((73,))
+CAMERA_TORQUE_CARS = frozenset((
+  CAR.TOYOTA_ALPHARD_TSS2, CAR.TOYOTA_AVALON_TSS2, CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_COROLLA_TSS2,
+  CAR.TOYOTA_HIGHLANDER_TSS2, CAR.TOYOTA_PRIUS_TSS2, CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_MIRAI,
+  CAR.LEXUS_ES_TSS2, CAR.LEXUS_NX_TSS2, CAR.LEXUS_LC_TSS2, CAR.LEXUS_RX_TSS2,
+  CAR.LEXUS_IS_TSS2, CAR.LEXUS_RC_TSS2,
+))
 
 
 def qualified(cp, *, marked_only=False):
-  if (cp is None or cp.brand != 'toyota' or cp.carFingerprint != CAR.TOYOTA_HIGHLANDER_TSS2 or
+  if (cp is None or cp.brand != 'toyota' or cp.carFingerprint not in CAMERA_TORQUE_CARS or
       cp.notCar or cp.passive or cp.dashcamOnly or not cp.pcmCruise or not cp.openpilotLongitudinalControl or
       cp.steerControlType != structs.CarParams.SteerControlType.torque or
       not cp.flags & ToyotaFlags.TSS2 or cp.flags & (ToyotaFlags.SECOC | ToyotaFlags.ANGLE_CONTROL | ToyotaFlags.UNSUPPORTED_DSU) or
-      len(cp.safetyConfigs) != 1 or cp.alternativeExperience not in ((32, 160) if marked_only else (0, 32, 128, 160))):
+      len(cp.safetyConfigs) != 1):
     return False
   from opendbc.car.toyota.interface import toyota_auto_hold_supported
   hold = bool(cp.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
-  if ((cp.alternativeExperience & 128 and not hold) or
-      (hold and (not toyota_auto_hold_supported(cp) or cp.alternativeExperience not in (0, 128, 160)))):
+  hold_permission = 256 if uses_toyota_auto_hold_aeb(cp) else 128
+  allowed_experience = (32 | hold_permission,) if hold else (32,)
+  if not marked_only:
+    allowed_experience += (0, hold_permission) if hold else (0,)
+  if (cp.alternativeExperience not in allowed_experience or
+      hold and not toyota_auto_hold_supported(cp)):
     return False
   required_flags = ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.RAISED_ACCEL_LIMIT
   allowed_flags = required_flags | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM
   if cp.flags & required_flags != required_flags or int(cp.flags) & ~int(allowed_flags | ToyotaFlags.AUTO_BRAKE_HOLD):
     return False
   config = cp.safetyConfigs[0]
-  expected = EPS_SCALE[CAR.TOYOTA_HIGHLANDER_TSS2]
+  expected = EPS_SCALE[cp.carFingerprint]
   return config.safetyModel == structs.CarParams.SafetyModel.toyota and config.safetyParam == expected
 
 

@@ -413,8 +413,6 @@ class TestToyotaSecOcSafety(TestToyotaSecOcSafetyBase):
         self.assertEqual(should_tx, self._tx(self._accel_msg_343(accel, cancel_req=1)))
 
 
-
-
 class TestToyotaPriusLongFilter(TestToyotaSafetyTorque):
   SAFETY_PARAM = 0x1049
   TX_MSGS = TOYOTA_COMMON_TX_MSGS + [msg for msg in TOYOTA_COMMON_LONG_TX_MSGS if msg != [0x750, 0]]
@@ -489,7 +487,7 @@ class TestToyotaHighlanderAol(unittest.TestCase):
     self.safety.aol_set_host_request(3)
 
   def test_main_lateral_independent_of_cruise_and_belt(self):
-    for ae in (32, 160):
+    for ae in (32, 160, 288):
       self.init(ae=ae)
       self.physical(belt=False)
       self.assertEqual(self.safety.aol_get_permission_mask(), 1)
@@ -576,7 +574,7 @@ class TestToyotaHighlanderAol(unittest.TestCase):
       self.assertEqual(self.safety.aol_get_permission_mask(), 0)
 
   def test_exact_profile_admission_and_reset(self):
-    for word, ae in ((585, 32), (72, 32), (329, 32), (1097, 32), (73, 33), (73, 288)):
+    for word, ae in ((585, 32), (72, 32), (329, 32), (1097, 32), (73, 33), (73, 289), (73, 416)):
       self.init(word, ae)
       self.physical()
       self.assertEqual(self.safety.aol_get_request_mask(), 0)

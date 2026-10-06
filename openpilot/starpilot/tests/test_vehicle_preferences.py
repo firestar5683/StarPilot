@@ -535,7 +535,8 @@ class TestVehicleStartupPreferences(unittest.TestCase):
         host, constructed, published = self.start(candidate, change_saved=True)
         self.assertEqual(constructed, [(True, permission)])
         self.assertTrue(host.CI.CS.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
-        self.assertEqual(published.alternativeExperience, permission)
+        self.assertEqual(published.alternativeExperience & ~32, permission)
+        self.assertEqual(published.alternativeExperience & 32, 32)
         self.assertTrue(published.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
         self.assertEqual(self.params.get("ToyotaAutoHold"), False)
 
@@ -544,7 +545,8 @@ class TestVehicleStartupPreferences(unittest.TestCase):
       with self.subTest(enabled=enabled, requested=requested):
         _, constructed, published = self.start(CAR.TOYOTA_CAMRY_TSS2, enabled=enabled, requested=requested)
         self.assertEqual(constructed, [(False, 0)])
-        self.assertEqual(published.alternativeExperience, 0)
+        self.assertEqual(published.alternativeExperience & ~32, 0)
+        self.assertEqual(published.alternativeExperience & 32, 32 if enabled else 0)
         self.assertFalse(published.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
         if not enabled:
           self.assertTrue(published.passive)
