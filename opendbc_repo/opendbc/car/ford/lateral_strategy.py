@@ -251,7 +251,17 @@ class FordLateralController:
         [MACH_E_DIRECTION_CHANGE_MIN_PREVIEW_CURVATURE, MACH_E_DIRECTION_CHANGE_FULL_PREVIEW_CURVATURE],
         [0.0, 1.0],
       ))
-    return base + (MACH_E_CURVATURE_ERROR_MAX - base) * speed_weight * max(deficit_weight, reversal_weight)
+    unwind_weight = 0.0
+    if (self.model is not None and len(self.model.orientationRate.z) >= 17 and
+        requested * current >= 0.0 and desired * current >= 0.0 and abs(desired) < abs(current)):
+      unwind_deficit = np.sign(current) * (current - requested)
+      preview_deficit = np.sign(current) * (current - predicted)
+      unwind_weight = float(np.interp(
+        min(unwind_deficit, preview_deficit),
+        [MACH_E_UNDERSTEER_ERROR_MIN_DEFICIT, MACH_E_UNDERSTEER_ERROR_FULL_DEFICIT],
+        [0.0, 1.0],
+      ))
+    return base + (MACH_E_CURVATURE_ERROR_MAX - base) * speed_weight * max(deficit_weight, reversal_weight, unwind_weight)
 
   def _path_angle_assist(self, requested: float, desired: float, applied: float, current: float, v_ego: float,
                          steering_pressed: bool, lane_change: bool) -> float:
