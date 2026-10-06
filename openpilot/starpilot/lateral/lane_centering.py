@@ -17,8 +17,7 @@ from openpilot.cereal import log
 
 
 STRENGTH_BASELINE = 1.5
-# At 8 m lookahead, keep the unsaturated error interval above the 0.08 m deadband.
-STRENGTH_MAX = 1.575
+STRENGTH_MAX = 2 * STRENGTH_BASELINE
 
 MIN_SPEED = 5.0
 MIN_LANE_PROB = 0.6

@@ -100,13 +100,13 @@ class TestLaneCentering(unittest.TestCase):
     for _ in range(100):
       before = standard.update(source)
       same = explicit.update(replace(source, settings=replace(source.settings, strength=1.5)))
-      boosted = stronger.update(replace(source, settings=replace(source.settings, strength=1.575)))
+      boosted = stronger.update(replace(source, settings=replace(source.settings, strength=3.0)))
       self.assertEqual(before, same)
-      self.assertAlmostEqual(boosted.correction, before.correction * 1.05, delta=1e-15)
+      self.assertAlmostEqual(boosted.correction, before.correction * 2, delta=1e-15)
       self.assertLess(abs(boosted.correction), MAX_CORRECTION)
 
   def test_strength_preserves_absolute_filter_and_axis_bounds(self):
-    for strength in (0.5, 1.5, 1.575):
+    for strength in (0.5, 1.5, 3.0):
       controller = LaneCenteringController()
       source = observation(model(left=-0.3, right=3.3), settings=LaneCenteringSettings(True, strength=strength))
       previous = 0.0
@@ -118,7 +118,7 @@ class TestLaneCentering(unittest.TestCase):
         previous = correction
       self.assertEqual(controller.update(replace(source, lateral_active=False)).correction, 0)
       self.assertEqual(controller.update(replace(source, time_discontinuity=True)).correction, 0)
-    for invalid in (True, float("nan"), 0.49, 1.576):
+    for invalid in (True, float("nan"), 0.49, 3.001):
       self.assertEqual(LaneCenteringController().update(replace(observation(), settings=LaneCenteringSettings(True, strength=invalid))).reason,
                        "invalid_input")
 
@@ -131,7 +131,7 @@ class TestLaneCentering(unittest.TestCase):
         displacement = (.079, .081, .159, .161)[index % 4] * (1 if index < 60 else -1)
         source = observation(model(left=-1.8 + displacement, right=1.8 + displacement, std=.29999998211860657),
                              speed_mps=speed, elapsed_seconds=dt,
-                             settings=LaneCenteringSettings(True, e2e_authority=0., strength=1.575))
+                             settings=LaneCenteringSettings(True, e2e_authority=0., strength=3.0))
         result = controller.update(source)
         self.assertEqual(result.reason, "qualified")
         self.assertLessEqual(abs(result.correction), MAX_CORRECTION)
@@ -145,8 +145,8 @@ class TestLaneCentering(unittest.TestCase):
     for authority in (0.0, 0.5, 1.0):
       source = observation(shifted, settings=LaneCenteringSettings(True, e2e_authority=authority))
       normal = settled(LaneCenteringController(), source).correction
-      stronger = settled(LaneCenteringController(), replace(source, settings=replace(source.settings, strength=1.575))).correction
-      self.assertAlmostEqual(stronger, normal * 1.05, delta=1e-15)
+      stronger = settled(LaneCenteringController(), replace(source, settings=replace(source.settings, strength=3.0))).correction
+      self.assertAlmostEqual(stronger, normal * 2, delta=1e-15)
 
   def test_native_builder_trace_matches_frozen_source(self):
     # Frozen controller at 678af783; native modelV2, ten held 0.01 s ticks.

@@ -1000,7 +1000,7 @@ class SettingsGatewayTest(unittest.TestCase):
     tagged, root = self._live_lane_context()
     page = self.page("lane")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Lane Centering Strength")
-    for value in (32, 106, float("nan")):
+    for value in (32, 201, float("nan")):
       with self.subTest(value=value), self.assertRaises(SettingsChanged):
         self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=value)
     with self.assertRaises(SettingsChanged):
@@ -1035,10 +1035,10 @@ class SettingsGatewayTest(unittest.TestCase):
     self.context.value = AuthorityContext(True, tagged, tagged.as_reader().as_builder().to_bytes())
     page = self.page("lane")
     self.assertTrue(page["rows"][index]["available"])
-    self.assertEqual((page["rows"][index]["minimum"], page["rows"][index]["maximum"]), (33, 105))
-    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=105)
+    self.assertEqual((page["rows"][index]["minimum"], page["rows"][index]["maximum"]), (33, 200))
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=200)
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
-    self.assertEqual((root / "LaneCenteringStrength").read_bytes(), b"1.575")
+    self.assertEqual((root / "LaneCenteringStrength").read_bytes(), b"3.0")
     self.assertIsNone(self.params.get("LaneCenteringE2EAuthority"))
 
   def test_uploads_missing_default_off_saved_values_and_vehicle_independence(self):
