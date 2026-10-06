@@ -29,7 +29,9 @@ class TestPredeploy(unittest.TestCase):
       self.assertNotIn('FAST', environment)
       self.assertNotIn('SKIP', environment)
       self.assertNotIn('PYTEST_ADDOPTS', environment)
-      self.assertEqual(plan[0], ('lint', ['bash', 'scripts/lint/lint.sh']))
+      self.assertEqual(plan[:2], [('mapd-package', [sys.executable, 'tools/release/stage_mapd_provider.py',
+                                                    '--source', str(run_local_tests.ROOT), '--require-tracked']),
+                                 ('lint', ['bash', 'scripts/lint/lint.sh'])])
       self.assertIn('openpilot/starpilot/tests', plan[-1][1])
       self.assertIn('opendbc_repo/opendbc/safety/tests/test_gm_bolt_pedal.py', plan[-1][1])
       self.assertIn('opendbc_repo/opendbc/safety/tests/test_hyundai_ioniq6_long.py', plan[-1][1])
