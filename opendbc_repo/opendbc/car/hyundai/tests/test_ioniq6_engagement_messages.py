@@ -85,3 +85,52 @@ class TestIoniq6EngagementMessages(unittest.TestCase):
     self.assertFalse(cp.openpilotLongitudinalControl)
     self.assertIsNone(interface.CS.ioniq6_camera_lead)
     self.assertIsNone(interface.CC.ioniq6_longitudinal)
+
+  def test_torque_lkas_damping_matches_separate_lfa_wire(self):
+    from opendbc.car.hyundai.hyundaicanfd import CanBus, create_steering_messages
+    from opendbc.car.hyundai.values import HyundaiFlags
+    for alternate, aol in ((False, False), (True, False), (True, True)):
+      cp, cs, controller = controller_fixture(alternate, aol=aol)
+      control = structs.CarControl()
+      control.enabled = not aol
+      control.latActive = True
+      control.actuators.torque = .5
+      state = cs.out.as_reader().as_builder()
+      state.steeringAngleDeg = 120.
+      state.steeringTorque = 0.
+      cs.out = state.as_reader()
+      cuts = 0
+      for frame in range(190):
+        _, messages = controller.update(control.as_reader(), cs, 1_000_000_000 + frame * 10_000_000)
+        for address, data, bus in messages:
+          if address not in (0x50, 0x110, 0x12A):
+            continue
+          lfa = address == 0x12A
+          self.assertEqual(data[13 if lfa else 8], 100 if lfa else 0)
+          # Reference wire fields use independent pinned bit positions.
+          expected = bytearray(len(data))
+          expected[2] = data[2]
+          torque = (int.from_bytes(data, 'little') >> 41 & 0x7FF) - 1024
+          request = int.from_bytes(data, 'little') >> 52 & 3
+          bits = (2 << 24) | (2 << 38) | ((torque + 1024) << 41) | (request << 52)
+          expected[:] = (bits | (data[2] << 16) | ((100 if lfa else 0) << (104 if lfa else 64))).to_bytes(len(data), 'little')
+          crc = 0
+          for value in expected[2:] + address.to_bytes(2, 'little'):
+            crc ^= value << 8
+            for _ in range(8):
+              crc = ((crc << 1) ^ (0x1021 if crc & 0x8000 else 0)) & 0xFFFF
+          crc ^= {16: 0x041D, 32: 0x9F5B}[len(data)]
+          expected[:2] = crc.to_bytes(2, 'little')
+          self.assertEqual(data, bytes(expected), (frame, hex(address), bus))
+          if not lfa and request == 0:
+            cuts += 1
+            self.assertNotEqual(torque, 0, (alternate, aol, frame, data.hex()))
+      self.assertEqual(cuts, 4)
+      stock = cp.as_reader().as_builder()
+      stock.openpilotLongitudinalControl = False
+      packets = create_steering_messages(CANPacker(DBC[cp.carFingerprint][Bus.pt]), stock, CanBus(stock), True, True, 20)
+      self.assertEqual(packets[-1][1][8], 100)
+      angle = cp.as_reader().as_builder()
+      angle.flags |= int(HyundaiFlags.CANFD_ANGLE_STEERING)
+      packets = create_steering_messages(CANPacker(DBC[cp.carFingerprint][Bus.pt]), angle, CanBus(angle), True, True, 20)
+      self.assertEqual(packets[-1][1][8], 100)

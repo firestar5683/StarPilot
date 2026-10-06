@@ -668,6 +668,14 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
           extra_lkas[:2] = hkg_can_fd_checksum(lkas[0], None, extra_lkas).to_bytes(2, "little")
           self.assertFalse(self.safety.safety_tx_hook(self.packet((lkas[0], bytes(extra_lkas), lkas[2]))))
           self.assertTrue(self.safety.safety_tx_hook(self.packet(lfa)))
+          wrong_damping = bytearray(lkas[1])
+          self.assertEqual(wrong_damping[8], 0)
+          self.assertEqual(lfa[1][13], 100)
+          wrong_damping[8] = 100
+          wrong_damping[:2] = hkg_can_fd_checksum(lkas[0], None, wrong_damping).to_bytes(2, "little")
+          self.assertFalse(self.safety.safety_tx_hook(self.packet((lkas[0], bytes(wrong_damping), lkas[2]))))
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(lkas)))  # rejected damping consumes the pair
+          self.assertTrue(self.safety.safety_tx_hook(self.packet(lfa)))
           self.assertTrue(self.safety.safety_tx_hook(self.packet(lkas)))
           self.assertFalse(self.safety.safety_tx_hook(self.packet(lkas)))  # replay denied
           self.assertTrue(self.safety.safety_tx_hook(self.packet(lfa)))
