@@ -176,11 +176,54 @@ class LaneRuntimeTests(unittest.TestCase):
       params = Params()
       params.put('PauseLateralSpeed', 20., block=True)
       params.put_bool('IsMetric', False, block=True)
-      self.assertAlmostEqual(read_pause(params).speed_mps, 20. * .44704)
+      settings = read_pause(params)
+      assert settings is not None
+      self.assertAlmostEqual(settings.speed_mps, 20. * .44704)
       params.put_bool('IsMetric', True, block=True)
-      self.assertAlmostEqual(read_pause(params).speed_mps, 20. / 3.6)
+      settings = read_pause(params)
+      assert settings is not None
+      self.assertAlmostEqual(settings.speed_mps, 20. / 3.6)
       Path(params.get_param_path('PauseLateralSpeed')).write_bytes(b'nan')
-      self.assertEqual(read_pause(params).speed_mps, 0.)
+      self.assertIsNone(read_pause(params))
+
+  def test_invalid_saved_pause_settings_preserve_committed_delay(self):
+    from openpilot.starpilot.lateral.pause import LateralPause, PauseSettings, read_settings as read_pause
+    with OpenpilotPrefix():
+      params = Params()
+      self.assertEqual(read_pause(params), PauseSettings())
+      params.put('PauseLateralSpeed', 20., block=True)
+      params.put_bool('PauseLateralOnSignal', True, block=True)
+      params.put('LateralResumeDelay', 5., block=True)
+      pause = LateralPause(read_pause(params), params)
+      expected = pause.settings
+      state = SimpleNamespace(vEgo=0., leftBlinker=True, rightBlinker=False, canValid=True, canTimeout=False)
+      now = 1_000_000_000
+      self.assertFalse(pause.allowed(state, now_ns=now, source_ns=now))
+      state.leftBlinker = False
+      self.assertFalse(pause.allowed(state, now_ns=now + 10_000_000, source_ns=now + 10_000_000))
+      path = Path(params.get_param_path('PauseLateralSpeed'))
+      for tick, raw in ((2, b'nan'), (3, b'')):
+        path.write_bytes(raw)
+        self.assertIsNone(read_pause(params))
+        self.assertFalse(pause.allowed(state, now_ns=tick * now, source_ns=tick * now))
+        self.assertEqual(pause.settings, expected)
+      path.unlink()
+      path.mkdir()  # A nonregular Params object is unreadable, not an explicit zero.
+      self.assertIsNone(read_pause(params))
+      self.assertFalse(pause.allowed(state, now_ns=4 * now, source_ns=4 * now))
+      self.assertEqual(pause.settings, expected)
+      path.rmdir()
+      params.put('PauseLateralSpeed', 20., block=True)
+      self.assertFalse(pause.allowed(state, now_ns=5 * now, source_ns=5 * now))
+      self.assertTrue(pause.allowed(state, now_ns=6_010_000_000, source_ns=6_010_000_000))
+      # Only a valid explicit opt-out (or canonical absence) disables the policy.
+      state.leftBlinker = True
+      self.assertFalse(pause.allowed(state, now_ns=7 * now, source_ns=7 * now))
+      params.put('PauseLateralSpeed', 0., block=True)
+      self.assertTrue(pause.allowed(state, now_ns=8 * now, source_ns=8 * now))
+      self.assertEqual(pause.settings.speed_mps, 0.)
+      path.write_bytes(b'nan')
+      self.assertEqual(LateralPause(read_pause(params)).settings, PauseSettings())
 
   def test_actual_controls_steering_pause_angle_standard_and_torque_aol(self):
     from opendbc.car.ford.values import CAR as FORD
