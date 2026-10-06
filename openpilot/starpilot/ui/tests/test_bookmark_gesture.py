@@ -61,7 +61,7 @@ def navigation(monkeypatch):
 @pytest.mark.parametrize('batched', [False, True])
 def test_deliberate_left_swipe_claims_before_real_scroller(navigation, batched):
   n = navigation
-  events = [n.event(400, pressed=True, down=True), n.event(380, down=True), n.event(250, down=True), n.event(250, released=True)]
+  events = [n.event(400, pressed=True, down=True), n.event(380, down=True), n.event(230, down=True), n.event(230, released=True)]
   if batched:
     n.frame(*events)
   else:
@@ -69,7 +69,7 @@ def test_deliberate_left_swipe_claims_before_real_scroller(navigation, batched):
       n.frame(event)
   n.callback.assert_called_once()
   assert n.page.rect.x == 0
-  n.frame(n.event(250, released=True))
+  n.frame(n.event(230, released=True))
   n.callback.assert_called_once()
 
 
@@ -104,6 +104,24 @@ def test_navigation_or_revoked_touch_cannot_finish_bookmark(navigation, cancel):
     n.bookmark.set_enabled(False)
   else:
     n.layout.set_enabled(False)
-  n.frame(n.event(250, down=True))
-  n.frame(n.event(250, released=True))
+  n.frame(n.event(230, down=True))
+  n.frame(n.event(230, released=True))
   n.callback.assert_not_called()
+
+
+def test_visible_bookmark_cannot_trigger_again_from_second_swipe(navigation):
+  n = navigation
+  for event in (n.event(400, pressed=True, down=True), n.event(230, down=True), n.event(230, released=True)):
+    n.frame(event)
+  n.callback.assert_called_once()
+  for event in (n.event(400, pressed=True, down=True), n.event(230, down=True), n.event(230, released=True)):
+    n.frame(event)
+  n.callback.assert_called_once()
+
+
+@pytest.mark.parametrize('distance,expected', [(150, 0), (151, 1)])
+def test_bookmark_requires_full_swipe_threshold(navigation, distance, expected):
+  n = navigation
+  for event in (n.event(400, pressed=True, down=True), n.event(400-distance, released=True)):
+    n.frame(event)
+  assert n.callback.call_count == expected
