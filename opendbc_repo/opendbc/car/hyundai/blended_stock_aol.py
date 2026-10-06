@@ -19,7 +19,6 @@ def qualified(cp, *, marked_only=False):
     or cp.dashcamOnly
     or cp.openpilotLongitudinalControl
     or not cp.pcmCruise
-    or cp.alphaLongitudinalAvailable
     or cp.steerControlType != structs.CarParams.SteerControlType.torque
     or len(cp.safetyConfigs) != 1
     or cp.alternativeExperience not in ((AOL_EXPERIENCE,) if marked_only else (0, AOL_EXPERIENCE))
