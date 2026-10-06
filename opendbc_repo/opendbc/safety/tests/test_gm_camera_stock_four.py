@@ -99,7 +99,7 @@ class TestGmCameraStockFour(unittest.TestCase):
       for alpha in (False, True):
         for release in (False, True):
           with self.subTest(car=car, alpha=alpha, release=release):
-            cp = self.params(car, alpha=alpha, release=release, pedal=True)
+            cp = self.params(car, alpha=alpha, release=release, pedal=False)
             expected = GMSafetyFlags.HW_CAM | (GMSafetyFlags.EV if car in
                        (CAR.CHEVROLET_BOLT_ACC_2022_2023, CAR.CHEVROLET_VOLT_CAMERA) else 0)
             promoted = car in (CAR.CHEVROLET_SUBURBAN_CAMERA, CAR.CHEVROLET_TRAX)
@@ -114,6 +114,18 @@ class TestGmCameraStockFour(unittest.TestCase):
             self.assertEqual(cp.dashcamOnly, not promoted)
             self.assertNotIn(car, FINGERPRINTS)
             self.assertNotIn(car, FW_VERSIONS)
+
+  def test_incomplete_detected_interceptor_graph_does_not_grant_longitudinal(self):
+    for car, word in ((CAR.CHEVROLET_SUBURBAN_CAMERA, 0xE110), (CAR.CHEVROLET_TRAX, 0xE110),
+                      (CAR.CHEVROLET_VOLT_CAMERA, 0xE212)):
+      for alpha in (False, True):
+        for release in (False, True):
+          cp = self.params(car, alpha=alpha, release=release, pedal=True)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+          self.assertFalse(cp.openpilotLongitudinalControl)
+          self.assertTrue(cp.pcmCruise)
+          self.assertTrue(cp.dashcamOnly)
+          self.assertTrue(cp.flags & GMFlags.PEDAL_LONG)
 
   def test_joined_stock_steering_cancel_pscm_and_long_denial(self):
     for car in CAMERA_STOCK_CAR:

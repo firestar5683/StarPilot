@@ -1,8 +1,6 @@
 """Actual CAN/native acknowledgment and cruise consumers; synthetic transport clocks."""
-import ast
-import inspect
-import textwrap
 from types import SimpleNamespace
+from typing import cast
 import unittest
 
 from opendbc.car.hyundai.values import Buttons
@@ -12,26 +10,12 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_INITIAL
 from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
 
 
-def reached_card_initialize():
-  # Execute the exact reached Card initialization block, including its actual
-  # facade call. The unrelated hardware/transport state_update loop is excluded.
-  tree = ast.parse(textwrap.dedent(inspect.getsource(Car.state_update)))
-  block = next(node for node in tree.body[0].body if isinstance(node, ast.If) and
-               any(isinstance(call, ast.Call) and ast.unparse(call.func) == 'self.v_cruise_helper.initialize_v_cruise'
-                   for call in ast.walk(node)))
-  fn = ast.FunctionDef(name='initialize', args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='self')],
-                                                           kwonlyargs=[], kw_defaults=[], defaults=[]),
-                       body=[block], decorator_list=[])
-  namespace = {}
-  exec(compile(ast.fix_missing_locations(ast.Module(body=[fn], type_ignores=[])), '<actual Card initialization>', 'exec'), namespace)
-  return namespace['initialize']
-
-
 class TestBlendedCruiseAcknowledgment(unittest.TestCase):
 
   def acknowledged(self, topology, button):
     stream = AcknowledgedCancelStream(topology)
     frames = stream.frames
+
     def moving_frames(*args):
       return [stream.packer.make_can_msg('WHL_SPD11', bus, dict.fromkeys(
         ('WHL_SPD_FL', 'WHL_SPD_FR', 'WHL_SPD_RL', 'WHL_SPD_RR'), 20)) if address == 0x386
@@ -53,8 +37,8 @@ class TestBlendedCruiseAcknowledgment(unittest.TestCase):
     helper.v_cruise_kph = helper.v_cruise_kph_last = 90.
     instance = SimpleNamespace(sm={'carControl': SimpleNamespace(enabled=True)},
                                CC_prev=SimpleNamespace(enabled=False), CS_prev=previous,
-                               experimental_mode=False, vehicle_startup=holder, v_cruise_helper=helper)
-    reached_card_initialize()(instance)
+                               experimental_mode=False, is_metric=True, vehicle_startup=holder, v_cruise_helper=helper)
+    Car.update_cruise_speed(cast(Car, instance), previous)
     self.assertIsNone(holder.consume_cruise_resume())
     return helper.v_cruise_kph
 

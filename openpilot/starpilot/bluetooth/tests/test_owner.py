@@ -116,7 +116,7 @@ class BluetoothOwnerTest(unittest.TestCase):
 
   def test_forced_offroad_power_scan_connect_and_revocation_use_actual_owner(self):
     fixture = self.connectivity_fixture()
-    self.assertFalse(fixture.adapter.confirmed_offroad())
+    self.assertTrue(fixture.adapter.confirmed_offroad())
     self.assertTrue(self.owner.snapshot()['parked'])
     self.assertTrue(self.owner.request('power', enabled=True)['powered'])
     self.owner.request('scan')
@@ -125,6 +125,8 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.assertTrue(self.owner.request('connect', address='AA:BB:CC:DD:EE:FF')['devices'][0]['connected'])
     self.assertFalse(self.owner.request('disconnect', address='AA:BB:CC:DD:EE:FF')['devices'][0]['connected'])
     fixture.ui.started = True
+    self.assertFalse(fixture.adapter.confirmed_offroad())
+    self.assertFalse(self.owner.snapshot()['parked'])
     before = list(FakeBlueZ.operations)
     self.assertTrue(self.owner.request('connect', address='AA:BB:CC:DD:EE:FF')['devices'][0]['connected'])
     self.assertEqual(FakeBlueZ.operations[len(before):], [('connect', 'AA:BB:CC:DD:EE:FF')])

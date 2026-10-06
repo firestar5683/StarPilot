@@ -12,6 +12,7 @@ from opendbc.car.gm.values import CAR, DBC
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.can import CANPacker
 from openpilot.cereal import messaging
+from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.starpilot.longitudinal.tests.test_gm_euv_long_policy import interp
@@ -195,6 +196,7 @@ class TestVoltStop(unittest.TestCase):
     def clock_pair():
       now = time.monotonic_ns()
       return now, now
+    self.enterContext(OpenpilotPrefix())
     self.enterContext(patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', side_effect=clock_pair))
     provider = ResumePlanInputs()
     pm = messaging.PubMaster(['deviceState', 'carState', 'longitudinalPlan'])
