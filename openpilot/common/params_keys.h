@@ -314,6 +314,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UpdaterNewReleaseNotes", {CLEAR_ON_MANAGER_START, BYTES}},
     {"UpdaterFastState", {PERSISTENT | DONT_LOG, JSON}},
     {"UpdaterState", {CLEAR_ON_MANAGER_START, STRING}},
+    {"UpdaterLastCheckTime", {PERSISTENT, TIME}},
     {"UpdaterTargetBranch", {CLEAR_ON_MANAGER_START, STRING}},
     {"UpdaterLastFetchTime", {PERSISTENT, TIME}},
     {"UptimeOffroad", {PERSISTENT, FLOAT, "0.0"}},
