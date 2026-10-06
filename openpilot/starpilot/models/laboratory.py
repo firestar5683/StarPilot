@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from openpilot.starpilot.models.catalog import BY_ID, BUNDLED_CURRENT, GENERATION
+from openpilot.starpilot.models.catalog import model_entries, BUNDLED_CURRENT, GENERATION
 from openpilot.starpilot.models.manager import (
   ModelError, ModelManager, artifact_entry, artifact_path, atomic_json, catalog, read_json, state_lock, verified_artifact,
 )
@@ -10,19 +10,20 @@ def configuration(root: Path) -> dict:
   default = {"enabled": False, "lateralModel": "", "longitudinalModel": ""}
   try:
     saved = read_json(root / "laboratory.json", 4096)
-    validate_configuration(saved)
+    validate_configuration(saved, root)
     return saved
   except (OSError, ValueError, TypeError):
     return default
 
 
-def validate_configuration(value: dict) -> None:
+def validate_configuration(value: dict, root: Path | None = None) -> None:
+  entries = model_entries(root)
   if (not isinstance(value, dict) or set(value) != {"enabled", "lateralModel", "longitudinalModel"} or
       type(value["enabled"]) is not bool):
     raise ModelError("Invalid laboratory configuration")
   for key in ("lateralModel", "longitudinalModel"):
     mid = value[key]
-    if not isinstance(mid, str) or (mid and (mid not in BY_ID or mid == BUNDLED_CURRENT or BY_ID[mid].uses_external_gpu)):
+    if not isinstance(mid, str) or (mid and (mid not in entries or mid == BUNDLED_CURRENT or entries[mid].uses_external_gpu)):
       raise ModelError("Choose small models for the laboratory pair")
   if value["enabled"] and (not value["lateralModel"] or not value["longitudinalModel"] or
                            value["lateralModel"] == value["longitudinalModel"]):
@@ -47,7 +48,7 @@ class ModelLaboratory:
       job = owner._job_status()
       models = []
       for mid, row in entries.items():
-        small = not BY_ID[mid].uses_external_gpu
+        small = not row.get("uses_external_gpu", False)
         eligible = small and row.get("model_lab_eligible") is True
         artifact = artifact_entry(mid, entries, "amd") if eligible else {}
         published = "artifact_sha256" in artifact
@@ -106,7 +107,7 @@ class ModelLaboratory:
         if owner._job_busy():
           raise ModelError("Wait for the model download to finish")
         if action == "configure":
-          validate_configuration(payload)
+          validate_configuration(payload, owner.root)
           if payload["enabled"]:
             if not self.runtime_supported:
               raise ModelError(self.runtime_unavailable_reason)

@@ -46,7 +46,7 @@ def test_big_default_disabled_and_explicit_download_preserved(tmp_path):
 
 def test_verified_download_precedes_shipped_default(tmp_path, monkeypatch):
   path = tmp_path / "download.pkl"
-  monkeypatch.setattr(manager, "catalog", lambda _: {DEFAULT_SMALL: {"artifact_sha256": "download-hash"}})
+  monkeypatch.setattr(manager, "catalog", lambda _: {DEFAULT_SMALL: {"artifact_sha256": "download-hash", "version": "v15"}})
   monkeypatch.setattr(manager, "verified_artifact", lambda *args: path)
   def unexpected_shipped_default():
     raise AssertionError("download replaced")

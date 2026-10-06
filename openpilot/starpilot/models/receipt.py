@@ -14,7 +14,7 @@ import stat
 import time
 
 from openpilot.common.hardware.hw import Paths
-from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, model_entries
 from openpilot.starpilot.models.status import ModelLoad, ModelVariant
 
 
@@ -140,6 +140,7 @@ def _positive_int(value: object) -> bool:
 
 
 def _decode(raw: bytes) -> ModelLoad:
+  entries = model_entries()
   try:
     record = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs)
   except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
@@ -151,13 +152,13 @@ def _decode(raw: bytes) -> ModelLoad:
     raise ReceiptUnavailable("unsupported model receipt")
   if not all(_positive_int(record[key]) for key in ("pid", "processStartTicks", "loadedMonoNs")):
     raise ReceiptUnavailable("invalid model process identity")
-  if not isinstance(record["modelId"], str) or record["modelId"] not in BY_ID:
+  if not isinstance(record["modelId"], str) or record["modelId"] not in entries:
     raise ReceiptUnavailable("unknown loaded model")
   try:
     variant = ModelVariant(record["variant"])
   except (ValueError, TypeError) as exc:
     raise ReceiptUnavailable("unknown model variant") from exc
-  if record["modelId"] != BUNDLED_CURRENT and BY_ID[record["modelId"]].uses_external_gpu != (variant is ModelVariant.CHESTNUT):
+  if record["modelId"] != BUNDLED_CURRENT and entries[record["modelId"]].uses_external_gpu != (variant is ModelVariant.CHESTNUT):
     raise ReceiptUnavailable("model receipt hardware mismatch")
   digest = record["artifactSha256"]
   if not isinstance(digest, str) or _DIGEST.fullmatch(digest) is None or record["fallbackReason"] not in _REASONS:
