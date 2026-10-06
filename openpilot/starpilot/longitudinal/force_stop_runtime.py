@@ -122,7 +122,8 @@ class ForceStopRuntime:
           lead=stop_lead, standstill=bool(car.standstill), left_blinker=bool(car.leftBlinker),
           right_blinker=bool(car.rightBlinker), steering_angle_deg=float(car.steeringAngleDeg),
           driving_in_curve=raw_curve[1], car_fingerprint=str(cp.carFingerprint), dashboard_stop_sign=False,
-          pedal_override=bool(car.gasPressed), model_tick_mono_s=stamp / 1e9))
+          pedal_override=bool(car.gasPressed), model_tick_mono_s=stamp / 1e9,
+          model_should_stop=bool(model.action.shouldStop)))
         perception_available = observation.light_detected is not None
         light_context = observation.light_detected is True or (observation.standstill_hold is True and
                                                              observation.standstill_reason == 'light')

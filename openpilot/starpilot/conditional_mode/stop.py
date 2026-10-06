@@ -1,6 +1,6 @@
 """Frozen CEM stop-light model-length detector over explicit owner evidence.
 
-The current model action.shouldStop is deliberately not a traffic-light input.
+The current model action.shouldStop can veto release, but cannot acquire a light.
 No Params, IPC, sign recognition, or longitudinal control is owned here.
 """
 
@@ -55,6 +55,7 @@ class StopFrame:
   dashboard_stop_sign: bool | None = None
   pedal_override: bool | None = None
   model_tick_mono_s: float | None = None
+  model_should_stop: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -99,10 +100,17 @@ class StopLightDetector:
     self.standstill_model_stopped = False
     self.standstill_reason: str | None = None
     self.committed = False
+    self.standstill_committed = False
     self.commit_distance_m = 0.0
     self.commit_clear_since_s: float | None = None
     self.last_observed_mono_s: float | None = None
     self.last_model_tick_mono_s: float | None = None
+
+  def invalidate(self) -> None:
+    committed, distance, stopped = self.committed, self.commit_distance_m, self.standstill_committed
+    self.reset()
+    # Missing evidence cannot acquire a stop or prove that a committed one cleared.
+    self.committed, self.commit_distance_m, self.standstill_committed = committed, distance, stopped
 
   def _reset_light(self) -> None:
     # Retain filter alpha across resets; clear its state and latches.
@@ -116,6 +124,7 @@ class StopLightDetector:
   def _commit(self, frame: StopFrame, horizon: float | None, model_stopping: bool | None, acquire: bool, dt: float) -> None:
     if frame.pedal_override is True:
       self.committed = False
+      self.standstill_committed = False
       self.commit_clear_since_s = None
       return
     if acquire and not self.committed and horizon is not None:
@@ -124,7 +133,7 @@ class StopLightDetector:
     if self.committed:
       assert frame.speed_mps is not None
       self.commit_distance_m = max(0.0, self.commit_distance_m - frame.speed_mps * dt)
-      clear = (horizon is not None and model_stopping is False and
+      clear = (horizon is not None and model_stopping is False and frame.model_should_stop is False and
                horizon >= max(FROZEN_RAW_STOP_DISTANCE_M + STOP_MODEL_RELEASE_MARGIN_M,
                               self.commit_distance_m + STOP_MODEL_RELEASE_MARGIN_M))
       if clear:
@@ -132,6 +141,7 @@ class StopLightDetector:
           self.commit_clear_since_s = frame.now_mono_s
         elif frame.now_mono_s - self.commit_clear_since_s >= 0.5:
           self.committed = False
+          self.standstill_committed = False
           self.commit_clear_since_s = None
           self._reset_light()
       else:
@@ -154,6 +164,8 @@ class StopLightDetector:
       self.standstill_reason = None
       self.standstill_model_stopped = False
       return None, None
+    if self.committed:
+      self.standstill_committed = True
     if frame.stop_sign_confirmed or frame.dashboard_stop_sign:
       self.standstill_reason = 'sign'
     elif self.light_detected or frame.forcing_stop or model_stopped:
@@ -194,21 +206,21 @@ class StopLightDetector:
       or lead is None
       or _boolean(lead.present) is None
     ):
-      self.reset()
+      self.invalidate()
       return unknown
     if self.last_model_tick_mono_s is not None:
       elapsed_ns = round(model_tick * 1e9) - round(self.last_model_tick_mono_s * 1e9)
       if elapsed_ns <= 0:
         return unknown  # Re-reading one model event cannot renew a stop scene.
       if elapsed_ns > round(MAX_FRAME_GAP_S * 1e9):
-        self.reset()
+        self.invalidate()
         return unknown
     if lead.present:
       distance = _finite(lead.distance_m, 0.0, 500.0)
       lead_speed = _finite(lead.speed_mps, -30.0, 100.0)
       lead_prob = _finite(lead.model_probability, 0.0, 1.0)
       if None in (distance, lead_speed, lead_prob) or _boolean(lead.radar) is None or (_boolean(lead.tracked) is None and not self.committed):
-        self.reset()
+        self.invalidate()
         return unknown
     else:
       distance, lead_speed, lead_prob = None, None, None
@@ -225,7 +237,7 @@ class StopLightDetector:
         self.light_detected = True
         hold, reason = self._standstill(frame, True)
         return StopObservation(True, hold, reason, None)
-      self.reset()
+      self.invalidate()
       return unknown
     # At standstill the speed-scaled detector has a zero threshold. Its raw
     # 50 m fallback therefore needs the same spatial release band as an approach;
@@ -247,7 +259,7 @@ class StopLightDetector:
       driving_in_curve=frame.driving_in_curve,
     )
     if turn_scene is None:
-      self.reset()
+      self.invalidate()
       return unknown
     if turn_scene or frame.traffic_mode or speed * MPS_TO_MPH > 75.0:
       self._reset_light()

@@ -107,6 +107,8 @@ class ConditionalModeHost:
       self.policy.reset()
       self.choice = selection.choice
     safe_value = _fresh_flag(safe_mode, now_ns=now_mono_ns, barrier_ns=self.projector.barrier_mono_ns)
+    if safe_value is True:
+      self.projector.stop_detector.reset()
     projected = self.projector.project(
       sm,
       cp,
@@ -120,7 +122,7 @@ class ConditionalModeHost:
       signal_options=signal_options,
     )
     authority = projected.authority
-    if authority is not None and (not authority.fresh or not authority.system_long_capable or authority.safe_mode or
+    if authority is not None and authority.fresh and (not authority.system_long_capable or authority.safe_mode or
                                   not authority.driving_enabled or not authority.long_active):
       self.projector.stop_detector.reset()
     manual_valid = (
@@ -141,7 +143,6 @@ class ConditionalModeHost:
       self.policy.reset()
       return HostProposal(selection.choice, projected, None, None, 'authority_unavailable', settings_revision)
     if authority is None:
-      self.projector.stop_detector.reset()
       self.policy.reset()
       return HostProposal(selection.choice, projected, None, None, 'authority_unavailable', settings_revision)
     decision = self.policy.step(now_mono_ns / 1e9, selection.choice,

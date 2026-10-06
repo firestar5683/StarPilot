@@ -37,7 +37,8 @@ def test_unknown_source_and_cold_invalid_geometry_cannot_authorize_commit():
   assert not detector.committed
   detector = prime()
   assert detector.step(replace(frame(30), traffic_mode=None)).light_detected is None
-  assert not detector.committed
+  assert detector.committed
+  assert not detector.standstill_committed
 
 
 def test_manual_chill_and_personality_mode_change_do_not_override_committed_stop():
@@ -57,3 +58,25 @@ def test_pedal_override_releases_acquired_stop_without_authority_recreation():
   detector = prime()
   result = detector.step(frame(30, horizon=6.684, speed=4.27, pedal=True))
   assert not result.light_detected and not detector.committed
+
+
+def test_standstill_commit_survives_unknowns_and_requires_continuous_clear_evidence():
+  detector = prime()
+  detector.step(frame(30, speed=0., standstill=True, horizon=6., model_should_stop=True))
+  assert detector.standstill_committed
+  for tick in range(31, 45):
+    observation = detector.step(replace(frame(tick), traffic_mode=None))
+    assert observation.light_detected is None
+    assert detector.standstill_committed
+  for tick in range(45, 65):
+    detector.step(frame(tick, speed=0., standstill=True, horizon=192., model_should_stop=True))
+    assert detector.standstill_committed
+  for tick in range(65, 71):
+    detector.step(frame(tick, speed=0., standstill=True, horizon=192., model_should_stop=False))
+  detector.step(replace(frame(71), traffic_mode=None))
+  for tick in range(72, 79):
+    detector.step(frame(tick, speed=0., standstill=True, horizon=192., model_should_stop=False))
+    assert detector.standstill_committed  # Unknown time contributes no clear dwell.
+  for tick in range(79, 86):
+    detector.step(frame(tick, speed=0., standstill=True, horizon=192., model_should_stop=False))
+  assert not detector.committed and not detector.standstill_committed

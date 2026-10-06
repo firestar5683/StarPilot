@@ -33,6 +33,7 @@ def frame(
   steering=0.0,
   measured_curve=False,
   model_time=8.0,
+  model_should_stop=False,
 ):
   return StopFrame(
     observed_mono_s=100.0 + tick * 0.05,
@@ -52,6 +53,7 @@ def frame(
     car_fingerprint='HYUNDAI_IONIQ_6',
     dashboard_stop_sign=dashboard_sign,
     pedal_override=pedal,
+    model_should_stop=model_should_stop,
   )
 
 
