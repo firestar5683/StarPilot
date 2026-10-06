@@ -53,7 +53,7 @@ export const VasmPage = {
       !!this.state.data.rows[this.state.data.editorRow]?.available && this.state.status === "ready" &&
       !this.state.pending && !this.state.reviewing },
     supportedFormat() { return FORMATS.some(([w, h]) => w === this.state.width && h === this.state.height) },
-    canDraw() { return this.canEdit && this.supportedFormat },
+    canDraw() { return this.canEdit && this.supportedFormat && !!this.state.imageName },
   },
   methods: {
     point(event) {
@@ -159,10 +159,9 @@ export const VasmPage = {
   },
   template: `
     <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings">
-      <header class="gx-card gx-settings__header"><div><h2>V-ASM Spot Monitoring</h2></div>
-        <button type="button" class="gx-btn gx-btn--tonal" @click="go('/theme_maker')">Position V-ASM widget</button></header>
+      <header class="gx-settings__header"><div><h2>V-ASM Spot Monitoring</h2></div>
+        <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
-      <GxNotice tone="info">Preview the cabin camera and edit saved visual monitoring settings while parked.</GxNotice>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
       <template v-else>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
@@ -170,28 +169,28 @@ export const VasmPage = {
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
         <div v-if="state.data" class="gx-settings__body">
+
+          <section class="gx-card gx-vasm__editor" aria-label="Camera window region editor">
+            <h3>Camera Window Regions</h3>
+            <p>The display is mirrored: vehicle left is camera right; vehicle right is camera left. Trace visible side glass, leaving pillars and interior out.</p>
+            <p class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · 5 seconds…" : state.imageName ? "Snapshot ready" : "Turn off the vehicle to take a snapshot." }}</p>
+            <div class="gx-actions">
+              <button v-for="side in ['cameraRight', 'cameraLeft']" :key="side" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.activeSide === side" :disabled="!canDraw" :aria-label="displaySide(side)" @click="state.activeSide=side">{{ side === 'cameraRight' ? 'Left' : 'Right' }}</button>
+              <button type="button" class="gx-icon-btn" :disabled="!canDraw || !state[state.activeSide]?.length" aria-label="Undo last region point" title="Undo last point" @click="undo(state.activeSide)"><i class="bi bi-arrow-counterclockwise"></i></button>
+              <button type="button" class="gx-icon-btn" :disabled="!canDraw || !state[state.activeSide]?.length" aria-label="Clear selected window region" title="Clear region" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>
+              <button type="button" class="gx-btn" :disabled="!canDraw" aria-label="Save Regions" @click="saveRegions">Save</button>
+            </div>
+            <canvas ref="canvas" class="gx-vasm__canvas" :aria-label="'Mirrored camera window canvas, editing ' + displaySide(state.activeSide)"
+              @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp"></canvas>
+            <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
+            <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
+            <p class="gx-note">A saved choice alone does not activate monitoring.</p>
+          </section>
           <section class="gx-card gx-settings__section" aria-label="Saved settings">
             <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.page + ':' + index" :row="row" :index="index"
               :disabled="!state.data.parked || state.status !== 'ready' || state.reviewing || !!state.pending"
               :save-value="(index, value) => feed.previewValue(index, value)"
               @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
-          </section>
-          <section class="gx-card gx-vasm__editor" aria-label="Camera window region editor">
-            <h3>Camera Window Regions</h3>
-            <p>The display is mirrored: vehicle left is camera right; vehicle right is camera left. Trace visible side glass, leaving pillars and interior out.</p>
-            <p v-if="!state.imageName && !state.cameraError" class="gx-note" role="status">Waiting for a live cabin frame. Turn off the vehicle to preview and edit the regions.</p>
-            <div class="gx-vasm__sides"><div v-for="side in ['cameraRight', 'cameraLeft']" :key="side" class="gx-vasm__side">
-              <button type="button" class="gx-btn" :class="{'gx-btn--tonal':state.activeSide !== side}" :disabled="!canDraw" @click="state.activeSide=side">{{ displaySide(side) }}</button>
-              <span>{{ state[side].length }} vertices</span>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!canDraw || !state[side].length" @click="undo(side)">Undo last</button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!canDraw || !state[side].length" @click="clear(side)">Clear side</button>
-            </div></div>
-            <canvas ref="canvas" class="gx-vasm__canvas" :aria-label="'Mirrored camera window canvas, editing ' + displaySide(state.activeSide)"
-              @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp"></canvas>
-            <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
-            <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
-            <button type="button" class="gx-btn" :disabled="!canDraw" @click="saveRegions">Review saved regions…</button>
-            <p class="gx-note">A saved choice alone does not activate monitoring.</p>
           </section>
         </div>
         <Teleport to="body"><div v-if="state.pending" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Confirm V-ASM preference">

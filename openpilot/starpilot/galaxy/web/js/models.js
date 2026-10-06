@@ -470,16 +470,16 @@ export const ModelsPage = {
 
         <section v-if="status.jetlink" class="gx-card">
           <div class="gx-section__header"><i aria-hidden="true" class="bi bi-usb-symbol"></i><span class="gx-section__title">Jetlink</span></div>
-          <div style="padding:var(--sp-3);">
-            <div class="gx-row">
+          <div class="gx-info-card">
+            <div class="gx-field-group">
               <label for="gx-jetlink-mode" class="gx-row__label">Remote model connection</label>
-              <GalaxySelect id="gx-jetlink-mode" :value="status.jetlink.mode" :disabled="!canAction('jetlink')" @change="configureJetlink($event.target.value)">
+              <GalaxySelect id="gx-jetlink-mode" class="gx-field" :value="status.jetlink.mode" :disabled="!canAction('jetlink')" @change="configureJetlink($event.target.value)">
                 <option value="off">Off</option>
                 <option value="usb" :disabled="!status.jetlink.supported || status.jetlink.chestnut">USB computer</option>
                 <option value="ios" :disabled="!status.jetlink.supported || status.jetlink.chestnut">iPhone / iPad</option>
               </GalaxySelect>
             </div>
-            <p role="status">{{ status.jetlink.state }}<span v-if="status.jetlink.model && !status.jetlink.active"> · selected: {{ status.jetlink.model }}</span></p>
+            <p class="gx-note" role="status"><span class="gx-chip">{{ status.jetlink.state }}</span><span v-if="status.jetlink.model && !status.jetlink.active"> · selected: {{ status.jetlink.model }}</span></p>
             <p v-if="status.jetlink.progress">{{ status.jetlink.progress }}</p>
             <p v-if="status.jetlink.reason" class="gx-model-reason">{{ status.jetlink.reason }}</p>
             <p v-if="status.jetlink.chestnut" class="gx-model-reason">Chestnut is connected. Jetlink stays off while Chestnut is fitted.</p>

@@ -35,7 +35,7 @@ function buttons(node) {
   return [...(node.type === "button" ? [node] : []), ...(Array.isArray(node.children) ? node.children.flatMap(buttons) : [])]
 }
 const context = { row, index: 2, control: "switch", currentValue: "Off", dimmed: false, locked: false,
-  onSwitch: () => {}, $emit: (...args) => events.push(args) }
+  showDefault: true, onSwitch: () => {}, $emit: (...args) => events.push(args) }
 const events = []
 const button = buttons(render(context, [])).find(node => node.children === "Default")
 assert.ok(button, "the button is actually rendered for a setting with a default")
@@ -44,7 +44,7 @@ assert.equal(button.props["aria-label"], "Reset Use StarPilot Widgets to default
 button.props.onClick()
 assert.deepEqual(events, [["reset-default", 2]])
 assert.equal(buttons(render({ ...context, locked: true }, [])).find(node => node.children === "Default").props.disabled, true)
-assert.equal(buttons(render({ ...context, row: { ...row, defaultValue: null } }, [])).some(node => node.children === "Default"), false)
+assert.equal(buttons(render({ ...context, row: { ...row, defaultValue: null }, showDefault: false }, [])).some(node => node.children === "Default"), false)
 
 // A successful mutation invalidates every active consumer without user refreshes.
 let savedValue = "Off"
@@ -64,3 +64,8 @@ await flush()
 assert.equal(dependent.at(-1).data.rows[0].value, "On")
 source.stop()
 consumer.stop()
+
+assert.equal(GalaxySettingRow.computed.showDefault.call({ row }), true)
+assert.equal(GalaxySettingRow.computed.showDefault.call({ row: { ...row, value: 'On' } }), false)
+assert.equal(GalaxySettingRow.computed.showDefault.call({ row: { ...row, value: '0.9', defaultValue: '0.90' } }), false)
+assert.equal(buttons(render({ ...context, showDefault: false }, [])).some(node => node.children === 'Default'), false)

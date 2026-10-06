@@ -9,7 +9,7 @@ const layout = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c',
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   const jpeg=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1344;c.height=760;const x=c.getContext('2d');x.fillStyle='#a04020';x.fillRect(0,0,c.width,c.height);return c.toDataURL('image/jpeg').split(',')[1]})
-  let confidence='0.90',version=0,saves=0,defaults=0,draws=0,cameraFail=false,disconnected=false
+  let confidence='0.85',version=0,saves=0,defaults=0,draws=0,cameraFail=false,disconnected=false
   const row={label:'Detection confidence',value:confidence,minimum:0.8,maximum:1,step:0.01,available:true,action:true,choices:[],defaultValue:'0.90',resetAvailable:true,revision:'r1'}
   await page.route('**/data/runtime.json',r=>r.fulfill({json:{schemaVersion:1,monitor:'local'}}))
   await page.route('**/api/**',async r=>{
@@ -50,6 +50,18 @@ const layout = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c',
   await page.evaluate(()=>location.hash='/cameras/pip')
   await page.getByLabel('Live selected crop preview',{exact:true}).waitFor()
   await page.waitForFunction(()=>{const c=document.querySelector('.gx-pip__preview canvas')||[...document.querySelectorAll('canvas')].at(-1);return c?.width===300&&c.getContext('2d').getImageData(20,20,1,1).data[0]>100})
+  await page.setViewportSize({width:390,height:844})
+  assert.equal(await page.locator('.gx-pip input[type="range"]').count(),1, 'only the independent detection setting remains; crop sliders are hidden')
+  assert.equal(await page.locator('.gx-pip__preview canvas').evaluate(canvas=>getComputedStyle(canvas).borderRadius),'50%')
+  const toolbarCenters=await page.locator('.gx-pip .gx-actions button').evaluateAll(buttons=>buttons.map(button=>{const rect=button.getBoundingClientRect();return rect.y+rect.height/2}))
+  assert.ok(Math.max(...toolbarCenters)-Math.min(...toolbarCenters)<1,'camera actions occupy one row')
+  await page.waitForFunction(()=>document.querySelector('.gx-camera-status')?.textContent==='Snapshot ready')
+  const frozenCaptures=draws
+  await page.waitForTimeout(1800)
+  assert.equal(draws,frozenCaptures,'camera stops fetching after warm-up')
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
+  await page.screenshot({path:'/tmp/galaxy-polish-pip-phone.png'})
+  await page.setViewportSize({width:1280,height:900})
   await page.evaluate(()=>location.hash='/theme_maker')
   await page.getByRole('button',{name:'PiP left side camera',exact:true}).waitFor()
   await page.getByRole('button',{name:'PiP right side camera',exact:true}).waitFor()
@@ -94,6 +106,7 @@ const layout = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c',
   assert.equal(await page.getByText('Waiting for a live cabin frame.',{exact:false}).count(),0)
   cameraFail=false
   await page.evaluate(()=>location.hash='/vehicle')
+  await page.getByRole('heading',{name:'Vehicle Selection',exact:true}).waitFor()
   const vehicleDefault=page.getByRole('button',{name:'Reset Detection confidence to default'})
   await vehicleDefault.waitFor()
   await page.evaluate(()=>{

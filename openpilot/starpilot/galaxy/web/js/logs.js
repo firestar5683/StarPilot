@@ -49,8 +49,8 @@ export const Logs = {
         <MenuTile icon="bi-terminal" title="tmux Live View" description="Read the launcher console tail" @select="openTmux" />
         <MenuTile icon="bi-wrench" title="Troubleshoot" description="Read device and vehicle diagnostics" @select="openTroubleshoot" />
       </div>
-      <TroubleshootPage v-else-if="path === '/logs/troubleshoot'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
-      <TmuxPage v-else-if="path === '/logs/tmux'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
+      <TroubleshootPage v-else-if="path === '/logs/troubleshoot'" :mode="mode" :unauthorized="unauthorized" />
+      <TmuxPage v-else-if="path === '/logs/tmux'" :mode="mode" :unauthorized="unauthorized" />
       <template v-else-if="path === '/logs/monitor'"><SystemMonitor :mode="mode" :unauthorized="unauthorized" /></template>
       <template v-else-if="path === '/logs/crashes' && mode === 'local'">
 

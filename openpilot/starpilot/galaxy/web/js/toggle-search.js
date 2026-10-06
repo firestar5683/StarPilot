@@ -167,7 +167,11 @@ export const ToggleSearch = {
     onInput() { this.state.open = true; this.state.active = 0; if (this.enabled) this.index.load(); this.$nextTick(() => this.measure()) },
     onFocus() { this.openSearch() },
     onKey(event) {
-      if (event.key === "Escape") { this.state.query = ""; this.state.open = false; event.preventDefault(); return }
+      if (event.key === "Escape") {
+        this.state.query = ""; this.state.open = false; event.preventDefault()
+        this.$nextTick(() => { if (this.$refs.toggle?.getClientRects().length) this.$refs.toggle.focus() })
+        return
+      }
       if (!this.showResults) return
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault()
@@ -178,7 +182,7 @@ export const ToggleSearch = {
   },
   template: `
     <div class="gx-searchbox" :class="{ open: state.open }">
-      <button type="button" class="gx-icon-btn gx-search-toggle" aria-label="Search toggles" :aria-expanded="state.open"
+      <button type="button" ref="toggle" class="gx-icon-btn gx-search-toggle" :aria-label="state.open ? 'Close search' : 'Search toggles'" :aria-expanded="state.open"
         :disabled="!enabled" @click="toggle"><i class="bi" :class="state.open ? 'bi-x-lg' : 'bi-search'"></i></button>
       <div class="gx-searchwrap">
       <input ref="input" v-model="state.query" class="gx-search gx-appbar__search" type="search" placeholder="Search toggles…"

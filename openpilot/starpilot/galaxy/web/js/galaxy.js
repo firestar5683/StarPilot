@@ -56,7 +56,8 @@ export const GalaxyPage = {
     },
   },
   template: `
-    <div><h2 style="margin-top:0">Galaxy Tunnel</h2><p>Pair this comma for remote Galaxy access. Galaxy is installed as a Progressive Web App: open the paired link, then use <strong>Install app</strong> or <strong>Add to Home Screen</strong> for a full-screen, app-like experience with no app store download, its own window, instant launch from your home screen, and automatic updates. It needs an active connection, just like the browser version.</p>
+    <div class="gx-settings gx-tunnel"><h2>Galaxy Tunnel</h2>
+      <GxNotice tone="info" title="Your comma, wherever you are">Pair your device for secure remote Galaxy access.</GxNotice>
       <section v-if="mode !== 'local'" class="gx-card gx-message">Pairing is available on your comma.</section>
       <section v-else-if="loading" class="gx-card gx-message">Checking pairing status…</section>
       <section v-else class="gx-card" style="padding:var(--sp-4)">
@@ -74,9 +75,15 @@ export const GalaxyPage = {
           <p v-else-if="legacyPairingAvailable">An earlier Galaxy pairing is available. Enter its password to keep the saved link, or choose a new password (at least 8 characters) for a new link.</p>
           <p v-else>First choose a password, then pair your comma. Open Galaxy remotely using the link and QR code when the tunnel is connected.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="gx-field" style="flex:1;min-width:200px" type="password" v-model="password" :minlength="legacyPassword || legacyPairingAvailable ? 6 : 8" maxlength="255" :autocomplete="legacyPassword ? 'current-password' : 'new-password'" :placeholder="legacyPassword ? 'Existing Galaxy password' : legacyPairingAvailable ? 'Existing or new Galaxy password' : 'New password (at least 8 characters)'" @keydown.enter="pair" />
-          <button type="button" class="gx-btn" :disabled="busy || password.trim().length < (legacyPassword || legacyPairingAvailable ? 6 : 8)" @click="pair">{{ busy ? 'Pairing…' : 'Set password & pair' }}</button></div>
+          <button type="button" class="gx-btn" :disabled="busy || password.trim().length < (legacyPassword || legacyPairingAvailable ? 6 : 8)" @click="pair">{{ busy ? 'Pairing…' : 'Pair' }}</button></div>
         </template>
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+      </section>
+      <section class="gx-card gx-info-card">
+        <h3><i class="bi bi-phone" aria-hidden="true"></i> Install Galaxy</h3>
+        <p>Open your paired link, then choose <strong>Install app</strong> or <strong>Add to Home Screen</strong>.</p>
+        <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>
+        <p class="gx-note">Galaxy is a Progressive Web App and needs an active connection.</p>
       </section>
       <LocalAccess :mode="mode" :on-unauthorized="unauthorized" />
     </div>

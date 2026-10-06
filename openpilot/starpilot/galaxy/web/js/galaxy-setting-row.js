@@ -42,6 +42,11 @@ export const GalaxySettingRow = {
   data() { return { preview: undefined, interacting: false, fineScrub: null, isFineScrubbing: false, updating: false } },
   computed: {
     control() { return settingControl(this.row) },
+    showDefault() {
+      const value = this.row.value, initial = this.row.defaultValue
+      if (initial === null || initial === undefined || this.row.page) return false
+      return Number.isFinite(Number(value)) && Number.isFinite(Number(initial)) ? Number(value) !== Number(initial) : String(value) !== String(initial)
+    },
     bounds() {
       const bounds = numericBounds(this.row)
       if (!bounds || !this.row.choices?.includes("Auto")) return bounds
@@ -158,13 +163,13 @@ export const GalaxySettingRow = {
   },
   beforeUnmount() { this.clearHoldTimer() },
   template: `
-    <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' || control === 'select' }">
+    <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' }">
       <div class="gx-row__info">
         <span class="gx-row__label">{{ row.label }}</span>
         <span v-if="row.reason" class="gx-row__desc">{{ row.reason.replace('https://firestar.link/discord', '') }}<a v-if="row.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
         <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ row.value }}</span>
       </div>
-      <button v-if="control !== 'slider' && row.defaultValue !== null && row.defaultValue !== undefined && !row.page" type="button"
+      <button v-if="control !== 'slider' && showDefault" type="button"
           class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
           :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
           @click="$emit('reset-default', index)">Default</button>
@@ -175,7 +180,7 @@ export const GalaxySettingRow = {
       <div v-else-if="control === 'slider'" class="gx-slider-row" :class="{ 'is-fine-scrubbing': isFineScrubbing }">
         <div class="gx-slider-header"><span class="gx-row__value">{{ displayValue }}</span>
           <span v-if="interacting" class="gx-slider-hint">{{ isFineScrubbing ? 'Fine scrubbing' : 'Hold to fine scrub' }}</span>
-          <button v-if="row.defaultValue !== null && row.defaultValue !== undefined && !row.page" type="button"
+          <button v-if="showDefault" type="button"
           class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
           :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
           @click="$emit('reset-default', index)">Default</button></div>
