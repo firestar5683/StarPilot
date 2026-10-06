@@ -242,9 +242,9 @@ def test_native_ui_keeps_loading_during_enumeration_then_reports_failure(previou
 
   ui = SimpleNamespace(sm=Messages(deviceState=SimpleNamespace(chestnutPresent=False), modelV2=SimpleNamespace(big=False)),
                        started=True, started_frame=1, chestnut_present=True, chestnut_compiled=True,
-                       chestnut_loading=True, chestnut_active=False, chestnut_state=states[previous])
+                       chestnut_loading=True, chestnut_active=False, chestnut_output_seen=False, chestnut_state=states[previous])
   env["_update_chestnut_state"](ui)
-  assert ui.chestnut_state is states.LOADING
+  assert ui.chestnut_state is states.FAILED
   ui.chestnut_loading = False
   env["_update_chestnut_state"](ui)
   assert ui.chestnut_state is states.FAILED

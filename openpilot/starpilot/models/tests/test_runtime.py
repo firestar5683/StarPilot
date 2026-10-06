@@ -51,10 +51,10 @@ class TestRuntimeSnapshot(unittest.TestCase):
     self.sm.logMonoTime["managerState"] = 100
     self.assertEqual(self.status().health, ModelHealth.UNAVAILABLE)
 
-  def test_pid_reuse_or_corrupt_chestnut_does_not_claim_identity(self):
+  def test_pid_reuse_or_actual_variant_mismatch_does_not_claim_identity(self):
     self.assertEqual(self.status(process_ticks=54322).health, ModelHealth.IDENTITY_UNAVAILABLE)
     self.assertEqual(self.status(process_ticks=0).health, ModelHealth.IDENTITY_UNAVAILABLE)
-    self.assertEqual(self.status(params=FakeParams(b"broken")).health, ModelHealth.FAILED)
+    self.assertEqual(self.status(params=FakeParams(b"broken")).health, ModelHealth.ACTIVE)
     self.sm.messages["modelV2"].big = True
     self.assertEqual(self.status(params=FakeParams(b"1")).health, ModelHealth.FAILED)
 
@@ -70,6 +70,8 @@ class TestRuntimeSnapshot(unittest.TestCase):
       self.load = ModelLoad(421, 54321, 1_800_000_000, BUNDLED_CURRENT, ModelVariant.CHESTNUT, "a" * 64)
       self.assertEqual(self.status(params=params).health, ModelHealth.ACTIVE)
       params.put_bool("ChestnutActive", False, block=True)
+      self.assertEqual(self.status(params=params).health, ModelHealth.ACTIVE)
+      self.sm.messages["modelV2"].big = False
       self.assertEqual(self.status(params=params).health, ModelHealth.FAILED)
 
   def test_real_manager_and_model_output_ipc(self):

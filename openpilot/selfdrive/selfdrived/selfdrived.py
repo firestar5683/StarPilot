@@ -219,18 +219,18 @@ class SelfdriveD:
     big_active = self.params.get("ChestnutActive")
     fresh = self.sm.seen['modelV2'] and self.sm.alive['modelV2'] and self.sm.valid['modelV2']
     published_big = fresh and self.sm['modelV2'].big
-    if big_active is True:
+    if published_big and (big_active is True or self.sm['deviceState'].chestnutPresent):
       self.big_model_chestnut = True
-    remote_big = (published_big and big_active is not True and not self.big_model_chestnut and
-                  not self.sm['deviceState'].chestnutPresent)
-    model_unavailable = (big_active is True or self.big_model_active) and self.sm.seen['modelV2'] and not fresh
+    model_unavailable = self.big_model_active and self.sm.seen['modelV2'] and not fresh
     demoted = self.big_model_active and fresh and not published_big
     chestnut_lost = self.big_model_active and self.big_model_chestnut and not self.sm['deviceState'].chestnutPresent
-    big_failed = (big_active is False and not remote_big) or model_unavailable or demoted or chestnut_lost
+    load_mismatch = big_active is True and fresh and not published_big
+    big_failed = (big_active is False and not published_big) or load_mismatch or model_unavailable or demoted or chestnut_lost
     if big_failed and not self.big_model_failed:
       self.events.add(EventName.bigModelFailed)
     self.big_model_failed = big_failed
-    if published_big or big_active is True:
+    # A successful load is not yet an executed frame; warmup output can be invalid.
+    if published_big:
       self.big_model_active = True
     control_current = self.sm.seen['carControl'] and self.sm.alive['carControl'] and self.sm.valid['carControl']
     axis_active = control_current and (self.sm['carControl'].latActive or self.sm['carControl'].longActive)
