@@ -105,6 +105,47 @@ class FeatureNavigationTests(unittest.TestCase):
       reset()
       self.assertEqual(controller.drag_x, 0)
 
+  def test_native_toyota_swap_has_separate_authority_on_both_profiles(self):
+    from opendbc.car.toyota.interface import CarInterface as ToyotaInterface
+    from opendbc.car.toyota.values import CAR as ToyotaCAR
+    from openpilot.starpilot.controllers.toyota_cruise import ToyotaCruisePreference
+    from openpilot.starpilot.ui import runtime_app
+
+    vehicle = ToyotaInterface.get_non_essential_params(ToyotaCAR.TOYOTA_COROLLA_TSS2)
+    self.assertTrue(vehicle.openpilotLongitudinalControl and vehicle.pcmCruise)
+    with tempfile.TemporaryDirectory() as directory:
+      params = Params(directory)
+      for profile in (Profile.LARGE, Profile.COMPACT):
+        with self.subTest(profile=profile):
+          session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+          session._mode, session.profile = runtime_app.ShellMode.SETTINGS, profile
+          session._unavailable = lambda _reason: None
+          session.feature_owner = FeatureSettingsOwner(params, session._feature_authority,
+            vehicle_fingerprint=lambda: vehicle.carFingerprint, vehicle_params=lambda: vehicle)
+          with patch.object(runtime_app, 'ui_state', NS(CP=vehicle)):
+            self.assertFalse(session._feature_authority('long'))
+            self.assertTrue(session._feature_authority('toyota_cruise'))
+            for expected in (True, False):
+              state = session.feature_owner.snapshot('profiles', parked=True, system_long=False,
+                                                      lateral_context=False, metric=False)
+              rows = {row.key: row for row in state.rows}
+              self.assertNotIn('CustomCruise', rows)
+              self.assertNotIn('CustomCruiseLong', rows)
+              self.assertTrue(rows['ReverseCruise'].available)
+              request = row_change(rows['ReverseCruise'])
+              assert request is not None
+              self.assertTrue(session.feature_request(request))
+              self.assertEqual(params.get_bool('ReverseCruise'), expected)
+              self.assertEqual(ToyotaCruisePreference(vehicle, params).update(), expected)
+            session._mode = runtime_app.ShellMode.ONROAD
+            with patch.object(session, '_favorite_authority', return_value=False):
+              self.assertFalse(session._feature_authority('toyota_cruise'))
+          session._mode = runtime_app.ShellMode.SETTINGS
+          other = HondaCarInterface.get_non_essential_params(HONDA_CAR.HONDA_CIVIC)
+          with patch.object(runtime_app, 'ui_state', NS(CP=other)):
+            self.assertFalse(session._feature_authority('toyota_cruise'))
+            self.assertFalse(session._feature_authority('long'))
+
   def test_native_saved_preferences_need_settings_or_favorite_context_not_cp(self):
     from openpilot.starpilot.ui import runtime_app
 

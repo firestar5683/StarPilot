@@ -532,7 +532,7 @@ class StarShellSession:
 
   def _feature_authority(self, group: str) -> bool:
     preference_authority = self._settings_preference_authority() or (
-      group in ("preferences", "lane", "long", "long_output", "slc", "aol") and self._favorite_authority())
+      group in ("preferences", "lane", "long", "toyota_cruise", "long_output", "slc", "aol") and self._favorite_authority())
     if group == "preferences":
       return preference_authority
     if group == "parked_preferences":
@@ -541,9 +541,12 @@ class StarShellSession:
     if cp is None or not getattr(cp, "carFingerprint", ""):
       return False
     if group in ("lane_change", "conditional", "conditional_wheel", "switchback_wheel", "aol_wheel",
-                 "lane", "long", "long_output", "slc", "torque", "aol", "vehicle"):
+                 "lane", "long", "toyota_cruise", "long_output", "slc", "torque", "aol", "vehicle"):
       if not preference_authority:
         return False
+      if group == "toyota_cruise":
+        from openpilot.starpilot.controllers.toyota_cruise import capability
+        return capability(cp) is not None
       if group == "vehicle":
         from opendbc.car.toyota.interface import toyota_auto_hold_supported
         return toyota_auto_hold_supported(cp)

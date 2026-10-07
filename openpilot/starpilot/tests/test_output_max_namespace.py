@@ -1,11 +1,11 @@
-"""The registered ceiling follows existing retained-namespace admission."""
+"""The retired key retains saved bytes without affecting the fixed output ceiling."""
 
 from pathlib import Path
 import tempfile
 import unittest
 
 from openpilot.common.params import Params
-from openpilot.starpilot.longitudinal.output_max import KEY, read_maximum
+from openpilot.starpilot.longitudinal.output_max import KEY, final_output
 from openpilot.starpilot.state_migration import MigrationRequired, prepare_manager_start
 
 
@@ -23,7 +23,7 @@ class OutputMaximumNamespaceTests(unittest.TestCase):
       prepare_manager_start(params, recovery, dry_run=True)
       prepare_manager_start(params, recovery)
       self.assertEqual(Path(params.get_param_path(KEY)).read_bytes(), raw)
-      self.assertEqual(read_maximum(Params(str(root / 'params'))).value, .6)
+      self.assertEqual(final_output(5.0), 4.0)
       legacy = Params(str(root / 'legacy'))
       namespace = Path(legacy.get_param_path())
       (namespace / 'AdvancedLongitudinalTune').write_bytes(b'0')
