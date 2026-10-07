@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from openpilot.starpilot.galaxy.device_state import DeviceStateSource, TTL_NS
-from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
+from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS, host_parked
 
 
 class Clock:
@@ -236,3 +236,19 @@ class SharedMessages(Messages):
   def __getitem__(self, key):
     self.reads.append(key)
     return self.values[key]
+
+
+class TestHostParked(unittest.TestCase):
+  HOST = {'SP_HOST_PARKED': '1', 'SP_HOST_RUNTIME': '1', 'SP_HOST_PREFIX': 'starpilot-dev-abc',
+          'OPENPILOT_PREFIX': 'starpilot-dev-abc'}
+
+  def test_only_host_launchers_with_runner_prefix_are_parked(self):
+    self.assertTrue(host_parked(self.HOST))
+    self.assertFalse(host_parked({}))
+    for key in ('SP_HOST_PARKED', 'SP_HOST_RUNTIME', 'OPENPILOT_PREFIX'):
+      self.assertFalse(host_parked({k: v for k, v in self.HOST.items() if k != key}))
+    self.assertFalse(host_parked(self.HOST | {'OPENPILOT_PREFIX': 'replay-demo'}))
+
+  def test_host_header_reports_parked_without_publishers(self):
+    with patch.dict('os.environ', self.HOST):
+      self.assertEqual(DeviceStateSource(Messages()).sample(), {'state': 'parked', 'maxAgeMs': TTL_NS // 1_000_000})

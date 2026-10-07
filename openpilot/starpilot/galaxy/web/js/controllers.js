@@ -1,3 +1,4 @@
+import { guardUnload } from "./unload-guard.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 
@@ -132,11 +133,12 @@ export const ControllersPage = {
     actions() { return this.state.status?.slots.slice(3) || [] },
   },
   mounted() {
+    this._stopUnloadGuard = guardUnload(() => this.dirty || this.state.busy)
     this.visibility = () => { if (this.mode === "local" && !document.hidden) this.feed.start(); else this.feed.stop() }
     document.addEventListener("visibilitychange", this.visibility)
     this.visibility()
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
+  beforeUnmount() { this._stopUnloadGuard(); document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
   watch: { mode() { this.visibility() } },
   methods: {
     async reload() {
