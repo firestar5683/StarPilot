@@ -103,6 +103,7 @@ def test_custom_lane_colors_keep_blue_correction_and_compact_torque_warning(modu
 
 def test_large_path_edges_preserve_outer_width_and_default_projection(monkeypatch):
   renderer = large.ModelRenderer.__new__(large.ModelRenderer)
+  renderer._clip_region = rl.Rectangle(-500, -500, 2160, 1800)
   points = np.array([[1, 0, 0], [10, 1, 0], [50, 2, 0]], dtype=np.float32)
   monkeypatch.setattr(renderer, '_path', NS(raw_points=points), raising=False)
   monkeypatch.setattr(renderer, '_lane_lines', [NS(raw_points=points.copy()) for _ in range(4)], raising=False)
@@ -144,9 +145,9 @@ def test_native_preview_uses_draft_only_and_shared_gradients(profile):
   assert not state.camera_available
 
 
-def test_compact_default_gradient_reuses_quantized_colors_and_keeps_filter_cadence(monkeypatch):
+@pytest.mark.parametrize("module", [large, compact])
+def test_default_gradient_reuses_quantized_colors_and_keeps_filter_cadence(monkeypatch, module):
   from types import SimpleNamespace
-  from openpilot.selfdrive.ui.mici.onroad import model_renderer as module
 
   renderer = module.ModelRenderer.__new__(module.ModelRenderer)
   renderer._path = SimpleNamespace(projected_points=np.array([[1, 2], [3, 4]], dtype=np.float32))
@@ -155,7 +156,7 @@ def test_compact_default_gradient_reuses_quantized_colors_and_keeps_filter_caden
   renderer._blend_filter = Mock(x=.731)
   renderer._experimental_mode = False
   renderer._rainbow_path = SimpleNamespace(refresh_enabled=Mock(return_value=False))
-  renderer._visual_status = Mock(return_value=module.UIStatus.ENGAGED)
+  renderer._visual_status = Mock(return_value=UIStatus.ENGAGED)
   renderer.road_style = {"pathMode": "acceleration"}
   monkeypatch.setattr(module, "ui_state", SimpleNamespace(params=object()))
   draw = Mock()
@@ -171,7 +172,8 @@ def test_compact_default_gradient_reuses_quantized_colors_and_keeps_filter_caden
     expected = module.ModelRenderer._blend_colors(module.NO_THROTTLE_COLORS, module.THROTTLE_COLORS, round(value * 100) / 100)
     assert [rgba(color) for color in gradient.colors] == [rgba(color) for color in expected]
     assert (gradient.start, gradient.end, gradient.stops) == ((0., 1.), (0., 0.), [0., .5, 1.])
-    np.testing.assert_array_equal(draw.call_args.args[1], [[11, 22], [13, 24]])
+    expected_points = [[11, 22], [13, 24]] if module is compact else [[1, 2], [3, 4]]
+    np.testing.assert_array_equal(draw.call_args.args[1], expected_points)
     if value == .734:
       assert gradient is previous
     previous = gradient

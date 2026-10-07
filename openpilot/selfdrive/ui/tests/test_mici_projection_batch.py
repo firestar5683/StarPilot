@@ -156,11 +156,19 @@ def test_transform_guard_preserves_render_projection_updates(renderer, monkeypat
     renderer._render(renderer._clip_region)
     sm.updated[service] = False
   assert renderer._update_model.call_count == 4
+  assert renderer._update_model.call_args.kwargs == {"update_lane_geometry": False}
   renderer._update_raw_points.assert_called_once_with(sm["modelV2"])
 
 
-def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(renderer):
+@pytest.mark.parametrize("renderer_class", [ModelRenderer, LargeModelRenderer])
+def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(renderer, renderer_class):
   import copy
+
+  if renderer_class is LargeModelRenderer:
+    large_renderer = object.__new__(renderer_class)
+    large_renderer._car_space_transform = renderer._car_space_transform
+    large_renderer._clip_region = renderer._clip_region
+    renderer = large_renderer
 
   points = np.column_stack((np.linspace(5, 100, 33), np.zeros(33), np.zeros(33))).astype(np.float32)
   renderer._path = ModelPoints(raw_points=points)
@@ -183,20 +191,67 @@ def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(r
   lead = SimpleNamespace(present=True, dRel=10.)
   renderer._update_model(lead, points[:, 0], update_lane_geometry=False)
   reference._update_model(lead, points[:, 0])
-  renderer._map_lines_to_polygons.assert_not_called()
+  # The large renderer also routes its single path polygon through the batch.
+  batch_calls = renderer._map_lines_to_polygons.call_args_list
+  assert len(batch_calls) == (1 if renderer_class is LargeModelRenderer else 0)
+  assert all(len(call.args[0]) == 1 for call in batch_calls)
   for line, expected, previous in zip([*renderer._lane_lines, *renderer._road_edges],
                                      [*reference._lane_lines, *reference._road_edges], lane_arrays, strict=True):
     assert line.projected_points is previous
     np.testing.assert_array_equal(line.projected_points, expected.projected_points)
   np.testing.assert_array_equal(renderer._path.projected_points, reference._path.projected_points)
   assert renderer._path.projected_points.shape != old_path.shape
-  assert renderer._acceleration_x_filter.update.call_count == reference._acceleration_x_filter.update.call_count == 2
-  assert renderer._acceleration_x_filter2.update.call_count == reference._acceleration_x_filter2.update.call_count == 2
+  filter_updates = 2 if renderer_class is ModelRenderer else 0
+  assert renderer._acceleration_x_filter.update.call_count == reference._acceleration_x_filter.update.call_count == filter_updates
+  assert renderer._acceleration_x_filter2.update.call_count == reference._acceleration_x_filter2.update.call_count == filter_updates
   assert renderer._update_experimental_gradient.call_count == reference._update_experimental_gradient.call_count == 2
   renderer._car_space_transform[0, 0] += 1
   renderer._update_model(lead, points[:, 0], update_lane_geometry=True)
-  renderer._map_lines_to_polygons.assert_called_once()
+  batch_calls = renderer._map_lines_to_polygons.call_args_list
+  assert len(batch_calls) == (3 if renderer_class is LargeModelRenderer else 1)
+  assert sum(len(call.args[0]) == 6 for call in batch_calls) == 1
   renderer._map_lines_to_polygons.reset_mock()
   renderer._clip_region.x += 1
   renderer._update_model(lead, points[:, 0], update_lane_geometry=False)
-  renderer._map_lines_to_polygons.assert_called_once()
+  batch_calls = renderer._map_lines_to_polygons.call_args_list
+  assert len(batch_calls) == (2 if renderer_class is LargeModelRenderer else 1)
+  assert sum(len(call.args[0]) == 6 for call in batch_calls) == 1
+
+
+def test_large_render_preserves_lead_cadence_and_lane_invalidation(renderer, monkeypatch):
+  from openpilot.selfdrive.ui.onroad import model_renderer
+
+  class Messages(dict):
+    recv_frame = {"extrinsicsCalibration": 1, "modelV2": 1}
+    updated = {"carParams": False, "modelV2": False, "radarState": False}
+    valid = {"radarState": True}
+
+  sm = Messages(selfdriveState=SimpleNamespace(experimentalMode=False),
+                extrinsicsCalibration=SimpleNamespace(height=[]), modelV2=object(),
+                radarState=SimpleNamespace(leadOne=None))
+  monkeypatch.setattr(model_renderer, "ui_state", SimpleNamespace(sm=sm, started_frame=0))
+  view = object.__new__(LargeModelRenderer)
+  view._path = SimpleNamespace(raw_points=np.array([[10, 0, 0]], dtype=np.float32))
+  view._longitudinal_control = True
+  view._update_model = Mock()
+  view._update_raw_points = Mock()
+  view._update_leads = Mock()
+  view._draw_lane_lines = Mock()
+  view._draw_path = Mock()
+  view._draw_lead_indicator = Mock()
+  view._transform_dirty = True
+  view._render(renderer._clip_region)
+  assert view._update_model.call_args.kwargs == {"update_lane_geometry": True}
+  assert not view._transform_dirty
+  view._render(renderer._clip_region)
+  assert view._update_model.call_count == view._update_leads.call_count == 1
+  sm.updated["radarState"] = True
+  view._render(renderer._clip_region)
+  assert view._update_model.call_args.kwargs == {"update_lane_geometry": False}
+  sm.updated["radarState"] = False
+  sm.updated["modelV2"] = True
+  view._render(renderer._clip_region)
+  assert view._update_model.call_args.kwargs == {"update_lane_geometry": True}
+  view._update_raw_points.assert_called_once_with(sm["modelV2"])
+  assert view._update_model.call_count == view._update_leads.call_count == 3
+  assert view._draw_path.call_count == view._draw_lead_indicator.call_count == 4

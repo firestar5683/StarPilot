@@ -24,8 +24,8 @@ def update_frame(preview=None, controllers=None):
 
 
 def main():
-  c4 = COMMA_HARDWARE and HARDWARE.get_device_type() == "mici"
-  cores = {6} if c4 else {5}
+  camera_core_ui = COMMA_HARDWARE and HARDWARE.get_device_type() in ("mici", "tici", "tizi")
+  cores = {6} if camera_core_ui else {5}
   main_thread_configured = False
   config_realtime_process(0, Priority.UI)
 
@@ -58,7 +58,7 @@ def main():
   try:
     for should_render, frame_time, cpu_time in gui_app.render(before_frame=lambda: update_frame(preview, controllers)):
       if should_render:
-        if c4 and not main_thread_configured:
+        if camera_core_ui and not main_thread_configured:
           # Share the camera core with normal scheduling, without FIFO display
           # work preempting camera work or waiting on the driving core.
           drop_realtime()
