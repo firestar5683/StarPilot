@@ -1192,6 +1192,8 @@ def malibu_hybrid_profile(cp):
     if len(cp.safetyConfigs) != 1:
       return None
     profile = MALIBU_HYBRID_PROFILES.get(int(cp.safetyConfigs[0].safetyParam))
+    if profile is None:
+      return None
     flags = int(GMFlags.CC_LONG | (GMFlags.NO_CAMERA if profile and profile.removed else 0))
     if cp.flags & GMFlags.PEDAL_LONG:
       flags |= int(GMFlags.PEDAL_LONG)
