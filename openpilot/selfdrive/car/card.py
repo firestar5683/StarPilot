@@ -32,7 +32,7 @@ from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
-from openpilot.starpilot.aol.intent import disarming_fault, independent_axis_requested, read_settings
+from openpilot.starpilot.aol.intent import AolProcessFaultContext, disarming_fault, independent_axis_requested, read_settings
 from opendbc.car.honda.stock_aol import (
   qualified as qualified_honda_stock_aol, native_observation as honda_native_observation,
   temporary_restriction as honda_temporary_restriction,
@@ -137,6 +137,7 @@ class Car:
   RI: RadarInterfaceBase
   CP: car.CarParams
   controller_cruise_sock = None
+  aol_process_fault_context = None
   curve_replay = False
   car_params_published = False
 
@@ -150,7 +151,7 @@ class Car:
     self.conditional_replay = os.getenv('CONDITIONAL_MODE_REPLAY_RUNTIME') == '1' or feature_requested(self.params, 'conditional')
     subscribed_services = ['pandaStates', 'carControl', 'onroadEvents', 'deviceState']
     if self.aol_replay:
-      subscribed_services.append('aolSafetyWire')
+      subscribed_services.extend(('aolSafetyWire', 'managerState'))
     if self.slc_replay:
       subscribed_services.append('slcState')
     self.sm = messaging.SubMaster(subscribed_services)
@@ -322,7 +323,7 @@ class Car:
     aol_policy = aol_policy_for(self.CP)
     if aol_policy.full_axis_runtime_required and not self.aol_replay:
       self.aol_replay = True
-      subscribed_services.append('aolSafetyWire')
+      subscribed_services.extend(('aolSafetyWire', 'managerState'))
       self.sm = messaging.SubMaster(subscribed_services)
       self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
@@ -334,6 +335,7 @@ class Car:
                             if self.aol_qualified and self.aol_settings is not None else None)
     self.distance_personality_tracker = ButtonTracker() if aol_policy.distance_personality else None
     self.aol_sequence = 0
+    self.aol_process_fault_context = AolProcessFaultContext() if self.aol_replay else None
     if self.aol_qualified:
       self.CP.safetyConfigs[0].safetyParam |= aol_policy.safety_param_addition
       self.CP.alternativeExperience |= aol_policy.alternative_experience_addition
@@ -443,12 +445,15 @@ class Car:
                                              enabled=bool(host_control_enabled and can_rcv_valid and not self.params.get_bool("SafeMode")))
     consumed = self.v_cruise_helper.slc_consumed_button
     if self.aol_card_intent is not None:
+      if self.aol_process_fault_context is None:
+        self.aol_process_fault_context = AolProcessFaultContext()
+      self.aol_process_fault_context.observe(self.sm, now_ns)
       fault_active = None
       event_ns = int(self.sm.logMonoTime['onroadEvents'])
       if (getattr(self.aol_card_intent, 'requires_fault_observation', self.aol_card_intent.explicit_latch) and
           self.sm.updated['onroadEvents'] and
           self.sm.valid['onroadEvents'] and 0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
-        fault_active = disarming_fault(self.sm['onroadEvents'], CS)
+        fault_active = self.aol_disarming_fault(CS, event_ns, now_ns)
       angle_aol = qualified_angle_aol(self.CP, marked_only=True)
       ford_aol = qualified_ford_aol(self.CP, marked_only=True)
       honda_aol = qualified_honda_stock_aol(self.CP, marked_only=True)
@@ -621,6 +626,10 @@ class Car:
       # Initialization owns this edge; evaluate commands against its final speed.
       self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode,
                                             resume=self.vehicle_startup.consume_cruise_resume())
+
+  def aol_disarming_fault(self, CS, event_ns: int, now_ns: int) -> bool:
+    return disarming_fault(self.sm['onroadEvents'], CS,
+      temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns))
 
   def observe_aol_calibration(self, CS, now_ns: int, standard_enabled: bool) -> None:
     calibration_events = None

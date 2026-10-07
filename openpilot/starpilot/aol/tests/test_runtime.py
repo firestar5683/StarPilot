@@ -808,5 +808,144 @@ class IpcAxisContractTests(unittest.TestCase):
     self.assertFalse(decision.native_acknowledged)
 
 
+class UiProcessIntentTests(unittest.TestCase):
+  def make_card(self):
+    from openpilot.selfdrive.car.card import Car
+    from openpilot.starpilot.aol.intent import AolProcessFaultContext
+
+    card = Car.__new__(Car)
+    card.aol_process_fault_context = AolProcessFaultContext()
+    class SM:
+      seen = {'managerState': True}
+      valid = {'managerState': True}
+      alive = {'managerState': True}
+      logMonoTime = {'managerState': 1_000_000_000}
+      events = Events()
+      processes = []
+
+      def __getitem__(self, key):
+        if key == 'managerState':
+          return SimpleNamespace(processes=self.processes)
+        if key == 'onroadEvents':
+          return self.events.to_msg()
+        raise KeyError(key)
+    card.sm = SM()
+    return card
+
+  def observe(self, card, stamp, failed):
+    card.sm.logMonoTime['managerState'] = stamp
+    card.sm.processes = [SimpleNamespace(name=name, running=name not in failed, shouldBeRunning=True)
+                         for name in ('ui', 'modeld', 'controlsd', 'card', 'pandad', 'unknown_service')]
+    card.aol_process_fault_context.observe(card.sm, stamp + 1)
+
+  def test_actual_card_ui_fault_pause_recovery_and_ordinary_cancel_handoff(self):
+    from openpilot.starpilot.aol.tests.test_ioniq6_stock_repair import stock
+    from openpilot.starpilot.car.hyundai.aol import create_intent, native_latch_rejected
+
+    card = self.make_card()
+    cp = stock(True)
+    cp.openpilotLongitudinalControl, cp.pcmCruise = True, False
+    cp.safetyConfigs[0].safetyParam = 0x8895
+    owner = create_intent(cp, AolSettings(True, 0., 9, 0, (0, 0, 0), (0, 0, 0)))
+    state = car_state()
+    state.cruiseState.available = True
+    owner.update(state, now_ns=100)
+    state.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
+    owner.update(state, now_ns=200)
+    state.buttonEvents = []
+    self.assertTrue(owner.allowed_latch)
+    self.observe(card, 1_000_000_000, {'ui'})
+    card.sm.events.add(log.OnroadEvent.EventName.processNotRunning)
+    event_ns = 1_020_000_000
+    self.assertTrue(card.sm.events.contains(ET.NO_ENTRY))
+    self.assertTrue(card.sm.events.contains(ET.SOFT_DISABLE))
+    fault = card.aol_disarming_fault(state, event_ns, event_ns + 1)
+    self.assertFalse(fault)
+    owner.update(state, fault_active=fault)
+    self.assertTrue(owner.allowed_latch)
+    native = SimpleNamespace(requestedLateral=False, requestedLongitudinal=False,
+                             lateralAllowed=False, longitudinalAllowed=False)
+    self.assertFalse(native_latch_rejected(cp, native))
+    for standard in (True, False):
+      paused = decide_axes(standard_lateral=standard, standard_longitudinal=standard, intent=SimpleNamespace(
+        allowedLatch=owner.allowed_latch, pauseLateral=False, pauseLongitudinal=False), native=native,
+        car_state=state, initialized=True, model_ready=True, no_entry=True, immediate_disable=False,
+        dm_lockout=False, pause_brake_mps=0)
+      self.assertTrue(owner.allowed_latch)
+      self.assertEqual(paused.mode, 'off')
+      self.assertFalse(paused.desired_lateral or paused.desired_longitudinal)
+    # Manager recovery precedes clearing the old fault event, as in the route.
+    self.observe(card, 1_400_000_000, set())
+    self.assertFalse(card.aol_disarming_fault(state, event_ns, 1_410_000_000))
+    card.sm.events.clear()
+    owner.update(state, fault_active=card.aol_disarming_fault(state, 1_420_000_000, 1_420_000_001))
+    native.requestedLateral = native.lateralAllowed = True
+    recovered = decide_axes(standard_lateral=False, standard_longitudinal=False,
+      intent=SimpleNamespace(allowedLatch=owner.allowed_latch, pauseLateral=False, pauseLongitudinal=False),
+      native=native, car_state=state, initialized=True, model_ready=True, no_entry=False,
+      immediate_disable=False, dm_lockout=False, pause_brake_mps=0)
+    self.assertEqual(recovered.mode, 'lateralOnly')  # No normal engagement or fresh button required.
+    self.assertTrue(recovered.desired_lateral)
+    self.assertFalse(recovered.desired_longitudinal)
+    native.requestedLongitudinal = native.longitudinalAllowed = True
+    for standard, expected in ((True, 'combined'), (False, 'lateralOnly')):
+      state.buttonEvents = ([] if standard else
+        [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.altButton2, pressed=True)])
+      owner.update(state, standard_enabled=standard)
+      self.assertTrue(owner.allowed_latch)
+      native.requestedLongitudinal = native.longitudinalAllowed = standard
+      decision = decide_axes(standard_lateral=standard, standard_longitudinal=standard,
+        intent=SimpleNamespace(allowedLatch=owner.allowed_latch, pauseLateral=False, pauseLongitudinal=False),
+        native=native, car_state=state, initialized=True, model_ready=True, no_entry=False,
+        immediate_disable=False, dm_lockout=False, pause_brake_mps=0)
+      self.assertEqual(decision.mode, expected)
+    # Real requested-lateral revocation and critical faults keep their authority.
+    native.lateralAllowed = False
+    self.assertTrue(native_latch_rejected(cp, native))
+    owner.update(state, now_ns=2_000_000_000, native_rejection_ns=1_990_000_000)
+    self.assertFalse(owner.allowed_latch)
+    owner.allowed_latch = True
+    state.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.cancel, pressed=True)]
+    owner.update(state)
+    self.assertFalse(owner.allowed_latch)  # Physical CANCEL remains intentional withdrawal.
+
+  def test_context_denies_unknown_mixed_stale_missing_and_critical_faults(self):
+    card = self.make_card()
+    state = car_state()
+    card.sm.events.add(log.OnroadEvent.EventName.processNotRunning)
+    event_ns = 1_020_000_000
+    self.assertTrue(card.aol_disarming_fault(state, event_ns, event_ns + 1))
+    for failures in ({'controlsd'}, {'unknown_service'}, {'ui', 'modeld'}, set()):
+      with self.subTest(failures=failures):
+        card.aol_process_fault_context.history.clear()
+        self.observe(card, 1_000_000_000, failures)
+        self.assertTrue(card.aol_disarming_fault(state, event_ns, event_ns + 1))
+    self.observe(card, 1_100_000_000, {'ui'})
+    self.assertTrue(card.aol_disarming_fault(state, 1_120_000_000, 2_600_000_001))
+    self.observe(card, 1_150_000_000, {'ui', 'modeld'})
+    self.assertTrue(card.aol_disarming_fault(state, 1_120_000_000, 1_160_000_000))
+    card.aol_process_fault_context.history.clear()
+    self.observe(card, 1_100_000_000, {'ui'})
+    card.sm.processes[0].shouldBeRunning = False
+    card.aol_process_fault_context.observe(card.sm, 1_120_000_000)
+    self.assertTrue(card.aol_disarming_fault(state, 1_120_000_000, 1_120_000_001))
+    self.observe(card, 1_100_000_000, {'ui'})
+    for source_flag in ('seen', 'valid', 'alive'):
+      with self.subTest(source_flag=source_flag):
+        getattr(card.sm, source_flag)['managerState'] = False
+        card.aol_process_fault_context.observe(card.sm, 1_120_000_000)
+        self.assertTrue(card.aol_disarming_fault(state, 1_120_000_000, 1_120_000_001))
+        getattr(card.sm, source_flag)['managerState'] = True
+        self.observe(card, 1_100_000_000, {'ui'})
+    for name in (log.OnroadEvent.EventName.controlsMismatch, log.OnroadEvent.EventName.steerUnavailable):
+      with self.subTest(name=name):
+        card.sm.events.add(name)
+        self.assertTrue(card.aol_disarming_fault(state, 1_120_000_000, 1_120_000_001))
+        card.sm.events.clear()
+        card.sm.events.add(log.OnroadEvent.EventName.processNotRunning)
+    state.steerFaultPermanent = True
+    self.assertTrue(card.aol_disarming_fault(state, 1_120_000_000, 1_120_000_001))
+
+
 if __name__ == '__main__':
   unittest.main()

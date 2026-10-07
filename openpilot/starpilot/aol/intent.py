@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 from opendbc.car.structs import car
 from openpilot.cereal import log
 from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS
+from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, Press
 
 ButtonType = car.CarState.ButtonEvent.Type
@@ -73,7 +75,44 @@ def independent_axis_requested(settings: AolSettings, *, include_auxiliary: bool
   return settings.enabled or any(action in pause for action in actions)
 
 
-def disarming_fault(events, CS) -> bool:
+PROCESS_FAULT_MAX_AGE_NS = 1_500_000_000
+
+
+class AolProcessFaultContext:
+  def __init__(self):
+    self.history = deque(maxlen=4)
+
+  def observe(self, sm, now_ns: int) -> None:
+    stamp = int(sm.logMonoTime.get('managerState', 0))
+    if not (getattr(sm, 'seen', {}).get('managerState', False) and
+            sm.valid.get('managerState', False) and sm.alive.get('managerState', False) and
+            0 < stamp <= now_ns and now_ns - stamp <= PROCESS_FAULT_MAX_AGE_NS):
+      self.history.clear()
+      return
+    processes = sm['managerState'].processes
+    ui_requested = any(p.name == 'ui' and p.shouldBeRunning for p in processes)
+    if not ui_requested or (self.history and stamp < self.history[-1][0]):
+      self.history.clear()
+      return
+    if not self.history or stamp > self.history[-1][0]:
+      self.history.append((stamp, frozenset(driving_process_failures(processes))))
+
+  def temporary_ui_failure(self, event_ns: int, now_ns: int) -> bool:
+    if not self.history or not 0 < event_ns <= now_ns:
+      return False
+    latest_stamp, latest_failures = self.history[-1]
+    if not (latest_stamp <= now_ns and now_ns - latest_stamp <= PROCESS_FAULT_MAX_AGE_NS and
+            latest_failures <= {'ui'}):
+      return False
+    # Recovery may arrive before the corresponding onroadEvents update. Use
+    # the manager observation that produced this fault, never later UI health.
+    for stamp, failures in reversed(self.history):
+      if stamp <= event_ns:
+        return now_ns - stamp <= PROCESS_FAULT_MAX_AGE_NS and failures == {'ui'}
+    return False
+
+
+def disarming_fault(events, CS, *, temporary_ui_process_failure: bool = False) -> bool:
   """Temporary steering/known non-driving gears pause output, not driver intent."""
   if CS.steerFaultPermanent:
     return True
@@ -81,6 +120,8 @@ def disarming_fault(events, CS) -> bool:
     if event.immediateDisable:
       return True
     if event.softDisable:
+      if event.name == log.OnroadEvent.EventName.processNotRunning and temporary_ui_process_failure:
+        continue
       if event.name in (log.OnroadEvent.EventName.steerTempUnavailable, log.OnroadEvent.EventName.seatbeltNotLatched):
         continue
       if event.name == log.OnroadEvent.EventName.wrongGear and CS.gearShifter != GearShifter.unknown:
