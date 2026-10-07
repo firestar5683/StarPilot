@@ -129,9 +129,23 @@ def test_transform_guard_preserves_render_projection_updates(renderer, monkeypat
   renderer._render(renderer._clip_region)
   assert renderer._update_model.call_count == 1
   assert not renderer._transform_dirty
+  disabled_leads = renderer._lead_vehicles
   renderer.set_transform(renderer._car_space_transform.copy())
   renderer._render(renderer._clip_region)
   assert renderer._update_model.call_count == 1
+  assert renderer._lead_vehicles is disabled_leads
+  renderer._lead_indicator_enabled = True
+  renderer._update_leads = Mock()
+  renderer._draw_lead_indicator = Mock()
+  renderer._render(renderer._clip_region)
+  renderer._update_leads.assert_called_once_with(sm)
+  renderer._lead_indicator_enabled = False
+  renderer._render(renderer._clip_region)
+  reset_leads = renderer._lead_vehicles
+  assert reset_leads is not disabled_leads
+  assert all(lead.info is None and not lead.bar.size for lead in reset_leads)
+  renderer._render(renderer._clip_region)
+  assert renderer._lead_vehicles is reset_leads
   changed = renderer._car_space_transform.copy()
   changed[0, 0] += 1
   renderer.set_transform(changed)
@@ -143,3 +157,46 @@ def test_transform_guard_preserves_render_projection_updates(renderer, monkeypat
     sm.updated[service] = False
   assert renderer._update_model.call_count == 4
   renderer._update_raw_points.assert_called_once_with(sm["modelV2"])
+
+
+def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(renderer):
+  import copy
+
+  points = np.column_stack((np.linspace(5, 100, 33), np.zeros(33), np.zeros(33))).astype(np.float32)
+  renderer._path = ModelPoints(raw_points=points)
+  renderer._lane_lines = [ModelPoints(raw_points=points + np.array([0, y, 0], dtype=np.float32)) for y in (-3.5, -1.8, 1.8, 3.5)]
+  renderer._road_edges = [ModelPoints(raw_points=points + np.array([0, y, 0], dtype=np.float32)) for y in (-6, 6)]
+  renderer._lane_line_probs = np.array([.6, .9, .8, .5], dtype=np.float32)
+  renderer._acceleration_x = np.array([.2] * 33, dtype=np.float32)
+  renderer._acceleration_x_filter = Mock()
+  renderer._acceleration_x_filter2 = Mock()
+  renderer._experimental_mode = False
+  renderer._car_space_transform[1, 2] = 480
+  renderer._path_offset_z = 1.22
+  renderer._update_experimental_gradient = Mock()
+  reference = copy.deepcopy(renderer)
+  renderer._update_model(None, points[:, 0])
+  reference._update_model(None, points[:, 0])
+  lane_arrays = [line.projected_points for line in [*renderer._lane_lines, *renderer._road_edges]]
+  old_path = renderer._path.projected_points.copy()
+  renderer._map_lines_to_polygons = Mock(wraps=renderer._map_lines_to_polygons)
+  lead = SimpleNamespace(present=True, dRel=10.)
+  renderer._update_model(lead, points[:, 0], update_lane_geometry=False)
+  reference._update_model(lead, points[:, 0])
+  renderer._map_lines_to_polygons.assert_not_called()
+  for line, expected, previous in zip([*renderer._lane_lines, *renderer._road_edges],
+                                     [*reference._lane_lines, *reference._road_edges], lane_arrays, strict=True):
+    assert line.projected_points is previous
+    np.testing.assert_array_equal(line.projected_points, expected.projected_points)
+  np.testing.assert_array_equal(renderer._path.projected_points, reference._path.projected_points)
+  assert renderer._path.projected_points.shape != old_path.shape
+  assert renderer._acceleration_x_filter.update.call_count == reference._acceleration_x_filter.update.call_count == 2
+  assert renderer._acceleration_x_filter2.update.call_count == reference._acceleration_x_filter2.update.call_count == 2
+  assert renderer._update_experimental_gradient.call_count == reference._update_experimental_gradient.call_count == 2
+  renderer._car_space_transform[0, 0] += 1
+  renderer._update_model(lead, points[:, 0], update_lane_geometry=True)
+  renderer._map_lines_to_polygons.assert_called_once()
+  renderer._map_lines_to_polygons.reset_mock()
+  renderer._clip_region.x += 1
+  renderer._update_model(lead, points[:, 0], update_lane_geometry=False)
+  renderer._map_lines_to_polygons.assert_called_once()

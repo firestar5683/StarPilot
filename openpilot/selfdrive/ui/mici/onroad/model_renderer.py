@@ -73,10 +73,13 @@ class ModelRenderer(Widget):
     self._experimental_mode = False
     self._blend_filter = FirstOrderFilter(1.0, 0.25, 1 / gui_app.target_fps)
     self._prev_allow_throttle = True
+    self._default_path_gradient = None
+    self._default_path_blend_factor = None
     self._lane_line_probs = np.zeros(4, dtype=np.float32)
     self._lane_centering_direction = 0
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
+    self._leads_need_reset = False
     self._lead_indicator_enabled = False
     self._lead_info_mode = 0
     self._lead_info_metric = None
@@ -99,6 +102,7 @@ class ModelRenderer(Widget):
     self._car_space_transform = np.zeros((3, 3), dtype=np.float32)
     self._transform_dirty = True
     self._clip_region = None
+    self._lane_projection_clip = None
 
     self._exp_gradient = Gradient(
       start=(0.0, 1.0),  # Bottom of path
@@ -180,14 +184,16 @@ class ModelRenderer(Widget):
       if path_x_array.size == 0:
         return
 
-      self._update_model(lead_one, path_x_array)
+      self._update_model(lead_one, path_x_array, update_lane_geometry=model_updated or self._transform_dirty)
       self._transform_dirty = False
 
     lead_ready = render_lead_indicator and bool(self._path.raw_points.size)
     if lead_ready:
       self._update_leads(sm)
-    else:
+      self._leads_need_reset = True
+    elif getattr(self, "_leads_need_reset", True):
       self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
+      self._leads_need_reset = False
 
     # Draw elements (hide when disengaged)
     if self._visual_status() != UIStatus.DISENGAGED:
@@ -310,20 +316,23 @@ class ModelRenderer(Widget):
 
 
 
-  def _update_model(self, lead, path_x_array):
+  def _update_model(self, lead, path_x_array, *, update_lane_geometry: bool = True):
     """Update model visualization data based on model message"""
     max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
-    max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
+    clip = self._clip_region
+    clip_key = (clip.x, clip.y, clip.width, clip.height)
+    if update_lane_geometry or clip_key != getattr(self, "_lane_projection_clip", None):
+      max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
-    # Lane lines and road edges share one transform; keep the path's separate
-    # hill-inversion and lead-distance handling below.
-    lines = [*self._lane_lines, *self._road_edges]
-    widths = [width * probability for width, probability in
-              zip((0.12, 0.16, 0.16, 0.16), self._lane_line_probs, strict=True)]
-    widths.extend((0.16, 0.16))
-    polygons = self._map_lines_to_polygons([line.raw_points for line in lines], widths, max_idx)
-    for line, polygon in zip(lines, polygons, strict=True):
-      line.projected_points = polygon
+      # Radar changes the path's lead-distance clipping, not lane/edge geometry.
+      lines = [*self._lane_lines, *self._road_edges]
+      widths = [width * probability for width, probability in
+                zip((0.12, 0.16, 0.16, 0.16), self._lane_line_probs, strict=True)]
+      widths.extend((0.16, 0.16))
+      polygons = self._map_lines_to_polygons([line.raw_points for line in lines], widths, max_idx)
+      for line, polygon in zip(lines, polygons, strict=True):
+        line.projected_points = polygon
+      self._lane_projection_clip = clip_key
 
     # Update path using raw points
     if lead and lead.present:
@@ -479,13 +488,15 @@ class ModelRenderer(Widget):
     else:
       # Blend throttle/no throttle colors based on transition
       blend_factor = round(self._blend_filter.x * 100) / 100
-      blended_colors = self._blend_colors(NO_THROTTLE_COLORS, THROTTLE_COLORS, blend_factor)
-      gradient = Gradient(
-        start=(0.0, 1.0),  # Bottom of path
-        end=(0.0, 0.0),  # Top of path
-        colors=blended_colors,
-        stops=[0.0, 0.5, 1.0],
-      )
+      if blend_factor != getattr(self, "_default_path_blend_factor", None):
+        self._default_path_gradient = Gradient(
+          start=(0.0, 1.0),  # Bottom of path
+          end=(0.0, 0.0),  # Top of path
+          colors=self._blend_colors(NO_THROTTLE_COLORS, THROTTLE_COLORS, blend_factor),
+          stops=[0.0, 0.5, 1.0],
+        )
+        self._default_path_blend_factor = blend_factor
+      gradient = self._default_path_gradient
 
       if self._visual_status() == UIStatus.DISENGAGED:
         draw_polygon(self._rect, path_pts, rl.Color(0, 0, 0, 90))

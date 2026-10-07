@@ -142,3 +142,38 @@ def test_native_preview_uses_draft_only_and_shared_gradients(profile):
   assert solid_gradient('#12345680') in gradients
   assert (edge_gradient('#AABBCCFF') in gradients) == (profile == Profile.LARGE)
   assert not state.camera_available
+
+
+def test_compact_default_gradient_reuses_quantized_colors_and_keeps_filter_cadence(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.selfdrive.ui.mici.onroad import model_renderer as module
+
+  renderer = module.ModelRenderer.__new__(module.ModelRenderer)
+  renderer._path = SimpleNamespace(projected_points=np.array([[1, 2], [3, 4]], dtype=np.float32))
+  renderer._rect = SimpleNamespace(x=10, y=20, width=476, height=240)
+  renderer._longitudinal_control = True
+  renderer._blend_filter = Mock(x=.731)
+  renderer._experimental_mode = False
+  renderer._rainbow_path = SimpleNamespace(refresh_enabled=Mock(return_value=False))
+  renderer._visual_status = Mock(return_value=module.UIStatus.ENGAGED)
+  renderer.road_style = {"pathMode": "acceleration"}
+  monkeypatch.setattr(module, "ui_state", SimpleNamespace(params=object()))
+  draw = Mock()
+  monkeypatch.setattr(module, "draw_polygon", draw)
+  blend = Mock(wraps=module.ModelRenderer._blend_colors)
+  renderer._blend_colors = blend
+  sm = {"longitudinalPlan": SimpleNamespace(allowThrottle=True)}
+  previous = None
+  for value in (.731, .734, .735):
+    renderer._blend_filter.x = value
+    renderer._draw_path(sm)
+    gradient = draw.call_args.kwargs['gradient']
+    expected = module.ModelRenderer._blend_colors(module.NO_THROTTLE_COLORS, module.THROTTLE_COLORS, round(value * 100) / 100)
+    assert [rgba(color) for color in gradient.colors] == [rgba(color) for color in expected]
+    assert (gradient.start, gradient.end, gradient.stops) == ((0., 1.), (0., 0.), [0., .5, 1.])
+    np.testing.assert_array_equal(draw.call_args.args[1], [[11, 22], [13, 24]])
+    if value == .734:
+      assert gradient is previous
+    previous = gradient
+  assert blend.call_count == 2
+  assert renderer._blend_filter.update.call_count == draw.call_count == 3
