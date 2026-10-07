@@ -3,7 +3,7 @@
 from collections import deque
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 
@@ -18,7 +18,38 @@ class EndProducer(BaseException):
 
 
 class TestVisionProducer(unittest.TestCase):
-  def run_frame(self, streams, *, completion_age_ns=10_000_000):
+  def setUp(self):
+    event = messaging.new_message('drivingModelData', valid=True)
+    self.model = event.drivingModelData
+    self.model.frameDropPerc = 0
+    self.sm = MagicMock()
+    self.sm.seen = {'drivingModelData': True}
+    self.sm.valid = {'drivingModelData': True}
+    self.sm.logMonoTime = {'drivingModelData': 0}
+    self.sm.__getitem__ = Mock(return_value=self.model)
+    for patcher in (patch.object(messaging, 'SubMaster', return_value=self.sm),
+                    patch.object(producer, '_configure_process')):
+      patcher.start()
+      self.addCleanup(patcher.stop)
+
+  def clock_pairs(self, clocks, states=None):
+    pairs = iter(clocks)
+    model_states = iter(states) if states is not None else None
+
+    def next_pair():
+      pair = next(pairs)
+      self.sm.logMonoTime['drivingModelData'] = pair[0]
+      if model_states is not None:
+        seen, valid, age_ns, drop = next(model_states)
+        self.sm.seen['drivingModelData'] = seen
+        self.sm.valid['drivingModelData'] = valid
+        self.sm.logMonoTime['drivingModelData'] = pair[0] - age_ns
+        self.model.frameDropPerc = drop
+      return pair
+
+    return next_pair
+
+  def run_frame(self, streams, *, completion_age_ns=10_000_000, model_states=None):
     core = Mock()
     core.observe.return_value = (55, 0.9, 2, 1)
     client = Mock()
@@ -38,11 +69,13 @@ class TestVisionProducer(unittest.TestCase):
          patch.object(messaging, 'PubMaster', return_value=SimpleNamespace(send=send)), \
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, '_camera_buffer', return_value=(object(), 5_000_000_000, 12)), \
-         patch.object(producer, '_convert_camera_buffer', return_value=(np.zeros((2, 2, 3)), 5_000_000_000, 12)), \
-         patch.object(producer, 'clock_pair_ns', side_effect=clocks), \
+         patch.object(producer, '_convert_camera_buffer', return_value=(np.zeros((2, 2, 3)), 5_000_000_000, 12)) as convert, \
+         patch.object(producer, 'clock_pair_ns', side_effect=self.clock_pairs(clocks, model_states)), \
          patch.object(producer.time, 'sleep'), \
          self.assertRaises(EndProducer):
       producer.main()
+    if model_states is not None and len(model_states) == 1:
+      convert.assert_not_called()
     return camera, core, messages
 
   def test_actual_narrow_camera_api_and_compatible_road_wire_tag(self):
@@ -78,9 +111,31 @@ class TestVisionProducer(unittest.TestCase):
     self.assertEqual(messages[0].validUntilMonoTime, 0)
     self.assertEqual(messages[0].speedMps, 0)
 
+  def test_unhealthy_driving_model_skips_inference_and_does_not_publish_speed(self):
+    road = {VisionStreamType.VISION_STREAM_NARROW_ROAD}
+    for state in ((False, True, 0, 0), (True, False, 0, 0),
+                  (True, True, 250_000_001, 0), (True, True, -1, 0),
+                  (True, True, 0, 1.01), (True, True, 0, float('nan'))):
+      with self.subTest(state=state):
+        _, core, messages = self.run_frame(road, model_states=[state])
+        core.observe.assert_not_called()
+        self.assertEqual([str(message.status) for message in messages], ['unavailable'])
+        self.assertEqual(messages[0].speedMps, 0)
+        self.assertEqual(messages[0].validUntilMonoTime, 0)
+
+  def test_model_loss_during_inference_cannot_renew_result(self):
+    healthy = (True, True, 0, 0)
+    _, core, messages = self.run_frame({VisionStreamType.VISION_STREAM_NARROW_ROAD},
+                                      model_states=[healthy, healthy, (True, True, 0, 1.01)])
+    core.observe.assert_called_once()
+    self.assertEqual([str(message.status) for message in messages], ['unavailable'])
+    self.assertEqual(messages[0].validUntilMonoTime, 0)
+    self.assertEqual(messages[0].speedMps, 0)
+
   def test_borrowed_camera_buffers_do_not_survive_conversion_or_skip(self):
     received, released = [], []
-    sources = iter(((12, 5_000_000_000), (13, 5_050_000_000), (14, 5_000_000_000)))
+    sources = iter(((12, 5_000_000_000), (13, 5_050_000_000), (14, 5_000_000_000),
+                    (15, 5_400_000_000), (16, 5_500_000_000), (17, 5_700_000_000)))
 
     class Buffer:
       def __init__(self, frame_id):
@@ -107,31 +162,43 @@ class TestVisionProducer(unittest.TestCase):
     core = Mock()
 
     def observe(_frame, *, now):
-      self.assertEqual(released, [12])
-      self.assertEqual(now, 1.)
+      self.assertEqual(released, [12] if core.observe.call_count == 1 else [12, 13, 14, 15, 16, 17])
+      self.assertEqual(now, 1. if core.observe.call_count == 1 else 1.7)
       return None
 
     core.observe.side_effect = observe
     road = {VisionStreamType.VISION_STREAM_NARROW_ROAD}
     camera = Mock(return_value=client)
-    camera.available_streams.side_effect = [road, road, road, EndProducer()]
+    camera.available_streams.side_effect = [road] * 6 + [EndProducer()]
     clocks = [(1_000_000_000, 5_000_000_000), (1_000_000_000, 5_000_000_000),
               (1_010_000_000, 5_010_000_000), (1_050_000_000, 5_050_000_000),
-              (1_300_000_000, 5_300_000_000)]
+              (1_300_000_000, 5_300_000_000), (1_400_000_000, 5_400_000_000),
+              (1_500_000_000, 5_500_000_000), (1_700_000_000, 5_700_000_000),
+              (1_700_000_000, 5_700_000_000), (1_710_000_000, 5_710_000_000)]
+    healthy = (True, True, 0, 0)
+    states = [healthy] * 5 + [(True, True, 0, 1.1)] * 2 + [healthy] * 3
+    messages = []
+
+    def send(_service, event):
+      messages.append(messaging.log_from_bytes(event.to_bytes()).slcVisionObservation.vision)
+
     opencv = Mock()
     opencv.cvtColor.side_effect = lambda array, _format: array.copy()
     with patch('msgq.visionipc.VisionIpcClient', camera), \
          patch('openpilot.common.params.Params', return_value=SimpleNamespace(get_bool=lambda _: False)), \
-         patch.object(messaging, 'PubMaster', return_value=Mock()), \
+         patch.object(messaging, 'PubMaster', return_value=SimpleNamespace(send=send)), \
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, 'cv2', opencv), \
-         patch.object(producer, 'clock_pair_ns', side_effect=clocks), \
+         patch.object(producer, 'clock_pair_ns', side_effect=self.clock_pairs(clocks, states)), \
          patch.object(producer.time, 'sleep'), \
          self.assertRaises(EndProducer):
       producer.main()
-    self.assertEqual(released, [12, 13, 14])
-    opencv.cvtColor.assert_called_once()
-    core.observe.assert_called_once()
+    self.assertEqual(released, [12, 13, 14, 15, 16, 17])
+    self.assertEqual(opencv.cvtColor.call_count, 2)
+    self.assertEqual(core.observe.call_count, 2)
+    self.assertEqual([str(message.status) for message in messages], ['unknown', 'stale', 'unavailable', 'unknown'])
+    self.assertEqual(messages[2].validUntilMonoTime, 0)
+    self.assertEqual(messages[2].producerSessionId, messages[3].producerSessionId)
 
   def test_throttled_and_already_stale_frames_do_not_convert(self):
     core = Mock()
@@ -158,7 +225,7 @@ class TestVisionProducer(unittest.TestCase):
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, '_camera_buffer', side_effect=buffers), \
          patch.object(producer, '_convert_camera_buffer', return_value=(np.zeros((2, 2, 3)), 5_000_000_000, 12)) as convert, \
-         patch.object(producer, 'clock_pair_ns', side_effect=clocks), \
+         patch.object(producer, 'clock_pair_ns', side_effect=self.clock_pairs(clocks)), \
          patch.object(producer.time, 'sleep'), \
          self.assertRaises(EndProducer):
       producer.main()
@@ -195,7 +262,7 @@ class TestVisionProducer(unittest.TestCase):
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, '_camera_buffer', side_effect=buffers), \
          patch.object(producer, '_convert_camera_buffer', side_effect=frames) as convert, \
-         patch.object(producer, 'clock_pair_ns', side_effect=clocks), \
+         patch.object(producer, 'clock_pair_ns', side_effect=self.clock_pairs(clocks)), \
          patch.object(producer.time, 'sleep'), \
          self.assertRaises(EndProducer):
       producer.main()
@@ -237,7 +304,7 @@ class TestVisionProducer(unittest.TestCase):
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, '_camera_buffer', side_effect=[(object(), item[1], item[2]) for item in frames]), \
          patch.object(producer, '_convert_camera_buffer', side_effect=frames), \
-         patch.object(producer, 'clock_pair_ns', side_effect=clocks), \
+         patch.object(producer, 'clock_pair_ns', side_effect=self.clock_pairs(clocks)), \
          patch.object(producer.time, 'sleep'), \
          patch.object(core, 'infer', side_effect=[Detection(55, 0.60)] * 3), \
          self.assertRaises(EndProducer):
