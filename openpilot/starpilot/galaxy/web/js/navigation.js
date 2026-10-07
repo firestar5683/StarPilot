@@ -2,6 +2,7 @@ import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
 import { NavigationMap } from "./navigation-map.js"
 import { MapOperationsPanel } from "./map-operations.js"
+import { OfflineRoadMapsPanel } from "./offline-road-maps.js"
 
 export function searchUuid() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
@@ -170,7 +171,7 @@ export class NavigationClient {
 
 export const NavigationPage = {
   name: "NavigationPage",
-  components: { GxNotice, MapOperationsPanel, NavigationMap },
+  components: { GxNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null } },
   data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", favoritesOpen: false, query: "", token: "", searched: false }),
@@ -214,7 +215,10 @@ export const NavigationPage = {
         <button v-for="item in [{id:'route',label:'Destination'},{id:'maps',label:'Offline Maps'},{id:'setup',label:'Setup'}]" :key="item.id"
           type="button" class="gx-btn" :class="tab === item.id ? '' : 'gx-btn--tonal'" role="tab" :aria-selected="tab === item.id" @click="tab=item.id">{{ item.label }}</button>
       </div>
-      <MapOperationsPanel v-if="tab === 'maps'" :mode="mode" :unauthorized="unauthorized" />
+      <div v-if="tab === 'maps'" class="gx-navigation__offline">
+        <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" />
+        <MapOperationsPanel :mode="mode" :unauthorized="unauthorized" />
+      </div>
       <template v-else>
         <NavigationMap v-if="tab === 'route' && data?.enabled && data?.hasKey" :data="data" :stale="stale" />
         <div :class="tab === 'route' ? 'gx-navigation__panel' : 'gx-stack'">

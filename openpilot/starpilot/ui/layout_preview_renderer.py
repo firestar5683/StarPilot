@@ -159,6 +159,7 @@ class _Canvas:
     self.view: OnroadView | None = None
     self.monitor: _DriverMonitorArt | None = None
     self.target: rl.RenderTexture | None = None
+    self.map = None
     try:
       self.fonts = BitmapFonts(profile, default_font_directory())
       layers = {'background_layer': self._render_background}
@@ -167,6 +168,9 @@ class _Canvas:
       else:
         from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
         self.view = ProjectionOnroad.create_view(OnroadView, self.fonts, viewport=viewport, **layers)
+        from openpilot.starpilot.ui.onroad_map import MapOverlay, SampleTileReader
+        self.map = MapOverlay(reader=SampleTileReader(), fonts=self.fonts)
+        self.view.map_layer = self._render_map
       self.monitor = _DriverMonitorArt(profile)
       self.view.driver_monitor_layer = self._render_driver_monitor
       self.target = rl.load_render_texture(*(viewport or profile.size))
@@ -180,6 +184,16 @@ class _Canvas:
     render_sample_road(rect, state, self.profile)
     if self.viewport is None:
       self._render_side_cameras(state)
+
+  @staticmethod
+  def _map_placement(state: OnroadState):
+    placed = state.customization["layouts"]["large"].get("nav_map")
+    return placed if placed is not None and placed["enabled"] else None
+
+  def _render_map(self, _rect: rl.Rectangle, state: OnroadState) -> None:
+    placed = self._map_placement(state)
+    if placed is not None and self.map is not None:
+      self.map.draw(rl.Rectangle(placed["x"], placed["y"], placed["width"], placed["height"]), placed["opacity"] / 100.0)
 
   def _render_side_cameras(self, state: OnroadState) -> None:
     for key in CAMERA_WIDGETS:
@@ -212,6 +226,10 @@ class _Canvas:
       raise RuntimeError("Layout preview resources are closed")
     self._settle(state)
     width, height = self.viewport or self.profile.size
+    placed = self._map_placement(state) if self.map is not None else None
+    if placed is not None:
+      from openpilot.starpilot.ui.onroad_map import sample_input
+      self.map.prepare(sample_input(), placed["width"], placed["height"])  # offscreen, before the preview target
     rl.begin_texture_mode(self.target)
     try:
       rl.clear_background(rl.BLACK)
@@ -261,6 +279,9 @@ class _Canvas:
     self.fonts.draw(label, FontRole.SEMI_BOLD, size, x, y, rl.Color(255, 255, 255, 255))
 
   def close(self) -> None:
+    if self.map is not None:
+      self.map.close()
+    self.map = None
     if self.target is not None and rl.is_window_ready():
       rl.unload_render_texture(self.target)
     self.target = None
@@ -300,6 +321,11 @@ class LayoutPreviewRenderer:
     profile = Profile.LARGE if viewport else Profile(payload["profile"])
     scene = payload["scene"]
     state = sample_state(scene, document)
+    if viewport:
+      from dataclasses import replace
+      from openpilot.starpilot.ui.navigation_state import NavigationDisplay
+      state = replace(state, navigation=NavigationDisplay(("preview", 1), "Turn left onto Desert Inn Road", "turn", "left",
+                                                          152.0, 6800.0, 540.0))
     if not rl.is_window_ready():
       raise RuntimeError("Layout preview requires the UI graphics context")
     if self._canvas is None or self._canvas.profile != profile or self._canvas.viewport != viewport:

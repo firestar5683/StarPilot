@@ -40,8 +40,15 @@ class NavigationCard:
       self._key, self.collapsed = state.navigation.key, False
     if self.fonts.profile == Profile.COMPACT:
       return rl.Rectangle(244, 18, 72, 72) if self.collapsed else rl.Rectangle(96, 16, 368, 142)
-    shift = state.viewport_width - 1860
-    return rl.Rectangle(1678 + shift, 415, 112, 112) if self.collapsed else rl.Rectangle(1230 + shift, 415, 560, 195)
+    # Android Auto layouts place the card; the comma keeps its fixed spot.
+    placed = state.customization["layouts"]["large"].get("nav_card")
+    if placed is not None:
+      if not placed["enabled"]:
+        return None
+      x, y = placed["x"], placed["y"]
+    else:
+      x, y = 1230 + state.viewport_width - 1860, 415
+    return rl.Rectangle(x + 448, y, 112, 112) if self.collapsed else rl.Rectangle(x, y, 560, 195)
 
   def press(self, x, y, state):
     self.cancel()

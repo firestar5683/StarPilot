@@ -71,7 +71,17 @@ func plausibleLoadedWays(offlineMaps *maps.Offline, location log.GpsLocationData
 	}
 	ways := make([]maps.Way, 0, 2)
 	seen := make(map[int64]struct{})
-	for i := range offlineMaps.Ways.Len() {
+	// The grid lists, in tile order, every way that could pass OnWay here.
+	candidates, indexed := offlineMaps.WaysNear(m.NewPosition(location.Latitude(), location.Longitude()))
+	count := len(candidates)
+	if !indexed {
+		count = offlineMaps.Ways.Len()
+	}
+	for c := range count {
+		i := c
+		if indexed {
+			i = int(candidates[c])
+		}
 		way := offlineMaps.Ways.At(i)
 		if way.Id() <= 0 || way.Nodes.Len() < 2 {
 			continue

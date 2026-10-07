@@ -300,9 +300,9 @@ export const MapOperationsPanel = {
   },
   template: `
     <section class="gx-card gx-map-manager">
-      <div class="gx-section__header"><i class="bi bi-map"></i><span class="gx-section__title">Offline Maps</span></div>
+      <div class="gx-section__header"><i class="bi bi-map"></i><span class="gx-section__title">Speed Limit Maps</span></div>
       <div class="gx-map-manager__body">
-        <p class="gx-note">Choose a region to download for offline use. Downloading another region replaces the selected map.</p>
+        <p class="gx-note">Speed-limit and curve data for a whole region, used by the map provider. Choose a region to download for offline use. Downloading another region replaces the selected map.</p>
         <p v-if="mode !== 'local'">Parked map management is unavailable in the offline preview.</p>
         <template v-else>
           <template v-if="setup"><p role="status">{{ setup.packageReady ? 'Map service ready.' : 'Map service setup required.' }} {{ setup.snapshotReady ? 'A downloaded map is selected.' : setup.packageReady ? 'Choose a region to download its maps.' : 'Update device software to set up offline maps.' }}</p>

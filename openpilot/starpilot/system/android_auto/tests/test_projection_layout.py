@@ -8,6 +8,7 @@ import unittest
 from openpilot.starpilot.system.android_auto.display_profile import record_screen, read_screen
 from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
+  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP,
 )
 from openpilot.starpilot.ui.onroad_customization import default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
@@ -62,7 +63,9 @@ class TestProjectionLayout(unittest.TestCase):
     before = copy.deepcopy(base)
     document = default_layout(SCREEN)
     converted = projection_customization(document, base)
-    self.assertEqual(converted['layouts']['large'], base['layouts']['large'])
+    native = {key: value for key, value in converted['layouts']['large'].items() if key not in PROJECTION_WIDGETS}
+    self.assertEqual(native, base['layouts']['large'])
+    self.assertEqual(converted['layouts']['large'][NAV_MAP], document['widgets'][NAV_MAP])
     document['widgets']['current_speed']['x'] += 100
     converted = projection_customization(document, base)
     self.assertEqual(converted['layouts']['large']['current_speed']['x'], 740)
@@ -92,3 +95,46 @@ class TestProjectionLayout(unittest.TestCase):
       result = commit_exact(source, authorized=lambda: True, **args)
       self.assertTrue(result.committed and result.verified)
       self.assertFalse(commit_exact(source, authorized=lambda: True, **args).committed)
+
+  def test_android_auto_widgets_are_added_to_older_layouts(self):
+    document = default_layout(SCREEN)
+    older = copy.deepcopy(document)
+    for key in PROJECTION_WIDGETS:
+      del older['widgets'][key]
+    older['widgets']['current_speed']['x'] += 20
+    upgraded = validate_layout(older, SCREEN)
+    self.assertEqual(upgraded['widgets'][NAV_MAP], document['widgets'][NAV_MAP])
+    self.assertEqual(upgraded['widgets'][NAV_CARD], document['widgets'][NAV_CARD])
+    self.assertEqual(upgraded['widgets']['current_speed']['x'], document['widgets']['current_speed']['x'] + 20)
+    self.assertFalse(upgraded['widgets'][NAV_MAP]['enabled'], 'the map is something you add')
+    self.assertTrue(upgraded['widgets'][NAV_CARD]['enabled'], 'the turn card keeps showing where it always did')
+    missing_native = copy.deepcopy(document)
+    del missing_native['widgets']['current_speed']
+    with self.assertRaises(ValueError):
+      validate_layout(missing_native, SCREEN)
+
+  def test_map_overlay_size_opacity_and_edges(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    box = metadata['widgets'][NAV_MAP]['box']
+    placement = document['widgets'][NAV_MAP]
+    self.assertEqual(set(placement), {'x', 'y', 'enabled', 'width', 'height', 'opacity'})
+    placement.update(x=30, y=30, width=box['maxWidth'], height=box['maxHeight'], opacity=15, enabled=True)
+    validate_layout(document, SCREEN)
+    for change in ({'width': box['maxWidth'] + 1}, {'height': box['minHeight'] - 1}, {'opacity': 14},
+                   {'opacity': 101}, {'opacity': 70.0}, {'width': 600.5}, {'x': 31},
+                   {'extra': 1}):
+      broken = copy.deepcopy(document)
+      broken['widgets'][NAV_MAP].update(change)
+      with self.assertRaises(ValueError, msg=str(change)):
+        validate_layout(broken, SCREEN)
+
+  def test_map_defaults_scale_with_the_screen(self):
+    from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport
+    small, wide = default_layout_for_viewport((1860, 1080)), default_layout_for_viewport((2880, 1080))
+    for document in (small, wide):
+      card, overlay = document['widgets'][NAV_CARD], document['widgets'][NAV_MAP]
+      self.assertEqual(card['x'] + 560, overlay['x'] + overlay['width'], 'right edges line up')
+      self.assertGreaterEqual(overlay['y'], card['y'] + 195)
+      self.assertLessEqual(overlay['y'] + overlay['height'], document['canvas']['height'] - 30)
+    self.assertLess(small['widgets'][NAV_MAP]['width'], wide['widgets'][NAV_MAP]['width'])

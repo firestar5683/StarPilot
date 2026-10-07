@@ -26,12 +26,26 @@ export function widgetPalette(document, metadata, profile, id) {
 
 export const withAlpha = (color, factor) => color.slice(0, 7) + Math.floor(parseInt(color.slice(7), 16) * factor).toString(16).padStart(2, "0")
 
+// Steering wheels resize as a square ("size"); box widgets such as the Android Auto map take a width and height.
+export function widgetSize(widget, position) {
+  if (widget.box) return [position?.width ?? widget.width, position?.height ?? widget.height]
+  if (widget.resizable) return [position?.size ?? widget.width, position?.size ?? widget.height]
+  return [widget.width, widget.height]
+}
+
 export function placementLimits(profile, id, layout = null) {
   const widget = profile.widgets[id], bounds = widget.bounds || profile.bounds
-  const width = widget.resizable ? layout?.[id]?.size ?? widget.width : widget.width
-  const height = widget.resizable ? layout?.[id]?.size ?? widget.height : widget.height
+  const [width, height] = widgetSize(widget, layout?.[id])
   return { minX: bounds.x, maxX: bounds.x + bounds.width - width,
     minY: bounds.y, maxY: bounds.y + bounds.height - height }
+}
+
+// The largest box that still fits from the widget's current corner, within its own limits.
+export function clampBox(profile, id, position, width, height) {
+  const widget = profile.widgets[id], box = widget.box, bounds = widget.bounds || profile.bounds
+  if (!box || !Number.isFinite(width) || !Number.isFinite(height)) return null
+  return { width: Math.round(Math.max(box.minWidth, Math.min(box.maxWidth, bounds.x + bounds.width - position.x, width))),
+    height: Math.round(Math.max(box.minHeight, Math.min(box.maxHeight, bounds.y + bounds.height - position.y, height))) }
 }
 
 export function clampPlacement(profile, id, x, y, layout = null) {
@@ -44,8 +58,7 @@ export function clampPlacement(profile, id, x, y, layout = null) {
 export function overlapsReserved(profile, id, x, y, layout = null) {
   const widget = profile.widgets[id]
   if (widget.layer === "underlay") return false
-  const size = widget.resizable ? layout?.[id]?.size ?? widget.width : null
-  const width = size ?? widget.width, height = size ?? widget.height
+  const [width, height] = widgetSize(widget, layout?.[id])
   const intersects = (left, top, otherWidth, otherHeight) => x < left + otherWidth && x + width > left &&
     y < top + otherHeight && y + height > top
   if (profile.reservedZones.some((zone) => intersects(zone.x, zone.y, zone.width, zone.height))) return true
@@ -56,8 +69,7 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
     const at = positions[key]
     return key !== id && key !== "speed_limit" && other.layer !== "underlay" && at &&
       !(key === "driving_mode_descriptions" && !at.enabled) && Number.isFinite(at.x) && Number.isFinite(at.y) &&
-      intersects(at.x, at.y, other.resizable ? at.size ?? other.width : other.width,
-        other.resizable ? at.size ?? other.height : other.height)
+      intersects(at.x, at.y, ...widgetSize(other, at))
   })
   if (id === "speed_limit") return false
   const at = positions.speed_limit_actions
@@ -90,9 +102,12 @@ export function validDocument(document, metadata) {
     })) return false
     return keysEqual(layout, Object.keys(profile.widgets)) && Object.entries(layout).every(([id, position]) => {
       const widget = profile.widgets[id], limits = placementLimits(profile, id, layout)
-      const resizable = widget.resizable
-      return keysEqual(position, resizable ? ["x", "y", "enabled", "size"] : ["x", "y", "enabled"]) &&
+      const resizable = widget.resizable, box = widget.box, opacity = widget.opacity
+      return keysEqual(position, resizable ? ["x", "y", "enabled", "size"] : box ? ["x", "y", "enabled", "width", "height", "opacity"] : ["x", "y", "enabled"]) &&
         (!resizable || (Number.isInteger(position.size) && position.size >= resizable.min && position.size <= resizable.max)) &&
+        (!box || (Number.isInteger(position.width) && position.width >= box.minWidth && position.width <= box.maxWidth &&
+          Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight &&
+          Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
         typeof position.enabled === "boolean" &&
         Number.isFinite(position.x) && Number.isFinite(position.y) &&
         position.x >= limits.minX && position.x <= limits.maxX && position.y >= limits.minY && position.y <= limits.maxY &&
@@ -137,6 +152,13 @@ export function validSnapshot(data) {
           !positive(area.width) || !positive(area.height) || area.x + area.width > profile.width ||
           area.y + area.height > profile.height || typeof widget.label !== "string" || typeof widget.kind !== "string" ||
           !positive(widget.width) || !positive(widget.height) || widget.width > area.width || widget.height > area.height) return false
+      if (widget.box && (data.metadata.projection !== true || widget.kind !== "nav_map" || !object(widget.opacity) ||
+          ![widget.box.minWidth, widget.box.maxWidth, widget.box.minHeight, widget.box.maxHeight].every(Number.isInteger) ||
+          widget.box.minWidth < 24 || widget.box.minHeight < 24 || widget.box.minWidth > widget.box.maxWidth ||
+          widget.box.minHeight > widget.box.maxHeight || widget.box.maxWidth > area.width || widget.box.maxHeight > area.height ||
+          ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
+          widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
+          widget.opacity.default > widget.opacity.max)) return false
       if (widget.resizable && (widget.kind !== "steering_wheel" || !Number.isInteger(widget.resizable.min) ||
           !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
           widget.resizable.default !== widget.width || widget.width !== widget.height ||
@@ -338,6 +360,36 @@ export const LayoutWidgetPreview = {
         <circle cx="30" cy="31" r="6" fill="white" />
         <path d="M20 47 Q20 38 30 38 Q40 38 40 47 Z" fill="white" />
       </g>
+      <g v-else-if="widget.kind === 'nav_card'">
+        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="39" fill="#0f0d17f5" stroke="#a07edcbe" stroke-width="2" />
+        <g transform="translate(24 47) scale(1.7)" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 56 V30 Q16 18 28 18 H46" /><path d="M38 6 L50 18 L38 30" />
+        </g>
+        <text x="148" y="78" font-size="40" font-weight="600" fill="white">Turn right onto</text>
+        <text x="148" y="121" font-size="40" font-weight="600" fill="white">Las Vegas Blvd</text>
+        <text x="148" y="170" font-size="30" font-weight="700" fill="#c7aef7">500 ft</text>
+        <text :x="widget.width - 24" y="170" text-anchor="end" font-size="22" fill="#bebbc5">4.2 mi - 9 min</text>
+      </g>
+      <g v-else-if="widget.kind === 'nav_map'" :opacity="(widget.opacity ?? 70) / 100">
+        <defs>
+          <radialGradient id="gx-nav-map-fade" cx=".5" cy=".55" r=".75"><stop offset=".55" stop-color="white" /><stop offset="1" stop-color="white" stop-opacity="0" /></radialGradient>
+          <mask id="gx-nav-map-mask"><rect :width="widget.width" :height="widget.height" :rx="Math.min(widget.width, widget.height) * .08" fill="url(#gx-nav-map-fade)" /></mask>
+        </defs>
+        <g mask="url(#gx-nav-map-mask)" :transform="'scale(' + widget.width / 600 + ' ' + widget.height / 450 + ')'" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="600" height="450" fill="#0b0f16" opacity=".45" />
+          <g stroke="#000000a8" vector-effect="non-scaling-stroke">
+            <path d="M-20 120 Q200 150 640 90 M90 -20 L130 480 M430 -20 Q400 200 470 480 M-20 330 L640 360 M260 -20 L250 480" stroke-width="11" vector-effect="non-scaling-stroke" />
+          </g>
+          <path d="M-20 120 Q200 150 640 90 M-20 330 L640 360" stroke="#ebf0f5" stroke-width="6" vector-effect="non-scaling-stroke" />
+          <path d="M90 -20 L130 480 M430 -20 Q400 200 470 480" stroke="#bec8d2" stroke-width="4" vector-effect="non-scaling-stroke" />
+          <path d="M260 -20 L250 480" stroke="#ffc45c" stroke-width="8" vector-effect="non-scaling-stroke" />
+          <path d="M300 330 Q258 300 254 250 L262 -20" stroke="#8f6bff55" stroke-width="20" vector-effect="non-scaling-stroke" />
+          <path d="M300 330 Q258 300 254 250 L262 -20" stroke="#a98bff" stroke-width="9" vector-effect="non-scaling-stroke" />
+        </g>
+        <g :transform="'translate(' + widget.width / 2 + ' ' + widget.height * .7 + ')'">
+          <circle r="22" fill="#8f6bff40" /><path d="M0 -17 L13 13 L0 6 L-13 13 Z" fill="white" stroke="#6e4fe0" stroke-width="3" stroke-linejoin="round" />
+        </g>
+      </g>
       <template v-else>
         <rect :width="widget.width" :height="widget.height" :fill="palette.cardFill" :stroke="palette.cardBorder" />
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" :font-size="Math.min(32, widget.width / 10)">{{ widget.label }}</text>
@@ -429,14 +481,15 @@ export const OnroadLayoutPage = {
       const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
       const widget = { ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
         visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0) }
-      return widget.resizable ?
-      { ...widget, width: this.layout[widget.id].size, height: this.layout[widget.id].size } : widget })
+      const [width, height] = widgetSize(widget, this.layout[widget.id])
+      return { ...widget, width, height, ...(widget.box ? { opacity: this.layout[widget.id].opacity } : {}) } })
       .sort((a, b) => (a.id === this.state.selected ? 2 : a.layer === "underlay" ? -1 : 0) -
         (b.id === this.state.selected ? 2 : b.layer === "underlay" ? -1 : 0)) },
     inactiveWidgets() { return this.widgets.filter(({ id }) => !this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id)) },
     availableProfiles() { return this.state.data?.supportedProfiles || (this.state.data?.activeProfile ? [this.state.data.activeProfile] : []) },
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
     selectedPosition() { return this.layout?.[this.state.selected] },
+    selectedSize() { return this.selectedWidget ? widgetSize(this.selectedWidget, this.selectedPosition) : [0, 0] },
     selectedColors() { return this.selectedWidget ? this.widgetColors(this.state.selected) : {} },
     colorFields() { return (this.state.data?.metadata.paletteFields || []).filter((field) =>
       Object.hasOwn(this.selectedWidget?.colors || {}, field.id)) },
@@ -579,8 +632,7 @@ export const OnroadLayoutPage = {
       const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
       if (!point) return
       const position = this.layout[id], widget = this.profile.widgets[id]
-      const width = widget.resizable ? position.size : widget.width
-      const height = widget.resizable ? position.size : widget.height
+      const [width, height] = widgetSize(widget, position)
       this.state.selected = id
       this.finishColorEdit()
       this.state.drag = { id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
@@ -590,11 +642,50 @@ export const OnroadLayoutPage = {
       this._dragTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()
     },
+    startResize(id, event) {
+      const widget = this.profile.widgets[id]
+      if (!this.editable || event.button > 0 || this.state.drag || !widget?.box) return
+      const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
+      if (!point) return
+      const position = this.layout[id]
+      this.state.selected = id
+      this.finishColorEdit()
+      this.state.drag = { id, pointerId: event.pointerId, resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
+        inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height }
+      this._dragTarget = this.$refs.preview
+      this._dragTarget.setPointerCapture?.(event.pointerId)
+      event.stopPropagation()
+      event.preventDefault()
+    },
+    resizeBox(id, width, height) {
+      if (!this.editable) return false
+      const position = this.layout[id], next = clampBox(this.profile, id, position, width, height)
+      if (!next) return false
+      const before = this.state.drag ? null : clone(this.state.draft)
+      Object.assign(position, next)
+      if (before) this.recordChange(before)
+      this.state.placementError = this.state.notice = ""
+      return true
+    },
+    boxInput(axis, event) {
+      const number = event.target.value.trim() === "" ? NaN : Number(event.target.value)
+      if (Number.isFinite(number)) this.resizeBox(this.state.selected, axis === "width" ? number : this.selectedPosition.width,
+        axis === "height" ? number : this.selectedPosition.height)
+      event.target.value = this.selectedPosition[axis]
+    },
+    opacityInput(event) {
+      const value = Number(event.target.value), range = this.selectedWidget?.opacity
+      if (!this.editable || this.state.drag || !range || !Number.isInteger(value) || value < range.min || value > range.max) return
+      const before = clone(this.state.draft)
+      this.selectedPosition.opacity = value
+      this.recordChange(before, this.state.profile + ":" + this.state.selected + ":opacity")
+    },
     moveDrag(event) {
       const drag = this.state.drag
       if (!drag || drag.pointerId !== event.pointerId) return
       const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
       if (!point) return
+      if (drag.resize) { this.resizeBox(drag.id, point.x - drag.offsetX, point.y - drag.offsetY); return }
       drag.inside = point.x >= 0 && point.y >= 0 && point.x <= this.profile.width && point.y <= this.profile.height
       if (!drag.fromTray || drag.inside) {
         const x = point.x - drag.offsetX, y = point.y - drag.offsetY
@@ -804,6 +895,11 @@ export const OnroadLayoutPage = {
                   <rect class="gx-layout__hit" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="transparent" />
                   <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" />
                   <rect class="gx-layout__selection" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="none" stroke="#b799ff" :stroke-width="state.profile === 'large' ? 5 : 1.5" stroke-dasharray="6 4" />
+                  <g v-if="widget.box && state.selected === widget.id && editable" class="gx-layout__resize" role="button" :aria-label="'Resize ' + widget.label"
+                    :transform="'translate(' + widget.width + ' ' + widget.height + ')'" @pointerdown="startResize(widget.id, $event)">
+                    <circle r="34" fill="transparent" /><circle r="16" fill="#b799ff" stroke="#16121f" stroke-width="4" />
+                    <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
+                  </g>
                 </g>
               </svg>
               <button class="gx-btn gx-btn--tonal" type="button" :disabled="!!state.drag" @click="state.devicePreviewOpen ? hideDevicePreview() : showDevicePreview()">{{ state.devicePreviewOpen ? 'Hide preview' : 'Device preview' }}</button>
@@ -819,7 +915,7 @@ export const OnroadLayoutPage = {
                 </div>
 
               </section>
-              <p class="gx-note">The steering wheel can be resized in each layout. Existing display preferences and driving state still control when widgets appear.</p>
+              <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
               <p v-if="!projection && state.showFavoriteZones" class="gx-note">Favorite tap areas apply to enabled slots. Speed-limit controls and the steering wheel take priority when the drawer is closed.</p>
               <p v-if="state.placementError" class="gx-note" role="status">{{ state.placementError }}</p>
@@ -829,10 +925,18 @@ export const OnroadLayoutPage = {
               <div class="gx-layout__widget-list"><button v-for="widget in activeWidgets" :key="widget.id" class="gx-btn gx-btn--tonal" type="button"
                 :aria-pressed="state.selected === widget.id" @click="state.selected = widget.id">{{ widget.label }}</button></div>
               <div v-if="selectedWidget && selectedPosition.enabled" class="gx-layout__position">
-                <strong>{{ selectedWidget.label }}</strong><span class="gx-note">{{ selectedWidget.resizable ? selectedPosition.size : selectedWidget.width }} × {{ selectedWidget.resizable ? selectedPosition.size : selectedWidget.height + (selectedWidget.visualInsetTop || 0) }} pixels</span>
+                <strong>{{ selectedWidget.label }}</strong><span class="gx-note">{{ selectedSize[0] }} × {{ selectedSize[1] + (selectedWidget.box ? 0 : selectedWidget.visualInsetTop || 0) }} pixels</span>
                 <label v-if="selectedWidget.resizable">Size
                   <input class="gx-field" type="number" step="1" :min="selectedWidget.resizable.min" :max="selectedWidget.resizable.max"
                     :value="selectedPosition.size" :disabled="!editable || !!state.drag" @change="resizeSelected($event)"></label>
+                <template v-if="selectedWidget.box">
+                  <div class="gx-layout__coordinates"><label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editable || !!state.drag" @change="boxInput('width', $event)"></label>
+                    <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editable || !!state.drag" @change="boxInput('height', $event)"></label></div>
+                  <label for="layout-map-opacity">Map opacity · {{ selectedPosition.opacity }}%</label>
+                  <input id="layout-map-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
+                    :value="selectedPosition.opacity" :disabled="!editable || !!state.drag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
+                  <span class="gx-note">Lower values let more of the road show through. Drag the corner handle on the preview to resize.</span>
+                </template>
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <div class="gx-layout__coordinates"><label>X<input class="gx-field" type="number" step="1" :min="limits.minX" :max="limits.maxX" :value="selectedPosition.x" :disabled="!editable || !!state.drag" @change="positionInput('x', $event)"></label>

@@ -260,6 +260,7 @@ def run(frames_path: str) -> int:
       ui_state.update()
       if sampler is not None:
         sampler.onroad = ui_state.started
+      layout.prepare()  # offscreen passes (the map) must not run inside the content target
       rl.begin_texture_mode(content)
       try:
         rl.clear_background(rl.BLACK)

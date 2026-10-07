@@ -444,7 +444,16 @@ func (w *Way) GetStartEnd(isForward bool) (m.Position, m.Position) {
 func (w *Way) MatchingWays(offlineMaps *Offline, matchNode m.Position) ([]Way, error) {
 	matchingWays := []Way{}
 
-	for i := range offlineMaps.Ways.Len() {
+	candidates, indexed := offlineMaps.WaysWithEndpoint(matchNode)
+	count := len(candidates)
+	if !indexed {
+		count = offlineMaps.Ways.Len()
+	}
+	for c := range count {
+		i := c
+		if indexed {
+			i = int(candidates[c])
+		}
 		way := offlineMaps.Ways.At(i)
 		if way.Nodes.Len() == 0 {
 			continue

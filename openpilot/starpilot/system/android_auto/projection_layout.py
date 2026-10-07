@@ -13,6 +13,14 @@ MAX_BYTES = 16384
 DOCUMENT_KEY = 'projection'
 DOCUMENT_PATH = DATA_DIR / 'layouts/document.json'
 
+# Android Auto only: the comma layout keeps its fixed schema. Layouts saved
+# before these (or the driving-mode widget) existed gain them with their defaults.
+NAV_CARD, NAV_MAP = 'nav_card', 'nav_map'
+PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP)
+NAV_CARD_SIZE = (560, 195)
+MAP_MIN_SIZE = (280, 200)
+MAP_OPACITY = (15, 100, 70)  # percent: min, max, default
+
 
 class ProjectionLayoutSource:
   """Path adapter for existing read_saved/commit_exact file ownership semantics."""
@@ -50,6 +58,23 @@ def layout_metadata_for_viewport(viewport):
   x, y, w, h = maximum_footprint(30, 30, width - 60, height - 60, width)
   widgets['torque_bar'].update(width=w, height=h)
   widgets['torque_bar']['default'].update(x=x, y=y)
+  # The turn card keeps the comma's large-UI spot, following the right edge.
+  card_w, card_h = NAV_CARD_SIZE
+  widgets[NAV_CARD] = {'label': 'Turn-by-turn', 'kind': NAV_CARD, 'width': card_w, 'height': card_h, 'colors': {},
+                       'note': 'The next maneuver while a route is active, in the comma style',
+                       'default': {'x': 1230 + width - 1860, 'y': 415, 'enabled': True}}
+  # The map scales with the screen: about 30% of its width in a 4:3 frame,
+  # right-aligned with the turn card and sitting just below it.
+  card_x, card_bottom = 1230 + width - 1860, 415 + card_h + 15
+  map_w = max(MAP_MIN_SIZE[0], round(width * 0.3 / 10) * 10)
+  map_h = max(MAP_MIN_SIZE[1], min(round(map_w * 0.75 / 10) * 10, (height - 30 - card_bottom) // 10 * 10))
+  widgets[NAV_MAP] = {'label': 'Map overlay', 'kind': NAV_MAP, 'width': map_w, 'height': map_h, 'colors': {},
+                      'note': 'Road lines and your route over the camera. Drag the corner to resize; opacity sets how much shows.',
+                      'box': {'minWidth': MAP_MIN_SIZE[0], 'maxWidth': width - 60,
+                              'minHeight': MAP_MIN_SIZE[1], 'maxHeight': height - 60},
+                      'opacity': {'min': MAP_OPACITY[0], 'max': MAP_OPACITY[1], 'default': MAP_OPACITY[2]},
+                      'default': {'x': max(30, card_x + card_w - map_w), 'y': min(card_bottom, height - 30 - map_h),
+                                  'enabled': False, 'width': map_w, 'height': map_h, 'opacity': MAP_OPACITY[2]}}
   return profile
 
 
@@ -65,6 +90,14 @@ def default_layout_for_viewport(viewport):
                       for key, widget in metadata['widgets'].items()}}
 
 
+def placement_size(key, widget, placement):
+  if key == 'steering_wheel':
+    return placement.get('size', 192), placement.get('size', 192)
+  if key == NAV_MAP:
+    return placement['width'], placement['height']
+  return widget['width'], widget['height']
+
+
 def validate_layout(value, screen):
   geometry = screen_geometry(screen)
   return validate_layout_for_viewport(value, (geometry.logical_width, geometry.logical_height))
@@ -75,23 +108,31 @@ def validate_layout_for_viewport(value, viewport):
   if (type(value) is not dict or set(value) != {'version', 'canvas', 'widgets'} or
       type(value['version']) is not int or value['version'] != 1 or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
-      type(value['widgets']) is not dict or
-      set(value['widgets']) not in (set(metadata['widgets']), set(metadata['widgets']) - {MODE_WIDGET})):
+      type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
+      not set(metadata['widgets']) - set(value['widgets']) <= {MODE_WIDGET, *PROJECTION_WIDGETS}):
     raise ValueError('Projection layout does not match saved screen')
   result = copy.deepcopy(value)
-  result['widgets'].setdefault(MODE_WIDGET, dict(metadata['widgets'][MODE_WIDGET]['default']))
+  for key in set(metadata['widgets']) - set(value['widgets']):
+    result['widgets'][key] = dict(metadata['widgets'][key]['default'])
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
     placement = result['widgets'][key]
-    fields = {'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set())
+    fields = ({'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set()) |
+              ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
     size = placement.get('size', 192)
     if key == 'steering_wheel' and (type(size) is not int or not WHEEL_SIZES['large'][0] <= size <= WHEEL_SIZES['large'][2]):
       raise ValueError('Invalid steering wheel size')
-    for axis, extent in (('x', 'width'), ('y', 'height')):
+    if key == NAV_MAP:
+      box, opacity = widget['box'], widget['opacity']
+      if (type(placement['width']) is not int or not box['minWidth'] <= placement['width'] <= box['maxWidth'] or
+          type(placement['height']) is not int or not box['minHeight'] <= placement['height'] <= box['maxHeight'] or
+          type(placement['opacity']) is not int or not opacity['min'] <= placement['opacity'] <= opacity['max']):
+        raise ValueError('Invalid map overlay size or opacity')
+    dimensions = placement_size(key, widget, placement)
+    for (axis, extent), dimension in zip((('x', 'width'), ('y', 'height')), dimensions, strict=True):
       number = placement[axis]
-      dimension = size if key == 'steering_wheel' else widget[extent]
       if (type(number) not in (int, float) or not math.isfinite(number) or
           not bounds[axis] <= number <= bounds[axis] + bounds[extent] - dimension):
         raise ValueError('Projection widget outside screen')

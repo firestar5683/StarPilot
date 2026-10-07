@@ -31,6 +31,7 @@ def native_dependencies():
   from openpilot.starpilot.ui.onroad import OnroadView
   from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
   from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
+  from openpilot.starpilot.ui.onroad_map import MapFeed, MapOverlay
   from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
   from openpilot.starpilot.ui.pip_preferences import read_pip
   from openpilot.starpilot.ui.pip_render import PiPRenderer
@@ -70,7 +71,7 @@ def native_dependencies():
                          adapter=RuntimeSnapshotAdapter, current_message=current_message, display_message=display_message,
                          shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
                          pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size,
-                         alert=OnroadAlert, alert_size=AlertSize)
+                         alert=OnroadAlert, alert_size=AlertSize, map_overlay=MapOverlay, map_feed=MapFeed)
 
 
 class ProjectionOnroad:
@@ -106,6 +107,13 @@ class ProjectionOnroad:
         self.pip = native.pip_renderer("bubble")
         self._resources.callback(self.pip.close)
         self.onroad.pip_layer = self._pip_layer
+      self.map = None
+      self.map_feed = None
+      if self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
+        self.map = native.map_overlay(fonts=self.fonts)
+        self._resources.callback(self.map.close)
+        self.map_feed = native.map_feed()
+        self.onroad.map_layer = self._map_layer
       self.adapter = native.adapter(native.ui_state)
     except BaseException:
       self._resources.close()
@@ -153,6 +161,26 @@ class ProjectionOnroad:
                           onroad=ui.is_onroad())
     finally:
       self.native.rl.rl_pop_matrix()
+
+  def _map_placement(self):
+    """The enabled map overlay's placement from this connection's layout, or None."""
+    if self.customization is None:
+      return None
+    placed = self.customization['widgets'].get('nav_map')
+    return placed if placed is not None and placed['enabled'] else None
+
+  def prepare(self):
+    """Before the frame's render target is bound: offscreen map work happens here."""
+    placed = self._map_placement()
+    if self.map is None or placed is None or not self.native.ui_state.started:
+      return
+    self.map.prepare(self.map_feed.read(self.native.ui_state.sm), placed['width'], placed['height'])
+
+  def _map_layer(self, rect, state):
+    placed = self._map_placement()
+    if placed is not None and self.map is not None:
+      self.map.draw(self.native.rl.Rectangle(placed['x'], placed['y'], placed['width'], placed['height']),
+                    placed['opacity'] / 100.0)
 
   def _pip_layer(self, rect, state):
     """The comma's blinker/blind-spot side-camera bubbles, at the AA layout's placements."""

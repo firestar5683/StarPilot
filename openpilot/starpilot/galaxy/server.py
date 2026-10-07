@@ -178,7 +178,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
-                android_auto_client=None, navigation=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
+                android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
                 local_access=None, tmux_live=None, android_auto_logs=None):
   cloud = cloud_provider
 
@@ -308,6 +308,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         navigation_source = NavigationOwner()
       server.navigation_source = navigation_source
       return navigation_source
+
+  offline_maps_source = offline_maps
+
+  def offline_maps_owner():
+    nonlocal offline_maps_source
+    with navigation_lock:
+      if offline_maps_source is None:
+        from openpilot.starpilot.navigation.offline_owner import OfflineMapsOwner
+        offline_maps_source = OfflineMapsOwner(position=lambda: navigation_owner().position_store.read())
+      return offline_maps_source
 
   def statistics_owner():
     nonlocal drive_stats_source
@@ -935,6 +945,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.require_session():
             self.respond(200, tile, 'image/png')
+      elif path == '/api/navigation/offline':
+        if not self.require_session():
+          return
+        try:
+          result = offline_maps_owner().snapshot()
+        except (OSError, ValueError, RuntimeError):
+          self.json(503, {'error': 'Offline maps are unavailable'})
+        else:
+          if self.require_session():
+            self.json(200, result)
       elif path == '/api/navigation/status':
         if not self.require_session():
           return
@@ -1488,7 +1508,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
                       '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore',
                       '/api/recordings/delete-videos', '/api/sentry/notifications',
-                      '/api/navigation/search', '/api/navigation/action', '/api/drive-state/action',
+                      '/api/navigation/search', '/api/navigation/action', '/api/navigation/offline', '/api/drive-state/action',
                       '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
@@ -1580,6 +1600,24 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.settings_session() == identity:
             self.json(200, {**result, 'canSelect': cloud_allowed()})
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        return
+      if path == '/api/navigation/offline':
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          with effect_lock:
+            result = offline_maps_owner().action(payload)
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        except OSError:
+          self.json(503, {'error': 'Offline maps could not be saved. Try again shortly.'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
         return

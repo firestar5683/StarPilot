@@ -350,6 +350,8 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__selection { pointer-events: none; opacity: 0; }
 .gx-layout__widget.is-selected .gx-layout__selection, .gx-layout__widget:focus-visible .gx-layout__selection { opacity: 1; }
 .gx-layout__widget:focus-visible .gx-layout__selection { stroke: #fff; stroke-dasharray: none; }
+.gx-layout__resize { cursor: nwse-resize; touch-action: none; }
+.gx-layout__resize:hover circle:last-of-type { fill: #d4c2ff; }
 .gx-layout__widget-list { display: grid; gap: 8px; }
 .gx-layout__widget-list > button { justify-content: flex-start; text-align: left; white-space: normal; }
 .gx-layout__position, .gx-layout__tray, .gx-layout__color { display: grid; gap: 10px; }

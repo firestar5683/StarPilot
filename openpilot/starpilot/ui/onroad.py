@@ -95,6 +95,7 @@ class OnroadView:
     self.background_layer = background_layer
     self.extra_overlays = extra_overlays
     self.driver_monitor_layer: OverlayLayer | None = None
+    self.map_layer: OverlayLayer | None = None  # Android Auto map overlay, under the HUD widgets
     self.pip_layer = pip_layer
     self.stock_confidence_layer: OverlayLayer | None = None
     self.stock_confidence_reset: Callable[[], None] | None = None
@@ -236,6 +237,9 @@ class OnroadView:
       pip_layer = getattr(self, "pip_layer", None)
       if pip_layer is not None and state.camera_available:
         pip_layer(content, state)
+      map_layer = getattr(self, "map_layer", None)
+      if map_layer is not None and state.alert.size != AlertSize.FULL:
+        map_layer(content, state)
       rl.draw_rectangle_gradient_v(30, 30, int(content.width), 300, rl.Color(0, 0, 0, 114), rl.BLANK)
       if state.alert.size != AlertSize.FULL:
         if placement(state.customization, "large", "cruise_limits")["enabled"]:
@@ -253,7 +257,7 @@ class OnroadView:
         self.extra_overlays(content, state)
       if monitor_layer := getattr(self, "driver_monitor_layer", None):
         monitor_layer(content, state)
-      if self.projection_viewport:
+      if self.projection_viewport and "nav_card" not in state.customization["layouts"]["large"]:
         rl.rl_push_matrix()
         try:
           rl.rl_translatef(right_shift, 0, 0)

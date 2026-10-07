@@ -14,6 +14,10 @@ export function unproject(x, y, zoom) {
     longitude: ((x / world * 360) % 360 + 360) % 360 - 180, latitude: Math.atan(Math.sinh(Math.PI * (1 - 2 * y / world))) * 180 / Math.PI
   }
 }
+// Screen pixels per meter at a latitude: the circles for offline areas are true ground distances.
+export function metersPerPixelInverse(latitude, zoom) {
+  return SIZE * 2 ** zoom / (40075016.686 * Math.max(0.01, Math.cos(latitude * Math.PI / 180)))
+}
 export function relativeX(x, center, world) {
   return center + ((x - center + world / 2) % world + world) % world - world / 2
 }
@@ -31,9 +35,13 @@ export class RasterMap {
     this.closed = false;
     this.data = {};
     this.initialized = false
+    // Circles drawn over the map ({ latitude, longitude, radiusKm, stroke, fill }) and a tap callback (latitude, longitude).
+    this.overlays = [];
+    this.onTap = null
     this.observer = new ResizeObserver(() => this.draw());
     this.observer.observe(canvas)
     this.down = (event) => {
+      this.press = [event.clientX, event.clientY]
       this.userPanned = true
       this.drag = [event.clientX, event.clientY, ...project(this.center, this.zoom)];
       canvas.setPointerCapture(event.pointerId)
@@ -43,8 +51,14 @@ export class RasterMap {
       this.center = unproject(this.drag[2] - event.clientX + this.drag[0], this.drag[3] - event.clientY + this.drag[1], this.zoom);
       this.draw()
     }
-    this.up = () => {
+    this.up = (event) => {
       this.drag = null
+      const press = this.press
+      this.press = null
+      if (press && event?.type === 'pointerup' && this.onTap && Math.hypot(event.clientX - press[0], event.clientY - press[1]) < 6) {
+        const rect = this.canvas.getBoundingClientRect(), [cx, cy] = project(this.center, this.zoom)
+        this.onTap(unproject(cx - rect.width / 2 + event.clientX - rect.left, cy - rect.height / 2 + event.clientY - rect.top, this.zoom))
+      }
     }
     this.key = (event) => {
       const delta = {
@@ -133,6 +147,12 @@ export class RasterMap {
     const pixel = (point) => {
       const [x, y] = project(point, this.zoom);
       return [relativeX(x, cx, world) - cx + width / 2, y - cy + height / 2]
+    }
+    for (const circle of this.overlays) {
+      const [x, y] = pixel(circle), radius = metersPerPixelInverse(circle.latitude, this.zoom) * circle.radiusKm * 1000
+      ctx.beginPath(); ctx.arc(x, y, Math.max(2, radius), 0, Math.PI * 2)
+      ctx.fillStyle = circle.fill; ctx.fill()
+      ctx.setLineDash(circle.dash || []); ctx.strokeStyle = circle.stroke; ctx.lineWidth = circle.width || 2; ctx.stroke(); ctx.setLineDash([])
     }
     for (const choice of this.data.alternatives || []) {
       if (choice.index === this.data.selectedRoute || !choice.geometry?.length) continue
