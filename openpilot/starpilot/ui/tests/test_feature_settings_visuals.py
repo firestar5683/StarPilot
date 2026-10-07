@@ -11,7 +11,7 @@ import pyray as rl
 from openpilot.starpilot.ui import clip, feature_settings as view, settings_geometry as geometry
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
-  feature_scroll, feature_row_top, value_buttons, value_editor_rect, value_done_rect,
+  feature_scroll, feature_row_top, feature_page_counter_left, FEATURE_PAGE_COUNTER_WIDTH, value_buttons, value_editor_rect, value_done_rect,
 )
 from openpilot.starpilot.ui.presentation import FontRole, Profile
 from openpilot.starpilot.ui.runtime_app import SOUND_PRESETS
@@ -476,7 +476,10 @@ class FeatureVisualTests(unittest.TestCase):
             break
           scroll = next_scroll
         self.assertEqual(reached, list(rows))
-        self.assertIsNone(FeatureInput.target(600, FEATURE_ROW_TOP + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT, state))
+        footer_y = FEATURE_ROW_TOP + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT
+        self.assertEqual(FeatureInput.target(600, footer_y, state), FeatureUiAction("scroll", direction=-1))
+        counter_center = feature_page_counter_left(state) + FEATURE_PAGE_COUNTER_WIDTH / 2
+        self.assertIsNone(FeatureInput.target(counter_center, footer_y, state))
         while scroll:
           scroll = feature_scroll(scroll, -1, count)
         self.assertEqual(scroll, 0)
