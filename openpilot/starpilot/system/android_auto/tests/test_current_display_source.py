@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 import unittest
 
-from openpilot.starpilot.system.android_auto.current_car_ui import create_readback, finish_readback, visible_geometry
+from openpilot.starpilot.system.android_auto.current_car_ui import create_readback, visible_geometry
 from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
 from openpilot.starpilot.system.android_auto.frame_source import FrameRequest
 from openpilot.starpilot.system.android_auto.identity import DEFAULT_CONFIG
@@ -56,26 +56,6 @@ if __name__ == "__main__":
 
 
 class TestReadbackFallback(unittest.TestCase):
-  def test_async_failure_drops_frame_and_uses_same_size_sync_once(self):
-    from unittest.mock import Mock
-    factory = Mock()
-    synchronous = Mock(size=12, asynchronous=False)
-    synchronous.finish.return_value = memoryview(b"n" * 12)
-    factory.return_value = synchronous
-    asynchronous = Mock(size=12, asynchronous=True)
-    asynchronous.finish.side_effect = RuntimeError("GPU fence failed")
-    replacement, pixels = finish_readback(factory, asynchronous)
-    self.assertIsNone(pixels)
-    self.assertIs(replacement, synchronous)
-    asynchronous.close.assert_called_once()
-    factory.assert_called_once_with(12, asynchronous=False)
-    replacement, pixels = finish_readback(factory, replacement)
-    self.assertEqual(bytes(pixels), b"n" * 12)
-    factory.assert_called_once()
-    synchronous.finish.side_effect = RuntimeError("synchronous failure")
-    with self.assertRaises(RuntimeError):
-      finish_readback(factory, synchronous)
-
   def test_async_initialization_falls_back_without_changing_explicit_sync(self):
     from unittest.mock import Mock, call
     synchronous = Mock(asynchronous=False)

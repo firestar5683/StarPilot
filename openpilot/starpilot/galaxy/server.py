@@ -1789,6 +1789,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             if self.settings_session() != identity:
               self.json(401, {'error': 'Sign in to Galaxy'})
               return
+            if not parked():
+              self.json(409, {'error': 'Turn off the vehicle before managing recordings'})
+              return
             result = history.delete_videos(payload['segmentName'])
         except ValueError:
           self.json(400, {'error': 'Invalid segment selection'})

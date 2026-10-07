@@ -90,7 +90,8 @@ class DriveHistoryHTTPTest(unittest.TestCase):
         (segment / name).write_bytes(b'fixture')
       access = GalaxyAccessOwner(root / 'access')
       access.configure('password123', lambda: True)
-      server = make_server(port=0, owner=access, recordings=DriveHistory(segment.parent))
+      parked = [True]
+      server = make_server(port=0, owner=access, recordings=DriveHistory(segment.parent), parked=lambda: parked[0])
       worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
       worker.start()
       def request(path, payload, cookie=None):
@@ -111,6 +112,10 @@ class DriveHistoryHTTPTest(unittest.TestCase):
         self.assertEqual(request(route, {'segmentName': '../recordings'}, cookie)[0], 400)
         self.assertEqual(request(route, {'segmentName': segment.name, 'extra': 1}, cookie)[0], 400)
         self.assertEqual(request(route, {'segmentName': '0000021e--371eaf116b--7'}, cookie)[0], 404)
+        parked[0] = False
+        self.assertEqual(request(route, {'segmentName': segment.name}, cookie)[0], 409)
+        self.assertTrue((segment / 'fcamera.hevc').exists())
+        parked[0] = True
         status, body, _ = request(route, {'segmentName': segment.name}, cookie)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)['deleted'], ['fcamera', 'qcamera'])

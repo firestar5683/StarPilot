@@ -88,8 +88,7 @@ CONFIG_VERSION = 4
 # at 12 fps / 4000 kbps. Unversioned files holding exactly them get today's defaults.
 LEGACY_DEFAULTS = {"fps": 12, "bitrate_kbps": 4000}
 # Before version 3 the car view could only publish RGBA, and every save wrote these off.
-# Version 4 drops a failed asynchronous readback frame instead of crashing the renderer,
-# so files from before it that turned the pipeline off for safety return to it too.
+# They were never a choice, so older files get today's defaults for them.
 PIPELINE_RESET = ("gpu_nv12", "async_readback")
 
 DEFAULT_CONFIG = {
@@ -128,7 +127,7 @@ def load_config(path: Path | None = None) -> dict:
       version = stored.get("config_version")
       if not isinstance(version, int) or version < 2:
         stored = {key: value for key, value in stored.items() if LEGACY_DEFAULTS.get(key, object()) != value}
-      if not isinstance(version, int) or version < 4:
+      if not isinstance(version, int) or version < 3:
         stored = {key: value for key, value in stored.items() if key not in PIPELINE_RESET}
       config.update({key: value for key, value in stored.items() if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key]))})
   except (OSError, ValueError):
