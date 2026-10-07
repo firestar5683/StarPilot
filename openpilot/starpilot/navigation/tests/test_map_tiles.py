@@ -72,7 +72,7 @@ def test_fixed_provider_and_server_only_key(tmp_path):
   provider = Provider()
   assert tile_owner(tmp_path, provider).map_tile(2, 3, 1) == PNG
   url, arguments = provider.calls[0]
-  assert url == 'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/2/3/1.png'
+  assert url == 'https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/512/2/3/1.png'
   assert arguments['params'] == {'access_token': 'pk.fixture'}
   assert arguments['allow_redirects'] is False
 
@@ -163,4 +163,17 @@ def test_authorized_key_change_clears_cache_even_when_key_restored(tmp_path):
   assert not owner._tiles
   owner.configure({'token': 'pk.first'}, saved['revision'], True)
   owner.map_tile(0, 0, 0)
+  assert len(provider.calls) == 2
+
+
+def test_theme_tiles_have_separate_cache_entries(tmp_path):
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  for theme in ('light', 'dark', 'light', 'dark'):
+    assert owner.map_tile(2, 3, 1, theme) == PNG
+  assert len(provider.calls) == 2
+  assert '/mapbox/light-v11/' in provider.calls[0][0]
+  assert '/mapbox/dark-v11/' in provider.calls[1][0]
+  with pytest.raises(ValidationError, match='Invalid map theme'):
+    owner.map_tile(2, 3, 1, 'custom/style')
   assert len(provider.calls) == 2

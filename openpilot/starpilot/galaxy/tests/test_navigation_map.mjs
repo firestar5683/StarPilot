@@ -146,3 +146,43 @@ console.log('Tile completions coalesce into one frame; canvas allocation changes
   globalThis.requestAnimationFrame = originalRaf; globalThis.cancelAnimationFrame = originalCancelRaf
 }
 console.log('Follow, pinch and double-tap zoom passed')
+
+// A live Galaxy theme change discards the old imagery without moving the map.
+{
+  const savedObserver = globalThis.MutationObserver, savedDocument = globalThis.document
+  const savedFetch = globalThis.fetch, savedBitmap = globalThis.createImageBitmap
+  let observeTheme, disconnected = false, oldClosed = false, lateClosed = false, finishOld
+  globalThis.document = { documentElement: { dataset: { theme: 'light' } } }
+  globalThis.MutationObserver = class {
+    constructor(callback) { observeTheme = callback }
+    observe(target, options) { assert.deepEqual(options.attributeFilter, ['data-theme']) }
+    disconnect() { disconnected = true }
+  }
+  globalThis.requestAnimationFrame = fn => { frames.set(++frameId, fn); return frameId }
+  globalThis.cancelAnimationFrame = id => frames.delete(id)
+  const themed = new RasterMap(canvas)
+  themed.draw = () => {}
+  themed.center = { latitude: 40, longitude: -90 }; themed.zoom = 12
+  themed.tiles.set('old', { close() { oldClosed = true } })
+  const urls = [], signals = []
+  globalThis.fetch = (url, options) => {
+    urls.push(url); signals.push(options.signal)
+    return new Promise(resolve => { finishOld = resolve })
+  }
+  globalThis.createImageBitmap = async () => ({ close() { lateClosed = true } })
+  const oldRequest = themed.load('0/0/0')
+  document.documentElement.dataset.theme = 'dark'; observeTheme()
+  assert.equal(themed.theme, 'dark'); assert.equal(signals[0].aborted, true)
+  assert.equal(oldClosed, true); assert.equal(themed.tiles.size, 0)
+  assert.deepEqual(themed.center, {latitude:40, longitude:-90}); assert.equal(themed.zoom, 12)
+  finishOld({ ok: true, blob: async () => ({}) }); await oldRequest
+  assert.equal(lateClosed, true); assert.equal(themed.tiles.size, 0, 'late light tiles cannot enter the dark cache')
+  globalThis.fetch = async url => { urls.push(url); return { ok: true, blob: async () => ({}) } }
+  await themed.load('0/0/0')
+  assert.ok(urls[0].endsWith('?theme=light')); assert.ok(urls[1].endsWith('?theme=dark'))
+  themed.close(); assert.equal(disconnected, true)
+  globalThis.MutationObserver = savedObserver; globalThis.document = savedDocument
+  globalThis.fetch = savedFetch; globalThis.createImageBitmap = savedBitmap
+  globalThis.requestAnimationFrame = originalRaf; globalThis.cancelAnimationFrame = originalCancelRaf
+}
+console.log('Live map theme changes: correct requests, cache disposal, late-response isolation, camera preservation and observer cleanup passed')

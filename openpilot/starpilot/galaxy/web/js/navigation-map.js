@@ -21,8 +21,8 @@ export function metersPerPixelInverse(latitude, zoom) {
 export function relativeX(x, center, world) {
   return center + ((x - center + world / 2) % world + world) % world - world / 2
 }
-// Mapbox Streets (the default style) background, shown before tiles arrive so loading never flashes dark.
-const LAND = '#ece7df'
+// Match the tile style while imagery loads, including during live theme changes.
+const LAND = { light: '#f5f5f3', dark: '#191a1a' }
 const TILE_BITMAPS = 64  // decoded 512 px tiles are ~1 MB each; the browser's HTTP cache keeps the rest
 const MAX_ZOOM = 18
 const clampZoom = (zoom) => Math.max(0, Math.min(MAX_ZOOM, zoom))
@@ -38,6 +38,11 @@ export class RasterMap {
     this.tiles = new Map();
     this.pending = new Map();
     this.closed = false;
+    this.theme = globalThis.document?.documentElement?.dataset.theme === 'light' ? 'light' : 'dark'
+    if (globalThis.MutationObserver && globalThis.document?.documentElement) {
+      this.themeObserver = new MutationObserver(() => this.setTheme(document.documentElement.dataset.theme))
+      this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    }
     this.data = {};
     this.initialized = false
     // Following keeps the car centered; panning or a new route overview pauses it until Recenter.
@@ -124,6 +129,21 @@ export class RasterMap {
     for (const [name, listener] of [['pointerdown', this.down], ['pointermove', this.move], ['pointerup', this.up], ['pointercancel', this.up], ['wheel', this.wheel], ['keydown', this.key]]) canvas.addEventListener(name, listener, {
       passive: false
     })
+  }
+  setTheme(value) {
+    const theme = value === 'light' ? 'light' : 'dark'
+    if (this.closed || this.theme === theme) return
+    this.theme = theme
+    for (const controller of this.pending.values()) controller.abort()
+    this.pending.clear()
+    for (const image of this.tiles.values()) image.close()
+    this.tiles.clear()
+    this.failed.clear()
+    this.failures = 0
+    clearTimeout(this.retryTimer)
+    this.retryTimer = null
+    this.changed('')
+    this.draw()
   }
   pause() {
     if (this.follow) { this.follow = false; this.changed() }
@@ -248,7 +268,7 @@ export class RasterMap {
     const ctx = this.canvas.getContext('2d'), [cx, cy] = project(this.center, this.zoom), world = SIZE * 2 ** this.zoom, needed = []
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
     ctx.imageSmoothingQuality = 'high'
-    ctx.fillStyle = LAND;
+    ctx.fillStyle = LAND[this.theme];
     ctx.fillRect(0, 0, width, height)
     // Tiles come from the nearest whole zoom level, scaled while a pinch is between levels.
     const tileZoom = clampZoom(Math.round(this.zoom)), n = 2 ** tileZoom, span = SIZE * 2 ** (this.zoom - tileZoom)
@@ -324,7 +344,7 @@ export class RasterMap {
       controller.abort()
     }, 8000)
     try {
-      const response = await fetch(`./api/navigation/map/tiles/${key}.png`, {
+      const response = await fetch(`./api/navigation/map/tiles/${key}.png?theme=${this.theme}`, {
         credentials: 'same-origin', signal: controller.signal
       });
       if (!response.ok) throw new Error('Map tiles unavailable')
@@ -342,7 +362,7 @@ export class RasterMap {
       }
       if (!this.failed.size) this.changed('')
     } catch (error) {
-      if (timedOut || !controller.signal.aborted) {
+      if (this.pending.get(key) === controller && (timedOut || !controller.signal.aborted)) {
         this.failed.add(key);
         if (this.failed.size > 64) this.failed.delete(this.failed.values().next().value);
         // A quick refusal (a busy moment) is retried quickly and silently; a hung request or a run of failures is reported.
@@ -371,6 +391,7 @@ export class RasterMap {
     clearTimeout(this.locationTimer);
     clearTimeout(this.retryTimer);
     this.observer.disconnect();
+    this.themeObserver?.disconnect();
     cancelAnimationFrame(this.paintScheduled);
     if (this.frameScheduled) cancelAnimationFrame(this.frameScheduled);
     for (const controller of this.pending.values()) controller.abort();
@@ -396,6 +417,14 @@ export const NavigationMap = {
   beforeUnmount() {
     this.map.close()
   },
+  methods: {
+    overview() {
+      if (this.map?.fit(this.data?.route || [])) {
+        this.map.pause()
+        this.map.draw()
+      }
+    },
+  },
   watch: {
     data(value) {
       this.map?.update(value, this.stale)
@@ -407,6 +436,7 @@ export const NavigationMap = {
     <canvas tabindex="0" ref="canvas" aria-label="Map. Drag to pan, pinch or double-tap to zoom" />
     <div v-if="!locationFresh && lastLocation" class="gx-navigation-map__last">Last known position · waiting for GPS</div>
     <div class="gx-navigation-map__controls">
+    <button v-if="data?.route?.length" type="button" class="gx-navigation-map__control" @click="overview" aria-label="Show whole route" title="Show whole route"><i class="bi bi-bounding-box" aria-hidden="true"></i></button>
     <button type="button" class="gx-navigation-map__control" @click="map.changeZoom(1)" aria-label="Zoom in"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
     <button type="button" class="gx-navigation-map__control" @click="map.changeZoom(-1)" aria-label="Zoom out"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
     <button type="button" class="gx-navigation-map__control" :class="{'gx-navigation-map__control--active':!following}" @click="map.recenter()" :aria-pressed="following" aria-label="Recenter and follow"><i class="bi bi-crosshair" aria-hidden="true"></i></button>

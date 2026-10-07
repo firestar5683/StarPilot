@@ -310,6 +310,9 @@ export const NavigationPage = {
       if (!this.query.trim()) { this.client.endSuggestions(); return }
       this.suggestTimer = setTimeout(() => this.client.suggest(this.query), 300)
     },
+    onSearchFocusOut(event) {
+      if (!event.relatedTarget?.closest('.gx-navigation__suggestions, .gx-navigation__search')) this.closeSuggestions()
+    },
     closeSuggestions() { this.suggestOpen = false; clearTimeout(this.suggestTimer) },
     clearQuery() {
       this.query = ""
@@ -344,11 +347,15 @@ export const NavigationPage = {
     duration(value) { const minutes = Math.max(1, Math.round(value / 60)); return minutes >= 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : `${minutes} min` },
   },
   template: `
-    <div class="gx-view gx-navigation" :class="{'gx-navigation--fullscreen':tab==='route'}">
-      <h2>Navigation</h2>
-      <div class="gx-navigation__tabs gx-tabs" role="tablist" aria-label="Navigation tools">
+    <div class="gx-view gx-navigation">
+      <header class="gx-card gx-driving__intro gx-navigation__intro">
+        <div><span class="gx-navigation__eyebrow"><i class="bi bi-compass" aria-hidden="true"></i> YOUR NEXT JOURNEY</span>
+          <h2>Navigation</h2><p>Find your next stop. See your route. Let’s go.</p></div>
+        <button v-if="go" type="button" class="gx-btn gx-btn--tonal" @click="go('/tools')"><i class="bi bi-arrow-left" aria-hidden="true"></i> Back to tools</button>
+      </header>
+      <div class="gx-navigation__tabs gx-tabs" role="group" aria-label="Navigation tools">
         <button v-for="item in [{id:'route',label:'Destination'},{id:'maps',label:'Offline Maps'},{id:'setup',label:'Setup'}]" :key="item.id"
-          type="button" class="gx-btn" :class="tab === item.id ? '' : 'gx-btn--tonal'" role="tab" :aria-selected="tab === item.id" @click="tab=item.id">{{ item.label }}</button>
+          type="button" class="gx-btn" :class="tab === item.id ? '' : 'gx-btn--tonal'" :aria-pressed="tab === item.id" @click="tab=item.id">{{ item.label }}</button>
       </div>
       <div v-if="tab === 'maps'" class="gx-navigation__offline">
         <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" :metric="data?.isMetric !== false" />
@@ -381,23 +388,27 @@ export const NavigationPage = {
         </section>
       </template>
       <template v-else>
-        <NavigationMap v-if="ready" :data="data" :stale="stale" />
-        <div class="gx-navigation__panel">
+        <div class="gx-navigation__workspace">
+        <div class="gx-card gx-navigation__panel">
+          <div class="gx-navigation__step"><span class="gx-navigation__number">1</span><div><h3>Where to?</h3><p>Search an address, place, or business.</p></div></div>
+          <p v-if="mode === 'local' && !data" role="status" class="gx-note">{{ error ? 'Navigation could not be loaded.' : 'Connecting to your comma…' }}</p>
+          <button v-if="mode === 'local' && !data && error" type="button" class="gx-btn" @click="client.load()">Try again</button>
           <p v-if="mode !== 'local'" class="gx-card gx-navigation__section gx-note">Connect to your comma to set up navigation and choose a destination.</p>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
           <p v-if="stale && data" class="gx-card gx-navigation__section gx-note">Showing the last received route. Reconnecting before accepting changes.</p>
-          <form v-if="ready" @submit.prevent="search" class="gx-navigation__search" role="search">
+          <form v-if="ready" @submit.prevent="search" class="gx-navigation__search" role="search" @focusout="onSearchFocusOut">
             <div class="gx-navigation__field">
               <i class="bi bi-search" aria-hidden="true"></i>
               <label for="navigation-search" class="gx-sr-only">Search destinations</label>
-              <input id="navigation-search" ref="search" v-model="query" placeholder="Search here" minlength="2" maxlength="200" required
+              <input id="navigation-search" ref="search" v-model="query" placeholder="Address or place name" minlength="2" maxlength="200" required
                 autocomplete="off" enterkeyhint="search" :disabled="!available" role="combobox" :aria-expanded="showQuick || showSuggestions" aria-controls="navigation-suggestions"
-                @input="typed" @focus="suggestOpen = true" @blur="closeSuggestions" @keydown.escape="closeSuggestions">
+                @input="typed" @focus="suggestOpen = true" @keydown.escape="closeSuggestions">
               <button v-if="query || results.length" type="button" class="gx-navigation__icon" aria-label="Clear search" @mousedown.prevent @click="clearQuery"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
             </div>
-            <button class="gx-sr-only" type="submit" :disabled="!available || query.trim().length < 2">Search</button>
+            <button class="gx-btn" type="submit" :disabled="!available || query.trim().length < 2"><i class="bi bi-search" aria-hidden="true"></i> Search</button>
           </form>
-          <div v-if="showQuick || showSuggestions" id="navigation-suggestions" class="gx-navigation__suggestions" @mousedown.prevent>
+          <p v-if="ready && !data.destination" class="gx-note gx-navigation__hint">Choose a place to start guidance on your comma and see the route here.</p>
+          <div v-if="showQuick || showSuggestions" id="navigation-suggestions" class="gx-navigation__suggestions" @mousedown.prevent @focusout="onSearchFocusOut">
             <template v-if="showQuick">
               <div v-if="favorites.length" class="gx-navigation__group"><span>Saved</span></div>
               <div v-for="place in favorites" :key="'saved-' + place.id" class="gx-navigation__row">
@@ -453,7 +464,8 @@ export const NavigationPage = {
                 <i class="bi" :class="destinationSaved.label === key ? (key === 'home' ? 'bi-house-fill' : 'bi-briefcase-fill') : (key === 'home' ? 'bi-house' : 'bi-briefcase')" aria-hidden="true"></i>{{ label }}</button>
             </div>
             <div class="gx-navigation__route-actions gx-actions">
-              <button type="button" class="gx-btn" :disabled="!available" @click="client.action('clear')">End Navigation</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!available" @click="$refs.search?.focus()"><i class="bi bi-search" aria-hidden="true"></i> Change destination</button>
+              <button type="button" class="gx-btn gx-btn--danger" :disabled="!available" @click="client.action('clear')">End navigation</button>
             </div>
           </section>
           <section v-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your public Mapbox key to search for places and plan a route. Your key stays on your comma.</p>
@@ -467,13 +479,20 @@ export const NavigationPage = {
               <li v-for="place in results" :key="place.id" class="gx-card">
                 <span><strong>{{ place.name }}</strong><small v-if="place.address || place.description" class="gx-note">{{ place.address || place.description }}</small></span><div class="gx-navigation__actions gx-actions">
                   <button type="button" class="gx-navigation__icon" :aria-label="(isFavorite(place) ? 'Saved: ' : 'Save ') + place.name" :aria-pressed="isFavorite(place)" :disabled="!available || isFavorite(place)" @click="save(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
-                  <button type="button" class="gx-btn" :disabled="!available" @click="pick(place)">Go</button>
+                  <button type="button" class="gx-btn" :disabled="!available" @click="pick(place)"><i class="bi bi-arrow-up-right" aria-hidden="true"></i> Navigate</button>
                 </div>
               </li>
             </ul>
           </template>
         </div>
+        <section class="gx-card gx-navigation__preview" aria-label="Route preview">
+          <div class="gx-navigation__preview-head"><div class="gx-navigation__step"><span class="gx-navigation__number">2</span><div><h3>Route preview</h3><p role="status">{{ stale ? 'Reconnecting · last received route' : statusLabel }}</p></div></div>
+            <span v-if="summary" class="gx-navigation__trip">{{ duration(summary.duration) }} · {{ distance(summary.distance) }}</span></div>
+          <NavigationMap v-if="ready" :data="data" :stale="stale" />
+          <div v-else class="gx-navigation__empty"><i class="bi bi-signpost-split" aria-hidden="true"></i><h3>Your journey starts here</h3><p>{{ mode !== 'local' ? 'Connect to your comma to plan your next trip.' : 'Set up navigation to explore the map and find your next stop.' }}</p><button v-if="mode === 'local' && data" type="button" class="gx-btn gx-btn--tonal" @click="tab='setup'">Open navigation setup</button></div>
+          <p class="gx-navigation__preview-note"><i class="bi bi-map" aria-hidden="true"></i> {{ data?.route?.length ? 'Drag to explore. Use the route overview button to see the whole trip.' : 'Your route and travel time appear after you choose a destination.' }}</p>
+        </section>
+        </div>
       </template>
-      <button v-if="go" type="button" class="gx-navigation__exit" aria-label="Exit navigation" @click="go('/tools')"><i class="bi bi-x-lg"></i><span>Exit</span></button>
     </div>`,
 }

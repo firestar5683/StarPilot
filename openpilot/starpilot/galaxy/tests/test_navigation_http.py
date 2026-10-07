@@ -80,6 +80,25 @@ class NavigationHttpTest(unittest.TestCase):
     finally:
       connection.close()
 
+  def test_map_theme_is_validated_and_forwarded(self):
+    self.navigation.map_tile = Mock(return_value=b'fixture tile')
+    for theme in ('light', 'dark'):
+      connection = http.client.HTTPConnection('127.0.0.1', self.local.server_port, timeout=2)
+      try:
+        connection.request('GET', f'/api/navigation/map/tiles/0/0/0.png?theme={theme}',
+                           headers={'Host': f'127.0.0.1:{self.local.server_port}', 'Cookie': self.local_cookie})
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(), b'fixture tile')
+        self.navigation.map_tile.assert_called_with(0, 0, 0, theme)
+      finally:
+        connection.close()
+    self.navigation.map_tile.reset_mock()
+    for query in ('theme=invalid', 'theme=', 'theme=light&theme=dark', 'style=custom'):
+      status, _, _ = self.request('/api/navigation/map/tiles/0/0/0.png?' + query, cookie=self.local_cookie)
+      self.assertEqual(status, 400)
+    self.navigation.map_tile.assert_not_called()
+
   def action(self, action, *, remote=False, **values):
     return self.request('/api/navigation/action', payload=dict(action=action, revision=self.navigation.snapshot()['revision'], **values),
                          remote=remote, cookie=self.remote_cookie if remote else self.local_cookie)

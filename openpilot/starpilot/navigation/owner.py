@@ -37,8 +37,8 @@ SUGGESTS_PER_SESSION = 50  # Mapbox starts a new billable session after this man
 MAX_FAVORITES = 100
 MAX_RECENTS = 10
 FAVORITE_LABELS = ('home', 'work')
-# Mapbox's default style. Static Tiles stay inside the free 200k monthly map views.
-MAP_STYLE = 'mapbox/streets-v12'
+# Fixed provider styles matching Galaxy; cache entries are separate for each theme.
+MAP_STYLES = {'light': 'mapbox/light-v11', 'dark': 'mapbox/dark-v11'}
 
 
 class ValidationError(ValueError):
@@ -304,14 +304,16 @@ class NavigationOwner:
       (self.transient_root / 'routes.cache').write_text(json.dumps(value, allow_nan=False))
     return self.snapshot()
 
-  def map_tile(self, z: int, x: int, y: int) -> bytes:
+  def map_tile(self, z: int, x: int, y: int, theme: str = 'light') -> bytes:
+    if theme not in MAP_STYLES:
+      raise ValidationError('Invalid map theme')
     if any(type(v) is not int for v in (z, x, y)) or not 0 <= z <= 18 or not 0 <= x < 2 ** z or not 0 <= y < 2 ** z:
       raise ValidationError('Invalid map tile')
     token = self.read()['token']
     if not token:
       raise ValidationError('Save a Mapbox key to view the map')
     key = hashlib.sha256(token.encode()).digest()
-    coordinates = (z, x, y)
+    coordinates = (theme, z, x, y)
     with self._tile_lock:
       self._expire_tiles(key)
       cached = self._tiles.get(coordinates)
@@ -326,7 +328,7 @@ class NavigationOwner:
       raise ValidationError('Map is busy; try again')
     try:
       started = time.monotonic()
-      with self.session.get(f'https://api.mapbox.com/styles/v1/{MAP_STYLE}/tiles/512/{z}/{x}/{y}.png',
+      with self.session.get(f'https://api.mapbox.com/styles/v1/{MAP_STYLES[theme]}/tiles/512/{z}/{x}/{y}.png',
                             params={'access_token': token}, timeout=(2, 2), stream=True, allow_redirects=False) as response:
         if response.status_code != 200 or response.headers.get('Content-Type', '').split(';')[0] != 'image/png':
           raise ValidationError('Map tiles are unavailable')
