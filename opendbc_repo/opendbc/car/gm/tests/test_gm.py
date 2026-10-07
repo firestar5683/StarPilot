@@ -428,6 +428,25 @@ class TestGMInterface:
     assert accel_max == pytest.approx(np.interp(4.73, [0.0, 1.5, 4.0, 8.0, 15.0],
                                                 [0.54, 0.74, 1.03, 1.46, CarControllerParams.ACCEL_MAX]))
 
+  @parameterized.expand([
+    CAR.CHEVROLET_BOLT_CC_2017,
+    CAR.CHEVROLET_BOLT_CC_2018_2021,
+    CAR.CHEVROLET_BOLT_CC_2022_2023,
+  ])
+  def test_bolt_cc_long_tune_tracks_planner_accel(self, car_model):
+    car_params = interfaces[car_model].get_params(car_model, _empty_fingerprint(), [], alpha_long=False, is_release=False,
+                                                  docs=False, starpilot_toggles=_test_starpilot_toggles())
+
+    assert car_params.flags & GMFlags.CC_LONG.value
+    assert list(car_params.longitudinalTuning.kpV) == [0., 0.5, 0.5]
+
+  def test_other_cc_only_cars_keep_existing_long_tune(self):
+    car_params = interfaces[CAR.CHEVROLET_EQUINOX_CC].get_params(CAR.CHEVROLET_EQUINOX_CC, _empty_fingerprint(), [], alpha_long=False,
+                                                                 is_release=False, docs=False, starpilot_toggles=_test_starpilot_toggles())
+
+    assert car_params.flags & GMFlags.CC_LONG.value
+    assert list(car_params.longitudinalTuning.kpV) == [0., 5., 2.]
+
   def test_bolt_cc_pedal_pid_accel_limits_remain_regen_limited(self):
     cp = SimpleNamespace(
       enableGasInterceptorDEPRECATED=True,
@@ -1266,7 +1285,9 @@ class TestGMCarController:
 
   def test_non_volt_cc_redneck_spam_stays_on_powertrain_bus(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_BOLT_CC_2018_2021][Bus.pt])
-    controller = SimpleNamespace(frame=int(0.3 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    # Seed the Bolt set speed target filter so a tap is due on this frame.
+    controller = SimpleNamespace(frame=int(0.3 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0,
+                                 gm_cc_target_speed=27.5, gm_cc_target_frame=int(0.3 / DT_CTRL) - 4)
     cs = SimpleNamespace(
       CP=SimpleNamespace(
         carFingerprint=CAR.CHEVROLET_BOLT_CC_2018_2021,
@@ -1331,33 +1352,107 @@ class TestGMCarController:
     assert len(msgs) == 1
     assert controller.apply_speed == 61
 
-  def test_bolt_cc_redneck_requires_persistent_acceleration_after_deceleration(self):
-    cp = SimpleNamespace(carFingerprint=CAR.CHEVROLET_BOLT_CC_2018_2021)
-    controller = SimpleNamespace(
-      frame=100,
-      gm_cc_last_direction_button=CruiseButtons.DECEL_SET,
-      gm_cc_last_direction_frame=100,
-      gm_cc_pending_reverse_button=CruiseButtons.INIT,
-      gm_cc_pending_reverse_frame=0,
-    )
+  @staticmethod
+  def _bolt_cc_controller(frame=0):
+    return SimpleNamespace(frame=frame, last_button_frame=0, apply_speed=0,
+                           gm_cc_target_speed=None, gm_cc_target_frame=None)
 
-    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.RES_ACCEL) == CruiseButtons.INIT
-    controller.frame += int(0.5 / DT_CTRL)
-    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.RES_ACCEL) == CruiseButtons.INIT
-    controller.frame += int(0.11 / DT_CTRL)
-    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.RES_ACCEL) == CruiseButtons.RES_ACCEL
+  @staticmethod
+  def _bolt_cc_state(v_ego_mph, set_mph, car=CAR.CHEVROLET_BOLT_CC_2022_2023):
+    CP = SimpleNamespace(carFingerprint=car, minEnableSpeed=24 * CV.MPH_TO_MS, networkLocation=None, flags=0)
+    out = SimpleNamespace(vEgo=v_ego_mph * CV.MPH_TO_MS,
+                          cruiseState=SimpleNamespace(speed=set_mph * CV.MPH_TO_MS))
+    return SimpleNamespace(out=out, CP=CP, buttons_counter=0)
 
-  def test_bolt_cc_redneck_deceleration_is_not_debounced(self):
-    cp = SimpleNamespace(carFingerprint=CAR.CHEVROLET_BOLT_CC_2018_2021)
-    controller = SimpleNamespace(
-      frame=100,
-      gm_cc_last_direction_button=CruiseButtons.RES_ACCEL,
-      gm_cc_last_direction_frame=100,
-      gm_cc_pending_reverse_button=CruiseButtons.INIT,
-      gm_cc_pending_reverse_frame=0,
-    )
+  @staticmethod
+  def _bolt_cc_button(controller, CS, plan_mph, accel=0.0, v_cruise_mph=65.0):
+    actuators = SimpleNamespace(accel=accel, speed=plan_mph * CV.MPH_TO_MS)
+    return gmcan._bolt_cc_setpoint_button(controller, CS, actuators, v_cruise_mph * CV.MPH_TO_MS, CV.MS_TO_MPH, False)
 
-    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.DECEL_SET) == CruiseButtons.DECEL_SET
+  def test_bolt_cc_holds_set_speed_with_no_lead(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=64.4, set_mph=65)
+    for _ in range(50):
+      controller.frame += 4
+      button, _ = self._bolt_cc_button(controller, cs, plan_mph=65.0, accel=0.05)
+      assert button == CruiseButtons.INIT
+
+  def test_bolt_cc_cruise_speed_caps_set_speed(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=65.4, set_mph=66)
+    for _ in range(100):
+      controller.frame += 4
+      button, interval = self._bolt_cc_button(controller, cs, plan_mph=70.0, accel=0.3, v_cruise_mph=65.0)
+    assert button == CruiseButtons.DECEL_SET
+    assert interval == gmcan.BOLT_CC_TAP_INTERVAL_V_S[0]
+
+  def test_bolt_cc_small_target_changes_are_filtered_before_tapping(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=64.4, set_mph=65)
+    # A 1 mph planned speed drop is about a 1 mph set speed drop once the speedo ratio is applied.
+    button, _ = self._bolt_cc_button(controller, cs, plan_mph=63.4, accel=-0.2)
+    assert button == CruiseButtons.INIT
+    controller.frame += 4
+    button, _ = self._bolt_cc_button(controller, cs, plan_mph=63.4, accel=-0.2)
+    assert button == CruiseButtons.INIT
+    for _ in range(150):
+      controller.frame += 4
+      button, interval = self._bolt_cc_button(controller, cs, plan_mph=63.4, accel=-0.2)
+    assert button == CruiseButtons.DECEL_SET
+    assert interval == gmcan.BOLT_CC_TAP_INTERVAL_V_S[0]
+
+  def test_bolt_cc_sudden_planned_speed_drop_bypasses_filter_and_taps_fast(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=64.4, set_mph=65)
+    self._bolt_cc_button(controller, cs, plan_mph=65.0)
+    controller.frame += 4
+    button, interval = self._bolt_cc_button(controller, cs, plan_mph=55.0, accel=-1.5)
+    assert button == CruiseButtons.DECEL_SET
+    assert interval == gmcan.BOLT_CC_URGENT_TAP_INTERVAL_S
+
+  def test_bolt_cc_raising_target_is_slower_than_lowering(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=59.4, set_mph=60)
+    self._bolt_cc_button(controller, cs, plan_mph=60.0)
+    for _ in range(5):
+      controller.frame += 4
+      button, _ = self._bolt_cc_button(controller, cs, plan_mph=63.0, accel=0.5)
+    assert button == CruiseButtons.INIT
+    for _ in range(100):
+      controller.frame += 4
+      button, _ = self._bolt_cc_button(controller, cs, plan_mph=63.0, accel=0.5)
+    assert button == CruiseButtons.RES_ACCEL
+
+  def test_bolt_cc_does_not_tap_below_stock_minimum_set_speed(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=25.0, set_mph=25)
+    for _ in range(100):
+      controller.frame += 4
+      button, _ = self._bolt_cc_button(controller, cs, plan_mph=22.0, accel=-0.3)
+    assert button == CruiseButtons.INIT
+
+  def test_bolt_cc_cancels_when_target_falls_well_below_engage_speed(self):
+    controller = self._bolt_cc_controller()
+    cs = self._bolt_cc_state(v_ego_mph=30.0, set_mph=30)
+    self._bolt_cc_button(controller, cs, plan_mph=30.0)
+    controller.frame += 4
+    button, _ = self._bolt_cc_button(controller, cs, plan_mph=10.0, accel=-2.0)
+    assert button == CruiseButtons.CANCEL
+
+  def test_bolt_cc_spam_command_updates_apply_speed_and_respects_interval(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_BOLT_CC_2022_2023][Bus.pt])
+    controller = self._bolt_cc_controller(frame=1000)
+    cs = self._bolt_cc_state(v_ego_mph=65.4, set_mph=66)
+    actuators = SimpleNamespace(accel=-0.1, speed=66.0 * CV.MPH_TO_MS)
+    toggles = SimpleNamespace(is_metric=False)
+    v_cruise = 65.0 * CV.MPH_TO_MS
+
+    msgs = gmcan.create_gm_cc_spam_command(packer, controller, cs, actuators, toggles, v_cruise=v_cruise)
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 65
+    controller.frame += 4
+    assert gmcan.create_gm_cc_spam_command(packer, controller, cs, actuators, toggles, v_cruise=v_cruise) == []
 
   def test_xt4_cc_redneck_spam_matches_physical_button_burst(self):
     packer = CANPacker(DBC[CAR.CADILLAC_XT4_CC][Bus.pt])
