@@ -502,7 +502,8 @@ class CarState(CarStateBase):
         ret.cruiseState.standstill = False
       ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
       ret.cruiseState.nonAdaptive = not (is_silverado_cc_stock_profile(self.CP) or
-                                         is_ordinary_cc_profile(self.CP) or is_conventional_cc_pedal_profile(self.CP))
+                                         is_ordinary_cc_profile(self.CP) or is_conventional_cc_pedal_profile(self.CP) or
+                                         is_volt_cc_profile(self.CP))
     if self.hybrid_profile is not None:
       ret.accFaulted = False
       ret.cruiseState.enabled = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])
@@ -569,6 +570,7 @@ class CarState(CarStateBase):
       ret.stockFcw = self.stock_fcw_alert != 0
 
     if self.volt_cc_pedal_profile is not None:
+      ret.cruiseState.nonAdaptive = False
       ret.brakePressed = bool(pt_cp.vl["ECMEngineStatus"]["BrakePressed"])
       ret.accFaulted = False  # ACC status is not a conventional-cruise fault source.
       ret.cruiseState.enabled = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])

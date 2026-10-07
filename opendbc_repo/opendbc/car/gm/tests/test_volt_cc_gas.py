@@ -33,6 +33,11 @@ class TestVoltCcGas(unittest.TestCase):
       for source in sources:
         native('rx', source, now // 1000)
     self.assertTrue(out.canValid)
+    self.assertFalse(out.cruiseState.nonAdaptive)
+    from openpilot.selfdrive.car.car_events import CarEvents
+    from openpilot.cereal import log
+    events = CarEvents(cp).update(out, structs.CarState(), structs.CarControl())
+    self.assertNotIn(log.OnroadEvent.EventName.wrongCruiseMode, events.names)
     return cp, ci, packer, now
 
   @staticmethod
