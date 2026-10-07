@@ -1,6 +1,6 @@
 """Authenticated projection of the existing parked vehicle-selection owner."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import secrets
 import threading
@@ -45,7 +45,8 @@ class VehicleSelectionGateway:
     self.clock = clock
     self.lock = threading.Lock()
     self.owner = VehicleSelectionOwner(params, context.parked)
-    self.catalog = self.owner.choices()
+    self.catalog = tuple(sorted((replace(choice, make='GM / Chevrolet') if choice.make.casefold() in ('gm', 'chevrolet') else choice
+                                 for choice in self.owner.choices()), key=lambda choice: (choice.make, choice.label, choice.platform)))
     self.by_platform = {str(choice.platform): choice for choice in self.catalog}
     self.views: dict[str, _View] = {}
     self.intents: dict[str, _Intent] = {}
