@@ -57,6 +57,41 @@ class TestJetlinkArtifacts(unittest.TestCase):
       self.admit()
     self.assertEqual(self.target.read_bytes(), previous)
 
+  def test_exact_unused_loader_extension_keeps_build_manifest_and_captures(self):
+    self.manifest['sources'] = {**self.source, artifacts.RUNTIME_HELPER: artifacts.RUNTIME_HELPER_BEFORE}
+    self.write_manifest()
+    self.source = {**self.source, artifacts.RUNTIME_HELPER: artifacts.RUNTIME_HELPER_AFTER}
+    sidecar = self.package / 'runtime-compatibility.json'
+    extension = {'version': 1, 'profile': artifacts.RUNTIME_PROFILE,
+                 'build_manifest_sha256': artifacts.sha(self.package / 'manifest.json'),
+                 'compatible_source_sha256': artifacts.source_signature(self.source)}
+    before = (self.package / 'manifest.json').read_bytes(), dict(self.rows)
+    with self.assertRaisesRegex(ValueError, 'source closure'):
+      self.admit()
+    sidecar.write_text(json.dumps(extension))
+    self.admit()
+    self.assertEqual(before, ((self.package / 'manifest.json').read_bytes(), self.rows))
+    for field in ('profile', 'build_manifest_sha256', 'compatible_source_sha256'):
+      with self.subTest(field=field):
+        sidecar.write_text(json.dumps({**extension, field: 'wrong'}))
+        with self.assertRaisesRegex(ValueError, 'source closure'):
+          self.admit()
+    sidecar.write_text(json.dumps(extension))
+    self.source['jetlink_repo/jetlink/openpilot/warp.py'] = 'changed-compiler'
+    with self.assertRaisesRegex(ValueError, 'source closure'):
+      self.admit()
+    self.source['jetlink_repo/jetlink/openpilot/warp.py'] = 'known-source'
+    self.source[artifacts.RUNTIME_HELPER] = 'unreviewed-helper'
+    with self.assertRaisesRegex(ValueError, 'source closure'):
+      self.admit()
+    self.source[artifacts.RUNTIME_HELPER] = artifacts.RUNTIME_HELPER_AFTER
+    sidecar.unlink()
+    external = self.package / 'external.json'
+    external.write_text(json.dumps(extension))
+    sidecar.symlink_to(external)
+    with self.assertRaisesRegex(ValueError, 'source closure'):
+      self.admit()
+
   def test_incomplete_or_extra_geometry_is_rejected(self):
     for change in ('remove', 'extra'):
       with self.subTest(change=change):

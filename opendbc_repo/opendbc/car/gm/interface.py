@@ -12,10 +12,13 @@ from opendbc.car.gm.radar_interface import RadarInterface, RADAR_HEADER_MSG, CAM
 from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, SDGM_CAR, ALT_ACCS,
                                    CanBus, GMSafetyFlags, GMFlags, PEDAL_BOLT_CAR, NO_ACC_BOLT_CAR, ASCM_INTERCEPT_CAR,
                                    SDGM_STOCK_CAR, SDGM_CANCEL_PT_CAR, ORDINARY_SDGM_CAR, CC_GATEWAY_STOCK_CAR,
-                                   SILVERADO_CC_STOCK_SOURCES, ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS,
+                                   SILVERADO_CC_STOCK_SOURCES, MALIBU_CC_F1_SOURCES, MALIBU_CC_F1_WORD,
+                                   ORDINARY_CC_CAR, ORDINARY_CC_WORD, SILVERADO_CC_PEDAL_WORDS,
                                    is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
                                    CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
-                                       VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS, is_bolt_pedal_removed_profile)
+                                       VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS,
+                                   is_bolt_pedal_removed_profile, is_bolt_pedal_profile)
+from opendbc.car.gm.values import malibu_hybrid_profile, MALIBU_HYBRID_SOURCES
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -41,10 +44,15 @@ class CarInterface(CarInterfaceBase):
     return super().get_params(pedal_candidate(candidate, fingerprint), fingerprint, car_fw, alpha_long, is_release, docs)
 
   def update(self, can_packets):
+    if malibu_hybrid_profile(self.CP) is not None:
+      self.CS.hybrid_buttons.observe_packets(can_packets)
     if (is_bolt_pedal_removed_profile(self.CP) or is_bolt_pedal_removed_profile(self.CP, stock_only=True)):
       self.CS.conventional_cancel_credit.observe(
         can_packets, clear_on_main_off=True,
         clear_on_driver_override=is_bolt_pedal_removed_profile(self.CP, stock_only=True))
+    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2018_2021 and is_bolt_pedal_profile(self.CP) and
+        self.CP.safetyConfigs[0].safetyParam == 0x9D):
+      self.CS.conventional_cancel_credit.observe(can_packets, clear_on_main_off=True)
     if volt_cc_pedal_profile(self.CP) is not None:
       self.CS.conventional_cancel_credit.observe(can_packets)
     if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP) and not self.CP.openpilotLongitudinalControl:
@@ -122,7 +130,8 @@ class CarInterface(CarInterfaceBase):
     if (profile is not None and profile.longitudinal) or (volt_cc_pedal_profile(CP) is not None and CP.openpilotLongitudinalControl):
       return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
               float(np.interp(current_speed, [0., 1.5, 4., 8., 15.], [.60, .85, 1.15, 1.60, 2.])))
-    if is_silverado_cc_pedal_profile(CP):
+    hybrid = malibu_hybrid_profile(CP)
+    if is_silverado_cc_pedal_profile(CP) or hybrid is not None and hybrid.pedal and hybrid.longitudinal:
       return (float(np.interp(current_speed, [0., 1.5, 4., 8., 15., 30.], [-.95, -1.3, -1.85, -2.3, -2.6, -2.8])),
               float(np.interp(current_speed, [0., 1.5, 4., 8., 15.], [.60, .85, 1.15, 1.60, 2.])))
     if CP.flags & GMFlags.PEDAL_LONG.value:
@@ -802,6 +811,45 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam = BOLT_PEDAL_REMOVED_WORDS[candidate]
       else:
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.noOutput)]
+    if (candidate == CAR.CHEVROLET_MALIBU_CC and 0x201 not in fingerprint[CanBus.POWERTRAIN] and
+        0xBE not in fingerprint[CanBus.POWERTRAIN]):
+      pt = fingerprint[CanBus.POWERTRAIN]
+      admitted = (all(pt.get(address) == length for address, length in MALIBU_CC_F1_SOURCES.items()) and
+                  RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and
+                  CAMERA_DATA_HEADER_MSG not in fingerprint[CanBus.OBSTACLE] and not docs)
+      ret.flags = int(GMFlags.CC_LONG | GMFlags.NO_ACCELERATOR_POS_MSG)
+      ret.openpilotLongitudinalControl = admitted
+      ret.pcmCruise = not admitted
+      ret.dashcamOnly = not admitted
+      ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm if admitted else structs.CarParams.SafetyModel.noOutput)]
+      if admitted:
+        ret.safetyConfigs[0].safetyParam = MALIBU_CC_F1_WORD
+    if candidate == CAR.CHEVROLET_MALIBU_HYBRID_CC:
+      pt, cam = fingerprint[CanBus.POWERTRAIN], fingerprint[CanBus.CAMERA]
+      pedal, removed, alternate = 0x201 in pt, 0x320 not in cam, 0xBE not in pt
+      admitted = (not docs and all(pt.get(address) == length for address, length in MALIBU_HYBRID_SOURCES.items()) and
+                  (pt.get(0xF1) == 6 if alternate else pt.get(0xBE) in (6, 7, 8)) and
+                  (not pedal or pt.get(0x201) == 6) and (removed or cam.get(0x180) == 4 and cam.get(0x320) == 6))
+      ret.networkLocation = NetworkLocation.fwdCamera
+      ret.transmissionType = TransmissionType.direct
+      ret.alphaLongitudinalAvailable = False
+      ret.radarUnavailable = not pedal or RADAR_HEADER_MSG not in fingerprint[CanBus.OBSTACLE]
+      ret.flags = int(GMFlags.CC_LONG | (GMFlags.PEDAL_LONG if pedal else 0) |
+                      (GMFlags.NO_CAMERA if removed else 0) | (GMFlags.NO_ACCELERATOR_POS_MSG if alternate else 0))
+      ret.openpilotLongitudinalControl, ret.pcmCruise = admitted, not admitted
+      ret.dashcamOnly = not admitted
+      ret.autoResumeSng = pedal and admitted
+      ret.minEnableSpeed = -1. if pedal else 24 * CV.MPH_TO_MS
+      ret.minSteerSpeed = 10 * CV.KPH_TO_MS
+      ret.steerActuatorDelay = .2
+      ret.longitudinalActuatorDelay = .5
+      ret.stopAccel = -.25
+      ret.longitudinalTuning.kiBP, ret.longitudinalTuning.kiV = [5., 35.], [.5, .5]
+      if pedal:
+        ret.longitudinalTuning.kiBP, ret.longitudinalTuning.kiV = [0., 3., 6., 35.], [.07, .10, .15, .24]
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm if admitted else structs.CarParams.SafetyModel.noOutput,
+                                           0xE800 + 2 * int(pedal) + int(removed) if admitted else 0)]
     if 0x142 in fingerprint[CanBus.POWERTRAIN] or candidate in VOLT_BSM_CAR:
       ret.flags |= GMFlags.HAS_BSM.value
     return ret

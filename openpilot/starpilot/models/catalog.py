@@ -1,6 +1,7 @@
 """Reviewed local driving-model catalog. This module never loads model artifacts."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import lru_cache
 import json
 from pathlib import Path
 
@@ -52,9 +53,37 @@ CATALOG = BUNDLED + tuple(ModelEntry(
 BY_ID = {entry.model_id: entry for entry in CATALOG}
 
 
-def resolve_selection(requested_id: str | None) -> ModelEntry:
+def _document_identity(path: Path) -> tuple:
+  try:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+  except OSError:
+    return ()
+
+
+@lru_cache(maxsize=8)
+def _cached_entries(root: Path, identities: tuple) -> tuple[ModelEntry, ...]:
+  from openpilot.starpilot.models.manager import catalog
+  entries = dict(BY_ID)
+  for model_id, row in catalog(root).items():
+    entries[model_id] = (replace(BY_ID[model_id], name=row["name"]) if model_id in BY_ID else
+                         ModelEntry(model_id, row["name"], "", "", COMPILER_REVISION, ARTIFACT_ABI,
+                                    True, row["version"], row.get("uses_external_gpu", False)))
+  return tuple(entries.values())
+
+
+def model_entries(root: Path | None = None) -> dict[str, ModelEntry]:
+  """Resolve validated cached metadata without mutating the bundled catalog."""
+  from openpilot.starpilot.models.manager import ROOT
+  root = ROOT if root is None else root
+  identities = (_document_identity(CATALOG_PATH), _document_identity(root / "catalog.json"))
+  return {entry.model_id: entry for entry in _cached_entries(root, identities)}
+
+
+def resolve_selection(requested_id: str | None, *, root: Path | None = None) -> ModelEntry:
   """Resolve a saved request; absence means the bundled model, never an unknown ID."""
   model_id = DEFAULT_SMALL if requested_id in (None, BUNDLED_CURRENT) else requested_id
-  if not isinstance(model_id, str) or model_id not in BY_ID or not BY_ID[model_id].selectable:
+  entries = model_entries(root)
+  if not isinstance(model_id, str) or model_id not in entries or not entries[model_id].selectable:
     raise ValueError("unqualified driving-model selection")
-  return BY_ID[model_id]
+  return entries[model_id]

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import CAR, CruiseButtons, is_ordinary_cc_profile, is_volt_cc_longitudinal
+from opendbc.car.gm.values import CAR, CruiseButtons, is_ordinary_cc_profile, is_volt_cc_longitudinal, malibu_hybrid_profile
 from opendbc.car.gm.longitudinal import GMOrdinaryLongitudinalPolicy, _GMDefaultStopPolicy
 from opendbc.car.gm.cc_longitudinal import VoltCcEvidence
 
@@ -99,4 +99,4 @@ def policy_for(cp):
 
 
 def control_transport_required(cp):
-  return is_ordinary_cc_profile(cp) or is_volt_cc_longitudinal(cp)
+  return is_ordinary_cc_profile(cp) or is_volt_cc_longitudinal(cp) or malibu_hybrid_profile(cp) is not None

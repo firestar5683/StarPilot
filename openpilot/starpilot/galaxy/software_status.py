@@ -19,7 +19,7 @@ from openpilot.starpilot.ui.brand import DISPLAY_VERSION
 MAX_FIELD_BYTES = 256
 PARAMS_TARGET = re.compile(r"(?:\.tmp_[A-Za-z0-9]{1,128}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})\Z")
 FIELDS = ("Version", "GitBranch", "GitCommit", "UpdaterState", "UpdaterTargetBranch",
-          "LastUpdateTime", "UpdaterLastFetchTime", "UpdaterFetchAvailable", "UpdateAvailable", "UpdateFailedCount", "UpdaterFastState")
+          "LastUpdateTime", "UpdaterLastCheckTime", "UpdaterLastFetchTime", "UpdaterFetchAvailable", "UpdateAvailable", "UpdateFailedCount", "UpdaterFastState")
 
 
 def _fast_state(raw):
@@ -164,7 +164,8 @@ class SoftwareStatus:
       "installed": {"version": _text(data["Version"]), "displayVersion": DISPLAY_VERSION, "branch": _text(data["GitBranch"]),
                     "commit": _text(data["GitCommit"])},
       "updater": {"state": _text(data["UpdaterState"]), "targetBranch": _text(data["UpdaterTargetBranch"]),
-                  "lastSuccessAt": _time(data["LastUpdateTime"]), "lastFetchAt": _time(data["UpdaterLastFetchTime"]),
+                  "lastCheckedAt": _time(data["UpdaterLastCheckTime"]), "lastSuccessAt": _time(data["LastUpdateTime"]),
+                  "lastFetchAt": _time(data["UpdaterLastFetchTime"]),
                   "targetChangeFound": _flag(data["UpdaterFetchAvailable"]),
                   "finalizedUpdateReady": _flag(data["UpdateAvailable"]),
                   "failedCount": _count(data["UpdateFailedCount"]), "fast": _fast_state(data["UpdaterFastState"])},

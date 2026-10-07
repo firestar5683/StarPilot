@@ -111,8 +111,8 @@ export class RasterMap {
   draw() {
     if (this.closed) return
     const width = Math.max(1, Math.round(this.canvas.clientWidth)), height = Math.max(1, Math.round(this.canvas.clientHeight));
-    this.canvas.width = width;
-    this.canvas.height = height
+    if (this.canvas.width !== width) this.canvas.width = width;
+    if (this.canvas.height !== height) this.canvas.height = height
     const ctx = this.canvas.getContext('2d'), [cx, cy] = project(this.center, this.zoom), n = 2 ** this.zoom, world = SIZE * n, needed = new Set()
     ctx.fillStyle = '#0e0e1a';
     ctx.fillRect(0, 0, width, height)
@@ -201,10 +201,10 @@ export class RasterMap {
       clearTimeout(timer);
       if (this.pending.get(key) === controller) this.pending.delete(key);
       if (!this.closed) {
-        /* Paint completed tiles without continuously retrying failures. */ this.paintScheduled ??= setTimeout(() => {
+        /* Paint completed tiles without continuously retrying failures. */ this.paintScheduled ??= requestAnimationFrame(() => {
           this.paintScheduled = null;
           this.draw()
-        }, 200)
+        })
       }
     }
   }
@@ -217,7 +217,7 @@ export class RasterMap {
     clearTimeout(this.locationTimer);
     clearTimeout(this.retryTimer);
     this.observer.disconnect();
-    clearTimeout(this.paintScheduled);
+    cancelAnimationFrame(this.paintScheduled);
     for (const controller of this.pending.values()) controller.abort();
     for (const image of this.tiles.values()) image.close();
     this.tiles.clear();

@@ -2,12 +2,14 @@
 
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/can_tx.h"
+#include "gm_rx.h"
 #include "gm_aol.h"
 #include "gm_volt_one_pedal.h"
-#include "gm_bolt_cc.h"
 #include "gm_cc_pedal.h"
 #include "gm_volt_auto_hold.h"
 #include "gm_camera_acc_pedal.h"
+#include "gm_hybrid_cc.h"
+#include "gm_bolt_cc.h"
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
 #define GM_COMMON_RX_CHECKS \
@@ -75,6 +77,10 @@ static bool gm_cc_gateway_stock = false;
 // Exact EV|NO_ACC word20 was rejected previously; it is a DEBUG-only Volt CC owner.
 static bool gm_volt_cc_long = false;
 static bool gm_ordinary_cc_long = false;
+static bool gm_malibu_cc_f1 = false;
+static bool gm_malibu_cc_stock = false;
+static bool gm_malibu_f1_brake = false;
+static bool gm_malibu_c9_brake = false;
 static bool gm_volt_cc_seen[8] = {false, false, false, false, false, false, false, false};
 static uint32_t gm_volt_cc_last_us[8] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
 static bool gm_volt_cc_main = false;
@@ -122,9 +128,12 @@ static uint32_t gm_pedal_main_last_us = 0U;
 static bool gm_regen_gear_ready = false;
 static bool gm_pedal_forward_gear_ready = false;
 static bool gm_acc_pedal_forward_owner = false;
+static bool gm_acc_pedal_dashboard_seen = false;
+static uint32_t gm_acc_pedal_dashboard_us = 0U;
 static bool gm_bolt_pedal_removed = false;
 static bool gm_bolt_removed_acc_seen = false;
 static bool gm_bolt_removed_gear_seen = false;
+static bool gm_bolt_present_cc_cancel = false;
 static bool gm_bolt_removed_acc_active = false;
 static uint32_t gm_bolt_removed_acc_us = 0U;
 static uint32_t gm_regen_gear_last_us = 0U;
@@ -163,6 +172,16 @@ static bool gm_pedal_main_ready(void) {
   return gm_pedal_main_seen && acc_main_on &&
          safety_get_ts_elapsed(microsecond_timer_get(), gm_pedal_main_last_us) <= 300000U;
 }
+
+static bool gm_acc_pedal_dashboard_current(void) {
+  const bool physical = gm_acc_pedal_forward_owner && gm_pedal_sensor_current() &&
+    gm_pedal_main_ready() && gm_pedal_drive_ready() && gm_acc_status_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), gm_acc_status_last_us) <= 300000U) &&
+    !safety_rx_checks_invalid && !relay_malfunction;
+  if (!physical) { gm_acc_pedal_dashboard_seen = false; }
+  return physical;
+}
+
 
 static void gm_pedal_brake_producer_clear(void) {
   gm_pedal_brake_producer_seen = false;
@@ -205,7 +224,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
 
   gm_camera_pedal_rx(msg);
   if (msg->bus == 0U) {
-    if (gm_bolt_pedal_removed && (msg->addr == 0x3D1U)) {
+    if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && (msg->addr == 0x3D1U)) {
       gm_bolt_removed_acc_seen = GET_LEN(msg) == 8U;
       if (gm_bolt_removed_acc_seen) {
         gm_bolt_removed_acc_active = GET_BIT(msg, 39U);
@@ -242,7 +261,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       } else if ((msg_matches(msg, 0xC9U, 0U)) && (GET_LEN(msg) == 8U)) {
         source = 2;
         gm_volt_cc_main = GET_BIT(msg, 29U);
-      } else if ((msg_matches(msg, 0xBEU, 0U)) && (GET_LEN(msg) == 6U)) {
+      } else if ((msg_matches(msg, gm_malibu_cc_f1 ? 0xF1U : 0xBEU, 0U)) && (GET_LEN(msg) == 6U)) {
         source = 3;
       } else if ((msg->addr == 0x1F5U) && (GET_LEN(msg) == 8U)) {
         source = 4;
@@ -272,7 +291,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       if (!gm_volt_cc_main || !gm_volt_cc_active) { controls_allowed = false; }
     }
 
-    if (gm_volt_camera_removed || (gm_bolt_pedal_removed && !gm_pedal_acc) ||
+    if (gm_volt_camera_removed || ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_pedal_acc) ||
         ((gm_camera_gateway || gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_long)) {
       const uint32_t now = microsecond_timer_get();
       if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) {
@@ -298,12 +317,12 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       } else if (msg_matches(msg, 0xC9U, 0U, 8U)) {
         gm_volt_removed_main = GET_BIT(msg, 29U);
         gm_volt_removed_main_us = now;
-        if (gm_bolt_pedal_removed && !gm_volt_removed_main) { gm_volt_removed_credit = false; }
-      } else if (gm_bolt_pedal_removed && (msg->addr == 0x3D1U) && (GET_LEN(msg) == 8U)) {
+        if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_volt_removed_main) { gm_volt_removed_credit = false; }
+      } else if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && (msg->addr == 0x3D1U) && (GET_LEN(msg) == 8U)) {
         gm_volt_removed_pcm = GET_BIT(msg, 39U);
         gm_volt_removed_pcm_us = now;
         if (!gm_volt_removed_pcm) { gm_volt_removed_credit = false; }
-      } else if (!gm_bolt_pedal_removed && (msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
+      } else if (!gm_bolt_pedal_removed && !gm_bolt_present_cc_cancel && (msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
         gm_volt_removed_pcm = (msg->data[1] >> 5) != 0U;
         gm_volt_removed_pcm_us = now;
         if (!gm_volt_removed_pcm) { gm_volt_removed_credit = false; }
@@ -352,9 +371,19 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       cruise_button_prev = button;
     }
 
+    if (gm_malibu_cc_f1) {
+      if (msg_matches(msg, 0xF1U, 0U) && (GET_LEN(msg) == 6U)) {
+        gm_malibu_f1_brake = (msg->data[1] >= 21U) || GET_BIT(msg, 1U);
+      }
+      if (msg_matches(msg, 0xC9U, 0U) && (GET_LEN(msg) == 8U)) {
+        gm_malibu_c9_brake = GET_BIT(msg, 40U);
+      }
+      brake_pressed = gm_malibu_f1_brake || gm_malibu_c9_brake;
+    }
+
     // Reference for brake pressed signals:
     // https://github.com/commaai/openpilot/blob/master/selfdrive/car/gm/carstate.py
-    if ((msg_matches(msg, 0xBEU, 0U)) && !gm_camera_gateway && (((gm_hw == GM_ASCM) && !gm_volt_gateway_alt_brake) || (gm_ascm_intercept && !gm_ascm_brake_c9) ||
+    if ((msg_matches(msg, 0xBEU, 0U)) && !gm_camera_gateway && !gm_malibu_cc_f1 && (((gm_hw == GM_ASCM) && !gm_volt_gateway_alt_brake) || (gm_ascm_intercept && !gm_ascm_brake_c9) ||
                                    (gm_sdgm && !gm_sdgm_brake_c9))) {
       brake_pressed = msg->data[1] >= 8U;
     }
@@ -411,7 +440,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       gm_regen_gear_ready = ((msg->data[3] & 0xFU) == 6U) && ((msg->data[5] & 0x2U) == 0U);
       gm_pedal_forward_gear_ready = (((msg->data[3] & 0xFU) == 4U) || ((msg->data[3] & 0xFU) == 6U)) &&
                                     ((msg->data[5] & 0x2U) == 0U);
-      if (gm_bolt_pedal_removed) { gm_bolt_removed_gear_seen = true; }
+      if (gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) { gm_bolt_removed_gear_seen = true; }
       gm_regen_gear_last_us = microsecond_timer_get();
       gm_emit_paddle_after_stock(microsecond_timer_get(), 0x1F5U, 8U, &gm_gear_feed);
     }
@@ -448,6 +477,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
   gm_one_pedal_observe(msg);
   gm_hold_rx(msg);
   if (gm_camera_volt && gm_auto_hold) { (void)gm_camera_hold_sensor_ready(); }
+  if (gm_acc_pedal_forward_owner) { (void)gm_acc_pedal_dashboard_current(); }
 }
 
 static bool gm_tx_hook(const CANPacket_t *msg) {
@@ -549,6 +579,16 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     if (violation) {
       tx = false;
     }
+  }
+
+  if (gm_acc_pedal_forward_owner && (msg->addr == 0x370U)) {
+    const bool active = (msg->data[2] & 0x80U) != 0U;
+    const uint16_t speed = ((uint16_t)(msg->data[2] & 0xFU) << 8U) | msg->data[3];
+    const bool shape = (msg->data[0] == 1U) && (msg->data[1] == 2U) &&
+      ((msg->data[2] & 0x40U) == 0U) && (speed <= 4080U) &&
+      (msg->data[4] == 1U) && ((msg->data[5] & 0xECU) == 0U) &&
+      (active || ((msg->data[2] & 0x30U) == 0U));
+    tx &= shape && gm_acc_pedal_dashboard_current() && (!active || controls_allowed);
   }
 
   if (gm_ascm_intercept && (msg->addr == 0x370U)) {
@@ -686,7 +726,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     const uint8_t counter = (gm_volt_cc_counter + 1U) % 4U;
     const uint32_t button_offset = (button > 0U) ? ((uint32_t)button - 1U) : 0U;
     const uint16_t checksum = (uint16_t)(0xFFU + ((uint32_t)counter * 0x4EFU) - (button_offset << 4));
-    const bool direction = (button == GM_BTN_SET) || (button == GM_BTN_RESUME);
+    const bool direction = !gm_malibu_cc_stock && ((button == GM_BTN_SET) || (button == GM_BTN_RESUME));
     const bool cancel = button == GM_BTN_CANCEL;
     // Cruise set speed is 0.0625 km/h; each rear wheel count is 0.0311 km/h.
     const bool gas_set = (button == GM_BTN_SET) && gas_pressed && longitudinal_controls_allowed() &&
@@ -741,11 +781,12 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (gm_bolt_pedal_removed && !gm_pedal_acc && (msg->addr == 0x1E1U)) {
+  if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_pedal_acc && (msg->addr == 0x1E1U)) {
     const uint32_t now = microsecond_timer_get();
     const uint8_t counter = (gm_volt_removed_counter + 1U) % 4U;
     const uint16_t checksum = 0xFFU + (counter * 0x4EFU) - (5U << 4U);
     tx &= !safety_rx_checks_invalid && gm_pedal_sensor_current() && gm_bolt_removed_gear_seen &&
+          (!gm_bolt_present_cc_cancel || gm_pedal_forward_gear_ready) &&
           (safety_get_ts_elapsed(now, gm_regen_gear_last_us) <= 100000U) &&
           gm_volt_removed_main && gm_volt_removed_pcm && gm_bolt_removed_acc_seen && gm_bolt_removed_acc_active &&
           gm_volt_removed_credit && gm_volt_removed_button_seen &&
@@ -764,14 +805,23 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     for (uint8_t i = 0U; i < 7U; i++) { tx &= msg->data[i] == 0U; }
   }
 
-  return gm_camera_pedal_tx(msg, tx);
+  tx = gm_camera_pedal_tx(msg, tx);
+  if (gm_acc_pedal_forward_owner && (msg->addr == 0x370U) && tx &&
+      !relay_malfunction && !safety_rx_checks_invalid) {
+    gm_acc_pedal_dashboard_seen = true;
+    gm_acc_pedal_dashboard_us = microsecond_timer_get();
+  }
+  return tx;
 }
 
 static bool gm_fwd_hook(int bus_num, int addr) {
+  const bool dashboard_owned = gm_acc_pedal_dashboard_current() && gm_acc_pedal_dashboard_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), gm_acc_pedal_dashboard_us) <= 100000U);
   if (gm_pedal_acc) { (void)gm_pedal_brake_producer_current(); }
   // SDGM replaces the PT PSCM status at the camera. Frozen SDGM topology
   // blocks this direction without treating camera PSCM traffic as a relay fault.
-  return (gm_bolt_pedal_removed && (((bus_num == 0) && (addr == 0x184)) ||
+  return (dashboard_owned && (bus_num == 2) && (addr == 0x370)) ||
+         (gm_bolt_pedal_removed && (((bus_num == 0) && (addr == 0x184)) ||
           ((bus_num == 2) && (addr == 0x180)))) ||
          (gm_camera_gateway && gm_camera_gateway_removed && (bus_num == 0) && (addr == 0x184)) ||
          (gm_camera_gateway && gm_camera_pedal_long && (bus_num == 2) && ((addr == 0x180) || (addr == 0x315) || (addr == 0x2CB) || (addr == 0x370) || (addr == 0x2CD))) ||
@@ -895,7 +945,11 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_volt_removed_cancel_seen = false;
   gm_volt_removed_cancel_us = 0U;
 
-  gm_ordinary_cc_long = safety_param == 0xC160U;
+  gm_malibu_cc_f1 = (safety_param == 0xC161U) || (safety_param == 0xC162U);
+  gm_malibu_cc_stock = safety_param == 0xC162U;
+  gm_malibu_f1_brake = false;
+  gm_malibu_c9_brake = false;
+  gm_ordinary_cc_long = (safety_param == 0xC160U) || gm_malibu_cc_f1;
   if (gm_ordinary_cc_long) { param = GM_PARAM_NO_ACC; }
   gm_ordinary_camera_removed = camera_param == 0xC172U;
   gm_ordinary_camera_removed_long = false;
@@ -1036,7 +1090,6 @@ static safety_config gm_init(uint16_t safety_param) {
   };
 
 #endif
-  static RxCheck gm_extended_rx_checks[10];
   for (uint8_t i = 0U; i < 10U; i++) { gm_extended_rx_checks[i] = (RxCheck){0}; }
   for (uint8_t i = 0U; i < 6U; i++) { gm_extended_rx_checks[i] = gm_ordinary_camera_rx_template[i]; }
   gm_extended_rx_checks[3].msg[0].addr = (gm_camera_pedal && !gm_camera_pedal_f1) ? 0xBEU : 0xF1U;
@@ -1166,6 +1219,7 @@ static safety_config gm_init(uint16_t safety_param) {
                                                 {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
                                                 {0x184, 2, 8, .check_relay = true}};
   static const CanMsg GM_BOLT_ACC_PEDAL_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x200, 0, 6, .check_relay = false},
+                                                    {0x370, 0, 6, .check_relay = false},
                                                     {0x315, 0, 5, .check_relay = false},
                                                     {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
                                                     {0x184, 2, 8, .check_relay = true}, {0x1E1, 2, 7, .check_relay = false}};
@@ -1250,6 +1304,7 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_cc_cancel_sent = false;
   gm_cc_stock_button_counter = 0U;
   gm_cc_stock_button_last_us = 0U;
+  gm_bolt_present_cc_cancel = param == 0x9DU;
   gm_pedal_long = (gm_hw == GM_CAM) && GET_FLAG(param, GM_PARAM_PEDAL_LONG);
   gm_pedal_acc = gm_pedal_long && GET_FLAG(param, GM_PARAM_BOLT_ACC_PEDAL) && !gm_no_acc;
   gm_bolt_2017 = (gm_hw == GM_CAM) && GET_FLAG(param, GM_PARAM_BOLT_2017);
@@ -1288,6 +1343,8 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_regen_gear_ready = false;
   gm_pedal_forward_gear_ready = false;
   gm_acc_pedal_forward_owner = param == 0x1CDU;
+  gm_acc_pedal_dashboard_seen = false;
+  gm_acc_pedal_dashboard_us = 0U;
   gm_regen_gear_last_us = 0U;
   gm_paddle_internal_tx = false;
   gm_bd_feed.valid = false;
@@ -1350,7 +1407,7 @@ static safety_config gm_init(uint16_t safety_param) {
     for (uint8_t i = 0U; i < 8U; i++) { gm_extended_rx_checks[i] = gm_pedal_rx_template[i]; }
     ret.rx_checks = gm_extended_rx_checks;
     ret.rx_checks_len = 8;
-    if (gm_bolt_pedal_removed) {
+    if (gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) {
       static const RxCheck removed_acc_cruise = {.msg = {{0x3D1U, 0U, 8U, 10U, .ignore_checksum = true,
         .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}};
       gm_extended_rx_checks[8] = removed_acc_cruise;
@@ -1364,6 +1421,15 @@ static safety_config gm_init(uint16_t safety_param) {
       // Other pedal profiles retain their existing transmit list.
     }
   }
+  if (gm_bolt_present_cc_cancel) {
+    static const CanMsg GM_BOLT_PRESENT_CC_PEDAL_TX_MSGS[] = {
+      {0x180, 0, 4, .check_relay = true}, {0x200, 0, 6, .check_relay = false},
+      {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
+      {0x184, 2, 8, .check_relay = true}, {0x1E1, 0, 7, .check_relay = false},
+    };
+    SET_TX_MSGS(GM_BOLT_PRESENT_CC_PEDAL_TX_MSGS, ret);
+  }
+
   if (gm_bolt_pedal_removed) {
     static const CanMsg GM_BOLT_REMOVED_PEDAL_TX_MSGS[] = {
       {0x180, 0, 4, .check_relay = false}, {0x200, 0, 6, .check_relay = false},
@@ -1420,10 +1486,14 @@ static safety_config gm_init(uint16_t safety_param) {
   }
 
   if (gm_volt_cc_long || gm_ordinary_cc_long) {
-    if (gm_ordinary_cc_long) { SET_RX_CHECKS(gm_ordinary_cc_rx_checks, ret); }
+    if (gm_ordinary_cc_long) {
+      gm_ordinary_cc_rx_checks[3].msg[0].addr = gm_malibu_cc_f1 ? 0xF1U : 0xBEU;
+      gm_ordinary_cc_rx_checks[3].msg[0].frequency = gm_malibu_cc_f1 ? 100U : 80U;
+      SET_RX_CHECKS(gm_ordinary_cc_rx_checks, ret);
+    }
     else { SET_RX_CHECKS(gm_volt_cc_rx_checks, ret); }
     SET_TX_MSGS(GM_CC_GATEWAY_STOCK_TX_MSGS, ret);
-    if (gm_ordinary_cc_long) {
+    if (gm_ordinary_cc_long && !gm_malibu_cc_stock) {
       static const CanMsg GM_ORDINARY_CC_TX_MSGS[] = {
         {0x180, 0, 4, .check_relay = true}, {0x1E1, 0, 7, .check_relay = false},
         {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},

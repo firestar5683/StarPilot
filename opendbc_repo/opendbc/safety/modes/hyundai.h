@@ -623,8 +623,9 @@ static safety_config hyundai_init(uint16_t param) {
 #ifdef ALLOW_DEBUG
   if (hyundai_blended_alpha) {
     static const CanMsg alpha_hda1_tx[] = {
-      {0x340, 0, 8, .check_relay = true}, {0x485, 0, 8, .check_relay = true},
-      {0x364, 0, 8, .check_relay = true}, {0x420, 0, 8, .check_relay = true},
+      {0x340, 0, 8, .check_relay = true, .disable_static_blocking = true},
+      {0x485, 0, 8, .check_relay = true, .disable_static_blocking = true},
+      {0x364, 0, 8, .check_relay = true, .disable_static_blocking = true}, {0x420, 0, 8, .check_relay = true},
       {0x421, 0, 8, .check_relay = true}, {0x389, 0, 8, .check_relay = true},
       {0x7D0, 0, 8, .check_relay = false}, {0x363, 0, 8, .check_relay = false},
       {0x398, 0, 8, .check_relay = false},

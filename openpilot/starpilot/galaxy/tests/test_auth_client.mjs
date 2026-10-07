@@ -178,7 +178,7 @@ assert.equal(localStates.at(-1).localAccess, false)
 const app = readFileSync(new URL("../web/js/app.js", import.meta.url), "utf8")
 assert.match(app, /authState\.status === 'authenticated' && !authState\.localAccess/)
 assert.match(app, /state\.monitorMode === 'local' && authState\.status !== 'authenticated'/)
-assert.match(app, /sessionExpired\(\) \{ auth\.expired\(\); auth\.check\(\) \}/)
+assert.match(app, /sessionExpired\(\) \{ if \(initializing\) return; auth\.expired\(\); initialize\(\) \}/)
 
 const oldMonitor = deferred(), nextMonitor = deferred(), lateStates = []
 let lateUnauthorized = 0, monitorRequests = 0

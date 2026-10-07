@@ -36,7 +36,10 @@ def dump_pickle(obj, path):
 def load_pickle(path, *, out_of_band=False):
   with open(path, "rb") as f:
     if not out_of_band: return pickle.load(f)
-    opcodes, buffers = f.read(struct.unpack('<q', f.read(8))[0]), Tensor(pathlib.Path(path))[f.tell():].uop.buffer.ensure_allocated()
+    opcodes = f.read(struct.unpack('<q', f.read(8))[0])
+    if f.tell() == pathlib.Path(path).stat().st_size:
+      return pickle.loads(opcodes)
+    buffers = Tensor(pathlib.Path(path))[f.tell():].uop.buffer.ensure_allocated()
 
   # FIXME: we load in chunks here because hcq_submit for one large copy is very slow to compile
   arena, CHUNK_SIZE = Buffer(Device.DEFAULT, buffers.nbytes, dtypes.uchar, preallocate=True), 32 << 20

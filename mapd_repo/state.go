@@ -158,6 +158,12 @@ func (s *State) ProcessGps(sample cereal.GpsSample, success bool, load MapLoader
 	location := sample.Location
 	pos := m.PosFromLocation(location)
 	s.Position = pos
+	// Unknown CAN direction or speed uncertainty cannot create confident road evidence.
+	if sample.Source == cereal.GpsSourceCar && (math.IsNaN(float64(location.BearingAccuracyDeg())) || math.IsInf(float64(location.BearingAccuracyDeg()), 0) || location.BearingAccuracyDeg() <= 0 || location.BearingAccuracyDeg() >= 180 || math.IsNaN(float64(location.SpeedAccuracy())) || math.IsInf(float64(location.SpeedAccuracy()), 0) || location.SpeedAccuracy() >= 100) {
+		s.clearRoadDerived()
+		s.RoadStatus = custom.MapdOut_SampleStatus_noMatch
+		return
+	}
 	box := s.Data.Box()
 	if !s.Data.Loaded || !box.PosInside(pos) {
 		// Retry missing coverage at most once a second while a fix remains in

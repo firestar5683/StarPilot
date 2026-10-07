@@ -12,6 +12,7 @@ from openpilot.starpilot.longitudinal.toyota_output_policy import (CLOCK_PAIR_MA
 from openpilot.starpilot.longitudinal.ioniq6_start import StartEvidence, eligible as ioniq6_start_eligible
 from opendbc.car.gm.conventional_pedal import policy_for as conventional_pedal_policy_for
 from opendbc.car.gm.ordinary_cc import policy_for as ordinary_cc_policy_for
+from opendbc.car.gm.hybrid_cc import policy_for as hybrid_policy_for
 from opendbc.car.gm.suburban import SuburbanStopEvidence
 from opendbc.car.gm.cc_longitudinal import VoltCcEvidence, policy_for as volt_cc_policy_for
 from opendbc.car.gm.longitudinal import (
@@ -80,7 +81,8 @@ class LongitudinalInputs:
     evidence_type = getattr(stop_policy, 'evidence_type', None)
     self.gm_volt_enabled = evidence_type is VoltStopEvidence
     self.resume_freshness = ResumeFreshness()
-    self.gm_cc_enabled = (conventional_pedal_policy_for(self.CP) or ordinary_cc_policy_for(self.CP) or volt_cc_policy_for(self.CP)) is not None
+    self.gm_cc_enabled = (conventional_pedal_policy_for(self.CP) or ordinary_cc_policy_for(self.CP) or
+                          volt_cc_policy_for(self.CP) or hybrid_policy_for(self.CP)) is not None
     self.gm_cc_stop_enabled = evidence_type is VoltCcEvidence
     if self.gm_cc_enabled or self.gm_cc_stop_enabled:
       self.gm_cc_evidence = None

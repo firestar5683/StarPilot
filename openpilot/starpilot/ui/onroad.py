@@ -15,7 +15,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui import clip
 from openpilot.system.ui.lib.application import gui_app
-from openpilot.starpilot.ui.onroad_customization import offset, placement, rgba
+from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET, offset, placement, rgba, widget_size
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 
 from openpilot.starpilot.ui.onroad_alerts import AlertRenderer
@@ -38,6 +38,23 @@ from openpilot.starpilot.conditional_mode.policy import ModeChoice
 CameraLayer = Callable[[rl.Rectangle, OnroadState], None]
 OverlayLayer = Callable[[rl.Rectangle, OnroadState], None]
 PipLayer = Callable[[rl.Rectangle, OnroadState], None]
+
+
+def driving_mode_description(state: OnroadState) -> str:
+  if state.longitudinal_overridden:
+    return "ACC - Override"
+  if state.lateral_active and state.switchback_mode:
+    return "Switchback Mode"
+  if state.longitudinal_active:
+    if state.traffic_mode:
+      return "Traffic Mode"
+    mode = state.conditional_effective
+    experimental = (mode.effective_experimental if mode is not None else
+                    state.experimental_enabled and state.conditional_configured in (None, ModeChoice.STOCK))
+    return "ACC - Experimental" if experimental else "ACC - Chill"
+  if state.lateral_active:
+    return "Always On Lateral"
+  return "Stock ACC" if state.stock_cruise_active else "Disengaged"
 
 
 def axis_status_color(state: OnroadState) -> rl.Color:
@@ -172,6 +189,35 @@ class OnroadView:
     x = 1390 + (self.projection_viewport[0] if self.projection_viewport else state.viewport_width) - 1860
     self.fonts.draw(state.traffic_display.label, FontRole.SEMI_BOLD, 25, x, y, traffic_color)
 
+  def _driving_mode(self, state: OnroadState, center_shift: float = 0) -> None:
+    profile = self.fonts.profile
+    position = placement(state.customization, profile, MODE_WIDGET)
+    if (not position["enabled"] or state.alert.size != AlertSize.NONE or
+        state.appearance.camera_view == CameraViewChoice.DRIVER or state.reverse_driver_camera):
+      return
+    width, height = widget_size(state.customization, profile, MODE_WIDGET)
+    size = 40 if profile == Profile.LARGE else 18
+    stroke = 2 if profile == Profile.LARGE else 1
+    role = FontRole.SEMI_BOLD
+    lines = [""]
+    for word in driving_mode_description(state).split():
+      candidate = f"{lines[-1]} {word}".strip()
+      if lines[-1] and self.fonts.measure(candidate, role, size).width > width - 2 * stroke:
+        lines.append(word)
+      else:
+        lines[-1] = candidate
+    line_height = size * profile.font_scale * 1.2
+    top = position["y"] + (height - len(lines) * line_height) / 2
+    color = rl.Color(*rgba(state.customization, "text", profile, MODE_WIDGET))
+    shadow = rl.Color(0, 0, 0, color.a)
+    for index, text in enumerate(lines):
+      x = position["x"] + center_shift + (width - self.fonts.measure(text, role, size).width) / 2
+      ink_top, ink_bottom = self.fonts.vertical_ink(text, role, size)
+      y = top + index * line_height + (line_height - ink_bottom + ink_top) / 2 - ink_top
+      for dx, dy in ((-stroke, 0), (stroke, 0), (0, -stroke), (0, stroke)):
+        self.fonts.draw(text, role, size, x + dx, y + dy, shadow)
+      self.fonts.draw(text, role, size, x, y, color)
+
   def _large(self, state: OnroadState) -> None:
     width, height = self.projection_viewport or (state.viewport_width, 1080)
     right_shift = width - 1860
@@ -216,6 +262,7 @@ class OnroadView:
           rl.rl_pop_matrix()
       else:
         self.navigation.render(state)
+      self._driving_mode(state, right_shift / 2)
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
@@ -280,6 +327,7 @@ class OnroadView:
       if monitor_layer := getattr(self, "driver_monitor_layer", None):
         monitor_layer(frame, state)
       self.navigation.render(state)
+      self._driving_mode(state)
       signals = state.border_signals
       direction = (-1 if signals.left_blinker else 1 if signals.right_blinker else 0) if signals else 0
       self.alert.render(frame, state.alert, signal_direction=direction)

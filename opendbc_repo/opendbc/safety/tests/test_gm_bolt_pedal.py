@@ -15,7 +15,7 @@ from opendbc.safety.tests.libsafety.libsafety_py import new_CANPacket
 
 class TestGmBoltPedalSafety(unittest.TestCase):
   def setUp(self):
-    self.packer = CANPacker(DBC[CAR.CHEVROLET_BOLT_CC_2017]["pt"])
+    self.packer = CANPacker(DBC[CAR.CHEVROLET_BOLT_CC_2017][Bus.pt])
     self.safety = libsafety_py.libsafety
     self.init_mode(GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_2017)
 
@@ -257,6 +257,72 @@ class TestGmBoltPedalSafety(unittest.TestCase):
     self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, int(GMSafetyFlags.HW_CAM | GMSafetyFlags.EV)), 0)
     self.safety.init_tests()
     self.assertFalse(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 1))))
+
+  def test_acc_pedal_dashboard_shape_and_accepted_forwarding_lease(self):
+    from opendbc.car.gm.gmcan import create_acc_dashboard_command
+
+    hud = structs.CarControl.HUDControl(leadDistanceBars=3, leadVisible=True)
+
+    def dashboard(active=True, bus=0):
+      return create_acc_dashboard_command(self.packer, bus, active, 72., hud, False, cruise_state=2)
+
+    self.init_mode(GMSafetyFlags.BOLT_ACC_PEDAL | GMSafetyFlags.BOLT_GEN2)
+    self.safety.set_timer(1)
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 4, "ManualMode": 0}))
+    self.safety.safety_rx_hook(self.sensor(1))
+    self.safety.safety_rx_hook(self.stock("AcceleratorPedal2", {"CruiseState": 0}))
+    self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 1}))
+    for name in ("PSCMStatus", "EBCMWheelSpdRear", "EBCMRegenPaddle", "ASCMSteeringButton"):
+      self.assertTrue(self.safety.safety_rx_hook(self.stock(name, {})))
+    self.safety.safety_tick()
+    self.assertTrue(self.safety.safety_config_valid())
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    self.assertFalse(self.safety.safety_tx_hook(self.packet(dashboard())))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self.safety.safety_tx_hook(self.packet(dashboard())))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), -1)
+    self.assertFalse(self.safety.safety_tx_hook(self.packet(dashboard(bus=2))))
+    original = dashboard()[1]
+    for byte, mask in ((0, 2), (1, 4), (2, 0x40), (4, 2), (5, 4)):
+      malformed = bytearray(original)
+      malformed[byte] ^= mask
+      self.assertFalse(self.safety.safety_tx_hook(self.packet((0x370, bytes(malformed), 0))))
+    self.safety.set_timer(90000)
+    self.safety.safety_rx_hook(self.sensor(2))
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 4, "ManualMode": 0}))
+    malformed = bytearray(original)
+    malformed[0] |= 2
+    self.assertFalse(self.safety.safety_tx_hook(self.packet((0x370, bytes(malformed), 0))))
+    self.assertFalse(self.safety.safety_tx_hook(self.packet((0x370, original[:5], 0))))
+    self.safety.set_timer(100002)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    self.safety.safety_rx_hook(self.sensor(3))
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 4, "ManualMode": 0}))
+    self.safety.set_controls_allowed(False)
+    self.assertTrue(self.safety.safety_tx_hook(self.packet(dashboard(False))))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), -1)
+    invalid = bytearray(dashboard(False)[1])
+    invalid[2] |= 0x10
+    self.assertFalse(self.safety.safety_tx_hook(self.packet((0x370, bytes(invalid), 0))))
+    self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 0}))
+    self.assertFalse(self.safety.safety_tx_hook(self.packet(dashboard(False))))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    self.safety.safety_rx_hook(self.stock("ECMEngineStatus", {"CruiseMainOn": 1}))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    self.assertTrue(self.safety.safety_tx_hook(self.packet(dashboard(False))))
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 2, "ManualMode": 0}))
+    self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": 4, "ManualMode": 0}))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    self.assertTrue(self.safety.safety_tx_hook(self.packet(dashboard(False))))
+    self.safety.safety_rx_hook(self.sensor(4, state=1))
+    self.safety.safety_rx_hook(self.sensor(5))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
+    for variant in (GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_2017, GMSafetyFlags.NO_ACC,
+                    GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_GEN2):
+      self.init_mode(variant)
+      self.assertFalse(self.safety.safety_tx_hook(self.packet(dashboard(False))))
+      self.assertEqual(self.safety.safety_fwd_hook(2, 0x370), 0)
 
   def test_acc_pedal_friction_requires_exclusive_fresh_owner(self):
     chassis = CANPacker("gm_global_a_chassis")
@@ -504,6 +570,7 @@ class TestGmBoltPedalSafety(unittest.TestCase):
         self.safety.set_timer(10_000)
         for name, values in (('PSCMStatus', {}), ('EBCMWheelSpdRear', {}),
                              ('ECMEngineStatus', {}), ('AcceleratorPedal2', {}),
+                             ('ECMCruiseControl', {}),
                              ('EBCMRegenPaddle', {}), ('ECMPRDNL2', {'PRNDL2': 6})):
           self.assertTrue(self.safety.safety_rx_hook(self.stock(name, values)))
         self.assertTrue(self.safety.safety_rx_hook(self.sensor(0)))
@@ -642,9 +709,23 @@ class TestGmBoltPedalSafety(unittest.TestCase):
       command = self.packet(self.packer.make_can_msg("ASCMSteeringButton", 2, {"ACCButtons": 6}))
       self.assertFalse(self.safety.safety_tx_hook(command))
 
+  def test_present_2020_cancel_does_not_admit_sibling_pedal_profiles(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for word in (0xBD, 0x19D):
+      with self.subTest(word=word):
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+        self.safety.init_tests()
+        self.safety.set_timer(1000)
+        for frame in (self.low_gear(), self.sensor(1),
+                      self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                      libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
+                      libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, 0))):
+          self.safety.safety_rx_hook(frame)
+        self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))))
+
   def test_removed_no_acc_cancel_requires_physical_one_shot_neutral_slot(self):
     from opendbc.car.gm.bolt_cc import button_bytes
-    for word, gear in ((0xE700, None), (0xE700, 4), (0xE700, 6), (0xE701, None), (0xE701, 4), (0xE701, 6),
+    for word, gear in ((0x9D, None), (0x9D, 4), (0x9D, 6), (0xE700, None), (0xE700, 4), (0xE700, 6), (0xE701, None), (0xE701, 4), (0xE701, 6),
                        (0xE702, None), (0xE702, 4), (0xE702, 6)):
       for button, bus, damaged in ((6, 0, False), (2, 0, False), (3, 0, False), (6, 2, False), (6, 0, True)):
         with self.subTest(word=word, gear=gear, button=button, bus=bus, damaged=damaged):
@@ -661,7 +742,8 @@ class TestGmBoltPedalSafety(unittest.TestCase):
           if damaged:
             data[6] ^= 1
           self.safety.set_timer(2000)
-          self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, bus, data)), gear is not None and button == 6 and bus == 0 and not damaged)
+          self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, bus, data)),
+                           gear is not None and button == 6 and bus == 0 and not damaged)
           self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))),
                            gear is not None and bus == 2)
           self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))))

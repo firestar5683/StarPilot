@@ -116,6 +116,36 @@ class TestRetrofit(unittest.TestCase):
       safety.set_controls_allowed(True)
       self.assertFalse(safety.safety_tx_hook(packer.make_can_msg_safety('ACC_CONTROL', 0, {'ACCEL_CMD': 1})))
 
+  def test_original_gap_sources_emit_one_press_and_release(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.toyota.carstate import CarState
+    from opendbc.car.toyota.values import DBC
+
+    rack = structs.CarParams.CarFw.new_message(ecu=structs.CarParams.Ecu.eps,
+                                               fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')
+    cases = ((CAR.TOYOTA_PRIUS, False, 'ACC_CONTROL', 'DISTANCE', 0),
+             (CAR.TOYOTA_PRIUS_RETROFIT, False, 'ACC_CONTROL', 'DISTANCE', 0),
+             (CAR.TOYOTA_PRIUS, True, 'SDSU', 'FD_BUTTON', 0),
+             (CAR.TOYOTA_PRIUS_RETROFIT, True, 'SDSU', 'FD_BUTTON', 0),
+             (CAR.TOYOTA_SIENNA_4TH_GEN, False, 'PCM_CRUISE_4', 'DISTANCE', 0),
+             (CAR.TOYOTA_COROLLA_TSS2, False, 'ACC_CONTROL', 'DISTANCE', 2))
+    for car, filtered, message, signal, bus in cases:
+      with self.subTest(car=car, filtered=filtered):
+        cp = CarInterface.get_params(car, {0: {0x2FF: 4} if filtered else {}, 1: {}, 2: {}},
+                                     [rack] if filtered else [], False, False, False)
+        cs = CarState(cp)
+        parsers = cs.get_can_parsers(cp)
+        cs.update(parsers)
+        packer = CANPacker(DBC[car][Bus.pt])
+        for tick, pressed in enumerate((0, 1, 1, 0, 0), start=1):
+          frame = packer.make_can_msg(message, bus, {signal: pressed})
+          for parser in parsers.values():
+            parser.update([[(1_000_000_000 + tick * 30_000_000), [frame]]])
+          events = cs.update(parsers).buttonEvents
+          expected = [(structs.CarState.ButtonEvent.Type.gapAdjustCruise, bool(pressed))] if tick in (2, 4) else []
+          self.assertEqual([(event.type, event.pressed) for event in events], expected)
+
   def test_packed_retrofit_lkas_and_gap_buttons(self):
     from opendbc.can import CANPacker
     from opendbc.car.toyota.carstate import CarState

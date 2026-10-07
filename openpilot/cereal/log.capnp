@@ -132,9 +132,6 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     excessiveActuation @96;
     bigModelLoading @100;
     bigModelFailed @102;
-    teslaCCEngaged @105;
-    teslaCCDisengaged @106;
-    teslaCCNotArmed @107;
 
     lowBatteryDEPRECATED @40;
     soundsUnavailableDEPRECATED @47;
@@ -170,12 +167,7 @@ struct InitData {
   gitSrcCommit @23 :Text;
   gitSrcCommitDate @24 :Text;
 
-  androidProperties @16 :Map(Text, Text);
-
-  pandaInfo @8 :PandaInfo;
-
   dirty @9 :Bool;
-  passive @12 :Bool;
   params @17 :Map(Text, Data);
 
   commands @19 :Map(Text, Data);
@@ -193,6 +185,17 @@ struct InitData {
     mici @7;  # comma four
   }
 
+  deprecated :group {
+    gctx @1 :Text;
+    androidBuildInfo @5 :Deprecated.AndroidBuildInfo;
+    androidSensors @6 :List(Deprecated.AndroidSensor);
+    chffrAndroidExtra @7 :ChffrAndroidExtra;
+    pandaInfo @8 :PandaInfo;
+    passive @12 :Bool;
+    iosBuildInfo @14 :Deprecated.IosBuildInfo;
+    androidProperties @16 :Map(Text, Text);
+  }
+
   struct PandaInfo {
     hasPanda @0 :Bool;
     dongleId @1 :Text;
@@ -202,14 +205,6 @@ struct InitData {
 
   struct ChffrAndroidExtra {
     allCameraCharacteristics @0 :Map(Text, Text);
-  }
-
-  deprecated :group {
-    gctx @1 :Text;
-    androidBuildInfo @5 :Deprecated.AndroidBuildInfo;
-    androidSensors @6 :List(Deprecated.AndroidSensor);
-    chffrAndroidExtra @7 :ChffrAndroidExtra;
-    iosBuildInfo @14 :Deprecated.IosBuildInfo;
   }
 }
 
@@ -1245,7 +1240,7 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   shouldStop @37: Bool;
   allowThrottle @38: Bool;
   allowBrake @39: Bool;
-  forceStopHolding @40 :Bool;
+  accelBoost @40 :Float32;
 
 
   solverExecutionTime @35 :Float32;
@@ -2645,8 +2640,8 @@ struct Event {
     # DON'T change which struct it points to
     starpilotNavigation @107 :Custom.StarPilotCarControl;
     customReserved1 @108 :Custom.CustomReserved1;
-    customReserved2 @109 :Custom.CustomReserved2;
-    customReserved3 @110 :Custom.CustomReserved3;
+    starpilotCarState @109 :Custom.StarPilotCarState;
+    starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
     slcVisionObservation @111 :Custom.StarPilotModelDataV2;
     customReserved5 @112 :Custom.CustomReserved5;
     customReserved6 @113 :Custom.CustomReserved6;

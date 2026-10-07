@@ -184,8 +184,11 @@ class TestVoltStop(unittest.TestCase):
            patch('openpilot.selfdrive.controls.controlsd.messaging.SubMaster', side_effect=register):
         with self.assertRaises(Registered):
           Controls()
-      for name in ('radarState', 'deviceState'):
-        self.assertEqual(name in captured['services'], selected)
+      self.assertEqual(captured['services'].count('deviceState'), 1)
+      self.assertEqual(captured['services'].count('radarState'), int(selected))
+      for name in ('deviceState',) + (('radarState',) if selected else ()):
+        for ignored in ('ignore_alive', 'ignore_valid', 'ignore_avg_freq'):
+          self.assertIn(name, captured['options'][ignored])
 
   def test_stop_recurrence_and_release_boundaries(self):
     for cp, _, sascm, alpha in profiles():

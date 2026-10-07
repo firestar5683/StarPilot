@@ -31,6 +31,46 @@ def required_document(raw: object) -> dict:
 
 
 class FeatureSettingsOwnerTests(unittest.TestCase):
+  def test_bolt_wheel_menu_exposes_only_received_buttons(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.params.put('LKASButtonControl', 9, block=True)
+    rows = self.owner.snapshot('wheel', parked=True, system_long=True, lateral_context=True, metric=False).rows
+    self.assertFalse(any(row.key == 'wheel:LKASButtonControl' for row in rows))
+    self.assertTrue(any(row.key == 'wheel:MainCruiseButtonControl' and row.available for row in rows))
+    self.assertTrue(any(row.key == 'wheel:DistanceButtonControl' and row.available for row in rows))
+    self.assertEqual(self.params.get('LKASButtonControl'), 9)
+
+  def test_hybrid_manual_settings_and_automatic_pedal_owner(self):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import CAR
+    from opendbc.car.gm.aol import qualified_gm
+    from opendbc.car.gm.tests.test_ordinary_cc import malibu_hybrid_params
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    cp = CarInterface.get_params(CAR.CHEVROLET_MALIBU_HYBRID_CC, gen_empty_fingerprint(), [], False, False, False)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.owner.configuration_vehicle = lambda: True
+    original = cp.to_bytes()
+    row = self._row('aol', 'AlwaysOnLateral')
+    self.assertTrue(row.available)
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertFalse(qualified_gm(cp))
+    self.assertEqual(cp.to_bytes(), original)
+    self.owner.configuration_vehicle = lambda: False
+    cp = malibu_hybrid_params(pedal=True, removed=True)
+    row = self._row('vehicle', 'GMPedalLongitudinal')
+    self.assertEqual(row.value, 'Automatic')
+    self.assertFalse(row.available)
+    self.assertIn('Activates automatically', row.reason)
+    prepare_disable_longitudinal(cp, True)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Detected, inactive')
+
   def test_prius_retrofit_manual_settings_do_not_grant_runtime(self):
     from opendbc.car import gen_empty_fingerprint, structs
     from opendbc.car.toyota.interface import CarInterface

@@ -60,6 +60,7 @@ var ServiceQueueSize = map[string]int64{
 	"carOutput":           QUEUE_SIZE_SMALL,
 	"selfdriveState":      QUEUE_SIZE_SMALL,
 	"gpsLocation":         QUEUE_SIZE_SMALL,
+	"starpilotCarState":   QUEUE_SIZE_SMALL,
 	"gpsLocationExternal": QUEUE_SIZE_SMALL,
 	"liveLocationKalman":  QUEUE_SIZE_SMALL,
 	"gpsNMEA":             QUEUE_SIZE_SMALL,

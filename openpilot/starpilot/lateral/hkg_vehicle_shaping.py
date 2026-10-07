@@ -596,6 +596,12 @@ KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED = 18.0
 
 KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED_WIDTH = 2.5
 
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN = 0.30
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_ONSET = 100.0 / 3.6
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_FULL = 120.0 / 3.6
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_START = 0.80
+KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_END = 1.50
+
 KONA_EV_2022_CENTER_OUTPUT_TAPER_MAX = 0.08
 
 KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT = 0.20
@@ -672,9 +678,20 @@ def _kona_ev_2022_center_weights(desired_lateral_accel: float, v_ego: float) -> 
 
 def get_kona_ev_2022_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0) -> float:
   speed_weight, center_weight = _kona_ev_2022_center_weights(desired_lateral_accel, v_ego)
-  return get_standard_friction_threshold(v_ego) * (
+  base_threshold = get_standard_friction_threshold(v_ego) * (
     1.0 + KONA_EV_2022_CENTER_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight
   )
+  high_speed_weight = float(np.interp(
+    v_ego,
+    [KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_ONSET, KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_SPEED_FULL],
+    [0.0, 1.0],
+  ))
+  curve_weight = float(np.interp(
+    abs(desired_lateral_accel),
+    [KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_START, KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_LAT_FADE_END],
+    [1.0, 0.0],
+  ))
+  return base_threshold + KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN * high_speed_weight * curve_weight
 
 def get_kona_ev_2022_center_output_scale(desired_lateral_accel: float, v_ego: float) -> float:
   speed_weight = _sigmoid((v_ego - KONA_EV_2022_CENTER_OUTPUT_TAPER_SPEED) /

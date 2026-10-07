@@ -80,6 +80,25 @@ def test_saved_invalid_or_absent_uses_defaults(raw):
     assert read_customization(Mock()) == default_document()
 
 
+def test_mode_widget_defaults_off_without_resetting_saved_layouts():
+  key = 'driving_mode_descriptions'
+  document = default_document()
+  document['layouts']['large']['current_speed'].update(x=700, y=100, enabled=False)
+  document['layouts']['compact']['speed_limit_actions']['y'] = 45
+  for layout in document['layouts'].values():
+    assert layout.pop(key)['enabled'] is False
+  migrated = validate_document(document)
+  for profile, layout in document['layouts'].items():
+    assert {key: value for key, value in migrated['layouts'][profile].items()
+            if key != 'driving_mode_descriptions'} == layout
+    assert migrated['layouts'][profile][key]['enabled'] is False
+  migrated['layouts']['large'][key].update(enabled=True, x=300, y=600)
+  assert validate_document(migrated) == migrated
+  migrated['layouts']['compact'][key]['enabled'] = True
+  with pytest.raises(ValueError, match='protected speed limit actions'):
+    validate_document(migrated)
+
+
 def test_saved_valid_layouts_survive_independently():
   document = default_document()
   document["layouts"]["large"]["current_speed"].update(x=100, y=120)

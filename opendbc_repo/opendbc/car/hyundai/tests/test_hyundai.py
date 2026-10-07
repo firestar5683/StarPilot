@@ -69,6 +69,35 @@ def cars_with(flags):
 
 
 class TestHyundaiFingerprint(unittest.TestCase):
+
+  def test_k4_shared_platform_physical_button_events(self):
+    from opendbc.car.hyundai.values import Buttons
+    button_type = structs.CarState.ButtonEvent.Type
+    signals = (("LDA_BTN", 1, button_type.lkas), ("ADAPTIVE_CRUISE_MAIN_BTN", 1, button_type.mainCruise),
+               ("CRUISE_BUTTONS", Buttons.RES_ACCEL, button_type.accelCruise),
+               ("CRUISE_BUTTONS", Buttons.SET_DECEL, button_type.decelCruise),
+               ("CRUISE_BUTTONS", Buttons.CANCEL, button_type.cancel))
+    for alpha_long in (False, True):
+      for alternate in (False, True):
+        for signal, value, expected in signals:
+          with self.subTest(alpha_long=alpha_long, alternate=alternate, signal=signal, value=value):
+            fingerprint = gen_empty_fingerprint()
+            if not alternate:
+              fingerprint[0][0x1CF] = 8
+            cp = CarInterface.get_params(CAR.KIA_K4_2025, fingerprint, [], alpha_long, False, False)
+            self.assertEqual(cp.carFingerprint, CAR.KIA_K4_2025)
+            self.assertEqual(bool(cp.flags & HyundaiFlags.CANFD_ALT_BUTTONS), alternate)
+            state = CarState(cp)
+            parsers = state.get_can_parsers(cp)
+            packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+            state.update(parsers)
+            for frame, sample in enumerate((0, value, 0), 1):
+              message = packer.make_can_msg(state.cruise_btns_msg_canfd, CanBus(cp).ECAN, {signal: sample})
+              parsers[Bus.pt].update([(frame * 10_000_000, [message])])
+              events = state.update(parsers).buttonEvents
+              actual = [(event.type, event.pressed) for event in events]
+              self.assertEqual(actual, [] if frame == 1 else [(expected, frame == 2)])
+
   def test_eight_ordinary_ccnc_interfaces_and_display_frames(self):
     family = (
       CAR.HYUNDAI_KONA_2ND_GEN, CAR.HYUNDAI_KONA_HEV_2ND_GEN, CAR.HYUNDAI_SANTA_CRUZ_2025,

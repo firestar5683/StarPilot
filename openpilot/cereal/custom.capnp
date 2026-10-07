@@ -94,10 +94,63 @@ struct StarPilotCarControl @0x81c2f05a394cf4af {
 struct CustomReserved1 @0xaedffd8f31e7b55d {
 }
 
-struct CustomReserved2 @0xf35cc4560bbf6ec2 {
+struct StarPilotCarState @0xf35cc4560bbf6ec2 {
+  accelPressed @0 :Bool;
+  alwaysOnLateralEnabled @1 :Bool;
+  brakeLights @2 :Bool;
+  dashboardSpeedLimit @3 :Float32;
+  decelPressed @4 :Bool;
+  distancePressed @5 :Bool;
+  distanceLongPressed @6 :Bool;
+  distanceVeryLongPressed @7 :Bool;
+  ecoGear @8 :Bool;
+  forceCoast @9 :Bool;
+  isParked @10 :Bool;
+  pauseLateral @11 :Bool;
+  pauseLongitudinal @12 :Bool;
+  sportGear @13 :Bool;
+  trafficModeEnabled @14 :Bool;
+  gasStack @15 :Bool;  # Compatibility with older StarPilot payloads
+  modePressed @16 :Bool;
+  customPressed @17 :Bool;
+  alwaysOnLateralAllowed @18 :Bool;
+  dashboardStopSign @19 :UInt8;  # 0 = no signal / platform doesn't publish
+  cancelPressed @20 :Bool;
+  cancelLongPressed @21 :Bool;
+  cancelVeryLongPressed @22 :Bool;
+  pedalMaxRegen @23 :Bool;  # pedal at max regen, driver should use brake for more decel
+  pedalLongActive @24 :Bool;  # Pre-AP pedal longitudinal mode is active (enableLongControl)
+  teslaCCEngaged @25 :Bool;  # rising edge of stock Tesla CC engaging (no-pedal mode)
+  teslaCCDisengaged @26 :Bool;  # falling edge of stock Tesla CC
+  teslaCCNotArmed @27 :Bool;  # lateral engaged but DI_cruiseState != STANDBY/ENABLED
+  accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal
+  decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal
+  pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled
+  gps @31 :Gps;
+
+  struct Gps {
+    sourceMonoTime @0 :UInt64;  # CAN observation converted to CLOCK_MONOTONIC
+    latitude @1 :Float64;
+    longitude @2 :Float64;
+    altitude @3 :Float64;
+    speed @4 :Float32;
+    bearingDeg @5 :Float32;
+    horizontalAccuracy @6 :Float32;
+    verticalAccuracy @7 :Float32;
+    bearingAccuracyDeg @8 :Float32;
+    speedAccuracy @9 :Float32;
+    unixTimestampMillis @10 :Int64;
+    hasFix @11 :Bool;
+    vNED @12 :List(Float32);
+  }
 }
 
-struct CustomReserved3 @0xda96579883444c35 {
+struct StarPilotLongitudinalPlan @0xda96579883444c35 {
+  version @0 :UInt16;
+  sourcePlanMonoTime @1 :UInt64;
+  modelMonoTime @2 :UInt64;
+  driveStartMonoTime @3 :UInt64;
+  forceStopHolding @4 :Bool;
 }
 
 struct SlcState @0xa1680744031fdb2d {
@@ -906,6 +959,7 @@ struct MapdOut @0xa4f1eb3323f5f582 {
     none @0;
     internal @1;
     external @2;
+    car @3;
   }
 
   enum RoadContext @0xabefa88b9563dbae {

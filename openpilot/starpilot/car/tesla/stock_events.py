@@ -2,6 +2,7 @@ import hashlib
 import json
 
 from openpilot.cereal import log
+from openpilot.selfdrive.selfdrived.events import Alert, ET, Priority, NormalPermanentAlert, VisualAlert
 from opendbc.car.tesla.preap.aol import qualified
 
 
@@ -45,7 +46,7 @@ class StockCruiseConsumer:
       from openpilot.cereal import messaging
       self.socket = messaging.sub_sock('slcCruiseEvent', conflate=False)
 
-  def poll(self, events, sm, *, now_ns, session):
+  def poll(self, sm, *, now_ns, session):
     from openpilot.cereal import messaging
     for _ in range(128):
       envelope = messaging.recv_one_or_none(self.socket)
@@ -55,12 +56,15 @@ class StockCruiseConsumer:
         self.pending.append(envelope)
     self.pending = self.pending[-16:]
     current_stamp = sm.logMonoTime['carState']
+    alerts = []
     for envelope in self.pending:
       if envelope.logMonoTime == current_stamp:
-        self.update(events, sm, envelope=envelope, now_ns=now_ns, session=session)
+        alerts.extend(self.update(sm, envelope=envelope, now_ns=now_ns, session=session))
     self.pending = [item for item in self.pending if current_stamp < item.logMonoTime <= now_ns + 100_000_000]
 
-  def update(self, events, sm, *, envelope, now_ns, session):
+    return alerts
+
+  def update(self, sm, *, envelope, now_ns, session):
     try:
       record = envelope.slcCruiseEvent
       stock = record.teslaStockCruise
@@ -71,19 +75,35 @@ class StockCruiseConsumer:
           stock.version != 1 or stock.cpFingerprint != self.binding or not session or
           record.producerSessionId != session or
           not 0 < stock.carStateMonoTime == record.observedMonoTime == stamp == sm.logMonoTime['carState'] <= now_ns <= stamp + 100_000_000):
-        return
+        return []
       if self.session != session:
         self.session, self.sequence, self.previous = session, -1, False
       if record.eventId <= self.sequence:
-        return
+        return []
       self.sequence = record.eventId
-      names = log.OnroadEvent.EventName
+      alerts = []
       if stock.engaged and not self.previous:
-        events.add(names.teslaCCEngaged)
+        alerts.append(stock_alert('engaged'))
       elif not stock.engaged and self.previous:
-        events.add(names.teslaCCDisengaged)
+        alerts.append(stock_alert('disengaged'))
       if stock.notArmed:
-        events.add(names.teslaCCNotArmed)
+        alerts.append(stock_alert('notArmed'))
       self.previous = bool(stock.engaged)
+      return alerts
     except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
-      return
+      return []
+
+
+def stock_alert(kind):
+  if kind == 'notArmed':
+    alert = NormalPermanentAlert('Arm Stock Cruise to Enable Speed Control')
+    alert.event_type = ET.PERMANENT
+  else:
+    engaged = kind == 'engaged'
+    alert = Alert('Tesla Cruise Engaged' if engaged else 'Tesla Cruise Disengaged', '',
+                  log.SelfdriveState.AlertStatus.normal, log.SelfdriveState.AlertSize.small,
+                  Priority.LOW, VisualAlert.none,
+                  log.SelfdriveState.AudibleAlert.engage if engaged else log.SelfdriveState.AudibleAlert.disengage, 0.8)
+    alert.event_type = ET.WARNING
+  alert.alert_type = f'teslaStockCruise/{kind}/{alert.event_type}'
+  return alert

@@ -17,6 +17,7 @@ export function validSoftwareSnapshot(data) {
   return data?.schemaVersion === 1 && !!data.installed && !!updater &&
     [data.installed.version, data.installed.branch, data.installed.commit, updater.state,
       updater.targetBranch, updater.lastSuccessAt, updater.lastFetchAt].every(text) &&
+    (updater.lastCheckedAt === undefined || text(updater.lastCheckedAt)) &&
     (data.installed.displayVersion === undefined || text(data.installed.displayVersion)) &&
     [updater.targetChangeFound, updater.finalizedUpdateReady].every(flag) &&
     (updater.failedCount === null || Number.isSafeInteger(updater.failedCount) && updater.failedCount >= 0) &&
@@ -24,6 +25,11 @@ export function validSoftwareSnapshot(data) {
     operations.availableBranches.length <= 256 && operations.availableBranches.every((branch) =>
       typeof branch === "string" && branch.length > 0 && branch.length <= 128) &&
     text(operations.selectedTarget) && text(operations.reason) &&
+    (operations.progress === undefined || operations.progress === null || typeof operations.progress === "object" &&
+      text(operations.progress.stage) && (operations.progress.stage === null || operations.progress.stage.length <= 128) &&
+      text(operations.progress.detail) && (operations.progress.detail === null || operations.progress.detail.length <= 512) &&
+      (operations.progress.percent === null || Number.isFinite(operations.progress.percent) &&
+       operations.progress.percent >= 0 && operations.progress.percent <= 100)) &&
     (operations.canFastUpdate === undefined || typeof operations.canFastUpdate === "boolean") &&
     (request?.selectedCommit === undefined || /^[0-9a-f]{40}$/.test(request.selectedCommit)) &&
     (operations.canRollback === undefined || typeof operations.canRollback === "boolean") &&
@@ -34,6 +40,24 @@ export function validSoftwareSnapshot(data) {
     (request === null || !!request && typeof request.id === "string" && request.id.length <= 100 &&
       ACTIONS.has(request.action) && text(request.target) && REQUEST_STATES.has(request.state) && text(request.error) &&
       (request.outcome === undefined || ["up_to_date", "restarting"].includes(request.outcome))))
+}
+
+export function softwareProgress(updater, operations = {}) {
+  if (!updater) return null
+  const progress = operations.progress
+  const fast = updater.state === "updating..." ? updater.fast : null
+  const stage = progress?.stage || fast?.stage
+  const active = UPDATER_ACTIVE.has(updater.state) && !["unavailable", "timed_out", "error", "complete"].includes(stage)
+  const labels = { "checking...": "Checking for updates", "downloading...": "Downloading update",
+    "finalizing update...": "Finalizing update", "updating...": "Updating software",
+    checking: "Checking for updates", downloading: "Downloading update", finalizing: "Finalizing update",
+    preparing: "Preparing update", fetching: "Downloading update", validating: "Validating update",
+    applying: "Applying update", submodules: "Preparing dependencies", rebooting: "Restarting device",
+    complete: "Update complete", error: "Update failed", unavailable: "Updater status unavailable", timed_out: "Update is taking longer than expected" }
+  if (!active && (!stage || ["idle", "unknown"].includes(stage))) return null
+  const percent = Number.isFinite(progress?.percent) && progress.percent >= 0 && progress.percent <= 100 ? progress.percent : null
+  return { active, percent, label: labels[progress?.stage || fast?.stage] || progress?.stage || fast?.stage || labels[updater.state] || "Update status",
+    detail: progress?.detail || fast?.detail || "" }
 }
 
 export function validHistory(value) {
@@ -272,6 +296,7 @@ export const SoftwarePage = {
   beforeUnmount() { this.feed.stop() },
   computed: {
     operations() { return this.data?.operations },
+    updateProgress() { return softwareProgress(this.data?.updater, this.operations) },
     pending() { return this.operations?.request?.state === "pending" },
     actionDisabled() { return this.busy || this.uncertain || this.pending || !!this.error || !this.operations?.parked },
     primaryBranchHelp() {
@@ -433,8 +458,6 @@ export const SoftwarePage = {
       <p class="gx-note">Turn off the vehicle before checking, downloading or installing updates. Selecting a branch saves the target for the next check.</p>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Software updates are unavailable in preview.</div>
       <template v-else>
-        <div class="gx-software-actions">
-          <button type="button" class="gx-btn" :disabled="actionDisabled || !operations?.canCheck" @click="feed.action('check')">Check for updates</button></div>
         <p v-if="status === 'loading' && !data" role="status" class="gx-card gx-message">Loading software updates…</p>
         <GxNotice tone="danger" v-if="error">{{ error }}
           </GxNotice>
@@ -462,21 +485,44 @@ export const SoftwarePage = {
             <p v-if="!operations.availableBranches.length" class="gx-note">No branch list is available yet. Check for updates to refresh it.</p></section>
           <section class="gx-card gx-software-card"><h3>Update</h3>
             <p v-if="operations.reason" class="gx-note">{{ operations.reason }}</p>
-            <p v-else-if="!operations.parked" class="gx-note">Park the vehicle to change or install software.</p>
+            <div class="gx-update-step"><h4>1. Check for updates</h4>
+              <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canCheck" @click="feed.action('check')">Check for updates</button>
+              <p class="gx-note">Check the selected branch, then choose how to update.</p>
+              <dl><dt>{{ data.updater.lastCheckedAt !== undefined ? 'Last checked' : 'Last successful activity' }}</dt>
+                <dd>{{ data.updater.lastCheckedAt === null ? 'Not checked yet' : reported(data.updater.lastCheckedAt !== undefined ? data.updater.lastCheckedAt : data.updater.lastSuccessAt) }}</dd></dl>
+            </div>
             <p v-if="operations.request" :role="operations.request.state === 'failed' ? 'alert' : 'status'">{{ requestMessage(operations.request) }}</p>
             <p v-else-if="data.updater.state">{{ data.updater.state }}</p>
             <p v-if="data.updater.targetChangeFound === true">An update was found for the target branch.</p>
             <p v-else-if="data.updater.targetChangeFound === false">No target change reported by the last check.</p>
-            <div class="gx-software-actions"><button type="button" class="gx-btn" :disabled="actionDisabled || operations.canFastUpdate !== true || !data.installed.branch" @click="askFastUpdate">Fast Update</button><button type="button" class="gx-btn" :disabled="actionDisabled || operations.canRollback !== true" @click="askRollback">Previous version</button>
-              <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canDownload || !operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Download update</button>
-              <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button></div>
-            <dl><dt>Last checked</dt><dd>{{ reported(data.updater.lastSuccessAt) }}</dd><dt>Last download</dt><dd>{{ reported(data.updater.lastFetchAt) }}</dd></dl></section>
+            <div class="gx-update-step"><h4>2. Choose your update</h4>
+              <div class="gx-software-actions">
+                <button type="button" class="gx-btn" :disabled="actionDisabled || operations.canFastUpdate !== true || !data.installed.branch" @click="askFastUpdate">Fast Update</button>
+                <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations.canDownload || !operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Normal Update</button>
+              </div>
+              <p class="gx-note">Fast updates and restarts now. Normal downloads and prepares the update; restart when you are ready.</p>
+            </div>
+            <div v-if="updateProgress" class="gx-update-progress" role="status">
+              <div class="gx-update-progress__heading"><span>{{ updateProgress.label }}</span>
+                <span v-if="updateProgress.percent !== null">{{ Math.round(updateProgress.percent) }}%</span></div>
+              <div v-if="updateProgress.active || updateProgress.percent !== null" class="gx-update-progress__track" role="progressbar" :aria-label="updateProgress.label"
+                aria-valuemin="0" aria-valuemax="100" :aria-valuenow="updateProgress.percent ?? undefined">
+                <div class="gx-update-progress__fill" :class="{'gx-update-progress__fill--indeterminate': updateProgress.active && updateProgress.percent === null}"
+                  :style="updateProgress.percent !== null ? {width: updateProgress.percent + '%'} : {}"></div>
+              </div>
+              <p v-if="updateProgress.detail" class="gx-note">{{ updateProgress.detail }}</p>
+            </div>
+            <div class="gx-software-actions">
+              <button v-if="data.updater.finalizedUpdateReady === true" type="button" class="gx-btn" :disabled="actionDisabled || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || operations.canRollback !== true" @click="askRollback">Previous version</button>
+            </div>
+            <dl><dt>Last download</dt><dd>{{ reported(data.updater.lastFetchAt) }}</dd></dl>
+          </section>
           <section v-if="operations.automaticDownloads !== undefined" class="gx-card gx-software-card">
             <h3>Automatic Downloads</h3>
             <label class="gx-toggle-row"><input type="checkbox" :checked="operations.automaticDownloads === true"
               :disabled="busy || uncertain || !!error || !operations.canConfigure"
               @change="feed.configureAutomaticDownloads($event.target.checked)"> Download updates automatically</label>
-            <p v-if="data.updater.fast" class="gx-note">{{ data.updater.fast.stage }}: {{ data.updater.fast.detail }}</p>
             <p class="gx-note">Keep the selected branch ready to install. Turn this off to download updates yourself; checking for updates and manual downloads still work.</p>
             <p v-if="operations.automaticDownloads === null" class="gx-note">The saved download preference could not be read. Turn off the vehicle, then choose a setting to repair it.</p>
           </section>

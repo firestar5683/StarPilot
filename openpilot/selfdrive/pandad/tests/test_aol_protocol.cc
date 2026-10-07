@@ -188,7 +188,7 @@ int main() {
         }
       }
     }
-    const bool expected = word == 0x2000U || word == 0x0500U || word == 0x0D00U || long_expected || scc_expected || word == 0x1400U || word == 0x1C00U || word == 0x1440U || word == 0x1C40U ||
+    const bool expected = word == 0x2000U || word == 0x2004U || word == 0x0500U || word == 0x0D00U || long_expected || scc_expected || word == 0x1400U || word == 0x1C00U || word == 0x1440U || word == 0x1C40U ||
                           word == 0x1402U || word == 0x1C02U || word == 0x1441U || word == 0x1C41U;
     assert(aol_capable(forte, HYUNDAI_CLASSIC_AOL_PROFILE.mode, VEHICLE_REGISTRY) == expected);
     assert(aol_runtime_enabled(false, forte, VEHICLE_REGISTRY) == expected);
@@ -216,7 +216,7 @@ int main() {
     forte.safety_mode = HYUNDAI_AOL_PROFILE.mode;
     assert(!aol_capable(forte, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
   }
-  for (const uint16_t word : {0U, 16U, 0x80U,
+  for (const uint16_t word : {0U, 16U, 0xC161U, 0xC162U, 0x80U,
                             0xE100U, 0xE101U, 0xE102U, 0xE103U,
                             0xE110U, 0xE111U, 0xE112U, 0xE113U,
                             0xE200U, 0xE201U, 0xE202U, 0xE203U,
@@ -243,6 +243,7 @@ int main() {
                             0xE604U, 0xE605U, 0xE606U, 0xE607U,
                             0xE610U, 0xE611U, 0xE612U, 0xE613U,
                             0xE614U, 0xE615U, 0xE616U, 0xE617U,
+                            0xE800U, 0xE801U, 0xE802U, 0xE803U, 0xE804U, 0xE805U,
                             0xE700U, 0xE701U, 0xE702U, 0xE703U,
                             0xE710U, 0xE711U, 0xE712U, 0xE713U,
                             0xD100U, 0xD101U, 0xD102U, 0xD103U, 0xD104U, 0xD105U,
@@ -274,7 +275,7 @@ int main() {
                             0xE3FFU, 0xE404U, 0xE414U, 0xE424U, 0xE430U, 0xE444U, 0xE450U, 0xE464U, 0xE470U,
                             0xE4FFU, 0xE504U, 0xE514U, 0xE524U, 0xE530U, 0xE544U, 0xE550U, 0xE564U, 0xE570U,
                             0xE5FFU, 0xE608U, 0xE60FU, 0xE618U, 0xE61FU, 0xE620U,
-                            0xE6FFU, 0xE704U, 0xE70FU, 0xE714U, 0xE71FU, 0xE720U}) {
+                            0xE806U, 0xE80FU, 0xE8FFU, 0xE6FFU, 0xE704U, 0xE70FU, 0xE714U, 0xE71FU, 0xE720U}) {
     assert(!gm_aol_param(word));
     auto unknown = status();
     unknown.safety_mode = GM_AOL_PROFILE.mode;

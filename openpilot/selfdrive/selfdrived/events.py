@@ -386,17 +386,6 @@ def invalid_lkas_setting_alert(CP: car.CarParams, CS: car.CarState, sm: messagin
 
 
 EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
-  EventName.teslaCCEngaged: {
-    ET.WARNING: Alert("Tesla Cruise Engaged", "", AlertStatus.normal, AlertSize.small,
-                      Priority.LOW, VisualAlert.none, AudibleAlert.engage, 0.8),
-  },
-  EventName.teslaCCDisengaged: {
-    ET.WARNING: Alert("Tesla Cruise Disengaged", "", AlertStatus.normal, AlertSize.small,
-                      Priority.LOW, VisualAlert.none, AudibleAlert.disengage, 0.8),
-  },
-  EventName.teslaCCNotArmed: {
-    ET.PERMANENT: NormalPermanentAlert("Arm Stock Cruise to Enable Speed Control"),
-  },
   # ********** events with no alerts **********
 
   EventName.noGps: {},
