@@ -8,6 +8,7 @@ from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
 from opendbc.car.mock.values import CAR as MOCK
+from opendbc.car.gm.pedal_capability import automatic_bolt_candidate
 from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
@@ -45,12 +46,16 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
   frame = 0
   car_fingerprint = None
   done = False
+  camera_cruise_states = set()
 
   while not done:
     # can_recv(wait_for_one=True) may return zero or multiple packets, so we increment frame for each one we receive
     can_packets = can_recv(wait_for_one=True)
     for can_packet in can_packets:
       for can in can_packet:
+        # Stock camera only: host echoes and malformed DLCs are not capability evidence.
+        if can.src == 2 and can.address == 0x370 and len(can.dat) == 6:
+          camera_cruise_states.add(can.dat[1] & 0x7)
         # The fingerprint dict is generated for all buses, this way the car interface
         # can use it to detect a (valid) multipanda setup and initialize accordingly
         if can.src < 128:
@@ -77,7 +82,7 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
 
       frame += 1
 
-  return car_fingerprint, finger
+  return automatic_bolt_candidate(car_fingerprint, finger, camera_cruise_states), finger
 
 
 # **** for use live only ****

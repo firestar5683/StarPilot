@@ -1,4 +1,5 @@
 """Finalized GM startup ownership and independent-axis caller lifecycle."""
+import json
 import os
 from types import SimpleNamespace
 import unittest
@@ -213,6 +214,138 @@ class TestGmAol(unittest.TestCase):
     with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
          patch('openpilot.selfdrive.car.card.get_car', side_effect=get_car):
       return Car()
+
+  def test_automatic_bolt_identity_reaches_real_card_factory_and_native(self):
+    from opendbc.car.can_definitions import CanData
+    from opendbc.car import car_helpers
+    from opendbc.car.gm.values import CarControllerParams
+    from opendbc.car.gm.pedal_capability import automatic_bolt_candidate
+    from opendbc.car.mock.values import CAR as MOCK
+    from opendbc.car.gm.tests.test_bolt_cc import setup
+    from openpilot.starpilot.vehicle_selection import encode
+
+    # Recorded pre-controller PT fingerprints: 2020 nonACC pedal and Zik Gen2
+    # ACC pedal. DLCs are literal; stock370 bytes are the first recorded true
+    # camera observation, not a fabricated native/control grant.
+    gen1 = {
+      170: 8, 188: 8, 189: 7, 190: 6, 193: 8, 197: 8, 201: 8, 209: 7, 211: 2,
+      241: 6, 257: 8, 288: 5, 298: 8, 304: 1, 308: 4, 309: 8, 311: 8, 313: 8,
+      320: 3, 322: 7, 328: 1, 352: 5, 353: 3, 368: 3, 381: 8, 384: 4, 386: 8,
+      388: 8, 390: 7, 407: 7, 417: 7, 419: 1, 451: 8, 452: 8, 453: 6, 454: 8,
+      456: 8, 463: 3, 479: 3, 481: 7, 485: 8, 489: 8, 493: 8, 495: 4, 497: 8,
+      499: 3, 500: 6, 501: 8, 503: 2, 508: 8, 513: 6, 528: 5, 532: 6, 546: 7,
+      550: 8, 554: 3, 558: 8, 560: 8, 562: 8, 564: 5, 566: 7, 567: 5, 568: 1,
+      569: 3, 608: 8, 609: 6, 610: 6, 611: 6, 612: 8, 613: 8, 647: 3, 707: 8,
+      711: 6, 717: 5, 753: 5, 761: 7, 800: 6, 810: 8, 840: 5, 842: 5, 844: 8,
+      848: 4, 866: 4, 869: 4, 872: 1, 961: 8, 967: 4, 969: 8, 975: 2, 977: 8,
+      979: 7, 985: 5, 988: 6, 989: 8, 995: 7, 1001: 8, 1005: 6, 1009: 8, 1013: 3,
+      1017: 8, 1019: 2, 1020: 8, 1022: 1, 1105: 5, 1187: 4, 1217: 8, 1221: 5, 1223: 3,
+      1225: 7, 1227: 4, 1233: 8, 1236: 8, 1243: 3, 1249: 8, 1257: 6, 1265: 8, 1275: 3,
+      1279: 4, 1280: 4, 1300: 8, 1322: 6, 1323: 4, 1328: 4, 1904: 7, 1905: 7, 1906: 7,
+      1907: 7, 1912: 7, 1913: 7, 1922: 7, 1927: 7, 2020: 8, 2028: 8,
+    }
+    gen2 = {
+      189: 7, 190: 7, 193: 8, 197: 8, 201: 8, 209: 7, 211: 3, 241: 6, 288: 5,
+      289: 8, 298: 8, 304: 3, 309: 8, 311: 8, 313: 8, 320: 4, 322: 7, 328: 1,
+      352: 5, 381: 8, 384: 4, 386: 8, 388: 8, 451: 8, 452: 8, 453: 6, 458: 5,
+      463: 3, 479: 3, 481: 7, 485: 8, 489: 8, 497: 8, 500: 6, 501: 8, 513: 6,
+      528: 5, 532: 6, 560: 8, 562: 8, 566: 8, 608: 8, 609: 6, 610: 6, 611: 6,
+      612: 8, 613: 8, 707: 8, 715: 8, 717: 5, 753: 5, 761: 7, 789: 5, 800: 6,
+      810: 8, 840: 5, 842: 5, 844: 8, 848: 4, 869: 4, 880: 6, 977: 8, 1001: 8,
+      1017: 8, 1020: 8, 1217: 8, 1221: 5, 1233: 8, 1249: 8, 1265: 8, 1280: 4, 1296: 4,
+      1300: 8, 1930: 7,
+    }
+    safety = libsafety_py.libsafety
+    release = safety.set_safety_hooks(int(structs.CarParams.SafetyModel.allOutput), 0) != 0
+    stock_acc = (0x370, bytes.fromhex('000221820000'), 2)
+
+    def receive_for(pt, camera_messages):
+      packets = [CanData(address, bytes(length), 0) for address, length in pt.items()]
+      packets += [CanData(0x180, bytes(4), 2), CanData(0x320, bytes(pt.get(0x320, 8)), 2)]
+      packets += [CanData(address, data, bus) for address, data, bus in camera_messages]
+      return lambda wait_for_one=False: [packets] if wait_for_one else []
+
+    # Unknown, mixed stock modes, wrong bus/echo and malformed lengths cannot
+    # manufacture ACC capability from the Gen2 alias.
+    for camera in ([], [(0x370, bytes(6), 2)], [(0x370, b'\0\4' + bytes(4), 2)],
+                   [(0x370, b'\0\5' + bytes(4), 2)], [stock_acc, (0x370, b'\0\4' + bytes(4), 2)],
+                   [(stock_acc[0], stock_acc[1], 0)], [(stock_acc[0], stock_acc[1], 130)],
+                   [(stock_acc[0], stock_acc[1][:5], 2)]):
+      with self.subTest(camera=camera):
+        candidate, fp = car_helpers.can_fingerprint(receive_for(gen2, camera))
+        self.assertIsNone(candidate)
+        self.assertEqual(fp[0], gen2)
+    fp = {0: gen2}
+    self.assertEqual(automatic_bolt_candidate(CAR.CHEVROLET_BOLT_CC_2022_2023, fp, {4}),
+                     CAR.CHEVROLET_BOLT_CC_2022_2023)
+    malformed = {0: dict(gen2)}
+    malformed[0][0x201] = 5
+    self.assertIsNone(automatic_bolt_candidate(CAR.CHEVROLET_BOLT_CC_2018_2021, malformed, {2}))
+    malformed[0][0x201] = 6
+    malformed[0][0x236] = 7
+    self.assertIsNone(automatic_bolt_candidate(CAR.CHEVROLET_BOLT_CC_2018_2021, malformed, {2}))
+    no_pedal = {0: {address: length for address, length in gen2.items() if address != 0x201}}
+    for alias in (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021, CAR.CHEVROLET_BOLT_EUV):
+      self.assertIsNone(automatic_bolt_candidate(alias, no_pedal, set()))
+      self.assertIsNone(automatic_bolt_candidate(alias, no_pedal, {4, 5}))
+    self.assertEqual(automatic_bolt_candidate(CAR.CHEVROLET_BOLT_ACC_2022_2023, no_pedal, set()),
+                     CAR.CHEVROLET_BOLT_ACC_2022_2023)
+    self.assertIsNone(automatic_bolt_candidate(None, fp, {2}))
+    self.assertEqual(automatic_bolt_candidate(MOCK.MOCK, fp, {2}), MOCK.MOCK)
+
+    def startup(pt, forced, camera):
+      with OpenpilotPrefix(), patch.dict(os.environ, {'SKIP_FW_QUERY': '1', 'FINGERPRINT': ''}):
+        settings = Params()
+        settings.put_bool('OpenpilotEnabledToggle', True, block=True)
+        settings.put_bool('AlwaysOnLateral', True, block=True)
+        settings.put_bool('AlphaLongitudinalEnabled', True, block=True)
+        settings.put_bool('IsReleaseBranch', release, block=True)
+        settings.put('VehicleSelection', json.loads(encode(None if forced is None else forced.value)), block=True)
+        receive = receive_for(pt, camera)
+
+        def discover(*args, **kwargs):
+          return car_helpers.get_car(receive, *args[1:], **kwargs)
+
+        with patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
+             patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
+          card = Car()
+        self.assertTrue(settings.get_bool('FirmwareQueryDone'))
+        self.assertFalse(card.ci_initialized)
+        self.assertEqual(card.CP.alternativeExperience, 32)
+        return card.CP
+
+    stock_pt = dict(gen2)
+    del stock_pt[0x201]
+    cases = ((gen1, None, CAR.CHEVROLET_BOLT_CC_2018_2021, 0x9D, []),
+             (gen2, None, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, 0x1CD, [stock_acc]),
+             (gen2, CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2017, 0xBD, [stock_acc]),
+             (gen2, CAR.CHEVROLET_BOLT_CC_2018_2021, CAR.CHEVROLET_BOLT_CC_2018_2021, 0x9D, [stock_acc]),
+             (gen2, CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_CC_2022_2023, 0x19D, [stock_acc]),
+             (stock_pt, CAR.CHEVROLET_BOLT_ACC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023,
+              5 if release else 7, [stock_acc]),
+             (gen2, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+              CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, 0x1CD, [stock_acc]))
+    for pt, forced, identity, word, camera in cases:
+      with self.subTest(forced=forced, identity=identity, release=release):
+        cp = startup(pt, forced, camera)
+        self.assertEqual(cp.carFingerprint, identity)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+        self.assertEqual(cp.fingerprintSource, structs.CarParams.FingerprintSource.fixed if forced else
+                         structs.CarParams.FingerprintSource.can)
+        self.assertTrue(cp.flags & 16)  # actual recorded BSM presence, not a manual flag assignment
+        self.assertFalse(cp.dashcamOnly)
+        self.assertFalse(cp.passive)
+        self.assertAlmostEqual(cp.lateralTuning.torque.latAccelFactor, 1.2 if identity == CAR.CHEVROLET_BOLT_CC_2017 else 2.)
+        self.assertAlmostEqual(cp.lateralTuning.torque.friction, .21 if identity == CAR.CHEVROLET_BOLT_CC_2017 else .13)
+        self.assertEqual(CarControllerParams(cp).STEER_MAX, 450 if identity == CAR.CHEVROLET_BOLT_CC_2017 else 300)
+        pedal = 0x201 in pt
+        self.assertEqual(cp.openpilotLongitudinalControl, pedal or not release)
+        self.assertEqual(cp.pcmCruise, not pedal and release)
+        setup(cp)
+        safety.set_alternative_experience(cp.alternativeExperience)
+        self.assertEqual(safety.get_current_safety_mode(), int(structs.CarParams.SafetyModel.gm))
+        self.assertEqual(safety.get_current_safety_param(), word)
+        self.assertFalse(safety.get_controls_allowed())
 
   def test_marked_gm_transport_survives_master_off_restart(self):
     from openpilot.starpilot.feature_runtime import enabled
