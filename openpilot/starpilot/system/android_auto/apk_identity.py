@@ -267,7 +267,10 @@ def identity_status(directory: Path | None = None) -> dict:
     ident = identity_store.load_identity(directory)
   except identity_store.IdentityError as error:
     status = {"installed": False, "expired": "expired" in str(error), "error": str(error), "message": str(error)}
-    expires = identity_store._not_after(directory / identity_store.CERT_NAME)
+    try:
+      expires = identity_store._not_after(directory / identity_store.CERT_NAME)
+    except (OSError, ValueError):
+      expires = None
     if expires is not None:
       status["expires"] = expires.isoformat()
     return status

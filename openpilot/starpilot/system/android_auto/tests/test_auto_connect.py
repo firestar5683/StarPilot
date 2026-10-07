@@ -252,13 +252,13 @@ def test_config_v2_rgba_pipeline_upgrades_to_gpu_nv12(tmp_path):
   assert identity_store.load_config(path)["gpu_nv12"] is False
 
 
-def test_config_v3_sync_readback_upgrades_to_async(tmp_path):
+def test_config_v3_preserves_explicit_pipeline_preferences(tmp_path):
   from openpilot.starpilot.system.android_auto import identity as identity_store
   path = tmp_path / "config.json"
-  # v3 files turned the pipeline off when a failed async readback still crashed the renderer.
+  # Version 3 already supports explicit pipeline preferences.
   path.write_text(json.dumps({"config_version": 3, "gpu_nv12": False, "async_readback": False, "bitrate_kbps": 5000}))
   config = identity_store.load_config(path)
-  assert config["gpu_nv12"] is True and config["async_readback"] is True and config["bitrate_kbps"] == 5000
+  assert config["gpu_nv12"] is False and config["async_readback"] is False and config["bitrate_kbps"] == 5000
   assert config["config_version"] == 4
 
 

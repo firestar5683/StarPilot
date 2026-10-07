@@ -83,18 +83,6 @@ def create_readback(factory, size: int, asynchronous: bool):
     return factory(size, asynchronous=False)
 
 
-def finish_readback(factory, readback):
-  try:
-    return readback, readback.finish()
-  except RuntimeError as error:
-    if not readback.asynchronous:
-      raise
-    size = readback.size
-    readback.close()
-    print(f"Async readback failed, using synchronous readback: {error}", flush=True)
-    return factory(size, asynchronous=False), None
-
-
 def visible_geometry(request: FrameRequest) -> tuple[int, int, float, int, int]:
   geometry = projection_geometry(request.width, request.height, request.margin_w, request.margin_h)
   return (geometry.width, geometry.height, geometry.scale,

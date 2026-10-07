@@ -258,7 +258,7 @@ assert.match(importProblem({ state: "failed", code: "WRONG_APP" }, "Maps.apk"), 
 assert.match(importProblem({ state: "failed", code: "WRONG_APP" }, "APKMirror Installer.apk"), /Installer/)
 assert.match(importProblem({ state: "failed", code: "EXPIRED", expires: "2026-04-12T00:00:00+00:00" }, "", "en-US"), /expired on Apr 12, 2026/)
 assert.match(importProblem({ state: "failed", code: "CORRUPT" }), /incomplete or damaged/)
-assert.match(importProblem({ state: "failed", code: "UNSUPPORTED_VERSION" }), /17\.6\.663454-release/)
+assert.equal(importProblem({ state: "failed", code: "UNSUPPORTED_VERSION", error: "Use version from server" }), "Use version from server")
 assert.equal(importProblem({ state: "running" }), "")
 const statuses = (job) => installChecks(job, "en-US").map((check) => check.status)
 assert.deepEqual(statuses({ state: "running", stage: "searching" }), ["done", "active", "pending", "pending"])
@@ -279,3 +279,26 @@ assert.equal(sheet.installState, "checking")
 sheet.setup.import = { state: "done", stage: "done", started: 2 }
 assert.equal(sheet.installState, "done")
 console.log("Android Auto: expiry badges, package preflight, friendly rejections and install checklist passed")
+
+// Enabling can finish its refresh after the service is already ready.
+const { reactive, watch, nextTick } = await import('../web/vendor/vue/vue.esm-browser.js')
+const readyPage = reactive(page({ ...setup, enabled: false, serviceReady: false }))
+let pairingCalls = 0
+readyPage.feed = {
+  async setEnabled() {
+    readyPage.setup = { ...readyPage.setup, enabled: true, serviceReady: true }
+    await nextTick()
+    return true
+  },
+  async action() { pairingCalls++; return true },
+}
+const stopReadyWatch = watch(() => readyPage.setup.serviceReady, () => AndroidAutoPage.watch['setup.serviceReady'].call(readyPage))
+assert.equal(await readyPage.startPairing(), true)
+assert.equal(pairingCalls, 1)
+assert.equal(readyPage.pairWhenReady, false)
+stopReadyWatch()
+const connectingPage = page(setup)
+connectingPage.runtime = { running: true, state: 'connecting_bluetooth' }
+assert.equal(connectingPage.projecting, false)
+connectingPage.runtime.state = 'streaming'
+assert.equal(connectingPage.projecting, true)

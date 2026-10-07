@@ -275,3 +275,10 @@ def test_real_android_auto_17_6_xapk():
   files, meta = apk_identity.extract_identity(REAL_XAPK)
   assert meta["root_sha256"] == apk_identity.GOOGLE_ROOT_SHA256 and "CarService" in meta["subject"]
   assert set(files) == {"phone-cert.pem", "phone-key.pem", "root-cert.pem"}
+
+
+def test_status_reports_corrupt_certificate_without_raising(tmp_path):
+  (tmp_path / identity_store.CERT_NAME).write_bytes(b"not a certificate")
+  status = apk_identity.identity_status(tmp_path)
+  assert status["installed"] is False and status["error"]
+  assert "expires" not in status

@@ -28,7 +28,7 @@ assert.equal(validSegmentSummary(summary, `${current}--2`), false)
 assert.match(LocalRecordingsPage.template, /Local recordings/)
 assert.equal(hasVideo(history.routes[0].segments[0].files), true)
 assert.equal(hasVideo({ rlog: true, qlog: true, fcamera: false, dcamera: false, ecamera: false, qcamera: false }), false)
-assert.match(LocalRecordingsPage.template, /v-if="hasVideo\(segment\.files\)"[^>]*@click="deleteVideos\(segment\)"/)
+assert.match(LocalRecordingsPage.template, /v-if="hasVideo\(segment\.files\)"[^>]*@click="confirmDeleteVideos\(segment\)"/)
 assert.match(LocalRecordingsPage.template, /scan was incomplete/)
 assert.doesNotMatch(LocalRecordingsPage.template, /v-html|deleteRoute/)
 assert.match(LocalRecordingsPage.template, /aria-label="Video segment"/)
@@ -291,3 +291,28 @@ player.selectCamera("dcamera")
 assert.equal(player.playing.camera, "dcamera")
 assert.equal(player.playing.segments[0].number, 2)
 player.closePlayer()
+
+// Confirmation has no side effects; errors stay in the dialog, and success refreshes inventory.
+const deletePage = { ...LocalRecordingsPage.data(), mode: 'local', status: 'ready', routeCards: [],
+  unauthorized: () => assert.fail('unexpected unauthorized'), feed: { async load() { deletePage.loads++ } }, loads: 0 }
+for (const [key, method] of Object.entries(LocalRecordingsPage.methods)) deletePage[key] = method.bind(deletePage)
+const deleteSegment = { segmentName: `${current}--0`, number: 0, files: { qcamera: true } }
+const realFetch = globalThis.fetch
+const deleteCalls = []
+try {
+  globalThis.fetch = async (path, options) => {
+    deleteCalls.push([path, JSON.parse(options.body)])
+    return { ok: false, status: 409, json: async () => ({ error: 'Turn off the vehicle before managing recordings' }) }
+  }
+  deletePage.confirmDeleteVideos(deleteSegment)
+  assert.equal(deleteCalls.length, 0)
+  await deletePage.deleteVideos()
+  assert.equal(deletePage.deleteSelection, deleteSegment)
+  assert.match(deletePage.deleteError, /Turn off the vehicle/)
+  assert.equal(deletePage.loads, 0)
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ deleted: ['qcamera'] }) })
+  await deletePage.deleteVideos()
+  assert.equal(deletePage.deleteSelection, null)
+  assert.equal(deletePage.loads, 1)
+  assert.equal(deletePage.deleting, null)
+} finally { globalThis.fetch = realFetch }
