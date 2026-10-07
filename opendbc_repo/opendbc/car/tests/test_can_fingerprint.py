@@ -17,7 +17,17 @@ class TestCanFingerprint(unittest.TestCase):
       fingerprint_iter = iter([can])
       car_fingerprint, finger = can_fingerprint(lambda **kwargs: [next(fingerprint_iter, [])])  # noqa: B023
 
-      assert car_fingerprint == car_model
+      # Legacy tables alias Gen2 hardware to old or broad Bolt identities.
+      # Zero payloads provide no affirmative camera ACC evidence.
+      ambiguous_bolt = (car_model in ("CHEVROLET_BOLT_EUV", "CHEVROLET_BOLT_CC_2017", "CHEVROLET_BOLT_CC_2018_2021") and
+                        fingerprint.get(0xD3) == 3)
+      ambiguous_hybrid = car_model == "CHEVROLET_MALIBU_HYBRID_CC"
+      if ambiguous_hybrid:
+        # This existing 33-message table is also a complete subset of the
+        # conventional Malibu table: CAN-only input cannot choose between them.
+        assert len(fingerprints) == 1 and len(fingerprint) == 33
+        assert fingerprint.items() <= FINGERPRINTS["CHEVROLET_MALIBU_CC"][1].items()
+      assert car_fingerprint == (None if ambiguous_bolt or ambiguous_hybrid else car_model)
       assert finger[0] == fingerprint
       assert finger[1] == fingerprint
       assert finger[2] == {}
@@ -30,7 +40,7 @@ class TestCanFingerprint(unittest.TestCase):
 
   def test_timing(self):
     # just pick any CAN fingerprinting car
-    car_model = "CHEVROLET_BOLT_EUV"
+    car_model = "CHEVROLET_BOLT_CC_2018_2021"
     fingerprint = FINGERPRINTS[car_model][0]
 
     cases = []
