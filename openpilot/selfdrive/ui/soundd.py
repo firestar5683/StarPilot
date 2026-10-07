@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import time
+from time import monotonic_ns
 from pathlib import Path
 
 
@@ -104,6 +105,8 @@ class Soundd:
     self.output_underflow_count = 0
     self.reported_output_underflows = 0
     self.stream_report_at = None
+    self.last_callback_start_ns = None
+    self.underflow_timing = None
     self.axis_alerts = AxisAlerts()
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
@@ -158,11 +161,22 @@ class Soundd:
     self.saved_volumes = {key: read_volume(self.volume_params, key).value for key, _, _ in VOLUMES}
 
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
-    if status:
-      self.pending_stream_status = status
-      self.stream_status_count += 1
-      self.output_underflow_count += int(bool(getattr(status, "output_underflow", False)))
-    data_out[:frames, 0] = self.get_sound_data(frames)
+    started_ns = monotonic_ns()
+    previous_ns = getattr(self, "last_callback_start_ns", None)
+    self.last_callback_start_ns = started_ns
+    try:
+      data_out[:frames, 0] = self.get_sound_data(frames)
+    finally:
+      finished_ns = monotonic_ns()
+      if status:
+        underflow = bool(getattr(status, "output_underflow", False))
+        if underflow:
+          self.underflow_timing = (self.output_underflow_count + 1, started_ns,
+                                   None if previous_ns is None else started_ns - previous_ns,
+                                   finished_ns - started_ns, frames)
+        self.pending_stream_status = status
+        self.stream_status_count += 1
+        self.output_underflow_count += int(underflow)
 
   def log_pending_stream_status(self, stream=None) -> None:
     status = self.pending_stream_status
@@ -176,6 +190,13 @@ class Soundd:
     underflows = self.output_underflow_count
     message = (f"soundd stream diagnostics: status={status} status_callbacks={self.stream_status_count} "
                + f"output_underflows={underflows}")
+    timing = getattr(self, "underflow_timing", None)
+    if timing is not None and timing[0] == underflows:
+      _, started_ns, gap_ns, work_ns, frames = timing
+      gap_ms = "unknown" if gap_ns is None else f"{gap_ns / 1e6:.3f}"
+      message += (f" underflow_callback_mono={started_ns / 1e9:.9f} callback_gap_ms={gap_ms}"
+                  + f" callback_work_ms={work_ns / 1e6:.3f}"
+                  + f" callback_period_ms={frames / SAMPLE_RATE * 1e3:.3f}")
     if stream is not None:
       message += f" latency={stream.latency} cpu_load={stream.cpu_load}"
     # Output dropouts must reach errorLogMessage, which is retained in qlog.
