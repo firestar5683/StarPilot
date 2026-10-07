@@ -16,7 +16,8 @@
     "StarPilotRadarState": "13289668853598257608",
     "StarPilotSelfdriveState": "17588504919375977753",
     "SpotMonitorState": "14672680772714322234",
-    "StarPilotLateralState": "13989372750770471812"
+    "StarPilotLateralState": "13989372750770471812",
+    "StarPilotCarState": "17536106922917195458"
   },
   "nodes": {
     "14441422469354927087": {
@@ -1138,7 +1139,8 @@
       "values": [
         "none",
         "internal",
-        "external"
+        "external",
+        "car"
       ]
     },
     "10834106446961912734": {
@@ -6337,6 +6339,752 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 6
+          }
+        }
+      }
+    },
+    "17536106922917195458": {
+      "kind": "struct",
+      "data_words": 2,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "accelPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "alwaysOnLateralEnabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "brakeLights",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "dashboardSpeedLimit",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "decelPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "distancePressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "distanceLongPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "distanceVeryLongPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "ecoGear",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "forceCoast",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "isParked",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "pauseLateral",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "pauseLongitudinal",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 12,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "sportGear",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 13,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "trafficModeEnabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 14,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "gasStack",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 15,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "modePressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "customPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "alwaysOnLateralAllowed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        },
+        "19": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint8": null
+            },
+            "defaultValue": {
+              "uint8": 0
+            }
+          },
+          "name": "dashboardStopSign",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 19
+          }
+        },
+        "20": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "cancelPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 20
+          }
+        },
+        "21": {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "cancelLongPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 21
+          }
+        },
+        "22": {
+          "slot": {
+            "offset": 20,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "cancelVeryLongPressed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 22
+          }
+        },
+        "23": {
+          "slot": {
+            "offset": 21,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "pedalMaxRegen",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 23
+          }
+        },
+        "24": {
+          "slot": {
+            "offset": 22,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "pedalLongActive",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 24
+          }
+        },
+        "25": {
+          "slot": {
+            "offset": 23,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "teslaCCEngaged",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 25
+          }
+        },
+        "26": {
+          "slot": {
+            "offset": 64,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "teslaCCDisengaged",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 26
+          }
+        },
+        "27": {
+          "slot": {
+            "offset": 65,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "teslaCCNotArmed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 27
+          }
+        },
+        "28": {
+          "slot": {
+            "offset": 66,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "accelHardCruise",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 28
+          }
+        },
+        "29": {
+          "slot": {
+            "offset": 67,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "decelHardCruise",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 29
+          }
+        },
+        "30": {
+          "slot": {
+            "offset": 68,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "pulseAndGlide",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 30
+          }
+        },
+        "31": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "struct": {
+                "typeId": 10488067326635002157
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "gps",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 31
+          }
+        }
+      }
+    },
+    "10488067326635002157": {
+      "kind": "struct",
+      "data_words": 9,
+      "pointers": 1,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "latitude",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "longitude",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "altitude",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "speed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "bearingDeg",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "horizontalAccuracy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "verticalAccuracy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 12,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "bearingAccuracyDeg",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 13,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            }
+          },
+          "name": "speedAccuracy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "int64": null
+            },
+            "defaultValue": {
+              "int64": 0
+            }
+          },
+          "name": "unixTimestampMillis",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 512,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "hasFix",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float32": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "vNED",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
           }
         }
       }

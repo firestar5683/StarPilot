@@ -1,3 +1,4 @@
+from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import CarStateBase
@@ -11,6 +12,8 @@ ButtonType = structs.CarState.ButtonEvent.Type
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    self.car_gps_tracker = CarGpsTracker(CP)
+    self.car_gps_supported = self.car_gps_tracker.config is not None
     self.frame = 0
     self.eps_init_complete = False
     self.tsk_recovery_timer = 0
@@ -45,8 +48,12 @@ class CarState(CarStateBase):
 
     return button_events
 
+  def get_car_gps(self):
+    return self.car_gps_tracker.get()
+
   def update(self, can_parsers) -> structs.CarState:
     pt_cp = can_parsers[Bus.pt]
+    self.car_gps_tracker.update(pt_cp)
     cam_cp = can_parsers[Bus.cam]
     ext_cp = pt_cp if self.CP.networkLocation == NetworkLocation.fwdCamera else cam_cp
     alt_cp = can_parsers[Bus.alt]
@@ -413,8 +420,10 @@ class CarState(CarStateBase):
     elif CP.flags & VolkswagenFlags.MEB:
       return CarState.get_can_parsers_meb(CP)
 
+    gps = get_car_gps_config(CP)
     # manually configure some optional and variable-rate/edge-triggered messages
-    pt_messages, cam_messages, alt_messages = [], [], []
+    pt_messages = [(name, float("nan")) for name in gps.messages] if gps is not None else []
+    cam_messages, alt_messages = [], []
 
     if not CP.flags & VolkswagenFlags.MLB:
       pt_messages += [

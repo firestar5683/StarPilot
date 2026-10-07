@@ -25,7 +25,7 @@ class CustomSchemaEvolutionTest(unittest.TestCase):
       'SlcCruiseCommand', 'AolAxisState', 'AolAxisState.SafetyWire', 'AolAxisState.IntentWire',
       'MapdOut', 'MapdExtendedOut', 'MapdIn',
       'AolAxisState.LaneChangeStatusWire', 'StarPilotModelDataV2', 'StarPilotRadarState',
-      'StarPilotSelfdriveState', 'SpotMonitorState', 'StarPilotLateralState',
+      'StarPilotSelfdriveState', 'SpotMonitorState', 'StarPilotLateralState', 'StarPilotCarState',
     })
     self.assertEqual(self.baseline['roots']['MapdExtendedOut'], str(0xa30662f84033036c))
     self.assertEqual(self.baseline['roots']['MapdIn'], str(0xc86a3d38d13eb3ef))

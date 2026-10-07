@@ -43,6 +43,15 @@ class MapSourceTests(unittest.TestCase):
     tracker.step(None, received=False, now_boot_ns=now+ms.EVENT_MAX_AGE_NS+4)
     self.assertIsNone(tracker.diagnostic(now_boot_ns=now+ms.EVENT_MAX_AGE_NS+4).frame)
 
+  def test_can_gps_retains_source_age_and_unqualified_map_authority(self):
+    frame = replace(v2_frame(), source='car', gps_mono_ns=453_600_000_000)
+    now = 456_100_000_000
+    result = ms.MapTracker().step(frame, received=True, now_boot_ns=now)
+    self.assertEqual(result.kind, 'matched_limit_unqualified')
+    self.assertIs(result.observation.kind, acc.ObservationKind.UNKNOWN)
+    self.assertIsNone(result.observation.candidate)
+    self.assertEqual(ms.MapTracker().step(frame, received=True, now_boot_ns=now+1).kind, 'stale')
+
   def test_real_provider_and_historical_wire_are_copied_immutably(self):
     frame = v2_frame()
     self.assertEqual((frame.version, frame.status, frame.source), (2, 'matchedLimit', 'external'))

@@ -1,3 +1,4 @@
+from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 import math
 
 from opendbc.can import CANDefine, CANParser
@@ -18,6 +19,8 @@ TransmissionType = structs.CarParams.TransmissionType
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    self.car_gps_tracker = CarGpsTracker(CP)
+    self.car_gps_supported = self.car_gps_tracker.config is not None
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     if CP.transmissionType == TransmissionType.automatic:
       if CP.carFingerprint == CAR.FORD_MONDEO_MK5:
@@ -36,6 +39,9 @@ class CarState(CarStateBase):
     self.lkas_available = False
     self.lkas_available_ts_nanos = 0
     self.lateral_motion_control = None
+
+  def get_car_gps(self):
+    return self.car_gps_tracker.get()
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -173,6 +179,7 @@ class CarState(CarStateBase):
       status, value_mps = ford_sign(speed, unit)
       self.dashboard_limit.update(timestamp, status, value_mps, valid_until_ns=expiry)
 
+    self.car_gps_tracker.update(cp)
     return ret
 
   @staticmethod
@@ -203,6 +210,10 @@ class CarState(CarStateBase):
     if CP.flags & FordFlags.LKA_STEERING:
       pt_messages.append(("Lane_Assist_Data3_FD1", 30))
       cam_messages.append(("LateralMotionControl", 20))
+    gps = get_car_gps_config(CP)
+    if gps is not None:
+      pt_messages += [(name, float("nan")) for name in gps.messages]
+
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).main),
       Bus.cam: CANParser(dbc_name, cam_messages, CanBus(CP).camera),

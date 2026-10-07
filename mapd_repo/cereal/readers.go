@@ -37,3 +37,11 @@ func GpsLocationExternalReader(evt log.Event) (log.GpsLocationData, error) {
 func SelfdriveStateReader(evt log.Event) (log.SelfdriveState, error) {
 	return evt.SelfdriveState()
 }
+
+func CarGpsReader(evt log.Event) (custom.StarPilotCarState_Gps, error) {
+	state, err := evt.StarpilotCarState()
+	if err != nil {
+		return custom.StarPilotCarState_Gps{}, err
+	}
+	return state.Gps()
+}
