@@ -10,7 +10,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui import clip, feature_settings as view, settings_geometry as geometry
 from openpilot.starpilot.ui.feature_settings_state import (
-  FeatureInput, FeatureRow, FeatureSettingsState, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
+  FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
   feature_scroll, feature_row_top, sound_buttons, sound_editor_rect, sound_done_rect,
 )
 from openpilot.starpilot.ui.presentation import FontRole, Profile
@@ -500,6 +500,24 @@ class FeatureVisualTests(unittest.TestCase):
     owner.release(2000, FEATURE_ROW_TOP + 140, replace(state, sidebar_expanded=False))
     self.assertFalse(actions)
 
+  def test_header_taps_are_inert_except_collapsed_back(self):
+    row = FeatureRow("key", "Setting", "On")
+    for expanded in (True, False):
+      state = FeatureSettingsState(sidebar_expanded=expanded, parent_title="Driving Controls", subtitle="Help", rows=(row,))
+      left = 520 if expanded else 20
+      actions = []
+      controller = FeatureInput(actions.append)
+      for x in (left + 208, 1000, 2140):
+        for y in (12, 50, 100):
+          controller.press(x, y, state)
+          controller.release(x, y, state)
+          self.assertFalse(actions)
+      controller.press(left + 60, 50, state)
+      controller.release(left + 60, 50, state)
+      self.assertEqual(actions, [] if expanded else [FeatureUiAction("back")])
+      self.assertEqual(FeatureInput.target(1000, 120, state), FeatureUiAction("details"))
+      self.assertEqual(FeatureInput.target(1000, feature_row_top(state) + 77, state), FeatureUiAction("details", row))
+
   def test_collapsed_header_and_content_share_the_expanded_keyline(self):
     self.drawing()
     fonts = fake_fonts()
@@ -520,9 +538,9 @@ class FeatureVisualTests(unittest.TestCase):
       self.assertTrue(all(call.args[1:3] == (FontRole.MEDIUM, 44) for call in header))
       self.assertEqual(len({call.args[4] for call in header}), 1)
       self.assertNotEqual(FeatureInput.target(left + 60, 120, state).kind, "back")
-      self.assertEqual(FeatureInput.target(left + 60, 76, state).kind, "details" if expanded else "back")
-      self.assertEqual(FeatureInput.target(left + 207, 76, state).kind, "details" if expanded else "back")
-      self.assertEqual(FeatureInput.target(left + 208, 76, state).kind, "details")
+      for x in (left + 60, left + 207):
+        self.assertEqual(FeatureInput.target(x, 76, state), None if expanded else FeatureUiAction("back"))
+      self.assertIsNone(FeatureInput.target(left + 208, 76, state))
       actions = []
       owner = FeatureInput(actions.append)
       owner.press(left + 60, 76, state)

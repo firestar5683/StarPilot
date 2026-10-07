@@ -219,7 +219,7 @@ class FeatureInput:
     if not left <= x <= 2140:
       return None
     if 12 <= y <= 12 + FEATURE_HEADER_HEIGHT:
-      return FeatureUiAction("back" if not state.sidebar_expanded and x < left + FEATURE_BACK_WIDTH else "details")
+      return FeatureUiAction("back") if not state.sidebar_expanded and x < left + FEATURE_BACK_WIDTH else None
     if 12 + FEATURE_HEADER_HEIGHT < y < row_top:
       return FeatureUiAction("details") if state.subtitle else None
     sound_editor = state.page == "sounds" and len(state.rows) == 1

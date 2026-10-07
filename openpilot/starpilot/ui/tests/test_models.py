@@ -57,7 +57,7 @@ class TestModelPage(unittest.TestCase):
     self.assertEqual(page.rows[2].value, "Small")
     self.assertTrue(all(not row.available and not row.page for row in page.rows))
     self.assertIsNone(FeatureInput.target(1980, 300, page))
-    self.assertEqual(FeatureInput.target(600, 60, page).kind, "details")
+    self.assertIsNone(FeatureInput.target(600, 60, page))
     self.assertEqual(FeatureInput.target(100, 60, replace(page, sidebar_expanded=False)).kind, "back")
 
   def test_missing_receipt_does_not_look_active(self):
