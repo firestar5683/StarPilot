@@ -709,3 +709,46 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TruckTuningFeatureTests(unittest.TestCase):
+  setUp = FeatureSettingsOwnerTests.setUp
+  _authority = FeatureSettingsOwnerTests._authority
+  _row = FeatureSettingsOwnerTests._row
+
+  def test_truck_saved_choice_exact_owner_and_stale_request(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    row = self._row('vehicle', 'TruckTuning')
+    self.assertEqual((row.value, row.default_value), ('Off', 'Off'))
+    request = required_change(row)
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(Path(self.params.get_param_path('TruckTuning')).read_bytes(), b'1')
+    self.assertFalse(self.owner.apply(request))
+    stale = required_change(self._row('vehicle', 'TruckTuning'))
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, release=True)
+    self.assertFalse(self.owner.apply(stale))
+    self.assertFalse(any(row.key == 'TruckTuning' for row in self.owner.snapshot(
+      'vehicle', parked=True, system_long=False, lateral_context=True, metric=False).rows))
+    self.assertEqual(Path(self.params.get_param_path('TruckTuning')).read_bytes(), b'1')
+
+  def test_truck_invalid_choice_repairs_only_off_and_respects_authority(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, camera=False)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    path = Path(self.params.get_param_path('TruckTuning'))
+    path.write_bytes(b'1\n')
+    row = self._row('vehicle', 'TruckTuning')
+    request = row_default(row)
+    self.assertIsNotNone(request)
+    self.assertFalse(self.owner.apply(replace(request, value='On')))
+    self.allowed = False
+    self.assertFalse(self.owner.apply(request))
+    self.allowed = True
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(path.read_bytes(), b'0')

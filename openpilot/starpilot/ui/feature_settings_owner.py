@@ -54,7 +54,7 @@ from openpilot.starpilot.ui.wheel_feature import WheelFeature, PREFIX as WHEEL_P
 from openpilot.starpilot.longitudinal.output_max import KEY as OUTPUT_MAX_KEY
 from openpilot.starpilot.ui.output_max_feature import OutputMaximumFeature
 from openpilot.starpilot.ui.tesla_screen_feature import TeslaScreenFeature, KEYS as TESLA_SCREEN_KEYS
-from openpilot.starpilot.ui.gm_tune_feature import GmTuneFeature
+from openpilot.starpilot.ui.gm_tune_feature import GmTuneFeature, GmTruckFeature
 from openpilot.starpilot.car.gm.tune_preferences import KEY as GM_TUNE_KEY
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.curve_speed.preferences import (
@@ -143,6 +143,7 @@ class FeatureSettingsOwner:
     self.output_maximum = OutputMaximumFeature(self)
     self.tesla_screen = TeslaScreenFeature(self)
     self.gm_tune = GmTuneFeature(self)
+    self.gm_truck = GmTruckFeature(self)
     self.traffic_profiles = TrafficFeature(self)
     self.lane_changes = LaneChangeFeature(params, authority, vehicle_fingerprint, self.vehicle_params,
                                           configuration_longitudinal=self.configuration_longitudinal)
@@ -670,7 +671,8 @@ class FeatureSettingsOwner:
       if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
           self._auto_hold_capability() is not None or self._pedal_setup_capability() is not None or
           self._gm_stop_capability("VoltSNG") is not None or
-          self._gm_stop_capability("GMAutoHold") is not None or self.tesla_screen.capability() is not None or self.gm_tune.capability() is not None):
+          self._gm_stop_capability("GMAutoHold") is not None or self.tesla_screen.capability() is not None or
+          self.gm_tune.capability() is not None or self.gm_truck.capability() is not None):
         rows.append(FeatureRow("", "Vehicle Settings", "Configure features supported by your vehicle", page=FeaturePage.VEHICLE, available=True))
       rows.extend(FeatureRow("", name.title() + " Personality", "", page=name, available=True)
                   for name in (*PROFILE_NAMES, "traffic"))
@@ -685,6 +687,7 @@ class FeatureSettingsOwner:
       rows = [replace(row, available=row.available and self._readable("ToyotaAutoHold"), capability=capability)] if capability is not None else []
       rows.extend(self.tesla_screen.rows(parked))
       rows.extend(self.gm_tune.rows(parked))
+      rows.extend(self.gm_truck.rows(parked))
       pedal_capability = self._pedal_setup_capability()
       if pedal_capability is not None:
         from opendbc.car.gm.values import GMFlags
@@ -1125,6 +1128,8 @@ class FeatureSettingsOwner:
       return self.tesla_screen.apply(request)
     if key == GM_TUNE_KEY:
       return self.gm_tune.apply(request)
+    if key == "TruckTuning":
+      return self.gm_truck.apply(request)
     if key == "DisableOpenpilotLongitudinal":
       return self._apply_bolt_disable(request)
     if key in ("VoltSNG", "GMAutoHold", "VoltOnePedalMode"):

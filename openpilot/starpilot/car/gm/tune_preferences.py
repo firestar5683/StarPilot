@@ -46,3 +46,41 @@ class AccTunePreference:
       except (OSError, RuntimeError, TypeError, ValueError):
         self.enabled = False
     return self.enabled
+
+
+TRUCK_KEY = "TruckTuning"
+
+
+def read_truck_choice(params):
+  raw, readable = read_saved(params, TRUCK_KEY, 8)
+  valid = readable and raw in (None, b"0", b"1")
+  return bool(valid and raw == b"1"), raw, readable, valid
+
+
+class TruckTuningPreference:
+  def __init__(self, cp, params):
+    self.cp, self.params = cp, params
+    self.read_ns = 0
+    self.enabled = False
+
+  def update(self, now_ns):
+    from opendbc.car.gm.truck_longitudinal import truck_tuning_supported
+    if type(now_ns) is not int or now_ns <= 0 or not truck_tuning_supported(self.cp):
+      self.enabled = False
+      return False
+    if now_ns < self.read_ns:
+      self.read_ns = 0
+      self.enabled = False
+      return False
+    if self.read_ns == 0 or now_ns - self.read_ns >= 500_000_000:
+      self.read_ns = now_ns
+      try:
+        enabled, _, _, valid = read_truck_choice(self.params)
+        master = read_saved(self.params, "OpenpilotEnabledToggle", 8) == (b"1", True)
+        safe, safe_readable = read_saved(self.params, "SafeMode", 8)
+        disabled, disable_readable = read_saved(self.params, "DisableOpenpilotLongitudinal", 8)
+        self.enabled = bool(enabled and valid and master and safe_readable and safe in (None, b"0") and
+                            disable_readable and disabled in (None, b"0"))
+      except (OSError, RuntimeError, TypeError, ValueError):
+        self.enabled = False
+    return self.enabled

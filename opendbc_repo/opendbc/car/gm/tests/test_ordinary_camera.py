@@ -18,7 +18,7 @@ def params(identity, *, alpha=False, release=False, camera=True, be=True):
   return CarInterface.get_params(identity, fp, [], alpha, release, False)
 
 
-def feed(ci, packer, now, *, cruise=True, gas=False, brake=False, fcw=0, counter=0, camera=True):
+def feed(ci, packer, now, *, cruise=True, gas=False, brake=False, fcw=0, counter=0, camera=True, speed=None):
   from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
   frames = pt_frames(packer, gas=gas, counter=counter, acc_cruise=2 if cruise else 0)
   frames = [frame for frame in frames if frame[0] != 0xC9]
@@ -30,6 +30,10 @@ def feed(ci, packer, now, *, cruise=True, gas=False, brake=False, fcw=0, counter
                                  {'ACCCruiseState': 2, 'ACCSpeedSetpoint': 80, 'FCWAlert': fcw})]
   if not camera:
     frames = [frame for frame in frames if frame[2] != 2]
+  if speed is not None:
+    frames = [frame for frame in frames if frame[0] not in (0x348, 0x34A)]
+    frames += [packer.make_can_msg('EBCMWheelSpdFront', 0, {'FLWheelSpd': speed, 'FRWheelSpd': speed}),
+               packer.make_can_msg('EBCMWheelSpdRear', 0, {'RLWheelSpd': speed, 'RRWheelSpd': speed})]
   return ci.update([(now, frames)]), frames
 
 
@@ -222,6 +226,7 @@ class TestOrdinaryCamera(unittest.TestCase):
     real_parser = carstate.CANParser
     for be in (False, True):
       recipes = {}
+
       def make_parser(dbc, messages, bus, recipes=recipes):
         recipes[bus] = list(messages)
         return real_parser(dbc, messages, bus)
@@ -231,3 +236,133 @@ class TestOrdinaryCamera(unittest.TestCase):
       self.assertEqual([frequency for name, frequency in recipes[0] if name == 'EBCMBrakePedalPosition'],
                        [10 if be else 100])
       self.assertEqual(any(name == 'ECMAcceleratorPos' for name, _ in recipes[0]), be)
+
+
+class TestTruckTuning(unittest.TestCase):
+  def test_exact_final_owner_and_pedal_stock_release_denials(self):
+    from opendbc.car.gm.values import CAR
+    from opendbc.car.gm.truck_longitudinal import truck_tuning_supported
+    from opendbc.car.gm.tests.test_silverado_cc_pedal import params as pedal_params
+    for camera, word in ((True, 0xC170), (False, 0xC173)):
+      cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, camera=camera)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+      self.assertTrue(truck_tuning_supported(cp))
+      self.assertIsNotNone(CarInterface(cp).CC.truck_tuning)
+    for cp in (params(CAR.CHEVROLET_SILVERADO), params(CAR.CHEVROLET_SILVERADO, alpha=True, release=True),
+               params(CAR.CHEVROLET_EQUINOX, alpha=True), pedal_params(), pedal_params(disabled=True)):
+      self.assertFalse(truck_tuning_supported(cp))
+      self.assertIsNone(CarInterface(cp).CC.truck_tuning)
+
+  def test_original_pitch_positive_follow_and_immediate_brake_boundaries(self):
+    from opendbc.car.gm.truck_longitudinal import (shape_truck_positive_accel, smooth_truck_follow_accel,
+                                                 shape_truck_pitch_accel, shape_truck_friction_brake)
+    self.assertAlmostEqual(shape_truck_pitch_accel(-.3, 30., True), -.0825)
+    self.assertAlmostEqual(shape_truck_pitch_accel(.3, 30., True), .0825)
+    self.assertEqual(shape_truck_pitch_accel(-.3, 30., False), -.3)
+    self.assertLess(shape_truck_positive_accel(.12, 26., True), .12)
+    self.assertGreater(shape_truck_positive_accel(.28, 26., True, True, 6.),
+                       shape_truck_positive_accel(.28, 26., True))
+    for accel, speed, enabled in ((-.3, 26., True), (1., 26., True), (.12, 6., True), (.12, 26., False)):
+      self.assertEqual(shape_truck_positive_accel(accel, speed, enabled), accel)
+    self.assertAlmostEqual(smooth_truck_follow_accel(.3, 0., 26., True, True, False), .06)
+    self.assertEqual(smooth_truck_follow_accel(-.85, .3, 26., True, True, False), -.85)
+    self.assertEqual(shape_truck_friction_brake(39, -.3, False, False), (0, False))
+    self.assertEqual(shape_truck_friction_brake(40, -.3, False, False), (40, True))
+    self.assertEqual(shape_truck_friction_brake(9, -.3, False, True), (9, True))
+    self.assertEqual(shape_truck_friction_brake(8, -.3, False, True), (0, False))
+    self.assertEqual(shape_truck_friction_brake(5, -.85, False, False), (5, True))
+    self.assertEqual(shape_truck_friction_brake(5, -.2, True, False), (5, True))
+
+  def test_absent_and_off_keep_default_demands_and_braking(self):
+    from opendbc.car.gm.values import CAR
+    from opendbc.car.gm.ordinary import demands
+    from opendbc.car.gm.truck_longitudinal import TruckTuning
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    off = TruckTuning()
+    for speed in (0., 12., 26., 35.):
+      for accel in (-4., -.85, -.3, .12, .35, 1.):
+        for orientation in (None, (0., -.03, 0.), (0., .03, 0.)):
+          arguments = dict(min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.)
+          baseline = demands(accel, speed, orientation, cp, **arguments)
+          self.assertEqual(demands(accel, speed, orientation, cp, truck_tuning=off,
+                                   lead_visible=True, set_speed_error=6., **arguments), baseline)
+    enabled = TruckTuning()
+    enabled.enabled = True
+    arguments = dict(min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.)
+    baseline = demands(.12, 26., None, cp, **arguments)
+    selected = demands(.12, 26., None, cp, truck_tuning=enabled, **arguments)
+    self.assertLess(selected[0], baseline[0])
+    self.assertEqual(selected[1], 0)
+    baseline = demands(-1., 26., None, cp, **arguments)
+    self.assertEqual(demands(-1., 26., None, cp, truck_tuning=enabled, **arguments), baseline)
+
+  def test_saved_owner_default_off_live_off_and_invalid_choice(self):
+    from unittest.mock import patch
+    from openpilot.starpilot.car.gm.tune_preferences import TruckTuningPreference
+    from openpilot.starpilot.controller_extensions import configure_controller
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    ci = CarInterface(cp)
+    saved = {'OpenpilotEnabledToggle': b'1'}
+
+    def read(_, key, limit):
+      return saved.get(key), True
+    with patch('openpilot.starpilot.car.gm.tune_preferences.read_saved', side_effect=read):
+      configure_controller(ci, object())
+      self.assertIsInstance(ci.CC.truck_tuning_input, TruckTuningPreference)
+      before = cp.to_bytes()
+      owner = ci.CC.truck_tuning_input
+      self.assertFalse(owner.update(1_000_000_000))
+      saved['TruckTuning'] = b'1'
+      self.assertTrue(owner.update(1_500_000_000))
+      saved['TruckTuning'] = b'0'
+      self.assertFalse(owner.update(2_000_000_000))
+      saved['TruckTuning'] = b'1\n'
+      self.assertFalse(owner.update(2_500_000_000))
+      saved['TruckTuning'] = b'1'
+      saved['SafeMode'] = b'1'
+      self.assertFalse(owner.update(3_000_000_000))
+      saved['SafeMode'] = b'0'
+      saved['DisableOpenpilotLongitudinal'] = b'1'
+      self.assertFalse(owner.update(3_500_000_000))
+      self.assertFalse(owner.update(3_000_000_000))
+      self.assertEqual(cp.to_bytes(), before)
+
+  def test_actual_ci_selected_shaping_retains_packed_owner_and_long_withdrawal(self):
+    from unittest.mock import patch
+    from openpilot.starpilot.controller_extensions import configure_controller
+    from opendbc.car.gm.values import CAR
+    outputs = []
+    for selected in (False, True):
+      ci = CarInterface(params(CAR.CHEVROLET_SILVERADO, alpha=True))
+      packer = CANPacker(DBC[CAR.CHEVROLET_SILVERADO][Bus.pt])
+
+      def read(_, key, limit, selected=selected):
+        return ({'OpenpilotEnabledToggle': b'1', 'TruckTuning': b'1' if selected else b'0'}.get(key), True)
+      with patch('openpilot.starpilot.car.gm.tune_preferences.read_saved', side_effect=read):
+        configure_controller(ci, object())
+        for tick in range(60):
+          now = 1_000_000_000 + tick * 10_000_000
+          out, _ = feed(ci, packer, now, counter=tick % 4, speed=93.6)
+        self.assertTrue(out.canValid)
+        self.assertGreater(out.vEgo, 25.)
+        cc = structs.CarControl(enabled=True, longActive=True)
+        cc.actuators.accel = .12
+        cc.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
+        ci.CC.frame = 240
+        _, messages = ci.apply(cc.as_reader(), now + 2)
+        self.assertEqual([m[0] for m in messages if m[0] in (0x2CB, 0x315)], [0x2CB, 0x315])
+        self.assertTrue(all(m[2] == 0 for m in messages if m[0] in (0x2CB, 0x315)))
+        outputs.append((ci.CC.apply_gas, ci.CC.apply_brake))
+        cc.longActive = False
+        ci.CC.frame = 244
+        ci.apply(cc.as_reader(), now + 40_000_000)
+        self.assertEqual((ci.CC.apply_gas, ci.CC.apply_brake), (-500, 0))
+        self.assertEqual(ci.CC.truck_tuning.follow_accel, 0.)
+        cc.longActive = True
+        cc.actuators.accel = -1.
+        ci.CC.frame = 248
+        ci.apply(cc.as_reader(), now + 80_000_000)
+        self.assertGreater(ci.CC.apply_brake, 0)
+    self.assertLess(outputs[1][0], outputs[0][0])
+    self.assertEqual(outputs[0][1], outputs[1][1])
