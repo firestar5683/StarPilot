@@ -849,10 +849,10 @@ def is_bolt_pedal_profile(cp, *, stock_only=False):
           cp.safetyConfigs[0].safetyParam == words[cp.carFingerprint])
 
 
-def is_bolt_present_no_acc_pedal_profile(cp):
+def is_bolt_present_no_acc_pedal_profile(cp, *, stock_only=False):
   """Exact camera-present conventional Bolt interceptor cancellation owner."""
-  return (cp.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_profile(cp) and
-          not is_bolt_pedal_removed_profile(cp))
+  return (cp.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_profile(cp, stock_only=stock_only) and
+          not is_bolt_pedal_removed_profile(cp, stock_only=stock_only))
 
 
 def is_bolt_pedal_stock_denied(cp):

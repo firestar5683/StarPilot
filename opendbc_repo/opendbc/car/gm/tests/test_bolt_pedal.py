@@ -827,6 +827,56 @@ class TestBoltPedalStartupParser(unittest.TestCase):
             _, frames = controller.update(command.as_reader(), ci.CS, now)
             self.assertFalse(any(frame[0] == 0x1E1 for frame in frames))
 
+  def test_present_no_acc_disabled_long_cancel_uses_delayed_pt_credit(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    from opendbc.car.gm.values import BOLT_PEDAL_STOCK_WORDS
+    from opendbc.safety.tests.libsafety import libsafety_py
+    for identity in NO_ACC_BOLT_CAR:
+      with self.subTest(identity=identity):
+        cp = params(identity, pedal=True, camera=True)
+        VehicleStartupPreferences(disable_bolt_long=True).prepare(cp)
+        self.assertFalse(cp.openpilotLongitudinalControl)
+        self.assertTrue(cp.pcmCruise)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, BOLT_PEDAL_STOCK_WORDS[identity])
+        self.assertTrue(is_bolt_present_no_acc_pedal_profile(cp, stock_only=True))
+        self.assertFalse(is_bolt_present_no_acc_pedal_profile(cp))
+        removed = params(identity, pedal=True, removed=True)
+        VehicleStartupPreferences(disable_bolt_long=True).prepare(removed)
+        self.assertFalse(is_bolt_present_no_acc_pedal_profile(removed, stock_only=True))
+        native = libsafety_py.libsafety
+        self.assertEqual(native.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
+        native.init_tests()
+        ci, state = self.stream(cp, native=native)
+        self.assertTrue(state.cruiseState.enabled)
+        self.assertEqual(ci.CS.conventional_cancel_credit.neutral_interval_ns, 100_000_000)
+        control = structs.CarControl()
+        seen = []
+        for tick in range(35):
+          now = 3_500_000_000 + tick * 10_000_000
+          self.present_tick(ci, native, now, 13 + tick, button=button_bytes(1, (3 + tick // 4) % 4), gear=6)
+          control.cruiseControl.cancel = tick >= 8
+          _, messages = ci.apply(control.as_reader(), now)
+          cancel = [message for message in messages if message[0] == 0x1E1]
+          self.assertFalse(any(message[0] == 0x3D1 for message in messages))
+          if tick < 18:
+            self.assertFalse(cancel)  # No proactive stock cancellation; preserve the ten-frame delay.
+          for address, raw, bus in cancel:
+            self.assertEqual(bus, 0)
+            self.assertEqual(raw, button_bytes(6, (ci.CS.conventional_cancel_credit.counter + 1) % 4))
+            packet = libsafety_py.make_CANPacket(address, bus, raw)
+            self.assertTrue(native.safety_tx_hook(packet))
+            self.assertFalse(native.safety_tx_hook(packet))
+            seen.append(tick)
+        self.assertTrue(seen)
+        self.assertEqual(seen[0], 18)
+        # A short gear sample cannot acquire strict raw authority through parser padding.
+        now += 10_000_000
+        self.present_tick(ci, native, now, 0, button=button_bytes(1, 0), gear=6, bad_length=0x1F5)
+        self.assertEqual(ci.CS.bolt_pedal_gear_ts_nanos, 0)
+        _, messages = ci.apply(control.as_reader(), now)
+        self.assertFalse(any(message[0] == 0x1E1 for message in messages))
+
   def test_identification_to_no_acc_pedal_parser(self):
     from opendbc.car.fingerprints import all_legacy_fingerprint_cars, eliminate_incompatible_cars
     from opendbc.car.gm.fingerprints import FINGERPRINTS
