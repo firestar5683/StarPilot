@@ -752,3 +752,76 @@ class TruckTuningFeatureTests(unittest.TestCase):
     self.allowed = True
     self.assertTrue(self.owner.apply(request))
     self.assertEqual(path.read_bytes(), b'0')
+
+
+class EvPresetFeatureTests(unittest.TestCase):
+  setUp = FeatureSettingsOwnerTests.setUp
+  _authority = FeatureSettingsOwnerTests._authority
+  _row = FeatureSettingsOwnerTests._row
+
+  def test_saved_ev_choice_is_atomic_and_stock_owner_cannot_change_it(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    row = self._row('vehicle', 'EVTuning')
+    self.assertEqual(row.value, 'Off')
+    self.assertIsNone(row.source)
+    request = required_change(row)
+    self.assertTrue(self.owner.apply(request))
+    self.assertTrue(self.params.get_bool('EVTuning'))
+    self.assertFalse(self.owner.apply(request))
+    stale = required_change(self._row('vehicle', 'EVTuning'))
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, release=True)
+    self.assertFalse(self.owner.apply(stale))
+    self.assertFalse(any(r.key == 'EVTuning' for r in self.owner.snapshot('vehicle', parked=True, system_long=False, lateral_context=True, metric=False).rows))
+    self.assertTrue(self.params.get_bool('EVTuning'))
+
+  def test_invalid_ev_choice_repairs_only_current_powertrain_default(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    path = Path(self.params.get_param_path('EVTuning'))
+    path.write_bytes(b'1\n')
+    request = row_default(self._row('vehicle','EVTuning'))
+    self.assertIsNotNone(request)
+    self.assertFalse(self.owner.apply(replace(request,value='On')))
+    self.allowed = False
+    self.assertFalse(self.owner.apply(request))
+    self.allowed = True
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(path.read_bytes(),b'0')
+
+
+  def test_ev_default_row_follows_final_direct_powertrain_without_saving(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_BOLT_CC_2022_2023,pedal=True,camera=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    row = self._row('vehicle','EVTuning')
+    self.assertEqual((row.value,row.default_value),('On','On'))
+    self.assertIsNone(row.source)
+    self.assertFalse(Path(self.params.get_param_path('EVTuning')).exists())
+
+
+  def test_current_vehicle_loss_during_ev_commit_denies_without_saving(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    request = required_change(self._row('vehicle', 'EVTuning'))
+    reads = []
+
+    def current_vehicle():
+      reads.append(len(reads))
+      return cp if len(reads) == 1 else None
+
+    self.owner.vehicle_params = current_vehicle
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(len(reads), 2)
+    self.assertFalse(Path(self.params.get_param_path('EVTuning')).exists())

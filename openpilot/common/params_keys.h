@@ -142,6 +142,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LongPitch", {PERSISTENT, BOOL, "1"}},
     {"GMLongitudinalTune", {PERSISTENT, INT, "0"}},
     {"TruckTuning", {PERSISTENT, BOOL, "0"}},
+    {"EVTuning", {PERSISTENT, BOOL}},
     {"LongitudinalMaxOutputAcceleration", {PERSISTENT, FLOAT, "4.0"}},
     {"TuningPreparationState", {PERSISTENT, JSON, ""}},
     {"PauseLateralSpeed", {PERSISTENT, FLOAT, "0.0"}},

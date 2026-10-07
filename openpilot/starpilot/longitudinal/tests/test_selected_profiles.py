@@ -281,3 +281,120 @@ class SelectedProfilesTests(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+class GlobalPowertrainPresetTests(unittest.TestCase):
+  setUp = SelectedProfilesTests.setUp
+  document = SelectedProfilesTests.document
+
+  def test_inherited_ev_override_preserves_personality_custom_braking_and_traffic(self):
+    from openpilot.starpilot.longitudinal.profile_runtime import GlobalPowertrainPreset
+    document = self.document('sport', 'sport')
+    ev = GlobalPowertrainPreset(True, False)
+    base = resolve_selected_profiles(document, 1, 20., self.cp)
+    selected = resolve_selected_profiles(document, 1, 20., self.cp, global_powertrain=ev)
+    self.assertEqual(selected.acceleration_max, interpolate_category_curve('acceleration', 20., {'preset':'sport','curve':[]}, True, False))
+    self.assertNotEqual(selected.acceleration_max, base.acceleration_max)
+    self.assertEqual(selected.cruise_brake_magnitude, base.cruise_brake_magnitude)
+    for config in ({'preset':'sport','curve':[]}, {'preset':'custom','curve':[.4]*10}):
+      document['profiles']['standard']['acceleration'] = config
+      self.assertEqual(resolve_selected_profiles(document, 1, 20., self.cp, global_powertrain=ev),
+                       resolve_selected_profiles(document, 1, 20., self.cp))
+    self.assertEqual(resolve_selected_profiles(document, 1, 20., self.cp, traffic_mode=True, global_powertrain=ev),
+                     resolve_selected_profiles(document, 1, 20., self.cp, traffic_mode=True))
+    default = self.document('dom_default', 'dom_default')
+    fallback = resolve_selected_profiles(default, 1, 20., self.cp, global_powertrain=ev)
+    self.assertEqual(fallback.acceleration_max, interpolate_category_curve('acceleration',20.,{'preset':'standard','curve':[]},True,False))
+    self.assertIsNone(fallback.cruise_brake_magnitude)
+    self.assertIsNone(resolve_selected_profiles(default,1,20.,self.cp).acceleration_max)
+
+  def test_actual_saved_ev_choices_truck_priority_and_stock_denial(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR as GmCAR
+    from openpilot.starpilot.longitudinal.profile_runtime import read_global_powertrain_preset, GlobalPowertrainPreset
+    truck = params(GmCAR.CHEVROLET_SILVERADO, alpha=True)
+    before = truck.to_bytes()
+    self.assertIsNone(read_global_powertrain_preset(self.params, truck))
+    self.params.put_bool('EVTuning', True, block=True)
+    self.assertEqual(read_global_powertrain_preset(self.params, truck), GlobalPowertrainPreset(True, False))
+    self.params.put_bool('TruckTuning', True, block=True)
+    self.assertEqual(read_global_powertrain_preset(self.params, truck), GlobalPowertrainPreset(False, True))
+    self.assertTrue(self.params.get_bool('EVTuning'))
+    self.params.put_bool('TruckTuning', False, block=True)
+    self.assertEqual(read_global_powertrain_preset(self.params, truck), GlobalPowertrainPreset(True, False))
+    self.params.put_bool('EVTuning', False, block=True)
+    self.assertEqual(read_global_powertrain_preset(self.params, truck), GlobalPowertrainPreset(False, False))
+    stock = params(GmCAR.CHEVROLET_SILVERADO, alpha=True, release=True)
+    self.assertIsNone(read_global_powertrain_preset(self.params, stock))
+    self.assertIsNone(read_global_powertrain_preset(self.params, self.cp))
+    self.assertEqual(truck.to_bytes(), before)
+    path = Path(self.params.get_param_path('EVTuning'))
+    path.write_bytes(b'1\n')
+    self.assertIsNone(read_global_powertrain_preset(self.params, truck))
+    self.assertEqual(path.read_bytes(), b'1\n')
+
+  def test_saved_host_refresh_changes_only_inherited_acceleration(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR as GmCAR
+    cp = params(GmCAR.CHEVROLET_SILVERADO, alpha=True)
+    doc = self.document('standard','sport')
+    self.params.put('LongitudinalPersonalityProfiles', doc, block=True)
+    original = Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).read_bytes()
+    host = ProfileHost(self.params)
+    absent = host.sample_selected(1_000_000_000, 1, 20., cp)
+    self.assertEqual(absent, resolve_selected_profiles(doc, 1, 20., cp))
+    self.params.put_bool('EVTuning', True, block=True)
+    self.assertEqual(host.sample_selected(1_500_000_000, 1, 20., cp), absent)
+    ev = host.sample_selected(2_000_000_000, 1, 20., cp)
+    self.assertEqual(ev.acceleration_max, interpolate_category_curve('acceleration',20.,{'preset':'standard','curve':[]},True,False))
+    self.assertEqual(ev.cruise_brake_magnitude, absent.cruise_brake_magnitude)
+    self.params.put_bool('EVTuning', False, block=True)
+    ice = host.sample_selected(3_000_000_000, 1, 20., cp)
+    self.assertEqual(ice.acceleration_max, interpolate_category_curve('acceleration',20.,{'preset':'standard','curve':[]},False,False))
+    self.assertEqual(Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).read_bytes(), original)
+    self.assertIsNone(host.sample_selected(-1, 1, 20., cp))
+
+
+  def test_ev_alone_inherited_standard_gate_requires_valid_document_and_final_long_owner(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR as GmCAR
+    from openpilot.starpilot.feature_runtime import enabled
+    from openpilot.starpilot.longitudinal.profile_runtime import read_global_powertrain_preset
+    cp = params(GmCAR.CHEVROLET_SILVERADO, alpha=True)
+    stock = params(GmCAR.CHEVROLET_SILVERADO, alpha=True, release=True)
+    doc = self.document('dom_default','dom_default')
+    self.params.put('LongitudinalPersonalityProfiles',doc,block=True)
+    self.assertFalse(enabled(self.params,cp,'profile',{}))
+    self.params.put_bool('EVTuning',False,block=True)
+    self.assertTrue(enabled(self.params,cp,'profile',{}))
+    selected = ProfileHost(self.params).sample_selected(1_000_000_000,1,20.,cp)
+    self.assertEqual(selected.acceleration_max,interpolate_category_curve('acceleration',20.,{'preset':'standard','curve':[]},False,False))
+    self.assertIsNone(selected.cruise_brake_magnitude)
+    self.assertFalse(enabled(self.params,stock,'profile',{}))
+    self.assertFalse(enabled(self.params,self.cp,'profile',{}))
+    Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).write_bytes(b'not-json')
+    self.assertFalse(enabled(self.params,cp,'profile',{}))
+    self.assertIsNone(ProfileHost(self.params).sample_selected(2_000_000_000,1,20.,cp))
+    self.params.remove('EVTuning')
+    self.params.put_bool('TruckTuning',True,block=True)
+    other = params(GmCAR.CHEVROLET_EQUINOX,alpha=True)
+    self.assertIsNone(read_global_powertrain_preset(self.params,other))
+
+
+  def test_absent_ev_uses_final_direct_powertrain_without_boot_write(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params
+    from opendbc.car.gm.values import CAR as GmCAR
+    from opendbc.car.structs import CarParams
+    from openpilot.starpilot.longitudinal.profile_runtime import read_global_powertrain_preset, GlobalPowertrainPreset
+    cp = params(GmCAR.CHEVROLET_BOLT_CC_2022_2023,pedal=True,camera=True)
+    self.assertEqual(cp.transmissionType,CarParams.TransmissionType.direct)
+    self.assertIsNone(read_global_powertrain_preset(self.params,cp))
+    self.assertIsNone(self.params.get('EVTuning'))
+    doc = self.document('sport','eco')
+    self.assertEqual(resolve_selected_profiles(doc,1,20.,cp).acceleration_max,
+                     interpolate_category_curve('acceleration',20.,{'preset':'sport','curve':[]},True,False))
+    self.params.put_bool('TruckTuning',False,block=True)
+    self.assertIsNone(read_global_powertrain_preset(self.params,cp))
+    self.assertIsNone(self.params.get('EVTuning'))
+    self.params.put_bool('EVTuning',False,block=True)
+    self.assertEqual(read_global_powertrain_preset(self.params,cp),GlobalPowertrainPreset(False,False))
