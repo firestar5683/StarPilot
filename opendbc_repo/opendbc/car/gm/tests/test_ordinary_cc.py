@@ -714,7 +714,7 @@ class TestMalibuHybridCc(unittest.TestCase):
     control.enabled = control.latActive = control.longActive = True
     control.actuators.torque, control.actuators.accel = .1, .5
     control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
-    positive_pedal = positive_steer = cancelled = recovered = False
+    positive_pedal = positive_steer = cancelled = recovered = status_recovered = False
     echo = []
     for tick in range(160):
       now = 1_000_000_000 + tick * 10_000_000
@@ -732,7 +732,12 @@ class TestMalibuHybridCc(unittest.TestCase):
       state = ci.update([(now, frames)])
       _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
       statuses = [packet for packet in sent if packet[0] == 0x3D1]
-      self.assertEqual(bool(statuses), tick % 4 == 0)
+      if 60 <= tick < 96 or tick >= 132:
+        self.assertEqual(bool(statuses), tick % 4 == 0)
+      if 96 <= tick < 132:
+        self.assertFalse(statuses)
+      if tick >= 132:
+        status_recovered |= bool(statuses)
       self.assertTrue(all(packet[2] == 0 and packet[1][4] == 0 for packet in statuses))
       echo = [(address, data, 128) for address, data, bus in sent if address == 0x180 and bus == 0]
       pedal = any(address == 0x200 and data[4] & 0x80 for address, data, _ in sent)
@@ -755,3 +760,74 @@ class TestMalibuHybridCc(unittest.TestCase):
     self.assertTrue(positive_steer)
     self.assertTrue(cancelled)
     self.assertTrue(recovered)
+    self.assertTrue(status_recovered)
+
+  def test_real_status_requires_raw_driver_and_camera_sources(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.gmcan import pedal_crc
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    for fault in ('brake', 'accelerator', 'main_expiry', 'camera_steer', 'camera_aeb'):
+      with self.subTest(fault=fault):
+        removed = not fault.startswith('camera_')
+        cp = malibu_hybrid_params(pedal=True, removed=removed)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE803 if removed else 0xE802)
+        ci = CarInterface(cp)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        control = structs.CarControl.new_message()
+        # Status production is independent of the requested control axes.
+        healthy = recovered = False
+        for tick in range(240):
+          now = 1_000_000_000 + tick * 10_000_000
+          blocked = 80 <= tick < (191 if not removed else 121 if fault == 'main_expiry' else 100)
+          frames = [frame for frame in pt_frames(packer) if frame[0] not in (0x1E1, 0xC9, 0x1C4, 0x1F5)]
+          frames += [packer.make_can_msg('ECMEngineStatus', 0, {
+                       'CruiseMainOn': 1, 'BrakePressed': int(blocked and fault == 'brake')}),
+                     packer.make_can_msg('AcceleratorPedal2', 0, {
+                       'AcceleratorPedal2': int(blocked and fault == 'accelerator')}),
+                     packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 7, 'ManualMode': 1}),
+                     packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                     (0x1E1, bytes.fromhex('000000010015ee' if tick % 2 else '00000001001fcc'), 0)]
+          sensor = bytearray((612).to_bytes(2, 'big') + (285).to_bytes(2, 'big') + bytes((tick % 16, 0)))
+          sensor[-1] = pedal_crc(sensor)
+          frames.append((0x201, bytes(sensor), 0))
+          if not removed:
+            if not (blocked and fault == 'camera_steer'):
+              frames.append(packer.make_can_msg('ASCMLKASteeringCmd', 2, {'RollingCounter': tick % 4}))
+            if not (blocked and fault == 'camera_aeb'):
+              frames.append(packer.make_can_msg('AEBCmd', 2, {}))
+          if blocked and fault == 'main_expiry':
+            frames = [frame for frame in frames if frame[0] != 0xC9]
+          state = ci.update([(now, frames)])
+          _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
+          statuses = [packet for packet in sent if packet[0] == 0x3D1]
+          self.assertTrue(all(bus == 0 and raw == bytes((1, 0, 0, 0, 0, 0, 0, 0))
+                              for _, raw, bus in statuses))
+          if tick >= 60:
+            self.assertEqual(state.gearShifter, structs.CarState.GearShifter.manumatic)
+            self.assertTrue(ci.CS.pedal_sensor_healthy)
+            main_ns = 1_790_000_000 if blocked and fault == 'main_expiry' else now
+            self.assertEqual(ci.CS.hybrid_status.main_ns, main_ns)
+            self.assertTrue(ci.CS.hybrid_status.main_on)
+            self.assertTrue(all(stamp == (main_ns if index == 4 else now)
+                                for index, (stamp, _) in enumerate(ci.CS.hybrid_sources)))
+          if 60 <= tick < 80 or tick >= 210:
+            self.assertTrue(state.canValid)
+            self.assertEqual(bool(statuses), tick % 4 == 0)
+            healthy |= tick < 80 and bool(statuses)
+            recovered |= tick >= 210 and bool(statuses)
+          if removed and blocked and (fault != 'main_expiry' or tick >= 110):
+            if fault == 'accelerator':
+              self.assertFalse(state.gasPressed)  # Healthy pedal data replaces the host gas state.
+              self.assertTrue(ci.CS.hybrid_status.accelerator_pressed)
+            if fault == 'main_expiry':
+              self.assertGreater(now - ci.CS.hybrid_status.main_ns, 300_000_000)
+            self.assertFalse(statuses)
+          if not removed and 180 <= tick < 191:
+            camera_ns = ci.CS.hybrid_status.camera_ns[0 if fault == 'camera_steer' else 1]
+            self.assertGreater(now - camera_ns, 1_000_000_000)
+            self.assertFalse(statuses)
+        self.assertTrue(healthy)
+        self.assertTrue(recovered)

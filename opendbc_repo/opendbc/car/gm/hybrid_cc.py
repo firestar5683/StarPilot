@@ -119,6 +119,16 @@ class HybridPhysical:
   button_credit_ns: int
 
 
+@dataclass(frozen=True)
+class HybridStatusPhysical:
+  main_ns: int
+  main_on: bool
+  brake_pressed: bool
+  accelerator_pressed: bool
+  sensor_gas: bool
+  camera_ns: tuple[int, ...]
+
+
 class HybridButtons:
   def __init__(self):
     self.slot = PhysicalSlot()
@@ -196,6 +206,19 @@ def lateral_ready(cs, now_ns):
 def rearm_ready(cs, now_ns):
   return (lateral_ready(cs, now_ns) and not cs.out.brakePressed and
           not cs.out.gasPressed and not cs.out.regenBraking)
+
+
+def status_ready(cs, now_ns):
+  profile = cs.hybrid_profile
+  physical = cs.hybrid_status
+  return bool(profile is not None and profile.pedal and profile.longitudinal and
+              physical is not None and rearm_ready(cs, now_ns) and
+              0 < physical.main_ns <= now_ns <= physical.main_ns + 300_000_000 and
+              physical.main_on and not physical.brake_pressed and
+              not physical.accelerator_pressed and not physical.sensor_gas and
+              len(physical.camera_ns) == (0 if profile.removed else 2) and
+              all(0 < stamp <= now_ns <= stamp + 1_000_000_000 for stamp in physical.camera_ns))
+
 
 class HybridPedalCommand:
   def __init__(self, cp):

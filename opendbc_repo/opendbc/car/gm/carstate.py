@@ -10,7 +10,7 @@ from opendbc.car.interfaces import CarStateBase
 from opendbc.car.gm.gmcan import pedal_crc
 from opendbc.car.gm.cc_longitudinal import VoltCcPhysical
 from opendbc.car.gm.ordinary_cc import PhysicalObservation
-from opendbc.car.gm.hybrid_cc import HybridButtons
+from opendbc.car.gm.hybrid_cc import HybridButtons, HybridStatusPhysical
 from opendbc.car.gm.values import malibu_hybrid_profile
 from opendbc.car.gm.conventional_pedal import CancelCredit
 from opendbc.car.gm.values import (DBC, AccState, CruiseButtons, STEER_THRESHOLD, SDGM_CAR, ALT_ACCS,
@@ -40,6 +40,7 @@ class CarState(CarStateBase):
     self.hybrid_profile = malibu_hybrid_profile(CP)
     self.hybrid_buttons = HybridButtons()
     self.hybrid_sources = ()
+    self.hybrid_status = None
     self.gm_auto_hold_config = auto_hold_config_for(CP)
     self.camera_pedal_profile = camera_acc_pedal_profile(CP)
     self.camera_pedal_sources = ()
@@ -446,6 +447,18 @@ class CarState(CarStateBase):
       # The physical pedal reports independent 12-bit ADC channels.
       first = int.from_bytes(sensor_bytes[:2], "big")
       second = int.from_bytes(sensor_bytes[2:4], "big")
+      if self.hybrid_profile is not None and self.hybrid_profile.pedal and self.hybrid_profile.longitudinal:
+        camera_ns = (() if self.hybrid_profile.removed else
+                     (cam_cp.ts_nanos["ASCMLKASteeringCmd"]["RollingCounter"],
+                      cam_cp.ts_nanos["AEBCmd"]["AEBCmdActive"]))
+        self.hybrid_status = HybridStatusPhysical(
+          main_ns=pt_cp.ts_nanos["ECMEngineStatus"]["CruiseMainOn"],
+          main_on=bool(pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"]),
+          brake_pressed=bool(pt_cp.vl["ECMEngineStatus"]["BrakePressed"]),
+          accelerator_pressed=bool(pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"]),
+          sensor_gas=125677 * first + 251976 * second > 198510000,
+          camera_ns=camera_ns,
+        )
       tracks_valid = 0 <= first <= 4095 and 0 <= second <= 4095
       checksum_valid = int(sensor["CHECKSUM_PEDAL"]) == pedal_crc(sensor_bytes)
       if new_sample:

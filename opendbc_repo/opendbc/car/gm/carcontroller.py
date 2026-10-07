@@ -31,7 +31,8 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
                                    CC_GATEWAY_STOCK_CAR, uses_camera_stock_controls, CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarControllerBase
 
-from opendbc.car.gm.hybrid_cc import HybridPedalCommand, rearm_ready as hybrid_rearm_ready, lateral_ready as hybrid_lateral_ready
+from opendbc.car.gm.hybrid_cc import (HybridPedalCommand, rearm_ready as hybrid_rearm_ready,
+                                     lateral_ready as hybrid_lateral_ready, status_ready as hybrid_status_ready)
 from opendbc.car.gm.values import malibu_hybrid_profile
 from opendbc.car.gm.bolt_cc import BoltCcOwner, BoltCcProfile, auxiliary_messages
 from opendbc.car.gm.volt_cc_pedal import VoltCcPedalCommand
@@ -601,7 +602,8 @@ class CarController(CarControllerBase):
 
     status_bolt = self.CP.carFingerprint in NO_ACC_BOLT_CAR and (
       is_bolt_present_no_acc_pedal_profile(self.CP) or is_bolt_pedal_removed_profile(self.CP))
-    status_hybrid = self.hybrid_profile is not None and self.hybrid_profile.pedal and self.hybrid_profile.longitudinal
+    status_hybrid = (self.hybrid_profile is not None and self.hybrid_profile.pedal and self.hybrid_profile.longitudinal and
+                     hybrid_status_ready(CS, now_nanos))
     if (status_bolt or status_hybrid) and self.frame % 4 == 0:
       can_sends.append(gmcan.create_ecm_cruise_control_command(
         self.packer_pt, CanBus.POWERTRAIN, True, hud_v_cruise * CV.MS_TO_KPH))
