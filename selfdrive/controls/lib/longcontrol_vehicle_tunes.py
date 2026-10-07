@@ -69,10 +69,13 @@ HYUNDAI_SANTA_FE_FINAL_STOP_CAP_BP = [0.0, 0.2, 0.5, HYUNDAI_SANTA_FE_FINAL_STOP
 HYUNDAI_SANTA_FE_FINAL_STOP_CAP_V = [-0.25, -0.30, -0.50, -0.90]
 # Force Stop hands off to the stopping state ~5 m out at 9-11 mph, which freezes the brake
 # at its handoff level (-1.7..-2.4) to 0 mph. Release it over the last ~2 m/s like a driver
-# feathering the pedal. Costs ~0.5-0.75 m, repaid by IONIQ 6's longer force-stop handoff.
-HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED = 2.0
-HYUNDAI_IONIQ_6_FINAL_STOP_CAP_BP = [0.0, 0.3, 1.0, HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED]
-HYUNDAI_IONIQ_6_FINAL_STOP_CAP_V = [-0.40, -0.45, -1.00, -2.50]
+# feathering the pedal. The brakes lag the command by a ~0.6 s first-order response (fit on
+# route 00000b82), so the release must lead the stop: a cap starting at 2 m/s still landed
+# at -0.9..-1.0 m/s^2 when the wheels stopped. This curve lands ~-0.35. Costs ~1.1 m of
+# rollout, repaid by IONIQ 6's longer force-stop handoff.
+HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED = 3.5
+HYUNDAI_IONIQ_6_FINAL_STOP_CAP_BP = [0.0, 0.5, 1.5, 2.5, HYUNDAI_IONIQ_6_FINAL_STOP_MAX_SPEED]
+HYUNDAI_IONIQ_6_FINAL_STOP_CAP_V = [-0.30, -0.35, -0.70, -1.20, -2.50]
 HYUNDAI_IONIQ_6_FINAL_STOP_URGENCY_MARGIN = 0.45
 VOLKSWAGEN_TAOS_COMFORT_STOP_MAX_SPEED = 4.5
 VOLKSWAGEN_TAOS_COMFORT_STOP_MIN_DISTANCE = 5.0

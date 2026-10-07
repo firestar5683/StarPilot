@@ -137,9 +137,9 @@ TOYOTA_CAMRY_TSS2_FORCE_STOP_HANDOFF_M = 4.5
 # offset range exposed by the Force Stop setting.
 TOYOTA_CAMRY_TSS2_FORCE_STOP_DISTANCE_BIAS_M = 6.0
 DEFAULT_FORCE_STOP_HANDOFF_M = 6.0
-# Hands off 0.75 m earlier to repay the distance the IONIQ 6 final-stop brake release
-# (longcontrol_vehicle_tunes) adds over the last ~2 m/s, keeping the stop on the line.
-HYUNDAI_IONIQ_6_FORCE_STOP_HANDOFF_M = 6.75
+# Hands off 1.1 m earlier to repay the distance the IONIQ 6 final-stop brake release
+# (longcontrol_vehicle_tunes) adds over the last ~3 m/s, keeping the stop on the line.
+HYUNDAI_IONIQ_6_FORCE_STOP_HANDOFF_M = 7.1
 HYUNDAI_SANTA_FE_2022_FORCE_STOP_REANCHOR_SPEED_TOLERANCE = 0.25
 HYUNDAI_SANTA_FE_2022_FORCE_STOP_LOW_SPEED_HOLD = 2.5
 KIA_CARNIVAL_2025_STOP_SIGN_LOW_SPEED_HOLD = 0.75
