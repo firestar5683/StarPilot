@@ -33,6 +33,7 @@ QUICK_TARGETS = (
   'openpilot/starpilot/car/tesla/tests',
   'openpilot/starpilot/lateral/tests',
   'openpilot/starpilot/longitudinal/tests',
+  'openpilot/starpilot/speed_limits/tests/test_runtime_replay.py',
   'openpilot/starpilot/drive_state/tests',
   'openpilot/starpilot/models/tests',
   'openpilot/starpilot/software/tests/test_fast_update.py',
