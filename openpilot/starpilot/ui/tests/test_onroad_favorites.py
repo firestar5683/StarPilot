@@ -307,7 +307,7 @@ class TestOnroadFavorites(unittest.TestCase):
     bookmark, personality, experimental = Mock(return_value=True), Mock(return_value=True), Mock(return_value=True)
     native = NS(CP=NS(carFingerprint='car', flags=0, pcmCruise=True), has_longitudinal_control=True, started_frame=42, personality=1,
                 sm={"deviceState": NS(startedMonoTime=42)},
-                params=NS(get_bool=lambda key: key == 'ExperimentalModeConfirmed'))
+                params=NS(get_bool=lambda key: False))
     with patch.object(runtime_app, 'ui_state', native):
       actions = session.native_favorite_actions(bookmark, personality, experimental)
       assert actions[BOOKMARK].invoke()
@@ -444,7 +444,7 @@ class TestOnroadFavorites(unittest.TestCase):
     self.enterContext(patch.object(session, 'conditional_actions', NS(context=Mock(return_value=context), dispatch=Mock(return_value=True)), create=True))
     experimental = Mock(return_value=True)
     native = NS(CP=NS(carFingerprint='car', flags=0, pcmCruise=True), has_longitudinal_control=True, started_frame=42,
-                personality=1, sm={"deviceState": NS(startedMonoTime=42)}, params=NS(get_bool=lambda key: key == 'ExperimentalModeConfirmed'))
+                personality=1, sm={"deviceState": NS(startedMonoTime=42)}, params=NS(get_bool=lambda key: False))
     with patch.object(runtime_app, 'ui_state', native), patch.object(runtime_app, '_slc_action_publisher') as publisher:
       action = session.native_favorite_actions(Mock(), Mock(), experimental)[EXPERIMENTAL]
       assert action.available and action.invoke()
@@ -457,9 +457,9 @@ class TestOnroadFavorites(unittest.TestCase):
       session._favorite_authority.return_value = False
       assert not action.invoke()
       session._favorite_authority.return_value = True
-      native.params.get_bool = lambda key: key in ('SafeMode', 'ExperimentalModeConfirmed')
+      native.params.get_bool = lambda key: key == 'SafeMode'
       assert not action.invoke()
-      native.params.get_bool = lambda key: key == 'ExperimentalModeConfirmed'
+      native.params.get_bool = lambda key: False
       session._conditional_favorite_active.return_value = False
       assert not action.invoke()
       assert session.conditional_actions.dispatch.call_count == 1

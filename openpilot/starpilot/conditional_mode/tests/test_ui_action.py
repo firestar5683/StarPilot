@@ -48,7 +48,6 @@ class TestUiAction(unittest.TestCase):
     directory = tempfile.TemporaryDirectory()
     self.addCleanup(directory.cleanup)
     self.params = Params(directory.name)
-    self.params.put_bool('ExperimentalModeConfirmed', True, block=True)
     self.params.put('LKASButtonControl', 5, block=True)
     self.cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
     self.planner = LongitudinalPlanner(self.cp, init_v=15.0)
@@ -226,7 +225,7 @@ class TestUiAction(unittest.TestCase):
       setattr(changed.slcAction, field, value)
       self.assertIsNone(observation(changed, observed))
 
-  def test_release_checks_exact_settings_confirmation_and_changed_context(self):
+  def test_release_checks_exact_settings_and_changed_context(self):
     stamp = MONO + 50_000_000
     self.ack(stamp)
     context = self.ui.context(self.sm, self.cp, now_ns=stamp + 1000)
@@ -237,9 +236,11 @@ class TestUiAction(unittest.TestCase):
     self.params.put_bool('SafeMode', True, block=True)
     self.assertFalse(self.ui.dispatch(context, self.sm, self.cp, self.publisher, now_ns=stamp + 10_002_000))
     self.params.remove('SafeMode')
-    self.params.put_bool('ExperimentalModeConfirmed', False, block=True)
+    original = self.params.get('ConditionalModeConfig')
+    self.configure(choice=ModeChoice.STOCK)
     self.assertFalse(self.ui.dispatch(context, self.sm, self.cp, self.publisher, now_ns=stamp + 10_003_000))
-    self.params.put_bool('ExperimentalModeConfirmed', True, block=True)
+    self.params.put('ConditionalModeConfig', original, block=True)
+    self.choice = ModeChoice.CEM
     self.ack(stamp + 20_000_000, effective=True)
     self.assertFalse(self.ui.dispatch(context, self.sm, self.cp, self.publisher, now_ns=stamp + 20_001_000))
     self.assertEqual(self.publisher.events, [])

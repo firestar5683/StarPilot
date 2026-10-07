@@ -1,10 +1,7 @@
-from collections.abc import Callable
-
 from openpilot.cereal import log
 
 from openpilot.system.ui.widgets.scroller import NavScroller
-from openpilot.selfdrive.ui.mici.widgets.button import BigParamControl, BigMultiParamToggle, BigToggle, GreyBigButton
-from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationCircleButton
+from openpilot.selfdrive.ui.mici.widgets.button import BigParamControl, BigMultiParamToggle, BigToggle
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -13,29 +10,6 @@ from openpilot.starpilot.ui.slc_offset_feature import SlcOffsetOwner, native_par
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 
 
-class ExperimentalModeConfirmPage(NavScroller):
-  def __init__(self, on_confirm: Callable[[], None]):
-    super().__init__()
-
-    accept = BigConfirmationCircleButton("enable\nexperimental mode",
-                                         gui_app.texture("icons_mici/setup/driver_monitoring/dm_check.png", 64, 64),
-                                         lambda: self.dismiss(on_confirm))
-
-    self._scroller.add_widgets([
-      GreyBigButton("enabling\nexperimental mode", "scroll to continue",
-                    gui_app.texture("icons_mici/setup/warning.png", 64, 64)),
-      GreyBigButton("", "openpilot defaults to driving in chill mode."),
-      GreyBigButton("", "Experimental mode enables alpha-level features that aren't ready for chill mode."),
-      GreyBigButton("End-to-End Longitudinal Control"),
-      GreyBigButton("", "Let the driving model control the gas and brakes."),
-      GreyBigButton("", "openpilot will drive as it thinks a human would, including stopping for red lights and stop signs."),
-      GreyBigButton("", "The set speed will only act as an upper bound."),
-      GreyBigButton("", "This is an alpha quality feature; mistakes should be expected."),
-      GreyBigButton("New Driving Visualization"),
-      GreyBigButton("", "The path will change colors to communicate acceleration intent."),
-      GreyBigButton("", "Red for braking, green for acceleration, and gray for coasting."),
-      accept,
-    ])
 
 
 class TogglesLayoutMici(NavScroller):
@@ -50,8 +24,8 @@ class TogglesLayoutMici(NavScroller):
                                                                "Relaxed leaves more space.\n" +
                                                                "Use the steering wheel distance button on supported cars.")
     self._safe_mode_btn = BigParamControl("safe mode", "SafeMode", toggle_callback=restart_needed_callback)
-    self._experimental_btn = BigToggle("experimental mode", description_icon=gui_app.texture("icons_mici/experimental_mode.png", 64, 64),
-                                       initial_state=ui_state.params.get_bool("ExperimentalMode"), toggle_callback=self._on_experimental_mode,
+    self._experimental_btn = BigParamControl("experimental mode", "ExperimentalMode",
+                                       description_icon=gui_app.texture("icons_mici/experimental_mode.png", 64, 64),
                                        description="Let the driving model control gas and brakes.\n" +
                                                    "Includes stopping for red lights and stop signs.\n" +
                                                    "Set speed is a maximum, not a target.\n" +
@@ -164,19 +138,6 @@ class TogglesLayoutMici(NavScroller):
     ui_state.params.put_bool("RecordAudio", desired)
     ui_state.params.put_bool("OnroadCycleRequested", True)
 
-  def _on_experimental_mode(self, state: bool):
-    if state and not ui_state.params.get_bool("ExperimentalModeConfirmed"):
-      # Don't show enabled state until confirm
-      self._experimental_btn.set_checked(False)
-
-      def on_confirm():
-        ui_state.params.put_bool("ExperimentalModeConfirmed", True)
-        ui_state.params.put_bool("ExperimentalMode", True)
-        self._experimental_btn.set_checked(True)
-
-      gui_app.push_widget(ExperimentalModeConfirmPage(on_confirm))
-    else:
-      ui_state.params.put_bool("ExperimentalMode", state)
 
   def request_personality(self, index: int) -> bool:
     self._update_toggles()
@@ -186,8 +147,9 @@ class TogglesLayoutMici(NavScroller):
 
   def request_experimental(self) -> bool:
     self._update_toggles()
-    if (ui_state.CP is None or not ui_state.has_longitudinal_control or not self._experimental_btn.enabled or
-        not ui_state.params.get_bool("ExperimentalModeConfirmed")):
+    if ui_state.CP is None or not ui_state.has_longitudinal_control or not self._experimental_btn.enabled:
       return False
-    self._on_experimental_mode(not ui_state.sm["selfdriveState"].experimentalMode)
+    desired = not ui_state.sm["selfdriveState"].experimentalMode
+    ui_state.params.put_bool("ExperimentalMode", desired)
+    self._experimental_btn.set_checked(desired)
     return True

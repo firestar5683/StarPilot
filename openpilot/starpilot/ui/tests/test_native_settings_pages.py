@@ -310,19 +310,18 @@ class NativeSettingsPageTests(unittest.TestCase):
     personality.callback.assert_not_called()
     self.assertEqual(personality.selected_button, 1)
 
-  def test_toggles_saved_state_matches_display_after_changes_and_confirmations(self):
+  def test_toggles_saved_state_matches_display_after_changes(self):
     # Run the real controller methods with only device services isolated.
     source = Path('openpilot/selfdrive/ui/layouts/settings/toggles.py')
     layout = next(node for node in ast.parse(source.read_text()).body if isinstance(node, ast.ClassDef) and node.name == 'TogglesLayout')
-    methods = {'_update_toggles', '_update_state', '_toggle_callback', '_handle_experimental_mode_toggle',
+    methods = {'_update_toggles', '_update_state', '_toggle_callback',
                'request_toggle', 'request_personality', '_set_longitudinal_personality'}
     layout.bases = []
     layout.body = [node for node in layout.body if isinstance(node, ast.FunctionDef) and node.name in methods]
     ui = NS(CP=None, engaged=False, update_params=Mock(), sm=NS(updated={'selfdriveState': False}))
     app = NS(push_widget=Mock())
     namespace = ModuleType('toggles_controller_test')
-    namespace.__dict__.update(tr=lambda text: text, ui_state=ui, gui_app=app, DialogResult=DialogResult,
-                              ConfirmDialog=lambda *args, **kwargs: NS(callback=kwargs['callback']))
+    namespace.__dict__.update(tr=lambda text: text, ui_state=ui)
     exec(compile(ast.Module(body=[layout], type_ignores=[]), str(source), 'exec'), namespace.__dict__)
     owner = namespace.TogglesLayout()
     saved = {'IsLdwEnabled': False, 'LongitudinalPersonality': 1}
@@ -358,15 +357,12 @@ class NativeSettingsPageTests(unittest.TestCase):
     self.click(pane, 2000)
     self.assertFalse(saved['IsLdwEnabled'])
     self.assertEqual(pane.snapshot().rows[0].value, 'Off')
-    for result in (DialogResult.CANCEL, DialogResult.CONFIRM):
+    for desired in (True, False):
       self.click(pane, 2000, index=2)
-      self.assertFalse(saved.get('ExperimentalMode', False))
-      app.push_widget.call_args.args[0].callback(result)
       pane._update_state()
-      self.assertEqual(pane.snapshot().rows[2].value, 'On' if result == DialogResult.CONFIRM else 'Off')
-    self.click(pane, 2000, index=2)
-    self.assertFalse(saved['ExperimentalMode'])
-    self.assertEqual(pane.snapshot().rows[2].value, 'Off')
+      self.assertEqual(saved['ExperimentalMode'], desired)
+      self.assertEqual(pane.snapshot().rows[2].value, 'On' if desired else 'Off')
+    app.push_widget.assert_not_called()
 
   def network_panel(self):
     manager = Mock(spec=WifiManager, is_connection_saved=lambda ssid: ssid == "Saved", connected_ssid="Saved",

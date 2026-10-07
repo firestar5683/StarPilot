@@ -38,7 +38,7 @@ class ExpButton(Widget):
 
   def request_toggle(self) -> bool:
     self._update_state()
-    if self._is_toggle_allowed():
+    if ui_state.has_longitudinal_control:
       new_mode = not self._experimental_mode
       self._params.put_bool("ExperimentalMode", new_mode)
 
@@ -67,10 +67,3 @@ class ExpButton(Widget):
       self._hold_end_time = self._held_mode = None
 
     return self._experimental_mode
-
-  def _is_toggle_allowed(self):
-    if not self._params.get_bool("ExperimentalModeConfirmed"):
-      return False
-
-    # Mirror exp mode toggle using persistent car params
-    return ui_state.has_longitudinal_control

@@ -315,10 +315,9 @@ class StarShellSession:
       return bool(self._favorite_authority() and ui_state.CP is not None and ui_state.has_longitudinal_control and
                   not ui_state.params.get_bool("SafeMode") and callback())
 
-    confirmed = ui_state.params.get_bool("ExperimentalModeConfirmed")
     context = (self._conditional_action_owner().context(ui_state.sm, ui_state.CP, now_ns=time.monotonic_ns())
-               if long_available and confirmed and conditional else None)
-    exp_available = bool(long_available and confirmed and (not conditional or context is not None))
+               if long_available and conditional else None)
+    exp_available = bool(long_available and (not conditional or context is not None))
     def toggle_experimental():
       if self._conditional_favorite_active() != conditional:
         return False

@@ -51,8 +51,7 @@ def current_authority(sm, cp, drive_id: int, now_ns: int) -> bool:
 def exact_settings(params, snapshot: SettingsSnapshot) -> bool:
   try:
     return (read_saved(params, 'ConditionalModeConfig', MAX_DOCUMENT_BYTES) == (snapshot.document_raw, True) and
-            read_saved(params, 'SafeMode', 8) == (snapshot.safe_mode_raw, True) and
-            read_saved(params, 'ExperimentalModeConfirmed', 8) == (b'1', True))
+            read_saved(params, 'SafeMode', 8) == (snapshot.safe_mode_raw, True))
   except (AttributeError, OSError, TypeError, ValueError):
     return False
 
