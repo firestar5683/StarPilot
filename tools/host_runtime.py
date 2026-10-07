@@ -16,6 +16,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -67,7 +68,11 @@ LIVE_SCRIPT = f"""// Added by ./dev galaxy --live to its host cache only: reload
       const response = await fetch('/{LIVE_VERSION}', {{ cache: 'no-store' }})
       if (!response.ok) return
       const version = (await response.text()).trim()
-      if (seen !== null && version !== seen) location.reload()
+      if (seen !== null && version !== seen) {{
+        const event = new Event('beforeunload', {{ cancelable: true }})
+        if (!window.dispatchEvent(event)) return
+        location.reload()
+      }}
       seen = version
     }} catch {{}}
   }}, 500)
@@ -121,6 +126,31 @@ def same_contents(source, destination):
   return True
 
 
+@contextmanager
+def file_lock(path, *, nonblocking=False):
+  with path.open('a+') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0))
+    yield
+
+
+@contextmanager
+def atomic_destination(path):
+  """Publish a complete file or symlink without truncating readers of the old inode."""
+  fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}-')
+  os.close(fd)
+  temporary = Path(temporary)
+  try:
+    yield temporary
+    os.replace(temporary, path)
+  finally:
+    temporary.unlink(missing_ok=True)
+
+
+def atomic_write(path, data):
+  with atomic_destination(path) as temporary:
+    temporary.write_bytes(data)
+
+
 class HostRuntime:
   def __init__(self, root, bucket, *, system=None, machine=None):
     self.root = Path(root).resolve()
@@ -162,48 +192,75 @@ class HostRuntime:
         self.lock_fd = None
         fcntl.flock(lock, fcntl.LOCK_UN)
 
+  def source_paths(self, *pathspec):
+    # Include uncommitted development, exclude ignored native/device outputs.
+    listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', *pathspec).split('\0')
+    return {Path(name) for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
+            and not (set(Path(name).suffixes) & NATIVE_SUFFIXES) and (self.root / name).is_file()}
+
+  def source_lock(self):
+    return file_lock(inside(self.cache / 'source-lock', self.cache))
+
+  def copy_source(self, name):
+    source = self.root / name
+    destination = inside(self.work / name, self.work)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_dir() and not destination.is_symlink():
+      shutil.rmtree(destination)
+    if source.is_symlink():
+      inside(source, self.root)
+      target = os.readlink(source)
+      if os.path.isabs(target):
+        raise RuntimeError(f'Absolute source symlink is not portable: {name}')
+      if destination.is_symlink() and os.readlink(destination) == target:
+        return
+      with atomic_destination(destination) as temporary:
+        temporary.unlink()
+        temporary.symlink_to(target)
+    elif destination.is_symlink() or not same_contents(source, destination):
+      old_mtime = destination.stat().st_mtime_ns if destination.exists() else None
+      with atomic_destination(destination) as temporary:
+        shutil.copy2(source, temporary)
+        if temporary.stat().st_mtime_ns == old_mtime:
+          os.utime(temporary, None)  # SCons must notice edits even when an editor keeps mtime.
+    elif source.stat().st_mode != destination.stat().st_mode:
+      destination.chmod(source.stat().st_mode)
+    if name.suffix == '.py':
+      # Timestamp-based bytecode can accept same-size edits within the same second.
+      for bytecode in (destination.parent / '__pycache__').glob(f'{destination.stem}.*.pyc'):
+        inside(bytecode, self.work).unlink(missing_ok=True)
+
+  def mirror(self, changed, removed):
+    """Serialize cache mutations and retain ownership of live-added files for later syncs."""
+    with self.source_lock():
+      return self._mirror(changed, removed)
+
+  def _mirror(self, changed, removed):
+    manifest = inside(self.cache / 'source-files.json', self.cache)
+    paths = set(json.loads(manifest.read_text())) if manifest.exists() else set()
+    copied = []
+    for name in removed:
+      path = inside(self.work / name, self.work)
+      path.unlink(missing_ok=True)
+      paths.discard(str(name))
+    for name in changed:
+      try:
+        self.copy_source(name)
+      except FileNotFoundError:
+        continue  # Do not acknowledge this edit; the watcher will retry it.
+      copied.append(name)
+      paths.add(str(name))
+    atomic_write(manifest, (json.dumps(sorted(paths)) + '\n').encode())
+    return copied
+
   def sync(self):
     inside(self.work, self.cache).mkdir(parents=True, exist_ok=True)
-    # Include uncommitted development, exclude ignored native/device outputs.
-    listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0')
-    paths = {name for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
-             and not (set(Path(name).suffixes) & NATIVE_SUFFIXES)
-             and (self.root / name).is_file()}
-    manifest = inside(self.cache / 'source-files.json', self.cache)
-    previous = set(json.loads(manifest.read_text())) if manifest.exists() else set()
-    for name in sorted(previous - paths):
-      path = inside(self.work / name, self.work)
-      if path.is_file() or path.is_symlink():
-        path.unlink()
-    for name in sorted(paths):
-      source = self.root / name
-      destination = inside(self.work / name, self.work)
-      destination.parent.mkdir(parents=True, exist_ok=True)
-      if source.is_symlink():
-        # Keep repository-relative links; never point the host cache at device builds.
-        inside(source, self.root)
-        target = os.readlink(source)
-        if os.path.isabs(target):
-          raise RuntimeError(f'Absolute source symlink is not portable: {name}')
-        if destination.is_symlink() and os.readlink(destination) == target:
-          continue
-        if destination.exists() or destination.is_symlink():
-          destination.unlink()
-        destination.symlink_to(target)
-      elif destination.is_symlink() or not same_contents(source, destination):
-        old_mtime = destination.stat().st_mtime_ns if destination.exists() else None
-        if destination.is_symlink():
-          destination.unlink()
-        elif destination.is_dir():
-          shutil.rmtree(destination)
-        shutil.copy2(source, destination)
-        # SCons' MD5-timestamp decider must notice edits even if an editor kept mtime.
-        if destination.stat().st_mtime_ns == old_mtime:
-          os.utime(destination, None)
-      elif source.stat().st_mode != destination.stat().st_mode:
-        destination.chmod(source.stat().st_mode)
-    self.sync_git()
-    manifest.write_text(json.dumps(sorted(paths)) + '\n')
+    paths = self.source_paths()
+    with self.source_lock():
+      manifest = inside(self.cache / 'source-files.json', self.cache)
+      previous = set(json.loads(manifest.read_text())) if manifest.exists() else set()
+      self._mirror(sorted(paths), [Path(name) for name in sorted(previous - set(map(str, paths)))])
+      self.sync_git()
 
   def sync_git(self):
     # Same read-only object sharing as `git clone --shared`, independent index/refs.
@@ -238,6 +295,7 @@ class HostRuntime:
                BASEDIR=str(self.work), PWD=str(self.work), PARAMS_ROOT=str(inside(self.cache / 'params', self.cache)),
                OPENPILOT_PREFIX=self.prefix, SP_HOST_PREFIX=self.prefix,
                SP_HOST_PARAMS_ROOT=str(self.cache / 'params'), SP_HOST_RUNTIME='1',
+               ANDROID_AUTO_DIR=str(inside(self.cache / 'android_auto', self.cache)),
                SP_SCONS_CACHE_DIR=str(self.cache / 'scons-cache'),
                SCONS_CACHE=str(self.cache / 'scons-cache'),
                NOBOARD='1', SIMULATION='1', SKIP_FW_QUERY='1', STARPILOT_UI_DEV='1',
@@ -322,58 +380,31 @@ class HostRuntime:
           signal.signal(sig, handler)
 
   def galaxy_sources(self):
-    """Source Galaxy files with their (mtime, size), under the same rules as sync()."""
+    """Content identities using the same source selection as sync(), including relative symlinks."""
     found = {}
-    for directory, names, files in os.walk(self.root / GALAXY):
-      names[:] = [name for name in names if name not in EXCLUDE_DIRS]
-      for name in files:
-        path = Path(directory, name)
-        if path.is_symlink() or set(path.suffixes) & NATIVE_SUFFIXES:
-          continue
-        try:
-          stat = path.stat()
-        except FileNotFoundError:
-          continue
-        found[path.relative_to(self.root)] = (stat.st_mtime_ns, stat.st_size)
-    return found
-
-  def ignored(self, names):
-    """Paths sync() would skip because Git ignores them, such as editor swap files."""
-    if not names:
-      return set()
-    env = {key: value for key, value in os.environ.items() if key not in REMOVE_ENV}
-    result = subprocess.run(['git', 'check-ignore', '-z', '--stdin'], cwd=self.root, env=env, capture_output=True,
-                            input='\0'.join(map(str, names)), text=True)
-    if result.returncode not in (0, 1):  # 1 means nothing was ignored.
-      raise RuntimeError(f'git check-ignore failed: {result.stderr.strip()}')
-    return {Path(name) for name in result.stdout.split('\0') if name}
-
-  def mirror(self, changed, removed):
-    # Unlocked on purpose: a concurrent sync copies these same files from the same checkout.
-    for name in removed:
-      path = inside(self.work / name, self.work)
-      if path.is_file() or path.is_symlink():
-        path.unlink()
-    for name in changed:
-      destination = inside(self.work / name, self.work)
-      destination.parent.mkdir(parents=True, exist_ok=True)
+    for name in self.source_paths(str(GALAXY)):
+      path = self.root / name
       try:
-        shutil.copy2(self.root / name, destination)
+        identity = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+        found[name] = (path.is_symlink(), path.stat().st_mode, hashlib.sha256(identity).digest())
       except FileNotFoundError:
-        pass  # Editors may replace files mid-save; the next poll copies the result.
+        continue
+    return found
 
   def live_reload(self, version=None):
     """Keep the cached page loading the reload script; publish a new edit version if given."""
+    with self.source_lock():
+      self._live_reload(version)
+
+  def _live_reload(self, version=None):
     web = self.work / GALAXY / 'web'
+    if version is None and not (web / LIVE_VERSION).is_file():
+      version = time.time_ns()
     if version is not None:
-      # Replace atomically so the page never reads a half-written version and reloads early.
-      temporary = inside(web / f'.{LIVE_VERSION}.tmp', self.work)
-      temporary.write_text(f'{version}\n')
-      os.replace(temporary, inside(web / LIVE_VERSION, self.work))
-    # Checked every poll, like the page tag below: an overlapping session's exit removes it.
+      atomic_write(inside(web / LIVE_VERSION, self.work), f'{version}\n'.encode())
     script = inside(web / LIVE_RELOAD, self.work)
     if not script.is_file() or script.read_text() != LIVE_SCRIPT:
-      script.write_text(LIVE_SCRIPT)
+      atomic_write(script, LIVE_SCRIPT.encode())
     page = inside(web / 'index.html', self.work)
     try:
       html = page.read_text()
@@ -381,19 +412,26 @@ class HostRuntime:
       return
     # Another command's sync restores the checkout's page.
     if LIVE_TAG not in html and '</body>' in html:
-      page.write_text(html.replace('</body>', f'  {LIVE_TAG}\n</body>', 1))
+      atomic_write(page, html.replace('</body>', f'  {LIVE_TAG}\n</body>', 1).encode())
 
   def end_live_reload(self):
-    web = self.work / GALAXY / 'web'
-    for name in (LIVE_RELOAD, LIVE_VERSION):
-      inside(web / name, self.work).unlink(missing_ok=True)
-    source = self.root / GALAXY / 'web/index.html'
-    if source.is_file():
-      shutil.copy2(source, inside(web / 'index.html', self.work))
+    with self.source_lock():
+      web = self.work / GALAXY / 'web'
+      for name in (LIVE_RELOAD, LIVE_VERSION):
+        inside(web / name, self.work).unlink(missing_ok=True)
+      if (self.root / GALAXY / 'web/index.html').is_file():
+        self.copy_source(GALAXY / 'web/index.html')
 
   def live_galaxy(self, arguments, *, autoreload=True, interval=0.5):
-    """Serve Galaxy without the bucket lock, following package edits until interrupted."""
-    argv = [str(self.venv / 'bin/python'), '-m', 'openpilot.starpilot.galaxy.server', *arguments]
+    """One live owner per cache; desktop UI and replay may still run alongside."""
+    try:
+      with file_lock(inside(self.cache / 'galaxy-live-lock', self.cache), nonblocking=True):
+        return self._live_galaxy(arguments, autoreload=autoreload, interval=interval)
+    except BlockingIOError:
+      raise RuntimeError('A Galaxy live session already owns this host cache; stop it before starting another.') from None
+
+  def _live_galaxy(self, arguments, *, autoreload, interval):
+    argv = [str(self.venv / 'bin/python'), '-B', '-m', 'openpilot.starpilot.galaxy.server', *arguments]
     env = self.environment() | {'SP_HOST_PARKED': '1'}
     self.private_ipc()
     # Without autoreload the cached page is left exactly as synced.
@@ -405,23 +443,42 @@ class HostRuntime:
       print(f'Galaxy live: refresh to see edits under {GALAXY}; Python edits restart the server.', flush=True)
     print('Changes outside Galaxy need ./dev sync and a restart. Stop with Ctrl+C.', flush=True)
     seen = self.galaxy_sources()
-    publish(time.time_ns())
-    child = subprocess.Popen(argv, cwd=self.work, env=env)
+    # Reconcile additions, edits and deletions made during preparation/building.
+    with self.source_lock():
+      manifest = self.cache / 'source-files.json'
+      previous_sources = set(map(Path, json.loads(manifest.read_text())))
+      removed = [name for name in previous_sources - seen.keys() if name.is_relative_to(GALAXY)]
+      copied = self._mirror(list(seen), removed)
+    seen = {name: seen[name] for name in copied}
+    child = None
     interrupted = False
+    termination = None
+
+    def terminate(signum, _frame):
+      nonlocal termination
+      termination = signum
+
+    previous = {sig: signal.signal(sig, terminate) for sig in (signal.SIGTERM, signal.SIGHUP)}
     try:
+      publish(time.time_ns())
+      child = subprocess.Popen(argv, cwd=self.work, env=env)
       while True:
+        if termination is not None:
+          return 128 + termination
+        if child.poll() is not None:
+          result = child.returncode
+          return result if result >= 0 else 128 - result
         time.sleep(interval)
         publish()
         current = self.galaxy_sources()
         changed = [name for name, identity in current.items() if seen.get(name) != identity]
         removed = [name for name in seen if name not in current]
-        seen = current
-        skipped = self.ignored(changed + removed)
-        changed = [name for name in changed if name not in skipped]
-        removed = [name for name in removed if name not in skipped]
         if not changed and not removed:
           continue
-        self.mirror(changed, removed)
+        changed = self.mirror(changed, removed)
+        for name in removed:
+          seen.pop(name, None)
+        seen.update({name: current[name] for name in changed})
         backend = [name for name in changed + removed
                    if not name.is_relative_to(GALAXY / 'web')
                    and not name.is_relative_to(GALAXY / 'tests')
@@ -438,9 +495,14 @@ class HostRuntime:
       interrupted = True
       return 130
     finally:
-      stop(child, interrupted=interrupted)
-      if autoreload:
-        self.end_live_reload()
+      try:
+        if child is not None:
+          stop(child, interrupted=interrupted)
+        if autoreload:
+          self.end_live_reload()
+      finally:
+        for sig, handler in previous.items():
+          signal.signal(sig, handler)
 
 
 def galaxy_port_free(arguments):

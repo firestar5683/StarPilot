@@ -122,8 +122,8 @@ def host_owner(params, parked, root=None, environ=os.environ):
   if environ.get('SP_HOST_RUNTIME') != '1':
     return None
   if root is None:
-    from openpilot.starpilot.storage import starpilot_storage_root
-    root = starpilot_storage_root() / 'android_auto'
+    from openpilot.starpilot.system.android_auto.identity import DATA_DIR
+    root = DATA_DIR
   root = Path(root)
   screen_path = root / 'screen.json'
   if not screen_path.exists():
