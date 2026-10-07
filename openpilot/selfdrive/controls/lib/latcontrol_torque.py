@@ -10,6 +10,7 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
 from openpilot.starpilot.lateral.controller_selection import ControllerMode, default_selection, policy_for
 from openpilot.starpilot.lateral.torque_extension import apply_turn_assist, create_extension, create_turn_assist
+from openpilot.starpilot.flm import live as flm
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -53,6 +54,8 @@ class LatControlTorque(LatControl):
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
     self.turn_assist = create_turn_assist(CP, turn_assist)
     self.starpilot_extension = create_extension(self, CP, self.controller_mode, self.controller_policy, turn_assist=turn_assist)
+    self.flm_source = flm.GmLiveSource(CP, self.controller_mode)
+    self.flm_surface = None
 
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
     if self.starpilot_extension is not None:
@@ -67,6 +70,7 @@ class LatControlTorque(LatControl):
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
+    self.flm_surface = self.flm_source.sample(active=active, speed=CS.vEgo)
     if self.starpilot_extension is not None:
       return self.starpilot_extension.update(active, CS, VM, params, steer_limited_by_safety,
                                                         desired_curvature, curvature_limited, lat_delay)
@@ -78,7 +82,7 @@ class LatControlTorque(LatControl):
     self.lat_accel_request_buffer.append(future_desired_lateral_accel)
 
     roll_compensation = params.roll * ACCELERATION_DUE_TO_GRAVITY
-    curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg), CS.vEgo, 0.0))
+    curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg + flm.deadband(self.flm_surface, CS.vEgo)), CS.vEgo, 0.0))
     lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
     delay_frames = int(np.clip(lat_delay / self.dt + 1, 1, self.lat_accel_request_buffer_len))
@@ -93,7 +97,9 @@ class LatControlTorque(LatControl):
     ff = gravity_adjusted_future_lateral_accel
     # latAccelOffset corrects roll compensation bias from device roll misalignment relative to car roll
     ff -= self.torque_params.latAccelOffset
-    ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
+    threshold = flm.base_threshold(self.flm_surface, CS.vEgo, FRICTION_THRESHOLD)
+    ff, threshold = flm.stages(self.flm_surface, CS, setpoint, desired_lateral_jerk, ff, threshold)
+    ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, threshold, self.torque_params)
 
     if not active:
       output_torque = 0.0
@@ -107,6 +113,7 @@ class LatControlTorque(LatControl):
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
 
       output_torque = apply_turn_assist(self, CS, VM, params, desired_curvature, output_torque)
+      output_torque = flm.angle_assist(self.flm_surface, CS, VM, params, desired_curvature, setpoint, desired_lateral_jerk, output_torque)
 
       pid_log.active = True
       pid_log.p = float(self.pid.p)

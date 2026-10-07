@@ -18,7 +18,7 @@ from openpilot.starpilot.flm.offline import SegmentInput, analyze_segments
 from openpilot.starpilot.galaxy.drive_history import SEGMENT_NAME
 
 
-MAX_REQUEST_BYTES = 2048
+MAX_REQUEST_BYTES = 32768
 MAX_REPORT_BYTES = 1024 * 1024
 LINUX_ADDRESS_SPACE_BYTES = 2 * 1024**3
 LINUX_CPU_SECONDS = 240
@@ -69,6 +69,14 @@ def main() -> int:
     _limits()
     request = json.loads(sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1))
     root, names = request['root'], request['segments']
+    gm_context = request.get('gmContext')
+    if gm_context is not None:
+      from openpilot.starpilot.flm.gm_recommend import validate_context
+      gm_context = validate_context(gm_context)
+    elif len(json.dumps(request).encode()) > 2048:
+      raise ValueError('invalid_request')
+    if set(request) != {'root', 'segments', 'parentPid'} | ({'gmContext'} if gm_context is not None else set()):
+      raise ValueError('invalid_request')
     _parent_lifeline(request['parentPid'])
     if (type(root) is not str or not Path(root).is_absolute() or type(names) is not list or
         not 1 <= len(names) <= 5 or any(type(name) is not str or len(name) > 180 or
@@ -77,13 +85,15 @@ def main() -> int:
       raise ValueError('invalid_request')
     selected_names = [name for name in names if type(name) is str]
     segments = []
+    gm_groups = []
     for index, name in enumerate(selected_names, 1):
       source = read_closed_rlog(Path(root), name, permitted=lambda: True)
       match = SEGMENT_NAME.fullmatch(name)
       if match is None:
         raise ValueError('invalid_request')
       events = decode_segment(source.compressed, source.codec)
-      analysis = analyze_segments((SegmentInput(match.group('route'), int(match.group('number')), events),))
+      analysis = analyze_segments((SegmentInput(match.group('route'), int(match.group('number')), events),),
+                                  gm_context=gm_context, evidence=gm_groups if gm_context is not None else None)
       segments.append({'source': {'segmentName': name, 'sha256': source.sha256,
                                   'compressedBytes': source.size, 'codec': source.codec},
                        'analysis': asdict(analysis.segments[0])})
@@ -91,6 +101,11 @@ def main() -> int:
       _emit({'kind': 'progress', 'processed': index})
     report = {'schemaVersion': 1, 'purpose': 'offline_tracking_diagnostics', 'segments': segments,
               'tuneRecommendation': None, 'vehicleQualification': False}
+    if gm_context is not None:
+      from openpilot.starpilot.flm.gm_recommend import classify_groups, build_report
+      summaries, stats = classify_groups(gm_groups)
+      report['purpose'] = 'gm_flm_evidence_profiles'
+      report['gmEvidence'] = build_report(gm_context, summaries, stats)
     _emit({'kind': 'result', 'report': report})
     return 0
   except LocalLogUnavailable:

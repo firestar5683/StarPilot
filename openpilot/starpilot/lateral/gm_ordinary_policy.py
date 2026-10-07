@@ -7,6 +7,7 @@ import numpy as np
 
 from opendbc.car.lateral import get_friction
 from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
+from openpilot.starpilot.flm import live as flm
 from openpilot.cereal import log
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -68,7 +69,7 @@ class GMOrdinaryTorquePolicy:
       parent.pid.i *= 0.8
     fade = np.interp(cs.vEgo, FF_ROLL_OFFSET_FADE_BP, FF_ROLL_OFFSET_FADE_V)
     roll = params.roll * ACCELERATION_DUE_TO_GRAVITY * fade
-    deadzone = abs(vm.calc_curvature(math.radians(parent.steering_angle_deadzone_deg), cs.vEgo, 0.0)) * cs.vEgo**2
+    deadzone = abs(vm.calc_curvature(math.radians(parent.steering_angle_deadzone_deg + flm.deadband(parent.flm_surface, cs.vEgo)), cs.vEgo, 0.0)) * cs.vEgo**2
     delay_frames = int(np.clip(delay / self.dt, 1, self.buffer_len))
     expected = self.curvature_buffer[-delay_frames] * cs.vEgo**2
     self.curvature_buffer.append(curvature)
@@ -85,7 +86,8 @@ class GMOrdinaryTorquePolicy:
     gravity_adjusted = future - roll
     ff = gravity_adjusted - parent.torque_params.latAccelOffset * fade
     ff = self.feedforward(ff, setpoint, jerk, cs.vEgo)
-    threshold = shaping.get_gm_base_friction_threshold(cs.vEgo)
+    threshold = flm.base_threshold(parent.flm_surface, cs.vEgo, shaping.get_gm_base_friction_threshold(cs.vEgo))
+    ff, threshold = flm.stages(parent.flm_surface, cs, setpoint, jerk, ff, threshold)
     jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, 0.0)
     friction_jerk = math.copysign(max(abs(jerk) - jerk_deadzone, 0.0), jerk)
     ff += get_friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, parent.torque_params)
@@ -98,6 +100,7 @@ class GMOrdinaryTorquePolicy:
     )
     output = apply_turn_assist(parent, cs, vm, params, curvature, output)
     output = self.output(output, setpoint, cs.vEgo)
+    output = flm.angle_assist(parent.flm_surface, cs, vm, params, curvature, setpoint, jerk, output)
     self.previous_pressed = cs.steeringPressed
     pid_log.active = True
     pid_log.p, pid_log.i, pid_log.d, pid_log.f = map(float, (parent.pid.p, parent.pid.i, parent.pid.d, parent.pid.f))

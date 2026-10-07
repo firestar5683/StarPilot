@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { FlmFeed, FlmPage, flmChart, selectableSegments, validFlmReport, validFlmStatus } from '../web/js/flm.js'
+import { FlmLiveEditor, validLiveFlm, validGmEvidence, gmEventSeries, FlmFeed, FlmPage, flmChart, selectableSegments, validFlmReport, validFlmStatus } from '../web/js/flm.js'
 
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
 const route = '1234abcd--0123456789'
@@ -65,12 +65,13 @@ reactivePage.requesting = true
 assert.equal(canAnalyze.value, false, 'Vue disables Analyze while completed report is still loading')
 reactivePage.requesting = false
 assert.equal(canAnalyze.value, true, 'Vue recomputes after report request retires')
-const rendered = JSON.stringify(compile(FlmPage.template)({ mode: 'local', inventoryStatus: 'ready', inventory,
+const rendered = JSON.stringify(compile(FlmPage.template)({ ...FlmPage.data(), ...FlmPage.methods, unauthorized: () => {},
+  mode: 'local', inventoryStatus: 'ready', inventory,
   inventoryError: '', available: selectableSegments(inventory), operation: { ...operation, state: 'completed', processed: 1 },
   report, operationError: '', busy: false, requesting: false, selected: [segment], canAnalyze: true, operationFeed: {},
   inventoryFeed: {}, toggle: () => {}, analyze: () => {}, resultLabel: FlmPage.methods.resultLabel,
   metric: FlmPage.methods.metric, exclusions: FlmPage.methods.exclusions, go: () => {} }, []))
-assert.match(rendered, /Offline Tracking/)
+assert.match(rendered, /FLM/)
 assert.match(rendered, /Mean absolute error/)
 assert.match(rendered, /No tune recommendation/)
 assert.match(rendered, /Desired/)
@@ -219,3 +220,76 @@ mutationLate.feed.stop()
 // Analyze is beside the selection, before even a long segment list; no duplicate plots destination.
 assert.ok(FlmPage.template.indexOf('@click="analyze"') < FlmPage.template.indexOf('v-for="segment in available"'))
 assert.equal(FlmPage.template.includes("go('/tuning/plots')"), false)
+
+// Existing offline analysis remains separate from explicit authenticated parked edits.
+const liveSurface = { profile: 'torque_universal', knobs: { ff_gain_left: .3 }, baseValues: null }
+const liveState = { version: 1, available: true, editable: true, resettable: true, token: 'a'.repeat(64),
+  vehicle: 'CHEVROLET_MALIBU_ASCM', controller: 'starpilot', profile: 'torque_universal',
+  knobs: { ff_gain_left: { min: -.4, max: .6 } }, defaults: liveSurface,
+  curveDefaults: [.16, .18, .20, .23, .27], manual: '{}', manualConflict: false, preconditions: {}, inactiveKnobs: {},
+  state: { saved: { one: { label: 'One', surface: liveSurface } }, active: 'one', applied: true,
+    trial: 'b'.repeat(32), baselineActive: null, baselineApplied: false, manual: {}, baselineManual: null, appliedManual: null, cleanupProgress: false } }
+assert.equal(validLiveFlm(liveState), true)
+for (const bad of [ { ...liveState, token: 'old' }, { ...liveState, curveDefaults: [NaN] },
+  { ...liveState, state: { ...liveState.state, active: 'missing' } },
+  { ...liveState, defaults: { ...liveSurface, knobs: { ff_gain_left: -.5 } } } ]) assert.equal(validLiveFlm(bad), false)
+const editor = { ...FlmLiveEditor.data(), live: liveState, closed: false,
+  unauthorized: () => { throw new Error('unexpected auth failure') } }
+for (const [key, method] of Object.entries(FlmLiveEditor.methods)) editor[key] = method.bind(editor)
+editor.choose('one')
+assert.deepEqual(editor.curve, liveState.curveDefaults, 'curve starts from owner-derived source values')
+assert.equal(editor.useCurve, false)
+editor.draft.knobs.ff_gain_left = .2
+assert.equal(liveState.state.saved.one.surface.knobs.ff_gain_left, .3, 'draft never mutates the server snapshot')
+const posted = []
+const savedFetch = globalThis.fetch
+const savedHidden = document.hidden
+try {
+  document.hidden = false
+  globalThis.fetch = async (url, options) => { posted.push([url, JSON.parse(options.body)]); return { ok: true, status: 200, json: async () => liveState } }
+  await editor.action('trial', { id: 'one' })
+  assert.deepEqual(posted[0], ['./api/flm/live-action', { action: 'trial', token: liveState.token, id: 'one' }])
+  await editor.restore()
+  await flush()
+  assert.deepEqual(posted[1][1], { action: 'restore', token: liveState.token, trial: liveState.state.trial })
+  editor.live = { ...liveState, editable: false }
+  await editor.action('trial', { id: 'one' })
+  assert.equal(posted.length, 2, 'moving view cannot issue a mutation')
+  editor.live = liveState
+  document.hidden = true
+  await editor.action('disable')
+  assert.equal(posted.length, 2, 'hidden editor does not send new requests')
+} finally { globalThis.fetch = savedFetch; document.hidden = savedHidden }
+
+
+const staleRich = { ...liveState, available: false, editable: false, resettable: true,
+  controller: 'standard', profile: 'torque_universal', reason: 'Selected controller changed.',
+  state: { ...liveState.state, saved: { one: { label: 'Rich', surface: { ...liveSurface, profile: 'gm_bolt_2022_2023' } } } } }
+assert.equal(validLiveFlm(staleRich), true, 'stale rich data admits only the exact reset-only owner response')
+assert.equal(validLiveFlm({ ...staleRich, editable: true }), false)
+assert.equal(validLiveFlm({ ...staleRich, available: true }), false, 'strict editable profile matching remains')
+try {
+  document.hidden = false
+  editor.live = staleRich
+  globalThis.fetch = async (url, options) => { posted.push([url, JSON.parse(options.body)]); return { ok: true, status: 200, json: async () => liveState } }
+  const count = posted.length
+  await editor.action('trial', { id: 'one' })
+  assert.equal(posted.length, count)
+  await editor.action('reset')
+  assert.deepEqual(posted.at(-1)[1], { action: 'reset', token: staleRich.token })
+} finally { globalThis.fetch = savedFetch; document.hidden = savedHidden }
+const gmEvidence = { fit: false, vehicleQualification: false,
+  context: { version: 1, sourceToken: 'a'.repeat(64), capability: { fingerprint: 'CHEVROLET_MALIBU_ASCM', controller: 'starpilot' } },
+  summaries: [{ dimensionId: 'understeer:left:mid', severity: 1 }],
+  paths: ['baseline_fix', 'cleanup_pass'].map((key) => ({ key, suggestions: [], profiles: [] })) }
+assert.equal(validGmEvidence(gmEvidence), true)
+assert.equal(validGmEvidence({ ...gmEvidence, fit: true }), false)
+assert.equal(validFlmReport({ ...report, purpose: 'gm_flm_evidence_profiles', gmEvidence }, 'owner:1'), true)
+assert.equal(validFlmReport({ ...report, purpose: 'gm_flm_evidence_profiles', gmEvidence: { ...gmEvidence, fit: true } }, 'owner:1'), false)
+assert.match(FlmPage.template, /Generate GM trials/)
+assert.match(FlmLiveEditor.template, /preconditions/)
+assert.match(FlmLiveEditor.template, /inactiveKnobs/)
+
+assert.equal(gmEventSeries({ times: [0, .1], desired: [.2, .3], actual: [.1, .2] }).length, 2)
+assert.deepEqual(gmEventSeries({ times: [0, 0], desired: [.2, .3], actual: [.1, .2] }), [])
+assert.deepEqual(gmEventSeries({ times: [0, .1], desired: [.2, Infinity], actual: [.1, .2] }), [])

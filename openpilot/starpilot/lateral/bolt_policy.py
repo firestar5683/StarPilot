@@ -8,6 +8,7 @@ import numpy as np
 from opendbc.car import structs
 from opendbc.car.gm.values import CAR
 from opendbc.car.lateral import get_friction
+from openpilot.starpilot.flm import live as flm
 from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
@@ -119,7 +120,7 @@ class BoltTorquePolicy:
       parent.pid.i *= 0.8
     fade = np.interp(cs.vEgo, FF_ROLL_OFFSET_FADE_BP, FF_ROLL_OFFSET_FADE_V)
     roll = params.roll * ACCELERATION_DUE_TO_GRAVITY * fade
-    deadzone = abs(vm.calc_curvature(math.radians(parent.steering_angle_deadzone_deg), cs.vEgo, 0.0)) * cs.vEgo**2
+    deadzone = abs(vm.calc_curvature(math.radians(parent.steering_angle_deadzone_deg + flm.deadband(parent.flm_surface, cs.vEgo)), cs.vEgo, 0.0)) * cs.vEgo**2
     delay_frames = int(np.clip(delay / self.dt, 1, self.buffer_len))
     expected = self.curvature_buffer[-delay_frames] * cs.vEgo**2
     self.curvature_buffer.append(curvature)
@@ -136,15 +137,21 @@ class BoltTorquePolicy:
     gravity_adjusted = future - roll
     ff = gravity_adjusted - parent.torque_params.latAccelOffset * fade
     ff *= np.interp(ff, [-0.05, 0.0, 0.05], [self.ff_negative, 1.0, self.ff_positive])
-    threshold = shaping.get_gm_base_friction_threshold(cs.vEgo)
+    original_base_threshold = shaping.get_gm_base_friction_threshold(cs.vEgo)
+    threshold = flm.base_threshold(parent.flm_surface, cs.vEgo, original_base_threshold)
     friction_scale = 1.0
     if self.generation == 2022:
+      rich_input = ff
       ff *= shaping.get_bolt_2022_2023_ff_scale(setpoint, jerk, cs.vEgo)
       threshold = shaping.get_bolt_2022_2023_friction_threshold(cs.vEgo, setpoint, jerk)
       friction_scale = shaping.get_bolt_2022_2023_friction_scale(cs.vEgo, setpoint, jerk)
+      ff, threshold = flm.stages(parent.flm_surface, cs, setpoint, jerk, ff, threshold, rich=True, rich_input=rich_input)
     elif self.generation == 2018:
       threshold = shaping.get_bolt_2018_2021_friction_threshold(cs.vEgo, setpoint, jerk)
       friction_scale = shaping.get_bolt_2018_2021_friction_scale(cs.vEgo, setpoint, jerk)
+      threshold = flm.scaled_threshold(parent.flm_surface, cs.vEgo, threshold, original_base_threshold)
+    if self.generation != 2022:
+      ff, threshold = flm.stages(parent.flm_surface, cs, setpoint, jerk, ff, threshold)
     jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, 0.0)
     friction_jerk = math.copysign(max(abs(jerk) - jerk_deadzone, 0.0), jerk)
     ff += friction_scale * get_friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, parent.torque_params)

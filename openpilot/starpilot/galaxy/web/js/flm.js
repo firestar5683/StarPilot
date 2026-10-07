@@ -56,7 +56,8 @@ function validAnalysis(value) {
 }
 
 export function validFlmReport(value, operationId) {
-  return value?.schemaVersion === 1 && value.purpose === 'offline_tracking_diagnostics' &&
+  return value?.schemaVersion === 1 && ['offline_tracking_diagnostics', 'gm_flm_evidence_profiles'].includes(value.purpose) &&
+    (value.purpose === 'offline_tracking_diagnostics' || validGmEvidence(value.gmEvidence)) &&
     value.operationId === operationId && value.tuneRecommendation === null && value.vehicleQualification === false &&
     Array.isArray(value.segments) && value.segments.length >= 1 && value.segments.length <= 5 && value.segments.every((entry) =>
       entry?.source && typeof entry.source.segmentName === 'string' && SEGMENT.test(entry.source.segmentName) &&
@@ -182,6 +183,20 @@ export class FlmFeed {
     }
   }
   startAnalysis(segments) { return this.mutate('./api/flm/start', { segments }) }
+  startTraining(segments, token) { return this.mutate('./api/flm/train', { segments, token }) }
+  async feedback(feedback) {
+    if (!this.active || this.inFlight || this.busy || !this.report?.gmEvidence) return
+    const generation = this.generation, operationId = this.status?.operationId
+    this.busy = true; this.emit()
+    try {
+      const value = await this.request('./api/flm/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operationId, feedback }) })
+      if (!this.active || generation !== this.generation || this.status?.operationId !== operationId || value === null) return
+      if (value.version !== 1 || value.operationId !== operationId || !validGmEvidence(value.recommendation)) throw new Error('Trial profiles are unavailable.')
+      this.report = { ...this.report, gmEvidence: value.recommendation }; this.emit()
+    } catch (error) { if (generation === this.generation) { this.error = error.message; this.emit() } }
+    finally { if (generation === this.generation) { this.busy = false; this.emit() } }
+  }
   cancelAnalysis() {
     if (this.status?.state !== 'running' || !this.status.operationId) return
     return this.mutate('./api/flm/cancel', { operationId: this.status.operationId })
@@ -203,18 +218,167 @@ export const FlmChart = {
   </svg>`,
 }
 
+export function validGmEvidence(value) {
+  return value?.fit === false && value.vehicleQualification === false &&
+    /^[a-f0-9]{64}$/.test(value.context?.sourceToken) && value.context?.version === 1 &&
+    typeof value.context?.capability?.fingerprint === 'string' &&
+    ['standard', 'starpilot'].includes(value.context?.capability?.controller) &&
+    Array.isArray(value.summaries) && value.summaries.length <= 128 &&
+    value.summaries.every((row) => typeof row.dimensionId === 'string' && finite(row.severity)) &&
+    Array.isArray(value.paths) && value.paths.length === 2 && value.paths.every((path) =>
+      ['baseline_fix', 'cleanup_pass'].includes(path.key) && Array.isArray(path.suggestions) &&
+      Array.isArray(path.profiles) && path.profiles.length <= 3 && path.profiles.every((profile) =>
+        typeof profile.id === 'string' && profile.id.length <= 128 && typeof profile.label === 'string' &&
+        (profile.canonical === null ? typeof profile.unavailableReason === 'string' :
+          typeof profile.canonical?.manual === 'string' && profile.canonical.manual.length <= 4096 &&
+          ['torque_universal', 'gm_bolt_2022_2023'].includes(profile.canonical?.surface?.profile))))
+}
+
+// Local authenticated profile editor; all mutation authority stays with the parked owner.
+export function validLiveFlm(value) {
+  if (value?.version !== 1 || typeof value.available !== 'boolean' || typeof value.editable !== 'boolean') return false
+  if (!value.available && !value.token) return true
+  if (!value.available) {
+    // A stale rich profile cannot be edited under the current STANDARD law.
+    // Only its exact current owner token and reset action remain reachable.
+    return value.editable === false && typeof value.resettable === 'boolean' &&
+      /^[a-f0-9]{64}$/.test(value.token) && typeof value.vehicle === 'string' && value.vehicle.length > 0 &&
+      ['standard', 'starpilot'].includes(value.controller) && ['torque_universal', 'gm_bolt_2022_2023'].includes(value.profile) &&
+      typeof value.reason === 'string' && value.reason.length > 0 && value.reason.length <= 256
+  }
+  const surface = (entry) => entry?.profile === value.profile && entry.knobs &&
+    Object.keys(entry.knobs).length === Object.keys(value.knobs || {}).length &&
+    Object.entries(entry.knobs).every(([key, number]) => value.knobs?.[key] && finite(number) &&
+      number >= value.knobs[key].min && number <= value.knobs[key].max) &&
+    (entry.baseValues === null || Array.isArray(entry.baseValues) && entry.baseValues.length === 5 &&
+      entry.baseValues.every((number) => finite(number) && number >= .05))
+  if (!/^[a-f0-9]{64}$/.test(value.token) || typeof value.vehicle !== 'string' ||
+      !['standard', 'starpilot'].includes(value.controller) || !['torque_universal', 'gm_bolt_2022_2023'].includes(value.profile) ||
+      !value.knobs || Object.keys(value.knobs).length > 32 ||
+      !Object.values(value.knobs).every((range) => finite(range.min) && finite(range.max) && range.min <= range.max) ||
+      !Array.isArray(value.curveDefaults) || value.curveDefaults.length !== 5 || !value.curveDefaults.every((n) => finite(n) && n >= .05) ||
+      !surface(value.defaults) || !value.state?.saved || Object.keys(value.state.saved).length > 4) return false
+  const state = value.state
+  if (typeof value.manual !== 'string' || value.manual.length > 4096 || typeof value.manualConflict !== 'boolean' ||
+      !value.preconditions || !value.inactiveKnobs || Object.entries(value.inactiveKnobs).some(([key, reason]) =>
+        !value.knobs[key] || typeof reason !== 'string' || reason.length > 256) || !state.manual || Object.keys(state.manual).some((id) => !state.saved[id]) ||
+      Object.values(state.manual).some((raw) => typeof raw !== 'string' || raw.length > 4096) ||
+      Object.entries(value.preconditions).some(([id, reasons]) => !state.saved[id] || !Array.isArray(reasons) ||
+        reasons.some((reason) => typeof reason !== 'string' || reason.length > 256))) return false
+  return Object.entries(state.saved).every(([id, item]) => /^[a-zA-Z0-9_-]{1,48}$/.test(id) &&
+    typeof item?.label === 'string' && item.label.trim().length > 0 && item.label.length <= 80 && surface(item.surface)) &&
+    typeof state.applied === 'boolean' && typeof state.baselineApplied === 'boolean' &&
+    (state.active === null ? !state.applied : Boolean(state.saved[state.active]) && state.applied) &&
+    (state.baselineActive === null ? !state.baselineApplied : Boolean(state.saved[state.baselineActive]) && state.baselineApplied) &&
+    (state.trial === null ? state.baselineActive === null : /^[a-f0-9]{32}$/.test(state.trial) && state.applied)
+}
+
+export const FlmLiveEditor = {
+  name: 'FlmLiveEditor',
+  emits: ['source'],
+  props: { unauthorized: { type: Function, required: true } },
+  data: () => ({ live: null, error: '', busy: false, id: 'profile1', label: 'My surface', draft: null, useCurve: false, curve: [] }),
+  mounted() { this.closed = false; this.load() },
+  beforeUnmount() { this.closed = true; this.abort?.abort() },
+  methods: {
+    async request(url, body = null) {
+      if (this.closed || this.busy || document.hidden) return null
+      this.busy = true; this.error = ''; this.abort = new AbortController()
+      const timer = setTimeout(() => this.abort.abort(), 10000)
+      try {
+        const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: this.abort.signal,
+          ...(body === null ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
+        if (response.status === 401) { this.unauthorized(); return null }
+        const value = await response.json()
+        if (!response.ok) throw new Error(value.error || 'The surface changed. Refresh before trying again.')
+        if (!validLiveFlm(value)) throw new Error('Surface profiles are unavailable.')
+        if (this.closed) return null
+        this.live = value
+        this.$emit?.('source', value)
+        return value
+      } catch (error) { if (!this.closed) this.error = error.name === 'AbortError' ? 'The request timed out. Refresh to check its result.' : error.message; return null }
+      finally { clearTimeout(timer); if (!this.closed) this.busy = false }
+    },
+    async load() { const value = await this.request('./api/flm/live'); if (value?.defaults) this.choose(this.id) },
+    choose(id) {
+      this.id = id
+      const saved = this.live?.state?.saved?.[id]
+      this.label = saved?.label || 'My surface'
+      this.draft = JSON.parse(JSON.stringify(saved?.surface || this.live?.defaults || null))
+      this.useCurve = Boolean(this.draft && this.draft.baseValues !== null)
+      this.curve = [...(this.useCurve ? this.draft.baseValues : this.live?.curveDefaults || [])]
+    },
+    create() {
+      const id = [1, 2, 3, 4].map((n) => `profile${n}`).find((key) => !this.live.state.saved[key])
+      if (id) this.choose(id)
+    },
+    async action(action, extra = {}) {
+      if (!this.live?.token || this.busy || !(action === 'reset' ? this.live.resettable : this.live.editable)) return
+      const value = await this.request('./api/flm/live-action', { action, token: this.live.token, ...extra })
+      if (value?.defaults) this.choose(this.id)
+    },
+    save() {
+      if (!this.draft || !this.label.trim() || Object.values(this.draft.knobs).some((v) => !finite(v)) ||
+          this.useCurve && this.curve.some((v) => !finite(v) || v < .05)) return
+      this.action('save', { id: this.id, label: this.label, surface: { ...this.draft, baseValues: this.useCurve ? this.curve : null } })
+    },
+    trial() { this.action('trial', { id: this.id }) },
+    restore() { this.action('restore', { trial: this.live.state.trial }) },
+    accept() { this.action('accept', { trial: this.live.state.trial }) },
+  },
+  template: `<section class="gx-card gx-flm__panel"><h3>GM Trial Tunes</h3>
+    <p>Save the current manual choices from Tuning together with this surface. Applying a trial switches both; Restore returns the original session baseline. Other vehicle preferences are retained.</p>
+    <button @click="load" :disabled="busy">Refresh</button><GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+    <p v-if="live && !live.available">{{ live.reason || "Choose an eligible GM torque controller to edit its surface." }}</p>
+    <button v-if="live?.resettable && !live.available" @click="action('reset')" :disabled="busy">Reset this surface binding</button>
+    <template v-if="live?.available && draft">
+      <p>{{ live.vehicle.replaceAll('_', ' ') }} · {{ live.controller === 'standard' ? 'Standard' : 'StarPilot' }}</p>
+      <p v-if="!live.editable">Park the vehicle to save, apply or restore a profile.</p>
+      <label>Profile<select :value="id" @change="choose($event.target.value)"><option v-for="(item, key) in live.state.saved" :value="key">{{ item.label }}</option><option v-if="!live.state.saved[id]" :value="id">New profile</option></select></label>
+      <button @click="create" :disabled="busy || Object.keys(live.state.saved).length >= 4">New profile</button>
+      <label>Name<input v-model="label" maxlength="80" :disabled="busy || !live.editable"></label>
+      <label v-for="(range, key) in live.knobs" :key="key">{{ key.replaceAll('_', ' ') }}<input type="number" v-model.number="draft.knobs[key]" :min="range.min" :max="range.max" step="0.001" :disabled="busy || !live.editable || live.inactiveKnobs?.[key]"><span v-if="live.inactiveKnobs?.[key]">{{ live.inactiveKnobs[key] }}</span></label>
+      <label><input type="checkbox" v-model="useCurve" :disabled="busy || !live.editable">Use the selected controller base friction curve</label>
+      <template v-if="useCurve"><label v-for="(speed, index) in [0,5,10,15,25]" :key="index">At {{ speed }} m/s<input type="number" min="0.05" step="0.001" v-model.number="curve[index]" :disabled="busy || !live.editable"></label></template>
+      <button @click="save" :disabled="busy || !live.editable">Save manual choices and surface</button>
+      <p v-for="reason in live.preconditions[id] || []" :key="reason">{{ reason }}</p>
+      <p v-if="live.manualConflict">Manual choices changed after this trial. Keep as baseline to retain those edits, or review them before restoring; FLM will not overwrite them.</p>
+      <button @click="trial" :disabled="busy || !live.editable || !live.state.saved[id] || live.manualConflict || live.preconditions[id]?.length">Apply trial</button>
+      <button @click="action('delete', { id })" :disabled="busy || !live.editable || !live.state.saved[id] || id === live.state.active || id === live.state.baselineActive">Delete profile</button>
+      <p v-if="live.state.applied">Active: {{ live.state.saved[live.state.active]?.label }}</p>
+      <template v-if="live.state.trial"><button @click="restore" :disabled="busy || !live.editable || live.manualConflict">Restore baseline</button><button @click="accept" :disabled="busy || !live.editable">Keep as baseline</button></template>
+      <button v-if="live.state.applied" @click="action('disable')" :disabled="busy || !live.editable">Use controller surface</button>
+    </template>
+  </section>`,
+  components: { GxNotice },
+}
+
+export function gmEventSeries(plot) {
+  if (!plot || !Array.isArray(plot.times) || plot.times.length < 2 || plot.times.length > 160 ||
+      !Array.isArray(plot.desired) || !Array.isArray(plot.actual) ||
+      plot.times.length !== plot.desired.length || plot.times.length !== plot.actual.length ||
+      !plot.times.every((time, index) => finite(time) && time >= 0 && (index === 0 || time > plot.times[index - 1])) ||
+      ![...plot.desired, ...plot.actual].every(finite)) return []
+  // Chart-only relative coordinates; these are not producer clock evidence.
+  return plot.times.map((time, index) => ({ mono_ns: 1 + time*1e9, desired_lat_accel: plot.desired[index],
+    actual_lat_accel: plot.actual[index], continuity_id: 0 }))
+}
+
 export const FlmPage = {
   name: 'FlmPage',
-  components: { GxNotice, FlmChart },
+  components: { GxNotice, FlmChart, FlmLiveEditor },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, go: { type: Function, required: true } },
   data: () => ({ inventoryStatus: 'idle', inventory: null, inventoryError: '', operation: null, report: null,
-    operationError: '', busy: false, requesting: false, selected: [] }),
+    operationError: '', busy: false, requesting: false, selected: [], gmSource: null, accepted: [], ignored: [] }),
   created() {
     this.inventoryFeed = new LocalHistoryFeed({ publish: ({ status, data, error }) => {
       this.inventoryStatus = status; this.inventory = data; this.inventoryError = error
       if (data) this.selected = this.selected.filter((name) => selectableSegments(data).some((segment) => segment.name === name))
     }, unauthorized: this.unauthorized })
-    this.operationFeed = new FlmFeed({ publish: (state) => Object.assign(this.$data, state), unauthorized: this.unauthorized })
+    this.operationFeed = new FlmFeed({ publish: (state) => {
+      if (this.operation?.operationId !== state.operation?.operationId) { this.accepted = []; this.ignored = [] }
+      Object.assign(this.$data, state)
+    }, unauthorized: this.unauthorized })
   },
   mounted() {
     this.visibility = () => {
@@ -230,21 +394,35 @@ export const FlmPage = {
     toggle(name) { this.selected = this.selected.includes(name) ? this.selected.filter((item) => item !== name) :
       this.selected.length < 5 ? [...this.selected, name] : this.selected },
     analyze() { if (this.canAnalyze && this.selected.every((name) => this.available.some((item) => item.name === name))) this.operationFeed.startAnalysis(this.selected) },
+    train() { if (this.canAnalyze && this.gmSource?.editable) this.operationFeed.startTraining(this.selected, this.gmSource.token) },
+    feedback() { this.operationFeed.feedback({ acceptedDimensions: this.accepted, ignoredDimensions: this.ignored }) },
+    async saveReport(profile) {
+      if (!profile.canonical || this.busy || this.requesting || !this.gmSource?.editable) return
+      const editor = this.$refs.liveEditor
+      const id = [1, 2, 3, 4].map((n) => `profile${n}`).find((key) => !editor.live.state.saved[key])
+      if (!id) { this.operationError = 'Delete a saved profile before saving another trial.'; return }
+      const value = await editor.request('./api/flm/save-report', { operationId: this.operation.operationId,
+        token: this.gmSource.token, generatedId: profile.id, id, label: profile.label,
+        feedback: this.report.gmEvidence.feedback })
+      if (value?.available) editor.choose(id)
+    },
     resultLabel(status) { return ({ measured: 'Measured', insufficient_samples: 'Insufficient samples', missing_car_params: 'Missing vehicle data',
       unsupported_car: 'Unsupported vehicle', unsupported_controller: 'Unsupported controller' })[status] || 'Unavailable' },
+    eventSeries(plot) { return gmEventSeries(plot) },
     metric(value) { return finite(value) ? `${value.toFixed(2)} m/s²` : 'Unavailable' },
     exclusions(items) { return items.map(([reason, count]) => `${reason.replaceAll('_', ' ')}: ${count}`).join(' · ') || 'None recorded' },
   },
   template: `<div class="gx-view gx-flm">
-    <div class="gx-settings__header"><div><h2>Offline Tracking</h2><p>Local recording diagnostics for Ioniq 6 steering torque tracking. Reports do not qualify a vehicle or recommend a tune.</p></div></div>
+    <div class="gx-settings__header"><div><h2>FLM</h2><p>Review recorded torque tracking or generate GM trial choices from observed symptoms. A trial is a user-selected tune, not a fitted learner or vehicle qualification.</p></div></div>
     <p v-if="mode !== 'local'" class="gx-card gx-message">Offline analysis requires authenticated local Galaxy access.</p>
     <template v-else>
+      <FlmLiveEditor ref="liveEditor" :unauthorized="unauthorized" @source="gmSource = $event"/>
 
       <p v-if="inventoryStatus === 'loading'" role="status" class="gx-card gx-message">Reading local recordings…</p><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
       <p v-if="inventory?.scanIncomplete" role="status">This recording scan was incomplete. More local segments may exist.</p>
       <section class="gx-card gx-flm__panel"><h3>Choose Full Logs</h3><p class="gx-note">Select 1–5 closed local segments. Quick logs alone cannot provide this report.</p>
 <div class="gx-flm__actions" style="position:sticky;top:0;z-index:1;background:var(--gx-surface, #181526);padding:0.75rem 0;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-          <button type="button" class="gx-btn" :disabled="!canAnalyze" @click="analyze">Analyze selected</button><span>{{ selected.length }} of 5 selected</span>
+          <button type="button" class="gx-btn" :disabled="!canAnalyze" @click="analyze">Analyze selected</button><button type="button" class="gx-btn" :disabled="!canAnalyze || !gmSource?.editable" @click="train">Generate GM trials</button><span>{{ selected.length }} of 5 selected</span>
         </div>
         <p v-if="inventoryStatus === 'ready' && !available.length">No closed full logs found in this scan.</p>
         <div v-for="segment in available" :key="segment.name" class="gx-flm__choice"><label><input type="checkbox" :checked="selected.includes(segment.name)"
@@ -262,7 +440,24 @@ export const FlmPage = {
 
         <button v-if="operation?.state === 'running'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy || requesting" @click="operationFeed.cancelAnalysis()">Cancel analysis</button>
       </section>
-      <template v-if="report"><p class="gx-note">Offline diagnostic only · {{ report.segments.length }} {{ report.segments.length === 1 ? 'segment' : 'segments' }} · No tune recommendation</p>
+      <section v-if="report?.gmEvidence" class="gx-card gx-flm__panel"><h3>Recorded GM symptoms</h3>
+        <p>{{ report.gmEvidence.decision.reason }}</p>
+        <p>Only recordings matching the current final vehicle configuration are eligible. Gaps and driver overrides stay excluded.</p>
+        <label v-for="row in report.gmEvidence.summaries" :key="row.dimensionId">
+          {{ row.dimensionId.replaceAll('_', ' ') }}
+          <input type="checkbox" v-model="accepted" :value="row.dimensionId">Confirmed
+          <input type="checkbox" v-model="ignored" :value="row.dimensionId">Ignore
+        </label>
+        <button @click="feedback" :disabled="busy || requesting">Update trial choices</button>
+        <section v-for="path in report.gmEvidence.paths" :key="path.key"><h4>{{ path.title }}</h4><p>{{ path.description }}</p>
+          <article v-for="suggestion in path.suggestions" :key="suggestion.dimensionId"><p>{{ suggestion.observedBehavior }}</p><p>{{ suggestion.likelyInterpretation }}</p><p>{{ suggestion.primaryAdjustment }}</p><p>{{ suggestion.whatNotToTouchYet }}</p><p>{{ suggestion.ifThatWasWrong }}</p><flm-chart v-if="eventSeries(suggestion.plotData).length" :series="eventSeries(suggestion.plotData)"/></article>
+          <div v-for="profile in path.profiles" :key="profile.id"><p>{{ profile.label }} · {{ profile.description }}</p>
+            <p v-if="profile.unavailableReason">{{ profile.unavailableReason }}</p>
+            <button @click="saveReport(profile)" :disabled="busy || requesting || !gmSource?.editable || !profile.canonical">Save trial for review</button>
+          </div>
+        </section>
+      </section>
+      <template v-if="report"><p class="gx-note">Offline diagnostic only · {{ report.segments.length }} {{ report.segments.length === 1 ? 'segment' : 'segments' }} · {{ report.gmEvidence ? "Human-selected GM trials" : "No tune recommendation" }}</p>
         <section v-for="entry in report.segments" :key="entry.source.segmentName" class="gx-card gx-flm__panel gx-plots__panel">
           <h3>{{ entry.source.segmentName }}</h3><p class="gx-note">{{ resultLabel(entry.analysis.status) }} · Full log SHA {{ entry.source.sha256.slice(0,12) }}…</p>
           <p>Eligible samples: {{ entry.analysis.eligible_samples }} · Mean absolute error: {{ metric(entry.analysis.mean_abs_error) }} · RMSE: {{ metric(entry.analysis.root_mean_square_error) }}</p>
