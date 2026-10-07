@@ -1,6 +1,6 @@
 import unittest
 
-from opendbc.can import CANPacker
+from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.fw_versions import match_fw_to_car
 from opendbc.car.hyundai.carcontroller import CarController
@@ -26,6 +26,38 @@ def params(candidate, fingerprint=None, car_fw=None, alpha_long=True):
 
 
 class TestNonSccFamily(unittest.TestCase):
+  def test_forte_sender_preserves_original_torque_scale_and_sibling_limits(self):
+    cases = ((CAR.KIA_FORTE_2019_NON_SCC, 255), (CAR.KIA_FORTE_2021_NON_SCC, 255),
+             (CAR.KIA_FORTE, 255), (CAR.HYUNDAI_KONA_NON_SCC, 270), (CAR.KIA_SELTOS_2023_NON_SCC, 384))
+    for candidate, maximum in cases:
+      for request in (-1., -.5, .5, 1.):
+        with self.subTest(candidate=candidate, request=request):
+          cp = params(candidate, alpha_long=False)
+          state = CarState(cp)
+          state.out = state.update(state.get_can_parsers(cp))
+          controller = CarController(DBC[candidate], cp)
+          parser = CANParser(DBC[candidate][Bus.pt], [('LKAS11', 100)], 0)
+          control = structs.CarControl()
+          control.latActive = True
+          control.actuators.torque = request
+          previous = 0
+          for frame in range(180):
+            stamp = 1_000_000_000 + frame * 10_000_000
+            _, sent = controller.update(control.as_reader(), state, stamp)
+            parser.update((stamp, sent))
+            torque = parser.vl['LKAS11']['CR_Lkas_StrToqReq']
+            self.assertLessEqual(abs(torque), maximum)
+            self.assertGreaterEqual(torque * request, 0)
+            self.assertLessEqual(abs(torque - previous), 3)
+            previous = torque
+          self.assertEqual(torque, round(request * maximum))
+          self.assertTrue(parser.vl['LKAS11']['CF_Lkas_ActToi'])
+          control.latActive = False
+          _, sent = controller.update(control.as_reader(), state, stamp + 10_000_000)
+          parser.update((stamp + 10_000_000, sent))
+          self.assertEqual(parser.vl['LKAS11']['CR_Lkas_StrToqReq'], 0)
+          self.assertFalse(parser.vl['LKAS11']['CF_Lkas_ActToi'])
+
   def test_all_ten_have_stock_longitudinal_ownership_and_lateral_only_controller(self):
     for candidate in NON_SCC_CARS:
       for alpha_long in (False, True):
