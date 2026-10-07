@@ -92,7 +92,7 @@ static bool honda_stock_aol_selected(const CANPacket_t *msg, const RxCheck *chec
   return selected;
 }
 
-static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus) {
+static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus, bool normal_engagement) {
   if (honda_stock_aol_enabled) {
     const unsigned int main_addr = honda_stock_aol_alt_main ? 0x1A6U : 0x326U;
     const unsigned int buttons_addr = honda_stock_aol_alt_main ? 0x1A6U : 0x296U;
@@ -141,6 +141,21 @@ static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus) {
       }
       honda_stock_aol_drive = (msg->addr == 0x188U) ? ((gear == 8U) || (gear == 0U)) :
         ((gear == 4U) || (gear == 7U) || (gear == 10U) || (gear == 11U));
+    }
+    // Only a newly accepted physical cruise grant can restore an independent token.
+    // Qualify after parsing this frame's brake/main state, before generic pedal checks.
+    const bool engagement_source = msg_matches(msg, 0x17CU, pt_bus, 8U) ||
+      msg_matches(msg, buttons_addr, pt_bus, buttons_len);
+    const bool request_current = !honda_stock_aol_request_seen ||
+      (safety_get_ts_elapsed(microsecond_timer_get(), aol_host_request_ts) <= AOL_HOST_REQUEST_TIMEOUT_US);
+    const bool eps_known = (honda_stock_aol_eps == 0U) || (honda_stock_aol_eps == 2U) ||
+      (honda_stock_aol_eps == 3U) || (honda_stock_aol_eps == 4U) || (honda_stock_aol_eps == 6U);
+    if (normal_engagement && engagement_source && controls_allowed && acc_main_on && honda_stock_aol_drive &&
+        eps_known && !brake_pressed && !regen_braking && !steering_disengage &&
+        heartbeat_engaged && !relay_malfunction && !safety_rx_checks_invalid && request_current &&
+        aol_rx_healthy() && honda_stock_aol_sources_current()) {
+      honda_stock_aol_token = true;
+      honda_stock_aol_session = true;
     }
   }
 }

@@ -11,19 +11,27 @@ CASES = [(vehicle, profile, factor) for profile, (vehicles, factor) in PROFILES.
 
 
 @pytest.mark.parametrize('vehicle,profile,factor', CASES)
-def test_available_exact_profile_preserves_standard_default_and_requires_saved_opt_in(vehicle, profile, factor):
+def test_exact_profile_defaults_and_saved_controller_selection(vehicle, profile, factor):
   cp = interfaces[vehicle].get_non_essential_params(vehicle)
   assert policy_for(cp) == profile
-  assert default_selection(cp).mode == ControllerMode.STANDARD
+  expected = (ControllerMode.STARPILOT if vehicle in (CAR.KIA_FORTE_2019_NON_SCC, CAR.KIA_FORTE_2021_NON_SCC)
+              else ControllerMode.STANDARD)
+  assert default_selection(cp).mode == expected
   for raw in (b'{', b'{"version":true,"vehicles":{}}', b'{"version":1,"vehicles":{},"vehicles":{}}', b'x' * 4097):
-    assert selection_from_bytes(cp, raw).mode == ControllerMode.STANDARD
+    assert selection_from_bytes(cp, raw).mode == expected
+  unrelated = interfaces[CAR.HYUNDAI_IONIQ_6].get_non_essential_params(CAR.HYUNDAI_IONIQ_6)
+  assert selection_from_bytes(cp, replace_mode(None, unrelated, ControllerMode.STANDARD)).mode == expected
   saved = replace_mode(None, cp, ControllerMode.STARPILOT)
   choice = selection_from_bytes(cp, saved)
   assert choice.mode == ControllerMode.STARPILOT
   assert choice.policy == profile
   ci = interfaces[vehicle](cp)
-  standard = LatControlTorque(cp.as_reader(), ci, 0.01)
+  default = LatControlTorque(cp.as_reader(), ci, 0.01)
+  assert bool(default.starpilot_extension) == (expected == ControllerMode.STARPILOT)
+  standard_choice = selection_from_bytes(cp, replace_mode(saved, cp, ControllerMode.STANDARD))
+  standard = LatControlTorque(cp.as_reader(), ci, 0.01, controller_mode=standard_choice.mode)
   assert standard.starpilot_extension is None
+  assert standard.torque_params.latAccelFactor == pytest.approx(cp.lateralTuning.torque.latAccelFactor)
   controller = LatControlTorque(cp.as_reader(), ci, 0.01, controller_mode=choice.mode)
   policy = controller.starpilot_extension.policy
   assert isinstance(policy, HKGVehicleTorquePolicy)
