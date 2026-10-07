@@ -14,9 +14,10 @@ from openpilot.selfdrive.ui.soundd import ALERT_VOLUME_KEYS, CRITICAL_MAX, Audib
 from openpilot.starpilot.audio.alert_volume import AUTO, SPECS, VOLUMES, effective_volume, read_volume
 from openpilot.starpilot.ui import sounds_compact
 from openpilot.starpilot.ui.feature_settings_state import (
-  feature_row_top, FeatureInput, FeatureSettingsRequest, FeatureUiAction, row_change, sound_buttons, sound_done_rect, SOUND_PRESETS,
+  feature_row_top, FeatureInput, FeatureSettingsRequest, FeatureUiAction, row_change, value_buttons, value_done_rect,
 )
 from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.ui.runtime_app import SOUND_PRESETS
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
 from openpilot.starpilot.ui.sounds_owner import SoundsOwner
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellSnapshot
@@ -168,8 +169,10 @@ class SoundsSettingsTests(unittest.TestCase):
     native.release(720, 600, summary)
     self.assertEqual(received, [FeatureUiAction("scroll")])
     received.clear()
-    state = replace(self.owner.snapshot(), rows=(self.row("WarningImmediateVolume"),))
-    _, (x, y, width, height), _ = next(button for button in sound_buttons(state, state.rows[0], feature_row_top(state)) if button[0] == "25")
+    session = self.large_session()
+    session.sounds_edit_key = "WarningImmediateVolume"
+    state = session.sounds_snapshot()
+    _, (x, y, width, height), _ = next(button for button in value_buttons(state, state.rows[0], feature_row_top(state)) if button[0] == "25")
     x, y = x + width / 2, y + height / 2
     native.press(x, y, state)
     native.move(x - 180, y, state)
@@ -180,12 +183,12 @@ class SoundsSettingsTests(unittest.TestCase):
     native.release(x, y, state)
     self.assertEqual(received[0].kind, "action")
     self.assertEqual(received[0].row.key, "WarningImmediateVolume")
-    self.assertEqual(sound_buttons(state, received[0].row)[received[0].direction][0], "25")
+    self.assertEqual(value_buttons(state, received[0].row)[received[0].direction][0], "25")
 
   def test_large_session_routes_saved_edit_and_back(self):
     session = self.large_session()
     session._sounds_ui(FeatureUiAction("open", next(row for row in session.sounds_snapshot().rows if row.key == "EngageVolume")))
-    row = self.row("EngageVolume")
+    row = session.sounds_snapshot().rows[0]
     session._sounds_ui(FeatureUiAction("change", row, 1))
     self.assertIsNone(read_volume(self.params, "EngageVolume").raw)
     session._sounds_ui(FeatureUiAction("action", row, 1))
@@ -214,7 +217,7 @@ class SoundsSettingsTests(unittest.TestCase):
           state = replace(state, sidebar_expanded=expanded, scroll=0)
           row = state.rows[0]
           self.assertEqual(row.key, key)
-          buttons = sound_buttons(state, row, feature_row_top(state))
+          buttons = value_buttons(state, row, feature_row_top(state))
           _, (x, y, width, height), enabled = next(button for button in buttons if button[0] == value)
           self.assertTrue(enabled)
           self.assertLessEqual(x + width, 2094.01)
@@ -236,7 +239,7 @@ class SoundsSettingsTests(unittest.TestCase):
             self.assertIsNone(FeatureInput.target(x, y, fresh))
         for value in (minimum, 100, AUTO):
           self.params.put(key, value, block=True)
-          buttons = sound_buttons(session.sounds_snapshot(), self.row(key))
+          buttons = value_buttons(session.sounds_snapshot(), session.sounds_snapshot().rows[0])
           self.assertEqual(buttons[0][2], value != minimum and value != AUTO)
           self.assertEqual(buttons[-1][2], value != 100 and value != AUTO)
     row = self.row("EngageVolume")
@@ -252,8 +255,8 @@ class SoundsSettingsTests(unittest.TestCase):
     self.assertGreater(len(self.owner.snapshot().rows), 8)
     state = session.sounds_snapshot()
     repair = replace(self.row(row.key), step=0, repair_value="Auto", value="Invalid saved level")
-    self.assertEqual(sound_buttons(state, repair), ())
-    self.assertEqual(sound_buttons(state, next(row for row in state.rows if row.key == "SoundPack")), ())
+    self.assertEqual(value_buttons(state, repair), ())
+    self.assertEqual(value_buttons(state, next(row for row in state.rows if row.key == "SoundPack")), ())
 
   def test_summary_opens_one_editor_and_returns_to_same_page_without_writes(self):
     session = self.large_session()
@@ -262,7 +265,7 @@ class SoundsSettingsTests(unittest.TestCase):
     state = replace(session.sounds_snapshot(), scroll=5)
     self.assertEqual(state.page, "sounds:overview")
     self.assertEqual(len(state.rows), 8)
-    self.assertTrue(all(sound_buttons(state, row) == () for row in state.rows))
+    self.assertTrue(all(value_buttons(state, row) == () for row in state.rows))
     self.assertEqual(next(row for row in state.rows if row.key == "EngageVolume").value, "40")
     received = []
     native = FeatureInput(received.append)
@@ -278,7 +281,7 @@ class SoundsSettingsTests(unittest.TestCase):
     self.assertEqual(session.sounds_scroll, 5)
     self.assertIsNone(read_volume(self.params, "PromptVolume").raw)
     received.clear()
-    x, y, width, height = sound_done_rect(editor)
+    x, y, width, height = value_done_rect(editor)
     native.press(x + width / 2, y + height / 2, editor)
     native.release(x + width / 2, y + height / 2, editor)
     session._sounds_ui(received[0])
@@ -327,14 +330,14 @@ class SoundsSettingsTests(unittest.TestCase):
               session.input = ShellInput(Profile.LARGE, session._emit)
               session.sounds_request = Mock(wraps=session.sounds_request)
               if control == "done":
-                x, y, width, height = sound_done_rect(editor)
+                x, y, width, height = value_done_rect(editor)
                 x, y = x + width / 2, y + height / 2
               elif control == "sidebar":
                 x, y = 240, 345
               elif key == "SoundPack":
                 x, y = 2010, feature_row_top(editor) + 77
               else:
-                _, (x, y, width, height), _ = next(button for button in sound_buttons(editor, editor.rows[0], feature_row_top(editor))
+                _, (x, y, width, height), _ = next(button for button in value_buttons(editor, editor.rows[0], feature_row_top(editor))
                                                  if button[0] == "25")
                 x, y = x + width / 2, y + height / 2
               with patch.object(runtime_app, "ui_state", SimpleNamespace(started=False, started_frame=0)):
@@ -366,7 +369,7 @@ class SoundsSettingsTests(unittest.TestCase):
         self.parked = False
         state = replace(session.sounds_snapshot(), sidebar_expanded=expanded)
         before = tuple(row.source for row in self.owner.snapshot().rows)
-        x, y, width, height = sound_done_rect(state)
+        x, y, width, height = value_done_rect(state)
         x, y = x + width / 2, y + height / 2
         received = []
         native = FeatureInput(received.append)

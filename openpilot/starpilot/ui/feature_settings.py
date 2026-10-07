@@ -11,7 +11,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
   FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN, FEATURE_HEADER_HEIGHT,
   FEATURE_TAP_SLOP, FEATURE_FLICK_DISTANCE, FEATURE_PAGE_COUNTER_WIDTH,
-  feature_scroll, feature_action_left, feature_row_top, feature_page_counter_left, sound_buttons, sound_editor_rect, sound_done_rect,
+  feature_scroll, feature_action_left, feature_row_top, feature_page_counter_left, value_buttons, value_editor_rect, value_done_rect, value_text,
 )
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.settings_geometry import (
@@ -24,8 +24,8 @@ LABEL_SIZE = 50
 DETAIL_SIZE = 35
 PAGE_TRANSITION_TIME = 0.18
 EDGE_ACCENT = rl.color_lerp(PANEL_BG, ACCENT, 0.5)
-SOUND_SELECTED_BORDER = rl.Color(ACCENT.r, ACCENT.g, ACCENT.b, 100)
-SOUND_DONE_BG = rl.Color(ACCENT.r, ACCENT.g, ACCENT.b, 34)
+VALUE_SELECTED_BORDER = rl.Color(ACCENT.r, ACCENT.g, ACCENT.b, 100)
+VALUE_DONE_BG = rl.Color(ACCENT.r, ACCENT.g, ACCENT.b, 34)
 
 
 def _confirmation(row: FeatureRow) -> bool:
@@ -108,10 +108,10 @@ class FeatureSettingsView:
     if subtitle:
       top, _ = self.fonts.vertical_ink(subtitle, FontRole.NORMAL, DETAIL_SIZE)
       self.fonts.draw(subtitle, FontRole.NORMAL, DETAIL_SIZE, left + 55, 116 - top, TEXT_SECONDARY)
-    if len(state.rows) == 1 and (buttons := sound_buttons(state, state.rows[0], row_top)):
+    if len(state.rows) == 1 and (buttons := value_buttons(state, state.rows[0], row_top)):
       self._page_frame(state, 0, False)
-      self._sound_row(state.rows[0], rl.Rectangle(*sound_editor_rect(state)), buttons)
-      self._sound_done(state)
+      self._value_row(state, state.rows[0], rl.Rectangle(*value_editor_rect(state)), buttons)
+      self._value_done(state)
       return
     clip.begin_scissor_mode(left + 25, row_top, 2100 - left, FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT)
     try:
@@ -144,8 +144,8 @@ class FeatureSettingsView:
             draw_rounded_fill(bounds, ACTIVE_ROW_BG, radius_px=12)
             draw_rounded_stroke(bounds, ACTIVE_ROW_BORDER, radius_px=12)
           rl.draw_line(left + 55, y + FEATURE_ROW_HEIGHT - 3, 2094, y + FEATURE_ROW_HEIGHT - 3, ROW_SEPARATOR)
-          if rows_state.page == "sounds:overview":
-            self._sound_summary(row, y, left)
+          if rows_state.page == "sounds:overview" or row.presets and not rows_state.editor:
+            self._value_summary(row, y, left)
             continue
           has_control = bool(row.actions or row.page or _confirmation(row) or row.available or value is not None)
           width = (feature_action_left(row) - 24 if has_control else 2094) - (left + 55)
@@ -228,8 +228,8 @@ class FeatureSettingsView:
                               rl.Color(PANEL_BG.r, PANEL_BG.g, PANEL_BG.b, cover))
     finally:
       clip.end_scissor_mode()
-    if state.page == "sounds" and len(state.rows) == 1:
-      self._sound_done(state)
+    if state.editor:
+      self._value_done(state)
       return
     self._center("Previous", DETAIL_SIZE, rl.Rectangle(left + 25, 980, 1320 - left - 25, 70),
                  TEXT_PRIMARY if state.scroll > 0 else TEXT_MUTED)
@@ -240,8 +240,8 @@ class FeatureSettingsView:
     self._center(f"{current_page}/{total_pages}", DETAIL_SIZE,
                  rl.Rectangle(feature_page_counter_left(state), 980, FEATURE_PAGE_COUNTER_WIDTH, 70), TEXT_SECONDARY)
 
-  def _sound_summary(self, row, y, left) -> None:
-    value = "Muted" if row.value == "0" else row.value + ("%" if row.unit and row.value != "Auto" else "")
+  def _value_summary(self, row, y, left) -> None:
+    value = value_text(row)
     value = self._elide(value, FontRole.SEMI_BOLD, DETAIL_SIZE, (2094 - left - 55) / 2)
     value_width = self.fonts.measure(value, FontRole.SEMI_BOLD, DETAIL_SIZE).width
     label = self._elide(row.label, FontRole.NORMAL, LABEL_SIZE, 2050 - value_width - 48 - left - 55)
@@ -251,27 +251,27 @@ class FeatureSettingsView:
       top, bottom = self.fonts.vertical_ink(text, role, size)
       self.fonts.draw(text, role, size, x, y + (FEATURE_ROW_HEIGHT - top - bottom) / 2, color)
 
-  def _sound_done(self, state) -> None:
-    button = rl.Rectangle(*sound_done_rect(state))
-    draw_rounded_fill(button, SOUND_DONE_BG, radius_px=32)
-    draw_rounded_stroke(button, SOUND_SELECTED_BORDER, radius_px=32)
+  def _value_done(self, state) -> None:
+    button = rl.Rectangle(*value_done_rect(state))
+    draw_rounded_fill(button, VALUE_DONE_BG, radius_px=32)
+    draw_rounded_stroke(button, VALUE_SELECTED_BORDER, radius_px=32)
     self._center("Done", 44, button)
 
-  def _sound_row(self, row, editor, buttons) -> None:
-    value = "Muted" if row.value == "0" else "Auto" if row.value == "Auto" else row.value + "%"
-    self._center("Saved level", DETAIL_SIZE, rl.Rectangle(editor.x, editor.y, editor.width, 52),
+  def _value_row(self, state, row, editor, buttons) -> None:
+    value = value_text(row)
+    self._center("Saved level" if row.unit == "%" else "Saved value", DETAIL_SIZE, rl.Rectangle(editor.x, editor.y, editor.width, 52),
                  TEXT_SECONDARY, role=FontRole.NORMAL)
     self._center(value, 140, rl.Rectangle(editor.x + 232, buttons[0][1][1], editor.width - 464, buttons[0][1][3]),
                  ACCENT if row.available else TEXT_MUTED, role=FontRole.SEMI_BOLD)
-    self._center("Changes save automatically" if row.available else "Editing unavailable", 32,
+    self._center(state.save_hint if row.available else "Editing unavailable", 32,
                  rl.Rectangle(editor.x, editor.y + 580, editor.width, 44), TEXT_SECONDARY, role=FontRole.NORMAL)
     for value, bounds, enabled in buttons:
       button = rl.Rectangle(*bounds)
       selected = value == row.value
       step = value in ("-", "+")
-      text = "Mute" if value == "0" else value if step or value == "Auto" else value + "%"
+      text = value if step else dict(row.presets)[value]
       draw_rounded_fill(button, ACTIVE_ROW_BG if selected and row.available else CONTROL_BG, radius_px=32)
-      draw_rounded_stroke(button, SOUND_SELECTED_BORDER if selected and row.available else CONTROL_BORDER, radius_px=32)
+      draw_rounded_stroke(button, VALUE_SELECTED_BORDER if selected and row.available else CONTROL_BORDER, radius_px=32)
       self._center(text, 64 if step else 44, button,
                    TEXT_PRIMARY if row.available and (enabled or selected) else TEXT_MUTED)
 

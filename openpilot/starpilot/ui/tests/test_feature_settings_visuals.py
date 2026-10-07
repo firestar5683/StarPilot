@@ -11,9 +11,10 @@ import pyray as rl
 from openpilot.starpilot.ui import clip, feature_settings as view, settings_geometry as geometry
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
-  feature_scroll, feature_row_top, sound_buttons, sound_editor_rect, sound_done_rect,
+  feature_scroll, feature_row_top, value_buttons, value_editor_rect, value_done_rect,
 )
 from openpilot.starpilot.ui.presentation import FontRole, Profile
+from openpilot.starpilot.ui.runtime_app import SOUND_PRESETS
 
 
 def fake_fonts():
@@ -23,10 +24,45 @@ def fake_fonts():
 
 
 class FeatureVisualTests(unittest.TestCase):
+  def test_system_value_units_and_confirmation_hint_share_drawn_touch_bounds(self):
+    from openpilot.starpilot.ui.runtime_app import SYSTEM_PRESETS
+    from openpilot.starpilot.ui.power_owner import HOUR_CHOICES, VOLT_CHOICES
+    self.drawing()
+    rows = (
+      FeatureRow("ScreenBrightness", "Brightness", "42", unit="%", step=1, minimum=5, maximum=100),
+      FeatureRow("ScreenTimeout", "Timeout", "30", unit="s", step=5, minimum=5, maximum=60),
+      FeatureRow("power:hours", "Parked time", "6 h", choices=HOUR_CHOICES),
+      FeatureRow("power:volts", "Voltage", "12.0 V", choices=VOLT_CHOICES),
+    )
+    for expanded in (True, False):
+      for row, expected in zip(rows, ("42%", "30 s", "6 h", "12.0 V"), strict=True):
+        row = replace(row, available=True, presets=SYSTEM_PRESETS[row.key])
+        state = FeatureSettingsState(rows=(row,), sidebar_expanded=expanded, editor=True,
+                                     save_hint="Changes require confirmation" if row.key.startswith("power:") else "Changes save automatically")
+        fonts = fake_fonts()
+        view.FeatureSettingsView(fonts).render(state)
+        text = [call.args[0] for call in fonts.draw.call_args_list]
+        self.assertIn(expected, text)
+        self.assertIn(state.save_hint, text)
+        self.assertIn("Done", text)
+        self.assertNotIn("Next", text)
+        for index, (value, (x, y, width, height), enabled) in enumerate(value_buttons(state, row, feature_row_top(state))):
+          label = value if value in ("-", "+") else dict(row.presets)[value]
+          drawn = next(call for call in fonts.draw.call_args_list if call.args[0] == label and call.args[1] == FontRole.MEDIUM)
+          self.assertAlmostEqual(drawn.args[3] + fonts.measure(*drawn.args[:3]).width / 2, x + width / 2, delta=.01)
+          self.assertGreater(width, fonts.measure(label, FontRole.MEDIUM, drawn.args[2]).width + 24)
+          self.assertEqual(height, 200)
+          self.assertLessEqual(x + width, 2094.01)
+          target = FeatureInput.target(x + width / 2, y + height / 2, state)
+          if enabled:
+            self.assertEqual(target.direction, (-1 if value == "-" else 1) if value in ("-", "+") else index)
+          else:
+            self.assertIsNone(target)
+
   def test_sound_overview_shows_values_without_edit_controls(self):
     self.drawing()
     for expanded in (True, False):
-      rows = (FeatureRow("EngageVolume", "Engagement Chime", "40", source=b"40", unit="%", step=5,
+      rows = (FeatureRow("EngageVolume", "Engagement Chime", "40", source=b"40", unit="%", presets=(("25", "25%"),), step=5,
                          minimum=0, maximum=100, available=True, page="EngageVolume"),
               FeatureRow("SoundPack", "Sound Pack", "StarPilot (Built-in)", available=True, page="SoundPack"))
       state = FeatureSettingsState(page="sounds:overview", rows=rows, sidebar_expanded=expanded)
@@ -49,15 +85,17 @@ class FeatureVisualTests(unittest.TestCase):
       for key, minimum in (("WarningSoftVolume", 25), ("EngageVolume", 0)):
         for value in ("40", "50", "Auto", *(() if minimum else ("0",))):
           row = FeatureRow(key, "Alert", value, source=value.encode(), step=5, minimum=minimum, maximum=100,
-                           available=True, reason="Existing details")
-          state = FeatureSettingsState(page="sounds", rows=(row,), sidebar_expanded=expanded)
+                           available=True, reason="Existing details", unit="%",
+                           presets=tuple((v, "Mute" if v == "0" else v if v == "Auto" else v + "%")
+                                         for v in SOUND_PRESETS if v == "Auto" or minimum <= int(v) <= 100))
+          state = FeatureSettingsState(page="sounds", rows=(row,), sidebar_expanded=expanded, editor=True)
           fonts = fake_fonts()
           rl.draw_line_ex.reset_mock()
           rl.draw_rectangle_rounded_lines_ex.reset_mock()
           with patch.object(view, "draw_settings_header"):
             view.FeatureSettingsView(fonts).render(state)
           rl.draw_line_ex.assert_not_called()
-          selected = [call for call in rl.draw_rectangle_rounded_lines_ex.call_args_list if call.args[-1] == view.SOUND_SELECTED_BORDER]
+          selected = [call for call in rl.draw_rectangle_rounded_lines_ex.call_args_list if call.args[-1] == view.VALUE_SELECTED_BORDER]
           self.assertEqual(len(selected), 1 if value == "40" else 2)
           rl.draw_rectangle_rounded_lines_ex.reset_mock()
           text = [call.args[0] for call in fonts.draw.call_args_list]
@@ -71,9 +109,9 @@ class FeatureVisualTests(unittest.TestCase):
           self.assertIn("Done", text)
           self.assertNotIn("Back", text)
           self.assertNotIn("Next", text)
-          buttons = sound_buttons(state, row, feature_row_top(state))
+          buttons = value_buttons(state, row, feature_row_top(state))
           first, last = buttons[1][1], buttons[-2][1]
-          cx, cy, editor_width, editor_height = sound_editor_rect(state)
+          cx, cy, editor_width, editor_height = value_editor_rect(state)
           self.assertEqual(cx, (520 if expanded else 20) + 55)
           self.assertAlmostEqual(saved.args[3] + fonts.measure(*saved.args[:3]).width / 2, cx + editor_width / 2)
           top, bottom = fonts.vertical_ink(*saved.args[:3])
@@ -81,7 +119,7 @@ class FeatureVisualTests(unittest.TestCase):
           self.assertEqual(first[0], cx)
           self.assertAlmostEqual(last[0] + last[2], 2094)
           self.assertGreater(first[1], buttons[0][1][1] + buttons[0][1][3])
-          bx, by, bw, bh = sound_done_rect(state)
+          bx, by, bw, bh = value_done_rect(state)
           done = next(call for call in fonts.draw.call_args_list if call.args[0] == "Done")
           self.assertAlmostEqual(done.args[3] + fonts.measure(*done.args[:3]).width / 2, bx + bw / 2)
           self.assertLessEqual(by + bh, cy + editor_height)
@@ -92,7 +130,7 @@ class FeatureVisualTests(unittest.TestCase):
           self.assertEqual(FeatureInput.target(bx + 20, by + bh - 5, state).kind, "back")
           self.assertEqual(FeatureInput.target(bx + bw - 20, by + bh - 5, state).kind, "back")
           self.assertIsNone(FeatureInput.target(1900, by + bh + 10, state))
-          for index, (button, (x, y, width, height), enabled) in enumerate(sound_buttons(state, row, feature_row_top(state))):
+          for index, (button, (x, y, width, height), enabled) in enumerate(value_buttons(state, row, feature_row_top(state))):
             label = "Mute" if button == "0" else button if button in ("-", "+", "Auto") else button + "%"
             drawn = next(call for call in fonts.draw.call_args_list if call.args[0] == label and call.args[1] == FontRole.MEDIUM)
             self.assertEqual(height, 200)
@@ -104,7 +142,7 @@ class FeatureVisualTests(unittest.TestCase):
               self.assertEqual(target.direction, (-1 if button == "-" else 1) if button in ("-", "+") else index)
             else:
               self.assertIsNone(target)
-          self.assertEqual(sound_buttons(replace(state, page="display"), row), ())
+          self.assertEqual(value_buttons(replace(state, editor=False), row), ())
           self.assertEqual(FeatureInput.target(1300, feature_row_top(state) + 157, state).kind, "details")
           self.assertIsNone(FeatureInput.target(1300, feature_row_top(state) + 330, state))
           disabled = replace(state, rows=(replace(row, available=False),))
@@ -114,7 +152,7 @@ class FeatureVisualTests(unittest.TestCase):
           self.assertIn("Editing unavailable", [call.args[0] for call in fonts.draw.call_args_list])
           saved = next(call for call in fonts.draw.call_args_list if call.args[1] == FontRole.SEMI_BOLD)
           self.assertEqual(saved.args[-1], geometry.TEXT_MUTED)
-          for _, (x, y, width, height), enabled in sound_buttons(disabled, disabled.rows[0], feature_row_top(disabled)):
+          for _, (x, y, width, height), enabled in value_buttons(disabled, disabled.rows[0], feature_row_top(disabled)):
             self.assertFalse(enabled)
             self.assertIsNone(FeatureInput.target(x + width / 2, y + height / 2, disabled))
 

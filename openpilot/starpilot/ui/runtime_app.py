@@ -33,7 +33,7 @@ from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.conditional_feature import confirmation_question as conditional_question
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
-from openpilot.starpilot.ui.display_owner import DisplayOwner
+from openpilot.starpilot.ui.display_owner import AUTO_PREFIX as DISPLAY_AUTO_PREFIX, DisplayOwner
 from openpilot.starpilot.ui.developer_preview import parse_flags, preview_at
 from openpilot.starpilot.ui.power_owner import POWER_KEYS, PowerOwner, confirm_question, power_row_change
 from openpilot.starpilot.ui.pip_owner import FORMAT_PREFIX as PIP_FORMAT_PREFIX, PiPOwner, RESET as PIP_RESET
@@ -47,7 +47,7 @@ from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns
 from openpilot.starpilot.ui.sounds_owner import AUTO_PREFIX as SOUND_AUTO_PREFIX, SoundsOwner
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureInput, FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureUiAction, row_change,
-  feature_scroll, feature_parent_page, feature_parent_title, sound_buttons,
+  feature_scroll, feature_parent_page, feature_parent_title, value_request,
 )
 from openpilot.starpilot.ui.lane_change_feature import KEYS as LANE_CHANGE_KEYS, RESET as LANE_CHANGE_RESET
 from openpilot.starpilot.models.runtime import ModelStatusSource
@@ -96,6 +96,15 @@ _FEATURE_SETTINGS_PANES = {
   Destination.SYSTEM: ("display", "display", "display"),
   Destination.DRIVING_MODEL: ("models", "model", "models"),
 }
+SOUND_PRESETS = ("0", "10", "25", "50", "75", "100", "Auto")
+SYSTEM_PRESETS = {
+  "ScreenBrightness": tuple((str(value), f"{value}%") for value in (10, 25, 50, 75, 100)) + (("Auto", "Auto"),),
+  "ScreenTimeout": tuple((str(value), f"{value} s") for value in (5, 10, 15, 30, 60)),
+  "power:hours": tuple((f"{value} h", f"{value} h") for value in (1, 3, 6, 12, 24, 30)),
+  "power:volts": tuple((f"{value} V", f"{value} V") for value in ("11.8", "12.0", "12.2", "12.5")),
+}
+SYSTEM_PRESETS["ScreenBrightnessOnroad"] = SYSTEM_PRESETS["ScreenBrightness"]
+SYSTEM_PRESETS["ScreenTimeoutOnroad"] = SYSTEM_PRESETS["ScreenTimeout"]
 
 
 def validate_runtime_fonts(profile: Profile) -> None:
@@ -204,6 +213,7 @@ class StarShellSession:
     self.sounds_edit_key: str | None = None
     self.appearance_scroll = 0
     self.display_scroll = 0
+    self.display_edit_key: str | None = None
     self.slc_actions: SlcActionDispatcher | None = None
     if slc_action_transport_enabled(os.environ, ui_state.params):
       try:
@@ -634,9 +644,13 @@ class StarShellSession:
     state = self.sounds_owner.snapshot()
     if self.profile == Profile.LARGE:
       rows = tuple(row for row in state.rows if not row.key.startswith(SOUND_AUTO_PREFIX))
+      rows = tuple(replace(row, presets=tuple(
+        (value, "Mute" if value == "0" else value if value == "Auto" else value + "%")
+        for value in SOUND_PRESETS if value == "Auto" or row.minimum <= int(value) <= row.maximum))
+        if row.unit == "%" else row for row in rows)
       if self.sounds_edit_key is not None:
         row = next(row for row in rows if row.key == self.sounds_edit_key)
-        return replace(state, title=row.label, subtitle=row.reason, rows=(row,), parent_title="Sounds & Alerts")
+        return replace(state, title=row.label, subtitle=row.reason, rows=(row,), parent_title="Sounds & Alerts", editor=True)
       state = replace(state, page="sounds:overview", rows=tuple(replace(row, page=row.key) for row in rows), subtitle="")
     return state
 
@@ -727,8 +741,17 @@ class StarShellSession:
                            choices=("Auto", "Offroad", "Onroad"), available=drive["available"],
                            reason=f"Device: {drive["effective"] or 'unavailable'}. " +
                                   "Offroad stops services; Onroad requires Park and disengagement. Auto follows ignition.")
-    return replace(display, title="System", subtitle="Display, parked power, and offline map status.",
-                   rows=display.rows + power.rows + maps.rows + (drive_row,))
+    state = replace(display, title="System", subtitle="Display, parked power, and offline map status.",
+                    rows=display.rows + power.rows + maps.rows + (drive_row,))
+    if self.profile == Profile.LARGE:
+      rows = tuple(replace(row, presets=SYSTEM_PRESETS[row.key], page=row.key) if row.key in SYSTEM_PRESETS else row
+                   for row in state.rows if not row.key.startswith(DISPLAY_AUTO_PREFIX))
+      if getattr(self, "display_edit_key", None) is not None:
+        row = next(row for row in rows if row.key == self.display_edit_key)
+        return replace(state, title=row.label, subtitle=row.reason, rows=(replace(row, page=""),), parent_title="System",
+                       editor=True, save_hint="Changes require confirmation" if row.key in POWER_KEYS else state.save_hint)
+      state = replace(state, rows=rows)
+    return state
 
   def map_snapshot(self):
     if getattr(self, "map_source", None) is None:
@@ -816,13 +839,24 @@ class StarShellSession:
       return
     state = self.system_snapshot()
     if action.kind == "back":
-      self.selected = Destination.STAR
-      self.display_scroll = 0
+      if state.editor:
+        self.display_edit_key = None
+      else:
+        self.selected = Destination.STAR
+        self.display_scroll = 0
       self.input.cancel()
-    elif action.kind == "scroll":
+    elif action.kind == "open" and not state.editor and action.row in state.rows and action.row.available and action.row.presets:
+      self.display_edit_key = action.row.key
+      self.input.cancel()
+    elif action.kind == "scroll" and not state.editor:
       self.display_scroll = feature_scroll(self.display_scroll, action.direction, len(state.rows))
-    elif action.kind == "change" and action.row is not None and action.row in state.rows:
-      request = power_row_change(action.row, action.direction) if action.row.key in POWER_KEYS else row_change(action.row, action.direction)
+    elif action.kind in ("change", "action") and action.row is not None and action.row in state.rows:
+      if state.editor:
+        request = value_request(state, action)
+      elif action.kind == "change" and not action.row.presets:
+        request = power_row_change(action.row, action.direction) if action.row.key in POWER_KEYS else row_change(action.row, action.direction)
+      else:
+        return
       if request is not None:
         if request.key in POWER_KEYS:
           from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
@@ -930,19 +964,7 @@ class StarShellSession:
     elif action.kind == "scroll" and self.sounds_edit_key is None:
       self.sounds_scroll = feature_scroll(self.sounds_scroll, action.direction, len(state.rows))
     elif action.kind in ("change", "action") and state.page == "sounds" and action.row is not None and action.row in state.rows:
-      buttons = sound_buttons(state, action.row)
-      if action.kind == "action":
-        if not 0 <= action.direction < len(buttons):
-          return
-        value, _, enabled = buttons[action.direction]
-        if not enabled or value in ("-", "+"):
-          return
-        request = FeatureSettingsRequest(action.row.key, action.row.source, value)
-      else:
-        if buttons and (action.direction not in (-1, 1) or not any(
-            value == ("-" if action.direction == -1 else "+") and enabled for value, _, enabled in buttons)):
-          return
-        request = row_change(action.row, action.direction)
+      request = value_request(state, action)
       if request is not None:
         self.sounds_request(request)
     self._snapshot_cache = None
@@ -1166,8 +1188,9 @@ class StarShellSession:
       snapshot = replace(snapshot, appearance=appearance)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SYSTEM:
       display = self.system_snapshot()
-      self.display_scroll = feature_scroll(self.display_scroll, 0, len(display.rows))
-      display = replace(display, scroll=self.display_scroll, sidebar_expanded=self.sidebar_expanded)
+      if not display.editor:
+        self.display_scroll = feature_scroll(self.display_scroll, 0, len(display.rows))
+      display = replace(display, scroll=0 if display.editor else self.display_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, display=display)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.DRIVING_MODEL:
       models = self.model_snapshot()
@@ -1305,6 +1328,7 @@ class StarShellSession:
             self.appearance_page = "appearance"
           elif destination == Destination.SYSTEM:
             self.display_scroll = 0
+            self.display_edit_key = None
           elif destination == Destination.DRIVING_MODEL:
             self.model_scroll = 0
         elif action.destination.available and self._on_compact_destination is not None:
@@ -1395,8 +1419,10 @@ class StarShellSession:
       return None
     if (pane := _FEATURE_SETTINGS_PANES.get(self.selected)) and self.profile == Profile.LARGE:
       state = getattr(snapshot, pane[0])
-      scroll = 0 if self.selected == Destination.SOUNDS and self.sounds_edit_key is not None else getattr(self, pane[1] + "_scroll")
+      edit_key = getattr(self, pane[1] + "_edit_key", None)
+      scroll = 0 if edit_key is not None else getattr(self, pane[1] + "_scroll")
       if (state.scroll != scroll or
+          state.editor != (edit_key is not None) or (state.editor and state.rows[0].key != edit_key) or
           state.page != getattr(self, pane[1] + "_page", state.page) or
           state.sidebar_expanded != self.sidebar_expanded):
         self.cancel()

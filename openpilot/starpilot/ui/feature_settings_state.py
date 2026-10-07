@@ -6,8 +6,6 @@ import math
 from collections import deque
 from collections.abc import Callable
 
-from openpilot.starpilot.audio.alert_volume import SPECS as SOUND_VOLUME_SPECS
-
 FEATURE_HEADER_HEIGHT = 88
 FEATURE_BACK_WIDTH = 208
 FEATURE_ROW_TOP = 112
@@ -25,7 +23,6 @@ FEATURE_FLICK_DISTANCE = 60
 FEATURE_FLICK_VELOCITY = 800
 FEATURE_FLICK_WINDOW = 0.1
 FEATURE_FLICK_PAUSE = 0.06
-SOUND_PRESETS = ("0", "10", "25", "50", "75", "100", "Auto")
 
 
 def is_long_confirm_action(key: str) -> bool:
@@ -84,6 +81,7 @@ class FeatureRow:
   default_value: str | None = None
   default_key: str = ""
   actions: tuple[tuple[str, bool], ...] = ()
+  presets: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,40 +94,58 @@ class FeatureSettingsState:
   scroll: int = 0
   sidebar_expanded: bool = True
   parent_title: str = "StarPilot"
+  editor: bool = False
+  save_hint: str = "Changes save automatically"
 
 
 def feature_row_top(state: FeatureSettingsState) -> int:
   return FEATURE_ROW_TOP + (52 if state.subtitle else 0)
 
 
-def sound_editor_rect(state: FeatureSettingsState) -> tuple[float, float, float, float]:
+def value_editor_rect(state: FeatureSettingsState) -> tuple[float, float, float, float]:
   left = (520 if state.sidebar_expanded else 20) + 55
   top = feature_row_top(state) + 24
   return left, top, 2094 - left, 1020 - top
 
 
-def sound_done_rect(state: FeatureSettingsState) -> tuple[float, float, float, float]:
-  x, y, width, height = sound_editor_rect(state)
+def value_done_rect(state: FeatureSettingsState) -> tuple[float, float, float, float]:
+  x, y, width, height = value_editor_rect(state)
   return x, y + height - 140, width, 140
 
 
-def sound_buttons(state: FeatureSettingsState, row: FeatureRow, y: float = 0) -> tuple[tuple[str, tuple[float, float, float, float], bool], ...]:
-  """Shared Big UI sound control geometry and availability; values bind to the saved row."""
-  if state.page != "sounds" or len(state.rows) != 1 or row.key not in SOUND_VOLUME_SPECS or row.repair_value or not row.step:
+def value_buttons(state: FeatureSettingsState, row: FeatureRow, y: float = 0) -> tuple[tuple[str, tuple[float, float, float, float], bool], ...]:
+  """Shared value-editor geometry; limits and choices come from the saved row."""
+  if not state.editor or len(state.rows) != 1 or not row.presets or row.repair_value:
     return ()
-  left, _, editor_width, _ = sound_editor_rect(state)
+  left, _, editor_width, _ = value_editor_rect(state)
   step_width, gap, height = 200, 24, 200
-  presets = tuple(value for value in SOUND_PRESETS if value == "Auto" or row.minimum <= int(value) <= row.maximum)
+  presets = tuple(value for value, _ in row.presets)
   width = (editor_width - (len(presets) - 1) * gap) / len(presets)
-  numeric = row.value != "Auto"
+  if row.step:
+    try:
+      current = float(row.value)
+    except ValueError:
+      current = None
+    minus = current is not None and current > row.minimum
+    plus = current is not None and current < row.maximum
+  else:
+    index = row.choices.index(row.value) if row.value in row.choices else -1
+    minus, plus = index > 0, 0 <= index < len(row.choices) - 1
   buttons = [("-", (left, y + 110, step_width, height),
-              row.available and numeric and float(row.value) > row.minimum)]
+              row.available and minus)]
   buttons.extend((value, (left + slot * (width + gap), y + 356, width, height),
                   row.available and row.value != value)
                  for slot, value in enumerate(presets))
   buttons.append(("+", (left + editor_width - step_width, y + 110, step_width, height),
-                  row.available and numeric and float(row.value) < row.maximum))
+                  row.available and plus))
   return tuple(buttons)
+
+
+def value_text(row: FeatureRow) -> str:
+  label = dict(row.presets).get(row.value)
+  if label is not None:
+    return "Muted" if label == "Mute" else label
+  return row.value + (("" if row.unit == "%" else " ") + row.unit if row.unit and row.value != "Auto" else "")
 
 
 def feature_page_counter_left(state: FeatureSettingsState) -> float:
@@ -222,13 +238,12 @@ class FeatureInput:
       return FeatureUiAction("back") if not state.sidebar_expanded and x < left + FEATURE_BACK_WIDTH else None
     if 12 + FEATURE_HEADER_HEIGHT < y < row_top:
       return FeatureUiAction("details") if state.subtitle else None
-    sound_editor = state.page == "sounds" and len(state.rows) == 1
-    if sound_editor:
-      bx, by, width, height = sound_done_rect(state)
+    if state.editor:
+      bx, by, width, height = value_done_rect(state)
       if bx <= x <= bx + width and by <= y <= by + height:
         return FeatureUiAction("back")
     if 980 <= y <= 1050:
-      if sound_editor:
+      if state.editor:
         return None
       counter_left = feature_page_counter_left(state)
       if counter_left <= x <= counter_left + FEATURE_PAGE_COUNTER_WIDTH:
@@ -236,14 +251,14 @@ class FeatureInput:
       return FeatureUiAction("scroll", direction=-1 if x < 1320 else 1)
     if not row_top <= y < row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT:
       return None
-    if len(state.rows) == 1 and (sound_controls := sound_buttons(state, state.rows[0], row_top)):
+    if len(state.rows) == 1 and (controls := value_buttons(state, state.rows[0], row_top)):
       row = state.rows[0]
-      for button, (value, (bx, by, width, height), enabled) in enumerate(sound_controls):
+      for button, (value, (bx, by, width, height), enabled) in enumerate(controls):
         if bx <= x <= bx + width and by <= y <= by + height:
           if not enabled:
             return None
           return FeatureUiAction("change", row, -1 if value == "-" else 1) if value in ("-", "+") else FeatureUiAction("action", row, button)
-      return FeatureUiAction("details", row) if sound_controls[0][1][1] <= y <= sound_controls[0][1][1] + sound_controls[0][1][3] else None
+      return FeatureUiAction("details", row) if controls[0][1][1] <= y <= controls[0][1][1] + controls[0][1][3] else None
     visible = int((y - row_top) // FEATURE_ROW_HEIGHT)
     index = state.scroll + visible
     if 0 <= index < len(state.rows):
@@ -346,6 +361,30 @@ class FeatureInput:
     self._drag_x = 0.0
 
 
+def row_request(row: FeatureRow, value: str) -> FeatureSettingsRequest:
+  return FeatureSettingsRequest(row.key, row.source, value, related_source=row.related_source,
+                                vehicle_fingerprint=row.vehicle_fingerprint, capability=row.capability,
+                                dependencies=row.dependencies, display_unit=row.display_unit)
+
+
+def value_request(state: FeatureSettingsState, action: FeatureUiAction) -> FeatureSettingsRequest | None:
+  row = action.row
+  if row is None or row not in state.rows or not row.available:
+    return None
+  buttons = value_buttons(state, row)
+  if action.kind == "action":
+    if not 0 <= action.direction < len(buttons):
+      return None
+    value, _, enabled = buttons[action.direction]
+    return row_request(row, value) if enabled and value not in ("-", "+") else None
+  if action.kind == "change":
+    if buttons and (action.direction not in (-1, 1) or not any(
+        value == ("-" if action.direction == -1 else "+") and enabled for value, _, enabled in buttons)):
+      return None
+    return row_change(row, action.direction)
+  return None
+
+
 def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | None:
   """Bind a press to the displayed source, never a later refreshed value."""
   if not row.available:
@@ -376,9 +415,7 @@ def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | 
       return None
   else:
     return None
-  return FeatureSettingsRequest(row.key, row.source, value, related_source=row.related_source,
-                                vehicle_fingerprint=row.vehicle_fingerprint, capability=row.capability,
-                                dependencies=row.dependencies, display_unit=row.display_unit)
+  return row_request(row, value)
 
 
 def row_default(row: FeatureRow) -> FeatureSettingsRequest | None:
