@@ -715,6 +715,7 @@ class TestVoltCcPedalProfiles(unittest.TestCase):
           self.assertIsNotNone(volt_cc_pedal_profile(cp))
 
   def test_actual_parser_keeps_cc_engagement_and_pedal_telemetry_distinct(self):
+    from openpilot.selfdrive.car.car_events import CarEvents, EventName
     from itertools import product
     from opendbc.can import CANPacker, CANParser
     from opendbc.car import Bus
@@ -762,6 +763,9 @@ class TestVoltCcPedalProfiles(unittest.TestCase):
             self.assertTrue(state.canValid)
             self.assertTrue(state.cruiseState.enabled)
             self.assertAlmostEqual(state.cruiseState.speed, 80 / 3.6, places=4)
+            self.assertFalse(state.cruiseState.nonAdaptive)
+            events = CarEvents(cp).update(state.as_reader(), structs.CarState().as_reader(), command.as_reader())
+            self.assertNotIn(EventName.wrongCruiseMode, events.names)
             self.assertFalse(state.accFaulted)
             if release:
               self.assertFalse(any(a == 0x200 for a, _, _ in tx))
