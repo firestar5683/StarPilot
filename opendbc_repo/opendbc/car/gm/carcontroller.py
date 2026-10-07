@@ -4,6 +4,7 @@ from opendbc.car.gm.longitudinal import volt_sng_release
 from opendbc.car.gm.auto_hold import AutoHold, config_for as auto_hold_config_for, hold_brake as estimate_hold_brake
 from opendbc.car.gm.values import is_gm_auto_hold
 from opendbc.car.gm.ordinary import demands as ascm_demands
+from opendbc.car.gm.truck_longitudinal import TruckTuning, truck_tuning_supported
 import math
 import numpy as np
 from opendbc.can import CANPacker
@@ -264,6 +265,8 @@ class CarController(CarControllerBase):
     self.bolt_removed_cancel_credit_used = 0
     self.bolt_pedal_removed = is_bolt_pedal_removed_profile(CP) or is_bolt_pedal_removed_profile(CP, stock_only=True)
     self.bolt_present_no_acc_stock = is_bolt_present_no_acc_pedal_profile(CP, stock_only=True)
+    self.truck_tuning = TruckTuning() if truck_tuning_supported(CP) else None
+    self.truck_tuning_input = None
     self.gm_acc_tune_input = None
     self.gm_acc_tune = False
     self.start_time = 0.
@@ -477,6 +480,9 @@ class CarController(CarControllerBase):
                                           not CC.longActive, gas_pressed=CS.out.gasPressed,
                                           speed=CS.out.vEgo)
     self.gm_acc_tune = (self.gm_acc_tune_input is not None and self.gm_acc_tune_input.update(now_nanos))
+    if self.truck_tuning is not None:
+      self.truck_tuning.enabled = bool(self.truck_tuning_input is not None and
+                                       self.truck_tuning_input.update(now_nanos))
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
@@ -858,12 +864,16 @@ class CarController(CarControllerBase):
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = 0
+          if self.truck_tuning is not None:
+            self.truck_tuning.follow_accel = 0.0
         else:
           stop_brake = fixed_stopping_brake(CC.longActive, near_stop, stopping, CC.cruiseControl.resume,
                                            self.CP.stopAccel, self.params.MAX_BRAKE)
           if stop_brake is not None:
             self.apply_gas = self.params.INACTIVE_REGEN
             self.apply_brake = stop_brake
+            if self.truck_tuning is not None:
+              self.truck_tuning.follow_accel = 0.0
           else:
             if self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN:
               self.apply_gas, self.apply_brake = suburban_gateway_demands(
@@ -871,7 +881,9 @@ class CarController(CarControllerBase):
             elif self.ordinary_camera_long:
               self.apply_gas, self.apply_brake = ascm_demands(
                 actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP,
-                min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.0, acc_tune=self.gm_acc_tune)
+                min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.0, acc_tune=self.gm_acc_tune,
+                truck_tuning=self.truck_tuning, lead_visible=CC.hudControl.leadVisible,
+                set_speed_error=max(CC.hudControl.setSpeed - CS.out.vEgo, 0.0), stopping=stopping)
             elif self.ordinary_sdgm_long:
               self.apply_gas, self.apply_brake = ascm_demands(
                 actuators.accel, CS.out.vEgo, CC.orientationNED, self.CP,

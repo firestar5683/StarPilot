@@ -110,6 +110,10 @@ class ResumePlanInputs:
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
+  from opendbc.car.gm.truck_longitudinal import truck_tuning_supported
+  if controller is not None and truck_tuning_supported(cp):
+    from openpilot.starpilot.car.gm.tune_preferences import TruckTuningPreference
+    controller.truck_tuning_input = TruckTuningPreference(cp, params)
   from opendbc.car.gm.long_tune import tune_options
   if controller is not None and 1 in tune_options(cp):
     from openpilot.starpilot.car.gm.tune_preferences import AccTunePreference

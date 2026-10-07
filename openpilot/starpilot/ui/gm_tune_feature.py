@@ -67,3 +67,47 @@ class GmTuneFeature:
     result = commit_exact(owner.params, key=KEY, max_bytes=8, raw=str(value).encode(), expected=request.expected,
                           authorized=authorized, temp_prefix=".gm-tune-")
     return result.committed and result.verified
+
+
+class GmTruckFeature:
+  def __init__(self, owner):
+    self.owner = owner
+
+  def capability(self):
+    from opendbc.car.gm.truck_longitudinal import truck_tuning_supported
+    cp = self.owner.vehicle_params()
+    if not truck_tuning_supported(cp):
+      return None
+    return (str(cp.carFingerprint), int(cp.flags), int(cp.alternativeExperience),
+            str(cp.transmissionType), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
+            tuple((str(c.safetyModel), int(c.safetyParam)) for c in cp.safetyConfigs))
+
+  def rows(self, parked):
+    from openpilot.starpilot.car.gm.tune_preferences import TRUCK_KEY, read_truck_choice
+    capability = self.capability()
+    if capability is None:
+      return ()
+    enabled, raw, readable, valid = read_truck_choice(self.owner.params)
+    return (FeatureRow(TRUCK_KEY, "Truck Speed Control", ("On" if enabled else "Off") if valid else "Invalid saved choice", raw,
+                       choices=("Off", "On"), available=parked and self.owner.authority("parked_preferences") and readable,
+                       capability=capability, repair_value="" if valid else "Off", default_value="Off",
+                       reason="Softens small acceleration requests, reduces grade corrections, and smooths light braking. Updates within half a second."),)
+
+  def apply(self, request):
+    from openpilot.starpilot.car.gm.tune_preferences import TRUCK_KEY, read_truck_choice
+    if (request.key != TRUCK_KEY or request.value not in ("Off", "On") or request.dependencies or
+        request.related_source is not None or request.display_unit or request.direction):
+      return False
+    owner = self.owner
+
+    def authorized():
+      capability = self.capability()
+      _, raw, readable, valid = read_truck_choice(owner.params)
+      return (owner.authority("parked_preferences") and bool(request.vehicle_fingerprint) and
+              owner.vehicle_fingerprint() == request.vehicle_fingerprint and capability is not None and
+              capability == request.capability and readable and raw == request.expected and
+              (valid or request.value == "Off"))
+
+    result = commit_exact(owner.params, key=TRUCK_KEY, max_bytes=8, raw=b"1" if request.value == "On" else b"0",
+                          expected=request.expected, authorized=authorized, temp_prefix=".gm-truck-")
+    return result.committed and result.verified
