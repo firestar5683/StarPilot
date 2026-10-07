@@ -1,7 +1,8 @@
 from types import SimpleNamespace
+from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
@@ -12,7 +13,7 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper, V_CRUISE_MAX, V_CRUISE
 from openpilot.starpilot.controllers.cruise_action import CruiseActionPublisher, CruiseActionConsumer
 from openpilot.starpilot.controllers.toyota_cruise import capability, ToyotaCruisePreference
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeaturePage, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeaturePage, FeatureSettingsRequest, row_change
 
 
 class State(dict):
@@ -106,6 +107,8 @@ class TestControllerCruise(unittest.TestCase):
     instance.CC_prev = car.CarControl(enabled=True)
     instance.CS_prev = self.cs
     vars(instance)['CI'] = SimpleNamespace(CS=SimpleNamespace(), update=lambda packets:self.cs)
+    instance.car_gps_publisher = card.CarGpsPublisher()
+    instance.pm = SimpleNamespace(send=Mock())
     vars(instance)['RI'] = SimpleNamespace(update=lambda packets:None)
     directory = tempfile.TemporaryDirectory()
     self.addCleanup(directory.cleanup)
@@ -120,6 +123,7 @@ class TestControllerCruise(unittest.TestCase):
     instance.is_metric = True
     instance.experimental_mode = False
     instance.v_cruise_helper = self.helper
+    instance.slc_command_sock = None
     instance.controller_cruise_sock = object()
     instance.controller_cruise_consumer = self.consumer
     with (patch.object(card.messaging,'drain_sock_raw',return_value=[messaging.new_message('can',1).to_bytes()]),
@@ -148,13 +152,23 @@ class TestControllerCruise(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       params=Params(directory)
       vehicle=cp(True,'toyota')
-      owner=FeatureSettingsOwner(params,lambda group:group=='long',vehicle_fingerprint=lambda:vehicle.carFingerprint,
+      owner=FeatureSettingsOwner(params,lambda group:group in ('long', 'toyota_cruise'),
+                                 vehicle_fingerprint=lambda:vehicle.carFingerprint,
                                  vehicle_params=lambda:vehicle)
       def rows():
         return {r.key:r for r in owner.snapshot(FeaturePage.PROFILES,parked=True,system_long=True,
                                                lateral_context=False,metric=True).rows}
       self.assertNotIn('CustomCruise',rows())
+      self.assertNotIn('CustomCruiseLong',rows())
       self.assertNotIn('QOLLongitudinal', rows())
+      owner.configuration_longitudinal = lambda: True
+      self.assertIsNone(owner._cruise_capability())
+      for key in ('CustomCruise', 'CustomCruiseLong'):
+        stale = FeatureSettingsRequest(key, None, '2', confirmation=True, vehicle_fingerprint=vehicle.carFingerprint,
+                                       capability=(vehicle.carFingerprint, True, False, False, False, False),
+                                       dependencies=(('IsMetric', None),), display_unit='mph')
+        self.assertFalse(owner.apply(stale))
+        self.assertFalse(Path(params.get_param_path(key)).exists())
       change=row_change(rows()['ReverseCruise'])
       assert change is not None
       self.assertTrue(owner.apply(change))

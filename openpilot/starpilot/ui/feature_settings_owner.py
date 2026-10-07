@@ -52,7 +52,6 @@ from openpilot.starpilot.ui.conditional_feature import BUTTON_PREFIX, Conditiona
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.wheel_feature import WheelFeature, PREFIX as WHEEL_PREFIX
 from openpilot.starpilot.longitudinal.output_max import KEY as OUTPUT_MAX_KEY
-from openpilot.starpilot.ui.output_max_feature import OutputMaximumFeature
 from openpilot.starpilot.ui.tesla_screen_feature import TeslaScreenFeature, KEYS as TESLA_SCREEN_KEYS
 from openpilot.starpilot.ui.gm_tune_feature import GmTuneFeature, GmTruckFeature, GmEvPresetFeature
 from openpilot.starpilot.car.gm.tune_preferences import KEY as GM_TUNE_KEY
@@ -140,7 +139,6 @@ class FeatureSettingsOwner:
                                       repair_parked=lambda: self.authority("parked_preferences"),
                                       configuration_longitudinal=self.configuration_longitudinal)
     self.long_profiles = LongProfileFeature(self)
-    self.output_maximum = OutputMaximumFeature(self)
     self.tesla_screen = TeslaScreenFeature(self)
     self.gm_tune = GmTuneFeature(self)
     self.gm_truck = GmTruckFeature(self)
@@ -321,6 +319,8 @@ class FeatureSettingsOwner:
 
   def _cruise_capability(self) -> tuple | None:
     cp = self.vehicle_params()
+    if toyota_cruise_capability(cp) is not None:
+      return None
     try:
       if (cp is None or not cp.carFingerprint or not self.longitudinal_available() or (cp.pcmCruise and not self.configuration_longitudinal()) or
           cp.notCar or cp.passive or cp.dashcamOnly):
@@ -347,7 +347,8 @@ class FeatureSettingsOwner:
     software_capability = self._cruise_capability()
     toyota_capability = toyota_cruise_capability(self.vehicle_params())
     capability = software_capability or toyota_capability
-    allowed = configurable and capability is not None and self.authority("long")
+    group = "toyota_cruise" if toyota_capability is not None else "long"
+    allowed = configurable and capability is not None and self.authority(group)
     unit_value, unit_raw, unit_valid = self._value("IsMetric")
     unit_valid = unit_valid and unit_value in ("0", "1") and self._readable("IsMetric")
     unit = "km/h" if unit_value == "1" else "mph"
@@ -409,11 +410,11 @@ class FeatureSettingsOwner:
                         authorized=authorized, temp_prefix=".cruise-interval-").verified
 
   def _apply_reverse_cruise(self, request):
-    if request.value not in ("On", "Off") or request.confirmation:
+    if request.value not in ("On", "Off"):
       return False
     def authorized():
       cap = toyota_cruise_capability(self.vehicle_params())
-      return bool(cap is not None and request.capability == cap and self.authority("long") and
+      return bool(cap is not None and request.capability == cap and self.authority("toyota_cruise") and
                   request.vehicle_fingerprint == self.vehicle_fingerprint() and request.dependencies == ())
     return commit_exact(self.params, key="ReverseCruise", max_bytes=8, expected=request.expected,
                         raw=b"1" if request.value == "On" else b"0", authorized=authorized,
@@ -937,7 +938,6 @@ class FeatureSettingsOwner:
       rows.extend(self.conditional.rows(page, parked))
     elif page == FeaturePage.PROFILES:
       title = "Long Planner"
-      rows.append(self.output_maximum.row())
       rows.append(self._bool_row(PLANNER_SELECTION_KEY, "Use StarPilot Longitudinal Planner", self.authority("preferences"),
                                  reason="Off uses the upstream planner. Supported longitudinal control stays active. Changes apply on the next drive."))
       allowed = configurable and system_long
@@ -1071,7 +1071,6 @@ class FeatureSettingsOwner:
     fingerprint = self.vehicle_fingerprint()
     rows = [replace(row, vehicle_fingerprint=None if row.key in (PLANNER_SELECTION_KEY, LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY,
                                                               "ShowSpeedLimits", "AlwaysAllowUploads") or
-                    row.key == OUTPUT_MAX_KEY and row.capability is None and row.vehicle_fingerprint is None or
                     row.key.startswith('conditional:') and not row.key.startswith(BUTTON_PREFIX) else fingerprint)
             for row in rows]
     subtitle = (
@@ -1112,9 +1111,9 @@ class FeatureSettingsOwner:
     if key.startswith(WHEEL_PREFIX):
       return self.wheel.apply(request)
     if key == OUTPUT_MAX_KEY:
-      return self.output_maximum.apply(request)
+      return False
     if key == "ReverseCruise":
-      return self._apply_reverse_cruise(replace(request, confirmation=False) if request.confirmation and request.value == "Off" else request)
+      return self._apply_reverse_cruise(request)
     if key in LATERAL_PAUSE_KEYS:
       return self._apply_lateral_pause(request)
     if key == "TurnAssist":

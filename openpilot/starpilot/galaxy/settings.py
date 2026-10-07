@@ -86,6 +86,9 @@ def _qualified(ctx: AuthorityContext, group: str) -> bool:
   try:
     if not cp.carFingerprint:
       return False
+    if group == "toyota_cruise":
+      from openpilot.starpilot.controllers.toyota_cruise import capability
+      return capability(cp) is not None
     if group == "vehicle":
       from opendbc.car.toyota.interface import toyota_auto_hold_supported
       return toyota_auto_hold_supported(cp)

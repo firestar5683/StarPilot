@@ -41,7 +41,7 @@ from openpilot.starpilot.lateral.torque_runtime import TorqueHost, runtime_enabl
 from openpilot.starpilot.lateral.controller_selection import learning_allowed, read_selection
 from openpilot.starpilot.lateral.gain_runtime import create_gain_owner
 from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
-from openpilot.starpilot.longitudinal.output_max import OutputMaximum, final_output
+from openpilot.starpilot.longitudinal.output_max import final_output
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
@@ -66,7 +66,6 @@ class Controls:
     self.aol_replay = feature_enabled(self.params, self.CP, 'aol', os.environ)
     self.ordinary_axis_ack_required = axis_policy_for(self.CP).ordinary_axis_ack_required
     self.longitudinal_inputs = LongitudinalInputs(self.CP, self.params, lambda: self.sm)
-    self.longitudinal_output_maximum = OutputMaximum(self.params, self.CP)
 
     services = (['lateralDelay', 'vehicleParameters', 'lateralTorqueParameters', 'modelV2', 'selfdriveState',
                  'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
@@ -243,7 +242,7 @@ class Controls:
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     longitudinal_output = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits,
                                           context=self.longitudinal_inputs.context(CC.longActive))
-    actuators.accel = final_output(longitudinal_output, getattr(self, "longitudinal_output_maximum", None), time.monotonic_ns())
+    actuators.accel = final_output(longitudinal_output)
     if self.longitudinal_inputs.publish_state:
       # Publish the selected launch state to the vehicle controller in this same frame.
       actuators.longControlState = self.LoC.long_control_state

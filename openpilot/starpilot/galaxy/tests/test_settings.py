@@ -140,6 +140,31 @@ class SettingsGatewayTest(unittest.TestCase):
     row = next(row for row in self.page("slc")["rows"] if row["label"] == "Speed Limit Controller")
     self.assertFalse(row["available"])
 
+  def test_confirmed_toyota_swap_saves_on_off_without_custom_cruise_rows(self):
+    from opendbc.car.toyota.interface import CarInterface as ToyotaInterface
+    from opendbc.car.toyota.values import CAR as ToyotaCAR
+    from openpilot.starpilot.controllers.toyota_cruise import capability, ToyotaCruisePreference
+    vehicle = ToyotaInterface.get_non_essential_params(ToyotaCAR.TOYOTA_COROLLA_TSS2)
+    self.assertIsNotNone(capability(vehicle))
+    self.context.value = AuthorityContext(True, vehicle, vehicle.to_bytes())
+    self.params.put('CustomCruise', 2.0, block=True)
+    self.params.put('CustomCruiseLong', 8.0, block=True)
+    before = {key: read_saved(self.params, key, 128)[0] for key in ('CustomCruise', 'CustomCruiseLong')}
+    for value, enabled in (('On', True), ('Off', False)):
+      page = self.page('profiles')
+      self.assertFalse(any(row['label'] in ('Short press', 'Hold') for row in page['rows']))
+      index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Swap Toyota Cruise Steps')
+      self.assertTrue(page['rows'][index]['available'])
+      intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value=value)
+      self.assertTrue(self.gateway.confirm(intent['intent'], self.session, self.generation))
+      self.assertEqual(self.params.get_bool('ReverseCruise'), enabled)
+      self.assertEqual(ToyotaCruisePreference(vehicle, self.params).update(), enabled)
+      with self.assertRaises(SettingsChanged):
+        self.gateway.confirm(intent['intent'], self.session, self.generation)
+      self.assertEqual({key: read_saved(self.params, key, 128)[0] for key in before}, before)
+    self.context.value.cp.brand = 'honda'
+    self.assertFalse(any(row['label'] == 'Swap Toyota Cruise Steps' for row in self.page('profiles')['rows']))
+
   def test_row_revision_is_stable_only_for_same_source_vehicle_and_session(self):
     first, second = self.page("lane"), self.page("lane")
     self.assertNotEqual(first["view"], second["view"])
@@ -397,8 +422,17 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertEqual(read_volume(self.params, "EngageVolume").value, AUTO)
 
   def test_vision_source_choice_matches_native_diagnostic_gate(self):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.honda.interface import CarInterface as HondaInterface
+    from opendbc.car.honda.values import CAR as HondaCAR
     from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
 
+    vehicle = HondaInterface.get_params(HondaCAR.HONDA_CIVIC_BOSCH, gen_empty_fingerprint(), [], True, False, False)
+    self.assertTrue(vehicle.openpilotLongitudinalControl and not vehicle.pcmCruise)
+    self.assertFalse(diagnostic_choice_enabled({}, vehicle))
+    self.context.value = AuthorityContext(True, vehicle, vehicle.to_bytes())
+    self.params.put('SLCPriority1', 'Dashboard', block=True)
+    self.params.put('SLCPriority2', 'Dashboard', block=True)
     for replay, vision, available in (("0", "0", False), ("1", "0", False),
                                       ("0", "1", False), ("1", "1", True)):
       with self.subTest(replay=replay, vision=vision), mock.patch.dict(
@@ -419,7 +453,7 @@ class SettingsGatewayTest(unittest.TestCase):
       self.assertEqual(intent["proposed"], "Vision")
       with mock.patch.dict(os.environ, {"SLC_VISION_DEVELOPMENT": "0"}):
         self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
-      self.assertIsNone(read_saved(self.params, "SLCPriority1", 128)[0])
+      self.assertEqual(read_saved(self.params, "SLCPriority1", 128)[0], b"Dashboard")
 
   def test_pip_saved_choices_no_vehicle_cp_and_one_use_confirmation(self):
     from openpilot.starpilot.ui.pip_preferences import BLINKER, MASK, read_pip
