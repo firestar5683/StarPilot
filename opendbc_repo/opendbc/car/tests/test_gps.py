@@ -100,7 +100,11 @@ def test_tracker_requires_each_message_to_advance_and_expires():
   owner.update(parser)
   assert owner.get() is None
   parser.update([(4_000_000_000, VW_FRAMES[:2])])
-  parser.update([(4_200_000_000, VW_FRAMES[2:])])
+  packer = CANPacker("vw_mqb")
+  status = dict(parser.vl["GNSS_05"])
+  status["GNSS_UTC_Zeit"] += 1
+  newer_status = packer.make_can_msg("GNSS_05", 0, status)
+  parser.update([(4_200_000_000, [VW_FRAMES[2], newer_status])])
   owner.update(parser)
   assert owner.get()['hasFix']
   assert owner.get()['timestamp_nanos'] == 4_000_000_000
@@ -225,3 +229,38 @@ def test_actual_gm_reverse_then_forward_gps_motion():
   assert sample['speed'] == observed.vEgo
   assert sample['bearingAccuracyDeg'] == 10.
   assert sample['vNED'][0] > 1.
+
+
+def test_vw_repeated_or_older_utc_cannot_renew_position():
+  owner = CarGpsTracker(config('volkswagen', VW_CAR.VOLKSWAGEN_TAOS_MK1))
+  parser = CANParser('vw_mqb', [(n, float('nan')) for n in VOLKSWAGEN_TAOS_GPS_MESSAGES], 0)
+  packer = CANPacker('vw_mqb')
+  parser.update([(1_000_000_000, VW_FRAMES)])
+  owner.update(parser)
+  original_utc = owner.get()['unixTimestampMillis'] // 1000
+  status = dict(parser.vl['GNSS_05'])
+
+  def observe(now, utc, valid=True):
+    status['GNSS_UTC_Zeit'] = utc
+    status['GNSS_Empfaenger_Status'] = 1 if valid else 0
+    frames = [*VW_FRAMES[:3], packer.make_can_msg('GNSS_05', 0, status)]
+    parser.update([(now, frames)])
+    owner.update(parser)
+
+  observe(2_000_000_000, original_utc)
+  assert owner.get()['timestamp_nanos'] == 1_000_000_000
+  observe(3_000_000_000, original_utc - 1)
+  assert owner.get()['timestamp_nanos'] == 1_000_000_000
+  observe(4_000_000_000, original_utc)
+  assert owner.get() is None
+  observe(5_000_000_000, original_utc + 1)
+  assert owner.get()['timestamp_nanos'] == 5_000_000_000
+  observe(6_000_000_000, original_utc + 1, valid=False)
+  assert not owner.get()['hasFix']
+  observe(7_000_000_000, original_utc + 1)
+  assert not owner.get()['hasFix']
+  observe(9_000_000_000, original_utc + 1)
+  assert owner.get() is None
+  observe(10_000_000_000, original_utc + 2)
+  assert owner.get()['hasFix']
+  assert owner.get()['timestamp_nanos'] == 10_000_000_000
