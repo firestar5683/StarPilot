@@ -1,3 +1,4 @@
+import { guardUnload } from "./unload-guard.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
 import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
@@ -437,10 +438,9 @@ export const OnroadLayoutPage = {
   },
   mounted() {
     if (this.mode === "local") this.feed.start()
-    this._beforeUnload = (event) => { if (this.dirty || this.state.status === "saving") { event.preventDefault(); event.returnValue = "" } }
-    window.addEventListener("beforeunload", this._beforeUnload)
+    this._stopUnloadGuard = guardUnload(() => this.dirty || this.state.status === "saving")
   },
-  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); window.removeEventListener("beforeunload", this._beforeUnload) },
+  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
   methods: {
     finishColorEdit() { this.state.history.group = null },
     recordChange(before, group = null) {

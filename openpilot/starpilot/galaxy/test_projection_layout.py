@@ -1,7 +1,10 @@
 """Actual file-owner tests, CPU-only, no IPC/Params runtime required."""
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -196,6 +199,27 @@ class TestProjectionLayoutOwner(unittest.TestCase):
     again = host_owner(self.params, lambda: True, root, environ={'SP_HOST_RUNTIME': '1'})
     self.assertEqual((root / 'screen.json').read_bytes(), screen)
     self.assertEqual(again.snapshot()['document'], payload['document'])
+
+  def test_host_editor_and_renderer_share_default_paths(self):
+    # Constants are initialized at import time, as in the actual launcher processes.
+    code = """
+import copy
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from openpilot.starpilot.galaxy.projection_layout import host_owner
+from openpilot.starpilot.system.android_auto.projection_layout_runtime import load_projection_layout
+root = Path(os.environ['ANDROID_AUTO_DIR'])
+params = SimpleNamespace(get_param_path=lambda key: str(root / 'params' / key), get_bool=lambda key: False)
+owner = host_owner(params, lambda: True)
+snapshot = owner.snapshot()
+payload = {'revision': snapshot['revision'], 'document': copy.deepcopy(snapshot['document'])}
+payload['document']['widgets']['current_speed']['x'] += 10
+owner.save(payload, session_valid=lambda: True)
+assert load_projection_layout((1920, 1080)) == payload['document']
+"""
+    env = os.environ | {'SP_HOST_RUNTIME': '1', 'ANDROID_AUTO_DIR': str(self.root / 'host')}
+    subprocess.run([sys.executable, '-c', code], env=env, check=True, capture_output=True)
 
 
 if __name__ == '__main__':

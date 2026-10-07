@@ -23,8 +23,9 @@ then follows edits under this package. An open page reloads itself after each
 edit; other changes here restart the server first. Refresh a page opened before
 the session once. Edits outside the package need `./dev sync` and a restart.
 The reload script exists only in the host cache, never in this directory.
-Add `--no-autoreload` to keep following edits but refresh by hand.
-
+Unsaved drafts and pending saves defer automatic reload until they are resolved.
+Add `--no-autoreload` to keep following edits but refresh by hand. Only one live
+Galaxy session can own a shared host cache at a time, regardless of port.
 Run the package tests with `./dev pytest openpilot/starpilot/galaxy/tests`.
 Browser JavaScript tests use Node 24; set `STARPILOT_NODE` to an existing Node
 24 executable when needed. A static preview can serve `web/` over loopback;
