@@ -105,6 +105,7 @@ static uint8_t gm_hybrid_permission(void) {
 }
 
 static void gm_hybrid_invalid(void) {
+  gm_cruise_status_clear();
   gm_hybrid_clear_credit(); controls_allowed = false;
   for (uint8_t i = 0U; i < 11U; i++) { gm_hybrid_seen[i] = false; }
   aol_set_host_request(0U);
@@ -341,20 +342,22 @@ static safety_config gm_hybrid_init(uint16_t word) {
   static const CanMsg present_tx[] = {
     {0x180U, 0U, 4U, .check_relay = true}, {0x1E1U, 0U, 7U, .check_relay = false},
     {0x184U, 2U, 8U, .check_relay = true}, {0x200U, 0U, 6U, .check_relay = false},
+    {0x3D1U, 0U, 8U, .check_relay = false},
   };
   static const CanMsg removed_tx[] = {
     {0x180U, 0U, 4U, .check_relay = false}, {0x1E1U, 0U, 7U, .check_relay = false},
     {0x184U, 2U, 8U, .check_relay = true}, {0x409U, 0U, 7U, .check_relay = false}, {0x40AU, 0U, 7U, .check_relay = false},
     {0x200U, 0U, 6U, .check_relay = false},
+    {0x3D1U, 0U, 8U, .check_relay = false},
   };
   if (gm_hybrid_removed) {
     ret.tx_msgs = removed_tx;
     if (gm_hybrid_stock) { ret.tx_msgs_len = 3; }
-    else if (gm_hybrid_pedal) { ret.tx_msgs_len = 6; }
+    else if (gm_hybrid_pedal) { ret.tx_msgs_len = 7; }
     else { ret.tx_msgs_len = 5; }
   } else {
     ret.tx_msgs = present_tx;
-    if (gm_hybrid_pedal) { ret.tx_msgs_len = 4; }
+    if (gm_hybrid_pedal) { ret.tx_msgs_len = 5; }
     else { ret.tx_msgs_len = 3; }
   }
   static const AolSafetyPolicy policy = {

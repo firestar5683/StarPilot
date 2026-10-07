@@ -8,6 +8,7 @@
 #include "gm_cc_pedal.h"
 #include "gm_volt_auto_hold.h"
 #include "gm_camera_acc_pedal.h"
+#include "gm_cruise_status.h"
 #include "gm_hybrid_cc.h"
 #include "gm_bolt_cc.h"
 
@@ -218,6 +219,18 @@ static void gm_emit_paddle_after_stock(uint32_t now_us, uint32_t addr, uint8_t d
       gm_paddle_internal_tx = false;
     }
   }
+}
+
+static bool gm_cruise_status_owner_ready(void) {
+  bool ready;
+  if (gm_cruise_status_hybrid) {
+    ready = gm_hybrid_main && gm_hybrid_drive && gm_hybrid_eps && gm_hybrid_sensor_valid &&
+            !gm_hybrid_sensor_gas && !gm_hybrid_regen;
+  } else {
+    ready = gm_cruise_status_main && gm_cruise_status_drive && gm_cruise_status_eps &&
+            gm_pedal_sensor_current();
+  }
+  return ready && !brake_pressed && !gas_pressed && !regen_braking;
 }
 
 static void gm_rx_hook(const CANPacket_t *msg) {
@@ -1435,6 +1448,7 @@ static safety_config gm_init(uint16_t safety_param) {
       {0x180, 0, 4, .check_relay = true}, {0x200, 0, 6, .check_relay = false},
       {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
       {0x184, 2, 8, .check_relay = true}, {0x1E1, 0, 7, .check_relay = false},
+      {0x3D1, 0, 8, .check_relay = false},
     };
     SET_TX_MSGS(GM_BOLT_PRESENT_CC_PEDAL_TX_MSGS, ret);
   }
@@ -1444,6 +1458,7 @@ static safety_config gm_init(uint16_t safety_param) {
       {0x180, 0, 4, .check_relay = false}, {0x200, 0, 6, .check_relay = false},
       {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
       {0x184, 2, 8, .check_relay = false}, {0x1E1, 0, 7, .check_relay = false},
+      {0x3D1, 0, 8, .check_relay = false},
       {0x409, 0, 7, .check_relay = false}, {0x40A, 0, 7, .check_relay = false},
     };
     static const CanMsg GM_BOLT_REMOVED_ACC_PEDAL_TX_MSGS[] = {

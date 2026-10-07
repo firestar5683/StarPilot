@@ -1,3 +1,5 @@
+import math
+
 from opendbc.car.can_definitions import CanData
 from opendbc.car.gm.values import CAR
 
@@ -210,3 +212,13 @@ def create_lka_icon_command(bus, active, critical, steer):
 
 def create_acc_2cd_command(bus, idx):
   return CanData(0x2CD, bytes([idx << 6, 0x2c, 0x03, 0xd3, 0xfd - idx]), bus)
+
+
+def create_ecm_cruise_control_command(packer, bus, enabled, target_speed_kph):
+  dat = bytearray(8)
+  dat[0] = 1
+  raw = 0
+  if enabled and math.isfinite(target_speed_kph):
+    raw = max(0, min(int(round(max(0., target_speed_kph) / .0625)), 0xFFF))
+  dat[2], dat[3] = raw >> 8, raw & 255
+  return CanData(0x3D1, bytes(dat), bus)

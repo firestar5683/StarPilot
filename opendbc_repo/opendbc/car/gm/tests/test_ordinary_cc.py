@@ -517,6 +517,9 @@ class TestMalibuHybridCc(unittest.TestCase):
         frames.append((0x201, bytes(sensor), 0))
       state = ci.update([(now, frames)])
       _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
+      statuses = [packet for packet in sent if packet[0] == 0x3D1]
+      self.assertEqual(bool(statuses), tick % 4 == 0)
+      self.assertTrue(all(packet[2] == 0 and packet[1][4] == 0 for packet in statuses))
       echo = [(address, data, 128) for address, data, bus in sent if address == 0x180 and bus == 0]
       pedal = any(address == 0x200 and data[4] & 0x80 for address, data, _ in sent)
       steering = any(address == 0x180 and ((data[0] & 7) or data[1]) for address, data, _ in sent)

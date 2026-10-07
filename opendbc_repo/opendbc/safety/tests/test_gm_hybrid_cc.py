@@ -399,3 +399,38 @@ class TestGmHybridCc(unittest.TestCase):
       self.feed(stock=word >= 0xE804)
       self.assertFalse(self.safety.get_controls_allowed())
       self.assertFalse(self.steering())
+
+  def test_status_direct_shape_lease_and_source_recovery(self):
+    for word in range(0xE800, 0xE806):
+      with self.subTest(word=word):
+        self.reset(word)
+        self.warm(stock=True)
+        frame = gmcan.create_ecm_cruise_control_command(self.packer, 0, True, 80.)
+        supported = word in (0xE802, 0xE803)
+        self.assertEqual(self.safety.safety_tx_hook(self.packet(frame)), supported)
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), -1 if supported else 2)
+        if not supported:
+          continue
+        malformed = bytearray(frame[1])
+        malformed[4] = 0x80
+        self.assertFalse(self.tx(0x3D1, malformed))
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)  # Rejected candidate revokes the lease.
+        self.advance(40_000)
+        self.feed(stock=True)
+        self.assertTrue(self.safety.safety_tx_hook(self.packet(frame)))
+        self.advance(100_001)
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+        self.feed(stock=True)
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)  # No lease revival on source refresh.
+        self.assertTrue(self.safety.safety_tx_hook(self.packet(frame)))
+        self.feed(stock=True, brake=True)
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+        self.feed(stock=True)
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+        self.advance(40_000)
+        self.feed(stock=True)
+        self.assertTrue(self.safety.safety_tx_hook(self.packet(frame)))
+        self.assertFalse(self.safety.safety_tx_hook(self.packet((frame[0], frame[1], 2))))
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), -1)  # Whitelist rejection never reaches the owner.
+        self.assertFalse(self.safety.safety_tx_hook(self.packet(frame)))
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), -1)  # Cadence rejection preserves the bounded prior lease.
