@@ -1,7 +1,10 @@
 import math
+import json
+import os
 import numpy as np
 import time
 from time import monotonic_ns
+from threading import get_native_id
 from pathlib import Path
 
 
@@ -81,6 +84,30 @@ def check_selfdrive_timeout_alert(sm):
   return False
 
 
+def _native_audio_time(info, key):
+  try:
+    value = float(getattr(info, key))
+    return value if math.isfinite(value) else None
+  except (AttributeError, TypeError, ValueError):
+    return None
+
+
+def _callback_thread_snapshot(tid):
+  snapshot = {"tid": tid}
+  try:
+    directory = Path(f"/proc/self/task/{tid}")
+    with (directory / "stat").open() as source:
+      fields = source.read(4096).rsplit(")", 1)[1].split()
+    with (directory / "schedstat").open() as source:
+      runtime_ns, runqueue_ns, timeslices = map(int, source.read(4096).split())
+    snapshot.update(state=fields[0], priority=int(fields[15]), nice=int(fields[16]), processor=int(fields[36]),
+                    runtime_ns=runtime_ns, runqueue_ns=runqueue_ns, timeslices=timeslices,
+                    policy=os.sched_getscheduler(tid), affinity=sorted(os.sched_getaffinity(tid)))
+  except (OSError, ValueError, IndexError, AttributeError):
+    snapshot["unavailable"] = True
+  return snapshot
+
+
 class Soundd:
   def __init__(self, params=None, pack_root=PACK_ROOT):
     self.volume_params = params if params is not None else Params()
@@ -106,6 +133,9 @@ class Soundd:
     self.reported_output_underflows = 0
     self.stream_report_at = None
     self.last_callback_start_ns = None
+    self.last_callback_work_ns = None
+    self.last_native_audio_time = None
+    self.callback_tid = None
     self.underflow_timing = None
     self.axis_alerts = AxisAlerts()
 
@@ -163,17 +193,28 @@ class Soundd:
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
     started_ns = monotonic_ns()
     previous_ns = getattr(self, "last_callback_start_ns", None)
+    previous_work_ns = getattr(self, "last_callback_work_ns", None)
+    previous_native_time = getattr(self, "last_native_audio_time", None)
+    native_time = _native_audio_time(time, "currentTime")
+    dac_time = _native_audio_time(time, "outputBufferDacTime")
+    native_gap = (native_time - previous_native_time if native_time is not None and
+                  previous_native_time is not None and native_time >= previous_native_time else None)
+    if getattr(self, "callback_tid", None) is None:
+      self.callback_tid = get_native_id()
     self.last_callback_start_ns = started_ns
+    self.last_native_audio_time = native_time
     try:
       data_out[:frames, 0] = self.get_sound_data(frames)
     finally:
       finished_ns = monotonic_ns()
+      self.last_callback_work_ns = finished_ns - started_ns
       if status:
         underflow = bool(getattr(status, "output_underflow", False))
         if underflow:
           self.underflow_timing = (self.output_underflow_count + 1, started_ns,
                                    None if previous_ns is None else started_ns - previous_ns,
-                                   finished_ns - started_ns, frames)
+                                   finished_ns - started_ns, frames, previous_work_ns,
+                                   native_time, dac_time, native_gap, self.callback_tid)
         self.pending_stream_status = status
         self.stream_status_count += 1
         self.output_underflow_count += int(underflow)
@@ -192,11 +233,20 @@ class Soundd:
                + f"output_underflows={underflows}")
     timing = getattr(self, "underflow_timing", None)
     if timing is not None and timing[0] == underflows:
-      _, started_ns, gap_ns, work_ns, frames = timing
+      _, started_ns, gap_ns, work_ns, frames, previous_work_ns, native_time, dac_time, native_gap, tid = timing
       gap_ms = "unknown" if gap_ns is None else f"{gap_ns / 1e6:.3f}"
       message += (f" underflow_callback_mono={started_ns / 1e9:.9f} callback_gap_ms={gap_ms}"
                   + f" callback_work_ms={work_ns / 1e6:.3f}"
                   + f" callback_period_ms={frames / SAMPLE_RATE * 1e3:.3f}")
+      previous_work_ms = "unknown" if previous_work_ns is None else f"{previous_work_ns / 1e6:.3f}"
+      native_text = "unknown" if native_time is None else f"{native_time:.9f}"
+      dac_text = "unknown" if dac_time is None else f"{dac_time:.9f}"
+      native_gap_ms = "unknown" if native_gap is None else f"{native_gap * 1e3:.3f}"
+      message += (f" previous_callback_work_ms={previous_work_ms} native_current_time={native_text}"
+                  + f" native_output_dac_time={dac_text} native_callback_gap_ms={native_gap_ms} callback_tid={tid}")
+      if underflows > self.reported_output_underflows:
+        snapshot = json.dumps(_callback_thread_snapshot(tid), separators=(",", ":"), sort_keys=True)
+        message += f" callback_thread_snapshot_current={snapshot} snapshot_mono={now:.9f}"
     if stream is not None:
       message += f" latency={stream.latency} cpu_load={stream.cpu_load}"
     # Output dropouts must reach errorLogMessage, which is retained in qlog.
