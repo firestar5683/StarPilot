@@ -221,6 +221,7 @@ class CarGpsTracker:
     self.previous_position: tuple[float, float] | None = None
     self.bearing: float | None = None
     self.bearing_ns = 0
+    self.vw_fix_utc_ms = 0
 
   def update(self, parser, *, speed: float = 0., backward: bool = False) -> None:
     now = parser._last_update_nanos
@@ -249,6 +250,10 @@ class CarGpsTracker:
       self.sample = None
       self.previous_position = self.bearing = None
       return
+    if self.config.brand == "volkswagen" and sample["hasFix"]:
+      if sample["unixTimestampMillis"] <= self.vw_fix_utc_ms:
+        return
+      self.vw_fix_utc_ms = sample["unixTimestampMillis"]
     sample["timestamp_nanos"] = min(stamps)
     if self.config.brand == "gm":
       sample.update(altitude=0., verticalAccuracy=500., speed=0., speedAccuracy=100.,
