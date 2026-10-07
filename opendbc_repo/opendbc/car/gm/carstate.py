@@ -544,6 +544,11 @@ class CarState(CarStateBase):
       self.stock_fcw_alert = int(cam_cp.vl["ASCMActiveCruiseControlStatus"]["FCWAlert"]) & 0x3
       ret.stockFcw = self.stock_fcw_alert != 0
 
+    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and
+        is_bolt_pedal_profile(self.CP) and not removed_pedal):
+      self.stock_fcw_alert = int(cam_cp.vl["ASCMActiveCruiseControlStatus"]["FCWAlert"]) & 0x3
+      ret.stockFcw = self.stock_fcw_alert != 0
+
     if self.volt_cc_pedal_profile is not None:
       ret.brakePressed = bool(pt_cp.vl["ECMEngineStatus"]["BrakePressed"])
       ret.accFaulted = False  # ACC status is not a conventional-cruise fault source.

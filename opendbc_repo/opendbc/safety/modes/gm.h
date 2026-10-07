@@ -128,6 +128,8 @@ static uint32_t gm_pedal_main_last_us = 0U;
 static bool gm_regen_gear_ready = false;
 static bool gm_pedal_forward_gear_ready = false;
 static bool gm_acc_pedal_forward_owner = false;
+static bool gm_acc_pedal_dashboard_seen = false;
+static uint32_t gm_acc_pedal_dashboard_us = 0U;
 static bool gm_bolt_pedal_removed = false;
 static bool gm_bolt_removed_acc_seen = false;
 static bool gm_bolt_removed_gear_seen = false;
@@ -169,6 +171,16 @@ static bool gm_pedal_main_ready(void) {
   return gm_pedal_main_seen && acc_main_on &&
          safety_get_ts_elapsed(microsecond_timer_get(), gm_pedal_main_last_us) <= 300000U;
 }
+
+static bool gm_acc_pedal_dashboard_current(void) {
+  const bool physical = gm_acc_pedal_forward_owner && gm_pedal_sensor_current() &&
+    gm_pedal_main_ready() && gm_pedal_drive_ready() && gm_acc_status_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), gm_acc_status_last_us) <= 300000U) &&
+    !safety_rx_checks_invalid && !relay_malfunction;
+  if (!physical) { gm_acc_pedal_dashboard_seen = false; }
+  return physical;
+}
+
 
 static void gm_pedal_brake_producer_clear(void) {
   gm_pedal_brake_producer_seen = false;
@@ -464,6 +476,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
   gm_one_pedal_observe(msg);
   gm_hold_rx(msg);
   if (gm_camera_volt && gm_auto_hold) { (void)gm_camera_hold_sensor_ready(); }
+  if (gm_acc_pedal_forward_owner) { (void)gm_acc_pedal_dashboard_current(); }
 }
 
 static bool gm_tx_hook(const CANPacket_t *msg) {
@@ -565,6 +578,16 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     if (violation) {
       tx = false;
     }
+  }
+
+  if (gm_acc_pedal_forward_owner && (msg->addr == 0x370U)) {
+    const bool active = (msg->data[2] & 0x80U) != 0U;
+    const uint16_t speed = ((uint16_t)(msg->data[2] & 0xFU) << 8U) | msg->data[3];
+    const bool shape = (msg->data[0] == 1U) && (msg->data[1] == 2U) &&
+      ((msg->data[2] & 0x40U) == 0U) && (speed <= 4080U) &&
+      (msg->data[4] == 1U) && ((msg->data[5] & 0xECU) == 0U) &&
+      (active || ((msg->data[2] & 0x30U) == 0U));
+    tx &= shape && gm_acc_pedal_dashboard_current() && (!active || controls_allowed);
   }
 
   if (gm_ascm_intercept && (msg->addr == 0x370U)) {
@@ -780,14 +803,23 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     for (uint8_t i = 0U; i < 7U; i++) { tx &= msg->data[i] == 0U; }
   }
 
-  return gm_camera_pedal_tx(msg, tx);
+  tx = gm_camera_pedal_tx(msg, tx);
+  if (gm_acc_pedal_forward_owner && (msg->addr == 0x370U) && tx &&
+      !relay_malfunction && !safety_rx_checks_invalid) {
+    gm_acc_pedal_dashboard_seen = true;
+    gm_acc_pedal_dashboard_us = microsecond_timer_get();
+  }
+  return tx;
 }
 
 static bool gm_fwd_hook(int bus_num, int addr) {
+  const bool dashboard_owned = gm_acc_pedal_dashboard_current() && gm_acc_pedal_dashboard_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), gm_acc_pedal_dashboard_us) <= 100000U);
   if (gm_pedal_acc) { (void)gm_pedal_brake_producer_current(); }
   // SDGM replaces the PT PSCM status at the camera. Frozen SDGM topology
   // blocks this direction without treating camera PSCM traffic as a relay fault.
-  return (gm_bolt_pedal_removed && (((bus_num == 0) && (addr == 0x184)) ||
+  return (dashboard_owned && (bus_num == 2) && (addr == 0x370)) ||
+         (gm_bolt_pedal_removed && (((bus_num == 0) && (addr == 0x184)) ||
           ((bus_num == 2) && (addr == 0x180)))) ||
          (gm_camera_gateway && gm_camera_gateway_removed && (bus_num == 0) && (addr == 0x184)) ||
          (gm_camera_gateway && gm_camera_pedal_long && (bus_num == 2) && ((addr == 0x180) || (addr == 0x315) || (addr == 0x2CB) || (addr == 0x370) || (addr == 0x2CD))) ||
@@ -1185,6 +1217,7 @@ static safety_config gm_init(uint16_t safety_param) {
                                                 {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
                                                 {0x184, 2, 8, .check_relay = true}};
   static const CanMsg GM_BOLT_ACC_PEDAL_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x200, 0, 6, .check_relay = false},
+                                                    {0x370, 0, 6, .check_relay = false},
                                                     {0x315, 0, 5, .check_relay = false},
                                                     {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
                                                     {0x184, 2, 8, .check_relay = true}, {0x1E1, 2, 7, .check_relay = false}};
@@ -1307,6 +1340,8 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_regen_gear_ready = false;
   gm_pedal_forward_gear_ready = false;
   gm_acc_pedal_forward_owner = param == 0x1CDU;
+  gm_acc_pedal_dashboard_seen = false;
+  gm_acc_pedal_dashboard_us = 0U;
   gm_regen_gear_last_us = 0U;
   gm_paddle_internal_tx = false;
   gm_bd_feed.valid = false;
