@@ -31,6 +31,8 @@ class ButtonCadence:
     self.remaining = 0
     self.button = CruiseButtons.INIT
     self.last_counter = -1
+    self.last_direction_frame = None
+    self.last_cancel_frame = None
 
   def reset_burst(self):
     self.remaining = 0
@@ -38,10 +40,21 @@ class ButtonCadence:
     self.last_counter = -1
     self.observed_counter = -1
 
+  def can_send(self, frame, button):
+    last_sent = self.last_cancel_frame if button == CruiseButtons.CANCEL else self.last_direction_frame
+    return last_sent is None or frame - last_sent > 2
+
+  def note_sent(self, frame, button):
+    if button == CruiseButtons.CANCEL:
+      self.last_cancel_frame = frame
+    else:
+      self.last_direction_frame = frame
+
   def ready(self, frame, counter, button, rate):
     if not self.burst:
-      if button != CruiseButtons.INIT and (frame - self.last_frame) * .01 > rate:
+      if button != CruiseButtons.INIT and (frame - self.last_frame) * .01 > rate and self.can_send(frame, button):
         self.last_frame = frame
+        self.note_sent(frame, button)
         return True
       return False
     if self.observed_counter != counter:
@@ -62,6 +75,10 @@ class ButtonCadence:
       self.last_counter = -1
     if frame - self.observed_frame < 1 or self.last_counter == counter:
       return False
+    # All ordinary-CC writers share the native direction/CANCEL clocks.
+    if not self.can_send(frame, button):
+      return False
+    self.note_sent(frame, button)
     self.last_counter = counter
     self.remaining -= 1
     return True

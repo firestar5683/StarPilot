@@ -19,6 +19,25 @@ def qualified_frames(packer, counter):
   return frames
 
 
+def warm_ordinary_native(test, ci, packer, safety):
+  from opendbc.car.gm.gmcan import create_buttons
+  from opendbc.car.gm.tests.test_bolt_cc import native
+  # Authentic physical SET release before the sender loop, with two current RX batches.
+  # No host transmission or controls/clock-history grant is fabricated.
+  for now, counter, button in ((980_000_000, 3, CruiseButtons.DECEL_SET),
+                               (990_000_000, 0, CruiseButtons.UNPRESS)):
+    frames = [f for f in qualified_frames(packer, counter) if f[0] not in (0x1E1, 0x3D1)]
+    frames.append(packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': 1, 'CruiseSetSpeed': 50}))
+    frames.append(create_buttons(packer, 0, counter, button))
+    safety.set_timer(now // 1000)
+    for frame in frames:
+      test.assertTrue(native('rx', frame, now // 1000))
+    ci.update([(now, frames)])
+    safety.safety_tick()
+  test.assertTrue(safety.safety_config_valid())
+  test.assertTrue(safety.get_controls_allowed(), 'real physical SET release grants ordinary cruise')
+
+
 def malibu_f1_params(*, release=False):
   from opendbc.car import gen_empty_fingerprint
   from opendbc.car.gm.interface import CarInterface
@@ -142,6 +161,156 @@ class TestOrdinaryCc(unittest.TestCase):
     self.assertFalse(cadence.ready(32, 0, CruiseButtons.RES_ACCEL, .2))
     self.assertFalse(cadence.ready(33, 1, CruiseButtons.RES_ACCEL, .2))
     self.assertTrue(cadence.ready(34, 1, CruiseButtons.RES_ACCEL, .2))
+
+  def test_xt4_burst_strict_native_interval_and_nominal_cadence(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.tests.test_bolt_cc import native
+    from opendbc.safety.tests.libsafety import libsafety_py
+
+    cadence = ButtonCadence(True)
+    self.assertFalse(cadence.ready(64, 0, CruiseButtons.RES_ACCEL, .2))
+    self.assertTrue(cadence.ready(65, 0, CruiseButtons.RES_ACCEL, .2))
+    self.assertFalse(cadence.ready(66, 1, CruiseButtons.RES_ACCEL, .2))
+    self.assertFalse(cadence.ready(67, 1, CruiseButtons.RES_ACCEL, .2), 'exact20ms cannot pass native')
+    self.assertEqual((cadence.remaining, cadence.last_counter), (5, 0), 'early attempt cannot consume settled credit')
+    self.assertTrue(cadence.ready(68, 1, CruiseButtons.RES_ACCEL, .2), 'same fresh counter remains eligible at30ms')
+    for identity in (CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT4_CC):
+      for physical_step in (2, 3):
+        with self.subTest(identity=identity, physical_step=physical_step):
+          cp = params(identity)
+          ci = CarInterface(cp)
+          packer = CANPacker(DBC[identity][Bus.pt])
+          safety = libsafety_py.libsafety
+          safety.init_tests()
+          safety.set_alternative_experience(cp.alternativeExperience)
+          self.assertEqual(safety.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
+          warm_ordinary_native(self, ci, packer, safety)
+          control = structs.CarControl(enabled=True, longActive=True)
+          control.actuators.accel = 1.
+          control.hudControl.setSpeed = 35.
+          sent = []
+          last_credit = None
+          for tick in range(200):
+            now = 1_000_000_000 + tick*10_000_000
+            counter = (tick // physical_step) % 4
+            frames = [frame for frame in qualified_frames(packer, counter)
+                      if frame[0] != 0x3D1 and (frame[0] != 0x1E1 or tick % physical_step == 0)]
+            frames.append(packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': 1, 'CruiseSetSpeed': 50}))
+            safety.set_timer(now//1000)
+            for frame in frames:
+              self.assertTrue(native('rx', frame, now//1000))
+            safety.safety_tick()
+            state = ci.update([(now, frames)])
+            if tick >= 60:
+              self.assertTrue(state.canValid)
+              self.assertTrue(safety.safety_config_valid())
+            _, outgoing = ci.apply(control.as_reader(), now)
+            for frame in outgoing:
+              self.assertTrue(native('tx', frame, now//1000), (identity, physical_step, tick, frame))
+              if frame[0] == 0x1E1:
+                self.assertEqual(frame[2], 0)
+                self.assertEqual(frame[1][4], (counter + 1) % 4)
+                self.assertEqual((frame[1][5] >> 4) & 7, CruiseButtons.RES_ACCEL)
+                credit = ci.CS.volt_cc_physical.button_credit_ns
+                self.assertGreater(credit, 0)
+                self.assertNotEqual(credit, last_credit, 'one physical credit is consumed once; counter wrap is allowed')
+                last_credit = credit
+                sent.append(tick)
+          self.assertGreaterEqual(len(sent), 6, 'actual parser/controller/native burst must be nonempty')
+          self.assertTrue(all((b-a)*10_000 > 20_000 for a,b in zip(sent, sent[1:], strict=False)), sent)
+          if identity == CAR.CADILLAC_CT6_CC:
+            self.assertTrue(all(tick % 4 == 0 for tick in sent), 'CT6 retains25Hz processing')
+          elif physical_step == 3:
+            self.assertTrue(any(b-a == 3 for a,b in zip(sent, sent[1:], strict=False)), 'nominal33Hz settled burst remains reachable')
+
+  def test_shared_writer_clocks_preserve_direct_set_cancel_and_burst_credit(self):
+    from opendbc.car.gm.gmcan import create_buttons
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.tests.test_bolt_cc import native
+    from opendbc.safety.tests.libsafety import libsafety_py
+
+    for burst in (False, True):
+      cadence = ButtonCadence(burst)
+      cadence.note_sent(51, CruiseButtons.RES_ACCEL)
+      self.assertFalse(cadence.can_send(52, CruiseButtons.DECEL_SET))
+      self.assertFalse(cadence.can_send(53, CruiseButtons.DECEL_SET))
+      self.assertTrue(cadence.can_send(54, CruiseButtons.DECEL_SET))
+      cadence.note_sent(54, CruiseButtons.DECEL_SET)
+      self.assertFalse(cadence.ready(55, 0, CruiseButtons.RES_ACCEL, .2))
+      self.assertFalse(cadence.ready(56, 0, CruiseButtons.RES_ACCEL, .2))
+      self.assertTrue(cadence.ready(57, 0, CruiseButtons.RES_ACCEL, .2))
+      cadence.note_sent(80, CruiseButtons.CANCEL)
+      self.assertFalse(cadence.can_send(82, CruiseButtons.CANCEL))
+      self.assertTrue(cadence.can_send(83, CruiseButtons.CANCEL))
+      self.assertTrue(cadence.can_send(82, CruiseButtons.DECEL_SET), 'native clock classes remain independent')
+      cadence.reset_burst()
+      self.assertFalse(cadence.can_send(82, CruiseButtons.CANCEL), 'reset cannot erase successful-send history')
+    for identity in (CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT4_CC):
+      cp = params(identity)
+      ci = CarInterface(cp)
+      packer = CANPacker(DBC[identity][Bus.pt])
+      safety = libsafety_py.libsafety
+      safety.set_alternative_experience(0)
+      self.assertEqual(safety.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
+      safety.init_tests()
+      warm_ordinary_native(self, ci, packer, safety)
+      sent = {True: [], False: []}
+      buttons = []
+      for tick in range(320):
+        now = 1_000_000_000 + tick * 10_000_000
+        gas = tick == 52 or 250 <= tick < 270
+        counter = (tick // 2) % 4
+        if identity == CAR.CADILLAC_XT4_CC:
+          if 44 <= tick < 50:
+            counter = 2  # Physical duplicate neutral packets at46/48 cannot renew consumed credit.
+          elif tick >= 50:
+            counter = (tick // 2 - 2) % 4  # Fresh sequential3@50,0@52 and continued physical wrap.
+        frames = [f for f in qualified_frames(packer, counter) if f[0] not in (0x3D1, 0x1C4, 0x1E1)]
+        if tick % 2 == 0:
+          frames.append(create_buttons(packer, 0, counter, CruiseButtons.UNPRESS))
+        frames += [packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': 1, 'CruiseSetSpeed': 50}),
+                   packer.make_can_msg('AcceleratorPedal2', 0, {'AcceleratorPedal2': 30 if gas else 0})]
+        safety.set_timer(now // 1000)
+        for f in frames:
+          self.assertTrue(native('rx', f, now // 1000))
+        safety.safety_tick()
+        state = ci.update([(now, frames)])
+        if tick >= 60:
+          self.assertTrue(state.canValid)
+          self.assertTrue(safety.safety_config_valid())
+        control = structs.CarControl(enabled=not 180 <= tick < 196, longActive=not 180 <= tick < 196)
+        control.actuators.accel = -20. if 170 <= tick < 180 else 1.
+        control.hudControl.setSpeed = 35.
+        _, outgoing = ci.apply(control.as_reader(), now)
+        if identity == CAR.CADILLAC_XT4_CC and tick == 52:
+          self.assertEqual(sent[False][-1], 51, 'actual burst RES immediately precedes single-frame gas SET opportunity')
+          self.assertTrue(state.canValid and safety.safety_config_valid())
+          self.assertTrue(ci.CS.volt_cc_physical.current(now))
+          self.assertTrue(state.gasPressed)
+          self.assertEqual(ci.CS.volt_cc_physical.button_credit_ns, now)
+          self.assertNotEqual(ci.CC.volt_cc_consumed_source_ns, now, '20ms guard cannot consume fresh raw credit')
+          self.assertEqual(ci.CC.ordinary_cc_cadence.last_direction_frame, 51)
+          self.assertFalse(any(f[0] == 0x1E1 for f in outgoing), 'native must reject SET52 after RES51')
+        for f in outgoing:
+          self.assertTrue(native('tx', f, now // 1000), (identity, tick, f))
+          if f[0] == 0x1E1:
+            button = (f[1][5] >> 4) & 7
+            self.assertEqual(f[2], 0)
+            self.assertEqual(f[1][4], (counter + 1) % 4)
+            sent[button == CruiseButtons.CANCEL].append(tick)
+            buttons.append(button)
+      for times in sent.values():
+        self.assertTrue(times)
+        self.assertTrue(all(b - a > 2 for a, b in zip(times, times[1:], strict=False)), (identity, times))
+      self.assertIn(CruiseButtons.RES_ACCEL, buttons)
+      self.assertIn(CruiseButtons.DECEL_SET, buttons)
+      self.assertIn(CruiseButtons.CANCEL, buttons)
 
   def test_actual_packed_state_and_missing_source_steering_backstop(self):
     from opendbc.can import CANPacker

@@ -4,12 +4,10 @@ import unittest
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.gmcan import pedal_crc
+from opendbc.car.gm.gmcan import pedal_crc, create_buttons
 from opendbc.car.gm.values import CAR, DBC, ORDINARY_CC_CAR, is_conventional_cc_pedal_profile
 from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
 from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
-
-
 
 
 def params(identity, *, disabled=False, removed=False, release=False, enabled=True, sensor=True, analog=True):
@@ -89,7 +87,8 @@ class TestConventionalPedal(unittest.TestCase):
           for tick in range(40):
             now = 1_000_000_000 + tick * 10_000_000
             cruise = tick < 25
-            frames = pt_frames(packer, cruise=cruise, counter=tick % 4)
+            frames = [message for message in pt_frames(packer, cruise=cruise, counter=tick % 4) if message[0] != 0x1E1]
+            frames.append(create_buttons(packer, 0, tick % 4, 1))
             frames += pedal_frames(packer, tick, removed=removed)
             out = ci.update([(now, frames)])
             self.assertTrue(out.canValid)
@@ -169,6 +168,66 @@ class TestConventionalPedal(unittest.TestCase):
         _, emitted = ci.apply(cc.as_reader(), now)
         for message in emitted:
           self.assertTrue(native('tx', message, now // 1000), hex(message[0]))
+
+  def test_active_cancel_uses_neutral_single_use_credit_and_native_ttl(self):
+    from opendbc.car.gm.gmcan import create_buttons
+    from opendbc.car.gm.tests.test_silverado_cc_pedal import params as silverado_params
+    from opendbc.safety.tests.libsafety import libsafety_py
+    safety = libsafety_py.libsafety
+    for silverado, disabled in ((False, False), (True, False), (True, True)):
+      for removed in (False, True):
+        cp = (silverado_params(removed=removed, disabled=disabled) if silverado else
+              params(CAR.CADILLAC_CT6_CC, removed=removed))
+        ci = CarInterface(cp)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        safety.set_alternative_experience(0)
+        self.assertEqual(safety.set_safety_hooks(int(cp.safetyConfigs[0].safetyModel.raw), cp.safetyConfigs[0].safetyParam), 0)
+        safety.init_tests()
+        counter = 0
+        accepted_credit = set()
+        cancelled = []
+        for tick in range(90):
+          now = 1_000_000_000 + tick * 10_000_000
+          if (tick < 50 or tick >= 70) and tick % 3 == 0 or tick == 50:
+            counter = (counter + 1) % 4
+          button = 3 if 30 <= tick < 40 else 1
+          frames = [m for m in pt_frames(packer, cruise=True, counter=counter) if m[0] != 0x1E1]
+          frames += pedal_frames(packer, tick, removed=removed)
+          if 40 <= tick < 66:
+            frames = [m for m in frames if m[0] != 0x1C4]
+          frames.append(create_buttons(packer, 0, counter, button))
+          out = ci.update([(now, frames)])
+          self.assertTrue(out.canValid)
+          safety.set_timer(now // 1000)
+          for address, data, bus in frames:
+            if bus != 128:
+              self.assertTrue(safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data)))
+          safety.safety_tick()
+          self.assertTrue(safety.safety_config_valid())
+          # Proactive cancellation is independent of software engagement.
+          cc = structs.CarControl(enabled=False, latActive=False, longActive=False)
+          cc.cruiseControl.cancel = disabled
+          _, messages = ci.apply(cc.as_reader(), now)
+          cancels = [m for m in messages if m[0] == 0x1E1]
+          if 30 <= tick < 40 or 50 <= tick < 66 or silverado and 66 <= tick < 70:
+            self.assertFalse(cancels, (silverado, removed, tick))
+          for message in messages:
+            self.assertTrue(safety.safety_tx_hook(libsafety_py.make_CANPacket(message[0], message[2], message[1])),
+                            (silverado, removed, tick, message))
+          for message in cancels:
+            credit = ci.CS.conventional_cancel_credit
+            self.assertEqual(message, create_buttons(packer, 2 if disabled else 0,
+                                                      credit.counter if disabled else (credit.counter + 1) % 4, 6))
+            self.assertNotIn(credit.credit_ns, accepted_credit)
+            accepted_credit.add(credit.credit_ns)
+            self.assertLessEqual(now - credit.credit_ns, 100_000_000 if silverado else 300_000_000)
+            cancelled.append(tick)
+        self.assertTrue(any(tick < 30 for tick in cancelled))
+        self.assertTrue(any(40 <= tick < 50 for tick in cancelled), 'fresh neutral recovers after physical SET')
+        self.assertTrue(any(tick >= 70 for tick in cancelled), 'new neutral restores cancellation after stale credit')
+        self.assertTrue(all(right - left > 4 for left, right in zip(cancelled, cancelled[1:], strict=False)))
+        if not silverado:
+          self.assertTrue(any(66 <= tick < 70 for tick in cancelled), 'ordinary 300ms credit remains eligible')
 
   def test_malibu_selected_analog_brake_source_and_alternate_threshold(self):
     from opendbc.car.gm.values import GMFlags

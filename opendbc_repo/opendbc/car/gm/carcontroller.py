@@ -1098,9 +1098,12 @@ class CarController(CarControllerBase):
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
       if (not self.CP.openpilotLongitudinalControl and self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and
           (self.frame - self.last_button_frame) * DT_CTRL > .04 and
-          conventional_pedal_sources_current(CS, now_nanos) and CS.out.cruiseState.available):
+          conventional_pedal_sources_current(CS, now_nanos) and CS.out.cruiseState.available and
+          CS.conventional_cancel_credit.available(now_nanos, self.conventional_cancel_credit_used) and
+          0 <= now_nanos - CS.conventional_cancel_credit.credit_ns <= 100_000_000):
         self.last_button_frame = self.frame
-        can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
+        self.conventional_cancel_credit_used = CS.conventional_cancel_credit.credit_ns
+        can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.conventional_cancel_credit.counter, CruiseButtons.CANCEL))
 
     elif self.conventional_pedal_profile and not self.CP.openpilotLongitudinalControl:
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
@@ -1119,10 +1122,14 @@ class CarController(CarControllerBase):
 
     if (self.conventional_pedal_profile and self.CP.openpilotLongitudinalControl and
         conventional_pedal_sources_current(CS, now_nanos) and CS.out.cruiseState.available and
-        CS.out.cruiseState.enabled and (self.frame - self.last_button_frame) * DT_CTRL > .04):
+        CS.out.cruiseState.enabled and (self.frame - self.last_button_frame) * DT_CTRL > .04 and
+        CS.conventional_cancel_credit.available(now_nanos, self.conventional_cancel_credit_used) and
+        0 <= now_nanos - CS.conventional_cancel_credit.credit_ns <=
+        (100_000_000 if self.silverado_cc_pedal_profile else 300_000_000)):
       self.last_button_frame = self.frame
+      self.conventional_cancel_credit_used = CS.conventional_cancel_credit.credit_ns
       can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN,
-                                           (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
+                                           (CS.conventional_cancel_credit.counter + 1) % 4, CruiseButtons.CANCEL))
 
     if (is_bolt_present_no_acc_pedal_profile(self.CP) and CS.out.canValid and not CS.out.canTimeout and
         CS.pedal_sensor_healthy and 0 < CS.pedal_sensor_ts_nanos <= now_nanos and
@@ -1205,8 +1212,11 @@ class CarController(CarControllerBase):
       if ((self.volt_cc_cancel_pending or stock_cancel_requested) and
           (not self.ordinary_cc_profile or self.CP.openpilotLongitudinalControl or stock_cancel_requested) and
           cancel_ready and (self.frame - self.volt_cc_last_cancel_frame) * DT_CTRL > .04 and
-          physical.button_credit_ns > 0 and physical.button_credit_ns != self.volt_cc_consumed_source_ns):
+          physical.button_credit_ns > 0 and physical.button_credit_ns != self.volt_cc_consumed_source_ns and
+          (not self.ordinary_cc_profile or self.ordinary_cc_cadence.can_send(self.frame, CruiseButtons.CANCEL))):
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
+        if self.ordinary_cc_profile:
+          self.ordinary_cc_cadence.note_sent(self.frame, CruiseButtons.CANCEL)
         self.volt_cc_last_cancel_frame = self.frame
         self.volt_cc_consumed_source_ns = physical.button_credit_ns
         self.volt_cc_cancel_pending = False
@@ -1223,11 +1233,14 @@ class CarController(CarControllerBase):
                        not CS.out.brakePressed and not CS.out.regenBraking and self.frame % 52 == 0 and
                        all(math.isfinite(value) for value in (CS.out.cruiseState.speed, CS.out.vEgo, hud_v_cruise)) and
                        CS.out.cruiseState.speed < CS.out.vEgo < hud_v_cruise and
-                       physical.button_credit_ns > 0 and physical.button_credit_ns != self.volt_cc_consumed_source_ns)
+                       physical.button_credit_ns > 0 and physical.button_credit_ns != self.volt_cc_consumed_source_ns and
+                       (not self.ordinary_cc_profile or self.ordinary_cc_cadence.can_send(self.frame, CruiseButtons.DECEL_SET)))
       if cancel_sent:
         self.volt_cc_last_button_frame = self.frame
       elif gas_set_ready:
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.DECEL_SET))
+        if self.ordinary_cc_profile:
+          self.ordinary_cc_cadence.note_sent(self.frame, CruiseButtons.DECEL_SET)
         self.volt_cc_consumed_source_ns = physical.button_credit_ns
         self.volt_cc_last_button_frame = self.frame
       elif not self.CP.openpilotLongitudinalControl or not ready or not CC.longActive:
