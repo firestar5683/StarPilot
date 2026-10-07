@@ -47,7 +47,7 @@ class RouteRuntime:
         self.owner.position_store.record({'longitude': coordinates[0], 'latitude': coordinates[1], 'bearing': bearing})
     if position is None:
       self.owner.position_store.flush()
-    settings = self.owner.read_routing()
+    settings = self.owner.read()
     selected = settings['destination']
     destination_key = None if selected is None else (selected['id'], selected['longitude'], selected['latitude'])
     key = settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive_id

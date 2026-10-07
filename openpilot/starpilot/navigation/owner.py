@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from contextlib import contextmanager
+import copy
 import fcntl
 import hashlib
 import json
 import math
 import os
-import stat
 import sys
 import subprocess
 from urllib.parse import quote
@@ -16,7 +16,6 @@ import tempfile
 import threading
 import time
 import uuid
-from itertools import islice
 
 import requests
 
@@ -35,6 +34,11 @@ TILE_SLOTS = 6
 TILE_SLOT_WAIT_S = 3.0  # a panned-away request still holds its slot until Mapbox answers; wait instead of failing
 AUTOCOMPLETE_TYPES = {'poi', 'address', 'street', 'place', 'neighborhood', 'locality'}
 SUGGESTS_PER_SESSION = 50  # Mapbox starts a new billable session after this many suggestions
+MAX_FAVORITES = 100
+MAX_RECENTS = 10
+FAVORITE_LABELS = ('home', 'work')
+# Mapbox's default style. Static Tiles stay inside the free 200k monthly map views.
+MAP_STYLE = 'mapbox/streets-v12'
 
 
 class ValidationError(ValueError):
@@ -56,7 +60,29 @@ def destination(value: dict) -> dict:
       not -90 <= latitude <= 90 or not -180 <= longitude <= 180):
     raise ValidationError('Destination name and coordinates are invalid')
   identity = hashlib.sha256(f'{latitude:.6f},{longitude:.6f}'.encode()).hexdigest()[:20]
-  return {'id': identity, 'name': name.strip(), 'latitude': float(latitude), 'longitude': float(longitude)}
+  result = {'id': identity, 'name': name.strip(), 'latitude': float(latitude), 'longitude': float(longitude)}
+  address = value.get('address')
+  if isinstance(address, str) and address.strip() and address.strip() != result['name']:
+    result['address'] = address.strip()[:512]
+  return result
+
+
+def favorite_place(value: dict) -> dict:
+  result = destination(value)
+  if value.get('label') in FAVORITE_LABELS:
+    result['label'] = value['label']
+  return result
+
+
+def remember(recents: list[dict], selected: dict) -> list[dict]:
+  """Most recent first; choosing a place again moves it to the top."""
+  return ([{key: selected[key] for key in ('id', 'name', 'latitude', 'longitude', 'address') if key in selected}] +
+          [row for row in recents if row['id'] != selected['id']])[:MAX_RECENTS]
+
+
+def rounded(points):
+  # About 10 cm: plenty for drawing, and a third of the bytes of full float precision.
+  return [dict(point, latitude=round(point['latitude'], 6), longitude=round(point['longitude'], 6)) for point in points]
 
 
 def response_json(session, url: str, params: dict) -> dict:
@@ -92,12 +118,15 @@ class NavigationOwner:
     from openpilot.starpilot.navigation.mapbox_budget import MonthlyBudget
     self.search_budget = MonthlyBudget('searchSessions', self.root / 'mapbox-usage')
     self.tile_budget = MonthlyBudget('staticTiles', self.root / 'mapbox-usage', flush_every=25)
+    self.geocode_budget = MonthlyBudget('geocoding', self.root / 'mapbox-usage')
     self._tile_lock = threading.Lock()
     self._tiles = OrderedDict()
     self._tile_key = None
     self._tile_bytes = 0
     self._lock = threading.RLock()
     self._searches = {}
+    self._read_cache = None
+    self._params = None
     identity = hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()[:24]
     if transient_root is not None:
       self.transient_root = Path(transient_root)
@@ -109,11 +138,20 @@ class NavigationOwner:
       self.transient_root = Path("/tmp") / ("starpilot-navigation-" + boot_id + "-" + identity)
 
   def read(self) -> dict:
+    # Galaxy polls and every map tile read settings; reparse only after a write replaced the file.
+    try:
+      info = os.stat(self.path)
+    except FileNotFoundError:
+      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': []}
+    key = (info.st_ino, info.st_mtime_ns, info.st_size)
+    cached = getattr(self, '_read_cache', None)
+    if cached is not None and cached[0] == key:
+      return copy.deepcopy(cached[1])
     try:
       with self.path.open('rb') as source:
         raw = source.read(MAX_DOCUMENT + 1)
     except FileNotFoundError:
-      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': []}
+      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': []}
     try:
       value = json.loads(raw)
       if (len(raw) > MAX_DOCUMENT or not isinstance(value, dict) or value.get('version') != 1 or
@@ -122,14 +160,17 @@ class NavigationOwner:
           any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for ch in value['revision']) or
           len(value['token']) > 2048 or 'destination' not in value or
           type(value.get('routeChoice', 0)) is not int or not 0 <= value.get('routeChoice', 0) <= 2 or
-          not isinstance(value.get('favorites'), list) or len(value['favorites']) > 100):
+          not isinstance(value.get('favorites'), list) or len(value['favorites']) > MAX_FAVORITES or
+          not isinstance(value.get('recents', []), list)):
         raise ValueError
       if value.get('destination') is not None:
         value['destination'] = destination(value['destination'])
-      value['favorites'] = [destination(item) for item in value['favorites']]
-      return value
+      value['favorites'] = [favorite_place(item) for item in value['favorites']]
+      value['recents'] = [destination(item) for item in value.get('recents', [])][:MAX_RECENTS]
     except (ValueError, TypeError, KeyError):
       raise ValidationError('Saved navigation settings could not be read') from None
+    self._read_cache = (key, copy.deepcopy(value))
+    return value
 
   def _temporary_directory(self):
     self.transient_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -140,71 +181,6 @@ class NavigationOwner:
       raise ValidationError('Navigation temporary storage is unavailable')
     return fd
 
-  def _sweep_active(self, current):
-    directory = self._temporary_directory()
-    try:
-      with os.scandir(directory) as entries:
-        for entry in islice(entries, MAX_SEARCHES + 1):
-          if ((entry.name.endswith('.json') and entry.name != current['revision'] + '.json') or
-              entry.name.startswith('.active-')):
-            os.unlink(entry.name, dir_fd=directory)
-    finally:
-      os.close(directory)
-
-  def _read_active(self, current):
-    directory = self._temporary_directory()
-    try:
-      try:
-        fd = os.open(current['revision'] + '.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
-      except FileNotFoundError:
-        return None
-      with os.fdopen(fd, 'rb') as source:
-        info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-          raise ValidationError('Navigation temporary storage is unavailable')
-        raw = source.read(4097)
-      value = json.loads(raw)
-      if (len(raw) > 4096 or set(value) != {'version', 'revision', 'expires', 'destination'} or type(value['version']) is not int or value['version'] != 1 or
-          not isinstance(value['revision'], str) or type(value['expires']) not in (float, int) or
-          not math.isfinite(value['expires'])):
-        raise ValueError
-      selected = destination(value['destination'])
-      if value['revision'] != current['revision'] or not time.monotonic() < value['expires'] <= time.monotonic() + ACTIVE_TTL:
-        os.unlink(current['revision'] + '.json', dir_fd=directory)
-        return None
-      return dict(value, destination=selected)
-    except (ValueError, TypeError, KeyError):
-      raise ValidationError('Navigation temporary destination could not be read') from None
-    finally:
-      os.close(directory)
-
-  def _write_active(self, value):
-    directory = self._temporary_directory()
-    name = '.active-' + uuid.uuid4().hex
-    try:
-      fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-      with os.fdopen(fd, 'w') as out:
-        json.dump(value, out, allow_nan=False, separators=(',', ':'))
-        out.flush()
-        os.fsync(out.fileno())
-      os.replace(name, value['revision'] + '.json', src_dir_fd=directory, dst_dir_fd=directory)
-      os.fsync(directory)
-    finally:
-      try:
-        os.unlink(name, dir_fd=directory)
-      except FileNotFoundError:
-        pass
-      os.close(directory)
-
-  def read_routing(self):
-    with self._exclusive():
-      current = self.read()
-      self._sweep_active(current)
-      active = self._read_active(current)
-      if active is not None:
-        current['destination'] = dict(active['destination'], temporary=True)
-      return current
-
   @contextmanager
   def _exclusive(self):
     with self._lock:
@@ -213,22 +189,15 @@ class NavigationOwner:
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
 
-  def _change(self, transform, expected_revision: str, authorized, *, active_destination=None, preserve_active=False) -> dict:
+  def _change(self, transform, expected_revision: str, authorized) -> dict:
     with self._exclusive():
       current = self.read()
       if not isinstance(expected_revision, str) or current['revision'] != expected_revision:
         raise ConflictError('Navigation changed; refresh and try again')
-      self._sweep_active(current)
-      active = self._read_active(current) if preserve_active else None
       transform(current)
       if not (authorized() if callable(authorized) else authorized is True):
         raise PermissionError('Navigation changes are not available right now')
       current['revision'] = uuid.uuid4().hex
-      if active_destination is not None:
-        active = {'version':1, 'destination':active_destination, 'expires':time.monotonic() + ACTIVE_TTL}
-      if active is not None:
-        self._write_active(dict(active, revision=current['revision']))
-      committed = False
       fd, temporary = tempfile.mkstemp(dir=self.root, prefix='.settings-')
       try:
         with os.fdopen(fd, 'w') as out:
@@ -238,15 +207,6 @@ class NavigationOwner:
         if not (authorized() if callable(authorized) else authorized is True):
           raise PermissionError('Navigation changes are not available right now')
         os.replace(temporary, self.path)
-        committed = True
-        temporary_directory = self._temporary_directory()
-        try:
-          with os.scandir(temporary_directory) as entries:
-            for stale in islice(entries, MAX_SEARCHES + 1):
-              if stale.name.endswith('.json') and stale.name != current['revision'] + '.json':
-                os.unlink(stale.name, dir_fd=temporary_directory)
-        finally:
-          os.close(temporary_directory)
         directory = os.open(self.root, os.O_RDONLY)
         try:
           os.fsync(directory)
@@ -254,32 +214,31 @@ class NavigationOwner:
           os.close(directory)
       finally:
         Path(temporary).unlink(missing_ok=True)
-        if not committed and active is not None:
-          directory = self._temporary_directory()
-          try:
-            os.unlink(current['revision'] + '.json', dir_fd=directory)
-          except FileNotFoundError:
-            pass
-          finally:
-            os.close(directory)
     return self.snapshot()
 
-  def snapshot(self) -> dict:
+  def snapshot(self, route_key: str | None = None) -> dict:
     with self._lock:
-      return self._snapshot()
+      return self._snapshot(route_key)
 
-  def _snapshot(self) -> dict:
-    document = self.read_routing()
+  def _is_metric(self) -> bool:
+    # One Params handle for the 1 Hz status polls instead of a new one per request.
     from openpilot.common.params import Params
-    is_metric = Params().get_bool('IsMetric')
+    if self._params is None or self._params[0] is not Params:
+      self._params = (Params, Params())
+    return self._params[1].get_bool('IsMetric')
+
+  def _snapshot(self, route_key: str | None = None) -> dict:
+    document = self.read()
     status = ('disabled' if not document['enabled'] else 'needsKey' if not document['token'] else
               'noDestination' if document['destination'] is None else 'waitingForLocation')
-    result = {key: document[key] for key in ('enabled', 'destination', 'favorites', 'revision')}
+    result = {key: document[key] for key in ('enabled', 'destination', 'recents', 'revision')}
+    # Home and Work lead, then places in the order they were saved.
+    result['favorites'] = sorted(document['favorites'], key=lambda row: FAVORITE_LABELS.index(row['label']) if 'label' in row else 2)
     from openpilot.starpilot.navigation.mapbox_budget import read_usage
     result['mapboxUsage'] = read_usage(self.root / 'mapbox-usage')
-    result['alternatives'] = self.route_options(document['revision'])
+    result['alternatives'] = [dict(row, geometry=rounded(row['geometry'])) for row in self.route_options(document['revision'])]
     result['selectedRoute'] = document.get('routeChoice', 0)
-    result.update(hasKey=bool(document['token']), status=status, instruction=None, route=[], isMetric=is_metric, location=None)
+    result.update(hasKey=bool(document['token']), status=status, instruction=None, route=[], isMetric=self._is_metric(), location=None)
     if document['enabled'] and document['token']:
       if self.runtime_source is None:
         from openpilot.starpilot.navigation.status import NavigationStatusSource
@@ -301,6 +260,12 @@ class NavigationOwner:
       if document['destination'] and isinstance(state, dict) and state.get('revision') == document['revision']:
         for key in ('status', 'instruction', 'route'):
           result[key] = state[key]
+        result['route'] = rounded(result['route'])
+    # Route lines are most of each status poll; a client that already holds them gets only the key.
+    result['routeKey'] = hashlib.sha256(json.dumps([result['route'], result['alternatives']], separators=(',', ':')).encode()).hexdigest()[:16]
+    if route_key is not None and route_key == result['routeKey']:
+      del result['route'], result['alternatives']
+      result['routeUnchanged'] = True
     return result
 
   def route_options(self, revision):
@@ -332,7 +297,7 @@ class NavigationOwner:
     rows = self.route_options(expected_revision)
     if type(index) is not int or not 0 <= index < len(rows):
       raise ValidationError('This route is no longer available; refresh and try again')
-    result = self._change(lambda doc: doc.update(routeChoice=index), expected_revision, authorized, preserve_active=True)
+    result = self._change(lambda doc: doc.update(routeChoice=index), expected_revision, authorized)
     # Retain choices across the preference revision without requesting another route.
     with self._exclusive():
       value = {'revision': result['revision'], 'expires': time.monotonic() + ACTIVE_TTL, 'routes': rows}
@@ -361,7 +326,7 @@ class NavigationOwner:
       raise ValidationError('Map is busy; try again')
     try:
       started = time.monotonic()
-      with self.session.get(f'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}.png',
+      with self.session.get(f'https://api.mapbox.com/styles/v1/{MAP_STYLE}/tiles/512/{z}/{x}/{y}.png',
                             params={'access_token': token}, timeout=(2, 2), stream=True, allow_redirects=False) as response:
         if response.status_code != 200 or response.headers.get('Content-Type', '').split(';')[0] != 'image/png':
           raise ValidationError('Map tiles are unavailable')
@@ -429,8 +394,10 @@ class NavigationOwner:
     token = self.read()['token']
     if not token:
       raise ValidationError('Add your Mapbox access token first')
+    # Temporary geocoding is inside Mapbox's free monthly allowance; results are kept only as this comma's own places.
+    self.geocode_budget.spend(enforce=False)
     data = response_json(self.session, 'https://api.mapbox.com/search/geocode/v6/forward',
-                         {'q': query.strip(), 'access_token': token, 'limit': 8, 'autocomplete': 'false', 'permanent': 'true'})
+                         {'q': query.strip(), 'access_token': token, 'limit': 8, 'autocomplete': 'false', **self._search_context()})
     results = []
     features = data.get('features')
     if not isinstance(features, list):
@@ -439,8 +406,9 @@ class NavigationOwner:
       try:
         properties = feature['properties']
         coordinates = feature['geometry']['coordinates']
-        name = properties.get('full_address') or properties.get('name') or properties.get('name_preferred')
-        results.append(destination({'name': name, 'longitude': coordinates[0], 'latitude': coordinates[1]}))
+        address = properties.get('full_address') or properties.get('place_formatted')
+        name = properties.get('name_preferred') or properties.get('name') or address
+        results.append(destination({'name': name, 'address': address, 'longitude': coordinates[0], 'latitude': coordinates[1]}))
       except (ValueError, TypeError, KeyError, IndexError, AttributeError):
         continue
     return results
@@ -544,7 +512,7 @@ class NavigationOwner:
             isinstance(name, str) and 1 <= len(name.strip()) <= 256):
           description = item.get('full_address') or item.get('place_formatted') or ''
           description = description.strip()[:512] if isinstance(description, str) else ''
-          results.append({'id':identity, 'name':name.strip(), 'description':description, 'searchId':search_id, 'temporary':True})
+          results.append({'id':identity, 'name':name.strip(), 'description':description, 'searchId':search_id})
       with self._lock:
         if (self._searches.get(key) is not entry or entry['expires'] <= time.monotonic() or
             self.read()['token'] != current['token']):
@@ -559,18 +527,19 @@ class NavigationOwner:
             self.read()['token'] != current['token']):
           raise ValidationError('Start a new destination search') from None
       if autocomplete:
-        return []  # suggestions are best effort and never fall back to paid geocoding
+        return []  # suggestions are best effort; typing never spends address lookups
       self.cancel_search(caller, search_id)
-      # Existing permanently storable address search remains available if POI search is unavailable.
+      # Address search remains available if place search is unavailable.
       return self.search(query)
     self.cancel_search(caller, search_id)
     return self.search(query)
 
-  def select_place(self, identity, search_id, caller, expected_revision, authorized):
+  def _retrieve(self, identity, search_id, caller, expected_revision, authorized, *, keep: bool) -> dict:
+    """Coordinates for a search suggestion. Saving (keep) leaves the other results usable."""
     if not isinstance(identity, str) or not isinstance(search_id, str):
       raise ValidationError('Choose a place from search results')
     with self._lock:
-      entry = self._searches.pop((caller, search_id), None)
+      entry = self._searches.get((caller, search_id)) if keep else self._searches.pop((caller, search_id), None)
     current = self.read()
     if (entry is None or entry['expires'] <= time.monotonic() or identity not in entry['ids'] or
         current['revision'] != expected_revision or entry['revision'] != expected_revision or
@@ -578,32 +547,55 @@ class NavigationOwner:
       raise ValidationError('Search again before choosing this place')
     if not (authorized() if callable(authorized) else authorized is True):
       raise PermissionError('Navigation changes are not available right now')
+    with self._lock:
+      session = entry['session']
+      # A retrieve ends the Mapbox session; a later retrieve from the same results is billed as its own session.
+      if entry.get('retrieved'):
+        self.search_budget.spend(enforce=False)
+      entry['retrieved'] = True
+      entry['session'] = str(uuid.uuid4())
     data = response_json(self.session, 'https://api.mapbox.com/search/searchbox/v1/retrieve/' + quote(identity, safe=''),
-                         {'access_token':current['token'], 'session_token':entry['session']})
+                         {'access_token':current['token'], 'session_token':session})
     try:
       feature = data['features'][0]
       properties = feature['properties']
       if properties.get('mapbox_id') != identity:
         raise ValueError
       coordinates = feature['geometry']['coordinates']
-      selected = destination({'name':properties.get('name'), 'longitude':coordinates[0], 'latitude':coordinates[1]})
+      return destination({'name':properties.get('name'), 'address':properties.get('full_address') or properties.get('place_formatted'),
+                          'longitude':coordinates[0], 'latitude':coordinates[1]})
     except (ValueError, TypeError, KeyError, IndexError):
       raise ValidationError('The map service returned an invalid place') from None
-    return self._change(lambda doc:doc.update(destination=None, routeChoice=0), expected_revision, authorized, active_destination=selected)
 
-  def _reject_temporary_promotion(self, doc, selected):
-    active = self._read_active(doc)
-    if active is not None and active['destination']['id'] == selected['id']:
-      raise ValidationError('This place can be used for a route but cannot be saved')
+  def select_place(self, identity, search_id, caller, expected_revision, authorized):
+    selected = self._retrieve(identity, search_id, caller, expected_revision, authorized, keep=False)
+    return self._change(lambda doc: self._navigate(doc, selected), expected_revision, authorized)
+
+  def favorite_place(self, identity, search_id, caller, expected_revision, authorized):
+    selected = self._retrieve(identity, search_id, caller, expected_revision, authorized, keep=True)
+    result = self._change(lambda doc: self._add_favorite(doc, selected), expected_revision, authorized)
+    with self._lock:
+      entry = self._searches.get((caller, search_id))
+      if entry is not None and entry['revision'] == expected_revision:
+        entry['revision'] = result['revision']  # the other results stay choosable after saving one
+    return result
+
+  @staticmethod
+  def _navigate(doc, selected):
+    doc.update(destination=selected, routeChoice=0, recents=remember(doc.get('recents', []), selected))
+
+  @staticmethod
+  def _add_favorite(doc, selected):
+    existing = next((row for row in doc['favorites'] if row['id'] == selected['id']), None)
+    if existing is not None:
+      return
+    if len(doc['favorites']) >= MAX_FAVORITES:
+      raise ValidationError('Remove a saved place before adding another')
+    doc['favorites'] = doc['favorites'] + [selected]
 
   def select(self, value: dict, expected_revision: str, authorized) -> dict:
-    if isinstance(value, dict) and value.get('temporary'):
-      raise ValidationError('This place can be used for a route but cannot be saved')
     selected = destination(value)
-    def update(doc):
-      self._reject_temporary_promotion(doc, selected)
-      doc.update(destination=selected, routeChoice=0)
-    return self._change(update, expected_revision, authorized)
+    return self._change(lambda doc: self._navigate(doc, selected), expected_revision, authorized)
 
   def clear(self, expected_revision: str, authorized) -> dict:
     with self._lock:
@@ -611,20 +603,33 @@ class NavigationOwner:
     return self._change(lambda doc: doc.update(destination=None, routeChoice=0), expected_revision, authorized)
 
   def favorite(self, value: dict, expected_revision: str, authorized) -> dict:
-    if isinstance(value, dict) and value.get('temporary'):
-      raise ValidationError('This place can be used for a route but cannot be saved')
     selected = destination(value)
-    def update(doc):
-      self._reject_temporary_promotion(doc, selected)
-      favorites = [row for row in doc['favorites'] if row['id'] != selected['id']]
-      if len(favorites) >= 100:
-        raise ValidationError('Remove a saved place before adding another')
-      doc['favorites'] = favorites + [selected]
-    return self._change(update, expected_revision, authorized, preserve_active=True)
+    return self._change(lambda doc: self._add_favorite(doc, selected), expected_revision, authorized)
 
   def remove_favorite(self, identity: str, expected_revision: str, authorized) -> dict:
     return self._change(lambda doc: doc.update(favorites=[row for row in doc['favorites'] if row['id'] != identity]),
-                        expected_revision, authorized, preserve_active=True)
+                        expected_revision, authorized)
+
+  def label_favorite(self, identity: str, label, expected_revision: str, authorized) -> dict:
+    """Mark a saved place as Home or Work (one each), or clear its label with None."""
+    if label is not None and label not in FAVORITE_LABELS:
+      raise ValidationError('Choose Home or Work')
+    def update(doc):
+      if not any(row['id'] == identity for row in doc['favorites']):
+        raise ValidationError('Choose a saved place')
+      for row in doc['favorites']:
+        if row['id'] == identity or label is not None and row.get('label') == label:
+          row.pop('label', None)
+        if row['id'] == identity and label is not None:
+          row['label'] = label
+    return self._change(update, expected_revision, authorized)
+
+  def remove_recent(self, identity: str, expected_revision: str, authorized) -> dict:
+    return self._change(lambda doc: doc.update(recents=[row for row in doc['recents'] if row['id'] != identity]),
+                        expected_revision, authorized)
+
+  def clear_recents(self, expected_revision: str, authorized) -> dict:
+    return self._change(lambda doc: doc.update(recents=[]), expected_revision, authorized)
 
   def close(self):
     with self._lock:

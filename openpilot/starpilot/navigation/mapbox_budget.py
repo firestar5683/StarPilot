@@ -20,12 +20,13 @@ from pathlib import Path
 # Free monthly allowances (mapbox.com/pricing, 2026-10).
 FREE = {
   "searchSessions": 500,       # Search Box API sessions (typing and searching)
+  "geocoding": 100_000,        # Temporary Geocoding API (address search)
   "staticTiles": 200_000,      # Static Tiles API (Galaxy's map pictures)
   "directions": 100_000,       # Directions API (routes)
   "vectorTiles": 200_000,      # Vector Tiles API (offline road maps)
 }
 STOP_FRACTION = 0.99
-LABELS = {"searchSessions": "searches", "staticTiles": "map views", "directions": "routes", "vectorTiles": "offline map tiles"}
+LABELS = {"searchSessions": "searches", "geocoding": "address lookups", "staticTiles": "map views", "directions": "routes", "vectorTiles": "offline map tiles"}
 
 
 class BudgetExhausted(RuntimeError):
@@ -112,7 +113,7 @@ def read_usage(root: Path | None = None, clock=time.time) -> dict:  # noqa: TID2
   root = Path(root if root is not None else usage_root())
   month = _month(clock())
   result = {}
-  for service in ("searchSessions", "staticTiles", "directions"):
+  for service in ("searchSessions", "geocoding", "staticTiles", "directions"):
     used = 0
     try:
       value = json.loads((root / f"{service}.json").read_text())

@@ -19,7 +19,10 @@ const ctx = new Proxy({}, { get: (obj, key) => obj[key] || (() => {}) })
 const canvas = { clientWidth: 400, clientHeight: 360, getContext: () => ctx, setPointerCapture() {}, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
 const map = new RasterMap(canvas)
 map.load = () => {}
-map.update({ destination: { latitude: 40, longitude: -90 }, route: [{ latitude: 40, longitude: -90 }, { latitude: 40.01, longitude: -89.99 }] }, false)
+map.update({ destination: { id: 'd', latitude: 40, longitude: -90 }, route: [{ latitude: 40, longitude: -90 }, { latitude: 40.01, longitude: -89.99 }], routeKey: '0123456789abcdef' }, false)
+const fitted = map.zoom
+assert.ok(fitted >= 10 && Number.isInteger(fitted) && map.follow === false, 'a new route is shown whole')
+assert.ok(Math.abs(map.center.latitude - 40.005) < 1e-6 && Math.abs(map.center.longitude + 89.995) < 1e-6)
 const before = project(map.center, map.zoom)
 listeners.get('pointerdown')({ clientX: 100, clientY: 100, pointerId: 1 })
 listeners.get('pointermove')({ clientX: 150, clientY: 120 })
@@ -28,8 +31,8 @@ listeners.get('pointerup')({})
 const panned = { ...map.center }
 map.update(map.data, false)
 assert.deepEqual(map.center, panned)
-map.changeZoom(1); assert.equal(map.zoom, 3)
-map.recenter(); assert.equal(map.zoom, 2)
+map.changeZoom(1); assert.equal(map.zoom, fitted + 1)
+map.recenter(); assert.equal(map.zoom, 2); assert.equal(map.follow, true)
 map.close(); assert.equal(listeners.size, 0); assert.deepEqual(calls, ['disconnect'])
 console.log('Map projection, dateline, pan, zoom, recenter, poll stability and cleanup passed')
 const timers = new Map(); let next = 0
@@ -102,3 +105,44 @@ measured.close(); assert.equal(frames.size, 0); assert.equal(closedImages, 3)
 globalThis.fetch = savedFetch; globalThis.createImageBitmap = savedBitmap
 globalThis.requestAnimationFrame = originalRaf; globalThis.cancelAnimationFrame = originalCancelRaf
 console.log('Tile completions coalesce into one frame; canvas allocation changes only on resize; close cancels paint')
+
+{
+  // Following keeps the car centered until a pan; pinch and double-tap zoom around the fingers and settle on whole levels.
+  const gestures = new Map()
+  const surface = { clientWidth: 400, clientHeight: 400, getContext: () => ctx, getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    addEventListener: (name, fn) => gestures.set(name, fn), removeEventListener: name => gestures.delete(name) }
+  globalThis.requestAnimationFrame = fn => { fn(); return 1 }
+  globalThis.cancelAnimationFrame = () => {}
+  const live = new RasterMap(surface); live.load = () => {}
+  live.update({ location: { latitude: 40, longitude: -90, validForMs: 2000 } }, false)
+  assert.deepEqual([live.center.latitude, live.zoom, live.follow], [40, 15, true])
+  live.update({ location: { latitude: 40.001, longitude: -90, validForMs: 2000 } }, false)
+  assert.equal(live.center.latitude, 40.001, 'following moves with the car')
+  live.changeZoom(1); assert.equal(live.center.latitude, 40.001, 'zoom buttons keep the car centered while following')
+  const anchor = live.pointAt(300, 100)
+  gestures.get('pointerdown')({ pointerId: 1, clientX: 280, clientY: 100 })
+  gestures.get('pointerdown')({ pointerId: 2, clientX: 320, clientY: 100 })
+  gestures.get('pointermove')({ pointerId: 2, clientX: 360, clientY: 100 })
+  assert.ok(Math.abs(live.zoom - 17) < 1e-9 && live.follow === false, 'spreading two fingers to twice the distance zooms one level')
+  const held = live.pointAt(320, 100)
+  assert.ok(Math.abs(held.latitude - anchor.latitude) < 1e-9 && Math.abs(held.longitude - anchor.longitude) < 1e-9, 'the pinched place stays under the fingers')
+  gestures.get('pointermove')({ pointerId: 2, clientX: 370, clientY: 100 })
+  gestures.get('pointerup')({ pointerId: 2, type: 'pointerup', clientX: 370, clientY: 100 })
+  assert.ok(Number.isInteger(live.zoom), 'a pinch settles on a whole zoom level')
+  gestures.get('pointerup')({ pointerId: 1, type: 'pointerup', clientX: 280, clientY: 100 })
+  live.update({ location: { latitude: 41, longitude: -90, validForMs: 2000 } }, false)
+  assert.notEqual(live.center.latitude, 41, 'a paused map does not jump back to the car')
+  const zoom = live.zoom, target = live.pointAt(100, 300)
+  for (let tap = 0; tap < 2; tap++) {
+    gestures.get('pointerdown')({ pointerId: 3, clientX: 100, clientY: 300 })
+    gestures.get('pointerup')({ pointerId: 3, type: 'pointerup', clientX: 100, clientY: 300 })
+  }
+  assert.equal(live.zoom, zoom + 1, 'double-tap zooms in')
+  const kept = live.pointAt(100, 300)
+  assert.ok(Math.abs(kept.latitude - target.latitude) < 1e-9 && Math.abs(kept.longitude - target.longitude) < 1e-9)
+  live.recenter()
+  assert.deepEqual([live.center.latitude, live.zoom, live.follow], [41, 15, true])
+  live.close()
+  globalThis.requestAnimationFrame = originalRaf; globalThis.cancelAnimationFrame = originalCancelRaf
+}
+console.log('Follow, pinch and double-tap zoom passed')

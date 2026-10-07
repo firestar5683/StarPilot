@@ -20,13 +20,14 @@ export function remainingLocationLease(lease, requestStarted, now = performance.
 const STATUS = new Set(["disabled", "needsKey", "noDestination", "waitingForLocation", "routing", "guiding", "arrived", "routeUnavailable", "stale"])
 const coordinate = (value) => !!value && Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 90 &&
   Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180
-export const validDestination = (value) => coordinate(value) && typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256 &&
-  typeof value.name === "string" && value.name.trim().length > 0 && value.name.length <= 256
-export const validSearchResult = (value) => validDestination(value) || !!value && value.temporary === true &&
-  typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256 &&
-  typeof value.name === "string" && value.name.trim().length > 0 && value.name.length <= 256 &&
+const text = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit
+export const validDestination = (value) => coordinate(value) && text(value.id, 256) && text(value.name, 256) &&
+  (value.address === undefined || text(value.address, 512)) && (value.label === undefined || ["home", "work"].includes(value.label))
+// Suggestions carry the search they came from; the comma looks up their coordinates when one is chosen or saved.
+export const validSuggestion = (value) => !!value && text(value.id, 256) && text(value.name, 256) &&
   (value.description === undefined || typeof value.description === "string" && value.description.length <= 512) &&
   typeof value.searchId === "string" && /^[0-9a-f-]{36}$/.test(value.searchId)
+export const validSearchResult = (value) => validDestination(value) || validSuggestion(value)
 export function validNavigation(value) {
   const instruction = value?.instruction
   if (value?.alternatives !== undefined && (!Array.isArray(value.alternatives) || value.alternatives.length > 3 ||
@@ -36,6 +37,8 @@ export function validNavigation(value) {
   return !!value && typeof value.enabled === "boolean" && typeof value.isMetric === "boolean" && typeof value.hasKey === "boolean" && STATUS.has(value.status) &&
     typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 128 &&
     (value.destination === null || validDestination(value.destination)) && Array.isArray(value.favorites) && value.favorites.length <= 100 &&
+    (value.recents === undefined || Array.isArray(value.recents) && value.recents.length <= 10 && value.recents.every(validDestination)) &&
+    (value.routeKey === undefined || typeof value.routeKey === "string" && /^[0-9a-f]{16}$/.test(value.routeKey)) &&
     (value.location == null || coordinate(value.location) && Number.isFinite(value.location.validForMs) && value.location.validForMs >= 0 && value.location.validForMs <= 2500) &&
     value.favorites.every(validDestination) && Array.isArray(value.route) && value.route.length <= 512 && value.route.every(coordinate) &&
     (instruction === null || !!instruction && ["text", "maneuverType", "maneuverModifier"].every((key) =>
@@ -43,6 +46,13 @@ export function validNavigation(value) {
       ["distanceMeters", "remainingDistanceMeters", "remainingDurationSeconds"].every((key) =>
         Number.isFinite(instruction[key]) && instruction[key] >= 0))
 }
+
+// Equal route keys mean equal route lines, so only the small remainder is compared.
+const withoutRoute = (value) => JSON.stringify({ ...value, route: undefined, alternatives: undefined })
+export const sameSnapshot = (a, b) => !!a && !!b && (a.routeKey !== undefined && a.routeKey === b.routeKey ?
+  withoutRoute(a) === withoutRoute(b) : JSON.stringify(a) === JSON.stringify(b))
+// The place fields the comma stores; ids are recomputed from the coordinates.
+export const placeOf = (place) => Object.fromEntries(["name", "latitude", "longitude", "address"].filter((key) => place[key] !== undefined).map((key) => [key, place[key]]))
 
 export function routePath(points) {
   if (!Array.isArray(points) || points.length < 2 || points.length > 512 || !points.every(coordinate)) return ""
@@ -103,10 +113,14 @@ export class NavigationClient {
     return this.run("search", { query: query.trim(), searchId: this.searchId, clientId: this.clientId })
   }
   choose(place) {
-    const pending = place.temporary ? this.action("selectPlace", { id: place.id, searchId: place.searchId }) :
-      this.action("select", { destination: place })
+    const pending = place.searchId ? this.action("selectPlace", { id: place.id, searchId: place.searchId }) :
+      this.action("select", { destination: placeOf(place) })
     this.endSuggestions()
     return pending
+  }
+  save(place) {
+    return place.searchId ? this.action("favoritePlace", { id: place.id, searchId: place.searchId }) :
+      this.action("favorite", { destination: placeOf(place) })
   }
 
   // As-you-type suggestions run beside status polling and never cancel it. One typing session
@@ -167,7 +181,9 @@ export class NavigationClient {
     this.emit()
     const deadline = this.later(() => controller.abort(), operation === "search" ? 24000 : operation === "action" && body?.action === "selectPlace" ? 12000 : 4000)
     try {
-      const response = await this.fetcher(`./api/navigation/${operation}`, {
+      // Status polls name the route lines they already hold; the comma then leaves them out.
+      const query = operation === "status" && this.data?.routeKey ? `?routeKey=${this.data.routeKey}` : ""
+      const response = await this.fetcher(`./api/navigation/${operation}${query}`, {
         credentials: "same-origin", cache: "no-store", signal: controller.signal,
         ...(body === null ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
       })
@@ -186,12 +202,25 @@ export class NavigationClient {
         this.results = payload.results
         this.searched = true
       } else {
+        if (payload?.routeUnchanged === true) {
+          delete payload.routeUnchanged
+          if (this.data?.routeKey === payload.routeKey) {
+            payload.route = this.data.route
+            if (this.data.alternatives) payload.alternatives = this.data.alternatives
+          } else {
+            payload.route = []
+            delete payload.routeKey  // the next poll asks for the lines again
+          }
+        }
         if (!validNavigation(payload)) throw new Error("Navigation status could not be read.")
+        // Route lines are drawn, never edited: keep them out of Vue's deep reactivity.
+        Object.freeze(payload.route)
+        if (payload.alternatives) Object.freeze(payload.alternatives)
         if (payload.location) {
           payload.location.validForMs = remainingLocationLease(payload.location.validForMs, requestStarted)
           payload.location.expiresAt = performance.now() + payload.location.validForMs
         }
-        if (JSON.stringify(payload) !== JSON.stringify(this.data)) this.data = payload
+        if (!sameSnapshot(payload, this.data)) this.data = payload
         this.stale = false
         if (operation === "action" && ["select", "selectPlace", "clear"].includes(body.action)) { this.results = []; this.searched = false }
       }
@@ -214,25 +243,38 @@ export class NavigationClient {
   }
 }
 
+const LABELS = { home: { name: "Home", icon: "bi-house-fill" }, work: { name: "Work", icon: "bi-briefcase-fill" } }
+const matches = (place, text) => place.name.toLocaleLowerCase().includes(text) || !!place.address?.toLocaleLowerCase().includes(text)
+
 export const NavigationPage = {
   name: "NavigationPage",
   components: { GxNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null } },
-  data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", favoritesOpen: false, query: "", token: "", searched: false,
-    suggestions: [], suggestOpen: false }),
+  data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", query: "", token: "", searched: false,
+    suggestions: [], suggestOpen: false, savedSearchIds: [] }),
   computed: {
     available() { return this.mode === "local" && !!this.data && !this.stale && !this.busy },
-    favoriteMatches() {
+    ready() { return !!this.data?.enabled && !!this.data?.hasKey },
+    favorites() { return this.data?.favorites || [] },
+    savedIds() { return new Set(this.favorites.map((place) => place.id)) },
+    // Recent places that are not already saved, newest first.
+    recents() { return (this.data?.recents || []).filter((place) => !this.savedIds.has(place.id)) },
+    // Saved places as one-tap buttons: Home and Work first (the comma sends them in that order).
+    shortcuts() { return this.favorites.slice(0, 8) },
+    showShortcuts() { return this.ready && !this.data.destination && !this.suggestOpen && !this.results.length && this.shortcuts.length > 0 },
+    localMatches() {
       const text = this.query.trim().toLocaleLowerCase()
-      if (text.length < 2) return []
-      return (this.data?.favorites || []).filter((place) => place.name.toLocaleLowerCase().includes(text)).slice(0, 4)
+      if (!text) return []
+      return [...this.favorites, ...this.recents].filter((place) => matches(place, text)).slice(0, 5)
     },
-    showSuggestions() { return this.suggestOpen && (this.favoriteMatches.length > 0 || this.suggestions.length > 0) },
+    showQuick() { return this.suggestOpen && !this.query.trim() && (this.favorites.length > 0 || this.recents.length > 0) },
+    showSuggestions() { return this.suggestOpen && !!this.query.trim() && (this.localMatches.length > 0 || this.suggestions.length > 0) },
+    destinationSaved() { return !!this.data?.destination && this.favorites.find((place) => place.id === this.data.destination.id) || null },
     usageRows() {
       const usage = this.data?.mapboxUsage
       if (!usage) return []
-      return [["searchSessions", "Searches"], ["directions", "Routes"], ["staticTiles", "Map views"]]
+      return [["searchSessions", "Searches"], ["geocoding", "Address lookups"], ["directions", "Routes"], ["staticTiles", "Map views"]]
         .filter(([key]) => usage[key]).map(([key, label]) => ({ key, label, ...usage[key] }))
     },
     path() { return routePath(this.data?.route) },
@@ -259,19 +301,40 @@ export const NavigationPage = {
     async search() {
       clearTimeout(this.suggestTimer)
       this.suggestOpen = false
+      this.savedSearchIds = []
       await this.client.search(this.query)
     },
     typed() {
       clearTimeout(this.suggestTimer)
       this.suggestOpen = true
+      if (!this.query.trim()) { this.client.endSuggestions(); return }
       this.suggestTimer = setTimeout(() => this.client.suggest(this.query), 300)
     },
     closeSuggestions() { this.suggestOpen = false; clearTimeout(this.suggestTimer) },
+    clearQuery() {
+      this.query = ""
+      this.savedSearchIds = []
+      this.results = []
+      this.searched = false
+      this.client.endSuggestions()
+      this.$refs.search?.focus()
+    },
     async pick(place) {
       this.closeSuggestions()
       this.query = ""
+      this.$refs.search?.blur()
       await this.client.choose(place)
     },
+    // Search suggestions get their saved id from the comma, so the ones saved here are remembered by suggestion id.
+    isFavorite(place) { return this.savedIds.has(place.id) || !!place.searchId && this.savedSearchIds.includes(place.id) },
+    async save(place) {
+      if (await this.client.save(place) && place.searchId) this.savedSearchIds = [...this.savedSearchIds, place.id]
+    },
+    toggleSave(place) { return this.isFavorite(place) ? this.client.action("removeFavorite", { id: place.id }) : this.client.save(place) },
+    setLabel(place, label) { return this.client.action("labelFavorite", { id: place.id, label: place.label === label ? null : label }) },
+    placeIcon(place) { return LABELS[place.label]?.icon || (this.isFavorite(place) ? "bi-star-fill" : place.searchId ? "bi-geo-alt-fill" : "bi-clock-history") },
+    placeName(place) { return LABELS[place.label]?.name || place.name },
+    placeDetail(place) { return place.label ? place.name : place.address || place.description || "" },
     async saveKey(enable = false) { const token = this.token.trim(); this.token = ""; await this.client.action("configure", { patch: enable ? { token, enabled: true } : { token } }) },
     distance(value) {
       const metric = this.data?.isMetric !== false
@@ -279,7 +342,6 @@ export const NavigationPage = {
         value < 160.9344 ? `${Math.round(value / 0.3048 / 10) * 10} ft` : `${(value / 1609.344).toFixed(1)} mi`
     },
     duration(value) { const minutes = Math.max(1, Math.round(value / 60)); return minutes >= 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : `${minutes} min` },
-    isFavorite(place) { return this.data?.favorites.some((favorite) => favorite.id === place.id) },
   },
   template: `
     <div class="gx-view gx-navigation" :class="{'gx-navigation--fullscreen':tab==='route'}">
@@ -292,94 +354,123 @@ export const NavigationPage = {
         <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" :metric="data?.isMetric !== false" />
         <MapOperationsPanel :mode="mode" :unauthorized="unauthorized" />
       </div>
+      <template v-else-if="tab === 'setup'">
+        <p v-if="mode !== 'local'" class="gx-note">Connect to your comma to set up navigation and choose a destination.</p>
+        <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+        <section class="gx-card gx-navigation__section">
+          <h3>Navigation</h3>
+          <p>Show directions on your comma. Navigation works with every driving model. Route guidance helps prepare for turns; steering and speed control follow your normal engagement settings.</p>
+          <button v-if="data" type="button" class="gx-btn" :class="{'gx-btn--tonal':data.enabled}" :disabled="!available"
+            @click="client.action('configure',{patch:{enabled:!data.enabled}})">{{ data.enabled ? 'Turn off navigation' : 'Turn on navigation' }}</button>
+        </section>
+        <section class="gx-card gx-navigation__section">
+          <h3>Mapbox</h3>
+          <p>One public Mapbox access token (starting with pk.) handles the map, place and address search, and routes. A separate secret token is not needed.</p>
+          <p>Save your token while parked. Galaxy keeps it on your comma and never displays it after saving. Favorites and recent destinations are also kept on your comma; going to one skips search, so it uses none of your search allowance. URL-restricted keys may reject map requests.</p>
+          <p class="gx-note">Typing suggestions and offline road maps stop just short of Mapbox's free monthly allowance and resume on the 1st. Searches, address lookups, routes and map views are counted here but not limited.</p>
+          <dl v-if="usageRows.length" class="gx-navigation__usage" aria-label="Free Mapbox use this month">
+            <template v-for="row in usageRows" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.used.toLocaleString() }} of {{ row.limit.toLocaleString() }} free this month</dd></template>
+          </dl>
+          <a class="gx-navigation__token-link" href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer">Get a Mapbox access token</a>
+          <p v-if="data?.hasKey" class="gx-note">A Mapbox key is saved.</p>
+          <div class="gx-field-group"><label for="navigation-token">Public Mapbox access token</label>
+          <form @submit.prevent="saveKey(false)" class="gx-navigation__search">
+            <input id="navigation-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available">
+            <button class="gx-btn" type="submit" :disabled="!available || !token.trim()">{{ data?.hasKey ? 'Replace key' : 'Save key' }}</button>
+          </form></div>
+        </section>
+      </template>
       <template v-else>
-        <NavigationMap v-if="tab === 'route' && data?.enabled && data?.hasKey" :data="data" :stale="stale" />
-        <div :class="tab === 'route' ? 'gx-navigation__panel' : 'gx-stack'">
-          <p v-if="mode !== 'local'" class="gx-note">Connect to your comma to set up navigation and choose a destination.</p>
+        <NavigationMap v-if="ready" :data="data" :stale="stale" />
+        <div class="gx-navigation__panel">
+          <p v-if="mode !== 'local'" class="gx-card gx-navigation__section gx-note">Connect to your comma to set up navigation and choose a destination.</p>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-          <p v-if="stale && data" class="gx-note">Showing the last received route. Reconnecting before accepting changes.</p>
-          <template v-if="tab === 'setup'">
-            <section class="gx-card gx-navigation__section">
-              <h3>Navigation</h3>
-              <p>Show directions on your comma. Navigation works with every driving model. Route guidance helps prepare for turns; steering and speed control follow your normal engagement settings.</p>
-
-            </section>
-            <section class="gx-card gx-navigation__section">
-              <h3>Mapbox</h3>
-              <p>One public Mapbox access token (starting with pk.) handles maps, address search, place search and routes. A separate secret token is not needed.</p>
-              <p>Save your token while parked. Galaxy keeps it on your comma and never displays it after saving. Saving address favorites requires permanent geocoding: a payment method on file or an enterprise agreement with Mapbox. Place-search results are available for the current route only. Map tiles use your Mapbox quota; URL-restricted keys may reject these requests.</p>
-              <p class="gx-note">Typing suggestions and offline road maps stop just short of Mapbox's free monthly allowance and resume on the 1st. Searches, routes and map views are counted here but not limited.</p>
-              <dl v-if="usageRows.length" class="gx-navigation__usage" aria-label="Free Mapbox use this month">
-                <template v-for="row in usageRows" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.used.toLocaleString() }} of {{ row.limit.toLocaleString() }} free this month</dd></template>
-              </dl>
-              <a class="gx-navigation__token-link" href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer">Get a Mapbox access token</a>
-              <p v-if="data?.hasKey" class="gx-note">A Mapbox key is saved.</p>
-              <div class="gx-field-group"><label for="navigation-token">Public Mapbox access token</label>
-              <form @submit.prevent="saveKey(false)" class="gx-navigation__search">
-                <input id="navigation-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available">
-                <button class="gx-btn" type="submit" :disabled="!available || !token.trim()">{{ data?.hasKey ? 'Replace key' : 'Save key' }}</button>
-              </form></div>
-            </section>
-          </template>
-          <template v-else>
-            <button v-if="data?.enabled" type="button" class="gx-btn gx-btn--tonal" :disabled="!available" @click="client.action('configure',{patch:{enabled:false}})">Turn off navigation</button>
-
-              <form v-if="data?.enabled && data?.hasKey" @submit.prevent="search" class="gx-navigation__search">
-                <label for="navigation-search" class="gx-sr-only">Search destinations</label>
-                <input id="navigation-search" class="gx-field" v-model="query" placeholder="Search here" minlength="2" maxlength="200" required
-                  autocomplete="off" :disabled="!available" role="combobox" :aria-expanded="showSuggestions" aria-controls="navigation-suggestions"
-                  @input="typed" @focus="suggestOpen = true" @keydown.escape="closeSuggestions">
-                <button class="gx-sr-only" type="submit" :disabled="!available || query.trim().length < 2">Search</button>
-                <button v-if="data?.favorites.length" class="gx-btn gx-btn--tonal" type="button" @click="favoritesOpen=!favoritesOpen" :aria-expanded="favoritesOpen">♥ Favorites</button>
-              </form>
-            <div v-if="showSuggestions" id="navigation-suggestions" class="gx-navigation__suggestions" role="listbox" aria-label="Suggestions">
-              <button v-for="place in favoriteMatches" :key="'saved-' + place.id" type="button" role="option" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
-                <i class="bi bi-star-fill" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small>Saved place</small></span></button>
-              <button v-for="place in suggestions" :key="place.id" type="button" role="option" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
-                <i class="bi bi-geo-alt" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.description">{{ place.description }}</small></span></button>
+          <p v-if="stale && data" class="gx-card gx-navigation__section gx-note">Showing the last received route. Reconnecting before accepting changes.</p>
+          <form v-if="ready" @submit.prevent="search" class="gx-navigation__search" role="search">
+            <div class="gx-navigation__field">
+              <i class="bi bi-search" aria-hidden="true"></i>
+              <label for="navigation-search" class="gx-sr-only">Search destinations</label>
+              <input id="navigation-search" ref="search" v-model="query" placeholder="Search here" minlength="2" maxlength="200" required
+                autocomplete="off" enterkeyhint="search" :disabled="!available" role="combobox" :aria-expanded="showQuick || showSuggestions" aria-controls="navigation-suggestions"
+                @input="typed" @focus="suggestOpen = true" @blur="closeSuggestions" @keydown.escape="closeSuggestions">
+              <button v-if="query || results.length" type="button" class="gx-navigation__icon" aria-label="Clear search" @mousedown.prevent @click="clearQuery"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
             </div>
-            <section v-if="data?.destination" class="gx-card gx-navigation__section" :class="{'gx-navigation--stale':stale}">
-              <h3 class="gx-navigation__summary-title">{{ data.destination.name }}</h3>
-              <div v-if="summary" class="gx-navigation__summary">
-                <div><span>🛣️</span><span>Distance:</span><span>{{distance(summary.distance)}}</span></div>
-                <div><span>⌛</span><span>Duration:</span><span>{{duration(summary.duration)}}</span></div>
-                <div><span>🕗</span><span>ETA:</span><span>{{new Date(Date.now()+summary.duration*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}}</span></div>
+            <button class="gx-sr-only" type="submit" :disabled="!available || query.trim().length < 2">Search</button>
+          </form>
+          <div v-if="showQuick || showSuggestions" id="navigation-suggestions" class="gx-navigation__suggestions" @mousedown.prevent>
+            <template v-if="showQuick">
+              <div v-if="favorites.length" class="gx-navigation__group"><span>Saved</span></div>
+              <div v-for="place in favorites" :key="'saved-' + place.id" class="gx-navigation__row">
+                <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
+                  <i class="bi" :class="placeIcon(place)" aria-hidden="true"></i><span><strong>{{ placeName(place) }}</strong><small v-if="placeDetail(place)">{{ placeDetail(place) }}</small></span></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Remove ' + place.name + ' from saved places'" :disabled="!available" @click="client.action('removeFavorite',{id:place.id})"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
               </div>
-              <p v-else class="gx-note">{{statusLabel}}</p>
-              <template v-if="data.instruction && !stale">
-                <p class="gx-navigation__instruction">{{ data.instruction.text }}</p>
-                <p>{{ distance(data.instruction.distanceMeters) }} · {{ duration(data.instruction.remainingDurationSeconds) }} remaining · {{ distance(data.instruction.remainingDistanceMeters) }}</p>
-              </template>
-              <div v-if="data.alternatives?.length > 1" class="gx-navigation__alternatives gx-actions" aria-label="Alternative routes">
-                <button v-for="choice in data.alternatives" :key="choice.index" class="gx-btn" :class="choice.index===data.selectedRoute ? '' : 'gx-btn--tonal'" :aria-pressed="choice.index===data.selectedRoute" :disabled="!available" @click="client.action('selectRoute',{index:choice.index})">Route {{choice.index+1}} · {{duration(choice.durationSeconds)}} · {{distance(choice.distanceMeters)}}</button>
+              <div v-if="recents.length" class="gx-navigation__group"><span>Recent</span>
+                <button type="button" class="gx-navigation__link" :disabled="!available" @click="client.action('clearRecents')">Clear</button></div>
+              <div v-for="place in recents" :key="'recent-' + place.id" class="gx-navigation__row">
+                <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
+                  <i class="bi bi-clock-history" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.address">{{ place.address }}</small></span></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :disabled="!available" @click="client.save(place)"><i class="bi bi-star" aria-hidden="true"></i></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Remove ' + place.name + ' from recent places'" :disabled="!available" @click="client.action('removeRecent',{id:place.id})"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
               </div>
-              <div class="gx-navigation__route-actions gx-actions">
-                <button type="button" class="gx-btn" :disabled="!available" @click="client.action('clear')">Cancel Navigation</button>
-                <button v-if="!data.destination.temporary" class="gx-btn" :disabled="!available" @click="isFavorite(data.destination) ? client.action('removeFavorite',{id:data.destination.id}) : client.action('favorite',{destination:data.destination})">{{isFavorite(data.destination) ? '♥ Unfavorite' : '♥ Favorite'}}</button>
-              </div>
-            </section>
-            <section v-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your public Mapbox key to search for places and plan a route. Your key stays on your comma.</p>
-              <form @submit.prevent="saveKey(true)" class="gx-navigation__search"><label for="navigation-inline-token" class="gx-sr-only">Public Mapbox access token</label><input id="navigation-inline-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available"><button type="submit" class="gx-btn" :disabled="!available || !token.trim()">Save and enable</button></form><button type="button" class="gx-btn gx-btn--tonal" @click="tab='setup'">Key details</button>
-            </section>
-            <section v-else-if="data && !data.enabled" class="gx-card gx-navigation__section"><h3>Navigation is off</h3><button type="button" class="gx-btn" :disabled="!available" @click="client.action('configure',{patch:{enabled:true}})">Enable Navigation</button></section>
-            <template v-else>
-              <p v-if="busy" role="status">Working…</p>
-              <p v-if="searched && !busy && !error && results.length === 0" class="gx-note">No places found. Try a nearby town or a more specific address.</p>
-              <ul v-if="results.length" class="gx-navigation__places" aria-label="Search results">
-                <li v-for="place in results" :key="place.id" class="gx-card">
-                  <span>{{ place.name }}<small v-if="place.description" class="gx-note">{{ place.description }}</small><small v-if="place.temporary" class="gx-note"> For this route only; cannot be saved.</small></span><div class="gx-navigation__actions gx-actions">
-                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="!available || place.temporary || isFavorite(place)" @click="client.action('favorite',{destination:place})">{{ isFavorite(place) ? 'Saved' : 'Save' }}</button>
-                    <button type="button" class="gx-btn" :disabled="!available" @click="client.choose(place)">Go</button>
-                  </div>
-                </li>
-              </ul>
-              <ul v-if="favoritesOpen && data?.favorites.length" class="gx-navigation__places" aria-label="Saved places">
-                <li v-for="place in data.favorites" :key="place.id" class="gx-card"><span>{{ place.name }}<small v-if="place.description" class="gx-note">{{ place.description }}</small><small v-if="place.temporary" class="gx-note"> For this route only; cannot be saved.</small></span><div class="gx-navigation__actions gx-actions">
-                  <button type="button" class="gx-icon-btn" :aria-label="'Remove '+place.name" :disabled="!available" @click="client.action('removeFavorite',{id:place.id})">Remove</button>
-                  <button type="button" class="gx-btn" :disabled="!available" @click="client.choose(place)">Go</button>
-                </div></li>
-              </ul>
             </template>
+            <template v-else>
+              <div v-for="place in localMatches" :key="'local-' + place.id" class="gx-navigation__row">
+                <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
+                  <i class="bi" :class="placeIcon(place)" aria-hidden="true"></i><span><strong>{{ placeName(place) }}</strong><small>{{ placeDetail(place) || (isFavorite(place) ? 'Saved place' : 'Recent') }}</small></span></button>
+              </div>
+              <div v-for="place in suggestions" :key="place.id" class="gx-navigation__row">
+                <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
+                  <i class="bi bi-geo-alt-fill" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.description">{{ place.description }}</small></span></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-pressed="isFavorite(place)" :disabled="!available || isFavorite(place)" @click="save(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
+              </div>
+            </template>
+          </div>
+          <div v-if="showShortcuts" class="gx-navigation__shortcuts" aria-label="Saved places">
+            <button v-for="place in shortcuts" :key="place.id" type="button" class="gx-navigation__chip" :disabled="!available" @click="pick(place)">
+              <i class="bi" :class="placeIcon(place)" aria-hidden="true"></i>{{ placeName(place) }}</button>
+          </div>
+          <section v-if="data?.destination" class="gx-card gx-navigation__section gx-navigation__destination" :class="{'gx-navigation--stale':stale}">
+            <div class="gx-navigation__heading">
+              <div><h3 class="gx-navigation__summary-title">{{ data.destination.name }}</h3><p v-if="data.destination.address" class="gx-note">{{ data.destination.address }}</p></div>
+              <button type="button" class="gx-navigation__icon gx-navigation__save" :class="{'gx-navigation__save--on':destinationSaved}" :aria-pressed="!!destinationSaved"
+                :aria-label="destinationSaved ? 'Remove from saved places' : 'Save this place'" :disabled="!available" @click="toggleSave(data.destination)">
+                <i class="bi" :class="destinationSaved ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
+            </div>
+            <div v-if="summary" class="gx-navigation__summary">
+              <div><strong>{{duration(summary.duration)}}</strong><span>{{distance(summary.distance)}}</span><span>Arrive {{new Date(Date.now()+summary.duration*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}}</span></div>
+            </div>
+            <p v-else class="gx-note">{{statusLabel}}</p>
+            <template v-if="data.instruction && !stale">
+              <p class="gx-navigation__instruction">{{ data.instruction.text }}</p>
+              <p class="gx-note">In {{ distance(data.instruction.distanceMeters) }}</p>
+            </template>
+            <div v-if="data.alternatives?.length > 1" class="gx-navigation__alternatives gx-actions" aria-label="Alternative routes">
+              <button v-for="choice in data.alternatives" :key="choice.index" type="button" class="gx-btn" :class="choice.index===data.selectedRoute ? '' : 'gx-btn--tonal'" :aria-pressed="choice.index===data.selectedRoute" :disabled="!available" @click="client.action('selectRoute',{index:choice.index})">{{duration(choice.durationSeconds)}} · {{distance(choice.distanceMeters)}}</button>
+            </div>
+            <div v-if="destinationSaved" class="gx-navigation__labels" aria-label="Mark this saved place">
+              <button v-for="(label, key) in {home:'Home', work:'Work'}" :key="key" type="button" class="gx-navigation__chip" :aria-pressed="destinationSaved.label === key" :disabled="!available" @click="setLabel(destinationSaved, key)">
+                <i class="bi" :class="destinationSaved.label === key ? (key === 'home' ? 'bi-house-fill' : 'bi-briefcase-fill') : (key === 'home' ? 'bi-house' : 'bi-briefcase')" aria-hidden="true"></i>{{ label }}</button>
+            </div>
+            <div class="gx-navigation__route-actions gx-actions">
+              <button type="button" class="gx-btn" :disabled="!available" @click="client.action('clear')">End Navigation</button>
+            </div>
+          </section>
+          <section v-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your public Mapbox key to search for places and plan a route. Your key stays on your comma.</p>
+            <form @submit.prevent="saveKey(true)" class="gx-navigation__search"><label for="navigation-inline-token" class="gx-sr-only">Public Mapbox access token</label><input id="navigation-inline-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available"><button type="submit" class="gx-btn" :disabled="!available || !token.trim()">Save and enable</button></form><button type="button" class="gx-btn gx-btn--tonal" @click="tab='setup'">Key details</button>
+          </section>
+          <section v-else-if="data && !data.enabled" class="gx-card gx-navigation__section"><h3>Navigation is off</h3><button type="button" class="gx-btn" :disabled="!available" @click="client.action('configure',{patch:{enabled:true}})">Turn on navigation</button></section>
+          <template v-else>
+            <p v-if="busy" role="status" class="gx-navigation__busy">Working…</p>
+            <p v-if="searched && !busy && !error && results.length === 0" class="gx-card gx-navigation__section gx-note">No places found. Try a nearby town or a more specific address.</p>
+            <ul v-if="results.length" class="gx-navigation__places" aria-label="Search results">
+              <li v-for="place in results" :key="place.id" class="gx-card">
+                <span><strong>{{ place.name }}</strong><small v-if="place.address || place.description" class="gx-note">{{ place.address || place.description }}</small></span><div class="gx-navigation__actions gx-actions">
+                  <button type="button" class="gx-navigation__icon" :aria-label="(isFavorite(place) ? 'Saved: ' : 'Save ') + place.name" :aria-pressed="isFavorite(place)" :disabled="!available || isFavorite(place)" @click="save(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
+                  <button type="button" class="gx-btn" :disabled="!available" @click="pick(place)">Go</button>
+                </div>
+              </li>
+            </ul>
           </template>
         </div>
       </template>

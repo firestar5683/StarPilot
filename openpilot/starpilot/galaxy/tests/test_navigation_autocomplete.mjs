@@ -6,7 +6,7 @@ const home = { id: "h1", name: "12 Elm St", latitude: 40.1, longitude: -90.1 }
 const gym = { id: "g1", name: "Elm Fitness", latitude: 40.3, longitude: -90.3 }
 const status = { enabled: true, isMetric: false, hasKey: true, status: "noDestination", revision: "r1", destination: null,
   favorites: [home, gym], route: [], instruction: null, location: null }
-const suggestion = (id, searchId) => ({ id, name: "Coffee " + id, description: "Main St", searchId, temporary: true })
+const suggestion = (id, searchId) => ({ id, name: "Coffee " + id, description: "Main St", searchId })
 
 assert.equal(validDestination(home), true)
 
@@ -75,16 +75,39 @@ assert.equal(stale, null)
 refuse = false
 assert.equal((await refused.suggest("coffee")).length, 1)
 
-// Page logic: matching saved places show first in the dropdown.
+// Page logic: saved and recent places match first in the dropdown; an empty box lists them all.
 const computed = NavigationPage.computed
-const page = { data: status, query: "elm", suggestOpen: true, suggestions: [] }
-page.favoriteMatches = computed.favoriteMatches.call(page)
-assert.deepEqual(page.favoriteMatches.map((place) => place.id), ["h1", "g1"])
-assert.equal(computed.showSuggestions.call(page), true)
-assert.equal(computed.showSuggestions.call({ ...page, favoriteMatches: [], suggestions: [] }), false)
-const usage = { searchSessions: { used: 12, limit: 495, free: 500 }, directions: { used: 3, limit: 99000, free: 100000 }, staticTiles: { used: 0, limit: 198000, free: 200000 } }
+const recent = { id: "r1", name: "Elm Diner", address: "5 Oak Ave", latitude: 40.5, longitude: -90.5 }
+const evaluate = (state) => {
+  const page = { suggestOpen: true, suggestions: [], results: [], ...state }
+  for (const name of ["ready", "favorites", "savedIds", "recents", "shortcuts", "localMatches", "showQuick", "showSuggestions", "showShortcuts"])
+    page[name] = computed[name].call(page)
+  return page
+}
+let page = evaluate({ data: { ...status, recents: [recent, home] }, query: "elm" })
+assert.deepEqual(page.recents.map((place) => place.id), ["r1"], "recents leave out places that are already saved")
+assert.deepEqual(page.localMatches.map((place) => place.id), ["h1", "g1", "r1"])
+assert.equal(page.showSuggestions, true)
+assert.deepEqual(evaluate({ data: status, query: "oak" }).localMatches, [], "only this page's places are matched")
+assert.deepEqual(evaluate({ data: { ...status, recents: [recent] }, query: "oak" }).localMatches.map((place) => place.id), ["r1"], "addresses match too")
+assert.equal(evaluate({ data: status, query: "zzz" }).showSuggestions, false)
+page = evaluate({ data: { ...status, recents: [recent] }, query: "" })
+assert.equal(page.showQuick, true)
+assert.equal(page.showShortcuts, false, "one-tap places hide while the list is open")
+page = evaluate({ data: { ...status, recents: [recent] }, query: "", suggestOpen: false })
+assert.deepEqual([page.showQuick, page.showShortcuts], [false, true])
+assert.equal(evaluate({ data: { ...status, destination: home }, query: "", suggestOpen: false }).showShortcuts, false)
+const methods = NavigationPage.methods
+const labeled = { ...home, label: "home" }
+assert.deepEqual([methods.placeName(labeled), methods.placeDetail(labeled)], ["Home", "12 Elm St"])
+assert.equal(methods.placeIcon.call({ isFavorite: () => true }, labeled), "bi-house-fill")
+const actions = []
+await methods.setLabel.call({ client: { action: async (...args) => actions.push(args) } }, labeled, "home")
+assert.deepEqual(actions.at(-1), ["labelFavorite", { id: "h1", label: null }], "choosing the current label clears it")
+const usage = { searchSessions: { used: 12, limit: 495, free: 500 }, geocoding: { used: 4, limit: 99000, free: 100000 },
+  directions: { used: 3, limit: 99000, free: 100000 }, staticTiles: { used: 0, limit: 198000, free: 200000 } }
 assert.deepEqual(computed.usageRows.call({ data: { mapboxUsage: usage } }).map((row) => [row.label, row.used, row.limit]),
-  [["Searches", 12, 495], ["Routes", 3, 99000], ["Map views", 0, 198000]])
+  [["Searches", 12, 495], ["Address lookups", 4, 99000], ["Routes", 3, 99000], ["Map views", 0, 198000]])
 
 compile(NavigationPage.template, { decodeEntities: (value) => value.replaceAll("&amp;", "&") })
 console.log("Navigation autocomplete: one session per typing burst, parallel polling, session reset, usage and template passed")

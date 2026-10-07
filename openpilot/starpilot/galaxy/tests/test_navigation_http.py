@@ -169,14 +169,45 @@ class NavigationHttpTest(unittest.TestCase):
       self.assertEqual(result['destination']['name'],'Coffee Shop')
       self.assertEqual(provider.call_count,2)
       self.assertEqual(provider.call_args_list[0].args[2]['session_token'],provider.call_args_list[1].args[2]['session_token'])
-    unmarked = dict(result['destination'])
-    unmarked.pop('temporary')
-    self.assertEqual(self.action('favorite',destination=unmarked)[0],400)
-    self.assertEqual(self.action('select',destination=unmarked)[0],400)
-    self.assertIsNone(self.navigation.read()['destination'])
-    self.assertNotIn('Coffee Shop',self.navigation.path.read_text())
+    self.assertEqual(self.navigation.read()['destination']['name'],'Coffee Shop')
+    self.assertEqual([row['name'] for row in result['recents']],['Coffee Shop'])
     self.assertNotIn('pk.synthetic',json.dumps(result))
     self.assertEqual(self.action('selectPlace',id=identity,searchId=search['searchId'])[0],400)
+    status, saved, _ = self.action('favorite',destination=result['destination'])
+    self.assertEqual(status,200)
+    place = saved['favorites'][0]['id']
+    status, labeled, _ = self.action('labelFavorite',id=place,label='home')
+    self.assertEqual((status,labeled['favorites'][0]['label']),(200,'home'))
+    self.assertEqual(self.action('labelFavorite',id=place,label='gym')[0],400)
+    self.assertEqual(self.action('labelFavorite',id=place,label=None)[1]['favorites'][0].get('label'),None)
+    self.assertEqual(self.action('removeRecent',id=place)[1]['recents'],[])
+    self.assertEqual(self.action('clearRecents')[1]['recents'],[])
+    self.assertEqual(self.action('removeFavorite',id=place)[1]['favorites'],[])
+
+  def test_search_result_can_be_saved_without_navigating(self):
+    self.action('configure', patch={'token':'pk.synthetic','enabled':True})
+    search = {'query':'coffee', 'searchId':str(uuid.uuid4()), 'clientId':str(uuid.uuid4())}
+    suggestion = {'suggestions':[{'mapbox_id':'poi/id','name':'Coffee Shop','feature_type':'poi'}]}
+    feature = {'features':[{'properties':{'mapbox_id':'poi/id','name':'Coffee Shop','full_address':'1 Main St'},
+                            'geometry':{'coordinates':[-90.,40.]}}]}
+    with patch('openpilot.starpilot.navigation.owner.response_json',side_effect=[suggestion,feature,feature]):
+      self.assertEqual(self.request('/api/navigation/search',payload=search,cookie=self.local_cookie)[0],200)
+      status, saved, _ = self.action('favoritePlace',id='poi/id',searchId=search['searchId'])
+      self.assertEqual(status,200)
+      self.assertEqual((saved['favorites'][0]['name'],saved['favorites'][0]['address'],saved['destination']),('Coffee Shop','1 Main St',None))
+      status, chosen, _ = self.action('selectPlace',id='poi/id',searchId=search['searchId'])
+      self.assertEqual((status,chosen['destination']['name']),(200,'Coffee Shop'))
+
+  def test_status_poll_with_route_key_omits_unchanged_route(self):
+    self.action('configure', patch={'token':'pk.synthetic','enabled':True})
+    status, full, _ = self.request('/api/navigation/status', cookie=self.local_cookie)
+    self.assertEqual(status,200)
+    status, light, _ = self.request('/api/navigation/status?routeKey=' + full['routeKey'], cookie=self.local_cookie)
+    self.assertEqual((status,light['routeUnchanged']),(200,True))
+    self.assertNotIn('route',light)
+    status, ignored, _ = self.request('/api/navigation/status?routeKey=bogus&x=1', cookie=self.local_cookie)
+    self.assertEqual(status,200)
+    self.assertIn('route',ignored)
 
   def test_slow_poi_retrieve_does_not_block_other_settings_actions(self):
     self.action('configure',patch={'token':'pk.synthetic','enabled':True})

@@ -959,8 +959,13 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       elif path == '/api/navigation/status':
         if not self.require_session():
           return
+        # A poll that already holds the drawn route sends its key and skips the route lines.
         try:
-          result = navigation_owner().snapshot()
+          route_key = parse_qs(urlsplit(self.path).query, max_num_fields=1).get('routeKey', [''])[0]
+        except ValueError:
+          route_key = ''
+        try:
+          result = navigation_owner().snapshot(route_key if re.fullmatch(r'[0-9a-f]{16}', route_key) else None)
         except (OSError, ValueError, RuntimeError):
           self.json(503, {'error': 'Navigation status is unavailable'})
         else:
@@ -1641,15 +1646,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                                   if 'searchId' in payload else navigation_owner().search(payload['query']))}
           else:
             fields = {'configure': {'patch'}, 'select': {'destination'}, 'selectPlace': {'id', 'searchId'},
-                      'cancelSearch': {'searchId'}, 'clear': set(),
-                      'favorite': {'destination'}, 'removeFavorite': {'id'}, 'selectRoute': {'index'}}
+                      'cancelSearch': {'searchId'}, 'clear': set(), 'favorite': {'destination'},
+                      'favoritePlace': {'id', 'searchId'}, 'removeFavorite': {'id'}, 'labelFavorite': {'id', 'label'},
+                      'removeRecent': {'id'}, 'clearRecents': set(), 'selectRoute': {'index'}}
             action = payload.get('action')
             if type(action) is not str or action not in fields or set(payload) != {'action', 'revision'} | fields[action]:
               raise ValidationError('Invalid navigation action')
             needs_park = action == 'configure' and isinstance(payload['patch'], dict) and 'token' in payload['patch']
             def authorized():
               return self.settings_session() == identity and (not needs_park or configuration_allowed())
-            with (nullcontext() if action == 'selectPlace' else effect_lock):
+            with (nullcontext() if action in ('selectPlace', 'favoritePlace') else effect_lock):
               if not authorized():
                 raise PermissionError('Park your car before changing the Mapbox key' if needs_park else 'Sign in to Galaxy')
               nav = navigation_owner()
@@ -1669,10 +1675,19 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 result = nav.select_route(payload['index'], **keywords)
               elif action == 'favorite':
                 result = nav.favorite(payload['destination'], **keywords)
+              elif action == 'favoritePlace':
+                result = nav.favorite_place(payload['id'], payload['searchId'], identity, **keywords)
+              elif action == 'clearRecents':
+                result = nav.clear_recents(**keywords)
               else:
                 if type(payload['id']) is not str or not 1 <= len(payload['id']) <= 256:
                   raise ValidationError('Choose a saved place')
-                result = nav.remove_favorite(payload['id'], **keywords)
+                if action == 'removeRecent':
+                  result = nav.remove_recent(payload['id'], **keywords)
+                elif action == 'labelFavorite':
+                  result = nav.label_favorite(payload['id'], payload['label'], **keywords)
+                else:
+                  result = nav.remove_favorite(payload['id'], **keywords)
         except ConflictError as error:
           self.json(409, {'error': str(error)})
         except ValidationError as error:

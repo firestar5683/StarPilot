@@ -88,4 +88,4 @@ def test_budget_counts_persist_and_reset_monthly(tmp_path):
   now[0] += 40 * 86400
   assert budget.remaining() == 99_000
   with pytest.raises(ValueError):
-    MonthlyBudget('geocoding', tmp_path)
+    MonthlyBudget('mapMatching', tmp_path)

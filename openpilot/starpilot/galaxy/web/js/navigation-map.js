@@ -21,6 +21,11 @@ export function metersPerPixelInverse(latitude, zoom) {
 export function relativeX(x, center, world) {
   return center + ((x - center + world / 2) % world + world) % world - world / 2
 }
+// Mapbox Streets (the default style) background, shown before tiles arrive so loading never flashes dark.
+const LAND = '#ece7df'
+const TILE_BITMAPS = 64  // decoded 512 px tiles are ~1 MB each; the browser's HTTP cache keeps the rest
+const MAX_ZOOM = 18
+const clampZoom = (zoom) => Math.max(0, Math.min(MAX_ZOOM, zoom))
 export class RasterMap {
   constructor(canvas, changed = () => {}) {
     this.canvas = canvas;
@@ -35,30 +40,60 @@ export class RasterMap {
     this.closed = false;
     this.data = {};
     this.initialized = false
+    // Following keeps the car centered; panning or a new route overview pauses it until Recenter.
+    this.follow = true
     // Circles drawn over the map ({ latitude, longitude, radiusKm, stroke, fill }) and a tap callback (latitude, longitude).
     this.overlays = [];
     this.onTap = null
+    this.pointers = new Map()
     this.observer = new ResizeObserver(() => this.draw());
     this.observer.observe(canvas)
     this.down = (event) => {
-      this.press = [event.clientX, event.clientY]
-      this.userPanned = true
-      this.drag = [event.clientX, event.clientY, ...project(this.center, this.zoom)];
-      canvas.setPointerCapture(event.pointerId)
+      this.pointers.set(event.pointerId, [event.clientX, event.clientY])
+      canvas.setPointerCapture?.(event.pointerId)
+      if (this.pointers.size === 1) {
+        this.press = [event.clientX, event.clientY]
+        this.drag = [event.clientX, event.clientY, ...project(this.center, this.zoom)];
+      } else this.startPinch()
     }
     this.move = (event) => {
+      if (this.pointers.has(event.pointerId)) this.pointers.set(event.pointerId, [event.clientX, event.clientY])
+      if (this.pinch && this.pointers.size >= 2) {
+        const [[ax, ay], [bx, by]] = this.pointers.values(), distance = Math.max(1, Math.hypot(ax - bx, ay - by))
+        this.anchor(this.pinch.point, clampZoom(this.pinch.zoom + Math.log2(distance / this.pinch.distance)), (ax + bx) / 2, (ay + by) / 2)
+        return
+      }
       if (!this.drag) return;
+      if (this.press && Math.hypot(event.clientX - this.press[0], event.clientY - this.press[1]) >= 6) this.pause()
       this.center = unproject(this.drag[2] - event.clientX + this.drag[0], this.drag[3] - event.clientY + this.drag[1], this.zoom);
       this.requestDraw()
     }
     this.up = (event) => {
+      this.pointers.delete(event?.pointerId)
+      if (this.pinch) {
+        if (this.pointers.size < 2) {
+          // Settle on a whole zoom level so tiles are drawn pixel for pixel.
+          const [x, y] = this.pinch.screen
+          this.pinch = this.press = null
+          this.drag = null
+          this.pointers.clear()
+          this.zoomAt(Math.round(this.zoom), x, y)
+        }
+        return
+      }
       this.drag = null
       const press = this.press
       this.press = null
-      if (press && event?.type === 'pointerup' && this.onTap && Math.hypot(event.clientX - press[0], event.clientY - press[1]) < 6) {
-        const rect = this.canvas.getBoundingClientRect(), [cx, cy] = project(this.center, this.zoom)
-        this.onTap(unproject(cx - rect.width / 2 + event.clientX - rect.left, cy - rect.height / 2 + event.clientY - rect.top, this.zoom))
+      if (!press || event?.type !== 'pointerup' || Math.hypot(event.clientX - press[0], event.clientY - press[1]) >= 6) return
+      const now = performance.now(), last = this.lastTap
+      if (last && now - last[0] < 300 && Math.hypot(event.clientX - last[1], event.clientY - last[2]) < 24) {
+        this.lastTap = null
+        this.pause()
+        this.zoomAt(Math.round(this.zoom) + 1, ...this.local(event))
+        return
       }
+      this.lastTap = [now, event.clientX, event.clientY]
+      if (this.onTap) this.onTap(this.pointAt(...this.local(event)))
     }
     this.key = (event) => {
       const delta = {
@@ -67,10 +102,13 @@ export class RasterMap {
       [event.key];
       if (delta) {
         event.preventDefault();
-        this.userPanned = true
+        this.pause()
         const [x,y] = project(this.center,this.zoom);
         this.center = unproject(x+delta[0],y+delta[1],this.zoom);
         this.draw()
+      } else if (event.key === '+' || event.key === '=' || event.key === '-') {
+        event.preventDefault()
+        this.changeZoom(event.key === '-' ? -1 : 1)
       }
     }
     this.wheel = (event) => {
@@ -79,13 +117,51 @@ export class RasterMap {
       this.wheelDelta = (this.wheelDelta || 0) + (event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY)
       const now = performance.now()
       if (Math.abs(this.wheelDelta) < 100 || now - (this.lastWheelZoom || 0) < 120) return
-      this.changeZoom(this.wheelDelta < 0 ? 1 : -1)
+      this.zoomAt(Math.round(this.zoom) + (this.wheelDelta < 0 ? 1 : -1), ...this.local(event))
       this.wheelDelta = 0
       this.lastWheelZoom = now
     }
     for (const [name, listener] of [['pointerdown', this.down], ['pointermove', this.move], ['pointerup', this.up], ['pointercancel', this.up], ['wheel', this.wheel], ['keydown', this.key]]) canvas.addEventListener(name, listener, {
       passive: false
     })
+  }
+  pause() {
+    if (this.follow) { this.follow = false; this.changed() }
+  }
+  startPinch() {
+    const [[ax, ay], [bx, by]] = this.pointers.values(), x = (ax + bx) / 2, y = (ay + by) / 2
+    const [left, top] = this.offset()
+    this.drag = this.press = null
+    this.pause()
+    this.pinch = { zoom: this.zoom, distance: Math.max(1, Math.hypot(ax - bx, ay - by)), point: this.pointAt(x - left, y - top), screen: [x - left, y - top] }
+  }
+  offset() {
+    const rect = this.canvas.getBoundingClientRect?.()
+    return rect ? [rect.left, rect.top] : [0, 0]
+  }
+  local(event) {
+    const [left, top] = this.offset()
+    return [event.clientX - left, event.clientY - top]
+  }
+  // The map coordinate under a point on the canvas.
+  pointAt(x, y) {
+    const [cx, cy] = project(this.center, this.zoom)
+    return unproject(cx - this.canvas.clientWidth / 2 + x, cy - this.canvas.clientHeight / 2 + y, this.zoom)
+  }
+  // Show `point` under the canvas position (clientX, clientY) at `zoom` (pinch keeps the pinched place under the fingers).
+  anchor(point, zoom, clientX, clientY) {
+    const [left, top] = this.offset(), [px, py] = project(point, zoom)
+    this.zoom = zoom
+    this.pinch.screen = [clientX - left, clientY - top]
+    this.center = unproject(px - (clientX - left) + this.canvas.clientWidth / 2, py - (clientY - top) + this.canvas.clientHeight / 2, zoom)
+    this.requestDraw()
+  }
+  zoomAt(zoom, x, y) {
+    zoom = clampZoom(zoom)
+    const point = this.pointAt(x, y), [px, py] = project(point, zoom)
+    this.zoom = zoom
+    if (!this.follow || !this.lastLocation) this.center = unproject(px - x + this.canvas.clientWidth / 2, py - y + this.canvas.clientHeight / 2, zoom)
+    this.draw()
   }
   update(data, stale) {
     clearTimeout(this.locationTimer)
@@ -102,26 +178,46 @@ export class RasterMap {
         this.draw()
       }, remaining)
     }
-    const firstLiveFix = this.locationFresh && this.lastLocation?.lastKnown === true
     if (data?.location && (this.locationFresh || data.location.lastKnown === true && !this.lastLocation)) {
       this.lastLocation = { ...data.location, bearing: Number.isFinite(data.location.bearing) ? data.location.bearing : this.lastLocation?.bearing }
     }
     this.data = data || {}
     this.stale = stale
-    if (firstLiveFix && !this.userPanned) this.recenter()
-    if (!this.initialized && (data?.location || data?.destination)) {
+    // A newly chosen route is shown whole once; Recenter returns to following the car.
+    const routeKey = this.data.destination && this.data.route?.length > 1 ? `${this.data.destination.id}|${this.data.routeKey ?? this.data.route.length}` : null
+    if (routeKey && routeKey !== this.overviewKey) {
+      this.overviewKey = routeKey
+      if (this.fit([...this.data.route, ...(this.lastLocation ? [this.lastLocation] : [])])) { this.follow = false; this.initialized = true }
+    } else if (!routeKey) this.overviewKey = null
+    if (this.follow && this.lastLocation && (this.locationFresh || !this.initialized)) {
+      this.center = { latitude: this.lastLocation.latitude, longitude: this.lastLocation.longitude }
+      if (!this.initialized) this.zoom = 15
+      this.initialized = true
+    } else if (!this.initialized && data?.destination) {
       this.recenter()
       this.initialized = true
     }
     this.changed()
     this.draw()
   }
+  // Frame these points with a margin, on a whole zoom level. False when there is nothing to frame.
+  fit(points) {
+    const width = this.canvas.clientWidth, height = this.canvas.clientHeight
+    if (!points.length || width < 2 || height < 2) return false
+    const xs = points.map((point) => project(point, 0)[0]), ys = points.map((point) => project(point, 0)[1])
+    const spanX = Math.max(1e-9, Math.max(...xs) - Math.min(...xs)), spanY = Math.max(1e-9, Math.max(...ys) - Math.min(...ys))
+    this.zoom = clampZoom(Math.floor(Math.min(16, Math.log2(width * 0.75 / spanX), Math.log2(height * 0.75 / spanY))))
+    this.center = unproject((Math.max(...xs) + Math.min(...xs)) / 2 * 2 ** this.zoom, (Math.max(...ys) + Math.min(...ys)) / 2 * 2 ** this.zoom, this.zoom)
+    return true
+  }
   recenter() {
+    this.follow = true
     const point = this.lastLocation || this.data.destination;
     if (point) {
-      this.center = point;
+      this.center = { latitude: point.latitude, longitude: point.longitude };
       this.zoom = this.lastLocation ? 15 : 2
     }
+    this.changed()
     this.draw()
   }
   requestDraw() {
@@ -139,36 +235,45 @@ export class RasterMap {
     return null
   }
   changeZoom(delta) {
-    this.zoom = Math.max(0, Math.min(18, this.zoom + delta));
+    this.zoom = clampZoom(Math.round(this.zoom) + delta);
     this.draw()
   }
   draw() {
     if (this.closed) return
     const width = Math.max(1, Math.round(this.canvas.clientWidth)), height = Math.max(1, Math.round(this.canvas.clientHeight));
-    if (this.canvas.width !== width) this.canvas.width = width;
-    if (this.canvas.height !== height) this.canvas.height = height
-    const ctx = this.canvas.getContext('2d'), [cx, cy] = project(this.center, this.zoom), n = 2 ** this.zoom, world = SIZE * n, needed = new Set()
-    ctx.fillStyle = '#0e0e1a';
+    // Draw at the screen's pixel density so roads, labels and the route stay sharp on phones.
+    const ratio = Math.min(3, Math.max(1, globalThis.devicePixelRatio || 1))
+    if (this.canvas.width !== Math.round(width * ratio)) this.canvas.width = Math.round(width * ratio);
+    if (this.canvas.height !== Math.round(height * ratio)) this.canvas.height = Math.round(height * ratio)
+    const ctx = this.canvas.getContext('2d'), [cx, cy] = project(this.center, this.zoom), world = SIZE * 2 ** this.zoom, needed = []
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+    ctx.imageSmoothingQuality = 'high'
+    ctx.fillStyle = LAND;
     ctx.fillRect(0, 0, width, height)
-    for (let ty = Math.floor((cy - height / 2) / SIZE); ty <= Math.floor((cy + height / 2) / SIZE); ty++) {
+    // Tiles come from the nearest whole zoom level, scaled while a pinch is between levels.
+    const tileZoom = clampZoom(Math.round(this.zoom)), n = 2 ** tileZoom, span = SIZE * 2 ** (this.zoom - tileZoom)
+    for (let ty = Math.floor((cy - height / 2) / span); ty <= Math.floor((cy + height / 2) / span); ty++) {
       if (ty < 0 || ty >= n) continue
-      for (let tx = Math.floor((cx - width / 2) / SIZE); tx <= Math.floor((cx + width / 2) / SIZE); tx++) {
-        const x = ((tx % n) + n) % n, key = `${this.zoom}/${x}/${ty}`;
-        needed.add(key)
-        const image = this.tiles.get(key), left = tx * SIZE - cx + width / 2, top = ty * SIZE - cy + height / 2
-        if (image) ctx.drawImage(image, left, top, SIZE, SIZE)
+      for (let tx = Math.floor((cx - width / 2) / span); tx <= Math.floor((cx + width / 2) / span); tx++) {
+        const x = ((tx % n) + n) % n, key = `${tileZoom}/${x}/${ty}`, left = tx * span - cx + width / 2, top = ty * span - cy + height / 2
+        needed.push([key, Math.hypot(left + span / 2 - width / 2, top + span / 2 - height / 2)])
+        const image = this.tiles.get(key)
+        if (image) ctx.drawImage(image, left, top, span, span)
         else {
           // A stretched coarser tile while this one loads, so zooming in never shows blank squares.
-          const cover = this.placeholder(this.zoom, x, ty)
-          if (cover) ctx.drawImage(cover[0], cover[1], cover[2], cover[3], cover[3], left, top, SIZE, SIZE)
+          const cover = this.placeholder(tileZoom, x, ty)
+          if (cover) ctx.drawImage(cover[0], cover[1], cover[2], cover[3], cover[3], left, top, span, span)
         }
       }
     }
-    for (const [key, controller] of this.pending) if (!needed.has(key)) {
+    const keys = new Set(needed.map(([key]) => key))
+    for (const [key, controller] of this.pending) if (!keys.has(key)) {
       controller.abort();
       this.pending.delete(key)
     }
-    for (const key of needed) if (!this.tiles.has(key) && !this.pending.has(key) && !this.failed.has(key) && this.pending.size < 6) this.load(key)
+    // The middle of the screen loads first.
+    needed.sort((a, b) => a[1] - b[1])
+    for (const [key] of needed) if (!this.tiles.has(key) && !this.pending.has(key) && !this.failed.has(key) && this.pending.size < 6) this.load(key)
     const pixel = (point) => {
       const [x, y] = project(point, this.zoom);
       return [relativeX(x, cx, world) - cx + width / 2, y - cy + height / 2]
@@ -179,35 +284,35 @@ export class RasterMap {
       ctx.fillStyle = circle.fill; ctx.fill()
       ctx.setLineDash(circle.dash || []); ctx.strokeStyle = circle.stroke; ctx.lineWidth = circle.width || 2; ctx.stroke(); ctx.setLineDash([])
     }
+    const line = (points, casing, color, size) => {
+      ctx.beginPath();
+      points.forEach((point, index) => { const xy = pixel(point); index ? ctx.lineTo(...xy) : ctx.moveTo(...xy) })
+      ctx.lineJoin = ctx.lineCap = 'round'
+      ctx.strokeStyle = casing; ctx.lineWidth = size + 3; ctx.stroke()
+      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.stroke()
+    }
     for (const choice of this.data.alternatives || []) {
       if (choice.index === this.data.selectedRoute || !choice.geometry?.length) continue
-      ctx.beginPath(); choice.geometry.forEach((point,index) => { const xy=pixel(point); index ? ctx.lineTo(...xy) : ctx.moveTo(...xy) });
-      ctx.strokeStyle='#7885a6'; ctx.lineWidth=4; ctx.stroke()
+      line(choice.geometry, '#727e8d', '#a9b4c2', 5)
     }
-    if (this.data.route?.length) {
-      ctx.beginPath();
-      this.data.route.forEach((point, index) => {
-        const xy = pixel(point);
-        index ? ctx.lineTo(...xy) : ctx.moveTo(...xy)
-      });
-      ctx.strokeStyle = '#b68cff';
-      ctx.lineWidth = 5;
-      ctx.stroke()
+    if (this.data.route?.length) line(this.data.route, '#2f7ac6', '#56a8fb', 6)
+    if (this.data.destination) {
+      // A pin whose tip marks the place.
+      const [x, y] = pixel(this.data.destination)
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.bezierCurveTo(x - 4, y - 8, x - 11, y - 14, x - 11, y - 21)
+      ctx.arc(x, y - 21, 11, Math.PI, 0); ctx.bezierCurveTo(x + 11, y - 14, x + 4, y - 8, x, y); ctx.closePath()
+      ctx.fillStyle = '#e5484d'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
+      ctx.beginPath(); ctx.arc(x, y - 21, 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill()
     }
-    for (const [point, color] of [[this.data.destination, '#ffbd59'], [this.lastLocation, this.locationFresh ? '#65c8ff' : '#9aa6bb']]) if (point) {
-      const xy = pixel(point);
-      ctx.beginPath();
-      ctx.arc(...xy, 7, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.stroke()
-      if (point === this.lastLocation && Number.isFinite(point.bearing)) {
-        ctx.save(); ctx.translate(...xy); ctx.rotate(point.bearing * Math.PI / 180);
-        ctx.beginPath(); ctx.moveTo(0,-22); ctx.lineTo(-7,-11); ctx.lineTo(7,-11); ctx.closePath();
+    if (this.lastLocation) {
+      const xy = pixel(this.lastLocation), color = this.locationFresh ? '#1a73e8' : '#8a94a6'
+      if (Number.isFinite(this.lastLocation.bearing)) {
+        ctx.save(); ctx.translate(...xy); ctx.rotate(this.lastLocation.bearing * Math.PI / 180);
+        ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(-8, -10); ctx.lineTo(8, -10); ctx.closePath();
         ctx.fillStyle = color; ctx.fill(); ctx.restore()
       }
+      ctx.beginPath(); ctx.arc(...xy, 8, 0, Math.PI * 2)
+      ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke()
     }
   }
   async load(key) {
@@ -230,7 +335,7 @@ export class RasterMap {
       }
       this.tiles.set(key, image);
       this.failures = 0
-      while (this.tiles.size > 160) {
+      while (this.tiles.size > TILE_BITMAPS) {
         const oldest = this.tiles.keys().next().value;
         this.tiles.get(oldest).close();
         this.tiles.delete(oldest)
@@ -277,13 +382,14 @@ export class RasterMap {
 export const NavigationMap = {
   components: { GxNotice },
   props: ['data', 'stale'], data: () => ({
-    error: '', map: null, locationFresh: false, lastLocation: null
+    error: '', map: null, locationFresh: false, lastLocation: null, following: true
   }),
   mounted() {
     this.map = markRaw(new RasterMap(this.$refs.canvas, (error) => {
       if (error !== undefined) this.error = error
       this.locationFresh = this.map?.locationFresh || false
       this.lastLocation = this.map?.lastLocation || null
+      this.following = this.map?.follow ?? true
     }));
     this.map.update(this.data, this.stale)
   },
@@ -298,12 +404,12 @@ export const NavigationMap = {
     }
   },
   template: `<section class="gx-navigation-map" aria-label="Interactive navigation map">
-    <canvas tabindex="0" ref="canvas" aria-label="Drag to pan the map" />
+    <canvas tabindex="0" ref="canvas" aria-label="Map. Drag to pan, pinch or double-tap to zoom" />
     <div v-if="!locationFresh && lastLocation" class="gx-navigation-map__last">Last known position · waiting for GPS</div>
     <div class="gx-navigation-map__controls">
-    <button class="gx-btn" @click="map.changeZoom(1)" aria-label="Zoom in">+</button>
-    <button class="gx-btn" @click="map.changeZoom(-1)" aria-label="Zoom out">−</button>
-    <button class="gx-btn" @click="map.recenter()">Recenter</button>
+    <button type="button" class="gx-navigation-map__control" @click="map.changeZoom(1)" aria-label="Zoom in"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
+    <button type="button" class="gx-navigation-map__control" @click="map.changeZoom(-1)" aria-label="Zoom out"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
+    <button type="button" class="gx-navigation-map__control" :class="{'gx-navigation-map__control--active':!following}" @click="map.recenter()" :aria-pressed="following" aria-label="Recenter and follow"><i class="bi bi-crosshair" aria-hidden="true"></i></button>
     </div>
     <GxNotice v-if="error" tone="danger">{{error}}</GxNotice>
     <a class="gx-navigation-map__logo" href="https://www.mapbox.com/" target="_blank" rel="noopener noreferrer" aria-label="Mapbox">
