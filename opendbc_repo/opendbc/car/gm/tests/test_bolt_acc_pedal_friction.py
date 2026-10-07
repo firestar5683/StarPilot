@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from opendbc.car import gen_empty_fingerprint, structs
+from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.carcontroller import CarController, bolt_acc_pedal_friction_brake
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.values import CAR, DBC
@@ -59,6 +59,73 @@ class TestBoltAccPedalFriction(unittest.TestCase):
     cs.out = state.as_reader()
     _, messages = controller.update(control.as_reader(), cs, now)
     return messages
+
+  def test_acc_pedal_adaptive_dashboard_and_source_withdrawal(self):
+    from opendbc.can import CANParser
+
+    fixture = self.fixture()
+    controller, control, state, cs = fixture
+    state.canValid = True
+    control.hudControl.setSpeed = 20.
+    control.hudControl.leadDistanceBars = 3
+    control.hudControl.leadVisible = True
+    decoder = CANParser(DBC[controller.CP.carFingerprint][Bus.pt], [("ASCMActiveCruiseControlStatus", 0)], 0)
+    for enabled in (True, False):
+      control.enabled = enabled
+      messages = self.step(fixture, 4)
+      dashboard = [message for message in messages if message[0] == 0x370]
+      self.assertEqual(len(dashboard), 1)
+      self.assertEqual(dashboard[0][2], 0)
+      decoder.update([(1_000_000_000, dashboard)])
+      fields = decoder.vl["ASCMActiveCruiseControlStatus"]
+      self.assertEqual(fields["ACCCruiseState"], 2)
+      self.assertEqual(fields["ACCSpeedSetpoint"], 72.)
+      self.assertEqual(fields["ACCCmdActive"], enabled)
+      self.assertEqual(fields["ACCGapLevel"], 3 if enabled else 0)
+      self.assertEqual(fields["ACCResumeButton"], 0)
+      self.assertEqual(fields["ACCAlwaysOne"], 1)
+      self.assertEqual(fields["ACCAlwaysOne2"], 1)
+    for fcw in range(4):
+      cs.stock_fcw_alert = fcw
+      messages = self.step(fixture, 4)
+      decoder.update([(1_010_000_000 + fcw * 10_000_000, [message for message in messages if message[0] == 0x370])])
+      self.assertEqual(decoder.vl["ASCMActiveCruiseControlStatus"]["FCWAlert"], fcw)
+    control.hudControl.visualAlert = structs.CarControl.HUDControl.VisualAlert.fcw
+    messages = self.step(fixture, 4)
+    decoder.update([(1_100_000_000, [message for message in messages if message[0] == 0x370])])
+    self.assertEqual(decoder.vl["ASCMActiveCruiseControlStatus"]["FCWAlert"], 3)
+    self.assertFalse(any(message[0] == 0x370 for message in self.step(fixture, 5)))
+    for field, value in (("canValid", False), ("canTimeout", True)):
+      setattr(state, field, value)
+      self.assertFalse(any(message[0] == 0x370 for message in self.step(fixture, 8)))
+      setattr(state, field, not value)
+    for field in ("pedal_sensor_ts_nanos", "stock_acc_status_ts_nanos", "bolt_pedal_gear_ts_nanos", "bolt_pedal_main_ts_nanos"):
+      before = getattr(cs, field)
+      setattr(cs, field, 0)
+      self.assertFalse(any(message[0] == 0x370 for message in self.step(fixture, 8)))
+      setattr(cs, field, before)
+    state.cruiseState.available = False
+    self.assertFalse(any(message[0] == 0x370 for message in self.step(fixture, 8)))
+    for candidate in (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021, CAR.CHEVROLET_BOLT_CC_2022_2023):
+      sibling = self.fixture(candidate)
+      sibling[2].canValid = True
+      self.assertFalse(any(message[0] == 0x370 for message in self.step(sibling, 4)))
+
+  def test_actual_acc_pedal_parser_retains_camera_fcw_levels(self):
+    from opendbc.can import CANPacker
+    from opendbc.car.gm.carstate import CarState
+
+    cp = pedal_params()
+    state = CarState(cp)
+    parsers = state.get_can_parsers(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    state.update(parsers)
+    for fcw in range(4):
+      message = packer.make_can_msg("ASCMActiveCruiseControlStatus", 2, {"FCWAlert": fcw})
+      parsers[Bus.cam].update([(1_000_000_000 + fcw * 40_000_000, [message])])
+      observed = state.update(parsers)
+      self.assertEqual(state.stock_fcw_alert, fcw)
+      self.assertEqual(observed.stockFcw, fcw != 0)
 
   def test_brake_curve_and_stop_fade(self):
     cp = pedal_params()

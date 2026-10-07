@@ -242,6 +242,19 @@ def suburban_gateway_demands(accel, speed, orientation, cp, *, acc_tune=False):
   return (-650 if brake > 0 else gas), brake
 
 
+def bolt_acc_pedal_dashboard_sensor_ready(CS, now_nanos):
+  return (CS.pedal_sensor_healthy and CS.pedal_sensor_ts_nanos > 0 and
+          0 <= now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS and
+          CS.stock_acc_status_ts_nanos > 0 and
+          0 <= now_nanos - CS.stock_acc_status_ts_nanos <= STOCK_ACC_STATUS_TIMEOUT_NS)
+
+
+def bolt_acc_pedal_dashboard_drive_ready(CS, now_nanos):
+  return (CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low) and
+          CS.bolt_pedal_gear_ts_nanos > 0 and 0 <= now_nanos - CS.bolt_pedal_gear_ts_nanos <= 100_000_000 and
+          CS.bolt_pedal_main_ts_nanos > 0 and 0 <= now_nanos - CS.bolt_pedal_main_ts_nanos <= 300_000_000)
+
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -798,6 +811,19 @@ class CarController(CarControllerBase):
               active and CS.out.standstill and actuators.longControlState == LongCtrlState.stopping, self.CP))
         else:
           self.apply_brake = 0
+        dashboard_ready = (
+          self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and
+          is_bolt_pedal_profile(self.CP) and len(self.CP.safetyConfigs) == 1 and
+          self.CP.safetyConfigs[0].safetyParam == 0x1CD and CS.out.canValid and not CS.out.canTimeout and
+          bolt_acc_pedal_dashboard_sensor_ready(CS, now_nanos) and CS.out.cruiseState.available and bolt_acc_pedal_dashboard_drive_ready(CS, now_nanos)
+        )
+        if dashboard_ready:
+          fcw = 3 if hud_alert == VisualAlert.fcw else int(getattr(CS, "stock_fcw_alert", 0)) & 3
+          if fcw == 0 and (CS.out.stockAeb or CS.out.stockFcw):
+            fcw = 3
+          can_sends.append(gmcan.create_acc_dashboard_command(
+            self.packer_pt, CanBus.POWERTRAIN, CC.enabled, hud_v_cruise * CV.MS_TO_KPH,
+            hud_control, False, cruise_state=2, fcw_alert=fcw))
       if self.bolt_pedal_removed and self.frame % 100 == 0:
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
       # Stock ACC on the equipped variant is canceled while pedal control owns longitudinal.
