@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 import pyray as rl
 
 from openpilot.starpilot.ui import onroad
-from openpilot.starpilot.ui.onroad import axis_status_color
+from openpilot.starpilot.ui.onroad import axis_status_color, driving_mode_description
+from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
 from openpilot.starpilot.ui.onroad_large_widgets import DISENGAGED, UnifiedSpeedWidget
 from openpilot.starpilot.ui.onroad_state import OnroadInput
@@ -111,10 +112,13 @@ class TestOnroadAxes(unittest.TestCase):
     self.assertFalse(disengaged_fixture.lateral_active or disengaged_fixture.longitudinal_active)
     for lateral, longitudinal in ((False, False), (True, False), (False, True), (True, True)):
       state = self.state(lateral, longitudinal)
+      for layout in state.customization['layouts'].values():
+        layout[MODE_WIDGET]['enabled'] = True
       for profile in (Profile.LARGE, Profile.COMPACT):
         with self.subTest(profile=profile, lateral=lateral, longitudinal=longitudinal):
           view = onroad.OnroadView.__new__(onroad.OnroadView)
-          object.__setattr__(view, "fonts", NS(profile=profile, draw=Mock(), measure=Mock(return_value=NS(width=100, height=30))))
+          object.__setattr__(view, "fonts", NS(profile=profile, draw=Mock(), measure=Mock(return_value=NS(width=100, height=30)),
+                                              vertical_ink=Mock(return_value=(0, 20))))
           view.camera_layer = Mock()
           view.extra_overlays = None
           view.alert = Mock()
@@ -137,6 +141,47 @@ class TestOnroadAxes(unittest.TestCase):
                patch.object(view, "_slc_actions"):
             view.render(state)
           self.assertEqual(rgba(border.call_args.args[-1]), rgba(axis_status_color(state)))
+          self.assertIn(driving_mode_description(state), [call.args[0] for call in view.fonts.draw.call_args_list])
+
+  def test_driving_mode_text_uses_active_axes_and_effective_mode(self):
+    from openpilot.starpilot.conditional_mode.policy import ModeChoice
+    from openpilot.starpilot.ui.conditional_status import ConditionalDisplay
+
+    base = self.state(True, True)
+    for changes, expected in [
+      ({}, 'ACC - Chill'),
+      ({'experimental_enabled': True}, 'ACC - Experimental'),
+      ({'longitudinal_active': False}, 'Always On Lateral'),
+      ({'lateral_active': False}, 'ACC - Chill'),
+      ({'switchback_mode': True, 'traffic_mode': True}, 'Switchback Mode'),
+      ({'traffic_mode': True, 'experimental_enabled': True}, 'Traffic Mode'),
+      ({'longitudinal_overridden': True}, 'ACC - Override'),
+      ({'lateral_active': False, 'longitudinal_active': False, 'traffic_mode': True,
+        'switchback_mode': True, 'experimental_enabled': True}, 'Disengaged'),
+      ({'lateral_active': False, 'longitudinal_active': False, 'stock_cruise_active': True}, 'Stock ACC'),
+      ({'longitudinal_active': False, 'stock_cruise_active': True}, 'Always On Lateral'),
+    ]:
+      with self.subTest(changes=changes):
+        self.assertEqual(driving_mode_description(replace(base, **changes)), expected)
+    stop = ConditionalDisplay(ModeChoice.CEM, True, 'cem_stop', 8, 'test', 1)
+    chill = replace(stop, effective_experimental=False, reason='manual_chill')
+    self.assertEqual(driving_mode_description(replace(base, conditional_effective=stop)), 'ACC - Experimental')
+    self.assertEqual(driving_mode_description(replace(base, experimental_enabled=True, conditional_effective=chill)), 'ACC - Chill')
+    self.assertEqual(driving_mode_description(replace(base, traffic_mode=True, conditional_effective=stop)), 'Traffic Mode')
+
+  def test_mode_widget_is_optional_and_yields_to_alerts(self):
+    from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
+
+    state = self.state(True, True)
+    for profile in (Profile.LARGE, Profile.COMPACT):
+      view = onroad.OnroadView.__new__(onroad.OnroadView)
+      view.fonts = NS(profile=profile, draw=Mock())
+      view._driving_mode(state)
+      view.fonts.draw.assert_not_called()
+      state.customization['layouts'][profile][MODE_WIDGET]['enabled'] = True
+      for size in (AlertSize.SMALL, AlertSize.MID, AlertSize.FULL):
+        view._driving_mode(replace(state, alert=OnroadAlert(size=size)))
+        view.fonts.draw.assert_not_called()
 
   def test_stock_cruise_is_distinct_from_system_long_and_lateral(self):
     self.ui.CP = NS(carFingerprint='', openpilotLongitudinalControl=False, pcmCruise=True)
