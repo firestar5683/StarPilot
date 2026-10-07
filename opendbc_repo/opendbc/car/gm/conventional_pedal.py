@@ -44,20 +44,31 @@ class CancelCredit:
 
   """One cancellation per sequential, byte-valid neutral wheel-button packet."""
 
-  def __init__(self):
+  def __init__(self, *, neutral_interval_ns=300_000_000):
+    self.neutral_interval_ns = neutral_interval_ns
     self.counter = None
     self.packet_ns = self.source_ns = self.credit_ns = 0
     self.main_ns = self.stock_ns = 0
+    self.gear_ns = self.gear_packet_ns = 0
     self.main = self.stock_active = False
     self.override_ns = {}
 
-  def observe(self, can_packets, *, clear_on_main_off=False, clear_on_driver_override=False):
+  def observe(self, can_packets, *, clear_on_main_off=False, clear_on_driver_override=False, observe_gear=False):
     # Decoded signals omit reserved bits. Observe ordered physical packets so
     # the sender cannot grant credit for a button frame Panda would reject.
     for stamp, packets in can_packets:
       for address, raw, bus in packets:
         if bus != 0:
           continue
+        if observe_gear and address == 0x1F5:
+          if len(raw) == 8 and stamp > max(0, self.gear_packet_ns):
+            self.gear_ns = stamp
+          elif len(raw) != 8 or stamp != self.gear_ns or stamp <= 0:
+            # Same-event valid observations retain a qualified clock, never refresh it.
+            self.gear_ns = 0
+          self.gear_packet_ns = max(self.gear_packet_ns, stamp)
+          if not self.gear_ns:
+            self.credit_ns = 0
         if clear_on_driver_override and stamp > self.override_ns.get(address, 0):
           if address in self.DRIVER_OVERRIDE_LENGTHS and len(raw) == self.DRIVER_OVERRIDE_LENGTHS[address]:
             self.override_ns[address] = stamp
@@ -93,7 +104,7 @@ class CancelCredit:
     checksum = 0xFF + counter * 0x4EF
     neutral = raw == bytes((0, 0, 0, 1, counter, 0x10 | (checksum >> 8), checksum & 0xFF))
     first = self.counter is None
-    timely = self.source_ns > 0 and 0 <= stamp - self.source_ns <= 300_000_000
+    timely = self.source_ns > 0 and 0 <= stamp - self.source_ns <= self.neutral_interval_ns
     if neutral and (first or timely and counter == (self.counter + 1) % 4):
       self.credit_ns = stamp
       self.source_ns = stamp

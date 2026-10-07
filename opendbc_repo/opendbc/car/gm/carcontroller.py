@@ -25,7 +25,8 @@ from opendbc.car.gm.values import (DBC, CanBus, CarControllerParams, CruiseButto
                                    is_ordinary_camera_profile, is_ordinary_camera_removed,
                                    is_ordinary_sdgm_profile,
                                    is_volt_camera_longitudinal, is_volt_camera_stock, is_volt_sdgm_profile, is_volt_camera_removed,
-                                   NO_ACC_BOLT_CAR, is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_bolt_euv_longitudinal,
+                                   NO_ACC_BOLT_CAR, is_bolt_pedal_profile, is_bolt_pedal_removed_profile,
+                                   is_bolt_present_no_acc_pedal_profile, is_bolt_euv_longitudinal,
                                    is_volt_cc_longitudinal, is_volt_cc_profile, is_silverado_cc_stock_profile, is_ordinary_cc_profile,
                                    CC_GATEWAY_STOCK_CAR, uses_camera_stock_controls, CAR, BOLT_CC_WORDS, is_bolt_cc_profile)
 from opendbc.car.interfaces import CarControllerBase
@@ -1108,8 +1109,7 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN,
                                            (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
 
-    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2018_2021 and is_bolt_pedal_profile(self.CP) and
-        self.CP.safetyConfigs[0].safetyParam == 0x9D and CS.out.canValid and not CS.out.canTimeout and
+    if (is_bolt_present_no_acc_pedal_profile(self.CP) and CS.out.canValid and not CS.out.canTimeout and
         CS.pedal_sensor_healthy and 0 < CS.pedal_sensor_ts_nanos <= now_nanos and
         now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS and
         bolt_acc_pedal_dashboard_drive_ready(CS, now_nanos) and CS.out.cruiseState.available and

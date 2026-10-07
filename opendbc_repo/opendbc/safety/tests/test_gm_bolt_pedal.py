@@ -709,9 +709,9 @@ class TestGmBoltPedalSafety(unittest.TestCase):
       command = self.packet(self.packer.make_can_msg("ASCMSteeringButton", 2, {"ACCButtons": 6}))
       self.assertFalse(self.safety.safety_tx_hook(command))
 
-  def test_present_2020_cancel_does_not_admit_sibling_pedal_profiles(self):
+  def test_present_no_acc_cancel_admits_exact_three_profiles(self):
     from opendbc.car.gm.bolt_cc import button_bytes
-    for word in (0xBD, 0x19D):
+    for word in (0xBD, 0x9D, 0x19D, 0x1CD):
       with self.subTest(word=word):
         self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
         self.safety.init_tests()
@@ -721,11 +721,48 @@ class TestGmBoltPedalSafety(unittest.TestCase):
                       libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
                       libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, 0))):
           self.safety.safety_rx_hook(frame)
+        self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))), word != 0x1CD)
         self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))))
+
+  def test_removed_no_acc_gap_recovers_without_reusing_cancel_slot(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for word in (0x9D, 0xE700, 0xE701, 0xE702):
+      with self.subTest(word=word):
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+        self.safety.init_tests()
+        for time, counter in ((1000, 0), (151000, 1), (181000, 2)):
+          self.safety.set_timer(time)
+          for frame in (self.low_gear(), self.sensor(counter + 1),
+                        self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                        libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
+                        libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, counter))):
+            self.assertTrue(self.safety.safety_rx_hook(frame))
+          accepted = self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, (counter + 1) % 4)))
+          self.assertEqual(accepted, counter in (0, 2))
+          self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, (counter + 1) % 4))))
+        self.safety.set_timer(186000)
+        self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, 2))))
+        self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 3))))
+
+  def test_removed_e701_keeps_forward_gear_cancel_guard(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for gear, manual in ((0, 0), (1, 0), (4, 1), (4, 0), (6, 0)):
+      with self.subTest(gear=gear, manual=manual):
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, 0xE701), 0)
+        self.safety.init_tests()
+        self.safety.set_timer(1000)
+        for frame in (self.stock("ECMPRDNL2", {"PRNDL2": gear, "ManualMode": manual}), self.sensor(1),
+                      self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                      libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
+                      libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, 0))):
+          self.assertTrue(self.safety.safety_rx_hook(frame))
+        self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))),
+                         gear in (4, 6) and not manual)
 
   def test_removed_no_acc_cancel_requires_physical_one_shot_neutral_slot(self):
     from opendbc.car.gm.bolt_cc import button_bytes
-    for word, gear in ((0x9D, None), (0x9D, 4), (0x9D, 6), (0xE700, None), (0xE700, 4), (0xE700, 6), (0xE701, None), (0xE701, 4), (0xE701, 6),
+    for word, gear in ((0xBD, None), (0xBD, 4), (0xBD, 6), (0x19D, None), (0x19D, 4), (0x19D, 6),
+                       (0x9D, None), (0x9D, 4), (0x9D, 6), (0xE700, None), (0xE700, 4), (0xE700, 6), (0xE701, None), (0xE701, 4), (0xE701, 6),
                        (0xE702, None), (0xE702, 4), (0xE702, 6)):
       for button, bus, damaged in ((6, 0, False), (2, 0, False), (3, 0, False), (6, 2, False), (6, 0, True)):
         with self.subTest(word=word, gear=gear, button=button, bus=bus, damaged=damaged):
