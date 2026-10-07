@@ -13,7 +13,7 @@ from openpilot.starpilot.conditional_mode.preferences import PreferenceError, de
 from openpilot.starpilot.aol.intent import independent_axis_requested, read_settings as read_aol_settings
 from openpilot.starpilot.aol.vehicle import policy_for as aol_policy_for
 from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
-from openpilot.starpilot.longitudinal.profile_runtime import read_settings as read_profile_settings, selected_profiles_requested
+from openpilot.starpilot.longitudinal.profile_runtime import read_settings as read_profile_settings, selected_profiles_requested, read_global_powertrain_preset
 from openpilot.starpilot.longitudinal.profile_preferences import read_document_value
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.speed_limits.runtime_settings import read_params as read_slc_settings
@@ -81,7 +81,9 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str]) -> bool:
   capable = cp is not None and (ioniq6_long_eligible(cp) or
                                 (feature in ('conditional', 'curve', 'slc', 'profile') and gm_long_supported(cp)) or
                                 (feature in ('slc', 'vision') and gm_display_supported(cp)))
-  return bool(capable and requested(params, feature))
+  powertrain_requested = (feature == 'profile' and cp is not None and gm_long_supported(cp) and
+                          read_document_value(params).valid and read_global_powertrain_preset(params, cp) is not None)
+  return bool(capable and (requested(params, feature) or powertrain_requested))
 
 
 def slc_runtime_settings(params, cp, environment: Mapping[str, str]):

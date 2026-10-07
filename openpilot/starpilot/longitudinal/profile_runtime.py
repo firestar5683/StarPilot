@@ -278,6 +278,34 @@ class SelectedProfileTuning:
   braking_style: str = 'standard'
 
 
+@dataclass(frozen=True)
+class GlobalPowertrainPreset:
+  ev: bool
+  truck: bool
+
+
+def read_global_powertrain_preset(params, CP) -> GlobalPowertrainPreset | None:
+  from opendbc.car.gm.feature_capabilities import longitudinal_supported
+  from opendbc.car.gm.truck_longitudinal import truck_tuning_supported
+  from openpilot.starpilot.saved_source import read_saved
+  if not longitudinal_supported(CP):
+    return None
+  try:
+    ev, ev_readable = read_saved(params, 'EVTuning', 8)
+    truck, truck_readable = read_saved(params, 'TruckTuning', 8)
+    if not ev_readable or not truck_readable or ev not in (None, b'0', b'1') or truck not in (None, b'0', b'1'):
+      return None
+    if not truck_tuning_supported(CP):
+      truck = None  # A saved choice from another truck cannot activate this owner.
+    if ev is None and truck is None:
+      return None  # Absence preserves the existing final-CP response.
+    truck_selected = truck == b'1' and truck_tuning_supported(CP)
+    return GlobalPowertrainPreset((CP.transmissionType == car.CarParams.TransmissionType.direct if ev is None else ev == b'1') and not truck_selected,
+                                  truck_selected)
+  except (OSError, RuntimeError, TypeError, ValueError):
+    return None
+
+
 def selected_profiles_requested(document: dict | None) -> bool:
   if document is None:
     return False
@@ -288,7 +316,7 @@ def selected_profiles_requested(document: dict | None) -> bool:
 
 
 def resolve_selected_profiles(document: dict | None, personality, v_ego: float, CP, *, traffic_mode: bool | None = False,
-                              legacy: ProfileTuning | None = None) -> SelectedProfileTuning | None:
+                              legacy: ProfileTuning | None = None, global_powertrain: GlobalPowertrainPreset | None = None) -> SelectedProfileTuning | None:
   """Resolve only acceleration/braking; never enable following or jerk tuning.
 
   Migration provenance preserves the former master/curve gates until the user
@@ -315,12 +343,18 @@ def resolve_selected_profiles(document: dict | None, personality, v_ego: float, 
     if inherited:
       preset = document['selectedAccelerationProfile' if category == 'acceleration' else 'selectedDecelerationProfile']
     if preset == 'dom_default':
-      continue
+      if category == 'acceleration' and inherited and traffic_mode is False and global_powertrain is not None:
+        preset = 'standard'  # Original explicit EV/Truck choice owns the global Standard fallback.
+      else:
+        continue
     if category == 'braking' and inherited:
       value = {'standard': 1.2, 'eco': 0.6, 'sport': 2.4}[preset]
     else:
+      selected_ev, selected_truck = ev, truck
+      if category == 'acceleration' and inherited and traffic_mode is False and global_powertrain is not None:
+        selected_ev, selected_truck = global_powertrain.ev, global_powertrain.truck
       value = interpolate_category_curve(category, v_ego,
-                                        {'preset': preset, 'curve': []} if inherited else config, ev, truck)
+                                        {'preset': preset, 'curve': []} if inherited else config, selected_ev, selected_truck)
     if not math.isfinite(value):
       return None
     if category == 'acceleration':
@@ -340,6 +374,7 @@ class ProfileHost:
     self.params = params
     self.disabled = False
     self.selected_document: dict | None = None
+    self.selected_powertrain: GlobalPowertrainPreset | None = None
     self.selected_attempt_ns = -self.REFRESH_NS
     self.selected_success_ns = -1
     self.settings: ProfileSettings | TrafficSettings | None = None
@@ -355,6 +390,7 @@ class ProfileHost:
                       legacy: ProfileTuning | None = None) -> SelectedProfileTuning | None:
     if now_ns < 0 or now_ns < self.selected_attempt_ns:
       self.selected_document = None
+      self.selected_powertrain = None
       self.selected_attempt_ns = now_ns - self.REFRESH_NS
       self.selected_success_ns = -1
     if now_ns - self.selected_attempt_ns >= self.REFRESH_NS:
@@ -362,14 +398,16 @@ class ProfileHost:
       try:
         saved = read_document_value(self.params)
         self.selected_document = saved.value if saved.valid and isinstance(saved.value, dict) else None
+        self.selected_powertrain = read_global_powertrain_preset(self.params, CP)
         self.selected_success_ns = now_ns if saved.valid else -1
       except (OSError, RuntimeError, ValueError, TypeError, KeyError):
         self.selected_document = None
+        self.selected_powertrain = None
         self.selected_success_ns = -1
     if self.selected_success_ns < 0 or now_ns - self.selected_success_ns > self.MAX_AGE_NS:
       return None
     return resolve_selected_profiles(self.selected_document, personality, v_ego, CP,
-                                     traffic_mode=traffic_mode, legacy=legacy)
+                                     traffic_mode=traffic_mode, legacy=legacy, global_powertrain=self.selected_powertrain)
 
   def sample_global_braking(self, now_ns: int) -> str | None:
     if now_ns < 0 or now_ns < self.global_last_attempt_ns:
