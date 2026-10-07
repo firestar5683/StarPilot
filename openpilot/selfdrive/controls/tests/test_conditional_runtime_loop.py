@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from collections import deque
+from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 from opendbc.car.honda.interface import CarInterface
@@ -52,10 +53,100 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
             call('slcAction', conflate=False),
             call('slcCruiseEvent', conflate=False)])
           # The typed manual-mode owner publishes status even without CEM.
-          self.assertEqual(publisher.call_args.args[0], ['longitudinalPlan', 'driverAssistance', 'slcState'])
+          self.assertEqual(publisher.call_args.args[0], ['longitudinalPlan', 'starpilotLongitudinalPlan',
+                                                       'driverAssistance', 'slcState'])
           self.assertEqual(conditional_ctor.call_count, int(enabled))
           if enabled:
             self.assertIs(conditional_ctor.call_args.args[0], params)
+
+  def test_saved_slc_attaches_replaces_and_detaches_without_planner_restart(self):
+    from openpilot.starpilot.longitudinal.tests.test_ioniq6_start import candidate
+    from openpilot.starpilot.speed_limits.selection import Source
+    _, cp = candidate(alternate=True)
+    with tempfile.TemporaryDirectory() as directory:
+      params = Params(directory)
+      params.put_bool('ShowSpeedLimits', False, block=True)
+      params.put_bool('SpeedLimitController', False, block=True)
+      params.put('SLCPriority1', 'Dashboard', block=True)
+      owner = plannerd.SavedSlcLifecycle(params, cp, {})
+      self.assertTrue(plannerd.slc_transport_capable(cp, {}))
+      self.assertEqual(owner.refresh(1_000_000_000), (None, True))
+      params.put_bool('ShowSpeedLimits', True, block=True)
+      display, changed = owner.refresh(2_000_000_000)
+      self.assertTrue(changed)
+      self.assertIsNotNone(display)
+      self.assertFalse(display.settings.enabled)
+      self.assertFalse(display.vision_enabled)
+      params.put('SLCPriority1', 'Vision', block=True)
+      vision, changed = owner.refresh(3_000_000_000)
+      self.assertTrue(changed)
+      self.assertIsNot(vision, display)
+      self.assertTrue(vision.vision_enabled)
+      self.assertTrue(vision.vision_display_qualified)
+      self.assertFalse(vision.vision_control_qualified)
+      self.assertEqual(vision.settings.selection.slots[0], Source.VISION)
+      session = vision.session_id
+      pending_actions = deque([(3_000_000_000, plannerd.SlcAction(session, 1, 1, 1, 'accept'))])
+      pending_cruise = deque([plannerd.SlcCruiseEvent(1, 3_000_000_000, 20., 21., 'set', session_id=session)])
+      self.assertEqual(owner.refresh(3_050_000_000, pending_actions=pending_actions,
+                                    pending_cruise=pending_cruise), (vision, False))
+      self.assertEqual(len(pending_actions), 1)
+      self.assertEqual(len(pending_cruise), 1)
+      params.put_bool('SpeedLimitController', True, block=True)
+      control, changed = owner.refresh(4_000_000_000, pending_actions=pending_actions, pending_cruise=pending_cruise)
+      self.assertFalse(pending_actions)
+      self.assertFalse(pending_cruise)
+      self.assertTrue(changed)
+      self.assertTrue(control.vision_control_qualified)
+      self.assertFalse(control.vision_display_qualified)
+      self.assertNotEqual(control.session_id, session)
+      self.assertNotEqual(vision.session_id, session)  # Retired session was reset.
+      params.put_bool('ShowSpeedLimits', False, block=True)
+      params.put_bool('SpeedLimitController', False, block=True)
+      pending_actions.append((4_050_000_000, plannerd.SlcAction(control.session_id, 1, 1, 1, 'accept')))
+      pending_cruise.append(plannerd.SlcCruiseEvent(2, 4_050_000_000, 20., 21., 'set', session_id=control.session_id))
+      self.assertEqual(owner.refresh(5_000_000_000, pending_actions=pending_actions,
+                                    pending_cruise=pending_cruise), (None, True))
+      self.assertFalse(pending_actions)
+      self.assertFalse(pending_cruise)
+      Path(params.get_param_path('ShowSpeedLimits')).write_bytes(b'invalid')
+      self.assertEqual(owner.refresh(6_000_000_000), (None, True))
+      self.assertEqual(Path(params.get_param_path('ShowSpeedLimits')).read_bytes(), b'invalid')
+      passive = cp.as_builder() if hasattr(cp, 'as_builder') else cp.as_reader().as_builder()
+      passive.passive = True
+      params.put_bool('ShowSpeedLimits', True, block=True)
+      self.assertFalse(plannerd.slc_transport_capable(passive, {}))
+      self.assertIsNone(plannerd.SavedSlcLifecycle(params, passive, {}).refresh(7_000_000_000)[0])
+      self.assertTrue(plannerd.slc_transport_capable(None, {'SLC_REPLAY_RUNTIME': '1'}))
+
+  def test_optional_slc_sources_are_reserved_while_saved_runtime_is_absent(self):
+    from openpilot.starpilot.longitudinal.tests.test_ioniq6_start import candidate
+    _, cp = candidate(alternate=True)
+    class EndLoop(Exception):
+      pass
+    with tempfile.TemporaryDirectory() as directory:
+      params = Params(directory)
+      params.put('CarParams', cp.to_bytes(), block=True)
+      params.put_bool('ShowSpeedLimits', False, block=True)
+      params.put_bool('SpeedLimitController', False, block=True)
+      sm = Mock()
+      sm.update.side_effect = EndLoop
+      with patch.dict(os.environ, {}, clear=True), patch.object(plannerd, 'Params', return_value=params), \
+           patch.object(plannerd, 'config_realtime_process'), \
+           patch.object(messaging, 'PubMaster') as publisher, \
+           patch.object(messaging, 'SubMaster', return_value=sm) as subscriber, patch.object(messaging, 'sub_sock'):
+        with self.assertRaises(EndLoop):
+          plannerd.starpilot_main()
+      self.assertIn('slcCruiseCommand', publisher.call_args.args[0])
+      for service in ('slcDashboardObservation', 'slcVisionObservation'):
+        self.assertIn(service, subscriber.call_args.args[0])
+        for check in ('ignore_alive', 'ignore_valid', 'ignore_avg_freq'):
+          self.assertIn(service, subscriber.call_args.kwargs[check])
+      for service in plannerd.NATIVE_PLAN_INPUTS:
+        self.assertIn(service, subscriber.call_args.args[0])
+        for check in ('ignore_alive', 'ignore_valid', 'ignore_avg_freq'):
+          self.assertNotIn(service, subscriber.call_args.kwargs[check])
+      self.assertIsNone(plannerd.SavedSlcLifecycle(params, cp, {}).refresh(1_000_000_000)[0])
 
   def test_automatic_chill_joins_native_mpc_radar_and_disabled_slc(self):
     cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)

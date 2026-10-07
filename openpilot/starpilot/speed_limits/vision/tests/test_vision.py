@@ -165,6 +165,10 @@ class TestVision(unittest.TestCase):
         return next(item for item in state.rows if item.key == key)
 
       primary = row('SLCPriority1')
+      self.assertEqual(primary.value, 'Vision')
+      self.assertEqual(primary.default_value, 'Vision')
+      params.put('SLCPriority1', 'Dashboard', block=True)
+      primary = row('SLCPriority1')
       self.assertEqual(primary.value, 'Dashboard')
       self.assertIn('Vision', primary.choices)
       request = row_change(primary)
