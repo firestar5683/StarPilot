@@ -35,6 +35,20 @@ def document(**choices):
 
 
 class TestControllerSelection(unittest.TestCase):
+  def test_hybrid_existing_policy_saved_standard_roundtrip(self):
+    from opendbc.car.gm.tests.test_ordinary_cc import malibu_hybrid_params
+    from openpilot.starpilot.lateral.controller_selection import parse_document, replace_mode
+    cp = malibu_hybrid_params()
+    before = default_selection(cp)
+    self.assertEqual(before.policy, 'ordinary_cc')
+    self.assertEqual(before.mode, ControllerMode.STARPILOT)
+    raw = replace_mode(None, cp, ControllerMode.STANDARD)
+    self.assertEqual(parse_document(raw)['vehicles'][str(cp.carFingerprint)]['mode'], 'standard')
+    self.assertEqual(selection_from_bytes(cp, raw).mode, ControllerMode.STANDARD)
+    self.assertEqual(default_selection(cp), before)
+    for bad in (raw.replace(b'CHEVROLET_MALIBU_HYBRID_CC', b'UNKNOWN_GM'), raw.replace(b'standard', b'unknown')):
+      self.assertEqual(selection_from_bytes(cp, bad).source, 'invalid')
+
   def test_missing_choice_exact_policy_and_untuned_matrix(self):
     expected = ((HYUNDAI.HYUNDAI_IONIQ_6, 'ioniq6'),
                 (HYUNDAI.GENESIS_G70_2020, 'genesis_g70_2020'),
