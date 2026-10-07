@@ -31,6 +31,19 @@ def required_document(raw: object) -> dict:
 
 
 class FeatureSettingsOwnerTests(unittest.TestCase):
+  def test_bolt_wheel_menu_exposes_only_received_buttons(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.params.put('LKASButtonControl', 9, block=True)
+    rows = self.owner.snapshot('wheel', parked=True, system_long=True, lateral_context=True, metric=False).rows
+    self.assertFalse(any(row.key == 'wheel:LKASButtonControl' for row in rows))
+    self.assertTrue(any(row.key == 'wheel:MainCruiseButtonControl' and row.available for row in rows))
+    self.assertTrue(any(row.key == 'wheel:DistanceButtonControl' and row.available for row in rows))
+    self.assertEqual(self.params.get('LKASButtonControl'), 9)
+
   def test_hybrid_manual_settings_and_automatic_pedal_owner(self):
     from opendbc.car import gen_empty_fingerprint
     from opendbc.car.gm.interface import CarInterface

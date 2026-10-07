@@ -38,6 +38,8 @@ class WheelFeature:
       from openpilot.starpilot.car.hyundai.settings import configuration_wheel_policy, configuration_media_supported
       policy = configuration_wheel_policy(cp) or policy
       media = configuration_media_supported(cp) or media
+    if key == "LKASButtonControl" and not policy.lkas_button_supported:
+      return ()
     if key in KEYS[:2] and policy.fixed_cruise_buttons:
       return ()
     if key in KEYS[8:] and not media:
