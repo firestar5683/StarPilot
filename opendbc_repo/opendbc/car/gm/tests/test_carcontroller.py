@@ -53,6 +53,8 @@ from opendbc.car.gm.carcontroller import (
   get_testing_ground_1_brake_switch_bias,
   get_acc_dashboard_status_active,
   get_stock_cc_active_for_cancel,
+  get_truck_highway_load_accel,
+  is_truck_long_car,
   limit_grade_feedforward,
   shape_bolt_acc_pedal_low_speed_friction,
   shape_truck_friction_brake,
@@ -917,6 +919,34 @@ def test_limit_grade_feedforward_caps_uphill_hold():
 def test_limit_grade_feedforward_keeps_downhill_help():
   assert limit_grade_feedforward(0.40, -0.30) == pytest.approx(-0.30)
   assert limit_grade_feedforward(-0.20, -0.30) == pytest.approx(-0.30)
+
+
+def test_limit_grade_feedforward_fades_uphill_help_with_command():
+  assert limit_grade_feedforward(0.15, 0.50) == pytest.approx(0.10)
+  assert limit_grade_feedforward(0.15, 0.08) == pytest.approx(0.04)
+
+
+def test_limit_grade_feedforward_never_lowers_total_request_as_command_rises():
+  for pitch_accel in (0.05, 0.15, 0.20, 0.40):
+    commands = np.linspace(-0.5, 1.0, 301)
+    totals = [cmd + limit_grade_feedforward(cmd, pitch_accel) for cmd in commands]
+    assert np.all(np.diff(totals) >= -1e-9)
+
+
+def test_truck_highway_load_accel_only_applies_at_highway_speed():
+  assert get_truck_highway_load_accel(15.0, True) == 0.0
+  assert get_truck_highway_load_accel(20.0, True) == 0.0
+  assert 0.14 < get_truck_highway_load_accel(30.0, True) < 0.18
+  assert get_truck_highway_load_accel(30.0, False) == 0.0
+
+
+def test_is_truck_long_car_requires_stock_automatic_silverado():
+  truck = SimpleNamespace(carFingerprint=CAR.CHEVROLET_SILVERADO, enableGasInterceptorDEPRECATED=False,
+                          transmissionType=CarParams.TransmissionType.automatic)
+  assert is_truck_long_car(truck)
+  assert not is_truck_long_car(SimpleNamespace(**{**vars(truck), "enableGasInterceptorDEPRECATED": True}))
+  assert not is_truck_long_car(SimpleNamespace(**{**vars(truck), "transmissionType": CarParams.TransmissionType.manual}))
+  assert not is_truck_long_car(SimpleNamespace(**{**vars(truck), "carFingerprint": CAR.CHEVROLET_BOLT_ACC_2022_2023}))
 
 
 def test_shape_truck_friction_brake_suppresses_boundary_chatter():

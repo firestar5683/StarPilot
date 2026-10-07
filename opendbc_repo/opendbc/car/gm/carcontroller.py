@@ -72,6 +72,9 @@ TRUCK_FRICTION_BRAKE_IMMEDIATE_ACCEL = -0.85
 TRUCK_FOLLOW_MICRO_ACCEL_MAX = 0.55
 TRUCK_FOLLOW_MICRO_ACCEL_MIN = -0.10
 TRUCK_FOLLOW_MICRO_ACCEL_SLEW = 1.5
+# Road load beyond the aero term that a stock truck needs to hold highway speed (m/s^2).
+TRUCK_HIGHWAY_LOAD_BP = [20.0, 22.4, 26.6, 29.5, 32.4, 36.7]
+TRUCK_HIGHWAY_LOAD_V = [0.0, 0.02, 0.085, 0.15, 0.175, 0.165]
 ACC_DASHBOARD_ZERO_RESERVED_CARS = {
   CAR.CHEVROLET_BLAZER,
   CAR.CHEVROLET_EQUINOX,
@@ -256,15 +259,31 @@ def shape_truck_pitch_accel(pitch_accel: float, v_ego: float, enabled: bool) -> 
   return pitch_accel * scale
 
 
+def is_truck_long_car(CP) -> bool:
+  return (
+    CP.carFingerprint in TRUCK_LONG_SMOOTH_CARS and
+    getattr(CP, "transmissionType", None) == TransmissionType.automatic and
+    not CP.enableGasInterceptorDEPRECATED
+  )
+
+
+def get_truck_highway_load_accel(v_ego: float, enabled: bool) -> float:
+  if not enabled:
+    return 0.0
+  return float(np.interp(v_ego, TRUCK_HIGHWAY_LOAD_BP, TRUCK_HIGHWAY_LOAD_V))
+
+
 MAX_UPHILL_GRADE_FF = 0.20
+UPHILL_GRADE_FF_FADE_ACCEL = 0.30
 
 
 def limit_grade_feedforward(planner_accel: float, pitch_accel: float) -> float:
-  if pitch_accel > 0.0 and planner_accel > 0.0:
-    return 0.0
-  if pitch_accel > MAX_UPHILL_GRADE_FF:
-    return MAX_UPHILL_GRADE_FF
-  return pitch_accel
+  if pitch_accel <= 0.0:
+    return pitch_accel
+  # Fade the uphill term out as the command rises so a larger command never
+  # produces a smaller total request.
+  fade = float(np.clip(1.0 - planner_accel / UPHILL_GRADE_FF_FADE_ACCEL, 0.0, 1.0))
+  return min(pitch_accel, MAX_UPHILL_GRADE_FF) * fade
 
 
 def shape_truck_friction_brake(apply_brake: int, accel_cmd: float, stopping: bool, active: bool) -> tuple[int, bool]:
@@ -1051,12 +1070,8 @@ class CarController(CarControllerBase):
             if testing_ground.use_1:
               accel_max = min(accel_max, np.interp(CS.out.vEgo, [0.0, 4.0, 12.0], [1.25, 1.6, self.params.ACCEL_MAX]))
 
-            truck_long_smoothing = (
-              getattr(starpilot_toggles, "truck_tuning", False) and
-              self.CP.carFingerprint in TRUCK_LONG_SMOOTH_CARS and
-              getattr(self.CP, "transmissionType", None) == TransmissionType.automatic and
-              not self.CP.enableGasInterceptorDEPRECATED
-            )
+            truck_long_car = is_truck_long_car(self.CP)
+            truck_long_smoothing = getattr(starpilot_toggles, "truck_tuning", False) and truck_long_car
             accel_due_to_pitch = shape_truck_pitch_accel(accel_due_to_pitch, CS.out.vEgo, truck_long_smoothing)
             accel_due_to_pitch = limit_grade_feedforward(actuators.accel, accel_due_to_pitch)
             accel_input = actuators.accel + accel_due_to_pitch
@@ -1080,7 +1095,9 @@ class CarController(CarControllerBase):
                 stopping,
               )
             self.truck_follow_accel = accel_cmd
-            torque = self.tireRadius * ((self.mass * accel_cmd) + (0.5 * self.coeffDrag * self.frontalArea * self.airDensity * CS.out.vEgo ** 2))
+            truck_load_accel = get_truck_highway_load_accel(CS.out.vEgo, truck_long_car)
+            torque = self.tireRadius * ((self.mass * (accel_cmd + truck_load_accel)) +
+                                        (0.5 * self.coeffDrag * self.frontalArea * self.airDensity * CS.out.vEgo ** 2))
             scaled_torque = torque + self.params.ZERO_GAS
             apply_gas_torque = np.clip(scaled_torque, self.params.MAX_ACC_REGEN, gas_max)
             brake_switch = int(round(np.interp(CS.out.vEgo, self.params.BRAKE_SWITCH_LOOKUP_BP, self.params.BRAKE_SWITCH_LOOKUP_V)))
