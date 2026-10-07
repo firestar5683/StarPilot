@@ -55,6 +55,7 @@ static std::map<std::string, service> services = {
   { "driverAssistance", {"driverAssistance", true, 20.000000, 20, 256000}},
   { "procLog", {"procLog", true, 0.500000, 15, 10485760}},
   { "gpsLocationExternal", {"gpsLocationExternal", true, 10.000000, 10, 256000}},
+  { "starpilotCarState", {"starpilotCarState", true, 0.000000, 1, 256000}},
   { "gpsLocation", {"gpsLocation", true, 1.000000, 1, 256000}},
   { "ubloxGnss", {"ubloxGnss", true, 10.000000, -1, 256000}},
   { "qcomGnss", {"qcomGnss", true, 2.000000, -1, 256000}},
