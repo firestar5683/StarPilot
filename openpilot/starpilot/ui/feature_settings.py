@@ -11,7 +11,8 @@ from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
   FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN, FEATURE_HEADER_HEIGHT,
   FEATURE_TAP_SLOP, FEATURE_FLICK_DISTANCE, FEATURE_PAGE_COUNTER_WIDTH,
-  feature_scroll, feature_action_left, feature_row_top, feature_page_counter_left, value_buttons, value_editor_rect, value_done_rect, value_text,
+  feature_scroll, feature_action_left, feature_row_top, feature_page_counter_left, feature_footer_buttons,
+  value_buttons, value_editor_rect, value_done_rect, value_text,
 )
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.settings_geometry import (
@@ -231,10 +232,13 @@ class FeatureSettingsView:
     if state.editor:
       self._value_done(state)
       return
-    self._center("Previous", DETAIL_SIZE, rl.Rectangle(left + 25, 980, 1320 - left - 25, 70),
-                 TEXT_PRIMARY if state.scroll > 0 else TEXT_MUTED)
-    self._center("Next", DETAIL_SIZE, rl.Rectangle(1320, 980, 800, 70),
-                 TEXT_PRIMARY if state.scroll + FEATURE_VISIBLE_ROWS < len(state.rows) else TEXT_MUTED)
+    can_page = (state.scroll > 0, state.scroll + FEATURE_VISIBLE_ROWS < len(state.rows))
+    for label, bounds, enabled in zip(("Previous", "Next"), feature_footer_buttons(state), can_page, strict=True):
+      button = rl.Rectangle(*bounds)
+      if enabled:
+        draw_rounded_fill(button, CONTROL_BG)
+      draw_rounded_stroke(button, CONTROL_BORDER)
+      self._center(label, DETAIL_SIZE, button, TEXT_PRIMARY if enabled else TEXT_MUTED)
     current_page = state.scroll // FEATURE_VISIBLE_ROWS + 1
     total_pages = max(1, (len(state.rows) + FEATURE_VISIBLE_ROWS - 1) // FEATURE_VISIBLE_ROWS)
     self._center(f"{current_page}/{total_pages}", DETAIL_SIZE,

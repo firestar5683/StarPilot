@@ -14,6 +14,7 @@ from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, feature_row_top, FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, row_change,
   FEATURE_PAGE_COUNTER_WIDTH, feature_page_counter_left,
+  FEATURE_FOOTER_BOTTOM, feature_footer_buttons, feature_footer_top,
 )
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
@@ -39,6 +40,37 @@ class FeatureNavigationTests(unittest.TestCase):
         controller.press(x, 1015, state)
         controller.release(x, 1015, state)
         self.assertEqual(actions.pop(), FeatureUiAction("scroll", direction=direction))
+
+  def test_footer_touch_zones_cover_the_full_band_around_the_drawn_buttons(self):
+    for expanded in (True, False):
+      for subtitle in ("", "Panel description"):
+        state = FeatureSettingsState(sidebar_expanded=expanded, subtitle=subtitle)
+        left = 520 if expanded else 20
+        top = feature_footer_top(state)
+        counter_left = feature_page_counter_left(state)
+        counter_right = counter_left + FEATURE_PAGE_COUNTER_WIDTH
+        buttons = feature_footer_buttons(state)
+        for direction, (bx, by, width, height) in zip((-1, 1), buttons, strict=True):
+          self.assertGreaterEqual(by, top)
+          self.assertLessEqual(by + height, FEATURE_FOOTER_BOTTOM)
+          self.assertTrue(bx + width < counter_left if direction == -1 else bx > counter_right)
+          for x in (bx, bx + width / 2, bx + width):
+            for y in (by, by + height / 2, by + height):
+              with self.subTest(expanded=expanded, subtitle=subtitle, x=x, y=y):
+                self.assertEqual(FeatureInput.target(x, y, state), FeatureUiAction("scroll", direction=direction))
+        for x, y, direction in ((left, top, -1), (counter_left - 1, FEATURE_FOOTER_BOTTOM, -1),
+                                (counter_right + 1, top, 1), (2140, FEATURE_FOOTER_BOTTOM, 1)):
+          with self.subTest(expanded=expanded, subtitle=subtitle, x=x, y=y):
+            self.assertEqual(FeatureInput.target(x, y, state), FeatureUiAction("scroll", direction=direction))
+        self.assertIsNone(FeatureInput.target(1720, FEATURE_FOOTER_BOTTOM + 1, state))
+        self.assertIsNone(FeatureInput.target(1720, FEATURE_FOOTER_BOTTOM - 5, replace(state, editor=True)))
+        actions = []
+        controller = FeatureInput(actions.append)
+        bx, by, width, height = buttons[1]
+        controller.press(bx + width / 2, by + 4, state)
+        controller.move(bx + width / 2 + 20, by - 26, state)
+        controller.release(bx + width / 2 + 20, by - 26, state)
+        self.assertEqual(actions, [FeatureUiAction("scroll", direction=1)])
 
   def test_drag_tracks_only_horizontal_body_movement(self):
     state = FeatureSettingsState()
