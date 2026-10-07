@@ -6,6 +6,8 @@ import math
 from collections import deque
 from collections.abc import Callable
 
+from openpilot.starpilot.audio.alert_volume import SPECS as SOUND_VOLUME_SPECS
+
 FEATURE_HEADER_HEIGHT = 88
 FEATURE_BACK_WIDTH = 208
 FEATURE_ROW_TOP = 112
@@ -23,6 +25,7 @@ FEATURE_FLICK_DISTANCE = 60
 FEATURE_FLICK_VELOCITY = 800
 FEATURE_FLICK_WINDOW = 0.1
 FEATURE_FLICK_PAUSE = 0.06
+SOUND_PRESETS = ("0", "10", "25", "50", "75", "100", "Auto")
 
 
 def is_long_confirm_action(key: str) -> bool:
@@ -97,6 +100,36 @@ class FeatureSettingsState:
 
 def feature_row_top(state: FeatureSettingsState) -> int:
   return FEATURE_ROW_TOP + (52 if state.subtitle else 0)
+
+
+def sound_editor_rect(state: FeatureSettingsState) -> tuple[float, float, float, float]:
+  left = (520 if state.sidebar_expanded else 20) + 55
+  top = feature_row_top(state) + 24
+  return left, top, 2094 - left, 1020 - top
+
+
+def sound_done_rect(state: FeatureSettingsState) -> tuple[float, float, float, float]:
+  x, y, width, height = sound_editor_rect(state)
+  return x, y + height - 140, width, 140
+
+
+def sound_buttons(state: FeatureSettingsState, row: FeatureRow, y: float = 0) -> tuple[tuple[str, tuple[float, float, float, float], bool], ...]:
+  """Shared Big UI sound control geometry and availability; values bind to the saved row."""
+  if state.page != "sounds" or len(state.rows) != 1 or row.key not in SOUND_VOLUME_SPECS or row.repair_value or not row.step:
+    return ()
+  left, _, editor_width, _ = sound_editor_rect(state)
+  step_width, gap, height = 200, 24, 200
+  presets = tuple(value for value in SOUND_PRESETS if value == "Auto" or row.minimum <= int(value) <= row.maximum)
+  width = (editor_width - (len(presets) - 1) * gap) / len(presets)
+  numeric = row.value != "Auto"
+  buttons = [("-", (left, y + 110, step_width, height),
+              row.available and numeric and float(row.value) > row.minimum)]
+  buttons.extend((value, (left + slot * (width + gap), y + 356, width, height),
+                  row.available and row.value != value)
+                 for slot, value in enumerate(presets))
+  buttons.append(("+", (left + editor_width - step_width, y + 110, step_width, height),
+                  row.available and numeric and float(row.value) < row.maximum))
+  return tuple(buttons)
 
 
 def feature_page_counter_left(state: FeatureSettingsState) -> float:
@@ -189,13 +222,28 @@ class FeatureInput:
       return FeatureUiAction("back" if not state.sidebar_expanded and x < left + FEATURE_BACK_WIDTH else "details")
     if 12 + FEATURE_HEADER_HEIGHT < y < row_top:
       return FeatureUiAction("details") if state.subtitle else None
+    sound_editor = state.page == "sounds" and len(state.rows) == 1
+    if sound_editor:
+      bx, by, width, height = sound_done_rect(state)
+      if bx <= x <= bx + width and by <= y <= by + height:
+        return FeatureUiAction("back")
     if 980 <= y <= 1050:
+      if sound_editor:
+        return None
       counter_left = feature_page_counter_left(state)
       if counter_left <= x <= counter_left + FEATURE_PAGE_COUNTER_WIDTH:
         return None
       return FeatureUiAction("scroll", direction=-1 if x < 1320 else 1)
     if not row_top <= y < row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT:
       return None
+    if len(state.rows) == 1 and (sound_controls := sound_buttons(state, state.rows[0], row_top)):
+      row = state.rows[0]
+      for button, (value, (bx, by, width, height), enabled) in enumerate(sound_controls):
+        if bx <= x <= bx + width and by <= y <= by + height:
+          if not enabled:
+            return None
+          return FeatureUiAction("change", row, -1 if value == "-" else 1) if value in ("-", "+") else FeatureUiAction("action", row, button)
+      return FeatureUiAction("details", row) if sound_controls[0][1][1] <= y <= sound_controls[0][1][1] + sound_controls[0][1][3] else None
     visible = int((y - row_top) // FEATURE_ROW_HEIGHT)
     index = state.scroll + visible
     if 0 <= index < len(state.rows):
