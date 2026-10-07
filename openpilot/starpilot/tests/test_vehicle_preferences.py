@@ -121,6 +121,58 @@ class TestVehicleStartupPreferences(unittest.TestCase):
       self.assertFalse(getattr(VehicleStartupPreferences.read(self.params, enabled=True), name))
     self.assertTrue(VehicleStartupPreferences(True, True).turn_assist)
 
+  def test_ordinary_camera_saved_disable_reaches_final_factory_before_controller(self):
+    from opendbc.car.gm.values import CAR as GM_CAR, is_ordinary_camera_profile
+    from opendbc.car.gm.startup_preferences import disable_long_supported
+    for camera in (False, True):
+      for state in ('absent', 'off', 'on', 'alpha_off', 'release', 'master_off'):
+        with self.subTest(camera=camera, state=state):
+          self.raw('SafeMode', b'0')
+          self.raw('DisableOpenpilotLongitudinal', b'1' if state == 'on' else b'0' if state == 'off' else None)
+          self.params.put_bool('AlphaLongitudinalEnabled', state != 'alpha_off', block=True)
+          self.params.put_bool('IsReleaseBranch', state == 'release', block=True)
+          observed = gen_empty_fingerprint()
+          observed[0].update({0xF1: 6, 0xBE: 6, 0xC9: 8, 0x1C4: 8, 0x184: 8, 0x34A: 5})
+          if camera:
+            observed[2].update({0x320: 6, 0x180: 4, 0x370: 6})
+          else:
+            observed[0][0x1E1] = 7
+          active = state in ('absent', 'off', 'master_off')
+          word = (0xC170 if active else 0xC171) if camera else (0xC173 if active else 0xC172)
+          host, constructed, published = self.start(
+            GM_CAR.CHEVROLET_SILVERADO, observed=observed, key='LongPitch', requested=False,
+            enabled=state != 'master_off', capture=lambda ci: int(ci.CS.CP.safetyConfigs[0].safetyParam))
+          self.assertEqual(constructed, [word])
+          if state == 'master_off':
+            self.assertEqual(published.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+            self.assertFalse(disable_long_supported(published))
+            continue
+          self.assertEqual(published.safetyConfigs[0].safetyParam, word)
+          self.assertEqual(published.openpilotLongitudinalControl, active)
+          self.assertEqual(published.pcmCruise, not active)
+          expected_speed = structs.CarParams(minEnableSpeed=0. if active else 5. / 3.6).minEnableSpeed
+          self.assertEqual(published.minEnableSpeed, expected_speed)
+          self.assertFalse(published.autoResumeSng)
+          self.assertTrue(is_ordinary_camera_profile(published, longitudinal=active))
+          self.assertTrue(disable_long_supported(published))
+          self.assertEqual(host.CI.CP.to_dict(), published.to_dict())
+          self.assertEqual(Path(self.params.get_param_path('DisableOpenpilotLongitudinal')).read_bytes()
+                           if state in ('on', 'off') else None, b'1' if state == 'on' else b'0' if state == 'off' else None)
+
+  def test_ordinary_camera_disable_never_admits_invalid_owner(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR as GM_CAR, GMFlags
+    from opendbc.car.gm.startup_preferences import disable_long_supported, prepare_disable_longitudinal
+    for field, value in (('brand', 'hyundai'), ('passive', True), ('dashcamOnly', True), ('notCar', True),
+                         ('radarUnavailable', False), ('flags', int(GMFlags.PEDAL_LONG))):
+      with self.subTest(field=field):
+        cp = params(GM_CAR.CHEVROLET_SILVERADO, alpha=True)
+        setattr(cp, field, value)
+        before = cp.to_dict()
+        self.assertFalse(disable_long_supported(cp))
+        prepare_disable_longitudinal(cp, True)
+        self.assertEqual(cp.to_dict(), before)
+
   def test_camera_interceptor_card_defaults_and_stock_reductions(self):
     from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint
     from opendbc.car.gm.values import CAR as GM_CAR, camera_acc_pedal_profile
@@ -371,7 +423,7 @@ class TestVehicleStartupPreferences(unittest.TestCase):
     with patch.object(card, "Params", return_value=self.params), \
          patch.object(card, "feature_requested", return_value=False), \
          patch.object(card.messaging, "sub_sock", return_value=Mock()), \
-         patch.object(card.messaging, "SubMaster", return_value=Mock()), \
+         patch.object(card.messaging, "SubMaster", return_value=Mock(ignore_alive=[], ignore_valid=[], ignore_average_freq=[])), \
          patch.object(card.messaging, "PubMaster", return_value=SimpleNamespace(sock={"sendcan": Mock()})), \
          patch.object(card.messaging, "recv_one_retry", return_value=SimpleNamespace(can=[object()])), \
          patch.object(card, "Ratekeeper", return_value=Mock()), \

@@ -1,7 +1,8 @@
 from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, ALT_ACCS, volt_cc_pedal_profile
 """Finalized GM speed-control choices; existing native envelopes are retained."""
 
-from opendbc.car.gm.values import (is_malibu_cc_f1_profile, MALIBU_CC_F1_STOCK_WORD, is_volt_gateway_profile, is_volt_cc_profile, is_ordinary_cc_profile,
+from opendbc.car.gm.values import (is_malibu_cc_f1_profile, MALIBU_CC_F1_STOCK_WORD, is_volt_gateway_profile, is_volt_cc_profile,
+                                  is_ordinary_cc_profile, is_ordinary_camera_profile,
                                   is_conventional_cc_pedal_profile, is_silverado_cc_pedal_profile, SILVERADO_CC_PEDAL_WORDS,
                                   CONVENTIONAL_CC_PEDAL_STOCK_WORDS, GMFlags)
 from opendbc.car.gm.values import (is_volt_ascm_longitudinal, is_volt_camera_longitudinal, is_volt_sdgm_profile,
@@ -13,7 +14,8 @@ def disable_long_supported(cp) -> bool:
   if malibu_hybrid_profile(cp) is not None:
     return True
   return (volt_cc_pedal_profile(cp) is not None or camera_acc_pedal_profile(cp) is not None or is_conventional_cc_pedal_profile(cp) or
-          is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
+          is_ordinary_cc_profile(cp) or is_ordinary_camera_profile(cp) or is_ordinary_camera_profile(cp, longitudinal=True) or
+          is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
           is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or is_volt_sdgm_profile(cp, longitudinal=True) or
           is_volt_camera_removed(cp, longitudinal=True) or is_lacrosse_gateway_profile(cp))
 
@@ -26,6 +28,12 @@ def prepare_disable_longitudinal(cp, requested: bool) -> None:
     cp.pcmCruise = True
     cp.autoResumeSng = False
     cp.safetyConfigs[0].safetyParam = 0xE804 + int(hybrid.removed)
+    return
+  if requested and is_ordinary_camera_profile(cp, longitudinal=True):
+    cp.safetyConfigs[0].safetyParam = 0xC172 if cp.flags & GMFlags.NO_CAMERA else 0xC171
+    cp.openpilotLongitudinalControl = False
+    cp.pcmCruise = True
+    cp.minEnableSpeed = -1. if cp.carFingerprint in ALT_ACCS else 5. / 3.6
     return
   if requested and is_malibu_cc_f1_profile(cp):
     cp.openpilotLongitudinalControl = False

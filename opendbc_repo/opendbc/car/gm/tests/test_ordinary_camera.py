@@ -50,8 +50,11 @@ class TestOrdinaryCamera(unittest.TestCase):
                 cp = params(identity, alpha=alpha, release=release, camera=camera)
                 before = (cp.openpilotLongitudinalControl, cp.pcmCruise, cp.safetyConfigs[0].safetyParam)
                 prepare_disable_longitudinal(cp, disable_long)
+                expected = ((False, True, 0xC171 if camera else 0xC172)
+                            if disable_long and before[0] else before)
                 self.assertEqual((cp.openpilotLongitudinalControl, cp.pcmCruise,
-                                  cp.safetyConfigs[0].safetyParam), before)
+                                  cp.safetyConfigs[0].safetyParam), expected)
+                self.assertTrue(is_ordinary_camera_profile(cp, longitudinal=expected[0]))
                 ci = CarInterface(cp)
                 packer = CANPacker(DBC[identity][Bus.pt])
                 for tick in range(40):
