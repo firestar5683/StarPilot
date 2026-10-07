@@ -156,6 +156,9 @@ class SelfdriveD:
     if REPLAY:
       # no vipc in replay will make them ignored anyways
       ignore += ['narrowRoadCameraState', 'wideRoadCameraState']
+    from openpilot.starpilot.car.gm.radar_recovery import capability as radar_recovery_capability
+    radar_notifications = ['radarTracks'] if radar_recovery_capability(self.CP) is not None else []
+    ignore += radar_notifications
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'extrinsicsCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'deviceMotion', 'lateralDelay',
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters',
@@ -164,7 +167,7 @@ class SelfdriveD:
                                   (['aolIntentWire'] if self.aol_replay else []) +
                                    (['aolSafetyWire'] if self.axis_transport_required else []) +
                                    (['slcState'] if self.conditional_replay or self.switchback_capable else []) + \
-                                   self.camera_packets + self.sensor_packets + self.gps_packets,
+                                   self.camera_packets + self.sensor_packets + self.gps_packets + radar_notifications,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
 
@@ -173,6 +176,7 @@ class SelfdriveD:
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+    self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
 
     car_recognized = self.CP.brand != 'mock'
 
@@ -708,8 +712,18 @@ class SelfdriveD:
       alerts.append(alert)
     else:
       clear_event_types.add(FORCE_STOP_HOLD)
+    from openpilot.starpilot.car.gm.radar_recovery import EVENT_TYPE as RADAR_RECOVERY_EVENT, RecoveryNotification
+    if not hasattr(self, 'radar_recovery_notification'):
+      self.radar_recovery_notification = RecoveryNotification()
+    recovery = self.radar_recovery_notification
+    notification = recovery.update(self.CP, self.sm, enabled=getattr(self, 'radar_recovery_enabled', False), now_ns=now_ns)
+    if notification is not None:
+      alerts.append(notification)
+    if not recovery.monitor.visible(now_ns):
+      clear_event_types.add(RADAR_RECOVERY_EVENT)
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
+    recovery.selected(self.AM.current_alert)
 
   def publish_selfdriveState(self, CS):
     # selfdriveState
@@ -884,6 +898,7 @@ class SelfdriveD:
         self.aol_settings = read_settings(self.params)
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+      self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
       self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
       self.requested_experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       if self.conditional_settings is not None:

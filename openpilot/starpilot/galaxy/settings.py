@@ -472,7 +472,8 @@ class SettingsGateway:
                                 vision_development=lambda: diagnostic_choice_enabled(os.environ, current().cp),
                                 show_cruise_intervals=True,
                                 configuration_longitudinal=lambda: current().configuration_longitudinal,
-                                configuration_vehicle=lambda: current().configuration_vehicle)
+                                configuration_vehicle=lambda: current().configuration_vehicle,
+                                galaxy=lambda: not current().editing_saved_vehicle)
 
   def _pip_owner(self, ctx: AuthorityContext, *, live: bool = False,
                  session_valid: Callable[[], bool] = lambda: True) -> PiPOwner:

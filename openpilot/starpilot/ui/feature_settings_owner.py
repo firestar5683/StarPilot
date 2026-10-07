@@ -55,6 +55,8 @@ from openpilot.starpilot.longitudinal.output_max import KEY as OUTPUT_MAX_KEY
 from openpilot.starpilot.ui.tesla_screen_feature import TeslaScreenFeature, KEYS as TESLA_SCREEN_KEYS
 from openpilot.starpilot.ui.gm_tune_feature import GmTuneFeature, GmTruckFeature, GmEvPresetFeature
 from openpilot.starpilot.car.gm.tune_preferences import KEY as GM_TUNE_KEY
+from openpilot.starpilot.car.gm.radar_recovery import KEY as RADAR_RECOVERY_KEY
+from openpilot.starpilot.ui.volt_radar_feature import VoltRadarFeature
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.curve_speed.preferences import (
   DOCUMENT_KEY as CURVE_DOCUMENT_KEY, LEGACY_KEY as CURVE_LEGACY_KEY,
@@ -121,7 +123,8 @@ class FeatureSettingsOwner:
                vision_development: Callable[[], bool] | None = None,
                show_cruise_intervals: bool = False,
                configuration_longitudinal: Callable[[], bool] = lambda: False,
-               configuration_vehicle: Callable[[], bool] = lambda: False):
+               configuration_vehicle: Callable[[], bool] = lambda: False,
+               galaxy: Callable[[], bool] = lambda: False):
     self.params = params
     self._snapshot_reads: ContextVar[dict[tuple[str, int], tuple[bytes | None, bool]] | None] = ContextVar(
       "feature_snapshot_reads", default=None)
@@ -143,6 +146,7 @@ class FeatureSettingsOwner:
     self.gm_tune = GmTuneFeature(self)
     self.gm_truck = GmTruckFeature(self)
     self.gm_ev_preset = GmEvPresetFeature(self)
+    self.volt_radar = VoltRadarFeature(self, galaxy=galaxy)
     self.traffic_profiles = TrafficFeature(self)
     self.lane_changes = LaneChangeFeature(params, authority, vehicle_fingerprint, self.vehicle_params,
                                           configuration_longitudinal=self.configuration_longitudinal)
@@ -675,7 +679,7 @@ class FeatureSettingsOwner:
           self._gm_stop_capability("VoltSNG") is not None or
           self._gm_stop_capability("GMAutoHold") is not None or self.tesla_screen.capability() is not None or
           self.gm_tune.capability() is not None or self.gm_truck.capability() is not None or
-          self.gm_ev_preset.capability() is not None):
+          self.gm_ev_preset.capability() is not None or self.volt_radar.capability() is not None):
         rows.append(FeatureRow("", "Vehicle Settings", "Configure features supported by your vehicle", page=FeaturePage.VEHICLE, available=True))
       rows.extend(FeatureRow("", name.title() + " Personality", "", page=name, available=True)
                   for name in (*PROFILE_NAMES, "traffic"))
@@ -692,6 +696,7 @@ class FeatureSettingsOwner:
       rows.extend(self.gm_tune.rows(parked))
       rows.extend(self.gm_truck.rows(parked))
       rows.extend(self.gm_ev_preset.rows(parked))
+      rows.extend(self.volt_radar.rows())
       pedal_capability = self._pedal_setup_capability()
       if pedal_capability is not None:
         from opendbc.car.gm.values import GMFlags
@@ -1130,6 +1135,8 @@ class FeatureSettingsOwner:
       return self.tesla_screen.apply(request)
     if key == GM_TUNE_KEY:
       return self.gm_tune.apply(request)
+    if key == RADAR_RECOVERY_KEY:
+      return self.volt_radar.apply(request)
     if key == "EVTuning":
       return self.gm_ev_preset.apply(request)
     if key == "TruckTuning":
