@@ -3293,7 +3293,7 @@ struct Event {
     UI_PLAN_D_E_P_R_E_C_A_T_E_D,
     STARPILOT_NAVIGATION,
     CUSTOM_RESERVED1,
-    CUSTOM_RESERVED2,
+    STARPILOT_CAR_STATE,
     STARPILOT_LONGITUDINAL_PLAN,
     SLC_VISION_OBSERVATION,
     CUSTOM_RESERVED5,
@@ -23209,9 +23209,9 @@ public:
   inline bool hasCustomReserved1() const;
   inline  ::cereal::CustomReserved1::Reader getCustomReserved1() const;
 
-  inline bool isCustomReserved2() const;
-  inline bool hasCustomReserved2() const;
-  inline  ::cereal::CustomReserved2::Reader getCustomReserved2() const;
+  inline bool isStarpilotCarState() const;
+  inline bool hasStarpilotCarState() const;
+  inline  ::cereal::StarPilotCarState::Reader getStarpilotCarState() const;
 
   inline bool isStarpilotLongitudinalPlan() const;
   inline bool hasStarpilotLongitudinalPlan() const;
@@ -24280,13 +24280,13 @@ public:
   inline void adoptCustomReserved1(::capnp::Orphan< ::cereal::CustomReserved1>&& value);
   inline ::capnp::Orphan< ::cereal::CustomReserved1> disownCustomReserved1();
 
-  inline bool isCustomReserved2();
-  inline bool hasCustomReserved2();
-  inline  ::cereal::CustomReserved2::Builder getCustomReserved2();
-  inline void setCustomReserved2( ::cereal::CustomReserved2::Reader value);
-  inline  ::cereal::CustomReserved2::Builder initCustomReserved2();
-  inline void adoptCustomReserved2(::capnp::Orphan< ::cereal::CustomReserved2>&& value);
-  inline ::capnp::Orphan< ::cereal::CustomReserved2> disownCustomReserved2();
+  inline bool isStarpilotCarState();
+  inline bool hasStarpilotCarState();
+  inline  ::cereal::StarPilotCarState::Builder getStarpilotCarState();
+  inline void setStarpilotCarState( ::cereal::StarPilotCarState::Reader value);
+  inline  ::cereal::StarPilotCarState::Builder initStarpilotCarState();
+  inline void adoptStarpilotCarState(::capnp::Orphan< ::cereal::StarPilotCarState>&& value);
+  inline ::capnp::Orphan< ::cereal::StarPilotCarState> disownStarpilotCarState();
 
   inline bool isStarpilotLongitudinalPlan();
   inline bool hasStarpilotLongitudinalPlan();
@@ -57565,57 +57565,57 @@ inline ::capnp::Orphan< ::cereal::CustomReserved1> Event::Builder::disownCustomR
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
-inline bool Event::Reader::isCustomReserved2() const {
-  return which() == Event::CUSTOM_RESERVED2;
+inline bool Event::Reader::isStarpilotCarState() const {
+  return which() == Event::STARPILOT_CAR_STATE;
 }
-inline bool Event::Builder::isCustomReserved2() {
-  return which() == Event::CUSTOM_RESERVED2;
+inline bool Event::Builder::isStarpilotCarState() {
+  return which() == Event::STARPILOT_CAR_STATE;
 }
-inline bool Event::Reader::hasCustomReserved2() const {
-  if (which() != Event::CUSTOM_RESERVED2) return false;
+inline bool Event::Reader::hasStarpilotCarState() const {
+  if (which() != Event::STARPILOT_CAR_STATE) return false;
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool Event::Builder::hasCustomReserved2() {
-  if (which() != Event::CUSTOM_RESERVED2) return false;
+inline bool Event::Builder::hasStarpilotCarState() {
+  if (which() != Event::STARPILOT_CAR_STATE) return false;
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::CustomReserved2::Reader Event::Reader::getCustomReserved2() const {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED2),
+inline  ::cereal::StarPilotCarState::Reader Event::Reader::getStarpilotCarState() const {
+  KJ_IREQUIRE((which() == Event::STARPILOT_CAR_STATE),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved2>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::CustomReserved2::Builder Event::Builder::getCustomReserved2() {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED2),
+inline  ::cereal::StarPilotCarState::Builder Event::Builder::getStarpilotCarState() {
+  KJ_IREQUIRE((which() == Event::STARPILOT_CAR_STATE),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved2>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::setCustomReserved2( ::cereal::CustomReserved2::Reader value) {
+inline void Event::Builder::setStarpilotCarState( ::cereal::StarPilotCarState::Reader value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED2);
-  ::capnp::_::PointerHelpers< ::cereal::CustomReserved2>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::STARPILOT_CAR_STATE);
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::CustomReserved2::Builder Event::Builder::initCustomReserved2() {
+inline  ::cereal::StarPilotCarState::Builder Event::Builder::initStarpilotCarState() {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED2);
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved2>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::STARPILOT_CAR_STATE);
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::adoptCustomReserved2(
-    ::capnp::Orphan< ::cereal::CustomReserved2>&& value) {
+inline void Event::Builder::adoptStarpilotCarState(
+    ::capnp::Orphan< ::cereal::StarPilotCarState>&& value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED2);
-  ::capnp::_::PointerHelpers< ::cereal::CustomReserved2>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::STARPILOT_CAR_STATE);
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::CustomReserved2> Event::Builder::disownCustomReserved2() {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED2),
+inline ::capnp::Orphan< ::cereal::StarPilotCarState> Event::Builder::disownStarpilotCarState() {
+  KJ_IREQUIRE((which() == Event::STARPILOT_CAR_STATE),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved2>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
