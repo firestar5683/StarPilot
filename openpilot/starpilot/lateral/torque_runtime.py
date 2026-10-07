@@ -90,8 +90,8 @@ def manual_overrides_present(CP, params) -> bool:
       return False
   elif not (production_supported_cp(CP) or os.getenv('TORQUE_REPLAY_RUNTIME') == '1' and supported_cp(CP)):
     return False
-  settings = read_settings(params, TorqueHost(params, CP).vehicle)
-  return settings.valid and (settings.user_factor is not None or settings.user_friction is not None)
+  settings = read_settings(params, TorqueHost(params, CP).vehicle, CP=CP)
+  return settings.valid and (settings.user_factor is not None or settings.user_friction is not None or settings.force_auto)
 
 
 def runtime_enabled(CP, params=None) -> bool:
@@ -100,8 +100,8 @@ def runtime_enabled(CP, params=None) -> bool:
   if str(CP.carFingerprint) in BOLT_VEHICLES:
     if params is None:
       return False
-    settings = read_settings(params, TorqueHost(params, CP).vehicle)
-    return settings.valid and settings.user_friction is not None
+    settings = read_settings(params, TorqueHost(params, CP).vehicle, CP=CP)
+    return settings.valid and (settings.user_friction is not None or settings.force_auto)
   if os.getenv('TORQUE_REPLAY_RUNTIME') == '1':
     return True
   # Preserve native/default startup behavior. A first custom edit is saved for
@@ -118,6 +118,7 @@ class TorqueSettings:
   user_factor: float | None = None
   user_friction: float | None = None
   valid: bool = True
+  force_auto: bool = False
 
 
 def _raw(params, key: str) -> bytes | None:
@@ -136,7 +137,7 @@ def _bool(raw: bytes | None, default: bool) -> bool:
   return raw == b'1'
 
 
-def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None = None) -> TorqueSettings:
+def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None = None, CP=None) -> TorqueSettings:
   try:
     force_off = _bool(_raw(params, 'ForceAutoTuneOff'), False) if allow_learning is None else not allow_learning
     basis = (vehicle.lat_accel_factor, vehicle.lat_accel_offset, vehicle.friction)
@@ -150,7 +151,15 @@ def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None 
       factor, friction, review = resolve_document(parse_document(document), vehicle.vehicle, basis)
       if review:
         return TorqueSettings(valid=False)
-    return TorqueSettings(force_off, factor, friction)
+    force_auto = False
+    if CP is not None:
+      from openpilot.starpilot.lateral.gm_geometry_runtime import read_geometry
+      geometry = read_geometry(params, CP)
+      force_off = force_off or geometry.force_off
+      force_auto = geometry.force_auto and not force_off
+      if force_auto:
+        factor = friction = None
+    return TorqueSettings(force_off, factor, friction, force_auto=force_auto)
   except (OSError, ValueError, OverflowError):
     return TorqueSettings(valid=False)
 
@@ -160,6 +169,7 @@ class TorqueHost:
   def __init__(self, params, CP, *, allow_learning: bool | None = None):
     if not supported_cp(CP):
       raise ValueError('Unsupported torque host')
+    self.CP = CP
     tune = CP.lateralTuning.torque
     self.vehicle = TorqueTuning(TorqueSource.VEHICLE, str(CP.carFingerprint),
                                 float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction))
@@ -200,7 +210,7 @@ class TorqueHost:
     if not sm.all_checks([name]) or stamp <= 0 or not 0 <= now_ns - stamp <= int(2e9 / SERVICE_LIST[name].frequency):
       return None
     state = sm[name]
-    if not state.useParams or not state.valid or int(state.version) != LEARNER_VERSION:
+    if not (state.useParams or self.settings.force_auto) or not state.valid or int(state.version) != LEARNER_VERSION:
       return None
     factor = float(state.latAccelFactorFiltered)
     offset = float(state.latAccelOffsetFiltered)
@@ -219,7 +229,7 @@ class TorqueHost:
     if not settings.valid:
       return vehicle
     allow_learning = not settings.force_auto_off if self.allow_learning is None else self.allow_learning
-    learned = self._learned(sm, now_ns) if allow_learning else None
+    learned = self._learned(sm, now_ns) if allow_learning and not settings.force_auto_off else None
     base = learned or vehicle
     if settings.user_factor is None and settings.user_friction is None:
       return base
@@ -238,7 +248,7 @@ class TorqueHost:
     dt = 0.01 if self.last_tick_ns is None else (now_ns - self.last_tick_ns) / 1e9
     self.last_tick_ns = now_ns
     if self.last_refresh_ns is None or now_ns - self.last_refresh_ns >= REFRESH_NS:
-      self.settings = read_settings(self.params, self.vehicle, allow_learning=self.allow_learning)
+      self.settings = read_settings(self.params, self.vehicle, allow_learning=self.allow_learning, CP=self.CP)
       self.last_refresh_ns = now_ns
     if not lat_active or not self.settings.valid:
       self.applied = self.selected = self.vehicle

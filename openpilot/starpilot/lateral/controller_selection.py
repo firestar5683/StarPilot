@@ -232,7 +232,13 @@ def learning_allowed(params, CP, *, selection: ControllerSelection | None = None
   if policy_for(CP) is None:
     return True
   selected = read_selection(params, CP) if selection is None else selection
-  if selected.mode == ControllerMode.STARPILOT:
-    return False
   raw, readable = read_saved(params, LEARNING_OFF_KEY, 1)
-  return readable and raw in (None, b'0')
+  if not readable or raw not in (None, b'0'):
+    return False
+  from openpilot.starpilot.lateral.gm_geometry_runtime import read_geometry
+  geometry = read_geometry(params, CP)
+  if geometry.force_off:
+    return False
+  if geometry.force_auto:
+    return selected.source != 'invalid'
+  return selected.mode != ControllerMode.STARPILOT

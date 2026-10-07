@@ -29,12 +29,22 @@ class GainBasis:
 
 
 @dataclass(frozen=True)
+class GeometryProfile:
+  basis: tuple[float, float]
+  ratio: FieldChoice = FieldChoice()
+  full_delay: FieldChoice = FieldChoice()
+  automatic_delay: bool = True
+  learning: str = "source"
+
+
+@dataclass(frozen=True)
 class PlatformProfile:
   basis: tuple[float, float, float]
   factor: FieldChoice
   friction: FieldChoice
   proportional_gain: FieldChoice = FieldChoice()
   gain_basis: GainBasis | None = None
+  geometry: GeometryProfile | None = None
 
 
 class LegacyMode(StrEnum):
@@ -149,14 +159,16 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
   except (RecursionError, OverflowError) as exc:
     raise ValueError("Malformed torque document") from exc
   if not isinstance(document, dict) or set(document) != {"schemaVersion", "vehicles"} or \
-     type(document["schemaVersion"]) is not int or document["schemaVersion"] not in (1, 2) or \
+     type(document["schemaVersion"]) is not int or document["schemaVersion"] not in (1, 2, 3) or \
      not isinstance(document["vehicles"], dict) or len(document["vehicles"]) > len(SUPPORTED_VEHICLES):
     raise ValueError("Malformed torque document")
   profiles: dict[str, PlatformProfile] = {}
   for fingerprint, value in document["vehicles"].items():
     expected = {"basis", "factor", "friction"}
-    if document["schemaVersion"] == 2 and isinstance(value, dict) and "proportionalGain" in value:
+    if document["schemaVersion"] >= 2 and isinstance(value, dict) and "proportionalGain" in value:
       expected |= {"proportionalGain", "gainBasis"}
+    if document["schemaVersion"] == 3 and isinstance(value, dict) and "geometry" in value:
+      expected |= {"geometry"}
     if fingerprint not in SUPPORTED_VEHICLES or not isinstance(value, dict) or set(value) != expected:
       raise ValueError("Malformed torque profile")
     basis_obj = value["basis"]
@@ -175,13 +187,18 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
       low, high = gain_bounds(fingerprint, gain_basis)
       if gain.mode == "custom" and (gain.custom_value is None or not low <= gain.custom_value <= high):
         raise ValueError("Out-of-range proportional gain")
-    profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis)
+    geometry = None
+    if "geometry" in value:
+      if fingerprint not in GM_VEHICLES:
+        raise ValueError("Unsupported geometry profile")
+      geometry = parse_geometry(value["geometry"])
+    profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis, geometry)
   return profiles
 
 
 def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
   vehicles: dict[str, dict] = {}
-  version = 2 if any(p.gain_basis is not None for p in profiles.values()) else 1
+  version = 3 if any(p.geometry is not None for p in profiles.values()) else 2 if any(p.gain_basis is not None for p in profiles.values()) else 1
   for fingerprint, profile in profiles.items():
     vehicles[fingerprint] = {
       "basis": dict(zip(("latAccelFactor", "latAccelOffset", "friction"), profile.basis, strict=True)),
@@ -195,6 +212,14 @@ def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
       vehicles[fingerprint]["gainBasis"] = {"controller": profile.gain_basis.controller,
                                             "sourceTable": profile.gain_basis.source_table,
                                             "torqueBasis": profile.gain_basis.torque_basis}
+    if profile.geometry is not None:
+      geometry = profile.geometry
+      vehicles[fingerprint]["geometry"] = {
+        "basis": {"steerRatio": geometry.basis[0], "fullDelay": geometry.basis[1]},
+        "ratio": {"mode": geometry.ratio.mode, "customValue": geometry.ratio.custom_value},
+        "fullDelay": {"mode": geometry.full_delay.mode, "customValue": geometry.full_delay.custom_value},
+        "automaticDelay": geometry.automatic_delay, "learning": geometry.learning,
+      }
   raw = json.dumps({"schemaVersion": version, "vehicles": vehicles}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
   parse_document(raw)
   return raw
@@ -286,4 +311,43 @@ def replace_gain(profiles: dict[str, PlatformProfile], fingerprint: str, basis: 
   result = dict(profiles)
   result[fingerprint] = replace(prior, proportional_gain=FieldChoice(mode, value if mode == "custom" else prior.proportional_gain.custom_value),
                                 gain_basis=basis)
+  return result
+
+
+def parse_geometry(value: object) -> GeometryProfile:
+  if not isinstance(value, dict) or set(value) != {"basis", "ratio", "fullDelay", "automaticDelay", "learning"}:
+    raise ValueError("Malformed geometry profile")
+  basis = value["basis"]
+  if (not isinstance(basis, dict) or set(basis) != {"steerRatio", "fullDelay"} or
+      any(not _finite_number(n) or n <= 0 for n in basis.values()) or
+      type(value["automaticDelay"]) is not bool or value["learning"] not in ("source", "force_auto", "force_off")):
+    raise ValueError("Malformed geometry basis")
+  ratio, delay = _choice(value["ratio"]), _choice(value["fullDelay"])
+  for choice, low, high in ((ratio, .5*basis["steerRatio"], 1.5*basis["steerRatio"]), (delay, .01, 1.)):
+    if choice.custom_value is not None and not low <= choice.custom_value <= high:
+      raise ValueError("Out-of-range geometry value")
+  return GeometryProfile((basis["steerRatio"], basis["fullDelay"]), ratio, delay, value["automaticDelay"], value["learning"])
+
+
+def replace_geometry(profiles: dict[str, PlatformProfile], fingerprint: str, torque_basis: tuple[float, float, float],
+                     basis: tuple[float, float], field: str, value: object) -> dict[str, PlatformProfile]:
+  if fingerprint not in GM_VEHICLES or not valid_basis(torque_basis):
+    raise ValueError("Unsupported geometry edit")
+  prior = profiles.get(fingerprint, PlatformProfile(torque_basis, FieldChoice(), FieldChoice()))
+  geometry = prior.geometry or GeometryProfile(basis)
+  if prior.basis != torque_basis or geometry.basis != basis:
+    raise ValueError("Geometry basis needs review")
+  if field in ("ratio", "full_delay"):
+    if not isinstance(value, FieldChoice):
+      raise ValueError("Malformed geometry edit")
+    geometry = replace(geometry, **{field: value})
+  elif field == "automatic_delay" and type(value) is bool:
+    geometry = replace(geometry, automatic_delay=value)
+  elif field == "learning" and value in ("source", "force_auto", "force_off"):
+    geometry = replace(geometry, learning=value)
+  else:
+    raise ValueError("Unknown geometry edit")
+  result = dict(profiles)
+  result[fingerprint] = replace(prior, geometry=geometry)
+  serialize_document(result)
   return result
