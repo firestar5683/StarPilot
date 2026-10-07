@@ -258,6 +258,34 @@ class TestGmAol(unittest.TestCase):
       card.aol_card_intent.update(cs)
       self.assertFalse(card.aol_card_intent.allowed_latch)
 
+  def test_bolt_main_intent_ignores_unavailable_lkas_assignment(self):
+    from openpilot.starpilot.aol.intent import read_settings
+    from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', True, block=True)
+      settings.put('LKASButtonControl', 9, block=True)
+      cp = pedal_params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x9D)
+      selected = self.card(cp, settings)
+      owner = selected.aol_card_intent
+      cs = structs.CarState(canValid=True, gearShifter='drive', vEgo=20.)
+      cs.cruiseState.available = True
+      for _ in range(2):
+        owner.settings = read_settings(settings)
+        owner.update(cs)
+        self.assertTrue(owner.allowed_latch)
+        self.assertEqual(settings.get('LKASButtonControl'), 9)
+      settings.put('MainCruiseButtonControl', 9, block=True)
+      owner = self.card(cp, settings).aol_card_intent
+      owner.update(cs)
+      self.assertFalse(owner.allowed_latch)
+      cs.buttonEvents = [structs.CarState.ButtonEvent(type='mainCruise', pressed=True)]
+      owner.update(cs)
+      self.assertTrue(owner.allowed_latch)
+      owner.update(cs, fault_active=True)
+      self.assertFalse(owner.allowed_latch)
+
   def test_actual_card_startup_default_off_and_main_cycle_fault_recovery(self):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
       settings = Params()
