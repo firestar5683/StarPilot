@@ -72,6 +72,10 @@ const VEHICLE_SETTING_MAKES = {
   SubaruAvhStartup: ["Subaru"],
   SubaruRedneckCruise: ["Subaru"],
   SNGHack: ["Lexus", "Toyota"],
+  LockDoors: ["Lexus", "Toyota"],
+  LockDoorsSpeed: ["Lexus", "Toyota"],
+  UnlockDoors: ["Lexus", "Toyota"],
+  UnlockDoorsTrigger: ["Lexus", "Toyota"],
   ToyotaAutoHold: ["Lexus", "Toyota"],
 }
 
@@ -220,6 +224,7 @@ export function formatSliderValue(val, stepStr, precisionInt, key) {
     if (v === 0) return "Off"
     return v === 1 ? "1 min" : `${v} min`
   }
+  if (key === "LockDoorsSpeed" && v === 0) return "On shift out of Park"
   if (key === "DeviceShutdown") {
     return v === 1 ? "1 hour" : `${v} hours`
   }
@@ -244,7 +249,7 @@ export function formatNumericParamValue(param, value, values = {}) {
   const resolved = resolveVehicleUnitParam(param, values)
   const bounds = numericBounds(resolved, values)
   const formatted = formatSliderValue(value, String(bounds.step), resolved.precision, resolved.key)
-  return resolved.unit && formatted !== "--" ? `${formatted}${resolved.unit}` : formatted
+  return resolved.unit && !Number.isNaN(Number(formatted)) ? `${formatted}${resolved.unit}` : formatted
 }
 
 export function formatReadoutValue(p, value) {
