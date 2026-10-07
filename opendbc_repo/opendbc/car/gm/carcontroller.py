@@ -623,8 +623,10 @@ class CarController(CarControllerBase):
         self.apply_gas, self.apply_brake = pedal, 0
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 16))
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
-      cancel = (CC.enabled and CS.out.cruiseState.enabled if profile.pedal and profile.longitudinal else
-                self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES)
+      if profile.longitudinal:
+        cancel = (CC.enabled if profile.pedal else not CC.enabled) and CS.out.cruiseState.enabled
+      else:
+        cancel = self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES
       slot = CS.hybrid_buttons.slot
       if slot.credit_ns <= self.volt_cc_consumed_source_ns:
         slot.credit_ns = 0
@@ -1063,7 +1065,10 @@ class CarController(CarControllerBase):
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
-      self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
+      cancel_requested = CC.cruiseControl.cancel
+      if is_silverado_cc_stock_profile(self.CP):
+        cancel_requested = cancel_requested and stock_cruise_fresh and CS.out.cruiseState.available and CS.out.cruiseState.enabled
+      self.cancel_counter = self.cancel_counter + 1 if cancel_requested else 0
 
       # Stock longitudinal, integrated at camera
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
