@@ -92,6 +92,15 @@ class TestGmVoltCameraRemoved(unittest.TestCase):
       self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())
 
+  def test_neutral_gap_recovers_without_reusing_cancel_slot(self):
+    self.mode(0xC150)
+    for stamp, counter in ((1_000_000, 0), (1_150_000, 1), (1_180_000, 2), (1_185_000, 2)):
+      self.safety.set_timer(stamp)
+      self.physical(counter)
+      cancel = self.packet(gmcan.create_buttons(self.packer, 0, counter, 6))
+      self.assertEqual(bool(self.safety.safety_tx_hook(cancel)), stamp in (1_000_000, 1_180_000))
+      self.assertFalse(self.safety.safety_tx_hook(cancel))
+
   def test_forwarding_and_reinitialization_clear_cancel_credit(self):
     for word in (0xC150, 0xC151):
       self.mode(word)

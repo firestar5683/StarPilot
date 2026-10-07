@@ -68,6 +68,7 @@ static bool gm_volt_removed_credit = false;
 static bool gm_volt_removed_button_seen = false;
 static uint8_t gm_volt_removed_counter = 0U;
 static uint32_t gm_volt_removed_button_us = 0U;
+static uint32_t gm_volt_removed_button_observed_us = 0U;
 static uint32_t gm_volt_removed_main_us = 0U;
 static uint32_t gm_volt_removed_pcm_us = 0U;
 static bool gm_volt_removed_cancel_seen = false;
@@ -134,6 +135,7 @@ static bool gm_bolt_pedal_removed = false;
 static bool gm_bolt_removed_acc_seen = false;
 static bool gm_bolt_removed_gear_seen = false;
 static bool gm_bolt_present_cc_cancel = false;
+static bool gm_bolt_cancel_forward_gear_required = false;
 static bool gm_bolt_removed_acc_active = false;
 static uint32_t gm_bolt_removed_acc_us = 0U;
 static uint32_t gm_regen_gear_last_us = 0U;
@@ -303,7 +305,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
                              (msg->data[5] == (uint8_t)(0x10U | (neutral_checksum >> 8))) &&
                              (msg->data[6] == (uint8_t)neutral_checksum);
         const bool forward = counter == ((gm_volt_removed_counter + 1U) % 4U);
-        const bool timely = safety_get_ts_elapsed(now, gm_volt_removed_button_us) <= 100000U;
+        const bool timely = safety_get_ts_elapsed(now, gm_volt_removed_button_observed_us) <= 100000U;
         if (neutral && (!gm_volt_removed_button_seen || (forward && timely))) {
           gm_volt_removed_credit = true;
           gm_volt_removed_button_us = now;
@@ -311,6 +313,10 @@ static void gm_rx_hook(const CANPacket_t *msg) {
           gm_volt_removed_credit = false;
         } else {
           // Duplicate neutral counters do not refresh a consumed slot.
+        }
+        if (!gm_volt_removed_button_seen || (counter != gm_volt_removed_counter)) {
+          // Physical observations recover the sequence; only valid neutral slots grant credit.
+          gm_volt_removed_button_observed_us = now;
         }
         gm_volt_removed_counter = counter;
         gm_volt_removed_button_seen = true;
@@ -786,7 +792,7 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     const uint8_t counter = (gm_volt_removed_counter + 1U) % 4U;
     const uint16_t checksum = 0xFFU + (counter * 0x4EFU) - (5U << 4U);
     tx &= !safety_rx_checks_invalid && gm_pedal_sensor_current() && gm_bolt_removed_gear_seen &&
-          (!gm_bolt_present_cc_cancel || gm_pedal_forward_gear_ready) &&
+          (!gm_bolt_cancel_forward_gear_required || gm_pedal_forward_gear_ready) &&
           (safety_get_ts_elapsed(now, gm_regen_gear_last_us) <= 100000U) &&
           gm_volt_removed_main && gm_volt_removed_pcm && gm_bolt_removed_acc_seen && gm_bolt_removed_acc_active &&
           gm_volt_removed_credit && gm_volt_removed_button_seen &&
@@ -940,6 +946,7 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_volt_removed_button_seen = false;
   gm_volt_removed_counter = 0U;
   gm_volt_removed_button_us = 0U;
+  gm_volt_removed_button_observed_us = 0U;
   gm_volt_removed_main_us = 0U;
   gm_volt_removed_pcm_us = 0U;
   gm_volt_removed_cancel_seen = false;
@@ -1304,7 +1311,9 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_cc_cancel_sent = false;
   gm_cc_stock_button_counter = 0U;
   gm_cc_stock_button_last_us = 0U;
-  gm_bolt_present_cc_cancel = param == 0x9DU;
+  gm_bolt_present_cc_cancel = (safety_param == 0xBDU) || (safety_param == 0x9DU) || (safety_param == 0x19DU);
+  // E701 historically shared the forward-gear guard through its canonical 9D word.
+  gm_bolt_cancel_forward_gear_required = gm_bolt_present_cc_cancel || (safety_param == 0xE701U);
   gm_pedal_long = (gm_hw == GM_CAM) && GET_FLAG(param, GM_PARAM_PEDAL_LONG);
   gm_pedal_acc = gm_pedal_long && GET_FLAG(param, GM_PARAM_BOLT_ACC_PEDAL) && !gm_no_acc;
   gm_bolt_2017 = (gm_hw == GM_CAM) && GET_FLAG(param, GM_PARAM_BOLT_2017);

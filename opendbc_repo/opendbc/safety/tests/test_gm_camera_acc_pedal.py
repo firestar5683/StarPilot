@@ -336,6 +336,21 @@ class TestGmCameraAccPedal(unittest.TestCase):
       self.safety.set_timer(self.now + 100001)
       self.assertFalse(self.safety.safety_tx_hook(cancel))
 
+  def test_reduced_volt_gap_and_late_duplicate_require_two_fresh_slots(self):
+    for word in (0xE212, 0xE213, *range(0xE310, 0xE314), *range(0xE410, 0xE414), *range(0xE510, 0xE514)):
+      with self.subTest(word=hex(word)):
+        self.init(word)
+        for stamp, counter in ((1000, 0), (151000, 0), (181000, 1), (211000, 2), (216000, 2)):
+          self.safety.set_timer(stamp)
+          for name, values in (('ECMEngineStatus', {'CruiseMainOn': 1}), ('AcceleratorPedal2', {'CruiseState': 2})):
+            frame = self.packer.make_can_msg(name, 0, values)
+            self.assertTrue(self.rx(frame[0], frame[1]))
+          neutral = gmcan.create_buttons(self.packer, 0, counter, 1)
+          self.assertTrue(self.rx(neutral[0], neutral[1]))
+          cancel = self.packet(gmcan.create_buttons(self.packer, 0 if word in (0xE212, 0xE213) else 2, counter, 6))
+          self.assertEqual(bool(self.safety.safety_tx_hook(cancel)), stamp in (1000, 211000))
+          self.assertFalse(self.safety.safety_tx_hook(cancel))
+
   def test_volt_interceptor_gas_withdraws_inactive_hold_and_rearm_credit(self):
     if self.release:
       self.skipTest("Active Volt interceptor profiles are DEBUG-only")

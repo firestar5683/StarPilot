@@ -17,7 +17,7 @@ from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerPara
                                    is_silverado_cc_pedal_profile, is_conventional_cc_pedal_profile,
                                    CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
                                        VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS,
-                                   is_bolt_pedal_removed_profile, is_bolt_pedal_profile)
+                                   is_bolt_pedal_removed_profile, is_bolt_present_no_acc_pedal_profile)
 from opendbc.car.gm.values import malibu_hybrid_profile, MALIBU_HYBRID_SOURCES
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
@@ -50,9 +50,8 @@ class CarInterface(CarInterfaceBase):
       self.CS.conventional_cancel_credit.observe(
         can_packets, clear_on_main_off=True,
         clear_on_driver_override=is_bolt_pedal_removed_profile(self.CP, stock_only=True))
-    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2018_2021 and is_bolt_pedal_profile(self.CP) and
-        self.CP.safetyConfigs[0].safetyParam == 0x9D):
-      self.CS.conventional_cancel_credit.observe(can_packets, clear_on_main_off=True)
+    if is_bolt_present_no_acc_pedal_profile(self.CP):
+      self.CS.conventional_cancel_credit.observe(can_packets, clear_on_main_off=True, observe_gear=True)
     if volt_cc_pedal_profile(self.CP) is not None:
       self.CS.conventional_cancel_credit.observe(can_packets)
     if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP) and not self.CP.openpilotLongitudinalControl:

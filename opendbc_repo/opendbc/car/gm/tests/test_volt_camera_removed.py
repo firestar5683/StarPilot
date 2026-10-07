@@ -32,6 +32,54 @@ def feed_removed(ci, packer, now, *, counter=0, gas=False, brake=False, low=Fals
 
 
 class TestVoltCameraRemoved(unittest.TestCase):
+  def test_shared_cancel_gap_recovery_uses_actual_parser_and_native(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import TestBoltPedalStartupParser, params as bolt_params
+    from opendbc.car.gm.tests.test_camera_acc_pedal import fingerprint as camera_fingerprint
+    from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
+    from opendbc.car.gm.values import CanBus, camera_acc_pedal_profile
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.bolt_cc import button_bytes
+    fingerprint = camera_fingerprint()
+    fingerprint[CanBus.POWERTRAIN][0xBD] = 7
+    fingerprint[CanBus.OBSTACLE][RADAR_HEADER_MSG] = 8
+    reduced = CarInterface.get_params(CAR.CHEVROLET_VOLT, fingerprint, [], True, False, False)
+    prepare_disable_longitudinal(reduced, True)
+    self.assertIsNotNone(camera_acc_pedal_profile(reduced))
+    profiles = ((bolt_params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, removed=True), 0xE701, 0),
+                (removed_params(alpha=False), 0xC150, 0), (reduced, 0xE310, 2))
+    fixture = TestBoltPedalStartupParser()
+    safety = libsafety_py.libsafety
+    for cp, word, bus in profiles:
+      for duplicate in (False, True):
+        with self.subTest(word=hex(word), duplicate=duplicate):
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+          self.assertEqual(safety.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, word), 0)
+          safety.init_tests()
+          ci, _ = fixture.stream(cp, native=safety)
+          if word == 0xE310:
+            fixture.present_tick(ci, safety, 3_495_000_000, 13, acc_cruise=2, camera_stock=True)
+          ci.CC.frame, ci.CC.cancel_counter = 100, 12
+          previous = ci.CS.conventional_cancel_credit.counter if word == 0xE701 else ci.CS.volt_removed_counter
+          first = (previous + 1) % 4
+          command = structs.CarControl()
+          command.cruiseControl.cancel = True
+          for tick in range(22):
+            now = 3_500_000_000 + tick * 10_000_000
+            counter = {0: first, 15: first if duplicate else (first + 1) % 4,
+                       18: (first + (1 if duplicate else 2)) % 4,
+                       19: (first + (1 if duplicate else 2)) % 4,
+                       21: (first + 2) % 4 if duplicate else None}.get(tick)
+            fixture.present_tick(ci, safety, now, 13 + tick, acc_cruise=2, camera_stock=word == 0xE310,
+                                 button=button_bytes(1, counter) if counter is not None else None)
+            _, messages = ci.apply(command.as_reader(), now)
+            cancel = [message for message in messages if message[0] == 0x1E1]
+            self.assertEqual(bool(cancel), tick in (0, 21 if duplicate else 18), (hex(word), duplicate, tick))
+            for address, raw, output_bus in cancel:
+              self.assertEqual(output_bus, bus)
+              packet = libsafety_py.make_CANPacket(address, output_bus, raw)
+              self.assertTrue(safety.safety_tx_hook(packet), (hex(word), duplicate, tick))
+              self.assertFalse(safety.safety_tx_hook(packet))
+
   def test_startup_matrix_and_malformed_sources(self):
     for alpha in (False, True):
       for release in (False, True):

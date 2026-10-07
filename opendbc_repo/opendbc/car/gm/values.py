@@ -849,6 +849,12 @@ def is_bolt_pedal_profile(cp, *, stock_only=False):
           cp.safetyConfigs[0].safetyParam == words[cp.carFingerprint])
 
 
+def is_bolt_present_no_acc_pedal_profile(cp):
+  """Exact camera-present conventional Bolt interceptor cancellation owner."""
+  return (cp.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_profile(cp) and
+          not is_bolt_pedal_removed_profile(cp))
+
+
 def is_bolt_pedal_stock_denied(cp):
   """Recognize only the saved-disable topology denial, for recovery UI."""
   return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and

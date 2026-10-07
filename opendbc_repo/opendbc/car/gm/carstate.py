@@ -18,7 +18,7 @@ from opendbc.car.gm.values import (DBC, AccState, CruiseButtons, STEER_THRESHOLD
                                    CC_GATEWAY_STOCK_CAR, requires_camera_state_sources, is_conventional_cc_pedal_profile, is_silverado_cc_pedal_profile,
                                    is_volt_cc_profile, is_silverado_cc_stock_profile, is_ordinary_cc_profile, is_malibu_cc_f1_profile, VOLT_BSM_CAR, CAR,
                                    is_volt_gateway_profile, is_volt_gateway_alternate_brake, is_bolt_cc_profile, BOLT_CC_WORDS,
-                                   is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_volt_camera_removed,
+                                   is_bolt_pedal_profile, is_bolt_pedal_removed_profile, is_bolt_present_no_acc_pedal_profile, is_volt_camera_removed,
                                    is_ordinary_camera_profile, is_ordinary_camera_removed)
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -50,6 +50,7 @@ class CarState(CarStateBase):
     self.volt_removed_sources = ()
     self.volt_removed_credit_ns = 0
     self.volt_removed_button_ns = 0
+    self.volt_removed_observed_ns = 0
     self.volt_removed_counter = None
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     self.shifter_values = can_define.dv["ECMPRDNL2"]["PRNDL2"]
@@ -100,7 +101,9 @@ class CarState(CarStateBase):
     self.volt_cc_pedal_profile = volt_cc_pedal_profile(CP)
     self.volt_cc_pedal_sources = ()
     self.conventional_pedal_sources = ()
-    self.conventional_cancel_credit = CancelCredit()
+    no_acc_pedal_cancel = (is_bolt_present_no_acc_pedal_profile(CP) or
+                          CP.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_removed_profile(CP))
+    self.conventional_cancel_credit = CancelCredit(neutral_interval_ns=100_000_000) if no_acc_pedal_cancel else CancelCredit()
     self.silverado_pedal_sources = ()
     self.bolt_cc_profile = is_bolt_cc_profile(CP)
     self.bolt_cc_removed = self.bolt_cc_profile and CP.safetyConfigs[0].safetyParam == BOLT_CC_WORDS[CP.carFingerprint][1]
@@ -139,7 +142,8 @@ class CarState(CarStateBase):
       self.bolt_pedal_removed_stock_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
       self.bolt_pedal_removed_stock_active = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])
     if is_bolt_pedal_profile(self.CP):
-      self.bolt_pedal_gear_ts_nanos = pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"]
+      self.bolt_pedal_gear_ts_nanos = (self.conventional_cancel_credit.gear_ns if is_bolt_present_no_acc_pedal_profile(self.CP) else
+                                     pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"])
       self.bolt_pedal_main_ts_nanos = pt_cp.ts_nanos["ECMEngineStatus"]["CruiseMainOn"]
 
     if self.camera_pedal_profile is not None:
@@ -226,12 +230,14 @@ class CarState(CarStateBase):
                  button["DistanceButton"] == 0 and button["LKAButton"] == 0 and button["DriveModeButton"] == 0 and
                  button["SteeringButtonChecksum"] == 0xFF + counter * 0x4EF)
       if stamp != self.volt_removed_button_ns:
-        timely = 0 < stamp - self.volt_removed_button_ns <= 100_000_000
+        timely = 0 < stamp - self.volt_removed_observed_ns <= 100_000_000
         first = self.volt_removed_counter is None
         if neutral and (first or timely and counter == (self.volt_removed_counter + 1) % 4):
           self.volt_removed_credit_ns = stamp
         elif not neutral or not timely or counter != self.volt_removed_counter:
           self.volt_removed_credit_ns = 0
+        if first or counter != self.volt_removed_counter:
+          self.volt_removed_observed_ns = stamp
         self.volt_removed_counter, self.volt_removed_button_ns = counter, stamp
     if requires_camera_state_sources(self.CP) and not pedal_stock_no_acc and not is_ordinary_camera_removed(self.CP):
       self.camera_stock_status_ts_nanos = cam_cp.ts_nanos["ASCMActiveCruiseControlStatus"]["ACCCruiseState"]
@@ -504,8 +510,7 @@ class CarState(CarStateBase):
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
     if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and self.CP.flags & GMFlags.PEDAL_LONG.value:
       self.stock_acc_status_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
-    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2018_2021 and is_bolt_pedal_profile(self.CP) and
-        self.CP.safetyConfigs[0].safetyParam == 0x9D):
+    if is_bolt_present_no_acc_pedal_profile(self.CP):
       self.bolt_pedal_stock_active = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])
       self.bolt_pedal_stock_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
     if self.CP.carFingerprint in NO_ACC_BOLT_CAR and not self.bolt_cc_profile:
