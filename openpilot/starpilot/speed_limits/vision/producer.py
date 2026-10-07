@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import os
 import time
 import uuid
 
@@ -13,6 +15,33 @@ from openpilot.starpilot.speed_limits.vision.observation import MODEL_ID, MAX_FR
 UNAVAILABLE_RETRY_SECONDS = 1.0
 INFERENCE_INTERVAL_NS = 166_666_667
 BUSY_INFERENCE_INTERVAL_NS = 1_500_000_000
+
+
+def _configure_process() -> None:
+  from openpilot.common.hardware import PC
+  from openpilot.common.realtime import drop_realtime, set_core_affinity
+
+  if PC:
+    return
+  for configure in (drop_realtime, lambda: set_core_affinity([0, 1, 2])):
+    try:
+      configure()
+    except OSError:
+      pass
+  try:
+    os.nice(max(0, 10 - os.getpriority(os.PRIO_PROCESS, 0)))
+  except (AttributeError, OSError):
+    pass
+
+
+def _driving_model_ready(sm, now_ns: int) -> bool:
+  service = 'drivingModelData'
+  if not sm.seen[service] or not sm.valid[service]:
+    return False
+  stamp_ns = sm.logMonoTime[service]
+  drop = float(sm[service].frameDropPerc)
+  return (stamp_ns > 0 and 0 <= now_ns - stamp_ns <= MAX_FRAME_AGE_NS and
+          math.isfinite(drop) and 0 <= drop <= 1)
 
 
 def _camera_buffer(client):
@@ -78,7 +107,9 @@ def main() -> None:
   from openpilot.common.params import Params
   from openpilot.common.swaglog import cloudlog
 
+  _configure_process()
   pm = messaging.PubMaster(['slcVisionObservation'])
+  sm = messaging.SubMaster(['drivingModelData'])
   session = uuid.uuid4().hex
   stream = 'unknown'
   client = None
@@ -93,6 +124,7 @@ def main() -> None:
   last_inference_ns = 0
   inference_interval_ns = INFERENCE_INTERVAL_NS
   last_clock_offset_ns = None
+  model_paused = False
   while True:
     if core is None:
       now = time.monotonic()
@@ -102,6 +134,7 @@ def main() -> None:
       time.sleep(0.1)
       continue
     try:
+      sm.update(0)
       available = VisionIpcClient.available_streams('camerad', block=False)
       wanted = (VisionStreamType.VISION_STREAM_NARROW_ROAD if VisionStreamType.VISION_STREAM_NARROW_ROAD in available else
                 VisionStreamType.VISION_STREAM_WIDE_ROAD if VisionStreamType.VISION_STREAM_WIDE_ROAD in available else None)
@@ -144,6 +177,20 @@ def main() -> None:
         del buffer_info
         _send(pm, session=session, status='stale', stream=stream, eof_boot_ns=eof_boot_ns, frame_id=frame_id)
         continue
+      if not _driving_model_ready(sm, admission_pair[0]):
+        del buffer_info
+        if not model_paused:
+          core.reset()
+          session = uuid.uuid4().hex
+          _send(pm, session=session, status='unavailable', stream=stream)
+          last_unavailable = admission_pair[0] / 1e9
+        elif admission_pair[0] / 1e9 - last_unavailable >= UNAVAILABLE_RETRY_SECONDS:
+          _send(pm, session=session, status='unavailable', stream=stream)
+          last_unavailable = admission_pair[0] / 1e9
+        model_paused = True
+        time.sleep(0.1)
+        continue
+      model_paused = False
       admission_offset_ns = admission_pair[1] - admission_pair[0]
       offset_stable = (last_clock_offset_ns is None or
                        abs(admission_offset_ns - last_clock_offset_ns) <= MAX_PAIR_SKEW_NS)
@@ -179,6 +226,7 @@ def main() -> None:
         client = None
         core = None
         continue
+      sm.update(0)
       observed_pair = clock_pair_ns()
       if observed_pair is not None:
         processing_ns = observed_pair[0] - last_inference_ns
@@ -194,6 +242,13 @@ def main() -> None:
         session = uuid.uuid4().hex
         last_clock_offset_ns = None
         _send(pm, session=session, status='stale', stream=stream, eof_boot_ns=eof_boot_ns, frame_id=frame_id)
+        continue
+      if not _driving_model_ready(sm, observed_pair[0]):
+        core.reset()
+        session = uuid.uuid4().hex
+        model_paused = True
+        last_unavailable = observed_pair[0] / 1e9
+        _send(pm, session=session, status='unavailable', stream=stream)
         continue
       _send(pm, session=session, status='valid' if result is not None else 'unknown', stream=stream,
             observed_ns=observed_pair[0], eof_boot_ns=eof_boot_ns, frame_id=frame_id, result=result)
