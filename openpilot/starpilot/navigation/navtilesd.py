@@ -39,7 +39,8 @@ AREA_INTERVAL_S = 0.12          # at most ~8 offline-area tiles a second
 STATUS_INTERVAL_S = 2.0
 TRIM_INTERVAL_S = 300.0
 LAYOUT_CHECK_S = 15.0
-FAILURE_NETWORK, FAILURE_KEY, FAILURE_SERVER = "network", "key", "server"
+FAILURE_NETWORK, FAILURE_KEY, FAILURE_SERVER, FAILURE_BUDGET = "network", "key", "server", "budget"
+BUDGET_RECHECK_S = 3600.0
 
 
 @dataclass
@@ -100,6 +101,11 @@ class Fetcher:
     """Encoded road tile, or None after recording why it could not be fetched."""
     if self.blocked or not token:
       return None
+    if self.usage is not None:
+      from openpilot.starpilot.navigation.mapbox_budget import FREE, STOP_FRACTION
+      if self.usage.snapshot()["tiles"] >= int(FREE["vectorTiles"] * STOP_FRACTION):
+        self._block(FAILURE_BUDGET, BUDGET_RECHECK_S)  # free tiles for the month are used up; resumes on the 1st
+        return None
     try:
       response = self.session.get(MVT_URL.format(z=key.z, x=key.x, y=key.y), params={"access_token": token},
                                   timeout=REQUEST_TIMEOUT, stream=True)

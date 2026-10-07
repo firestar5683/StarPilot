@@ -28,9 +28,13 @@ MAX_RESPONSE = 8 * 1024 * 1024
 SEARCH_TTL = 180
 ACTIVE_TTL = 12 * 60 * 60
 MAX_SEARCHES = 32
-TILE_CACHE_TTL = 60
-TILE_CACHE_ENTRIES = 64
-TILE_CACHE_BYTES = 16 * 1024 * 1024
+TILE_CACHE_TTL = 15 * 60
+TILE_CACHE_ENTRIES = 256
+TILE_CACHE_BYTES = 32 * 1024 * 1024
+TILE_SLOTS = 6
+TILE_SLOT_WAIT_S = 3.0  # a panned-away request still holds its slot until Mapbox answers; wait instead of failing
+AUTOCOMPLETE_TYPES = {'poi', 'address', 'street', 'place', 'neighborhood', 'locality'}
+SUGGESTS_PER_SESSION = 50  # Mapbox starts a new billable session after this many suggestions
 
 
 class ValidationError(ValueError):
@@ -84,7 +88,10 @@ class NavigationOwner:
     self.path = self.root / 'settings.json'
     self.position_store = LastPositionStore(self.root)
     self.runtime_source, self.session = runtime_source, session
-    self._tile_slots = threading.BoundedSemaphore(4)
+    self._tile_slots = threading.BoundedSemaphore(TILE_SLOTS)
+    from openpilot.starpilot.navigation.mapbox_budget import MonthlyBudget
+    self.search_budget = MonthlyBudget('searchSessions', self.root / 'mapbox-usage')
+    self.tile_budget = MonthlyBudget('staticTiles', self.root / 'mapbox-usage', flush_every=25)
     self._tile_lock = threading.Lock()
     self._tiles = OrderedDict()
     self._tile_key = None
@@ -268,6 +275,8 @@ class NavigationOwner:
     status = ('disabled' if not document['enabled'] else 'needsKey' if not document['token'] else
               'noDestination' if document['destination'] is None else 'waitingForLocation')
     result = {key: document[key] for key in ('enabled', 'destination', 'favorites', 'revision')}
+    from openpilot.starpilot.navigation.mapbox_budget import read_usage
+    result['mapboxUsage'] = read_usage(self.root / 'mapbox-usage')
     result['alternatives'] = self.route_options(document['revision'])
     result['selectedRoute'] = document.get('routeChoice', 0)
     result.update(hasKey=bool(document['token']), status=status, instruction=None, route=[], isMetric=is_metric, location=None)
@@ -347,7 +356,8 @@ class NavigationOwner:
       if self.read()['token'] != token:
         raise ValidationError('Map key changed; try again')
       return cached[1]
-    if not self._tile_slots.acquire(blocking=False):
+    self.tile_budget.spend(enforce=False)  # upstream's map: counted for Setup, never refused
+    if not self._tile_slots.acquire(timeout=TILE_SLOT_WAIT_S):
       raise ValidationError('Map is busy; try again')
     try:
       started = time.monotonic()
@@ -463,7 +473,7 @@ class NavigationOwner:
       except (AttributeError, ImportError, OSError, ValueError, TypeError, OverflowError, RuntimeError):
         return {}
 
-  def search_places(self, query, caller, search_id, client_id):
+  def search_places(self, query, caller, search_id, client_id, autocomplete=False):
     if not isinstance(client_id, str) or len(client_id) != 36:
       raise ValidationError('Start a new destination search')
     if not isinstance(search_id, str) or len(search_id) != 36:
@@ -479,17 +489,39 @@ class NavigationOwner:
     if not current['token']:
       raise ValidationError('Add your Mapbox access token first')
     key = (caller, search_id)
+    from openpilot.starpilot.navigation.mapbox_budget import BudgetExhausted
     with self._lock:
       now = time.monotonic()
-      self._searches = {key:value for key,value in self._searches.items()
-                        if value['expires'] > now and not (key[0] == caller and value['client_id'] == client_id)}
-      if key in self._searches:
+      previous = self._searches.get(key)
+      # Typing continues one Mapbox search session: keystrokes share a session token until a place is chosen.
+      continuing = (autocomplete and previous is not None and previous['expires'] > now and previous['client_id'] == client_id and
+                    previous.get('autocomplete') and previous['revision'] == current['revision'] and
+                    previous['token_digest'] == hashlib.sha256(current['token'].encode()).digest())
+      self._searches = {other:value for other,value in self._searches.items()
+                        if value['expires'] > now and (other == key and continuing or
+                                                       not (other[0] == caller and value['client_id'] == client_id))}
+      if key in self._searches and not continuing:
         raise ValidationError('Start a new destination search')
-      if len(self._searches) >= MAX_SEARCHES or sum(key[0] == caller for key in self._searches) >= 8:
-        raise ValidationError('Too many destination searches; try again shortly')
-      entry = {'client_id':client_id, 'session':str(uuid.uuid4()), 'expires':now + SEARCH_TTL, 'revision':current['revision'],
-               'token_digest':hashlib.sha256(current['token'].encode()).digest(), 'ids':set()}
-      self._searches[key] = entry
+      if continuing:
+        entry = previous
+        entry['expires'] = now + SEARCH_TTL
+        entry['suggests'] = entry.get('suggests', 0) + 1
+        if entry['suggests'] % SUGGESTS_PER_SESSION == 0:
+          try:
+            self.search_budget.spend()
+          except BudgetExhausted as error:
+            raise ValidationError(str(error)) from None
+      else:
+        if len(self._searches) >= MAX_SEARCHES or sum(key[0] == caller for key in self._searches) >= 8:
+          raise ValidationError('Too many destination searches; try again shortly')
+        # The Search button keeps upstream's behavior (counted, never refused); typing suggestions stop at the cap.
+        try:
+          self.search_budget.spend(enforce=autocomplete)
+        except BudgetExhausted as error:
+          raise ValidationError(str(error)) from None
+        entry = {'client_id':client_id, 'session':str(uuid.uuid4()), 'expires':now + SEARCH_TTL, 'revision':current['revision'],
+                 'token_digest':hashlib.sha256(current['token'].encode()).digest(), 'ids':set(), 'autocomplete':autocomplete}
+        self._searches[key] = entry
     try:
       context = self._search_context()
       with self._lock:
@@ -497,8 +529,8 @@ class NavigationOwner:
             self.read()['token'] != current['token']):
           raise ValidationError('Start a new destination search')
       data = response_json(self.session, 'https://api.mapbox.com/search/searchbox/v1/suggest',
-                           {'q':query.strip(), 'access_token':current['token'], 'session_token':entry['session'], 'types':'poi', 'limit':8,
-                            **context})
+                           {'q':query.strip(), 'access_token':current['token'], 'session_token':entry['session'],
+                            'types':','.join(sorted(AUTOCOMPLETE_TYPES)) if autocomplete else 'poi', 'limit':8, **context})
       suggestions = data.get('suggestions')
       if not isinstance(suggestions, list):
         raise ValidationError('The map service returned invalid search results')
@@ -507,7 +539,8 @@ class NavigationOwner:
         if not isinstance(item, dict):
           continue
         identity, name = item.get('mapbox_id'), item.get('name')
-        if (item.get('feature_type') == 'poi' and isinstance(identity, str) and 1 <= len(identity) <= 256 and
+        kinds = AUTOCOMPLETE_TYPES if autocomplete else {'poi'}
+        if (item.get('feature_type') in kinds and isinstance(identity, str) and 1 <= len(identity) <= 256 and
             isinstance(name, str) and 1 <= len(name.strip()) <= 256):
           description = item.get('full_address') or item.get('place_formatted') or ''
           description = description.strip()[:512] if isinstance(description, str) else ''
@@ -516,14 +549,17 @@ class NavigationOwner:
         if (self._searches.get(key) is not entry or entry['expires'] <= time.monotonic() or
             self.read()['token'] != current['token']):
           raise ValidationError('Start a new destination search')
-        entry['ids'] = {item['id'] for item in results}
-      if results:
+        # Any suggestion shown during this typing session can still be chosen.
+        entry['ids'] = (entry['ids'] if autocomplete else set()) | {item['id'] for item in results}
+      if results or autocomplete:
         return results
     except ValidationError:
       with self._lock:
         if (self._searches.get(key) is not entry or entry['expires'] <= time.monotonic() or
             self.read()['token'] != current['token']):
           raise ValidationError('Start a new destination search') from None
+      if autocomplete:
+        return []  # suggestions are best effort and never fall back to paid geocoding
       self.cancel_search(caller, search_id)
       # Existing permanently storable address search remains available if POI search is unavailable.
       return self.search(query)

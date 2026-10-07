@@ -49,7 +49,7 @@ export class RasterMap {
     this.move = (event) => {
       if (!this.drag) return;
       this.center = unproject(this.drag[2] - event.clientX + this.drag[0], this.drag[3] - event.clientY + this.drag[1], this.zoom);
-      this.draw()
+      this.requestDraw()
     }
     this.up = (event) => {
       this.drag = null
@@ -75,7 +75,13 @@ export class RasterMap {
     }
     this.wheel = (event) => {
       event.preventDefault();
-      this.changeZoom(event.deltaY < 0 ? 1 : -1)
+      // Trackpads send dozens of small wheel events per gesture; one zoom level per 100px, at most every 120 ms.
+      this.wheelDelta = (this.wheelDelta || 0) + (event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY)
+      const now = performance.now()
+      if (Math.abs(this.wheelDelta) < 100 || now - (this.lastWheelZoom || 0) < 120) return
+      this.changeZoom(this.wheelDelta < 0 ? 1 : -1)
+      this.wheelDelta = 0
+      this.lastWheelZoom = now
     }
     for (const [name, listener] of [['pointerdown', this.down], ['pointermove', this.move], ['pointerup', this.up], ['pointercancel', this.up], ['wheel', this.wheel], ['keydown', this.key]]) canvas.addEventListener(name, listener, {
       passive: false
@@ -118,6 +124,20 @@ export class RasterMap {
     }
     this.draw()
   }
+  requestDraw() {
+    this.frameScheduled ??= requestAnimationFrame(() => { this.frameScheduled = null; this.draw() })
+  }
+  // The nearest loaded ancestor of a missing tile, and the part of it that covers the tile.
+  placeholder(zoom, x, y) {
+    for (let up = 1; up <= 5 && zoom - up >= 0; up++) {
+      const image = this.tiles.get(`${zoom - up}/${x >> up}/${y >> up}`)
+      if (image) {
+        const span = SIZE / 2 ** up
+        return [image, (x - ((x >> up) << up)) * span, (y - ((y >> up) << up)) * span, span]
+      }
+    }
+    return null
+  }
   changeZoom(delta) {
     this.zoom = Math.max(0, Math.min(18, this.zoom + delta));
     this.draw()
@@ -135,15 +155,20 @@ export class RasterMap {
       for (let tx = Math.floor((cx - width / 2) / SIZE); tx <= Math.floor((cx + width / 2) / SIZE); tx++) {
         const x = ((tx % n) + n) % n, key = `${this.zoom}/${x}/${ty}`;
         needed.add(key)
-        const image = this.tiles.get(key)
-        if (image) ctx.drawImage(image, tx * SIZE - cx + width / 2, ty * SIZE - cy + height / 2, SIZE, SIZE)
+        const image = this.tiles.get(key), left = tx * SIZE - cx + width / 2, top = ty * SIZE - cy + height / 2
+        if (image) ctx.drawImage(image, left, top, SIZE, SIZE)
+        else {
+          // A stretched coarser tile while this one loads, so zooming in never shows blank squares.
+          const cover = this.placeholder(this.zoom, x, ty)
+          if (cover) ctx.drawImage(cover[0], cover[1], cover[2], cover[3], cover[3], left, top, SIZE, SIZE)
+        }
       }
     }
     for (const [key, controller] of this.pending) if (!needed.has(key)) {
       controller.abort();
       this.pending.delete(key)
     }
-    for (const key of needed) if (!this.tiles.has(key) && !this.pending.has(key) && !this.failed.has(key) && this.pending.size < 4) this.load(key)
+    for (const key of needed) if (!this.tiles.has(key) && !this.pending.has(key) && !this.failed.has(key) && this.pending.size < 6) this.load(key)
     const pixel = (point) => {
       const [x, y] = project(point, this.zoom);
       return [relativeX(x, cx, world) - cx + width / 2, y - cy + height / 2]
@@ -195,7 +220,7 @@ export class RasterMap {
     }, 8000)
     try {
       const response = await fetch(`./api/navigation/map/tiles/${key}.png`, {
-        credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+        credentials: 'same-origin', signal: controller.signal
       });
       if (!response.ok) throw new Error('Map tiles unavailable')
       const image = await createImageBitmap(await response.blob());
@@ -204,7 +229,8 @@ export class RasterMap {
         return
       }
       this.tiles.set(key, image);
-      while (this.tiles.size > 32) {
+      this.failures = 0
+      while (this.tiles.size > 160) {
         const oldest = this.tiles.keys().next().value;
         this.tiles.get(oldest).close();
         this.tiles.delete(oldest)
@@ -214,8 +240,11 @@ export class RasterMap {
       if (timedOut || !controller.signal.aborted) {
         this.failed.add(key);
         if (this.failed.size > 64) this.failed.delete(this.failed.values().next().value);
-        this.changed('Map tiles unavailable. Check the saved key and connection. Reconnecting automatically…')
-        this.retryTimer ??= setTimeout(() => { this.retryTimer = null; this.retry() }, 5000)
+        // A quick refusal (a busy moment) is retried quickly and silently; a hung request or a run of failures is reported.
+        this.failures = (this.failures || 0) + 1
+        const persistent = timedOut || this.failures >= 6
+        if (persistent) this.changed('Map tiles unavailable. Check the saved key and connection. Reconnecting automatically…')
+        this.retryTimer ??= setTimeout(() => { this.retryTimer = null; this.retry() }, persistent ? 5000 : 800)
       }
     } finally {
       clearTimeout(timer);
@@ -238,6 +267,7 @@ export class RasterMap {
     clearTimeout(this.retryTimer);
     this.observer.disconnect();
     cancelAnimationFrame(this.paintScheduled);
+    if (this.frameScheduled) cancelAnimationFrame(this.frameScheduled);
     for (const controller of this.pending.values()) controller.abort();
     for (const image of this.tiles.values()) image.close();
     this.tiles.clear();

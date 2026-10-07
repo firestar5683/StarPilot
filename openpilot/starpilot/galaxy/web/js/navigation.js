@@ -73,7 +73,8 @@ export class NavigationClient {
     this.stale = false
   }
 
-  emit() { this.publish({ data: this.data, results: this.results, searched: this.searched, busy: this.busy, error: this.error, stale: this.stale }) }
+  emit() { this.publish({ data: this.data, results: this.results, searched: this.searched, busy: this.busy, error: this.error, stale: this.stale,
+    suggestions: this.suggestions }) }
   stop() {
     if (this.searchId && this.data) {
       this.fetcher("./api/navigation/action", { method: "POST", credentials: "same-origin", cache: "no-store",
@@ -91,17 +92,61 @@ export class NavigationClient {
     this.searched = false
     this.error = ""
     this.busy = this.stale = false
+    this.endSuggestions(false)
     this.emit()
   }
   start() { this.stop(); this.active = true; return this.load() }
   load() { return this.run("status") }
   search(query) {
+    this.endSuggestions()
     this.searchId = searchUuid()
     return this.run("search", { query: query.trim(), searchId: this.searchId, clientId: this.clientId })
   }
   choose(place) {
-    return place.temporary ? this.action("selectPlace", { id: place.id, searchId: place.searchId }) :
+    const pending = place.temporary ? this.action("selectPlace", { id: place.id, searchId: place.searchId }) :
       this.action("select", { destination: place })
+    this.endSuggestions()
+    return pending
+  }
+
+  // As-you-type suggestions run beside status polling and never cancel it. One typing session
+  // shares a Mapbox search session on the comma until a place is chosen or a full search runs.
+  async suggest(query) {
+    const text = query.trim()
+    this.suggestController?.abort()
+    if (!this.active || text.length < 3 || !this.data?.hasKey || !this.data?.enabled) {
+      if (this.suggestions?.length) { this.suggestions = []; this.emit() }
+      return []
+    }
+    this.autocompleteId ??= searchUuid()
+    const controller = new AbortController(), sequence = this.suggestSequence = (this.suggestSequence || 0) + 1
+    this.suggestController = controller
+    const timer = this.later(() => controller.abort(), 8000)
+    try {
+      const response = await this.fetcher("./api/navigation/search", { method: "POST", credentials: "same-origin", cache: "no-store",
+        signal: controller.signal, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: text, searchId: this.autocompleteId, clientId: this.clientId, autocomplete: true }) })
+      const payload = await response.json().catch(() => null)
+      if (sequence !== this.suggestSequence || !this.active) return []
+      if (response.status === 401) { this.stop(); this.unauthorized(); return [] }
+      if (!response.ok || !Array.isArray(payload?.results) || payload.results.length > 20 || !payload.results.every(validSearchResult)) {
+        this.autocompleteId = null  // the comma ended this session (expired, or settings changed); the next keystroke starts another
+        this.suggestions = []
+      } else this.suggestions = payload.results
+      this.emit()
+      return this.suggestions
+    } catch {
+      if (sequence === this.suggestSequence && !controller.signal.aborted) { this.suggestions = []; this.emit() }
+      return []
+    } finally { this.cancelTimer(timer) }
+  }
+  endSuggestions(emit = true) {
+    this.suggestController?.abort()
+    this.suggestSequence = (this.suggestSequence || 0) + 1
+    this.autocompleteId = null
+    const had = this.suggestions?.length
+    this.suggestions = []
+    if (emit && had) this.emit()
   }
   action(action, value = {}) {
     if (!this.data || this.busy || this.stale) return Promise.resolve(null)
@@ -174,9 +219,22 @@ export const NavigationPage = {
   components: { GxNotice, MapOperationsPanel, NavigationMap, OfflineRoadMapsPanel },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null } },
-  data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", favoritesOpen: false, query: "", token: "", searched: false }),
+  data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", favoritesOpen: false, query: "", token: "", searched: false,
+    suggestions: [], suggestOpen: false }),
   computed: {
     available() { return this.mode === "local" && !!this.data && !this.stale && !this.busy },
+    favoriteMatches() {
+      const text = this.query.trim().toLocaleLowerCase()
+      if (text.length < 2) return []
+      return (this.data?.favorites || []).filter((place) => place.name.toLocaleLowerCase().includes(text)).slice(0, 4)
+    },
+    showSuggestions() { return this.suggestOpen && (this.favoriteMatches.length > 0 || this.suggestions.length > 0) },
+    usageRows() {
+      const usage = this.data?.mapboxUsage
+      if (!usage) return []
+      return [["searchSessions", "Searches"], ["directions", "Routes"], ["staticTiles", "Map views"]]
+        .filter(([key]) => usage[key]).map(([key, label]) => ({ key, label, ...usage[key] }))
+    },
     path() { return routePath(this.data?.route) },
     summary() {
       const instruction = this.data?.instruction, route = this.data?.alternatives?.[this.data?.selectedRoute || 0]
@@ -196,9 +254,24 @@ export const NavigationPage = {
     document.addEventListener("visibilitychange", this.visibilityHandler)
     if (document.visibilityState !== "hidden") this.client.start()
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibilityHandler); this.client.stop(); this.token = "" },
+  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibilityHandler); clearTimeout(this.suggestTimer); this.client.stop(); this.token = "" },
   methods: {
-    async search() { await this.client.search(this.query) },
+    async search() {
+      clearTimeout(this.suggestTimer)
+      this.suggestOpen = false
+      await this.client.search(this.query)
+    },
+    typed() {
+      clearTimeout(this.suggestTimer)
+      this.suggestOpen = true
+      this.suggestTimer = setTimeout(() => this.client.suggest(this.query), 300)
+    },
+    closeSuggestions() { this.suggestOpen = false; clearTimeout(this.suggestTimer) },
+    async pick(place) {
+      this.closeSuggestions()
+      this.query = ""
+      await this.client.choose(place)
+    },
     async saveKey(enable = false) { const token = this.token.trim(); this.token = ""; await this.client.action("configure", { patch: enable ? { token, enabled: true } : { token } }) },
     distance(value) {
       const metric = this.data?.isMetric !== false
@@ -216,7 +289,7 @@ export const NavigationPage = {
           type="button" class="gx-btn" :class="tab === item.id ? '' : 'gx-btn--tonal'" role="tab" :aria-selected="tab === item.id" @click="tab=item.id">{{ item.label }}</button>
       </div>
       <div v-if="tab === 'maps'" class="gx-navigation__offline">
-        <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" />
+        <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" :metric="data?.isMetric !== false" />
         <MapOperationsPanel :mode="mode" :unauthorized="unauthorized" />
       </div>
       <template v-else>
@@ -235,6 +308,10 @@ export const NavigationPage = {
               <h3>Mapbox</h3>
               <p>One public Mapbox access token (starting with pk.) handles maps, address search, place search and routes. A separate secret token is not needed.</p>
               <p>Save your token while parked. Galaxy keeps it on your comma and never displays it after saving. Saving address favorites requires permanent geocoding: a payment method on file or an enterprise agreement with Mapbox. Place-search results are available for the current route only. Map tiles use your Mapbox quota; URL-restricted keys may reject these requests.</p>
+              <p class="gx-note">Typing suggestions and offline road maps stop just short of Mapbox's free monthly allowance and resume on the 1st. Searches, routes and map views are counted here but not limited.</p>
+              <dl v-if="usageRows.length" class="gx-navigation__usage" aria-label="Free Mapbox use this month">
+                <template v-for="row in usageRows" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.used.toLocaleString() }} of {{ row.limit.toLocaleString() }} free this month</dd></template>
+              </dl>
               <a class="gx-navigation__token-link" href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer">Get a Mapbox access token</a>
               <p v-if="data?.hasKey" class="gx-note">A Mapbox key is saved.</p>
               <div class="gx-field-group"><label for="navigation-token">Public Mapbox access token</label>
@@ -249,10 +326,18 @@ export const NavigationPage = {
 
               <form v-if="data?.enabled && data?.hasKey" @submit.prevent="search" class="gx-navigation__search">
                 <label for="navigation-search" class="gx-sr-only">Search destinations</label>
-                <input id="navigation-search" class="gx-field" v-model="query" placeholder="Search here" minlength="2" maxlength="200" required :disabled="!available">
+                <input id="navigation-search" class="gx-field" v-model="query" placeholder="Search here" minlength="2" maxlength="200" required
+                  autocomplete="off" :disabled="!available" role="combobox" :aria-expanded="showSuggestions" aria-controls="navigation-suggestions"
+                  @input="typed" @focus="suggestOpen = true" @keydown.escape="closeSuggestions">
                 <button class="gx-sr-only" type="submit" :disabled="!available || query.trim().length < 2">Search</button>
                 <button v-if="data?.favorites.length" class="gx-btn gx-btn--tonal" type="button" @click="favoritesOpen=!favoritesOpen" :aria-expanded="favoritesOpen">♥ Favorites</button>
               </form>
+            <div v-if="showSuggestions" id="navigation-suggestions" class="gx-navigation__suggestions" role="listbox" aria-label="Suggestions">
+              <button v-for="place in favoriteMatches" :key="'saved-' + place.id" type="button" role="option" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
+                <i class="bi bi-star-fill" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small>Saved place</small></span></button>
+              <button v-for="place in suggestions" :key="place.id" type="button" role="option" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
+                <i class="bi bi-geo-alt" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.description">{{ place.description }}</small></span></button>
+            </div>
             <section v-if="data?.destination" class="gx-card gx-navigation__section" :class="{'gx-navigation--stale':stale}">
               <h3 class="gx-navigation__summary-title">{{ data.destination.name }}</h3>
               <div v-if="summary" class="gx-navigation__summary">

@@ -45,11 +45,27 @@ def test_missing_key_and_busy_fail_without_network(tmp_path):
   with pytest.raises(ValidationError):
     owner.map_tile(0, 0, 0)
   owner = tile_owner(tmp_path, provider)
-  for _ in range(4):
-    assert owner._tile_slots.acquire(False)
-  with pytest.raises(ValidationError):
-    owner.map_tile(0, 0, 0)
+  from openpilot.starpilot.navigation import owner as owner_module
+  owner_module.TILE_SLOT_WAIT_S, wait = 0.05, owner_module.TILE_SLOT_WAIT_S
+  try:
+    for _ in range(owner_module.TILE_SLOTS):
+      assert owner._tile_slots.acquire(False)
+    with pytest.raises(ValidationError):
+      owner.map_tile(0, 0, 0)
+  finally:
+    owner_module.TILE_SLOT_WAIT_S = wait
   assert not provider.calls
+
+
+def test_busy_slots_wait_for_a_finishing_tile(tmp_path):
+  import threading
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  from openpilot.starpilot.navigation import owner as owner_module
+  for _ in range(owner_module.TILE_SLOTS):
+    assert owner._tile_slots.acquire(False)
+  threading.Timer(0.1, owner._tile_slots.release).start()
+  assert owner.map_tile(2, 3, 1) == PNG, "a request queued behind a panned-away tile is served, not refused"
 
 
 def test_fixed_provider_and_server_only_key(tmp_path):
@@ -85,7 +101,11 @@ def test_cache_reuses_validated_tiles_and_expires(tmp_path, monkeypatch):
   assert owner.map_tile(0, 0, 0) == PNG
   assert owner.map_tile(0, 0, 0) == PNG
   assert len(provider.calls) == 1
-  now[0] += 61
+  from openpilot.starpilot.navigation.owner import TILE_CACHE_TTL
+  now[0] += TILE_CACHE_TTL - 1
+  assert owner.map_tile(0, 0, 0) == PNG
+  assert len(provider.calls) == 1, "panning back within the cache lifetime reuses the tile"
+  now[0] += 2
   assert owner.map_tile(0, 0, 0) == PNG
   assert len(provider.calls) == 2
 

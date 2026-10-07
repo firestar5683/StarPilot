@@ -7,6 +7,18 @@ import { RasterMap } from "./navigation-map.js"
 const object = (value) => !!value && typeof value === "object" && !Array.isArray(value)
 const finite = (value) => typeof value === "number" && Number.isFinite(value)
 const STATES = new Set(["queued", "downloading", "waiting_wifi", "complete", "incomplete", "no_space"])
+const KM_PER_MILE = 1.609344
+const START_ZOOM = 12  // a few miles across: streets readable, a typical area still fits after zooming out
+
+// Areas are stored in km; imperial devices pick and show whole miles.
+export function radiusLabel(radiusKm, metric) {
+  return metric ? `${Math.round(radiusKm)} km` : `${Math.round(radiusKm / KM_PER_MILE)} mi`
+}
+export function radiusRange(constants, metric) {
+  if (metric) return { min: constants.minRadiusKm, max: constants.maxRadiusKm, initial: constants.defaultRadiusKm }
+  return { min: Math.ceil(constants.minRadiusKm / KM_PER_MILE), max: Math.floor(constants.maxRadiusKm / KM_PER_MILE), initial: 15 }
+}
+export const toKm = (value, metric) => metric ? value : Math.round(value * KM_PER_MILE * 10) / 10
 
 export function formatBytes(bytes) {
   const value = Math.max(0, Number(bytes) || 0)
@@ -94,8 +106,8 @@ export const OfflineRoadMapsPanel = {
   name: "OfflineRoadMapsPanel",
   components: { GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
-    hasKey: { type: Boolean, default: false } },
-  data: () => ({ data: null, busy: false, error: "", point: null, name: "", radiusKm: null, confirmDelete: null, notice: "" }),
+    hasKey: { type: Boolean, default: false }, metric: { type: Boolean, default: true } },
+  data: () => ({ data: null, busy: false, error: "", point: null, name: "", radius: null, confirmDelete: null, notice: "" }),
   created() { this.client = new OfflineRoadsClient({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
   mounted() {
     if (this.mode !== "local") return
@@ -108,17 +120,20 @@ export const OfflineRoadMapsPanel = {
   watch: {
     hasKey() { this.$nextTick(() => this.ensureMap()) },
     data(value) {
-      if (value && this.radiusKm === null) this.radiusKm = value.constants.defaultRadiusKm
+      if (value && this.radius === null) this.radius = radiusRange(value.constants, this.metric).initial
       if (value?.position && this.map && !this.map.initialized) {
-        this.map.center = value.position; this.map.zoom = 9; this.map.initialized = true
+        this.map.center = value.position; this.map.zoom = START_ZOOM; this.map.initialized = true
       }
       this.drawOverlays()
     },
+    metric() { if (this.constants) this.radius = radiusRange(this.constants, this.metric).initial },
     point() { this.drawOverlays() },
-    radiusKm() { this.drawOverlays() },
+    radius() { this.drawOverlays() },
   },
   computed: {
     constants() { return this.data?.constants },
+    range() { return this.constants ? radiusRange(this.constants, this.metric) : null },
+    radiusKm() { return this.radius === null ? null : toKm(this.radius, this.metric) },
     estimate() { return this.point && this.constants ? estimateArea(this.point.latitude, this.radiusKm, this.constants) : null },
     service() { return this.data?.service || {} },
     serviceLabel() {
@@ -126,6 +141,7 @@ export const OfflineRoadMapsPanel = {
       if (!this.data) return "Checking…"
       if (!service.running) return "Not running"
       if (service.failure === "key") return "Mapbox key rejected"
+      if (service.failure === "budget") return "Paused until the 1st"
       if (service.noSpace) return "Storage full"
       if (areas.some((area) => area.progress?.state === "downloading")) return "Downloading"
       if (areas.some((area) => area.progress?.state === "waiting_wifi")) return "Waiting for Wi-Fi"
@@ -139,16 +155,19 @@ export const OfflineRoadMapsPanel = {
       return { used, cap, parts: [["Areas", bytes.saved || 0, "#9d72ff"], ["Driven", bytes.driven || 0, "#34c778"], ["Recent", bytes.cache || 0, "#4096ff"]] }
     },
     usage() { const usage = this.data?.usage || {}; return { tiles: usage.tiles || 0, free: usage.freeTiles || 200000 } },
+    // The downloader stops at 99% of the free tiles, so nothing is billed.
+    freeTilesLeft() { return Math.max(0, Math.floor(this.usage.free * 0.99) - this.usage.tiles) },
     canSave() { return this.mode === "local" && !this.busy && !!this.point && !!this.data && this.data.areas.length < this.constants.maxAreas },
   },
   methods: {
-    formatBytes, areaLabel,
+    formatBytes, areaLabel, radiusLabel,
     ensureMap() {
       if (this.map || !this.hasKey || !this.$refs.canvas) return
       this.map = markRaw(new RasterMap(this.$refs.canvas, () => {}))
       this.map.onTap = (point) => this.pick({ ...point, name: "" })
       this.map.update({}, false)
-      if (this.data?.position) { this.map.center = this.data.position; this.map.zoom = 9; this.map.initialized = true }
+      if (this.data?.position) { this.map.center = this.data.position; this.map.zoom = START_ZOOM; this.map.initialized = true }
+      this.overlaySignature = null
       this.drawOverlays()
     },
     zoom(delta) { this.map?.changeZoom(delta) },
@@ -165,15 +184,18 @@ export const OfflineRoadMapsPanel = {
       const metersPerPixel = radiusKm * 1000 / Math.max(40, pixels)
       const zoom = Math.log2(40075016.686 * Math.cos(point.latitude * Math.PI / 180) / (512 * metersPerPixel))
       this.map.zoom = Math.max(3, Math.min(14, Math.floor(zoom)))
-      this.map.draw()
+      this.map.requestDraw()
     },
     drawOverlays() {
       if (!this.map) return
       const saved = (this.data?.areas || []).map((area) => ({ ...area, stroke: area.progress?.state === "complete" ? "#34c778" : "#9d72ff",
         fill: area.progress?.state === "complete" ? "#34c77822" : "#9d72ff1f" }))
       const draft = this.point ? [{ ...this.point, radiusKm: this.radiusKm, stroke: "#f5b642", fill: "#f5b64226", dash: [8, 6], width: 3 }] : []
-      this.map.overlays = [...saved, ...draft]
-      this.map.draw()
+      const overlays = [...saved, ...draft], signature = JSON.stringify(overlays)
+      if (signature === this.overlaySignature) return   // polls usually change nothing on the map
+      this.overlaySignature = signature
+      this.map.overlays = overlays
+      this.map.requestDraw()
     },
     async save() {
       if (!this.canSave) return
@@ -195,10 +217,11 @@ export const OfflineRoadMapsPanel = {
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
         <GxNotice tone="warn" v-if="!hasKey">Add your Mapbox key in Setup. Road maps download with the same key.</GxNotice>
         <GxNotice tone="warn" v-else-if="service.failure === 'key'">Mapbox rejected the saved key for map tiles. Check that it is a public (pk.) key without URL restrictions.</GxNotice>
+        <GxNotice tone="warn" v-if="service.failure === 'budget'">This month's free Mapbox road tiles are used up, so downloads pause until the 1st. Nothing is billed.</GxNotice>
         <GxNotice tone="warn" v-if="service.noSpace">The comma's storage is nearly full, so new map areas are paused. Delete an area or free space.</GxNotice>
         <div class="gx-offline-roads__stats">
           <div class="gx-offline-roads__stat"><span>Downloader</span><strong>{{ serviceLabel }}</strong></div>
-          <div class="gx-offline-roads__stat"><span>Mapbox this month</span><strong>{{ usage.tiles.toLocaleString() }}</strong><small>of {{ usage.free.toLocaleString() }} free tiles</small></div>
+          <div class="gx-offline-roads__stat"><span>Mapbox this month</span><strong>{{ usage.tiles.toLocaleString() }}</strong><small>of {{ Math.floor(usage.free * 0.99).toLocaleString() }} free tiles used</small></div>
           <div v-if="storage" class="gx-offline-roads__stat gx-offline-roads__stat--wide"><span>On this comma</span><strong>{{ formatBytes(storage.used) }}</strong>
             <div class="gx-offline-roads__bar" role="img" :aria-label="formatBytes(storage.used) + ' used for road maps'">
               <i v-for="[label, value, color] in storage.parts" :key="label" :style="{ width: (storage.cap ? Math.max(value ? 1.5 : 0, value / storage.cap * 100) : 0) + '%', background: color }"></i></div>
@@ -216,9 +239,10 @@ export const OfflineRoadMapsPanel = {
             <template v-if="point && constants">
               <label for="offline-area-name">Name</label>
               <input id="offline-area-name" class="gx-field" v-model="name" maxlength="80" placeholder="Home, Tahoe trip…">
-              <label for="offline-area-radius">Radius · {{ Math.round(radiusKm) }} km</label>
-              <input id="offline-area-radius" class="gx-slider" type="range" :min="constants.minRadiusKm" :max="constants.maxRadiusKm" step="1" v-model.number="radiusKm" @change="focus(point, radiusKm)">
+              <label for="offline-area-radius">Radius · {{ radiusLabel(radiusKm, metric) }}</label>
+              <input id="offline-area-radius" class="gx-slider" type="range" :min="range.min" :max="range.max" step="1" v-model.number="radius" @change="focus(point, radiusKm)">
               <p class="gx-note" role="status">≈ {{ estimate.tiles.toLocaleString() }} tiles · {{ formatBytes(estimate.downloadBytes) }} to download · {{ formatBytes(estimate.storedBytes) }} on the comma</p>
+              <p v-if="estimate.tiles > freeTilesLeft" class="gx-note">Only {{ freeTilesLeft.toLocaleString() }} free tiles are left this month. The area downloads that many now and finishes after the 1st, without being billed.</p>
               <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="point = null">Cancel</button>
                 <button type="button" class="gx-btn" :disabled="!canSave" @click="save">Save area</button></div>
             </template>
@@ -227,7 +251,7 @@ export const OfflineRoadMapsPanel = {
         </div>
         <ul v-if="data?.areas.length" class="gx-offline-roads__areas" aria-label="Saved offline areas">
           <li v-for="area in data.areas" :key="area.id">
-            <div class="gx-offline-roads__area"><strong>{{ area.name }}</strong><small>{{ Math.round(area.radiusKm) }} km radius · {{ areaLabel(area) }}</small>
+            <div class="gx-offline-roads__area"><strong>{{ area.name }}</strong><small>{{ radiusLabel(area.radiusKm, metric) }} radius · {{ areaLabel(area) }}</small>
               <div v-if="area.progress && area.progress.state !== 'complete'" class="gx-offline-roads__bar"><i :style="{ width: (area.progress.total ? area.progress.done / area.progress.total * 100 : 0) + '%', background: '#9d72ff' }"></i></div></div>
             <div class="gx-navigation__actions">
               <button type="button" class="gx-btn gx-btn--tonal" @click="focus(area, area.radiusKm)">Show</button>

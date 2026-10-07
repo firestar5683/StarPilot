@@ -101,6 +101,16 @@ class NavigationHttpTest(unittest.TestCase):
         self.assertEqual(len(result[1]['favorites']), 1)
         self.assertEqual(self.action('removeFavorite', remote=remote, id=result[1]['favorites'][0]['id'])[1]['favorites'], [])
 
+  def test_autocomplete_search_requests(self):
+    self.action('configure', patch={'enabled': True, 'token': 'pk.test'})
+    search = {'query': 'cof', 'searchId': str(uuid.uuid4()), 'clientId': str(uuid.uuid4())}
+    with patch.object(self.navigation, 'search_places', return_value=[]) as places:
+      self.assertEqual(self.request('/api/navigation/search', payload={**search, 'autocomplete': True}, cookie=self.local_cookie)[0], 200)
+      self.assertTrue(places.call_args.kwargs['autocomplete'])
+      self.assertEqual(self.request('/api/navigation/search', payload=search, cookie=self.local_cookie)[0], 200)
+      self.assertFalse(places.call_args.kwargs['autocomplete'])
+      self.assertEqual(self.request('/api/navigation/search', payload={**search, 'autocomplete': 'yes'}, cookie=self.local_cookie)[0], 400)
+
   def test_alternative_route_action_uses_authenticated_revision(self):
     from openpilot.starpilot.navigation.route_engine import NavigationRoute
     route = NavigationRoute({'distance':100., 'duration':20., 'geometry':{'coordinates':[[0.,0.],[.001,0.]]},

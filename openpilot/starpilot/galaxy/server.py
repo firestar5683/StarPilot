@@ -561,11 +561,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         # The browser can retire an in-flight fetch or speculative connection.
         self.close_connection = True
 
-    def respond(self, status, body, content_type='application/json', cookie=None, *, asset_headers=None):
+    def respond(self, status, body, content_type='application/json', cookie=None, *, asset_headers=None, cache_control=None):
       self.send_response(status)
       self.send_header('Content-Type', content_type)
       self.send_header('Content-Length', str(len(body)))
-      self.send_header('Cache-Control', 'private, max-age=0, must-revalidate' if asset_headers else 'no-store')
+      self.send_header('Cache-Control', cache_control or ('private, max-age=0, must-revalidate' if asset_headers else 'no-store'))
       for key, value in (asset_headers or {}).items():
         self.send_header(key, value)
       self.send_header('X-Content-Type-Options', 'nosniff')
@@ -944,7 +944,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(503, {'error': 'Map tiles are unavailable'})
         else:
           if self.require_session():
-            self.respond(200, tile, 'image/png')
+            # Map imagery is not private data; let the browser keep it while panning back and forth.
+            self.respond(200, tile, 'image/png', cache_control='private, max-age=900')
       elif path == '/api/navigation/offline':
         if not self.require_session():
           return
@@ -1631,9 +1632,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if type(payload) is not dict:
             raise ValidationError('Invalid navigation request')
           if path == '/api/navigation/search':
-            if set(payload) not in ({'query'}, {'query', 'searchId', 'clientId'}):
+            if set(payload) not in ({'query'}, {'query', 'searchId', 'clientId'}, {'query', 'searchId', 'clientId', 'autocomplete'}):
               raise ValidationError('Enter a destination to search')
-            result = {'results': (navigation_owner().search_places(payload['query'], identity, payload['searchId'], payload['clientId'])
+            if 'autocomplete' in payload and payload['autocomplete'] is not True:
+              raise ValidationError('Enter a destination to search')
+            result = {'results': (navigation_owner().search_places(payload['query'], identity, payload['searchId'], payload['clientId'],
+                                                                   autocomplete='autocomplete' in payload)
                                   if 'searchId' in payload else navigation_owner().search(payload['query']))}
           else:
             fields = {'configure': {'patch'}, 'select': {'destination'}, 'selectPlace': {'id', 'searchId'},

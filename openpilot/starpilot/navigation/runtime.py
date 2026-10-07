@@ -25,7 +25,10 @@ def location(sm, now_ns: int):
 class RouteRuntime:
   def __init__(self, owner: NavigationOwner, engine=None, executor=None):
     self.owner = owner
-    self.engine = engine or MapboxRouteEngine(owner.session)
+    if engine is None:
+      from openpilot.starpilot.navigation.mapbox_budget import MonthlyBudget
+      engine = MapboxRouteEngine(owner.session, MonthlyBudget('directions', owner.root / 'mapbox-usage'))
+    self.engine = engine
     self.executor = executor or ThreadPoolExecutor(max_workers=1, thread_name_prefix='route')
     self.key = None
     self.route = None

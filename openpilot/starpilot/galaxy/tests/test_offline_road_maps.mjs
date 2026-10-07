@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { compile } from "../web/vendor/vue/vue.esm-browser.js"
-import { OfflineRoadMapsPanel, OfflineRoadsClient, areaLabel, estimateArea, formatBytes, validOffline } from "../web/js/offline-road-maps.js"
+import { OfflineRoadMapsPanel, OfflineRoadsClient, areaLabel, estimateArea, formatBytes, radiusLabel, radiusRange, toKm, validOffline } from "../web/js/offline-road-maps.js"
+import { RasterMap } from "../web/js/navigation-map.js"
 import { NavigationPage } from "../web/js/navigation.js"
 
 const constants = { minRadiusKm: 2, maxRadiusKm: 200, defaultRadiusKm: 25, averageDownloadBytes: 38000, averageStoredBytes: 6500, maxAreas: 24 }
@@ -31,6 +32,48 @@ assert.equal(areaLabel(area), "Downloading · 25%")
 assert.equal(areaLabel({ ...area, progress: null }), "Waiting for the downloader")
 assert.equal(areaLabel({ ...area, progress: { state: "complete", total: 4, done: 4, failed: 0 } }), "Saved for offline")
 assert.equal(areaLabel({ ...area, progress: { state: "incomplete", total: 4, done: 3, failed: 1 } }), "1 tiles missing · retries later")
+
+// Imperial devices pick whole miles; areas are still saved in km within the device's limits.
+assert.equal(radiusLabel(24.14, false), "15 mi")
+assert.equal(radiusLabel(25, true), "25 km")
+assert.deepEqual(radiusRange(constants, false), { min: 2, max: 124, initial: 15 })
+assert.deepEqual(radiusRange(constants, true), { min: 2, max: 200, initial: 25 })
+assert.equal(toKm(15, false), 24.1)
+assert.ok(toKm(2, false) >= constants.minRadiusKm && toKm(124, false) <= constants.maxRadiusKm)
+assert.equal(toKm(25, true), 25)
+
+// Map: a coarser tile stands in while zooming, trackpad wheels step one level per gesture, redraws share a frame.
+globalThis.ResizeObserver ??= class { observe() {} disconnect() {} }
+const frames = []
+globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length }
+globalThis.cancelAnimationFrame = () => {}
+const listeners = {}
+const canvas = { clientWidth: 400, clientHeight: 300, width: 0, height: 0, addEventListener: (name, fn) => { listeners[name] = fn },
+  removeEventListener() {}, setPointerCapture() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
+  getContext: () => new Proxy({}, { get: (_, key) => key === "drawImage" ? (...args) => drawn.push(args) : () => {}, set: () => true }) }
+const drawn = []
+const map = new RasterMap(canvas)
+map.load = () => {}
+const parent = { close() {} }
+map.tiles.set("11/600/800", parent)
+const cover = map.placeholder(12, 1201, 1600)
+assert.equal(cover[0], parent)
+assert.deepEqual(cover.slice(1), [256, 0, 256], "the right quarter of the parent tile")
+assert.equal(map.placeholder(12, 50, 50), null)
+map.zoom = 3
+let now = 1000
+const realPerformance = globalThis.performance
+globalThis.performance = { now: () => now }
+for (let i = 0; i < 40; i++) listeners.wheel({ preventDefault() {}, deltaY: -12, deltaMode: 0 })
+assert.equal(map.zoom, 4, "one trackpad flick is one zoom level, not ten")
+now += 200
+for (let i = 0; i < 9; i++) listeners.wheel({ preventDefault() {}, deltaY: -12, deltaMode: 0 })
+assert.equal(map.zoom, 5)
+globalThis.performance = realPerformance
+frames.length = 0
+map.requestDraw(); map.requestDraw(); map.requestDraw()
+assert.equal(frames.length, 1, "pointer moves within a frame draw once")
+map.close()
 
 // Client: load, act, and hand 401s to the sign-in flow.
 const requests = []
