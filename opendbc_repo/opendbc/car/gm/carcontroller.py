@@ -1108,6 +1108,21 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN,
                                            (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
 
+    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2018_2021 and is_bolt_pedal_profile(self.CP) and
+        self.CP.safetyConfigs[0].safetyParam == 0x9D and CS.out.canValid and not CS.out.canTimeout and
+        CS.pedal_sensor_healthy and 0 < CS.pedal_sensor_ts_nanos <= now_nanos and
+        now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS and
+        bolt_acc_pedal_dashboard_drive_ready(CS, now_nanos) and CS.out.cruiseState.available and
+        CS.bolt_pedal_stock_active and 0 < CS.bolt_pedal_stock_ts_nanos <= now_nanos and
+        now_nanos - CS.bolt_pedal_stock_ts_nanos <= STOCK_ACC_STATUS_TIMEOUT_NS and
+        (self.frame - self.last_button_frame) * DT_CTRL > .04 and
+        CS.conventional_cancel_credit.available(now_nanos, self.bolt_removed_cancel_credit_used) and
+        0 <= now_nanos - CS.conventional_cancel_credit.credit_ns <= 100_000_000):
+      self.last_button_frame = self.frame
+      self.bolt_removed_cancel_credit_used = CS.conventional_cancel_credit.credit_ns
+      can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN,
+                                           (CS.conventional_cancel_credit.counter + 1) % 4, CruiseButtons.CANCEL))
+
     if (self.bolt_pedal_removed and self.CP.openpilotLongitudinalControl and self.CP.carFingerprint in NO_ACC_BOLT_CAR and
         stock_steer_ready and CS.bolt_pedal_removed_stock_active and (self.frame - self.last_button_frame) * DT_CTRL > .04 and
         CS.conventional_cancel_credit.available(now_nanos, self.bolt_removed_cancel_credit_used) and

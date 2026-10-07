@@ -69,6 +69,8 @@ class CarState(CarStateBase):
     self.stock_acc_status_ts_nanos = 0
     self.bolt_pedal_removed_sources = ()
     self.bolt_pedal_removed_stock_ts_nanos = 0
+    self.bolt_pedal_stock_active = False
+    self.bolt_pedal_stock_ts_nanos = 0
     self.bolt_pedal_removed_stock_active = False
     self.bolt_pedal_removed_acc_active = False
     self.bolt_pedal_standstill_ts_nanos = 0
@@ -496,6 +498,10 @@ class CarState(CarStateBase):
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
     if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and self.CP.flags & GMFlags.PEDAL_LONG.value:
       self.stock_acc_status_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
+    if (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2018_2021 and is_bolt_pedal_profile(self.CP) and
+        self.CP.safetyConfigs[0].safetyParam == 0x9D):
+      self.bolt_pedal_stock_active = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])
+      self.bolt_pedal_stock_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
     if self.CP.carFingerprint in NO_ACC_BOLT_CAR and not self.bolt_cc_profile:
       ret.accFaulted = False
       ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0 if pedal_stock_no_acc else False

@@ -430,7 +430,7 @@ class TestBoltPedalStartupParser(unittest.TestCase):
     'EBCMRegenPaddle': 40, 'ECMCruiseControl': 10, 'GAS_SENSOR': 50,
   }
 
-  def stream(self, cp, missing=None, *, blindspot=False, pedal_present=True, camera_present=True):
+  def stream(self, cp, missing=None, *, blindspot=False, pedal_present=True, camera_present=True, native=None):
     ci = CarInterface(cp)
     packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
     pt_messages = dict(self.PT_MESSAGES)
@@ -451,7 +451,10 @@ class TestBoltPedalStartupParser(unittest.TestCase):
           rate = pt_messages[name] if bus == 0 else 25 if name == 'ASCMActiveCruiseControlStatus' else 10
           if index and index * rate // 100 == (index - 1) * rate // 100:
             continue
-          if name == 'GAS_SENSOR':
+          if name == 'ASCMSteeringButton':
+            from opendbc.car.gm.bolt_cc import button_bytes
+            frame = (0x1E1, button_bytes(1, (index * rate // 100) % 4), bus)
+          elif name == 'GAS_SENSOR':
             frame = TestBoltPedalMessages.sensor(packer, 0, sensor_counter % 16)
             sensor_counter += 1
           else:
@@ -461,8 +464,98 @@ class TestBoltPedalStartupParser(unittest.TestCase):
                       'ECMEngineStatus': {'CruiseMainOn': 1}}.get(name, {})
             frame = packer.make_can_msg(name, bus, values)
           frames.append(frame)
-      result = ci.update([(1_000_000_000 + index * 10_000_000, frames)])
+      stamp = 1_000_000_000 + index * 10_000_000
+      if native is not None:
+        from opendbc.safety.tests.libsafety import libsafety_py
+        native.set_timer(stamp // 1000)
+        for address, data, bus in frames:
+          if bus != 128:
+            native.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data))
+        native.safety_tick()
+      result = ci.update([(stamp, frames)])
     return ci, result
+
+  def test_present_2020_stock_cancel_uses_real_activity_without_logical_engagement(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    from opendbc.safety.tests.libsafety import libsafety_py
+    cp = params(CAR.CHEVROLET_BOLT_CC_2018_2021, True, True, camera=True)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x9D)
+    now = 3_490_000_000
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    contexts = [(acceleration, long_active, True) for acceleration in (-1., 0., 1.) for long_active in (False, True)]
+    contexts.append((0., False, False))
+    for acceleration, long_active, enabled in contexts:
+      with self.subTest(acceleration=acceleration, long_active=long_active, enabled=enabled):
+        native = libsafety_py.libsafety
+        self.assertEqual(native.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
+        native.init_tests()
+        ci, state = self.stream(cp, native=native)
+        self.assertTrue(state.canValid)
+        self.assertFalse(state.cruiseState.enabled)
+        self.assertTrue(ci.CS.bolt_pedal_stock_active)
+        native.safety_rx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(1, 3)))
+        ci.update([(now, [(0x1E1, button_bytes(1, 3), 0)])])
+        controller = CarController(DBC[cp.carFingerprint], cp)
+        controller.frame = 100
+        command = structs.CarControl(enabled=enabled, longActive=long_active)
+        command.actuators.accel = acceleration
+        _, frames = controller.update(command.as_reader(), ci.CS, now)
+        self.assertEqual([frame for frame in frames if frame[0] == 0x1E1],
+                         [(0x1E1, button_bytes(6, 0), 0)])
+        self.assertTrue(native.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 0))))
+        self.assertFalse(native.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 0))))
+        controller.frame = 101
+        _, frames = controller.update(command.as_reader(), ci.CS, now + 10_000_000)
+        self.assertFalse(any(frame[0] == 0x1E1 for frame in frames))
+        self.assertFalse(any(frame[0] == 0x370 for frame in frames))
+
+        for sample, (delay, stock_active, counter, frame_number, expected) in enumerate((
+          (10_000_000, False, 0, 101, False),
+          (20_000_000, True, 1, 102, False),
+          (50_000_000, True, 2, 105, True),
+        )):
+          stamp = now + delay
+          incoming = [
+            packer.make_can_msg("ECMCruiseControl", 0, {"CruiseActive": int(stock_active)}),
+            packer.make_can_msg("ECMEngineStatus", 0, {"CruiseMainOn": 1}),
+            packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 4}),
+            TestBoltPedalMessages.sensor(packer, 0, (13 + sample) % 16),
+            (0x1E1, button_bytes(1, counter), 0),
+          ]
+          native.set_timer(stamp // 1000)
+          for address, data, bus in incoming:
+            native.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data))
+          ci.update([(stamp, incoming)])
+          self.assertEqual(ci.CS.bolt_pedal_stock_active, stock_active)
+          self.assertFalse(ci.CS.out.cruiseState.enabled)
+          controller.frame = frame_number
+          _, frames = controller.update(command.as_reader(), ci.CS, stamp)
+          cancel = [frame for frame in frames if frame[0] == 0x1E1]
+          self.assertEqual(cancel, [(0x1E1, button_bytes(6, 3), 0)] if expected else [])
+          if cancel:
+            self.assertTrue(native.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, cancel[0][1])))
+        native.set_timer((now + 400_000_000) // 1000)
+        self.assertFalse(native.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 3))))
+    for failure in ("main", "stock", "sensor", "can", "credit"):
+      with self.subTest(failure=failure):
+        ci, _ = self.stream(cp)
+        ci.update([(now, [(0x1E1, button_bytes(1, 3), 0)])])
+        if failure == "main":
+          ci.CS.bolt_pedal_main_ts_nanos = now - 300_000_001
+        elif failure == "stock":
+          ci.CS.bolt_pedal_stock_ts_nanos = now - 300_000_001
+        elif failure == "sensor":
+          ci.CS.pedal_sensor_healthy = False
+        elif failure == "credit":
+          ci.CS.conventional_cancel_credit.credit_ns = now - 100_000_001
+        else:
+          out = ci.CS.out.as_reader().as_builder()
+          out.canValid = False
+          ci.CS.out = out.as_reader()
+        controller = CarController(DBC[cp.carFingerprint], cp)
+        controller.frame = 100
+        _, frames = controller.update(command.as_reader(), ci.CS, now)
+        self.assertFalse(any(frame[0] == 0x1E1 for frame in frames))
 
   def test_identification_to_no_acc_pedal_parser(self):
     from opendbc.car.fingerprints import all_legacy_fingerprint_cars, eliminate_incompatible_cars
@@ -583,6 +676,8 @@ class TestBoltPaddleModes(unittest.TestCase):
           control.longActive = tick >= 250
           withdrawals = {576: 'gas', 586: 'brake', 596: 'regen', 606: 'gear', 616: 'main', 626: 'sensor', 636: 'stock'}
           override = next((value for start, value in withdrawals.items() if start <= tick < start + 4), None)
+          if override in ('brake', 'regen'):
+            control.enabled = control.longActive = False
           values = {
             'ECMEngineStatus': {'CruiseMainOn': int(override != 'main'), 'BrakePressed': int(override == 'brake')},
             'ECMPRDNL2': {'PRNDL2': 3 if override == 'gear' else 6},

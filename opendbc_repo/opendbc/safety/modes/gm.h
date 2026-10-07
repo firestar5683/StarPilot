@@ -133,6 +133,7 @@ static uint32_t gm_acc_pedal_dashboard_us = 0U;
 static bool gm_bolt_pedal_removed = false;
 static bool gm_bolt_removed_acc_seen = false;
 static bool gm_bolt_removed_gear_seen = false;
+static bool gm_bolt_present_cc_cancel = false;
 static bool gm_bolt_removed_acc_active = false;
 static uint32_t gm_bolt_removed_acc_us = 0U;
 static uint32_t gm_regen_gear_last_us = 0U;
@@ -223,7 +224,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
 
   gm_camera_pedal_rx(msg);
   if (msg->bus == 0U) {
-    if (gm_bolt_pedal_removed && (msg->addr == 0x3D1U)) {
+    if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && (msg->addr == 0x3D1U)) {
       gm_bolt_removed_acc_seen = GET_LEN(msg) == 8U;
       if (gm_bolt_removed_acc_seen) {
         gm_bolt_removed_acc_active = GET_BIT(msg, 39U);
@@ -290,7 +291,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       if (!gm_volt_cc_main || !gm_volt_cc_active) { controls_allowed = false; }
     }
 
-    if (gm_volt_camera_removed || (gm_bolt_pedal_removed && !gm_pedal_acc) ||
+    if (gm_volt_camera_removed || ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_pedal_acc) ||
         ((gm_camera_gateway || gm_camera_ascm || gm_camera_sdgm) && !gm_camera_pedal_long)) {
       const uint32_t now = microsecond_timer_get();
       if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) {
@@ -316,12 +317,12 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       } else if (msg_matches(msg, 0xC9U, 0U, 8U)) {
         gm_volt_removed_main = GET_BIT(msg, 29U);
         gm_volt_removed_main_us = now;
-        if (gm_bolt_pedal_removed && !gm_volt_removed_main) { gm_volt_removed_credit = false; }
-      } else if (gm_bolt_pedal_removed && (msg->addr == 0x3D1U) && (GET_LEN(msg) == 8U)) {
+        if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_volt_removed_main) { gm_volt_removed_credit = false; }
+      } else if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && (msg->addr == 0x3D1U) && (GET_LEN(msg) == 8U)) {
         gm_volt_removed_pcm = GET_BIT(msg, 39U);
         gm_volt_removed_pcm_us = now;
         if (!gm_volt_removed_pcm) { gm_volt_removed_credit = false; }
-      } else if (!gm_bolt_pedal_removed && (msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
+      } else if (!gm_bolt_pedal_removed && !gm_bolt_present_cc_cancel && (msg->addr == 0x1C4U) && (GET_LEN(msg) == 8U)) {
         gm_volt_removed_pcm = (msg->data[1] >> 5) != 0U;
         gm_volt_removed_pcm_us = now;
         if (!gm_volt_removed_pcm) { gm_volt_removed_credit = false; }
@@ -439,7 +440,7 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       gm_regen_gear_ready = ((msg->data[3] & 0xFU) == 6U) && ((msg->data[5] & 0x2U) == 0U);
       gm_pedal_forward_gear_ready = (((msg->data[3] & 0xFU) == 4U) || ((msg->data[3] & 0xFU) == 6U)) &&
                                     ((msg->data[5] & 0x2U) == 0U);
-      if (gm_bolt_pedal_removed) { gm_bolt_removed_gear_seen = true; }
+      if (gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) { gm_bolt_removed_gear_seen = true; }
       gm_regen_gear_last_us = microsecond_timer_get();
       gm_emit_paddle_after_stock(microsecond_timer_get(), 0x1F5U, 8U, &gm_gear_feed);
     }
@@ -780,11 +781,12 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (gm_bolt_pedal_removed && !gm_pedal_acc && (msg->addr == 0x1E1U)) {
+  if ((gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_pedal_acc && (msg->addr == 0x1E1U)) {
     const uint32_t now = microsecond_timer_get();
     const uint8_t counter = (gm_volt_removed_counter + 1U) % 4U;
     const uint16_t checksum = 0xFFU + (counter * 0x4EFU) - (5U << 4U);
     tx &= !safety_rx_checks_invalid && gm_pedal_sensor_current() && gm_bolt_removed_gear_seen &&
+          (!gm_bolt_present_cc_cancel || gm_pedal_forward_gear_ready) &&
           (safety_get_ts_elapsed(now, gm_regen_gear_last_us) <= 100000U) &&
           gm_volt_removed_main && gm_volt_removed_pcm && gm_bolt_removed_acc_seen && gm_bolt_removed_acc_active &&
           gm_volt_removed_credit && gm_volt_removed_button_seen &&
@@ -1302,6 +1304,7 @@ static safety_config gm_init(uint16_t safety_param) {
   gm_cc_cancel_sent = false;
   gm_cc_stock_button_counter = 0U;
   gm_cc_stock_button_last_us = 0U;
+  gm_bolt_present_cc_cancel = param == 0x9DU;
   gm_pedal_long = (gm_hw == GM_CAM) && GET_FLAG(param, GM_PARAM_PEDAL_LONG);
   gm_pedal_acc = gm_pedal_long && GET_FLAG(param, GM_PARAM_BOLT_ACC_PEDAL) && !gm_no_acc;
   gm_bolt_2017 = (gm_hw == GM_CAM) && GET_FLAG(param, GM_PARAM_BOLT_2017);
@@ -1404,7 +1407,7 @@ static safety_config gm_init(uint16_t safety_param) {
     for (uint8_t i = 0U; i < 8U; i++) { gm_extended_rx_checks[i] = gm_pedal_rx_template[i]; }
     ret.rx_checks = gm_extended_rx_checks;
     ret.rx_checks_len = 8;
-    if (gm_bolt_pedal_removed) {
+    if (gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) {
       static const RxCheck removed_acc_cruise = {.msg = {{0x3D1U, 0U, 8U, 10U, .ignore_checksum = true,
         .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}};
       gm_extended_rx_checks[8] = removed_acc_cruise;
@@ -1418,6 +1421,15 @@ static safety_config gm_init(uint16_t safety_param) {
       // Other pedal profiles retain their existing transmit list.
     }
   }
+  if (gm_bolt_present_cc_cancel) {
+    static const CanMsg GM_BOLT_PRESENT_CC_PEDAL_TX_MSGS[] = {
+      {0x180, 0, 4, .check_relay = true}, {0x200, 0, 6, .check_relay = false},
+      {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
+      {0x184, 2, 8, .check_relay = true}, {0x1E1, 0, 7, .check_relay = false},
+    };
+    SET_TX_MSGS(GM_BOLT_PRESENT_CC_PEDAL_TX_MSGS, ret);
+  }
+
   if (gm_bolt_pedal_removed) {
     static const CanMsg GM_BOLT_REMOVED_PEDAL_TX_MSGS[] = {
       {0x180, 0, 4, .check_relay = false}, {0x200, 0, 6, .check_relay = false},
