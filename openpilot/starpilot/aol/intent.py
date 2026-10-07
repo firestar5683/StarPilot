@@ -112,7 +112,8 @@ class AolProcessFaultContext:
     return False
 
 
-def disarming_fault(events, CS, *, temporary_ui_process_failure: bool = False) -> bool:
+def disarming_fault(events, CS, *, temporary_ui_process_failure: bool = False,
+                    temporary_selfdrive_lagging: bool = False) -> bool:
   """Temporary steering/known non-driving gears pause output, not driver intent."""
   if CS.steerFaultPermanent:
     return True
@@ -120,6 +121,8 @@ def disarming_fault(events, CS, *, temporary_ui_process_failure: bool = False) -
     if event.immediateDisable:
       return True
     if event.softDisable:
+      if event.name == log.OnroadEvent.EventName.selfdrivedLagging and temporary_selfdrive_lagging:
+        continue
       if event.name == log.OnroadEvent.EventName.processNotRunning and temporary_ui_process_failure:
         continue
       if event.name in (log.OnroadEvent.EventName.steerTempUnavailable, log.OnroadEvent.EventName.seatbeltNotLatched):

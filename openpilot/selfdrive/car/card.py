@@ -54,6 +54,7 @@ from openpilot.starpilot.aol.vehicle import create_intent as create_aol_intent, 
 from openpilot.starpilot.aol.wire import IntentState, encode_intent
 from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, IoniqMediaMapCache, WheelMapCache, Press, ioniq6_media_eligible
 from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
+from opendbc.car.gm.aol import native_bootstrap_supported, qualified_gm
 from opendbc.car.gm.ordinary_cc import control_transport_required as gm_cc_transport_required
 from openpilot.starpilot.longitudinal.toyota_output_policy import CLOCK_PAIR_MAX_SKEW_NS, clock_pair_ns
 from openpilot.starpilot.longitudinal.cruise_intervals import read_cruise_intervals
@@ -629,7 +630,8 @@ class Car:
 
   def aol_disarming_fault(self, CS, event_ns: int, now_ns: int) -> bool:
     return disarming_fault(self.sm['onroadEvents'], CS,
-      temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns))
+      temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
+      temporary_selfdrive_lagging=qualified_gm(self.CP))
 
   def observe_aol_calibration(self, CS, now_ns: int, standard_enabled: bool) -> None:
     calibration_events = None
@@ -978,8 +980,21 @@ class Car:
     self.volt_cc_now_mono_ns = now_ns
     return True
 
-  def controls_update(self, CS: car.CarState, CC: car.CarControl):
+  def controls_update(self, CS: car.CarState, CC: car.CarControl, *, initialize_only=False):
     """control update loop, driven by carControl"""
+
+    if initialize_only:
+      now_ns = time.monotonic_ns()
+      source_ns = int(self.sm.logMonoTime['carControl'])
+      receipt_ns = int(self.sm.recv_time['carControl'] * 1e9)
+      # Disabled torque/accel are commands; inactive curvature is only telemetry.
+      if (not native_bootstrap_supported(self.CP) or self.vehicle_startup.owner is not None or
+          self.volt_cc_selected or not CS.canValid or CS.canTimeout or
+          not (self.sm.seen['carControl'] and self.sm.valid['carControl'] and self.sm.alive['carControl']) or
+          not (0 < source_ns <= now_ns and now_ns - source_ns <= 150_000_000 and
+               0 < receipt_ns <= now_ns and now_ns - receipt_ns <= 150_000_000) or
+          CC.enabled or CC.latActive or CC.longActive or CC.actuators.torque != 0.0 or CC.actuators.accel != 0.0):
+        return
 
     if getattr(self, 'volt_cc_selected', False):
       if not self.volt_cc_control_current():
@@ -1045,6 +1060,9 @@ class Car:
       self.params.put_bool("ControlsReady", True)
       self.ci_initialized = True
 
+    if initialize_only:
+      return
+
     self.vehicle_startup.check()
     now_ns = time.monotonic_ns()
     control_current = bool(self.sm.seen['carControl'] and self.sm.alive['carControl'] and self.sm.valid['carControl'] and
@@ -1097,6 +1115,10 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
+    elif (not self.ci_initialized and self.sm.seen['onroadEvents'] and
+          any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
+          native_bootstrap_supported(self.CP)):
+      self.controls_update(CS, self.sm['carControl'], initialize_only=True)
 
     self.initialized_prev = initialized
     self.CS_prev = CS

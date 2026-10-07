@@ -27,6 +27,7 @@ from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState, EV
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
+from opendbc.car.gm.aol import native_bootstrap_supported
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
@@ -600,6 +601,10 @@ class SelfdriveD:
 
     if not self.initialized:
       all_valid = CS.canValid and self.sm.all_checks()
+      if self.axis_transport_required and native_bootstrap_supported(self.CP):
+        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+        all_valid = all_valid and current_native(self.sm, self.CP, now_ns=now_ns,
+                                                axis_session_id=self.aol_session_id) is not None
       timed_out = self.sm.frame * DT_CTRL > 6.
       if all_valid or timed_out or (SIMULATION and not REPLAY):
         available_streams = VisionIpcClient.available_streams("camerad", block=False)

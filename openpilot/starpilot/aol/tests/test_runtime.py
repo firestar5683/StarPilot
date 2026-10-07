@@ -636,6 +636,200 @@ class IpcAxisContractTests(unittest.TestCase):
       self.assertTrue(sd.aol_axis_decision.lateral_active)
       self.assertNotIn(log.OnroadEvent.EventName.steerTempUnavailableSilent, sd.events.names)
 
+  def test_native_bootstrap_scope_is_exact_present_bolt_pedal(self):
+    from opendbc.car.gm.aol import native_bootstrap_supported
+    from opendbc.car.gm.tests.test_bolt_cc import params as bolt_params
+    from opendbc.car.gm.values import CAR
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+
+    for identity in (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
+                     CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+      with self.subTest(identity=identity):
+        cp = bolt_params(identity, present=True)
+        self.assertTrue(native_bootstrap_supported(cp))
+        self.assertFalse(native_bootstrap_supported(bolt_params(identity, present=True, removed=True)))
+        disabled = cp.as_reader().as_builder()
+        VehicleStartupPreferences(disable_bolt_long=True).prepare(disabled)
+        self.assertEqual(native_bootstrap_supported(disabled), identity != CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+        for field, value in (('passive', True), ('notCar', True), ('dashcamOnly', True),
+                             ('carFingerprint', CAR.CHEVROLET_VOLT_CC)):
+          denied = cp.as_reader().as_builder()
+          setattr(denied, field, value)
+          self.assertFalse(native_bootstrap_supported(denied))
+
+  def test_initialization_waits_for_current_matching_native_receipt(self):
+    from dataclasses import replace
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import CAR
+
+    from openpilot.starpilot.aol.tests.test_gm import TestGmAol
+
+    with OpenpilotPrefix(), mock.patch.dict('os.environ', {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', True, block=True)
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0].update({0x201: 6, 0x142: 8})
+      fingerprint[2].update({0x320: 8, 0x180: 4})
+      factory_cp = CarInterface.get_params(CAR.CHEVROLET_BOLT_CC_2018_2021, fingerprint, [], True, False, False)
+      selected = TestGmAol.card(factory_cp, settings)
+      cp = selected.CP.as_reader()
+      self.assertFalse(settings.get_bool('ControlsReady'))
+      self.assertTrue(settings.get_bool('FirmwareQueryDone'))
+      now = 4_000_000_000
+      cc = car.CarControl.new_message()
+      cc.actuators.curvature = 0.01  # Real inactive Controls telemetry need not be zero.
+      boot_events = Events()
+      boot_events.add(log.OnroadEvent.EventName.selfdriveInitializing)
+
+      class BootstrapSM(dict):
+        seen = {'onroadEvents': True, 'carControl': True}
+        valid = {'carControl': True}
+        alive = {'carControl': True}
+        logMonoTime = {'carControl': now}
+        recv_time = {'carControl': now / 1e9}
+
+        def all_alive(self, _services):
+          return self.alive['carControl']
+
+      boot_sm = BootstrapSM(onroadEvents=boot_events.to_msg(), carControl=cc)
+      physical = car_state()
+      with (mock.patch.object(selected, 'sm', boot_sm),
+            mock.patch.object(selected, 'state_update', return_value=(physical, None)),
+            mock.patch.object(selected, 'state_publish'),
+            mock.patch.object(selected.CI, 'init', wraps=selected.CI.init) as initialize,
+            mock.patch.object(selected.CI, 'apply') as apply,
+            mock.patch.object(selected, 'publish_sendcan') as sendcan,
+            mock.patch('openpilot.selfdrive.car.card.time.monotonic_ns', return_value=now)):
+        for invalid in ('unseen', 'invalid', 'dead', 'old_source', 'future_source', 'old_receipt', 'future_receipt',
+                        'enabled', 'lateral', 'longitudinal', 'torque', 'accel', 'nan_torque', 'bad_can', 'can_timeout'):
+          with self.subTest(bootstrap_invalid=invalid):
+            boot_sm.seen['carControl'] = invalid != 'unseen'
+            boot_sm.valid['carControl'] = invalid != 'invalid'
+            boot_sm.alive['carControl'] = invalid != 'dead'
+            boot_sm.logMonoTime['carControl'] = now - 150_000_001 if invalid == 'old_source' else now + 1 if invalid == 'future_source' else now
+            boot_sm.recv_time['carControl'] = (now - 150_000_001 if invalid == 'old_receipt' else now + 1000 if invalid == 'future_receipt' else now) / 1e9
+            cc.enabled, cc.latActive, cc.longActive = invalid == 'enabled', invalid == 'lateral', invalid == 'longitudinal'
+            cc.actuators.torque = float('nan') if invalid == 'nan_torque' else 0.1 if invalid == 'torque' else 0.0
+            cc.actuators.accel = 0.1 if invalid == 'accel' else 0.0
+            physical.canValid, physical.canTimeout = invalid != 'bad_can', invalid == 'can_timeout'
+            selected.step()
+            self.assertFalse(settings.get_bool('ControlsReady'))
+            self.assertFalse(selected.ci_initialized)
+            initialize.assert_not_called()
+            apply.assert_not_called()
+            sendcan.assert_not_called()
+        physical.canValid, physical.canTimeout = True, False
+        cc.enabled = cc.latActive = cc.longActive = False
+        cc.actuators.torque = cc.actuators.accel = 0.0
+        for excluded in ('passive', 'other_startup_owner', 'volt_transport'):
+          with self.subTest(bootstrap_excluded=excluded), mock.patch.object(selected, 'startup_panda_configured', return_value=False):
+            selected.CP.passive = excluded == 'passive'
+            selected.vehicle_startup.owner = mock.Mock() if excluded == 'other_startup_owner' else None
+            selected.volt_cc_selected = excluded == 'volt_transport'
+            selected.step()
+            self.assertFalse(settings.get_bool('ControlsReady'))
+            self.assertFalse(selected.ci_initialized)
+            initialize.assert_not_called()
+            apply.assert_not_called()
+            sendcan.assert_not_called()
+        selected.CP.passive = False
+        selected.vehicle_startup.owner = None
+        selected.volt_cc_selected = False
+        selected.step()
+        self.assertTrue(selected.ci_initialized)
+        self.assertTrue(settings.get_bool('ControlsReady', block=True))
+        initialize.assert_called_once()
+        apply.assert_not_called()
+        sendcan.assert_not_called()
+        selected.step()
+        initialize.assert_called_once()
+        apply.assert_not_called()
+        sendcan.assert_not_called()
+      # Actual Card wrote both prerequisites consumed by PandaSafety::fetchCarParams.
+      with car.CarParams.from_bytes(settings.get('CarParams')) as configured_cp:
+        self.assertEqual(configured_cp.safetyConfigs[0].safetyParam, cp.safetyConfigs[0].safetyParam)
+        self.assertEqual(configured_cp.alternativeExperience, cp.alternativeExperience)
+    self.assertEqual((cp.safetyConfigs[0].safetyParam, cp.alternativeExperience, cp.flags), (0x9D, 32, 17))
+    self.assertTrue(cp.openpilotLongitudinalControl)
+    self.assertFalse(cp.pcmCruise)
+    now = 4_000_000_000
+    native = SafetyState(1, True, now, now + 200_000_000, int(cp.safetyConfigs[0].safetyModel.raw),
+                         int(cp.safetyConfigs[0].safetyParam), False, False, False, False, 'panda', 'drive-session')
+
+    class SM(dict):
+      frame = 1
+      valid = {'aolSafetyWire': True, 'aolIntentWire': False}
+      alive = {'aolSafetyWire': True, 'aolIntentWire': False}
+      seen = {'aolSafetyWire': False, 'aolIntentWire': False}
+      logMonoTime = {'aolSafetyWire': now}
+      freq_ok = {'aolSafetyWire': True}
+
+      def update(self, _timeout):
+        pass
+
+      def all_checks(self, _services=None):
+        return True
+
+    for aol in (True, False):
+      with self.subTest(aol=aol):
+        sd = SelfdriveD.__new__(SelfdriveD)
+        sd.CP = cp
+        sm = SM(aolSafetyWire=b'', pandaStates=[],
+                driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
+                extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
+        sm.ignore_alive, sm.ignore_valid = [], []
+        sm.seen = dict(SM.seen)
+        self.enterContext(mock.patch.object(sd, 'sm', sm, create=True))
+        sd.car_state_sock = object()
+        sd.CS_prev = car_state()
+        sd.aol_car_state_log_ns = 0
+        sd.conditional_car_state_valid = False
+        sd.initialized = sd.enabled = sd.active = False
+        sd.aol_replay, sd.ordinary_axis_ack_required = aol, not aol
+        sd.axis_transport_required = True
+        sd.aol_session_id = 'drive-session'
+        sd.aol_axis_decision = AxisDecision()
+        sd.aol_dm_lateral_inhibit = False
+        sd.aol_settings = None
+        sd.nostalgia_paddle_cancel = False
+        sd.events, sd.state_machine = Events(), StateMachine()
+        sd.update_alerts = mock.Mock()
+        sd.update_conditional_mode = mock.Mock()
+        sd.publish_selfdriveState = mock.Mock()
+        self.enterContext(mock.patch.object(sd, 'update_events', lambda _cs, sd=sd: sd.events.clear()))
+        message = messaging.new_message('carState')
+        message.valid, message.logMonoTime, message.carState = True, now, sd.CS_prev
+        with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=message),
+              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now),
+              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False),
+              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.SIMULATION', False),
+              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.VisionIpcClient',
+                         SimpleNamespace(available_streams=lambda *_args, **_kwargs: [])),
+              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.cloudlog.event')):
+          for receipt in (None, replace(native, observedMonoTime=now - 250_000_000, validUntilMonoTime=now - 1),
+                          replace(native, axisSessionId='old-session'), replace(native, safetyParam=native.safetyParam + 1)):
+            sm.seen['aolSafetyWire'] = receipt is not None
+            sm['aolSafetyWire'] = encode_safety(receipt) if receipt else b''
+            sd.step()  # Actual data_sample and strict current_native decoding remain in this path.
+            self.assertFalse(sd.initialized)
+            self.assertNotIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+            self.assertEqual(sd.aol_axis_decision.mode, 'off')
+          sm['aolSafetyWire'] = encode_safety(native)
+          sd.step()
+          self.assertTrue(sd.initialized)
+          self.assertNotIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+          self.assertEqual(sd.aol_axis_decision.mode, 'off')  # Zero-axis native acknowledgment grants no actuation.
+          sm.seen['aolSafetyWire'] = False
+          sd.step()
+          self.assertIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+          self.assertTrue(sd.events.contains(ET.IMMEDIATE_DISABLE))
+          sd.initialized = False
+          sm.frame = 601
+          sd.step()
+          self.assertTrue(sd.initialized)  # Existing six-second timeout still exposes a genuine missing receipt.
+          self.assertIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+
   def test_native_receipt_gates_engagement_and_disables_on_loss(self):
     class SM:
       def __getitem__(self, service):
@@ -812,8 +1006,10 @@ class UiProcessIntentTests(unittest.TestCase):
   def make_card(self):
     from openpilot.selfdrive.car.card import Car
     from openpilot.starpilot.aol.intent import AolProcessFaultContext
+    from openpilot.starpilot.aol.tests.test_ioniq6_stock_repair import stock
 
     card = Car.__new__(Car)
+    card.CP = stock(True)
     card.aol_process_fault_context = AolProcessFaultContext()
     class SM:
       seen = {'managerState': True}
@@ -846,6 +1042,7 @@ class UiProcessIntentTests(unittest.TestCase):
     cp = stock(True)
     cp.openpilotLongitudinalControl, cp.pcmCruise = True, False
     cp.safetyConfigs[0].safetyParam = 0x8895
+    card.CP = cp
     owner = create_intent(cp, AolSettings(True, 0., 9, 0, (0, 0, 0), (0, 0, 0)))
     state = car_state()
     state.cruiseState.available = True
