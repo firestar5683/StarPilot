@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import customization_metadata, WHEEL_SIZES
+from openpilot.starpilot.ui.onroad_customization import customization_metadata, MODE_WIDGET, WHEEL_SIZES
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
 MAX_BYTES = 16384
@@ -44,6 +44,7 @@ def layout_metadata_for_viewport(viewport):
   profile.pop('inputZonePriority', None)
   widgets = profile['widgets']
   widgets['current_speed']['default']['x'] += (width - 1860) / 2
+  widgets[MODE_WIDGET]['default']['x'] += (width - 1860) / 2
   widgets['steering_wheel']['default']['x'] += width - 1860
   widgets['driver_monitor']['default']['y'] += height - 1080
   x, y, w, h = maximum_footprint(30, 30, width - 60, height - 60, width)
@@ -74,12 +75,14 @@ def validate_layout_for_viewport(value, viewport):
   if (type(value) is not dict or set(value) != {'version', 'canvas', 'widgets'} or
       type(value['version']) is not int or value['version'] != 1 or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
-      type(value['widgets']) is not dict or set(value['widgets']) != set(metadata['widgets'])):
+      type(value['widgets']) is not dict or
+      set(value['widgets']) not in (set(metadata['widgets']), set(metadata['widgets']) - {MODE_WIDGET})):
     raise ValueError('Projection layout does not match saved screen')
   result = copy.deepcopy(value)
+  result['widgets'].setdefault(MODE_WIDGET, dict(metadata['widgets'][MODE_WIDGET]['default']))
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
-    placement = value['widgets'][key]
+    placement = result['widgets'][key]
     fields = {'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set())
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
@@ -125,6 +128,7 @@ def projection_customization(document, base_customization):
   from openpilot.starpilot.ui.onroad_customization import PROFILES
   width, height = document['canvas']['width'], document['canvas']['height']
   shifts = {'current_speed': ((width - 1860) / 2, 0),
+            MODE_WIDGET: ((width - 1860) / 2, 0),
             'steering_wheel': (width - 1860, 0), 'driver_monitor': (0, height - 1080)}
   native = PROFILES['large']['widgets']
   assert isinstance(native, dict)

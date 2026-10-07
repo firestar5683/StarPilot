@@ -69,6 +69,19 @@ class TestProjectionLayout(unittest.TestCase):
     self.assertEqual(converted['layouts']['compact'], base['layouts']['compact'])
     self.assertEqual(base, before)
 
+  def test_new_mode_widget_preserves_saved_projection_layout(self):
+    key = 'driving_mode_descriptions'
+    document = default_layout(SCREEN)
+    self.assertFalse(document['widgets'].pop(key)['enabled'])
+    document['widgets']['current_speed'].update(x=300, y=400, enabled=False)
+    migrated = validate_layout(document, SCREEN)
+    self.assertFalse(migrated['widgets'][key]['enabled'])
+    self.assertEqual({name: value for name, value in migrated['widgets'].items() if name != key}, document['widgets'])
+    migrated['widgets'][key].update(enabled=True, x=500, y=200)
+    self.assertEqual(validate_layout(migrated, SCREEN), migrated)
+    converted = projection_customization(migrated, default_document())
+    self.assertEqual(converted['layouts']['large'][key]['x'] + (migrated['canvas']['width'] - 1860) / 2, 500)
+
   def test_existing_exact_commit_adapter_checks_revision_and_authority(self):
     with tempfile.TemporaryDirectory() as directory:
       source = ProjectionLayoutSource(Path(directory) / 'layouts/document.json')
