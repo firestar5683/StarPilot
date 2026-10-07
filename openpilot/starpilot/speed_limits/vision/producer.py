@@ -11,9 +11,11 @@ from openpilot.starpilot.speed_limits.vision.model import VisionModelCore, cv2
 from openpilot.starpilot.speed_limits.vision.observation import MODEL_ID, MAX_FRAME_AGE_NS, MAX_PAIR_SKEW_NS, clock_pair_ns
 
 UNAVAILABLE_RETRY_SECONDS = 1.0
+INFERENCE_INTERVAL_NS = 166_666_667
+BUSY_INFERENCE_INTERVAL_NS = 1_500_000_000
 
 
-def _camera_frame(client) -> tuple[np.ndarray, int, int] | None:
+def _camera_buffer(client):
   buffer = client.recv(100)
   if buffer is None:
     return None
@@ -23,9 +25,14 @@ def _camera_frame(client) -> tuple[np.ndarray, int, int] | None:
   if (stride < width or width <= 0 or height <= 0 or width % 2 or height % 2 or
       uv_offset < stride * height or uv_offset % stride):
     return None
-  # Copy before dropping VisionBuf: no old camerad allocation stays pinned.
+  return buffer, eof_boot_ns, frame_id, stride, width, height, uv_offset
+
+
+def _convert_camera_buffer(info) -> tuple[np.ndarray, int, int] | None:
+  buffer, eof_boot_ns, frame_id, stride, width, height, uv_offset = info
+  # VisionBuf borrows client-owned shared memory. Copy before another receive
+  # or reconnect; only the owned array is used for conversion and inference.
   raw = np.frombuffer(buffer.data, dtype=np.uint8).copy()
-  del buffer
   required = uv_offset + stride * (height // 2)
   if raw.size < required:
     return None
@@ -34,6 +41,11 @@ def _camera_frame(client) -> tuple[np.ndarray, int, int] | None:
   nv12 = np.concatenate((y, uv), axis=0)
   frame = cv2.cvtColor(nv12, cv2.COLOR_YUV2BGR_NV12)
   return frame, eof_boot_ns, frame_id
+
+
+def _camera_frame(client) -> tuple[np.ndarray, int, int] | None:
+  info = _camera_buffer(client)
+  return _convert_camera_buffer(info) if info is not None else None
 
 
 def _send(pm, *, session: str, status: str, stream: str, observed_ns: int = 0,
@@ -74,11 +86,12 @@ def main() -> None:
   last_unavailable = 0.0
   try:
     if cv2 is not None:
-      cv2.setNumThreads(2)
+      cv2.setNumThreads(1)
     core = VisionModelCore(is_metric=Params().get_bool('IsMetric'))
   except Exception as error:
     cloudlog.error('vision SLC model unavailable: %s', error)
   last_inference_ns = 0
+  inference_interval_ns = INFERENCE_INTERVAL_NS
   last_clock_offset_ns = None
   while True:
     if core is None:
@@ -113,6 +126,7 @@ def main() -> None:
         core.reset()
         session = uuid.uuid4().hex
         last_inference_ns = 0
+        inference_interval_ns = INFERENCE_INTERVAL_NS
         last_clock_offset_ns = None
         client.connect(False)
         if not client.is_connected():
@@ -120,7 +134,26 @@ def main() -> None:
           client = None
           time.sleep(0.1)
           continue
-      frame_info = _camera_frame(client)
+      buffer_info = _camera_buffer(client)
+      if buffer_info is None:
+        continue
+      eof_boot_ns, frame_id = buffer_info[1:3]
+      admission_pair = clock_pair_ns()
+      if (admission_pair is None or eof_boot_ns <= 0 or
+          not 0 <= admission_pair[1] - eof_boot_ns <= MAX_FRAME_AGE_NS):
+        del buffer_info
+        _send(pm, session=session, status='stale', stream=stream, eof_boot_ns=eof_boot_ns, frame_id=frame_id)
+        continue
+      admission_offset_ns = admission_pair[1] - admission_pair[0]
+      offset_stable = (last_clock_offset_ns is None or
+                       abs(admission_offset_ns - last_clock_offset_ns) <= MAX_PAIR_SKEW_NS)
+      if offset_stable and admission_pair[0] - last_inference_ns < inference_interval_ns:
+        del buffer_info
+        continue
+      try:
+        frame_info = _convert_camera_buffer(buffer_info)
+      finally:
+        del buffer_info
       if frame_info is None:
         continue
       frame, eof_boot_ns, frame_id = frame_info
@@ -133,8 +166,9 @@ def main() -> None:
         core.reset()
         session = uuid.uuid4().hex
         last_inference_ns = 0
+        inference_interval_ns = INFERENCE_INTERVAL_NS
       last_clock_offset_ns = offset_ns
-      if pair[0] - last_inference_ns < 166_666_667:
+      if pair[0] - last_inference_ns < inference_interval_ns:
         continue
       last_inference_ns = pair[0]
       try:
@@ -146,6 +180,13 @@ def main() -> None:
         core = None
         continue
       observed_pair = clock_pair_ns()
+      if observed_pair is not None:
+        processing_ns = observed_pair[0] - last_inference_ns
+        if processing_ns >= 0:
+          # Original Dom processing-cost cooldown: keep slow CPU inference from
+          # immediately starting another pass, including after stale rejection.
+          inference_interval_ns = max(INFERENCE_INTERVAL_NS,
+                                      min(BUSY_INFERENCE_INTERVAL_NS, processing_ns * 5 // 2))
       if (observed_pair is None or
           abs((observed_pair[1] - observed_pair[0]) - offset_ns) > MAX_PAIR_SKEW_NS or
           not 0 <= observed_pair[1] - eof_boot_ns <= MAX_FRAME_AGE_NS):
