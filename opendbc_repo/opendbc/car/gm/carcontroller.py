@@ -262,6 +262,7 @@ class CarController(CarControllerBase):
     self.long_pitch = True
     self.bolt_removed_cancel_credit_used = 0
     self.bolt_pedal_removed = is_bolt_pedal_removed_profile(CP) or is_bolt_pedal_removed_profile(CP, stock_only=True)
+    self.bolt_present_no_acc_stock = is_bolt_present_no_acc_pedal_profile(CP, stock_only=True)
     self.gm_acc_tune_input = None
     self.gm_acc_tune = False
     self.start_time = 0.
@@ -1056,7 +1057,7 @@ class CarController(CarControllerBase):
         self.last_button_frame = self.frame
         self.volt_removed_cancel_credit_used = credit
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
-    elif (not self.bolt_pedal_removed and self.volt_cc_pedal_profile is None and not self.volt_cc_profile and
+    elif (not self.bolt_pedal_removed and not self.bolt_present_no_acc_stock and self.volt_cc_pedal_profile is None and not self.volt_cc_profile and
           self.hybrid_profile is None and not self.ordinary_cc_profile and not self.bolt_cc_profile and
           not self.volt_gateway_profile and not self.silverado_cc_pedal_profile):
       # While car is braking, cancel button causes ECM to enter a soft disable state with a fault status.
@@ -1075,10 +1076,17 @@ class CarController(CarControllerBase):
                         else CanBus.CAMERA)
           can_sends.append(gmcan.create_buttons(self.packer_pt, cancel_bus, CS.buttons_counter, CruiseButtons.CANCEL))
 
-    if self.bolt_pedal_removed and not self.CP.openpilotLongitudinalControl:
+    if (self.bolt_pedal_removed or self.bolt_present_no_acc_stock) and not self.CP.openpilotLongitudinalControl:
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
       credit = CS.conventional_cancel_credit
-      if (self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and stock_steer_ready and
+      stock_cancel_ready = stock_steer_ready
+      if self.bolt_present_no_acc_stock:
+        stock_cancel_ready = (CS.out.canValid and not CS.out.canTimeout and CS.pedal_sensor_healthy and
+                              0 < CS.pedal_sensor_ts_nanos <= now_nanos <= CS.pedal_sensor_ts_nanos + PEDAL_SENSOR_TIMEOUT_NS and
+                              bolt_acc_pedal_dashboard_drive_ready(CS, now_nanos) and CS.out.cruiseState.available and
+                              CS.bolt_pedal_stock_active and 0 < CS.bolt_pedal_stock_ts_nanos <= now_nanos and
+                              now_nanos - CS.bolt_pedal_stock_ts_nanos <= STOCK_ACC_STATUS_TIMEOUT_NS)
+      if (self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES and stock_cancel_ready and
           (self.frame - self.last_button_frame) * DT_CTRL > .04 and
           credit.available(now_nanos, self.bolt_removed_cancel_credit_used) and
           0 <= now_nanos - credit.credit_ns <= 100_000_000):

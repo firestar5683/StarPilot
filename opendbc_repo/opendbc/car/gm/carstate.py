@@ -101,7 +101,7 @@ class CarState(CarStateBase):
     self.volt_cc_pedal_profile = volt_cc_pedal_profile(CP)
     self.volt_cc_pedal_sources = ()
     self.conventional_pedal_sources = ()
-    no_acc_pedal_cancel = (is_bolt_present_no_acc_pedal_profile(CP) or
+    no_acc_pedal_cancel = (is_bolt_present_no_acc_pedal_profile(CP) or is_bolt_present_no_acc_pedal_profile(CP, stock_only=True) or
                           CP.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_removed_profile(CP))
     self.conventional_cancel_credit = CancelCredit(neutral_interval_ns=100_000_000) if no_acc_pedal_cancel else CancelCredit()
     self.silverado_pedal_sources = ()
@@ -141,8 +141,10 @@ class CarState(CarStateBase):
       self.bolt_pedal_removed_sources = tuple((pt_cp.ts_nanos[name][signal], limit) for name, signal, limit in fields)
       self.bolt_pedal_removed_stock_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
       self.bolt_pedal_removed_stock_active = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])
-    if is_bolt_pedal_profile(self.CP):
-      self.bolt_pedal_gear_ts_nanos = (self.conventional_cancel_credit.gear_ns if is_bolt_present_no_acc_pedal_profile(self.CP) else
+    present_no_acc_pedal = (is_bolt_present_no_acc_pedal_profile(self.CP) or
+                            is_bolt_present_no_acc_pedal_profile(self.CP, stock_only=True))
+    if is_bolt_pedal_profile(self.CP) or present_no_acc_pedal:
+      self.bolt_pedal_gear_ts_nanos = (self.conventional_cancel_credit.gear_ns if present_no_acc_pedal else
                                      pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"])
       self.bolt_pedal_main_ts_nanos = pt_cp.ts_nanos["ECMEngineStatus"]["CruiseMainOn"]
 
@@ -510,7 +512,7 @@ class CarState(CarStateBase):
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
     if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and self.CP.flags & GMFlags.PEDAL_LONG.value:
       self.stock_acc_status_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
-    if is_bolt_present_no_acc_pedal_profile(self.CP):
+    if present_no_acc_pedal:
       self.bolt_pedal_stock_active = bool(pt_cp.vl["ECMCruiseControl"]["CruiseActive"])
       self.bolt_pedal_stock_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
     if self.CP.carFingerprint in NO_ACC_BOLT_CAR and not self.bolt_cc_profile:

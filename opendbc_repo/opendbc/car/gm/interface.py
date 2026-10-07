@@ -50,7 +50,7 @@ class CarInterface(CarInterfaceBase):
       self.CS.conventional_cancel_credit.observe(
         can_packets, clear_on_main_off=True,
         clear_on_driver_override=is_bolt_pedal_removed_profile(self.CP, stock_only=True))
-    if is_bolt_present_no_acc_pedal_profile(self.CP):
+    if (is_bolt_present_no_acc_pedal_profile(self.CP) or is_bolt_present_no_acc_pedal_profile(self.CP, stock_only=True)):
       self.CS.conventional_cancel_credit.observe(can_packets, clear_on_main_off=True, observe_gear=True)
     if volt_cc_pedal_profile(self.CP) is not None:
       self.CS.conventional_cancel_credit.observe(can_packets)
