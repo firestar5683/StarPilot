@@ -1,5 +1,7 @@
 #pragma once
 
+static void gm_cruise_status_clear(void);
+
 #define GM_ALT_EXP_ALWAYS_ON_LATERAL 32U
 #define GM_AOL_MAIN_TIMEOUT_US 300000U
 
@@ -50,6 +52,7 @@ static uint8_t gm_aol_permission_mask(void) {
 }
 
 static void gm_aol_rx_invalid(void) {
+  gm_cruise_status_clear();
   gm_aol_main_seen = false;
   gm_aol_gear_seen = false;
   aol_set_host_request(0U);

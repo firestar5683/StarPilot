@@ -230,21 +230,29 @@ static safety_config gm_bolt_cc_init(uint16_t word) {
     gm_aol_stock_only = gm_bolt_cc_stock_only || (word == 16U) || (word == 0xC162U);
     gm_aol_stock_gateway = word == 16U;
   }
+  gm_cruise_status_reset(word);
   return ret;
 }
 
 static void gm_bolt_cc_rx(const CANPacket_t *msg) {
-  if (gm_hybrid_selected) {
-    gm_hybrid_rx(msg);
-  } else if (gm_bolt_cc_selected) {
-    gm_bolt_cc_profile_rx(msg);
-  } else {
-    gm_rx_hook(msg);
+  gm_cruise_status_prune();
+  const bool ignore_status = (gm_cruise_status_bolt || gm_cruise_status_hybrid) && (msg->addr == 0x3D1U) &&
+                             (msg->returned || msg->rejected);
+  if (!ignore_status) {
+    if (gm_hybrid_selected) {
+      gm_hybrid_rx(msg);
+    } else if (gm_bolt_cc_selected) {
+      gm_bolt_cc_profile_rx(msg);
+    } else {
+      gm_rx_hook(msg);
+    }
+    gm_aol_observe(msg);
+    gm_cruise_status_observe(msg);
   }
-  gm_aol_observe(msg);
 }
 
 static void gm_bolt_cc_optional_rx(const CANPacket_t *msg) {
+  gm_cruise_status_prune();
   if (gm_hybrid_selected) {
     gm_hybrid_rx(msg);
   } else {
@@ -253,15 +261,19 @@ static void gm_bolt_cc_optional_rx(const CANPacket_t *msg) {
       gm_bolt_cc_profile_rx(msg);
     }
   }
+  gm_cruise_status_observe(msg);
 }
 
 static bool gm_bolt_cc_tx(const CANPacket_t *msg) {
-  return !gm_hybrid_rejected && (gm_hybrid_selected ? gm_hybrid_tx(msg) : (gm_bolt_cc_selected ? gm_bolt_cc_profile_tx(msg) : gm_tx_hook(msg)));
+  gm_cruise_status_prune();
+  return !gm_hybrid_rejected &&
+         ((msg->addr == 0x3D1U) ? gm_cruise_status_tx(msg) :
+          (gm_hybrid_selected ? gm_hybrid_tx(msg) : (gm_bolt_cc_selected ? gm_bolt_cc_profile_tx(msg) : gm_tx_hook(msg))));
 }
 
 static bool gm_bolt_cc_fwd(int bus, int addr) {
   bool block;
   if (gm_hybrid_selected) { block = ((bus == 2) && (addr == 0x180)) || ((bus == 0) && (addr == 0x184)); }
   else { block = gm_bolt_cc_selected ? gm_bolt_cc_profile_fwd(bus, addr) : gm_fwd_hook(bus, addr); }
-  return block;
+  return block || gm_cruise_status_block(bus, addr);
 }

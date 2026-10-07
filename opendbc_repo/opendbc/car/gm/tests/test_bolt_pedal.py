@@ -206,7 +206,7 @@ class TestBoltPedalIdentity(unittest.TestCase):
           if unavailable == "missing":
             del cs.bolt_pedal_standstill_ts_nanos
           _, messages = controller.update(control.as_reader(), cs, 1_000_000_000)
-          self.assertEqual(messages[0][0], 0x200)
+          self.assertEqual([message[0] for message in messages if message[0] == 0x200], [0x200])
           if unavailable in (None, "untuned"):
             self.assertAlmostEqual(controller.apply_gas, 18. / 255.)
           else:
@@ -350,7 +350,7 @@ class TestBoltPedalMessages(unittest.TestCase):
                              loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
                              buttons_counter=0)
         _, messages = controller.update(control.as_reader(), cs, 1_000_000_000)
-        expected = [0x200, 0x1F5, 0xBD]
+        expected = ([0x3D1] if candidate in NO_ACC_BOLT_CAR else []) + [0x200, 0x1F5, 0xBD]
         if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
           expected.append(0x315)
         self.assertEqual([m[0] for m in messages], expected)
@@ -367,9 +367,11 @@ class TestBoltPedalMessages(unittest.TestCase):
         controller.frame = 12
         cs.pedal_sensor_healthy = False
         _, messages = controller.update(control.as_reader(), cs, 1_000_000_000)
-        self.assertEqual(messages[0][1][0:4], b"\x00" * 4)
-        self.assertEqual(messages[1][1], b"\x0c\x0c\x00\x06\x00\x00\x01\x00")
-        self.assertEqual(messages[2][1], b"\x00" * 7)
+        self.assertEqual([m[0] for m in messages], expected)
+        payloads = {message[0]: message[1] for message in messages}
+        self.assertEqual(payloads[0x200][0:4], b"\x00" * 4)
+        self.assertEqual(payloads[0x1F5], b"\x0c\x0c\x00\x06\x00\x00\x01\x00")
+        self.assertEqual(payloads[0xBD], b"\x00" * 7)
         self.assertEqual(controller.pedal_steady, 0.)
 
         if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
@@ -978,7 +980,15 @@ class TestBoltPaddleModes(unittest.TestCase):
           for frame in sorted(frames, key=lambda frame: frame[0] in (0x1F5, 0xBD)):
             if frame[2] != 128:
               safety.safety_rx_hook(recorder.packet(frame))
-          recorded = recorder.recorded()
+          all_recorded = recorder.recorded()
+          statuses = [packet for packet in all_recorded if packet[0] == 0x3D1]
+          recorded = [packet for packet in all_recorded if packet[0] != 0x3D1]
+          for address, bus, payload in statuses:
+            self.assertIn(candidate, NO_ACC_BOLT_CAR)
+            self.assertEqual(bus, 0)
+            self.assertEqual(payload, last_feeds[address])
+            self.assertEqual((payload[0], payload[1], *payload[4:]), (1, 0, 0, 0, 0, 0))
+            self.assertEqual(payload[2] & 0xF0, 0)
           if tick in (277, 353):
             expected_pressed = tick == 277
             self.assertEqual({address for address, _, _ in recorded}, {0xBD, 0x1F5})
@@ -1009,7 +1019,7 @@ class TestBoltPaddleModes(unittest.TestCase):
             self.assertGreater(ci.CC.pedal_steady, 0.)  # Selection falls back to auto; physical authority is unchanged.
           for message in messages:
             allowed = safety.safety_tx_hook(recorder.packet(message))
-            if message[0] in (0xBD, 0x1F5):
+            if message[0] in (0xBD, 0x1F5, 0x3D1):
               self.assertFalse(allowed)  # Host feed is consumed; only the internal scheduler may transmit.
               last_feeds[message[0]] = message[1]
               if tick in (276, 352) and message[0] == 0xBD:
@@ -1021,3 +1031,54 @@ class TestBoltPaddleModes(unittest.TestCase):
             self.assertFalse(ci.CC.regen_paddle_pressed, (tick, override))
             self.assertEqual(ci.CC.pedal_steady, 0., (tick, override))
         self.assertEqual(observed, {'auto', 'off', 'force'})
+
+
+class TestCruiseStatus(unittest.TestCase):
+  def test_exact_helper_payload(self):
+    from opendbc.car.gm import gmcan
+    packer = CANPacker("gm_global_a_powertrain_generated")
+    for speed, raw in ((0., 0), (80., 1280), (10000., 4095), (-1., 0), (float("nan"), 0)):
+      frame = gmcan.create_ecm_cruise_control_command(packer, 0, True, speed)
+      self.assertEqual(frame, (0x3D1, bytes((1, 0, raw >> 8, raw & 255, 0, 0, 0, 0)), 0))
+    self.assertEqual(gmcan.create_ecm_cruise_control_command(packer, 0, False, 80.)[1],
+                     bytes((1, 0, 0, 0, 0, 0, 0, 0)))
+
+  def test_actual_parser_controller_status_cadence_and_owner_scope(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    from opendbc.safety.tests.libsafety import libsafety_py
+    from opendbc.safety.tests.test_gm_bolt_pedal import TestGmBoltPedalSafety
+    helper = TestBoltPedalStartupParser()
+    native = libsafety_py.libsafety
+    recorder = TestGmBoltPedalSafety()
+    recorder.safety = native
+    for identity in PEDAL_BOLT_CAR:
+      for removed in (False, True):
+        with self.subTest(identity=identity, removed=removed):
+          cp = params(identity, pedal=True, camera=not removed, removed=removed)
+          self.assertEqual(native.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw,
+                                                  cp.safetyConfigs[0].safetyParam), 0)
+          native.init_tests()
+          ci, _ = helper.stream(cp, native=native, camera_present=not removed)
+          control = structs.CarControl()
+          control.hudControl.setSpeed = 80. / 3.6
+          captured = []
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          for tick in range(16):
+            now = 3_500_000_000 + tick * 10_000_000
+            helper.present_tick(ci, native, now, tick, button=button_bytes(1, tick % 4), gear=6)
+            ci.CC.frame = 104 + tick
+            _, messages = ci.apply(control.as_reader(), now)
+            statuses = [message for message in messages if message[0] == 0x3D1]
+            expected = identity in NO_ACC_BOLT_CAR and tick % 4 == 0
+            self.assertEqual(bool(statuses), expected)
+            if expected:
+              self.assertEqual(statuses, [(0x3D1, bytes((1, 0, 5, 0, 0, 0, 0, 0)), 0)])
+              self.assertFalse(native.safety_tx_hook(recorder.packet(statuses[0])))
+              native.reset_recorded_can()
+              native.set_timer(now // 1000 + 1)
+              self.assertEqual(native.safety_fwd_hook(0, 0x3D1), -1)
+              raw = packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': 1})
+              self.assertTrue(native.safety_rx_hook(recorder.packet(raw)))
+              self.assertEqual(recorder.recorded(), [(0x3D1, 0, statuses[0][1])])
+              captured.extend(recorder.recorded())
+          self.assertEqual(len(captured), 4 if identity in NO_ACC_BOLT_CAR else 0)

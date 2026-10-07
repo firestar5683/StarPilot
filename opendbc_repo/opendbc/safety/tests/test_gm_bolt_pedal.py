@@ -535,8 +535,12 @@ class TestGmBoltPedalSafety(unittest.TestCase):
                              buttons_counter=0)
         _, commands = controller.update(control.as_reader(), cs, 1_000_000_000)
         acc_pedal = candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
-        self.assertEqual([msg[0] for msg in commands], [0x200, 0x1F5, 0xBD] + ([0x315] if acc_pedal else []))
+        self.assertEqual([msg[0] for msg in commands], ([0x3D1] if not acc_pedal else []) +
+                         [0x200, 0x1F5, 0xBD] + ([0x315] if acc_pedal else []))
         self.safety.set_timer(1_000_000)
+        if not acc_pedal:
+          self.assertFalse(self.safety.safety_tx_hook(self.packet(commands[0])))  # Required physical status sources are absent.
+          commands = commands[1:]
         self.assertTrue(self.safety.safety_tx_hook(self.packet(commands[0])))
         self.assertFalse(self.safety.safety_tx_hook(self.packet(commands[1])))
         self.assertFalse(self.safety.safety_tx_hook(self.packet(commands[2])))
@@ -833,3 +837,114 @@ class TestGmBoltPedalSafety(unittest.TestCase):
           self.assertTrue(self.safety.safety_tx_hook(brake))
           self.assertFalse(self.safety.safety_tx_hook(brake))
           self.assertEqual(self.safety.safety_fwd_hook(2, 0x315), -1)
+
+  def status_sources(self, now, counter=0, *, main=True, gear=6, brake=False, missing=None):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    self.safety.set_timer(now)
+    frames = (self.stock("PSCMStatus", {}), self.stock("EBCMWheelSpdRear", {}),
+              self.packet((0x1E1, button_bytes(1, counter % 4), 0)),
+              self.stock("AcceleratorPedal2", {}), self.stock("ECMEngineStatus", {"CruiseMainOn": main, "BrakePressed": brake}),
+              self.sensor(counter % 16), self.stock("EBCMRegenPaddle", {}),
+              self.stock("ECMPRDNL2", {"PRNDL2": gear}))
+    for frame in frames:
+      if frame.addr != missing:
+        self.assertTrue(self.safety.safety_rx_hook(frame))
+
+  def test_status_feed_forwarding_precedes_physical_rx(self):
+    from opendbc.car.gm import gmcan
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702):
+      with self.subTest(word=word):
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+        self.safety.init_tests()
+        self.safety.reset_recorded_can()
+        now = 1_000_000
+        self.status_sources(now)
+        status = self.packet(gmcan.create_ecm_cruise_control_command(self.packer, 0, True, 80.))
+        raw = self.stock("ECMCruiseControl", {"CruiseActive": 1})
+        self.assertFalse(self.safety.safety_tx_hook(status))
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+        self.assertTrue(self.safety.safety_rx_hook(raw))
+        self.assertFalse(self.recorded())
+        self.assertFalse(self.safety.safety_tx_hook(status))
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), -1)
+        self.assertTrue(self.safety.safety_rx_hook(raw))
+        self.assertEqual(self.recorded(), [(0x3D1, 0, bytes(status.data[0:8]))])
+        returned = self.stock("ECMCruiseControl", {"CruiseActive": 0})
+        returned.returned = True
+        self.safety.safety_rx_hook(returned)
+        self.safety.safety_rx_hook(self.packet((0x3D1, bytes(status.data[0:8]), 2)))
+        self.assertTrue(self.safety.safety_tx_hook(self.packet((0x1E1, button_bytes(6, 1), 0))))
+        # Raw physical CruiseActive remains authoritative after emitted and returned status zeros.
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+        self.safety.safety_rx_hook(raw)
+        self.assertEqual(len(self.recorded()), 1)
+        self.assertFalse(self.safety.safety_tx_hook(status))
+        self.safety.set_timer(now + 100_001)
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+        self.status_sources(now + 100_001, 1)
+        self.safety.safety_rx_hook(raw)
+        self.assertEqual(len(self.recorded()), 1)  # Fresh source RX cannot revive the expired feed.
+        self.assertFalse(self.safety.safety_tx_hook(status))
+        self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), -1)
+        self.safety.safety_rx_hook(raw)
+        self.assertEqual(len(self.recorded()), 2)
+
+  def test_status_shape_and_intervening_loss_cannot_widen_authority(self):
+    from opendbc.car.gm import gmcan
+    for word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702):
+      for loss in ("main", "brake", "gear", "sensor"):
+        with self.subTest(word=word, loss=loss):
+          self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word)
+          self.safety.init_tests()
+          self.safety.reset_recorded_can()
+          self.status_sources(1_000_000)
+          raw = self.stock("ECMCruiseControl", {"CruiseActive": 1})
+          self.safety.safety_rx_hook(raw)
+          status = gmcan.create_ecm_cruise_control_command(self.packer, 0, True, 80.)
+          self.safety.safety_tx_hook(self.packet(status))
+          if loss == "sensor":
+            self.safety.safety_rx_hook(self.sensor(1, bad_crc=True))
+          else:
+            self.status_sources(1_010_000, 1, main=loss != "main", gear=2 if loss == "gear" else 6,
+                                brake=loss == "brake")
+          self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+          self.status_sources(1_020_000, 2)
+          self.safety.safety_rx_hook(raw)
+          self.assertFalse(self.recorded())
+          for index in (0, 1, 2, 4, 5, 6, 7):
+            mutated = bytearray(status[1])
+            mutated[index] ^= 0x80 if index == 2 else 1
+            self.assertFalse(self.safety.safety_tx_hook(self.packet((0x3D1, bytes(mutated), 0))))
+            self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+          self.assertFalse(self.safety.safety_tx_hook(self.packet((0x3D1, status[1], 2))))
+
+  def test_status_physical_jitter_does_not_halve_output_cadence(self):
+    from opendbc.car.gm import gmcan
+    for word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702):
+      with self.subTest(word=word):
+        self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word)
+        self.safety.init_tests()
+        self.safety.reset_recorded_can()
+        now = 1_000_000
+        self.status_sources(now)
+        raw = self.stock("ECMCruiseControl", {"CruiseActive": 1})
+        self.safety.safety_rx_hook(raw)
+        status = gmcan.create_ecm_cruise_control_command(self.packer, 0, True, 80.)
+        source_counter = 0
+        for counter, interval in enumerate((99_000, 99_000, 80_000, 120_000, 100_000, 99_000), start=1):
+          # Keep independent physical sources and the 25 Hz host feed fresh between 10 Hz stock samples.
+          remaining = interval
+          while remaining:
+            step = min(40_000, remaining)
+            now += step
+            remaining -= step
+            source_counter += 1
+            self.status_sources(now, source_counter)
+            self.assertFalse(self.safety.safety_tx_hook(self.packet(status)))
+          self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), -1)
+          self.assertTrue(self.safety.safety_rx_hook(raw))
+          self.assertEqual(self.recorded(), [(0x3D1, 0, status[1])] * counter)
+          self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
+          self.assertTrue(self.safety.safety_rx_hook(raw))
+          self.assertEqual(len(self.recorded()), counter)
