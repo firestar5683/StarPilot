@@ -32,6 +32,7 @@ from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, slc_cont
 from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
 from openpilot.starpilot.ui.onroad_navigation import NavigationCard
+from openpilot.starpilot.ui.onroad_navigation_favorites import NavigationFavorites
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 
@@ -104,6 +105,7 @@ class OnroadView:
     self._stock_confidence_last_drive_frame: int | None = None
     self.alert = AlertRenderer(fonts)
     self.navigation = NavigationCard(fonts)
+    self.navigation_favorites = NavigationFavorites(fonts)
     self.torque_bar = TorqueBarWidget()
     if fonts.profile == Profile.LARGE:
       self.unified_speed = UnifiedSpeedWidget(fonts)
@@ -236,6 +238,9 @@ class OnroadView:
           submit("nav_map", lambda: map_layer(content, state))
       if "nav_card" in state.customization["layouts"]["large"]:
         submit("nav_card", lambda: self.navigation.render(state))
+      for key in ("nav_home", "nav_work"):
+        if key in state.customization["layouts"]["large"]:
+          submit(key, lambda key=key: self.navigation_favorites.render(key, state))
       if state.alert.size != AlertSize.FULL:
         if placement(state.customization, profile, "cruise_limits")["enabled"]:
           submit("cruise_limits", lambda: self.unified_speed.render(content, state))
@@ -324,6 +329,8 @@ class OnroadView:
       elif not ordered or "nav_card" not in state.customization["layouts"]["large"]:
         self.navigation.render(state)
       if not ordered:
+        for key in ("nav_home", "nav_work"):
+          self.navigation_favorites.render(key, state)
         self._driving_mode(state, right_shift / 2)
       self.alert.render(content, state.alert)
     finally:

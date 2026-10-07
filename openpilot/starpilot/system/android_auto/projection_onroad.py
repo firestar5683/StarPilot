@@ -1,4 +1,4 @@
-"""Read-only large onroad composition for a separate projection frame."""
+"""Large onroad projection with navigation-only favorite actions."""
 
 from contextlib import ExitStack
 from dataclasses import replace
@@ -39,6 +39,7 @@ def native_dependencies():
   from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
   from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
   from openpilot.starpilot.ui.shell import ShellMode
+  from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites
 
   class ProjectionRoadCamera(AugmentedRoadView):
     """Current native calibrated camera/model without stock action widgets."""
@@ -71,11 +72,12 @@ def native_dependencies():
                          adapter=RuntimeSnapshotAdapter, current_message=current_message, display_message=display_message,
                          shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
                          pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size,
-                         alert=OnroadAlert, alert_size=AlertSize, map_overlay=MapOverlay, map_feed=MapFeed)
+                         alert=OnroadAlert, alert_size=AlertSize, map_overlay=MapOverlay, map_feed=MapFeed,
+                         favorites=ProjectionFavorites)
 
 
 class ProjectionOnroad:
-  """Display-only renderer: no shell, settings, network, pairing, or action owner."""
+  """Separate renderer with Home/Work navigation; native UIState stays read-only."""
 
   def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
@@ -115,6 +117,11 @@ class ProjectionOnroad:
         self.map_feed = native.map_feed()
         self.onroad.map_layer = self._map_layer
       self.adapter = native.adapter(native.ui_state)
+      self._state = None
+      self.favorites = None
+      if getattr(native, 'favorites', None) is not None:
+        self.favorites = native.favorites(lambda: native.ui_state.started)
+        self._resources.callback(self.favorites.close)
     except BaseException:
       self._resources.close()
       raise
@@ -171,6 +178,10 @@ class ProjectionOnroad:
 
   def prepare(self):
     """Before the frame's render target is bound: offscreen map work happens here."""
+    if self.favorites is not None:
+      self.favorites.refresh()
+      self.onroad.navigation_favorites.document = self.favorites.document
+      self.onroad.navigation_favorites.error = self.favorites.error
     placed = self._map_placement()
     if self.map is None or placed is None or not self.native.ui_state.started:
       return
@@ -243,13 +254,31 @@ class ProjectionOnroad:
           self._projection_customization = projection_customization(self.customization, state.customization)
           self._base_customization = state.customization
         state = replace(state, customization=self._projection_customization)
-      self.onroad.render(self._with_certificate_notice(state, now_ns))
+      self._state = self._with_certificate_notice(state, now_ns)
+      self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:
+      self._state = None
+      if self.favorites is not None:
+        self.favorites.cancel()
       self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
       if self.pip is not None:
         self.pip.deactivate()
       self._standby()
+
+  def handle_touches(self, events):
+    if self.favorites is None:
+      return
+    if self._state is None or not self.native.ui_state.started:
+      self.favorites.cancel()
+      return
+    for event in events:
+      self.favorites.touch(event.kind, event.x * self.width, event.y * self.height,
+                           self._state, self.native.ui_state.started_frame)
+
+  def cancel_touch(self):
+    if self.favorites is not None:
+      self.favorites.cancel()
 
   def close(self):
     self._resources.close()

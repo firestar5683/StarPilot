@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
 
 ROOT = Path(__file__).parents[1]
@@ -41,6 +42,25 @@ class FakeGraphics:
 
 
 class TestProjectionOnroad(unittest.TestCase):
+  def test_navigation_touch_owner_receives_coordinates_and_cancels_offroad(self):
+    native, _ = self.dependencies()
+    owner = Mock(document={'favorites': []}, error='')
+    native.favorites = lambda authorized: owner
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080))
+    self.addCleanup(view.close)
+    view.onroad.navigation_favorites = SimpleNamespace()
+    view.prepare()
+    self.assertEqual(view.onroad.navigation_favorites.document, owner.document)
+    native.ui_state.started = True
+    native.ui_state.started_frame = 9
+    view.render()
+    view.handle_touches([SimpleNamespace(kind='down', x=.25, y=.5)])
+    owner.touch.assert_called_once_with('down', 720, 540, view._state, 9)
+    native.ui_state.started = False
+    view.handle_touches([SimpleNamespace(kind='up', x=.25, y=.5)])
+    owner.cancel.assert_called_once()
+    self.assertEqual(owner.touch.call_count, 1)
+
   def dependencies(self, *, fail_view=False, fail_camera=False):
     events = []
     ui = SimpleNamespace(projection_read_only=True, started=False, _offroad_transition_callbacks=[],

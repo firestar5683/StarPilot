@@ -1,6 +1,6 @@
-"""Read-only headless producer for a separate large StarPilot projection view.
+"""Headless producer for a separate large StarPilot projection view.
 
-Frames are rendered only while requested. Projection does not receive touch input.
+Frames are rendered only while requested. Touch input controls navigation favorites.
 Onroad, each new camera frame is drawn exactly once, as soon as it lands (see
 CameraPacer). When the encoder takes NV12, the frame is converted on the GPU,
 and it can be read back without stalling the renderer.
@@ -90,6 +90,21 @@ def visible_geometry(request: FrameRequest) -> tuple[int, int, float, int, int]:
           round((geometry.height - geometry.logical_height * geometry.scale) / 2))
 
 
+def projected_touches(events, geometry):
+  """Undo the composition's fit/letterboxing inside the receiver's margins."""
+  from openpilot.starpilot.system.android_auto.touch import TouchEvent
+  width, height = geometry.logical_width * geometry.scale, geometry.logical_height * geometry.scale
+  left, top = (geometry.width - width) / 2, (geometry.height - height) / 2
+  mapped = []
+  for event in events:
+    x, y = (event.x * geometry.width - left) / width, (event.y * geometry.height - top) / height
+    if event.kind == 'cancel' or not 0 <= x <= 1 or not 0 <= y <= 1:
+      mapped.append(TouchEvent('cancel', 0, 0))
+    else:
+      mapped.append(TouchEvent(event.kind, x, y))
+  return mapped
+
+
 def wait_for_request(producer: FrameProducer) -> FrameRequest:
   deadline = time.monotonic() + STARTUP_WAIT_SECONDS
   while time.monotonic() < deadline:
@@ -101,7 +116,7 @@ def wait_for_request(producer: FrameProducer) -> FrameRequest:
   raise TimeoutError("Android Auto did not request current UI frames")
 
 
-def run(frames_path: str) -> int:
+def run(frames_path: str, touch_path: str | None = None) -> int:
   if os.geteuid() == 0:
     raise RuntimeError("Car display must run as the comma user")
   parent = os.getppid()
@@ -123,6 +138,7 @@ def run(frames_path: str) -> int:
   from openpilot.starpilot.system.android_auto.headless_egl import FrameReadback, HeadlessContext
   from openpilot.starpilot.system.android_auto import gpu_nv12
   from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
+  from openpilot.starpilot.system.android_auto.touch import TouchReceiver, DEFAULT_TOUCH_SOCKET
   import pyray as rl
   from openpilot.system.ui.lib.application import gui_app
   from openpilot.selfdrive.ui.ui_state import ui_state
@@ -150,6 +166,8 @@ def run(frames_path: str) -> int:
     layout = ProjectionOnroad(viewport=viewport, customization=load_projection_layout(viewport),
                               certificate_days=certificate_days_left())
     resources.callback(layout.close)
+    touch = TouchReceiver(touch_path or DEFAULT_TOUCH_SOCKET)
+    resources.callback(touch.close)
     content = rl.load_render_texture(geometry.logical_width, geometry.logical_height)
     if not content.id:
       raise RuntimeError('Projection content target unavailable')
@@ -222,6 +240,8 @@ def run(frames_path: str) -> int:
       now = time.monotonic()
       pending = producer.pending_request(now)
       if pending is None:
+        touch.drain()
+        layout.cancel_touch()
         if readback.pending:
           readback.release()
         if sampler is not None:
@@ -267,6 +287,7 @@ def run(frames_path: str) -> int:
         layout.render()
       finally:
         rl.end_texture_mode()
+      layout.handle_touches(projected_touches(touch.drain(), geometry))
       if readback.pending:
         # The previous frame, read back while this one was drawn: waiting any
         # later only adds latency.
@@ -288,8 +309,9 @@ def run(frames_path: str) -> int:
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--frames", required=True)
+  parser.add_argument("--touch")
   args = parser.parse_args()
-  return run(args.frames)
+  return run(args.frames, args.touch)
 
 
 if __name__ == "__main__":

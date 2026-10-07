@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { compile } from "../web/vendor/vue/vue.esm-browser.js"
 import { snapshot } from "./test_onroad_layout.mjs"
 import { editorSnapshot, projectionPayload } from "../web/js/projection-layout.js"
-import { OnroadLayoutPage, clampBox, clampPlacement, placementLimits, validDocument, validSnapshot, widgetSize } from "../web/js/onroad-layout.js"
+import { OnroadLayoutPage, clampBox, clampPlacement, orderedWidgetIds, placementLimits, validDocument, validSnapshot, widgetSize } from "../web/js/onroad-layout.js"
 
 const copy = (v) => JSON.parse(JSON.stringify(v))
 const native = snapshot()
@@ -17,6 +17,12 @@ metadata.widgets.nav_card = { label: "Turn-by-turn", kind: "nav_card", width: 56
 metadata.widgets.nav_map = { label: "Map overlay", kind: "nav_map", width: 860, height: 410, colors: {},
   box: { minWidth: 280, maxWidth: 2820, minHeight: 200, maxHeight: 1020 }, opacity: { min: 15, max: 100, default: 70 },
   default: { x: 1950, y: 625, enabled: false, width: 860, height: 410, opacity: 70 } }
+for (const [index, label] of ["Home", "Work"].entries()) {
+  const key = `nav_${label.toLowerCase()}`
+  metadata.widgets[key] = { label, kind: key, width: 320, height: 110, colors: {},
+    default: { x: 2195 + index * 335, y: 280, enabled: false } }
+}
+metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
 const doc = { version: 1, canvas: { width: 2880, height: 1080 }, widgets }
@@ -87,7 +93,7 @@ Object.defineProperties(vm, {
   selectedWidget: { get: () => profile.widgets[vm.state.selected] },
   selectedPosition: { get: () => vm.state.draft.layouts.large[vm.state.selected] },
 })
-for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition"])
+for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "reorderLayer"])
   vm[name] = OnroadLayoutPage.methods[name].bind(vm)
 const pointer = (x, y) => ({ clientX: x, clientY: y, pointerId: 7, button: 0, preventDefault() {}, stopPropagation() {} })
 vm.startResize("nav_map", pointer(1950 + 860, 625 + 410))
@@ -106,5 +112,25 @@ vm.opacityInput({ target: { value: "5" } })
 assert.equal(vm.layout.nav_map.opacity, 35, "below the minimum is ignored")
 assert.equal(validDocument(vm.state.draft, data.metadata), true)
 
+// Home and Work use the same add, place, layer-order, remove and save controls.
+vm.state.data = data
+for (const key of ["nav_home", "nav_work"]) {
+  assert.equal(vm.layout[key].enabled, false)
+  vm.add(key)
+  assert.equal(vm.layout[key].enabled, true)
+  vm.changePosition(key, 400, 700)
+  assert.deepEqual([vm.layout[key].x, vm.layout[key].y], [400, 700])
+  vm.reorderLayer(key, "nav_map")
+  const order = orderedWidgetIds(vm.state.draft, data.metadata, "large")
+  assert.ok(order.indexOf(key) < order.indexOf("nav_map"))
+  vm.remove(key)
+  assert.equal(vm.layout[key].enabled, false)
+}
+const savedFavorites = projectionPayload({ revision: "favorites", document: vm.state.draft }, data.metadata).document
+assert.equal(savedFavorites.widgets.nav_home.enabled, false)
+assert.equal(savedFavorites.widgets.nav_work.enabled, false)
+assert.deepEqual(savedFavorites.widgetOrder, vm.state.draft.widgetOrder.large)
+assert.equal(validDocument(vm.state.draft, data.metadata), true)
+
 compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
-console.log("Projection map widgets: sizes, resize handle, opacity, strict documents and payload passed")
+console.log("Projection widgets: map resizing/opacity, Home/Work add/move/order/remove, strict documents and payload passed")

@@ -16,7 +16,10 @@ DOCUMENT_PATH = DATA_DIR / 'layouts/document.json'
 # Android Auto only: the comma layout keeps its fixed schema. Layouts saved
 # before these (or the driving-mode widget) existed gain them with their defaults.
 NAV_CARD, NAV_MAP = 'nav_card', 'nav_map'
-PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP)
+NAV_HOME, NAV_WORK = 'nav_home', 'nav_work'
+FAVORITE_WIDGETS = (NAV_HOME, NAV_WORK)
+FAVORITE_SIZE = (320, 110)
+PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *FAVORITE_WIDGETS)
 NAV_CARD_SIZE = (560, 195)
 MAP_MIN_SIZE = (280, 200)
 MAP_OPACITY = (15, 100, 70)  # percent: min, max, default
@@ -75,7 +78,13 @@ def layout_metadata_for_viewport(viewport):
                       'opacity': {'min': MAP_OPACITY[0], 'max': MAP_OPACITY[1], 'default': MAP_OPACITY[2]},
                       'default': {'x': max(30, card_x + card_w - map_w), 'y': min(card_bottom, height - 30 - map_h),
                                   'enabled': False, 'width': map_w, 'height': map_h, 'opacity': MAP_OPACITY[2]}}
-  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD]
+  for index, key in enumerate(FAVORITE_WIDGETS):
+    label = ('Home', 'Work')[index]
+    widgets[key] = {'label': label, 'kind': key, 'width': FAVORITE_SIZE[0], 'height': FAVORITE_SIZE[1], 'colors': {},
+                    'note': f'Navigate to your saved {label} favorite. Tap again to end navigation. Set the address in The Galaxy.',
+                    'default': {'x': width - 30 - 2 * FAVORITE_SIZE[0] - 15 + index * (FAVORITE_SIZE[0] + 15),
+                                'y': 280, 'enabled': False}}
+  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *FAVORITE_WIDGETS]
   return profile
 
 
