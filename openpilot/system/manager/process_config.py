@@ -135,7 +135,8 @@ procs = [
   JetlinkProcess("jetlinkd", "openpilot.starpilot.system.jetlink.daemon", jetlink_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE,
                 restart_on_exit=True),  # boot can race bluetoothd (NoSuchUnit)
-  PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview, restart_on_exit=True),  # boot can race the audio device; selfdrived blocks engagement while it is down
+  # Boot can race the audio device; selfdrived blocks engagement while soundd is down.
+  PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview, restart_on_exit=True),
   PythonProcess("locationd", "openpilot.selfdrive.locationd.locationd", only_onroad),
   MapdShadowProcess(),
   PythonProcess("map_snapshot_operations", "openpilot.starpilot.maps.operation_owner", only_offroad, enabled=platform.system() == "Linux"),

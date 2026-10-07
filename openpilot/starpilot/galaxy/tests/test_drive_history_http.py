@@ -26,6 +26,8 @@ class DriveHistoryHTTPTest(unittest.TestCase):
       release.set()
 
       class PausedInventory:
+        root = reader.root
+
         def snapshot(self):
           calls.append(True)
           result = reader.snapshot()

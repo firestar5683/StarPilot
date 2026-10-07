@@ -1461,7 +1461,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/models/active', '/api/models/preferences', '/api/models/download', '/api/models/download_all',
                       '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest', '/api/models/jetlink',
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
-                      '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore', '/api/recordings/delete-videos', '/api/sentry/notifications',
+                      '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore',
+                      '/api/recordings/delete-videos', '/api/sentry/notifications',
                       '/api/navigation/search', '/api/navigation/action', '/api/drive-state/action',
                       '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
