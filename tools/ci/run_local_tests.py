@@ -25,6 +25,8 @@ QUICK_TARGETS = (
   'openpilot/starpilot/tests',
   'openpilot/starpilot/aol/tests',
   'openpilot/starpilot/analytics/tests',
+  'openpilot/starpilot/gps/tests',
+  'opendbc_repo/opendbc/car/tests/test_gps.py',
   'openpilot/starpilot/bluetooth/tests/test_owner.py',
   'openpilot/starpilot/flm/tests/test_controller_replay.py',
   'openpilot/starpilot/controllers/tests',
