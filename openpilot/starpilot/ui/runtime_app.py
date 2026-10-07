@@ -693,7 +693,7 @@ class StarShellSession:
                         "saved display choice changed or settings closed")
     return ok
 
-  def _render_pip(self, rect: rl.Rectangle, state) -> None:
+  def _render_pip(self, rect: rl.Rectangle, state, *, submit=None) -> None:
     now_ns = time.monotonic_ns()
     if (self._pip_read_ns is None or now_ns < self._pip_read_ns or
         now_ns - self._pip_read_ns >= 1_000_000_000):
@@ -730,7 +730,7 @@ class StarShellSession:
         camera_positions[side] = Rect(position["x"], position["y"], width, height)
     status = self.pip_renderer.render(rect, saved.mask, signals, enabled=True,
                                       on_blinker=saved.on_blinker, on_bsm=saved.on_bsm, invert=saved.invert,
-                                      placements=camera_positions)
+                                      placements=camera_positions, **({"submit": submit} if submit is not None else {}))
     if status not in ("rendered", "inactive") and state.alert.size == AlertSize.NONE:
       self.fonts.draw("SIDE CAMERA UNAVAILABLE", FontRole.MEDIUM,
                       18 if self.profile == Profile.COMPACT else 25,

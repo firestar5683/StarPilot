@@ -191,7 +191,7 @@ const torqueEditor = editor().vm
 torqueEditor.changePosition("torque_bar", 500, 650)
 torqueEditor.selectProfile("compact")
 torqueEditor.changePosition("torque_bar", 174, 179)
-assert.equal(torqueEditor.renderWidgets[0].id, "torque_bar")
+assert.deepEqual(torqueEditor.renderWidgets.map(widget => widget.id), torqueEditor.layerWidgets.map(widget => widget.id).reverse())
 assert.equal(torqueEditor.state.draft.layouts.large.torque_bar.x, 500)
 assert.equal(torqueEditor.layout.torque_bar.y, 179)
 torqueEditor.remove("torque_bar")
@@ -661,17 +661,18 @@ overlap.changePosition('speed_limit_actions', 174, 100)
 assert.equal(overlap.layout.speed_limit_actions.y, 100)
 assert.equal(validDocument(overlap.state.draft, overlap.state.data.metadata), true)
 assert.deepEqual(copy(overlap.state.draft.layouts.large), bigBefore)
+const originalOrder = overlap.renderWidgets.map(widget => widget.id)
 overlap.state.selected = 'speed_limit'
-assert.equal(overlap.renderWidgets.at(-1).id, 'speed_limit')
+assert.deepEqual(overlap.renderWidgets.map(widget => widget.id), originalOrder)
 overlap.state.selected = 'speed_limit_actions'
-assert.equal(overlap.renderWidgets.at(-1).id, 'speed_limit_actions')
+assert.deepEqual(overlap.renderWidgets.map(widget => widget.id), originalOrder)
 
 overlap.changePosition('speed_limit_actions', 174, 0)
 assert.equal(overlap.layout.speed_limit_actions.y, 0)
 assert.equal(validDocument(overlap.state.draft, overlap.state.data.metadata), true)
-assert.equal(overlap.renderWidgets.at(-1).visualHeaderY, 62)
-assert.equal(overlap.renderWidgets.at(-1).visualInsetTop, 0)
-assert.equal(overlap.renderWidgets.at(-1).visualInsetBottom, 32)
+assert.equal(overlap.renderWidgets.find(widget => widget.id === "speed_limit_actions").visualHeaderY, 62)
+assert.equal(overlap.renderWidgets.find(widget => widget.id === "speed_limit_actions").visualInsetTop, 0)
+assert.equal(overlap.renderWidgets.find(widget => widget.id === "speed_limit_actions").visualInsetBottom, 32)
 
 const synchronizedDrag = editor()
 const syncVm = synchronizedDrag.vm
@@ -700,3 +701,32 @@ const largeHardware = editor().vm
 largeHardware.state.data.supportedProfiles = ['large']
 largeHardware.selectProfile('compact')
 assert.equal(largeHardware.state.profile, 'large')
+
+// Layer movement changes only stacking, supports undo/reset, and rejects corrupt orders.
+const layers = editor().vm
+const positionsBefore = copy(layers.state.draft.layouts)
+const initialLayers = layers.layerWidgets.map(widget => widget.id)
+layers.reorderLayer(initialLayers.at(-1), initialLayers[0])
+assert.equal(layers.layerWidgets[0].id, initialLayers.at(-1))
+assert.equal(layers.renderWidgets.at(-1).id, initialLayers.at(-1))
+assert.deepEqual(layers.state.draft.layouts, positionsBefore)
+assert.equal(validDocument(layers.state.draft, layers.state.data.metadata), true)
+const savedLayers = copy(layers.state.draft.widgetOrder)
+layers.undo()
+assert.equal(layers.state.draft.widgetOrder, undefined)
+layers.redo()
+assert.deepEqual(layers.state.draft.widgetOrder, savedLayers)
+layers.selectProfile('compact')
+layers.reorderLayer('max_speed', 'torque_bar')
+assert.deepEqual(layers.state.draft.widgetOrder.large, savedLayers.large)
+layers.resetLayout()
+assert.deepEqual(layers.state.draft.widgetOrder, savedLayers)
+for (const order of [[], ['unknown'], [...savedLayers.large, savedLayers.large[0]], savedLayers.large.map(() => savedLayers.large[0])]) {
+  const invalid = copy(layers.state.draft)
+  invalid.widgetOrder.large = order
+  assert.equal(validDocument(invalid, layers.state.data.metadata), false)
+}
+layers.selectProfile('large')
+layers.resetLayout()
+assert.equal(layers.state.draft.widgetOrder, undefined)
+console.log('Widget layer order: movement, selection, profile isolation, validation, undo and reset passed')

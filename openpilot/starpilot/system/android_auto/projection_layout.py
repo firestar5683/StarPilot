@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import customization_metadata, MODE_WIDGET, WHEEL_SIZES
+from openpilot.starpilot.ui.onroad_customization import customization_metadata, MODE_WIDGET, WHEEL_SIZES, validate_widget_order
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
 MAX_BYTES = 16384
@@ -75,6 +75,7 @@ def layout_metadata_for_viewport(viewport):
                       'opacity': {'min': MAP_OPACITY[0], 'max': MAP_OPACITY[1], 'default': MAP_OPACITY[2]},
                       'default': {'x': max(30, card_x + card_w - map_w), 'y': min(card_bottom, height - 30 - map_h),
                                   'enabled': False, 'width': map_w, 'height': map_h, 'opacity': MAP_OPACITY[2]}}
+  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD]
   return profile
 
 
@@ -105,7 +106,7 @@ def validate_layout(value, screen):
 
 def validate_layout_for_viewport(value, viewport):
   metadata = layout_metadata_for_viewport(viewport)
-  if (type(value) is not dict or set(value) != {'version', 'canvas', 'widgets'} or
+  if (type(value) is not dict or set(value) != {'version', 'canvas', 'widgets'} | ({'widgetOrder'} if 'widgetOrder' in value else set()) or
       type(value['version']) is not int or value['version'] != 1 or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
@@ -114,6 +115,11 @@ def validate_layout_for_viewport(value, viewport):
   result = copy.deepcopy(value)
   for key in set(metadata['widgets']) - set(value['widgets']):
     result['widgets'][key] = dict(metadata['widgets'][key]['default'])
+  if 'widgetOrder' in value:
+    order = value['widgetOrder']
+    if type(order) is list:
+      order = [*order, *(key for key in (MODE_WIDGET, *PROJECTION_WIDGETS) if key not in order)]
+    result['widgetOrder'] = validate_widget_order(order, metadata['widgets'])
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
     placement = result['widgets'][key]
@@ -176,6 +182,9 @@ def projection_customization(document, base_customization):
   tx, ty, _, _ = maximum_footprint(30, 30, width - 60, height - 60, width)
   shifts['torque_bar'] = (tx - native['torque_bar']['default']['x'], ty - native['torque_bar']['default']['y'])
   result = copy.deepcopy(base_customization)
+  result.setdefault('widgetOrder', {}).pop('large', None)
+  if 'widgetOrder' in document:
+    result['widgetOrder']['large'] = list(document['widgetOrder'])
   result['layouts']['large'] = {}
   for key, placement in document['widgets'].items():
     dx, dy = shifts.get(key, (0, 0))

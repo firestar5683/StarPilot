@@ -9,7 +9,7 @@ touches the network. The work is split so no frame waits on anything slow:
                   into a texture (only when one is ready), then composes the
                   widget: canvas rotated heading-up, the car, a glass tint
   draw()          inside the frame: one textured quad through a shader that
-                  rounds and feathers the edges and applies the chosen opacity
+                  rounds and feathers the edges; opacity fades the map, not navigation guidance
 
 Colors are premultiplied end to end, so translucent glows and the feathered
 edge composite without dark fringes.
@@ -154,6 +154,7 @@ class CanvasGeometry:
   request: CanvasRequest
   layers: list[tuple[rl.Color, np.ndarray]] = field(default_factory=list)
   tiles_missing: int = 0
+  guidance: list[tuple[rl.Color, np.ndarray]] = field(default_factory=list)
 
 
 def build_canvas(request: CanvasRequest, tiles: dict[TileKey, RoadTile], latitude: float) -> CanvasGeometry:
@@ -209,7 +210,8 @@ def build_canvas(request: CanvasRequest, tiles: dict[TileKey, RoadTile], latitud
       for color, width in layers:
         strip = line_strip(points, np.array([0, len(points)], np.int32), width * width_scale / 2, bounds)
         if len(strip):
-          geometry.layers.append((premultiplied(color), strip))
+          target = geometry.guidance if world is request.route else geometry.layers
+          target.append((premultiplied(color), strip))
   return geometry
 
 
@@ -337,6 +339,7 @@ MASK_FRAGMENT = GL_VERSION + """
 in vec2 fragTexCoord;
 out vec4 finalColor;
 uniform sampler2D texture0;
+uniform sampler2D guidance;
 uniform vec2 size;       // widget pixels
 uniform float radius;    // corner radius in pixels
 uniform float feather;   // soft edge width in pixels
@@ -351,7 +354,10 @@ void main() {
   float top = smoothstep(0.0, 0.22, fragTexCoord.y) * 0.35 + 0.65;
   // A faint glass rim where the feather meets the solid part.
   float rim = (1.0 - smoothstep(0.0, 1.6, abs(outside + feather))) * 0.14;
-  finalColor = texture(texture0, vec2(fragTexCoord.x, 1.0 - fragTexCoord.y)) * (edge * opacity * top) + vec4(rim * opacity * top);
+  vec2 uv = vec2(fragTexCoord.x, 1.0 - fragTexCoord.y);
+  vec4 base = texture(texture0, uv) * (opacity * top);
+  vec4 route = texture(guidance, uv);
+  finalColor = (route + base * (1.0 - route.a)) * edge + vec4(rim * opacity * top) * (1.0 - route.a);
 }
 """
 
@@ -372,6 +378,8 @@ class MapOverlay:
     self._canvas: rl.RenderTexture | None = None
     self._canvas_request: CanvasRequest | None = None
     self._widget: rl.RenderTexture | None = None
+    self._guidance: rl.RenderTexture | None = None
+    self._route_layers: list[tuple[rl.Color, np.ndarray]] = []
     self._widget_size: tuple[int, int] | None = None
     self._shader: rl.Shader | None = None
     self._uniforms: dict[str, int] = {}
@@ -477,17 +485,25 @@ class MapOverlay:
     if self._widget_size != (width, height):
       if self._widget is not None:
         rl.unload_render_texture(self._widget)
+      if self._guidance is not None:
+        rl.unload_render_texture(self._guidance)
       self._widget = rl.load_render_texture(width, height)
-      self._widget_size = (width, height)
-      if not self._widget.id:
-        self._widget = None
+      self._guidance = rl.load_render_texture(width, height)
+      self._widget_size = None
+      if not self._widget.id or not self._guidance.id:
+        for target in (self._widget, self._guidance):
+          if target.id:
+            rl.unload_render_texture(target)
+        self._widget = self._guidance = None
         return False
-      rl.set_texture_filter(self._widget.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+      self._widget_size = (width, height)
+      for target in (self._widget, self._guidance):
+        rl.set_texture_filter(target.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
     if self._shader is None:
       self._shader = rl.load_shader_from_memory(MASK_VERTEX, MASK_FRAGMENT)
       if not self._shader.id:
         raise RuntimeError("Map overlay shader unavailable")
-      self._uniforms = {name: rl.get_shader_location(self._shader, name) for name in ("size", "radius", "feather", "opacity")}
+      self._uniforms = {name: rl.get_shader_location(self._shader, name) for name in ("size", "radius", "feather", "opacity", "guidance")}
     return True
 
   def _draw_canvas(self, geometry: CanvasGeometry) -> None:
@@ -510,6 +526,7 @@ class MapOverlay:
       rl.end_blend_mode()
     finally:
       rl.end_texture_mode()
+    self._route_layers = geometry.guidance
     self._canvas_request = geometry.request
     self.has_roads = geometry.tiles_missing < len(geometry.request.tiles)
 
@@ -533,12 +550,13 @@ class MapOverlay:
     rl.draw_triangle(point(10, 0), point(5, -2.3), point(5, 2.3), premultiplied((255, 110, 96)))
     rl.draw_triangle(point(10, math.pi), point(5, math.pi + 2.3), point(5, math.pi - 2.3), premultiplied((210, 214, 224, 200)))
 
-  def _compose(self, width: int, height: int) -> None:
-    rl.begin_texture_mode(self._widget)
+  def _compose_layer(self, width: int, height: int, guidance: bool) -> None:
+    rl.begin_texture_mode(self._guidance if guidance else self._widget)
     try:
       rl.clear_background(rl.BLANK)
       rl.begin_blend_mode(rl.BlendMode.BLEND_ALPHA_PREMULTIPLY)
-      rl.draw_rectangle(0, 0, width, height, premultiplied(GLASS))
+      if not guidance:
+        rl.draw_rectangle(0, 0, width, height, premultiplied(GLASS))
       request = self._canvas_request
       if self._canvas is not None and request is not None and self._world is not None:
         px_per_unit = meters_per_tile(self._latitude) / request.m_per_px
@@ -548,14 +566,31 @@ class MapOverlay:
         car_x = (self._world[0] - request.center[0]) * px_per_unit * SUPERSAMPLE + side / 2
         car_y = (self._world[1] - request.center[1]) * px_per_unit * SUPERSAMPLE + side / 2
         anchor = rl.Vector2(width / 2, height * CAR_ANCHOR)
-        rl.draw_texture_pro(self._canvas.texture, rl.Rectangle(0, 0, side, -side),
-                            rl.Rectangle(anchor.x, anchor.y, side * zoom, side * zoom),
-                            rl.Vector2(car_x * zoom, car_y * zoom), -self._bearing, rl.WHITE)
-        self._puck(anchor.x, anchor.y)
-        self._compass(width, height)
+        if guidance:
+          rl.rl_push_matrix()
+          try:
+            rl.rl_translatef(anchor.x, anchor.y, 0)
+            rl.rl_rotatef(-self._bearing, 0, 0, 1)
+            rl.rl_scalef(zoom, zoom, 1)
+            rl.rl_translatef(-car_x, -car_y, 0)
+            for color, strip in self._route_layers:
+              strip = np.ascontiguousarray(strip, np.float32)
+              rl.draw_triangle_strip(rl.ffi.from_buffer("Vector2 *", strip), len(strip), color)
+          finally:
+            rl.rl_pop_matrix()
+          self._puck(anchor.x, anchor.y)
+          self._compass(width, height)
+        else:
+          rl.draw_texture_pro(self._canvas.texture, rl.Rectangle(0, 0, side, -side),
+                              rl.Rectangle(anchor.x, anchor.y, side * zoom, side * zoom),
+                              rl.Vector2(car_x * zoom, car_y * zoom), -self._bearing, rl.WHITE)
       rl.end_blend_mode()
     finally:
       rl.end_texture_mode()
+
+  def _compose(self, width: int, height: int) -> None:
+    self._compose_layer(width, height, False)
+    self._compose_layer(width, height, True)
 
   # ---- public
 
@@ -595,6 +630,7 @@ class MapOverlay:
       vec2, scalar = rl.ShaderUniformDataType.SHADER_UNIFORM_VEC2, rl.ShaderUniformDataType.SHADER_UNIFORM_FLOAT
       for name, value, kind in (("size", size, vec2), ("radius", radius, scalar), ("feather", feather, scalar), ("opacity", alpha, scalar)):
         rl.set_shader_value(self._shader, self._uniforms[name], value, kind)
+      rl.set_shader_value_texture(self._shader, self._uniforms["guidance"], self._guidance.texture)
       rl.draw_texture_pro(self._widget.texture, rl.Rectangle(0, 0, width, height), rect, rl.Vector2(0, 0), 0, rl.WHITE)
     finally:
       rl.end_shader_mode()
@@ -609,12 +645,13 @@ class MapOverlay:
   def close(self) -> None:
     self.reader.close()
     if rl.is_window_ready():
-      for target in (self._canvas, self._widget):
+      for target in (self._canvas, self._widget, self._guidance):
         if target is not None:
           rl.unload_render_texture(target)
       if self._shader is not None and self._shader.id:
         rl.unload_shader(self._shader)
-    self._canvas = self._widget = None
+    self._canvas = self._widget = self._guidance = None
+    self._route_layers = []
     self._shader = None
 
 

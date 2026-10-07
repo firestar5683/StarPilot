@@ -15,7 +15,8 @@ import pyray as rl
 
 from openpilot.starpilot.ui import clip
 from openpilot.system.ui.lib.application import gui_app
-from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET, offset, placement, rgba, widget_size
+from openpilot.starpilot.ui.onroad_customization import (MODE_WIDGET, RAIL_WIDGETS, offset, placement, rgba,
+                                                         widget_order, widget_size)
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 
 from openpilot.starpilot.ui.onroad_alerts import AlertRenderer
@@ -219,6 +220,55 @@ class OnroadView:
         self.fonts.draw(text, role, size, x + dx, y + dy, shadow)
       self.fonts.draw(text, role, size, x, y, color)
 
+  def _ordered_widgets(self, content, state, *, driver_camera=False, stock_layer=None):
+    profile = str(self.fonts.profile)
+    large = profile == "large"
+    width = self.projection_viewport[0] if self.projection_viewport else state.viewport_width
+    callbacks = {}
+    def submit(key, draw):
+      callbacks[key] = draw
+    pip = getattr(self, "pip_layer", None) if state.camera_available else getattr(self, "preview_pip_layer", None)
+    if pip is not None and (large or not driver_camera and state.appearance.camera_view != CameraViewChoice.NONE):
+      pip(content, state, submit=submit)
+    if large:
+      if "nav_map" in state.customization["layouts"]["large"] and state.alert.size != AlertSize.FULL:
+        if map_layer := getattr(self, "map_layer", None):
+          submit("nav_map", lambda: map_layer(content, state))
+      if "nav_card" in state.customization["layouts"]["large"]:
+        submit("nav_card", lambda: self.navigation.render(state))
+      if state.alert.size != AlertSize.FULL:
+        if placement(state.customization, profile, "cruise_limits")["enabled"]:
+          submit("cruise_limits", lambda: self.unified_speed.render(content, state))
+        submit("speed_limit_actions", lambda: self._slc_actions(state))
+      if not state.appearance.hide_speed and placement(state.customization, profile, "current_speed")["enabled"]:
+        speed_content = rl.Rectangle(content.x + (width - 1860) / 2, content.y, content.width, content.height)
+        submit("current_speed", lambda: self.current_speed.render(speed_content, state))
+      if state.alert.size == AlertSize.NONE:
+        if not state.appearance.hide_steering_wheel and placement(state.customization, profile, "steering_wheel")["enabled"]:
+          submit("steering_wheel", lambda: self.steering_wheel.render(content, state))
+        if state.appearance.show_torque_bar:
+          submit("torque_bar", lambda: self.torque_bar.render(content, state, width if self.projection_viewport else 2160))
+    else:
+      if state.alert.size == AlertSize.NONE and not driver_camera:
+        submit("speed_limit", lambda: self.compact_hud._speed_limit_sign(state))
+        submit("max_speed", lambda: self.compact_hud.render_max_speed(state))
+        submit("steering_wheel", lambda: self.compact_hud.render_steering_wheel(state))
+        submit("speed_limit_actions", lambda: self._slc_actions(state))
+        if state.appearance.show_torque_bar:
+          submit("torque_bar", lambda: self.torque_bar.render(content, state, 536))
+      if not driver_camera:
+        if stock_layer is not None:
+          submit("model_confidence", lambda: stock_layer(rl.Rectangle(0, 0, 536, 240), state))
+        else:
+          for key in RAIL_WIDGETS:
+            submit(key, lambda key=key: self.compact_sidebar.render(rl.Rectangle(0, 0, 536, 240), state, widget=key))
+    if monitor := getattr(self, "driver_monitor_layer", None):
+      submit("driver_monitor", lambda: monitor(content, state))
+    submit(MODE_WIDGET, lambda: self._driving_mode(state, (width - 1860) / 2 if large else 0))
+    for key in widget_order(state.customization, profile):
+      if draw := callbacks.get(key):
+        draw()
+
   def _large(self, state: OnroadState) -> None:
     width, height = self.projection_viewport or (state.viewport_width, 1080)
     right_shift = width - 1860
@@ -234,29 +284,36 @@ class OnroadView:
         self.camera_layer(content, state)
       elif self.background_layer is not None:
         self.background_layer(content, state)
-      pip_layer = getattr(self, "pip_layer", None)
-      if pip_layer is not None and state.camera_available:
-        pip_layer(content, state)
-      map_layer = getattr(self, "map_layer", None)
-      if map_layer is not None and state.alert.size != AlertSize.FULL:
-        map_layer(content, state)
-      rl.draw_rectangle_gradient_v(30, 30, int(content.width), 300, rl.Color(0, 0, 0, 114), rl.BLANK)
-      if state.alert.size != AlertSize.FULL:
-        if placement(state.customization, "large", "cruise_limits")["enabled"]:
-          self.unified_speed.render(content, state)
-        self._slc_actions(state)
-      if not state.appearance.hide_speed and placement(state.customization, "large", "current_speed")["enabled"]:
-        speed_content = rl.Rectangle(content.x + right_shift / 2, content.y, content.width, content.height)
-        self.current_speed.render(speed_content, state)
-      if state.alert.size == AlertSize.NONE:
-        if not state.appearance.hide_steering_wheel and placement(state.customization, "large", "steering_wheel")["enabled"]:
-          self.steering_wheel.render(content, state)
-        if state.appearance.show_torque_bar:
-          self.torque_bar.render(content, state, width if self.projection_viewport else 2160)
-      if self.extra_overlays is not None:
-        self.extra_overlays(content, state)
-      if monitor_layer := getattr(self, "driver_monitor_layer", None):
-        monitor_layer(content, state)
+      ordered = bool(state.customization.get("widgetOrder", {}).get("large"))
+      if ordered:
+        rl.draw_rectangle_gradient_v(30, 30, int(content.width), 300, rl.Color(0, 0, 0, 114), rl.BLANK)
+        self._ordered_widgets(content, state)
+        if self.extra_overlays is not None:
+          self.extra_overlays(content, state)
+      else:
+        pip_layer = getattr(self, "pip_layer", None)
+        if pip_layer is not None and state.camera_available:
+          pip_layer(content, state)
+        map_layer = getattr(self, "map_layer", None)
+        if map_layer is not None and state.alert.size != AlertSize.FULL:
+          map_layer(content, state)
+        rl.draw_rectangle_gradient_v(30, 30, int(content.width), 300, rl.Color(0, 0, 0, 114), rl.BLANK)
+        if state.alert.size != AlertSize.FULL:
+          if placement(state.customization, "large", "cruise_limits")["enabled"]:
+            self.unified_speed.render(content, state)
+          self._slc_actions(state)
+        if not state.appearance.hide_speed and placement(state.customization, "large", "current_speed")["enabled"]:
+          speed_content = rl.Rectangle(content.x + right_shift / 2, content.y, content.width, content.height)
+          self.current_speed.render(speed_content, state)
+        if state.alert.size == AlertSize.NONE:
+          if not state.appearance.hide_steering_wheel and placement(state.customization, "large", "steering_wheel")["enabled"]:
+            self.steering_wheel.render(content, state)
+          if state.appearance.show_torque_bar:
+            self.torque_bar.render(content, state, width if self.projection_viewport else 2160)
+        if self.extra_overlays is not None:
+          self.extra_overlays(content, state)
+        if monitor_layer := getattr(self, "driver_monitor_layer", None):
+          monitor_layer(content, state)
       if self.projection_viewport and "nav_card" not in state.customization["layouts"]["large"]:
         rl.rl_push_matrix()
         try:
@@ -264,9 +321,10 @@ class OnroadView:
           self.navigation.render(state)
         finally:
           rl.rl_pop_matrix()
-      else:
+      elif not ordered or "nav_card" not in state.customization["layouts"]["large"]:
         self.navigation.render(state)
-      self._driving_mode(state, right_shift / 2)
+      if not ordered:
+        self._driving_mode(state, right_shift / 2)
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
@@ -305,39 +363,6 @@ class OnroadView:
   def _compact(self, state: OnroadState) -> None:
     frame = rl.Rectangle(0, 0, 476, 240)
     driver_camera = state.appearance.camera_view == CameraViewChoice.DRIVER or state.reverse_driver_camera
-    color = axis_status_color(state) if state.alert.size == AlertSize.NONE else rl.Color(18, 40, 57, 255)
-    rl.draw_rectangle(0, 0, 536, 240, rl.BLACK)
-    clip.begin_scissor_mode(0, 0, 476, 240)
-    try:
-      if self.camera_layer is not None and state.camera_available:
-        self.camera_layer(frame, state)
-      elif self.background_layer is not None:
-        self.background_layer(frame, state)
-      pip_layer = getattr(self, "pip_layer", None)
-      if pip_layer is not None and state.camera_available and not driver_camera and \
-         state.appearance.camera_view != CameraViewChoice.NONE:
-        pip_layer(frame, state)
-      self._prepare_compact_fade()
-      rl.draw_texture_ex(self._fade, rl.Vector2(0, 0), 0, 1, rl.WHITE)
-      if state.alert.size == AlertSize.NONE and not driver_camera:
-        self.compact_hud.render(state)
-        if state.appearance.show_torque_bar:
-          self.torque_bar.render(frame, state, 536)
-        self._slc_actions(state)
-        if state.stopped_duration_s is not None:
-          self._stopped_timer(state.stopped_duration_s)
-      if self.extra_overlays is not None:
-        self.extra_overlays(frame, state)
-      if monitor_layer := getattr(self, "driver_monitor_layer", None):
-        monitor_layer(frame, state)
-      self.navigation.render(state)
-      self._driving_mode(state)
-      signals = state.border_signals
-      direction = (-1 if signals.left_blinker else 1 if signals.right_blinker else 0) if signals else 0
-      self.alert.render(frame, state.alert, signal_direction=direction)
-    finally:
-      clip.end_scissor_mode()
-    self._preview_badge(state)
     stock_layer = getattr(self, "stock_confidence_layer", None)
     source_ns = state.stock_confidence_source_stamp_ns if state.stock_confidence_source_fresh else None
     use_stock = (not driver_camera and state.appearance.camera_view != CameraViewChoice.NONE and
@@ -354,7 +379,55 @@ class OnroadView:
       self._stock_confidence_last_drive_frame = state.stock_confidence_drive_frame
     else:
       self._stock_confidence_last_source_ns = None
-    if not driver_camera:
+    color = axis_status_color(state) if state.alert.size == AlertSize.NONE else rl.Color(18, 40, 57, 255)
+    rl.draw_rectangle(0, 0, 536, 240, rl.BLACK)
+    clip.begin_scissor_mode(0, 0, 476, 240)
+    try:
+      if self.camera_layer is not None and state.camera_available:
+        self.camera_layer(frame, state)
+      elif self.background_layer is not None:
+        self.background_layer(frame, state)
+      ordered = bool(state.customization.get("widgetOrder", {}).get("compact"))
+      if ordered:
+        self._prepare_compact_fade()
+        rl.draw_texture_ex(self._fade, rl.Vector2(0, 0), 0, 1, rl.WHITE)
+        clip.end_scissor_mode()
+        clip.begin_scissor_mode(0, 0, 536, 240)
+        self._ordered_widgets(frame, state, driver_camera=driver_camera, stock_layer=stock_layer if use_stock else None)
+        clip.end_scissor_mode()
+        clip.begin_scissor_mode(0, 0, 476, 240)
+        if state.alert.size == AlertSize.NONE and not driver_camera and state.stopped_duration_s is not None:
+          self._stopped_timer(state.stopped_duration_s)
+        if self.extra_overlays is not None:
+          self.extra_overlays(frame, state)
+      else:
+        pip_layer = getattr(self, "pip_layer", None)
+        if pip_layer is not None and state.camera_available and not driver_camera and \
+           state.appearance.camera_view != CameraViewChoice.NONE:
+          pip_layer(frame, state)
+        self._prepare_compact_fade()
+        rl.draw_texture_ex(self._fade, rl.Vector2(0, 0), 0, 1, rl.WHITE)
+        if state.alert.size == AlertSize.NONE and not driver_camera:
+          self.compact_hud.render(state)
+          if state.appearance.show_torque_bar:
+            self.torque_bar.render(frame, state, 536)
+          self._slc_actions(state)
+          if state.stopped_duration_s is not None:
+            self._stopped_timer(state.stopped_duration_s)
+        if self.extra_overlays is not None:
+          self.extra_overlays(frame, state)
+        if monitor_layer := getattr(self, "driver_monitor_layer", None):
+          monitor_layer(frame, state)
+      self.navigation.render(state)
+      if not ordered:
+        self._driving_mode(state)
+      signals = state.border_signals
+      direction = (-1 if signals.left_blinker else 1 if signals.right_blinker else 0) if signals else 0
+      self.alert.render(frame, state.alert, signal_direction=direction)
+    finally:
+      clip.end_scissor_mode()
+    self._preview_badge(state)
+    if not driver_camera and not state.customization.get("widgetOrder", {}).get("compact"):
       rail = rl.Rectangle(0, 0, 536, 240)
       if use_stock:
         stock_layer(rail, state)

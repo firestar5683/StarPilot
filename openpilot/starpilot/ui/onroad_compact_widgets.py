@@ -128,6 +128,10 @@ class CompactHudRenderer:
 
   def render(self, state: OnroadState) -> None:
     self._speed_limit_sign(state)
+    self.render_max_speed(state)
+    self.render_steering_wheel(state)
+
+  def render_max_speed(self, state: OnroadState) -> None:
     set_speed_alpha = self._set_speed_opacity(state, time.monotonic_ns())
     cruise = "–" if state.cruise_kph is None else str(round(state.cruise_kph if state.metric else state.cruise_kph * 0.621371))
     mx, my = widget_offset(state.customization, "compact", "max_speed")
@@ -141,6 +145,7 @@ class CompactHudRenderer:
       color = rl.Color(red, green, blue, int(alpha * 0.9 * set_speed_alpha))
       self.fonts.draw(cruise, FontRole.DISPLAY, 112, 17 + mx, -4 + my, color)
       self.fonts.draw("MAX", FontRole.SEMI_BOLD, 36, 25 + mx, 109 + my, color)
+  def render_steering_wheel(self, state: OnroadState) -> None:
     if state.lateral_active:
       wheel_alpha = self._wheel_alpha.update(255 * 0.9)
       wheel_y = self._wheel_y.update(0)
@@ -231,17 +236,20 @@ class MiciSidebarWidgets:
     self._confidence_drive_frame: int | None = None
     self._confidence_stamp_ns: int | None = None
 
-  def render(self, rect: rl.Rectangle, state: OnroadState) -> None:
+  def render(self, rect: rl.Rectangle, state: OnroadState, *, widget=None) -> None:
     sidebar = rl.Rectangle(rect.x + rect.width - 60, rect.y, 60, rect.height)
-    rl.draw_rectangle(int(sidebar.x), int(sidebar.y), int(sidebar.width), int(sidebar.height), rl.BLACK)
-    for key, render in (("model_confidence", self._confidence_ball), ("conditional_mode", self._conditional)):
+    if widget is None:
+      rl.draw_rectangle(int(sidebar.x), int(sidebar.y), int(sidebar.width), int(sidebar.height), rl.BLACK)
+    for key, render in (("model_confidence", self._confidence_ball), ("conditional_mode", self._conditional),
+                        ("following_distance", self._personality)):
+      if widget is not None and key != widget:
+        continue
       position = placement(state.customization, "compact", key)
       if not position["enabled"] or (position["x"] < sidebar.x and state.alert.size != AlertSize.NONE):
         continue
       bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
       draw_widget_frame(bounds, state.customization, "compact", key)
       render(bounds, state)
-    self.render_personality(rect, state)
 
   def render_personality(self, rect: rl.Rectangle, state: OnroadState) -> None:
     position = placement(state.customization, "compact", "following_distance")

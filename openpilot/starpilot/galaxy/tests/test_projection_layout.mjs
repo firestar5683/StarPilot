@@ -66,3 +66,12 @@ assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
 feed.stop()
 console.log("Projection editor: isolated document, strict snapshot, routing confirmation, actual Vue template, endpoint and placement-only save passed")
+
+const orderedRaw = copy(raw)
+orderedRaw.document.widgetOrder = Object.keys(widgets).reverse()
+const orderedSnapshot = editorSnapshot(orderedRaw)
+assert.equal(validSnapshot(orderedSnapshot), true)
+assert.deepEqual(orderedSnapshot.document.widgetOrder.large, orderedRaw.document.widgetOrder)
+assert.deepEqual(projectionPayload({revision: raw.revision, document: orderedSnapshot.document}, orderedSnapshot.metadata).document,
+  orderedRaw.document)
+console.log('Projection layers survive editor translation and save payload')

@@ -79,9 +79,9 @@ def test_canvas_layers_order_and_highway_simplification():
   fast = build_canvas(CanvasRequest(center, ZOOM_FAST_M_PER_PX, 1536, route, None, tuple(keys)), tiles, CENTER[0])
   assert slow.tiles_missing == 0
   # Casings, then fills, then the route glow and core on top.
-  alphas = [color.a for color, _ in slow.layers]
-  assert len(slow.layers) == 2 * 4 + 2 and alphas[-2] < 255 and alphas[-1] == 255
-  assert len(fast.layers) == 2 * 3 + 2, "minor roads drop out at highway zoom"
+  alphas = [color.a for color, _ in slow.guidance]
+  assert len(slow.layers) == 2 * 4 and len(slow.guidance) == 2 and alphas[-2] < 255 and alphas[-1] == 255
+  assert len(fast.layers) == 2 * 3 and len(fast.guidance) == 2, "minor roads drop out at highway zoom"
   overview = build_canvas(CanvasRequest(center, 5.0, 1536, None, None, tuple(keys)), tiles, CENTER[0])
   assert len(overview.layers) == 2 * 2, "and streets when zoomed out further"
   missing = build_canvas(CanvasRequest(center, 1.0, 1536, None, None, tuple(keys) + (TileKey(14, 0, 0),)), tiles, CENTER[0])
@@ -169,12 +169,12 @@ def test_overlay_draws_heading_up_roads_route_and_soft_edges(gl, tmp_path):
   assert ((b > 200) & (r > 120) & (r < 210) & (g < 175)).sum() > 300
 
 
-def test_overlay_opacity_scales_the_whole_widget(gl, tmp_path):
+def test_overlay_opacity_fades_map_background(gl, tmp_path):
   rl = gl
   full = render_overlay(rl, tmp_path / "a", bearing=0.0, opacity=1.0, route=False).astype(int)
   half = render_overlay(rl, tmp_path / "b", bearing=0.0, opacity=0.35, route=False).astype(int)
   camera = np.array([70, 90, 70])
-  center = (slice(150, 270), slice(200, 360))
+  center = (slice(100, 240), slice(100, 360))
   full_delta = np.abs(full[center][..., :3] - camera).mean()
   half_delta = np.abs(half[center][..., :3] - camera).mean()
   assert 0.25 < half_delta / full_delta < 0.45
@@ -238,3 +238,13 @@ def test_map_feed_uses_navigation_gps_choice_with_car_fallback(monkeypatch):
   sm.put("gpsLocationExternal", now - 100_000_000, latitude=36.3, bearingAccuracyDeg=200.0)
   fix = feed.read().fix
   assert fix.latitude == 36.3 and fix.bearing is None, "a receiver wins; an unusable heading is dropped"
+
+
+def test_route_stays_bright_at_minimum_map_opacity(gl, tmp_path):
+  full = render_overlay(gl, tmp_path / "full", bearing=0.0, opacity=1.0)
+  faded = render_overlay(gl, tmp_path / "faded", bearing=0.0, opacity=0.15)
+  r, g, b = (full[..., i].astype(int) for i in range(3))
+  core = (b > 245) & (r > 130) & (r < 210) & (g < 180)
+  assert core.sum() > 100
+  assert np.abs(full[core, :3].astype(int) - faded[core, :3].astype(int)).mean() < 3
+  assert np.abs(faded[2, 2, :3].astype(int) - (70, 90, 70)).max() < 6

@@ -182,7 +182,7 @@ class ProjectionOnroad:
       self.map.draw(self.native.rl.Rectangle(placed['x'], placed['y'], placed['width'], placed['height']),
                     placed['opacity'] / 100.0)
 
-  def _pip_layer(self, rect, state):
+  def _pip_layer(self, rect, state, *, submit=None):
     """The comma's blinker/blind-spot side-camera bubbles, at the AA layout's placements."""
     native = self.native
     now_ns = time.monotonic_ns()
@@ -209,7 +209,7 @@ class ProjectionOnroad:
         width, height = native.widget_size(state.customization, 'large', key)
         placements[side] = native.pip_rect(position['x'], position['y'], width, height)
     self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
-                    on_bsm=saved.on_bsm, invert=saved.invert, placements=placements)
+                    on_bsm=saved.on_bsm, invert=saved.invert, placements=placements, **({"submit": submit} if submit is not None else {}))
 
   def _with_certificate_notice(self, state, now_ns):
     """Show the certificate heads-up for the first seconds of each drive; a real alert always wins."""

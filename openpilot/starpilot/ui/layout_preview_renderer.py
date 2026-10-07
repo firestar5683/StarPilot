@@ -173,6 +173,7 @@ class _Canvas:
         self.view.map_layer = self._render_map
       self.monitor = _DriverMonitorArt(profile)
       self.view.driver_monitor_layer = self._render_driver_monitor
+      self.view.preview_pip_layer = self._render_preview_pip
       self.target = rl.load_render_texture(*(viewport or profile.size))
       if not self.target.id:
         raise RuntimeError("Unable to create layout preview target")
@@ -182,7 +183,7 @@ class _Canvas:
 
   def _render_background(self, rect: rl.Rectangle, state: OnroadState) -> None:
     render_sample_road(rect, state, self.profile)
-    if self.viewport is None:
+    if not state.customization.get("widgetOrder", {}).get(str(self.profile)) and self.viewport is None:
       self._render_side_cameras(state)
 
   @staticmethod
@@ -195,8 +196,15 @@ class _Canvas:
     if placed is not None and self.map is not None:
       self.map.draw(rl.Rectangle(placed["x"], placed["y"], placed["width"], placed["height"]), placed["opacity"] / 100.0)
 
-  def _render_side_cameras(self, state: OnroadState) -> None:
+  def _render_preview_pip(self, rect, state, *, submit=None):
+    if submit is not None:
+      for key in CAMERA_WIDGETS:
+        submit(key, lambda key=key: self._render_side_cameras(state, only=key))
+
+  def _render_side_cameras(self, state: OnroadState, only=None) -> None:
     for key in CAMERA_WIDGETS:
+      if only is not None and key != only:
+        continue
       position = placement(state.customization, self.profile, key)
       if not position["enabled"]:
         continue

@@ -146,6 +146,26 @@ WIDGET_COLORS = {
 }
 
 
+# Back-to-front order used when a layout first opts into custom layers.
+DEFAULT_WIDGET_ORDER = {
+  "large": ("pip_left", "pip_right", "cruise_limits", "speed_limit_actions", "current_speed",
+            "steering_wheel", "torque_bar", "driver_monitor", MODE_WIDGET),
+  "compact": ("pip_left", "pip_right", "speed_limit", "max_speed", "steering_wheel", "torque_bar",
+              "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET),
+}
+
+
+def validate_widget_order(order, widgets):
+  if (type(order) is not list or any(type(key) is not str for key in order) or
+      len(order) != len(widgets) or set(order) != set(widgets)):
+    raise ValueError("Invalid widget layer order")
+  return list(order)
+
+
+def widget_order(document, profile):
+  return document.get("widgetOrder", {}).get(str(profile), DEFAULT_WIDGET_ORDER[str(profile)])
+
+
 def widget_bounds(profile, widget):
   return PROFILES[profile]["widgets"][widget].get("bounds", PROFILES[profile]["bounds"])
 
@@ -165,6 +185,8 @@ def customization_metadata():
       widget["colors"] = dict(WIDGET_COLORS[name].get(key, {}))
     profile["widgets"]["steering_wheel"]["resizable"] = {
       "min": WHEEL_SIZES[name][0], "default": WHEEL_SIZES[name][1], "max": WHEEL_SIZES[name][2]}
+  for profile, data in profiles.items():
+    data["widgetOrder"] = list(DEFAULT_WIDGET_ORDER[profile])
   return {"profiles": profiles, "roadColorFields": [
     {"id": key, "label": label, "default": ROAD_COLORS[key]}
     for key, label in (("path", "Path"), ("pathEdge", "Path edges"), ("laneLines", "Outer lane lines"))], "paletteFields": [
@@ -190,6 +212,8 @@ def validate_document(value):
     fields.add('speedSources')
     if type(value['speedSources']) is not bool:
       raise ValueError('Invalid speed source drawer preference')
+  if value['version'] == 4 and 'widgetOrder' in value:
+    fields.add('widgetOrder')
   if set(value) != fields:
     raise ValueError("Invalid customization fields")
   palette, layouts = value["palette"], value["layouts"]
@@ -314,6 +338,12 @@ def validate_document(value):
         if (placement["x"] < actions["x"] + area["width"] and placement["x"] + width > actions["x"] and
             placement["y"] < actions["y"] + area["height"] and placement["y"] + height > actions["y"]):
           raise ValueError("Widget overlaps protected speed limit actions")
+  if 'widgetOrder' in value:
+    orders = value['widgetOrder']
+    if type(orders) is not dict or not orders.keys() <= PROFILES.keys():
+      raise ValueError("Invalid widget layer profiles")
+    result['widgetOrder'] = {profile: validate_widget_order(order, PROFILES[profile]['widgets'])
+                             for profile, order in orders.items()}
   if 'speedSources' in value:
     result['speedSources'] = value['speedSources']
   if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_BYTES:

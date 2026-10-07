@@ -79,6 +79,22 @@ def _payload(raw_value, schema, kind: int):
     return None
 
 
+def _memoized(decode):
+  # Consumers poll at 100 Hz while wires change at 10-100 Hz; results are frozen, so reuse the last exact-bytes decode.
+  last = [None, None]
+
+  def wrapper(raw):
+    key = bytes(raw) if isinstance(raw, (bytes, bytearray, memoryview)) else None
+    if key is None:
+      return decode(raw)
+    if last[0] != key:
+      last[0], last[1] = key, decode(key)
+    return last[1]
+  wrapper.__wrapped__ = decode
+  return wrapper
+
+
+@_memoized
 def decode_safety(raw: bytes) -> SafetyState | None:
   value = _payload(raw, custom.AolAxisState.SafetyWire, SAFETY_KIND)
   if value is None:
@@ -96,6 +112,7 @@ def decode_safety(raw: bytes) -> SafetyState | None:
     return None
 
 
+@_memoized
 def decode_intent(raw: bytes) -> IntentState | None:
   value = _payload(raw, custom.AolAxisState.IntentWire, INTENT_KIND)
   if value is None:
