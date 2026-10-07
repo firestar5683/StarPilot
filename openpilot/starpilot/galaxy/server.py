@@ -1178,12 +1178,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.require_session():
             self.json(200, result)
-      elif path in ('/api/flm/status', '/api/flm/report'):
+      elif path in ('/api/flm/status', '/api/flm/report', '/api/flm/live'):
         if not self.require_session():
           return
         try:
           query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=2)
-          if path.endswith('/status'):
+          if path.endswith('/live'):
+            if query:
+              raise ValueError('Unexpected query')
+            result = flm_owner().request('live')
+          elif path.endswith('/status'):
             if query:
               raise ValueError('Unexpected query')
             result = flm_owner().request('status')
@@ -1458,7 +1462,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
-                      '/api/maps/start', '/api/maps/cancel', '/api/flm/start', '/api/flm/cancel', '/api/bluetooth/action', '/api/controllers/action',
+                      '/api/maps/start', '/api/maps/cancel', '/api/flm/start', '/api/flm/cancel', '/api/flm/live-action',
+                      '/api/flm/train', '/api/flm/recommend', '/api/flm/save-report',
+                        '/api/bluetooth/action', '/api/controllers/action',
                       '/api/models/active', '/api/models/preferences', '/api/models/download', '/api/models/download_all',
                       '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest', '/api/models/jetlink',
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
@@ -2366,7 +2372,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             if self.settings_session() != identity:
               self.json(401, {'error': 'Sign in to Galaxy'})
               return
-            result = flm_owner().request(operation, payload)
+            if operation in ('live-action', 'train', 'recommend', 'save-report'):
+              result = flm_owner().request(operation, payload, session_valid=lambda identity=identity: bluetooth_session_valid(identity),
+                                           session_guard=effect_lock)
+            else:
+              result = flm_owner().request(operation, payload)
         except ValueError:
           if self.require_session():
             self.json(400, {'error': 'Invalid FLM operation'})

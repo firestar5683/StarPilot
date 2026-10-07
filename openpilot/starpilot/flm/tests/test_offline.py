@@ -221,3 +221,52 @@ class OfflineTest(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+class GmEvidenceJoinTest(unittest.TestCase):
+  def test_actual_factory_context_serialized_epochs_original_profiles_and_mismatch_rejection(self):
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from opendbc.car.gm.tests.test_ascm_intercept import params as ordinary_params
+    from opendbc.car.gm.values import CAR as GM_CAR
+    from openpilot.starpilot.flm.gm_recommend import source_context, classify_groups, build_report
+    from openpilot.starpilot.lateral.torque_settings import PlatformProfile, FieldChoice
+    cp_builder = ordinary_params(GM_CAR.CHEVROLET_MALIBU_ASCM)
+    cp_builder.init('carFw', 1)[0].fwVersion = b'\x00\xfffirmware'
+    cp = cp_builder.as_reader()
+    tune = cp.lateralTuning.torque
+    with OpenpilotPrefix():
+      context = source_context(cp, 'starpilot', Params(), 'a'*64,
+                               PlatformProfile((tune.latAccelFactor, tune.latAccelOffset, tune.friction), FieldChoice(), FieldChoice()))
+    events = []
+    params_event = log.Event.new_message(logMonoTime=1_000_000_000, valid=True)
+    params_event.init('carParams').from_dict(cp.to_dict())
+    events.append(params_event)
+    for index in range(500):
+      ns = 1_000_000_000 + (index+1)*20_000_000 + (1_000_000_000 if index >= 250 else 0)
+      state = event('carState', ns, pressed=index == 100)
+      state.carState.steeringAngleDeg = 3.
+      command = event('carControl', ns)
+      control = event('controlsState', ns, desired=.8, actual=.1)
+      control.controlsState.lateralControlState.torqueState.output = .2
+      events.extend((state, command, control))
+    groups = []
+    result = analyze_segments((SegmentInput('synthetic-gm-recording', 0, serialized(events)),), gm_context=context, evidence=groups)
+    self.assertEqual(result.segments[0].status, 'measured')
+    self.assertGreaterEqual(len(groups), 3)
+    self.assertTrue(all(all(0 < b.t-a.t <= .251 for a,b in zip(group,group[1:], strict=False)) for group in groups))
+    self.assertTrue(all(not sample.steering_pressed for group in groups for sample in group))
+    summaries, stats = classify_groups(groups)
+    self.assertGreater(stats['sampleCount'], 0)
+    report = build_report(context, summaries, stats)
+    self.assertEqual({path['key'] for path in report['paths']}, {'baseline_fix', 'cleanup_pass'})
+    self.assertTrue(any(path['profiles'] for path in report['paths']))
+    self.assertFalse(report['fit'])
+    self.assertFalse(report['vehicleQualification'])
+    with self.assertRaises(ValueError):
+      build_report(context, summaries, stats, feedback={'acceptedDimensions':['invented-dimension']})
+    wrong = {**context, 'cpSignature': 'b'*64}
+    rejected = []
+    result = analyze_segments((SegmentInput('synthetic-gm-recording', 0, serialized(events)),), gm_context=wrong, evidence=rejected)
+    self.assertEqual(result.segments[0].status, 'unsupported_car')
+    self.assertEqual(rejected, [])

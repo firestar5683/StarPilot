@@ -14,6 +14,8 @@ DOCUMENT_KEY = "TorqueOverrideDocument"
 LEGACY_KEYS = ("SteerLatAccel", "SteerFriction", "SteerLatAccelStock", "SteerFrictionStock")
 MAX_DOCUMENT_BYTES = 16_384
 
+from openpilot.starpilot.flm.torque_surface import GmFlmBinding
+
 
 @dataclass(frozen=True)
 class FieldChoice:
@@ -45,6 +47,7 @@ class PlatformProfile:
   proportional_gain: FieldChoice = FieldChoice()
   gain_basis: GainBasis | None = None
   geometry: GeometryProfile | None = None
+  flm: GmFlmBinding | None = None
 
 
 class LegacyMode(StrEnum):
@@ -159,7 +162,7 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
   except (RecursionError, OverflowError) as exc:
     raise ValueError("Malformed torque document") from exc
   if not isinstance(document, dict) or set(document) != {"schemaVersion", "vehicles"} or \
-     type(document["schemaVersion"]) is not int or document["schemaVersion"] not in (1, 2, 3) or \
+     type(document["schemaVersion"]) is not int or document["schemaVersion"] not in (1, 2, 3, 4) or \
      not isinstance(document["vehicles"], dict) or len(document["vehicles"]) > len(SUPPORTED_VEHICLES):
     raise ValueError("Malformed torque document")
   profiles: dict[str, PlatformProfile] = {}
@@ -167,8 +170,10 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
     expected = {"basis", "factor", "friction"}
     if document["schemaVersion"] >= 2 and isinstance(value, dict) and "proportionalGain" in value:
       expected |= {"proportionalGain", "gainBasis"}
-    if document["schemaVersion"] == 3 and isinstance(value, dict) and "geometry" in value:
+    if document["schemaVersion"] >= 3 and isinstance(value, dict) and "geometry" in value:
       expected |= {"geometry"}
+    if document["schemaVersion"] == 4 and isinstance(value, dict) and "flm" in value:
+      expected |= {"flm"}
     if fingerprint not in SUPPORTED_VEHICLES or not isinstance(value, dict) or set(value) != expected:
       raise ValueError("Malformed torque profile")
     basis_obj = value["basis"]
@@ -192,13 +197,20 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
       if fingerprint not in GM_VEHICLES:
         raise ValueError("Unsupported geometry profile")
       geometry = parse_geometry(value["geometry"])
-    profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis, geometry)
+    flm = None
+    if "flm" in value:
+      if fingerprint not in GM_VEHICLES:
+        raise ValueError("Unsupported GM FLM profile")
+      flm = GmFlmBinding.from_document(value["flm"])
+      flm.validate_manual(fingerprint)
+    profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis, geometry, flm)
   return profiles
 
 
 def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
   vehicles: dict[str, dict] = {}
-  version = 3 if any(p.geometry is not None for p in profiles.values()) else 2 if any(p.gain_basis is not None for p in profiles.values()) else 1
+  version = (4 if any(p.flm is not None for p in profiles.values()) else 3 if any(p.geometry is not None for p in profiles.values())
+    else 2 if any(p.gain_basis is not None for p in profiles.values()) else 1)
   for fingerprint, profile in profiles.items():
     vehicles[fingerprint] = {
       "basis": dict(zip(("latAccelFactor", "latAccelOffset", "friction"), profile.basis, strict=True)),
@@ -220,6 +232,8 @@ def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
         "fullDelay": {"mode": geometry.full_delay.mode, "customValue": geometry.full_delay.custom_value},
         "automaticDelay": geometry.automatic_delay, "learning": geometry.learning,
       }
+    if profile.flm is not None:
+      vehicles[fingerprint]["flm"] = profile.flm.document()
   raw = json.dumps({"schemaVersion": version, "vehicles": vehicles}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
   parse_document(raw)
   return raw

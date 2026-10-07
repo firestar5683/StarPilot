@@ -158,15 +158,17 @@ def _windows(samples: list[TrackingSample], eligible: list[bool]) -> tuple[tuple
   return tuple(windows), truncated
 
 
-def analyze_segments(segments: tuple[SegmentInput, ...], *, cancelled: Callable[[], bool] = lambda: False) -> AnalysisReport:
+def analyze_segments(segments: tuple[SegmentInput, ...], *, cancelled: Callable[[], bool] = lambda: False,
+                     gm_context: dict | None = None, evidence: list | None = None) -> AnalysisReport:
   if not 1 <= len(segments) <= MAX_SEGMENTS:
     raise ValueError('segment_count')
   if len({(s.route, s.number) for s in segments}) != len(segments):
     raise ValueError('duplicate_segment')
-  return AnalysisReport(tuple(_analyze(segment, cancelled) for segment in segments))
+  return AnalysisReport(tuple(_analyze(segment, cancelled, gm_context=gm_context, evidence=evidence) for segment in segments))
 
 
-def _analyze(segment: SegmentInput, cancelled: Callable[[], bool]) -> SegmentReport:
+def _analyze(segment: SegmentInput, cancelled: Callable[[], bool], *,
+             gm_context: dict | None = None, evidence: list | None = None) -> SegmentReport:
   if not segment.route or len(segment.route) > 128 or type(segment.number) is not int or not 0 <= segment.number <= 9999:
     raise ValueError('segment_identity')
   latest: dict[str, tuple[int, object]] = {}
@@ -174,6 +176,7 @@ def _analyze(segment: SegmentInput, cancelled: Callable[[], bool]) -> SegmentRep
   counts: Counter[str] = Counter()
   samples: list[TrackingSample] = []
   override_ns: list[int] = []
+  gm_samples: dict[int, object] = {}
   messages = torque_frames = 0
   cp_seen = cp_ok = False
   cp_digest = None
@@ -206,6 +209,9 @@ def _analyze(segment: SegmentInput, cancelled: Callable[[], bool]) -> SegmentRep
         digest = hashlib.sha256(cp.as_builder().to_bytes()).hexdigest()
         supported = (cp.carFingerprint == CAR.HYUNDAI_IONIQ_6 and cp.lateralTuning.which() == 'torque' and
                      cp.steerControlType == 'torque' and not cp.dashcamOnly)
+        if gm_context is not None:
+          from openpilot.starpilot.flm.gm_recommend import matches_recording
+          supported = matches_recording(cp, gm_context)
       except (AttributeError, ValueError, RuntimeError, TypeError) as error:
         raise ValueError('invalid_car_params') from error
       if cp_seen and digest != cp_digest:
@@ -280,12 +286,46 @@ def _analyze(segment: SegmentInput, cancelled: Callable[[], bool]) -> SegmentRep
       if len(samples) >= MAX_SAMPLES_PER_SEGMENT:
         raise ValueError('sample_limit')
       samples.append(TrackingSample(stamp, speed, desired, actual, bool(torque.saturated), bool(car_state.steeringPressed), epoch))
+      if gm_context is not None:
+        # Only fields used by original GM classification must be measured.
+        # Unused legacy output/roll placeholders remain explicitly unavailable;
+        # no carOutput/native/physical receipt is invented from carControl.
+        from openpilot.starpilot.flm.gm_evidence import FLMSample
+        jerk = _finite_number(torque.desiredLateralJerk)
+        angle = _finite_number(car_state.steeringAngleDeg)
+        output = _finite_number(torque.output)
+        if jerk is not None and abs(jerk) <= 1000 and angle is not None and abs(angle) <= 2000 and output is not None and abs(output) <= 2:
+          gm_samples[len(samples) - 1] = FLMSample(segment.route, segment.number, stamp / 1e9, speed,
+            True, bool(car_state.steeringPressed), bool(torque.saturated), actual, desired, jerk,
+            _finite_number(torque.error), _finite_number(torque.errorRate), _finite_number(torque.p),
+            _finite_number(torque.i), _finite_number(torque.d), _finite_number(torque.f), output, angle,
+            _finite_number(car_state.steeringTorque), _finite_number(car_control.actuators.torque), None, None)
+        else:
+          counts['missing_gm_evidence_numeric'] += 1
+
   if cancelled():
     raise RuntimeError('cancelled')
   eligibility = _eligible(samples, override_ns)
   windows, windows_truncated = _windows(samples, eligibility)
   accepted = [sample for sample, eligible in zip(samples, eligibility, strict=True) if eligible]
   counts['driver_override_or_boundary'] += len(samples) - len(accepted)
+  if gm_context is not None and evidence is not None:
+    group = []
+    previous = None
+    for index, sample in enumerate(samples):
+      measured = gm_samples.get(index) if eligibility[index] else None
+      continuous = (previous is not None and sample.epoch == previous.epoch and
+                    0 < sample.mono_ns - previous.mono_ns <= GAP_NS)
+      if measured is None or not continuous:
+        if group:
+          evidence.append(group)
+        group = []
+      if measured is not None:
+        group.append(measured)
+      previous = sample if measured is not None else None
+    if group:
+      evidence.append(group)
+
   error = [s.actual_lat_accel - s.desired_lat_accel for s in accepted]
   if cp_seen and not cp_ok:
     status = 'unsupported_car'
