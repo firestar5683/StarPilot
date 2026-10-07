@@ -351,7 +351,7 @@ class NavigationOwner:
       raise ValidationError('Map is busy; try again')
     try:
       started = time.monotonic()
-      with self.session.get(f'https://api.mapbox.com/styles/v1/frogsgomoo/cmcfv151j000o01rcdxebhl76/tiles/512/{z}/{x}/{y}.png',
+      with self.session.get(f'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}.png',
                             params={'access_token': token}, timeout=(2, 2), stream=True, allow_redirects=False) as response:
         if response.status_code != 200 or response.headers.get('Content-Type', '').split(';')[0] != 'image/png':
           raise ValidationError('Map tiles are unavailable')

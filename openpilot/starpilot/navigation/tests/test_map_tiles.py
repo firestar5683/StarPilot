@@ -56,7 +56,7 @@ def test_fixed_provider_and_server_only_key(tmp_path):
   provider = Provider()
   assert tile_owner(tmp_path, provider).map_tile(2, 3, 1) == PNG
   url, arguments = provider.calls[0]
-  assert url == 'https://api.mapbox.com/styles/v1/frogsgomoo/cmcfv151j000o01rcdxebhl76/tiles/512/2/3/1.png'
+  assert url == 'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/2/3/1.png'
   assert arguments['params'] == {'access_token': 'pk.fixture'}
   assert arguments['allow_redirects'] is False
 
