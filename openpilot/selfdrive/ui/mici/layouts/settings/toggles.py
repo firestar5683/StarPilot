@@ -67,8 +67,8 @@ class TogglesLayoutMici(NavScroller):
     record_front = BigParamControl("record & upload cabin camera", "RecordFront",
                                    description_icon=gui_app.texture("icons_mici/settings/device/cameras.png", 64, 64),
                                    toggle_callback=restart_needed_callback, description="Upload cabin camera data to help improve driver monitoring.")
-    record_mic = BigParamControl("record & upload mic audio", "RecordAudio", description_icon=gui_app.texture("icons_mici/microphone.png", 64, 64),
-                                 toggle_callback=restart_needed_callback,
+    record_mic = BigToggle("record & upload mic audio", description_icon=gui_app.texture("icons_mici/microphone.png", 64, 64),
+                                 initial_state=ui_state.params.get_bool("RecordAudio"), toggle_callback=self._on_record_audio,
                                  description="Record microphone audio while driving.\n" +
                                              "Audio is included in dashcam videos in comma connect.")
     enable_openpilot = BigParamControl("enable openpilot", "OpenpilotEnabledToggle", toggle_callback=restart_needed_callback,
@@ -157,6 +157,12 @@ class TogglesLayoutMici(NavScroller):
     self._slc_offsets.change_units(desired, self._metric_source)
     self._metric_source = self._slc_offsets._raw("IsMetric")
     self._metric_toggle.set_checked(ui_state.params.get_bool("IsMetric"))
+
+  def _on_record_audio(self, desired: bool) -> None:
+    # Keep filesystem waits off the UI thread, and persist the preference before
+    # publishing the restart request through the same Params writer queue.
+    ui_state.params.put_bool("RecordAudio", desired)
+    ui_state.params.put_bool("OnroadCycleRequested", True)
 
   def _on_experimental_mode(self, state: bool):
     if state and not ui_state.params.get_bool("ExperimentalModeConfirmed"):
