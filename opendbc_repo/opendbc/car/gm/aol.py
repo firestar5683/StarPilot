@@ -5,6 +5,7 @@ import math
 from opendbc.car.structs import CarParams
 from opendbc.car.gm.values import (malibu_hybrid_profile, volt_cc_pedal_profile, control_flags,
   camera_acc_pedal_profile, CAR, GMFlags, GMSafetyFlags, is_bolt_cc_profile, is_bolt_pedal_profile,
+  is_bolt_pedal_removed_profile,
   is_ordinary_ascm_profile, is_ordinary_camera_profile, is_ordinary_sdgm_profile, is_bolt_euv_longitudinal,
   is_volt_gateway_profile, is_volt_cc_profile, is_silverado_cc_stock_profile,
   is_volt_ascm_longitudinal, is_volt_camera_stock, is_volt_camera_longitudinal,
@@ -96,3 +97,13 @@ def qualified_gm(cp) -> bool:
 def lateral_request(cp, cc) -> bool:
   """Only a finalized independent-axis owner may relax its cruise-active lateral gate."""
   return (qualified_gm(cp) and int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and cc.latActive)
+
+
+def native_bootstrap_supported(cp) -> bool:
+  """Present Bolt interceptor configuration may precede selfdrived readiness."""
+  try:
+    return bool(qualified_gm(cp) and
+                (is_bolt_pedal_profile(cp) or is_bolt_pedal_profile(cp, stock_only=True)) and
+                not (is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True)))
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False

@@ -330,6 +330,108 @@ class TestGmAol(unittest.TestCase):
       selected.aol_card_intent.update(cs, fault_active=False)
       self.assertTrue(selected.aol_card_intent.allowed_latch)
 
+  def test_actual_bolt_card_lagging_preserves_intent_but_withdraws_both_axes(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
+    from openpilot.cereal import log
+    from openpilot.selfdrive.selfdrived.events import Events, ET
+    from openpilot.starpilot.aol.intent import disarming_fault
+    from openpilot.starpilot.nostalgia import aol_no_entry
+
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', True, block=True)
+      selected = self.card(pedal_params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True), settings)
+      self.assertEqual(selected.CP.safetyConfigs[0].safetyParam, 0x9D)
+      cs = structs.CarState(canValid=True, gearShifter='drive', vEgo=20.)
+      cs.cruiseState.available = True
+      owner = selected.aol_card_intent
+      owner.update(cs)
+      self.assertTrue(owner.allowed_latch)
+      events = Events()
+      events.add(log.OnroadEvent.EventName.selfdrivedLagging)
+      self.assertTrue(events.contains(ET.NO_ENTRY))
+      self.assertTrue(events.contains(ET.SOFT_DISABLE))
+      self.assertTrue(disarming_fault(events.to_msg(), cs))  # Other vehicle owners retain their existing law.
+      for standard in (False, True):
+        with patch.object(selected, 'sm', {'onroadEvents': events.to_msg()}):
+          fault = selected.aol_disarming_fault(cs, 1_000_000_000, 1_000_000_001)
+        self.assertFalse(fault)
+        owner.update(cs, fault_active=fault)
+        self.assertTrue(owner.allowed_latch)
+        allowed, pause_lat, pause_long = owner.output(cs)
+        intent = SimpleNamespace(allowedLatch=allowed, pauseLateral=pause_lat, pauseLongitudinal=pause_long)
+        native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=True,
+                                 lateralAllowed=True, longitudinalAllowed=True)
+        blocked = decide_axes(standard_lateral=standard, standard_longitudinal=standard, intent=intent,
+          native=native, car_state=cs, initialized=True, model_ready=True,
+          no_entry=aol_no_entry(events.names, cs, paddle_only_cancel=False), immediate_disable=False,
+          dm_lockout=False, pause_brake_mps=0.)
+        self.assertFalse(blocked.desired_lateral or blocked.desired_longitudinal)
+        self.assertFalse(blocked.lateral_active or blocked.longitudinal_active)
+      events.clear()
+      with patch.object(selected, 'sm', {'onroadEvents': events.to_msg()}):
+        owner.update(cs, fault_active=selected.aol_disarming_fault(cs, 1_100_000_000, 1_100_000_001))
+      self.assertTrue(owner.allowed_latch)  # No main cycle, standard engagement, or gesture.
+      allowed, pause_lat, pause_long = owner.output(cs)
+      intent = SimpleNamespace(allowedLatch=allowed, pauseLateral=pause_lat, pauseLongitudinal=pause_long)
+      for native, expected_active in ((None, False), (SimpleNamespace(requestedLateral=False,
+          requestedLongitudinal=False, lateralAllowed=True, longitudinalAllowed=True), False),
+          (SimpleNamespace(requestedLateral=True, requestedLongitudinal=False,
+                           lateralAllowed=True, longitudinalAllowed=False), True)):
+        recovered = decide_axes(standard_lateral=False, standard_longitudinal=False, intent=intent,
+          native=native, car_state=cs, initialized=True, model_ready=True, no_entry=False,
+          immediate_disable=False, dm_lockout=False, pause_brake_mps=0.)
+        self.assertTrue(recovered.desired_lateral)
+        self.assertEqual(recovered.lateral_active, expected_active)
+        self.assertFalse(recovered.desired_longitudinal or recovered.longitudinal_active)
+      events.add(log.OnroadEvent.EventName.selfdrivedLagging)
+      denied = selected.CP.as_reader().as_builder()
+      denied.passive = True
+      with patch.object(selected, 'CP', denied), patch.object(selected, 'sm', {'onroadEvents': events.to_msg()}):
+        self.assertTrue(selected.aol_disarming_fault(cs, 1_200_000_000, 1_200_000_001))
+
+  def test_actual_bolt_card_mixed_lagging_faults_still_require_valid_main_cycle(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
+    from openpilot.cereal import log
+    from openpilot.selfdrive.selfdrived.events import Events
+
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', True, block=True)
+      for extra in (log.OnroadEvent.EventName.controlsMismatch, log.OnroadEvent.EventName.processNotRunning, None):
+        with self.subTest(extra=extra):
+          selected = self.card(pedal_params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True), settings)
+          cs = structs.CarState(canValid=True, gearShifter='drive', vEgo=20.)
+          cs.cruiseState.available = True
+          owner = selected.aol_card_intent
+          owner.update(cs)
+          events = Events()
+          events.add(log.OnroadEvent.EventName.selfdrivedLagging)
+          if extra is not None:
+            events.add(extra)
+          else:
+            cs.steerFaultPermanent = True
+          with patch.object(selected, 'sm', {'onroadEvents': events.to_msg()}):
+            fault = selected.aol_disarming_fault(cs, 1_000_000_000, 1_000_000_001)
+          self.assertTrue(fault)
+          owner.update(cs, fault_active=fault)
+          self.assertFalse(owner.allowed_latch)
+          cs.steerFaultPermanent = False
+          owner.update(cs, fault_active=False)
+          self.assertFalse(owner.allowed_latch)
+          cs.canValid = False
+          cs.cruiseState.available = False
+          owner.update(cs, fault_active=False)
+          cs.canValid = True
+          cs.cruiseState.available = True
+          owner.update(cs, fault_active=False)
+          self.assertFalse(owner.allowed_latch)
+          cs.cruiseState.available = False
+          owner.update(cs, fault_active=False)
+          cs.cruiseState.available = True
+          owner.update(cs, fault_active=False)
+          self.assertTrue(owner.allowed_latch)
+
   def test_actual_controls_axis_receipt_and_fault_gates(self):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
       settings = Params()
