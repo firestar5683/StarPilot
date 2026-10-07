@@ -17,6 +17,10 @@ FEATURE_BUTTON_TOP = 64
 FEATURE_BUTTON_HEIGHT = 80
 FEATURE_ACTION_MARGIN = 36
 FEATURE_PAGE_COUNTER_WIDTH = 160
+FEATURE_FOOTER_CENTER = 1015
+FEATURE_FOOTER_BOTTOM = 1080
+FEATURE_FOOTER_BUTTON_WIDTH = 540
+FEATURE_FOOTER_BUTTON_HEIGHT = 84
 FEATURE_TAP_SLOP = 36
 FEATURE_SWIPE_DISTANCE = 120
 FEATURE_FLICK_DISTANCE = 60
@@ -153,6 +157,29 @@ def feature_page_counter_left(state: FeatureSettingsState) -> float:
   return (left + 25 + 2120 - FEATURE_PAGE_COUNTER_WIDTH) / 2
 
 
+def feature_footer_top(state: FeatureSettingsState) -> float:
+  return feature_row_top(state) + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT
+
+
+def feature_footer_buttons(state: FeatureSettingsState) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+  left = 520 if state.sidebar_expanded else 20
+  y = FEATURE_FOOTER_CENTER - FEATURE_FOOTER_BUTTON_HEIGHT / 2
+  return tuple((center - FEATURE_FOOTER_BUTTON_WIDTH / 2, y, FEATURE_FOOTER_BUTTON_WIDTH, FEATURE_FOOTER_BUTTON_HEIGHT)
+               for center in ((left + 25 + 1320) / 2, (1320 + 2120) / 2))
+
+
+def feature_footer_target(x: float, y: float, state: FeatureSettingsState) -> int | None:
+  left = 520 if state.sidebar_expanded else 20
+  if state.editor or not feature_footer_top(state) <= y <= FEATURE_FOOTER_BOTTOM:
+    return None
+  counter_left = feature_page_counter_left(state)
+  if left <= x < counter_left:
+    return -1
+  if counter_left + FEATURE_PAGE_COUNTER_WIDTH < x <= 2140:
+    return 1
+  return None
+
+
 def feature_parent_page(page: str) -> str | None:
   if page == FeaturePage.HUB:
     return None
@@ -242,13 +269,9 @@ class FeatureInput:
       bx, by, width, height = value_done_rect(state)
       if bx <= x <= bx + width and by <= y <= by + height:
         return FeatureUiAction("back")
-    if 980 <= y <= 1050:
-      if state.editor:
-        return None
-      counter_left = feature_page_counter_left(state)
-      if counter_left <= x <= counter_left + FEATURE_PAGE_COUNTER_WIDTH:
-        return None
-      return FeatureUiAction("scroll", direction=-1 if x < 1320 else 1)
+    if not state.editor and y >= feature_footer_top(state):
+      direction = feature_footer_target(x, y, state)
+      return FeatureUiAction("scroll", direction=direction) if direction is not None else None
     if not row_top <= y < row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT:
       return None
     if len(state.rows) == 1 and (controls := value_buttons(state, state.rows[0], row_top)):

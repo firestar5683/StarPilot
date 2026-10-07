@@ -335,7 +335,7 @@ class FeatureVisualTests(unittest.TestCase):
             action = FeatureInput.target(1930, y, state)
             self.assertEqual((action.kind, action.row), ("action", row))
             self.assertEqual(separators[index].args[1], expected_top + (index + 1) * FEATURE_ROW_HEIGHT - 3)
-          self.assertIsNone(FeatureInput.target(1930, expected_top + 5 * FEATURE_ROW_HEIGHT, state))
+          self.assertEqual(FeatureInput.target(1930, expected_top + 5 * FEATURE_ROW_HEIGHT, state).kind, "scroll")
           gap = FeatureInput.target(1930, 108, state)
           self.assertEqual(gap.kind if gap else None, "details" if subtitle else None)
           self.assertEqual(FeatureInput.target(1930, 1015, state).kind, "scroll")
