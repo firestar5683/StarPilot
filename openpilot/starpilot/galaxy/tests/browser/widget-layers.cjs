@@ -29,7 +29,23 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
     const rows = page.locator('.gx-layout__layer')
     await rows.first().waitFor()
     const initial = await rows.locator('.gx-layout__layer-name').allTextContents()
-    await rows.last().dragTo(rows.first())
+    const source = await rows.last().boundingBox(), destination = await rows.first().boundingBox()
+    const beforeMouse = await page.evaluate(() => JSON.stringify(window.editor.state.draft))
+    await page.mouse.move(source.x + 30, source.y + source.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(destination.x + 30, destination.y + destination.height / 2, {steps: 5})
+    assert.equal(await page.locator('.gx-layout__drag-ghost').isVisible(), true)
+    assert.equal(await page.locator('.gx-layout__outline').first().isVisible(), true)
+    assert.equal(await page.locator('.is-drop-target').count(), 1)
+    assert.equal(await page.evaluate(() => window.editor.renderWidgets.at(-1).id), 'pip_left')
+    assert.equal(await page.evaluate(() => window.editor.state.history.undo.length), 0)
+    await page.screenshot({path:'/private/tmp/theme-live-layer-drag.png'})
+    await page.mouse.up()
+    assert.equal(await page.locator('.gx-layout__drag-ghost').count(), 0)
+    assert.equal(await page.evaluate(() => window.editor.state.history.undo.length), 1)
+    await page.getByRole('button', {name:'Undo', exact:true}).click()
+    assert.equal(await page.evaluate(() => JSON.stringify(window.editor.state.draft)), beforeMouse)
+    await page.getByRole('button', {name:'Redo', exact:true}).click()
     assert.equal((await rows.locator('.gx-layout__layer-name').allTextContents())[0], initial.at(-1))
     const order = await page.evaluate(() => window.editor.state.draft.widgetOrder.large
       .filter(id => window.editor.state.draft.layouts.large[id].enabled))
@@ -71,11 +87,37 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
     for (const aa of [false, true]) {
       await page.goto('http://layers.test/' + (aa ? '?projection=1' : ''))
       await rows.first().waitFor()
+      // Device preview receives the tentative order before release on both outputs.
+      await page.setViewportSize({width:1280, height:1000})
+      await client.send('Emulation.setTouchEmulationEnabled', {enabled:false})
+      await page.getByRole('button', {name:'Device preview', exact:true}).click()
+      const dragId = await rows.last().getAttribute('data-layer-id')
+      const deviceSource = await rows.last().boundingBox(), deviceTarget = await rows.first().boundingBox()
+      const previewRequest = page.waitForRequest(request => {
+        if (!request.url().endsWith('/api/ui/layout/preview')) return false
+        const doc = request.postDataJSON()?.document, order = doc?.widgetOrder
+        const widgets = aa ? doc.widgets : doc.layouts.large
+        return (aa ? order : order?.large)?.filter(id => widgets[id].enabled).at(-1) === dragId
+      })
+      await page.mouse.move(deviceSource.x + 30, deviceSource.y + deviceSource.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(deviceTarget.x + 30, deviceTarget.y + deviceTarget.height / 2, {steps:5})
+      await previewRequest
+      assert.equal(await page.locator('.gx-layout__device-outline .gx-layout__outline').isVisible(), true)
+      assert.equal(await page.evaluate(() => window.editor.state.layerDrag.moved), true)
+      await page.mouse.up()
+      await page.getByRole('button', {name:'Arrange widgets', exact:true}).click()
       for (const width of [360, 390, 768, 1280, 1920]) {
         await page.setViewportSize({width, height:900})
         await page.evaluate(() => window.scrollTo(0, 0))
         const undoLabel = page.getByRole('button', {name:'Undo', exact:true}).locator('.gx-layout__action-label')
-        assert.equal(await undoLabel.isVisible(), width > 600)
+        assert.equal(await undoLabel.isVisible(), await page.locator('.gx-layout').evaluate(el => el.clientWidth > 850))
+        for (const name of ['Undo', 'Redo', 'Reload saved', 'Reset to stock StarPilot', 'Save changes']) {
+          const action = page.getByRole('button', {name, exact:true})
+          assert.equal(await action.isVisible(), true)
+          if (width <= 768) assert.equal(await action.locator('svg').isVisible(), true)
+        }
+        assert.equal(await page.getByLabel('More actions', {exact:true}).count(), 0)
         const saveButton = page.getByRole('button', {name:'Save changes', exact:true})
         assert.equal(await saveButton.isVisible(), true)
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)

@@ -422,7 +422,7 @@ export const OnroadLayoutPage = {
       history: { undo: [], redo: [], group: null } })
     let deferred = null
     const apply = (update) => {
-      if (state.drag) { deferred = { ...deferred, ...update }; return }
+      if (state.drag || state.layerDrag) { deferred = { ...deferred, ...update }; return }
       if (deferred) {
         update = { ...deferred, ...update }
         deferred = null
@@ -461,7 +461,7 @@ export const OnroadLayoutPage = {
       if (draftChanged || ["Colors and both layouts saved.", "Android Auto layout saved."].includes(update.notice)) state.history = { undo: [], redo: [], group: null }
     }
     const feed = new OnroadLayoutFeed({ projection: props.projection, unauthorized: props.unauthorized, publish: apply })
-    watch(() => !!state.drag, (dragging) => { if (!dragging && deferred) apply({}) }, { flush: "sync" })
+    watch(() => !!state.drag || !!state.layerDrag, (dragging) => { if (!dragging && deferred) apply({}) }, { flush: "sync" })
     const previewFeed = new LayoutPreviewFeed({ unauthorized: props.unauthorized,
       publish: (update) => Object.assign(state.preview, update) })
     watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag, state.data?.revision],
@@ -492,6 +492,13 @@ export const OnroadLayoutPage = {
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
     layerWidgets() { return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
       .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled) },
+    listWidgets() { return this.state.layerDrag ? this.state.layerDrag.rows.map(id => this.widgets.find(widget => widget.id === id)) : this.layerWidgets },
+    selectionBox() {
+      const widget = this.renderWidgets.find(widget => widget.id === this.state.selected)
+      if (!widget) return null
+      return { x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
+        width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom }
+    },
     activeWidgets() { return this.widgets.filter(({ id }) => this.layout[id].enabled) },
     renderWidgets() { return this.layerWidgets.slice().reverse().map((item) => {
       const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
@@ -552,31 +559,56 @@ export const OnroadLayoutPage = {
       if (!this.editable || this.state.drag || this.state.layerDrag || event.button !== 0) return
       this._suppressLayerClick = false
       event.currentTarget.setPointerCapture(event.pointerId)
-      this.state.layerDrag = { id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY, moved: false }
+      const rect = event.currentTarget.getBoundingClientRect()
+      this.state.selected = id
+      this.state.layerDrag = { id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY,
+        x: rect.x, y: rect.y, width: rect.width, offsetX: event.clientX - rect.x, offsetY: event.clientY - rect.y,
+        rows: this.layerWidgets.map(widget => widget.id), before: clone(this.state.draft), moved: false }
+      this._layerTarget = event.currentTarget
     },
     moveLayerDrag(event) {
       const drag = this.state.layerDrag
       if (!drag || drag.pointerId !== event.pointerId) return
       if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 8) return
       drag.moved = true
+      drag.x = event.clientX - drag.offsetX
+      drag.y = event.clientY - drag.offsetY
       const row = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-layer-id]')
-      drag.target = row?.dataset.layerId || null
+      const target = row?.dataset.layerId
+      if (target && target !== drag.target) {
+        drag.target = target
+        const order = [...orderedWidgetIds(drag.before, this.state.data.metadata, this.state.profile)]
+        const from = order.indexOf(drag.id), to = order.indexOf(target)
+        drag.after = drag.rows.indexOf(target) > drag.rows.indexOf(drag.id)
+        order.splice(from, 1)
+        order.splice(to, 0, drag.id)
+        this.state.draft.widgetOrder ||= {}
+        this.state.draft.widgetOrder[this.state.profile] = order
+      }
       if (event.clientY < 60) window.scrollBy(0, -16)
       else if (event.clientY > window.innerHeight - 60) window.scrollBy(0, 16)
     },
     endLayerDrag(event, cancel = false) {
       const drag = this.state.layerDrag
       if (!drag || drag.pointerId !== event.pointerId) return
+      if (cancel) this.state.draft = drag.before
+      else if (drag.moved) this.recordChange(drag.before)
       this.state.layerDrag = null
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+      if (this._layerTarget?.hasPointerCapture(event.pointerId)) this._layerTarget.releasePointerCapture(event.pointerId)
+      this._layerTarget = null
       this._suppressLayerClick = cancel || drag.moved
-      if (!cancel && drag.moved && drag.target) this.reorderLayer(drag.id, drag.target)
     },
     layerClick(event, id) {
       if (event.detail === 0 || !this._suppressLayerClick) this.selectWidget(id)
       this._suppressLayerClick = false
     },
     layerKey(event, id) {
+      if (event.key === 'Escape' && this.state.layerDrag) {
+        event.preventDefault()
+        this.endLayerDrag({pointerId: this.state.layerDrag.pointerId}, true)
+        return
+      }
+      if (this.state.layerDrag) return
       const direction = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
       if (!direction) return
       event.preventDefault()
@@ -783,6 +815,7 @@ export const OnroadLayoutPage = {
       this._dragTarget = null
     },
     cancelDrag() {
+      if (this.state.layerDrag) this.endLayerDrag({pointerId: this.state.layerDrag.pointerId}, true)
       const drag = this.state.drag
       if (drag) Object.assign(this.layout[drag.id], drag.before)
       this.releaseDrag()
@@ -875,7 +908,7 @@ export const OnroadLayoutPage = {
     },
     alpha(color) { return parseInt(color.slice(7), 16) },
     requestLeave(action) {
-      if (this.busy || this.state.drag) return
+      if (this.busy || this.state.drag || this.state.layerDrag) return
       if (this.dirty) this.state.discard = action
       else this.leave(action)
     },
@@ -886,7 +919,7 @@ export const OnroadLayoutPage = {
       else if (["projection", "device"].includes(action)) { this.hideDevicePreview(); this.$emit("target", action) }
       else this.feed.load()
     },
-    save() { if (this.editable && this.dirty && !this.state.drag) return this.feed.save(this.state.draft) },
+    save() { if (this.editable && this.dirty && !this.state.drag && !this.state.layerDrag) return this.feed.save(this.state.draft) },
   },
   template: `
     <section class="gx-settings gx-layout" aria-label="Colors and layout">
@@ -905,13 +938,11 @@ export const OnroadLayoutPage = {
         <div class="gx-layout__savebar">
           <span role="status">{{ state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
 
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canUndo || !!state.drag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canRedo || !!state.drag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
-          <details class="gx-layout__more"><summary aria-label="More actions" title="More actions"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span class="gx-layout__action-label">More</span></summary><div>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy || !!state.drag" @click="requestLeave('reload')">Reload saved</button>
-          <button class="gx-btn gx-btn--tonal gx-layout__reset" type="button" :disabled="!editable || !stockChanged || !!state.drag" @click="resetToStock">Reset to stock StarPilot</button>
-          </div></details>
-          <button class="gx-btn" type="button" :disabled="!editable || !dirty || !!state.drag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
+          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
+          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canRedo || !!state.drag || !!state.layerDrag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
+          <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy || !!state.drag || !!state.layerDrag" aria-label="Reload saved" title="Reload saved" @click="requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg><span class="gx-layout__action-label">Reload saved</span></button>
+          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !stockChanged || !!state.drag || !!state.layerDrag" aria-label="Reset to stock StarPilot" title="Reset to stock StarPilot" @click="resetToStock"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="gx-layout__action-label">Reset to stock</span></button>
+          <button class="gx-btn" type="button" :disabled="!editable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <div v-if="state.discard" class="gx-card gx-layout__discard" role="alert">
@@ -927,7 +958,7 @@ export const OnroadLayoutPage = {
           </div>
           <div class="gx-layout__workspace">
             <section class="gx-card gx-layout__preview-card" aria-label="Driving screen preview">
-              <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ profile.width }} × {{ profile.height }}</span></div>
+              <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
               <nav class="gx-layout__switcher" aria-label="Preview type">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')">Arrange widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'device'" :disabled="!!state.drag" @click="selectPreview('device')">Device preview</button>
@@ -984,6 +1015,7 @@ export const OnroadLayoutPage = {
                     <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
                   </g>
                 </g>
+                <rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
               <section v-if="state.devicePreviewOpen" class="gx-layout__device" v-show="state.previewMode === 'device'" aria-label="Device preview">
                 <div class="gx-layout__subhead"><strong>{{ projection ? 'Android Auto renderer preview' : 'Device preview' }}</strong><span>Preview scene</span></div>
@@ -992,6 +1024,7 @@ export const OnroadLayoutPage = {
                     :disabled="!!state.drag" @click="state.scene = scene.id">{{ scene.label }}</button>
                 </div>
                 <div class="gx-layout__device-frame" :style="{ aspectRatio: profile.width + ' / ' + profile.height }">
+                  <svg class="gx-layout__device-outline" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" aria-hidden="true"><rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" /></svg>
                   <img v-if="state.preview.url" :src="state.preview.url" alt="Device-rendered sample driving screen" />
                   <span v-else role="status">{{ state.preview.status === 'editing' ? 'Finish moving the widget to refresh Device preview.' : state.preview.status === 'updating' ? 'Updating Device preview…' : state.preview.status === 'unavailable' ? state.preview.error : 'Device preview is waiting.' }}</span>
                 </div>
@@ -1015,15 +1048,19 @@ export const OnroadLayoutPage = {
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
               <p class="gx-note">Tap a widget to edit; drag its row to reorder. Top is front; bottom is back. Alerts stay above widgets.</p>
-              <div class="gx-layout__widget-list"><button v-for="widget in layerWidgets" :key="widget.id" class="gx-btn gx-btn--tonal gx-layout__layer" :data-layer-id="widget.id"
+              <div class="gx-layout__widget-list"><button v-for="widget in listWidgets" :key="widget.id" class="gx-btn gx-btn--tonal gx-layout__layer" :data-layer-id="widget.id"
                 type="button" :aria-label="widget.label" :aria-pressed="state.selected === widget.id"
-                :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id}"
+                :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}"
                 title="Tap to edit; drag to reorder. Up and down keys reorder."
                 @pointerdown="startLayerDrag($event, widget.id)" @pointermove="moveLayerDrag($event)"
                 @pointerup="endLayerDrag($event)" @pointercancel="endLayerDrag($event, true)" @lostpointercapture="endLayerDrag($event, true)"
                 @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)">
                 <span class="gx-layout__row-grip" aria-hidden="true">⠿</span><span class="gx-layout__layer-name">{{ widget.label }}</span>
               </button></div>
+              <Teleport to="body"><div v-if="state.layerDrag?.moved" class="gx-layout__drag-ghost" aria-hidden="true"
+                :style="{left: state.layerDrag.x + 'px', top: state.layerDrag.y + 'px', width: state.layerDrag.width + 'px'}">
+                <span aria-hidden="true">⠿</span><strong>{{ selectedWidget.label }}</strong><span>↕</span>
+              </div></Teleport>
               <details class="gx-layout__tray"><summary>Inactive Widgets · {{ inactiveWidgets.length }}</summary><p class="gx-note">In Arrange widgets, drag onto the preview, or select Add.</p>
                 <div v-for="widget in inactiveWidgets" :key="widget.id" class="gx-layout__tray-item">
                   <button class="gx-layout__drag-handle" type="button" :disabled="!editable || state.previewMode !== 'layout'" :aria-label="'Drag ' + widget.label + ' onto preview'"
