@@ -102,6 +102,7 @@ static uint8_t honda_get_counter(const CANPacket_t *msg) {
 static void honda_rx_hook(const CANPacket_t *msg) {
   const bool pcm_cruise = ((honda_hw == HONDA_BOSCH) && !honda_bosch_long) || ((honda_hw == HONDA_NIDEC) && !honda_interceptor);
   unsigned int pt_bus = honda_get_pt_bus();
+  bool normal_engagement = false;
 
   // sample speed
   if (msg->addr == 0x158U) {
@@ -127,6 +128,7 @@ static void honda_rx_hook(const CANPacket_t *msg) {
     const bool cruise_engaged = GET_BIT(msg, 38U);
     // engage on rising edge
     if (cruise_engaged && !cruise_engaged_prev) {
+      normal_engagement = !controls_allowed;
       controls_allowed = true;
     }
 
@@ -151,6 +153,7 @@ static void honda_rx_hook(const CANPacket_t *msg) {
     bool set = (button != HONDA_BTN_SET) && (cruise_button_prev == HONDA_BTN_SET);
     bool res = (button != HONDA_BTN_RESUME) && (cruise_button_prev == HONDA_BTN_RESUME);
     if (acc_main_on && !pcm_cruise && (set || res)) {
+      normal_engagement = !controls_allowed;
       controls_allowed = true;
     }
 
@@ -203,7 +206,7 @@ static void honda_rx_hook(const CANPacket_t *msg) {
       }
     }
   }
-  honda_stock_aol_rx(msg, pt_bus);
+  honda_stock_aol_rx(msg, pt_bus, normal_engagement);
 }
 
 static bool honda_tx_hook(const CANPacket_t *msg) {
