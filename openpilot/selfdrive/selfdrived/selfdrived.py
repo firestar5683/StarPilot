@@ -823,7 +823,7 @@ class SelfdriveD:
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
-      if native is None:
+      if native is None and self.initialized:
         lost_active_aol = self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active
         self.events.add(EventName.controlsMismatch)
     if not self.CP.passive and self.initialized:

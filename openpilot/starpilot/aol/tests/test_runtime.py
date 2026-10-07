@@ -677,8 +677,17 @@ class IpcAxisContractTests(unittest.TestCase):
                              lateralAllowed=True, longitudinalAllowed=True)
     intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False)
     sd = driver(True)
+    sd.initialized = False
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \
-         mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', side_effect=(None, native, None)):
+         mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', side_effect=(None, None, native, None)):
+      sd.step()
+      self.assertFalse(sd.enabled or sd.active)
+      self.assertEqual(sd.aol_axis_decision.mode, 'off')
+      self.assertNotIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+      self.assertFalse(disarming_fault(sd.events.to_msg(), car_state()))
+      sd.publish_selfdriveState.assert_called_once()
+      sd.publish_selfdriveState.reset_mock()
+      sd.initialized = True
       sd.step()
       self.assertFalse(sd.enabled)
       self.assertTrue(sd.events.contains(ET.NO_ENTRY))
