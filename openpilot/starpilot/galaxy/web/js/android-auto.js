@@ -634,8 +634,8 @@ export const AndroidAutoPage = {
             </div>
             <details class="gx-aa-wiki"><summary>Stuck pairing? Pairing order and wireless adapters</summary>
               <p><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</p>
-              <p><strong>Car with built-in wireless Android Auto:</strong> open the car’s phone pairing screen, tap Find My Car, choose your car, then confirm the code on both screens.</p>
-              <p><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</p>
+              <p><strong>Cars with built-in wireless Android Auto:</strong>  Set the car into pairing (search) mode. On Comma, go to Settings -> Bluetooth -> Scan For Devices. Choose your car, then confirm the code on both screens.</p>
+              <p><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</p>
               <p><strong>Start fresh:</strong></p>
               <ol>
                 <li>Forget the car on the comma: <a href="#/bluetooth">Bluetooth</a> → Forget.</li>
