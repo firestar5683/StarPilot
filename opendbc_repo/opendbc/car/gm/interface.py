@@ -54,7 +54,7 @@ class CarInterface(CarInterfaceBase):
       self.CS.conventional_cancel_credit.observe(can_packets, clear_on_main_off=True, observe_gear=True)
     if volt_cc_pedal_profile(self.CP) is not None:
       self.CS.conventional_cancel_credit.observe(can_packets)
-    if is_conventional_cc_pedal_profile(self.CP) and not is_silverado_cc_pedal_profile(self.CP) and not self.CP.openpilotLongitudinalControl:
+    if is_conventional_cc_pedal_profile(self.CP):
       self.CS.conventional_cancel_credit.observe(can_packets)
     if not is_bolt_cc_profile(self.CP):
       return super().update(can_packets)
