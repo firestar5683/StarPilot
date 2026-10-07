@@ -483,6 +483,51 @@ def malibu_hybrid_params(*, pedal=False, removed=False, alternate=False, radar=F
 
 
 class TestMalibuHybridCc(unittest.TestCase):
+  def test_active_speed_buttons_ignore_generic_upstream_cancel(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.hybrid_cc import CANCEL, RESUME, standard_set_bytes
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    cp = malibu_hybrid_params(removed=True)
+    ci = CarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    control = structs.CarControl.new_message()
+    control.enabled = control.latActive = control.longActive = True
+    control.cruiseControl.cancel = True  # Controls requests this for a non-PCM cruise owner.
+    control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
+    observed = set()
+    echo = []
+    for tick in range(280):
+      now = 1_000_000_000 + tick * 10_000_000
+      control.enabled = control.latActive = control.longActive = tick < 240
+      control.actuators.accel = .5 if tick < 150 else -3.
+      frames = [frame for frame in pt_frames(packer) if frame[0] not in (0x1E1, 0x3D1)]
+      frames += [packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': 1, 'CruiseSetSpeed': 50}),
+                 packer.make_can_msg('EBCMBrakePedalPosition', 0, {}),
+                 packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                 (0x1E1, bytes.fromhex('000000010015ee' if tick % 2 else '00000001001fcc'), 0), *echo]
+      state = ci.update([(now, frames)])
+      _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
+      echo = [(address, raw, 128) for address, raw, bus in sent if address == 0x180 and bus == 0]
+      if tick >= 60:
+        self.assertTrue(state.canValid)
+        for address, raw, bus in sent:
+          if address != 0x1E1:
+            continue
+          self.assertEqual(bus, 0)
+          if tick < 150:
+            self.assertIn(int.from_bytes(raw[5:7], 'big'), RESUME)
+            observed.add('resume')
+          elif tick < 240:
+            self.assertEqual(raw, standard_set_bytes(raw[4]))
+            observed.add('set')
+          else:
+            self.assertIn(int.from_bytes(raw[5:7], 'big'), CANCEL)
+            observed.add('cancel')
+    self.assertEqual(observed, {'resume', 'set', 'cancel'})
+
   def test_reached_factory_and_stock_reduction(self):
     from opendbc.car.gm.values import malibu_hybrid_profile
     from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal

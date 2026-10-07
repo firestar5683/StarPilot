@@ -43,6 +43,29 @@ def silverado_stock_params(*, alpha=False, release=False):
 
 
 class TestCcGatewayStock(unittest.TestCase):
+  def test_stock_cancel_delay_restarts_after_main_withdrawal(self):
+    from opendbc.car import structs
+    cp = silverado_stock_params()
+    ci = CarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    control = structs.CarControl.new_message()
+    control.cruiseControl.cancel = True
+    before = after = False
+    for tick in range(90):
+      now = 1_000_000_000 + tick * 10_000_000
+      state = ci.update([(now, pt_frames(packer, main=not 40 <= tick < 56, counter=tick % 4))])
+      _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
+      cancel = any(address == 0x1E1 for address, _, _ in sent)
+      if 40 <= tick < 66:
+        self.assertFalse(cancel, (tick, 'No inherited cancel delay across main withdrawal'))
+      if 20 <= tick < 40:
+        before |= cancel
+      if tick >= 66:
+        self.assertTrue(state.canValid)
+        after |= cancel
+    self.assertTrue(before)
+    self.assertTrue(after)
+
   def test_silverado_observed_stock_factory_and_parser(self):
     from opendbc.car.gm.aol import qualified_gm
     for release in (False, True):
