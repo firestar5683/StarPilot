@@ -18,6 +18,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
+from openpilot.starpilot.gps.source import observation as gps_observation
 
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -134,7 +135,7 @@ class SelfdriveD:
                                   (['starpilotSelfdriveState'] if self.conditional_replay else []))
 
     self.gps_location_service = get_gps_location_service(self.params)
-    self.gps_packets = [self.gps_location_service]
+    self.gps_packets = [self.gps_location_service, 'starpilotCarState']
     self.sensor_packets = ["accelerometer", "gyroscope"]
     self.camera_packets = ["narrowRoadCameraState", "cabinCameraState", "wideRoadCameraState"]
 
@@ -560,6 +561,7 @@ class SelfdriveD:
 
     # GPS checks
     gps_ok = self.sm.recv_frame[self.gps_location_service] > 0 and (self.sm.frame - self.sm.recv_frame[self.gps_location_service]) * DT_CTRL < 2.0
+    gps_ok = gps_ok or gps_observation(self.sm, 'starpilotCarState', time.monotonic_ns()) is not None
     if not gps_ok and self.sm['deviceMotion'].inputsOK and (self.distance_traveled > 1500):
       self.events.add(EventName.noGps)
     if gps_ok:

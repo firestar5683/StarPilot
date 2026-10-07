@@ -1,3 +1,4 @@
+from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, BrakeSource, volt_cc_pedal_profile
 from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
 from opendbc.car.gm.auto_hold import config_for as auto_hold_config_for, stopped_for_hold
@@ -34,6 +35,8 @@ BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.D
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    self.car_gps_tracker = CarGpsTracker(CP)
+    self.car_gps_supported = self.car_gps_tracker.config is not None
     self.hybrid_profile = malibu_hybrid_profile(CP)
     self.hybrid_buttons = HybridButtons()
     self.hybrid_sources = ()
@@ -111,6 +114,9 @@ class CarState(CarStateBase):
           (b.type == ButtonType.decelCruise and not b.pressed):
           return True
     return False
+
+  def get_car_gps(self):
+    return self.car_gps_tracker.get()
 
   def update(self, can_parsers) -> structs.CarState:
     pt_cp = can_parsers[Bus.pt]
@@ -645,6 +651,8 @@ class CarState(CarStateBase):
       self.gm_auto_hold_engaged = False
     ret.brakeHoldActive = bool(hold_current and self.gm_auto_hold_engaged and ret.standstill)
 
+    self.car_gps_tracker.update(pt_cp, speed=ret.vEgo, backward=(left_whl_sign < 0 or right_whl_sign < 0 or
+                                ret.gearShifter == structs.CarState.GearShifter.reverse))
     return ret
 
   @staticmethod
@@ -833,6 +841,10 @@ class CarState(CarStateBase):
       pt_messages = [(name, frequency) for name, frequency in pt_messages if name != "ASCMLKASteeringCmd"]
     if hybrid is not None:
       cam_messages = [] if hybrid.removed else [("ASCMLKASteeringCmd", 10), ("AEBCmd", 10)]
+
+    gps = get_car_gps_config(CP)
+    if gps is not None:
+      pt_messages += [(name, float("nan")) for name in gps.messages]
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),

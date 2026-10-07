@@ -1,3 +1,4 @@
+from openpilot.starpilot.gps.publisher import CarGpsPublisher
 #!/usr/bin/env python3
 import os
 import time
@@ -166,7 +167,8 @@ class Car:
     self.traffic_event_sequence = 0
     self.switchback_receipt = None
     self.switchback_event_sequence = 0
-    publish_services = ['sendcan', 'carState', 'carParams', 'carOutput', 'radarTracks']
+    publish_services = ['sendcan', 'carState', 'carParams', 'carOutput', 'radarTracks', 'starpilotCarState']
+    self.car_gps_publisher = CarGpsPublisher()
     # One existing event channel also carries source-qualified Switchback gestures.
     publish_services.append('slcCruiseEvent')
     self.wheel_publisher = WheelPublisher(self.params)
@@ -388,6 +390,7 @@ class Car:
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
+    self.car_gps_publisher.update(self.CI.CS, self.pm)
     self.observe_ioniq6_long_authority(can_list, CS)
     media_owner = getattr(self, 'ioniq6_media', None)
     media_observation = media_owner.update(can_list) if media_owner is not None else None

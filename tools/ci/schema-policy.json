@@ -13,7 +13,6 @@
   "custom_header": "using Cxx = import \"/include/c++.capnp\";\n$Cxx.namespace(\"cereal\");\nusing Car = import \"/car.capnp\";\n\n@0xb526ba661d550a59;\n\n# custom.capnp: a home for empty structs reserved for custom forks\n# These structs are guaranteed to remain reserved and empty in mainline\n# cereal, so use these if you want custom events in your fork.\n\n# DO rename the structs\n# DON'T change the identifier (e.g. @0x81c2f05a394cf4af)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
   "historical_empty_slots": [
     1,
-    2,
     5,
     6
   ],
@@ -168,6 +167,13 @@
       "type_id": "0xda96579883444c35",
       "name": "StarPilotLongitudinalPlan",
       "body": "\n  version @0 :UInt16;\n  sourcePlanMonoTime @1 :UInt64;\n  modelMonoTime @2 :UInt64;\n  driveStartMonoTime @3 :UInt64;\n  forceStopHolding @4 :Bool;\n"
+    },
+    "2": {
+      "type_id": "0xf35cc4560bbf6ec2",
+      "name": "StarPilotCarState",
+      "body": "\n  accelPressed @0 :Bool;\n  alwaysOnLateralEnabled @1 :Bool;\n  brakeLights @2 :Bool;\n  dashboardSpeedLimit @3 :Float32;\n  decelPressed @4 :Bool;\n  distancePressed @5 :Bool;\n  distanceLongPressed @6 :Bool;\n  distanceVeryLongPressed @7 :Bool;\n  ecoGear @8 :Bool;\n  forceCoast @9 :Bool;\n  isParked @10 :Bool;\n  pauseLateral @11 :Bool;\n  pauseLongitudinal @12 :Bool;\n  sportGear @13 :Bool;\n  trafficModeEnabled @14 :Bool;\n  gasStack @15 :Bool;  # Compatibility with older StarPilot payloads\n  modePressed @16 :Bool;\n  customPressed @17 :Bool;\n  alwaysOnLateralAllowed @18 :Bool;\n  dashboardStopSign @19 :UInt8;  # 0 = no signal / platform doesn't publish\n  cancelPressed @20 :Bool;\n  cancelLongPressed @21 :Bool;\n  cancelVeryLongPressed @22 :Bool;\n  pedalMaxRegen @23 :Bool;  # pedal at max regen, driver should use brake for more decel\n  pedalLongActive @24 :Bool;  # Pre-AP pedal longitudinal mode is active (enableLongControl)\n  teslaCCEngaged @25 :Bool;  # rising edge of stock Tesla CC engaging (no-pedal mode)\n  teslaCCDisengaged @26 :Bool;  # falling edge of stock Tesla CC\n  teslaCCNotArmed @27 :Bool;  # lateral engaged but DI_cruiseState != STANDBY/ENABLED\n  accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal\n  decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal\n  pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled",
+      "source_commit": "6de77049b3c3dc77c7275e9ff724a96f9e72a19d",
+      "source_path": "cereal/custom.capnp"
     }
   },
   "reviewed_enum_additions": {

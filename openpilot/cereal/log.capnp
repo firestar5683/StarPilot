@@ -2640,7 +2640,7 @@ struct Event {
     # DON'T change which struct it points to
     starpilotNavigation @107 :Custom.StarPilotCarControl;
     customReserved1 @108 :Custom.CustomReserved1;
-    customReserved2 @109 :Custom.CustomReserved2;
+    starpilotCarState @109 :Custom.StarPilotCarState;
     starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
     slcVisionObservation @111 :Custom.StarPilotModelDataV2;
     customReserved5 @112 :Custom.CustomReserved5;

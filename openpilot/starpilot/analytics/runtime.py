@@ -7,10 +7,11 @@ import re
 import uuid
 from typing import Any
 
+from openpilot.starpilot.gps.source import GPS_SOURCES, select_location
 from openpilot.starpilot.analytics.report import ReportClient, build_payload, fetch_branch_commit
 
 SERVICES = ('deviceState', 'carParams', 'carState', 'carControl', 'selfdriveState',
-            'modelV2', 'drivingModelData', 'managerState', 'gpsLocationExternal')
+            'modelV2', 'drivingModelData', 'managerState', *GPS_SOURCES)
 COUNTERS = ('drives', 'meters', 'seconds', 'current_months_meters', 'total_tracked_seconds',
             'total_lateral_seconds', 'total_longitudinal_seconds', 'total_aol_seconds')
 
@@ -175,10 +176,9 @@ class AnalyticsWorker:
             self.counters['total_longitudinal_seconds'] += elapsed * bool(control.longActive)
             if self.fresh('selfdriveState', .25) and not self.source['selfdriveState'].enabled:
               self.counters['total_aol_seconds'] += elapsed * bool(control.latActive)
-      if self.fresh('gpsLocationExternal'):
-        gps = self.source['gpsLocationExternal']
-        if gps.hasFix:
-          self.gps = {'latitude': gps.latitude, 'longitude': gps.longitude}
+      fix = select_location(self.source, int(now * 1e9))
+      if fix is not None:
+        self.gps = {'latitude': fix[1].latitude, 'longitude': fix[1].longitude}
     else:
       if self.previous_started is True:
         self.persist()
