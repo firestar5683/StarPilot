@@ -90,6 +90,12 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
                                 shouldStop=bool(stop))
 
 
+def drop_chestnut() -> None:
+  if "AMD" in Device._opened_devices:
+    for d in Device._opened_devices:
+      Device[d].pending.pop(Device["AMD"], None)
+
+
 class ChestnutGpuState:
   # GPU metrics require modeld's GPU context
   def __init__(self, pm: PubMaster, big: bool):
@@ -353,6 +359,8 @@ def main(demo=False):
       report_load_timeout(loader, BIG_MODEL_TIMEOUT)
     model = big_model
     params.put_bool("ChestnutActive", model is not None)
+    if model is None:
+      drop_chestnut()
 
   if small_model is None:
     small_model, small_prepared, selected_small_failed = load_small()
@@ -513,6 +521,7 @@ def main(demo=False):
         model.close()
         fallback_reason = None
       else:
+        drop_chestnut()
         params.put_bool("ChestnutActive", False)
       cloudlog.exception("big model failed, fall back to small")
       model = small_model

@@ -46,7 +46,7 @@ def test_inference_failure_uses_runner_identity(runner_chestnut, stored_active):
   env: dict = {"model": failed_model, "small_model": small_model, "params": params, "receipt_owner": receipt,
              "chestnut_state": chestnut_state, "run_count": 1, "ModelConstants": SimpleNamespace(MODEL_RUN_FREQ=20),
              "SERVICE_LIST": {"chestnutGpuState": SimpleNamespace(frequency=1)}, "bufs": {}, "transforms": {}, "inputs": {},
-             "small_prepared": object(), "ModelVariant": ModelVariant, "JetlinkModel": JetlinkModel, "cloudlog": Mock()}
+             "small_prepared": object(), "ModelVariant": ModelVariant, "JetlinkModel": JetlinkModel, "drop_chestnut": Mock(), "cloudlog": Mock()}
   code = compile(ast.fix_missing_locations(ast.Module(body=[fallback], type_ignores=[])), str(MODEL_SOURCE), "exec")
   if runner_chestnut:
     exec(code, env)
@@ -54,6 +54,7 @@ def test_inference_failure_uses_runner_identity(runner_chestnut, stored_active):
     assert env["model_output"] is None
     assert env["run_count"] == 0
     assert not chestnut_state.big
+    env["drop_chestnut"].assert_called_once_with()
     params.put_bool.assert_called_once_with("ChestnutActive", False)
     receipt.loaded.assert_called_once_with(env["small_prepared"], ModelVariant.SMALL, "chestnut-load-failed", model_id="fallback-small")
   else:
@@ -61,6 +62,7 @@ def test_inference_failure_uses_runner_identity(runner_chestnut, stored_active):
       exec(code, env)
     assert env["model"] is failed_model
     params.put_bool.assert_not_called()
+    env["drop_chestnut"].assert_not_called()
     receipt.loaded.assert_not_called()
   params.get_bool.assert_not_called()
 
@@ -76,9 +78,10 @@ def test_remote_inference_failure_does_not_change_chestnut_status():
   params, receipt = Mock(), Mock()
   env = {"model": failed_model, "small_model": small_model, "params": params, "receipt_owner": receipt,
          "chestnut_state": None, "run_count": 1, "bufs": {}, "transforms": {}, "inputs": {},
-         "small_prepared": object(), "ModelVariant": ModelVariant, "JetlinkModel": JetlinkModel, "cloudlog": Mock()}
+         "small_prepared": object(), "ModelVariant": ModelVariant, "JetlinkModel": JetlinkModel, "drop_chestnut": Mock(), "cloudlog": Mock()}
   execute([fallback], env)
   failed_model.close.assert_called_once_with()
+  env["drop_chestnut"].assert_not_called()
   assert env["model"] is small_model
   assert env["model_output"] is None
   assert env["run_count"] == 0
@@ -180,7 +183,8 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
          "receipt_owner": receipt, "threading": SimpleNamespace(Thread=Thread), "BIG_MODEL_TIMEOUT": 30,
          "params": params, "requested_model_id": "big", "ModelVariant": ModelVariant,
          "CP": SimpleNamespace(brand="mock"), "demo": False,
-         "wait_for_chestnut_power": lambda CP, timeout: events.append("power"), "attach_jetlink": attach_jetlink}
+         "wait_for_chestnut_power": lambda CP, timeout: events.append("power"), "attach_jetlink": attach_jetlink,
+         "drop_chestnut": Mock()}
   wrapper = ast.parse("def startup():\n  pass").body[0]
   wrapper.body = body[start:end] + [ast.Return(value=ast.Call(func=ast.Name(id="locals", ctx=ast.Load()), args=[], keywords=[]))]
   execute([wrapper], env)
@@ -195,6 +199,7 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
   assert events.index("wait") < events.index(("join", 30))
   if not timeout:
     assert events.index("wait") < events.index("power") < events.index("big")
+  assert env["drop_chestnut"].call_count == int(timeout)
   params.put_bool.assert_any_call("ChestnutActive", not timeout)
   params.put_bool.assert_any_call("ChestnutLoading", False)
   assert receipt.loaded.call_args.args[1] == (ModelVariant.SMALL if timeout else ModelVariant.CHESTNUT)
@@ -319,3 +324,23 @@ def test_failed_selected_small_uses_only_verified_rdf_or_refuses_startup(monkeyp
   stock.assert_not_called()
   if fallback_failure != 'missing':
     assert loader.call_args.args == (1928, 1208, shipped, 'v15', False, DEFAULT_SMALL, DEFAULT_SMALL_SHA256)
+
+
+@pytest.mark.parametrize("opened", [("QCOM",), ("QCOM", "AMD")])
+def test_fallback_releases_only_chestnut_dependencies(opened):
+  node = next(node for node in ast.parse(MODEL_SOURCE.read_text()).body if isinstance(node, ast.FunctionDef) and node.name == "drop_chestnut")
+  class RuntimeDevice:
+    def __init__(self):
+      self.pending = {}
+  class Devices(dict):
+    _opened_devices = opened
+  devices = Devices(QCOM=RuntimeDevice(), AMD=RuntimeDevice())
+  amd, unrelated = devices["AMD"], object()
+  for device in devices.values():
+    device.pending = {amd: "gpu fence", unrelated: "other fence"}
+  env = {"Device": devices}
+  execute([node], env)
+  env["drop_chestnut"]()
+  for name in opened:
+    assert unrelated in devices[name].pending
+    assert (amd in devices[name].pending) is ("AMD" not in opened)
