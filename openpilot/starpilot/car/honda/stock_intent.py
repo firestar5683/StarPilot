@@ -5,6 +5,7 @@ from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE, ButtonType
 
 class HondaStockCardIntent(AolCardIntent):
   observe_stock_engagement = True
+  observe_active_engagement = True
 
   def __init__(self, cp, settings):
     super().__init__(settings, explicit_latch=True)
@@ -14,6 +15,7 @@ class HondaStockCardIntent(AolCardIntent):
     self.main_pulse = False
     self.cancel_held = False
     self.cancel_ticks = 0
+    self._active_previous = False
     self.auto_main = settings.lkas_action != AOL_TOGGLE and settings.main_action != AOL_TOGGLE
 
   def cancel_action(self, action):
@@ -24,7 +26,11 @@ class HondaStockCardIntent(AolCardIntent):
     else:
       self._perform(action)
 
-  def update(self, CS, **kwargs):
+  def update(self, CS, *, standard_active=False, **kwargs):
+    engagement_started = bool(standard_active and not self._active_previous)
+    self._active_previous = bool(standard_active)
+    now_ns = kwargs.get("now_ns", 0)
+    rejected = self._native_rejection_ns < kwargs.get("native_rejection_ns", 0) <= now_ns
     state = structs.CarState(**CS.to_dict())
     events = []
     for event in CS.buttonEvents:
@@ -73,3 +79,14 @@ class HondaStockCardIntent(AolCardIntent):
         self.cancel_action(self.settings.cancel_actions[1])
       elif self.cancel_ticks == CRUISE_LONG_PRESS * 5:
         self.cancel_action(self.settings.cancel_actions[2])
+    manual = self._main_held or self._lkas_held or self.cancel_held or any(
+      event.type in (ButtonType.mainCruise, ButtonType.lkas, ButtonType.cancel) for event in CS.buttonEvents)
+    driving = state.gearShifter not in (structs.CarState.GearShifter.park, structs.CarState.GearShifter.neutral,
+                                       structs.CarState.GearShifter.reverse, structs.CarState.GearShifter.unknown)
+    if (engagement_started and self.settings.enabled and self.settings.lkas_action == AOL_TOGGLE and
+        available and healthy and driving and not state.accFaulted and not state.steerFaultPermanent and
+        not self._fault_inhibit and not rejected and not manual):
+      # Match the normal active engagement edge from Dom. Temporary restrictions
+      # and existing pause flags still gate output without erasing this intent.
+      self.allowed_latch = True
+      self._last_latch_edge_ns = now_ns
