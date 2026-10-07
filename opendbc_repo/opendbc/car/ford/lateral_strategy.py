@@ -41,6 +41,8 @@ MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED = 15.0
 MACH_E_TURN_IN_MIN_CURVATURE = 0.002
 MACH_E_TURN_IN_FULL_CURVATURE = 0.008
 MACH_E_TURN_IN_LAG_CURVATURE = 0.006
+MACH_E_TURN_IN_PREVIEW_HOLD_SECONDS = 0.10
+MACH_E_TURN_IN_PREVIEW_HOLD_MIN_LAG = 0.0005
 MACH_E_UNWIND_LOOKAHEAD_EXTRA = 0.80
 MACH_E_UNWIND_FULL_LAG_CURVATURE = 0.0005
 MACH_E_UNWIND_PREVIEW_LAG_CURVATURE = 0.002
@@ -170,6 +172,7 @@ class FordLateralController:
     self.path_angle_last = 0.0
     self.path_angle_driver_cooldown = 0.0
     self.desired_curvature_last = 0.0
+    self.turn_in_preview_hold_timer = 0.0
     self.assist_engagement_retained = False
 
   def set_assist_permission(self, panda_states, healthy: bool):
@@ -328,12 +331,31 @@ class FordLateralController:
     lag_weight = max(lag_weight, preview_lag_weight)
     return predicted + speed_weight * curvature_weight * lag_weight * (preview - predicted)
 
-  def _turn_in_preview_weight(self, desired: float, preview: float, current: float) -> float:
+  def _turn_in_preview_plateau(self, desired: float, current: float, v_ego: float,
+                              steering_pressed: bool, lane_change: bool) -> float:
+    if (self.CP.carFingerprint != CAR.FORD_MUSTANG_MACH_E_MK1 or not self.CP.flags & FordFlags.CANFD or
+        not MACH_E_LOW_SPEED_TURN_IN_START_SPEED <= v_ego < MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED or
+        steering_pressed or lane_change or desired * self.desired_curvature_last < 0.0 or
+        abs(desired) < abs(self.desired_curvature_last)):
+      self.turn_in_preview_hold_timer = 0.0
+      return 0.0
+    if abs(desired) > abs(self.desired_curvature_last):
+      self.turn_in_preview_hold_timer = MACH_E_TURN_IN_PREVIEW_HOLD_SECONDS
+      return 0.0
+    self.turn_in_preview_hold_timer = max(0.0, self.turn_in_preview_hold_timer - STEER_DT)
+    if (self.turn_in_preview_hold_timer <= 1e-9 or
+        np.sign(desired) * (desired - current) <= MACH_E_TURN_IN_PREVIEW_HOLD_MIN_LAG):
+      return 0.0
+    return float(np.interp(v_ego, [2.0, 3.0, 14.0, 15.0], [0.0, 1.0, 1.0, 0.0]))
+
+  def _turn_in_preview_weight(self, desired: float, preview: float, current: float,
+                              allow_plateau: float = 0.0) -> float:
     if self.CP.carFingerprint not in FORD_CONSERVATIVE_PREVIEW_CARS:
       return 0.0
     if desired * preview <= 0.0 or desired * self.desired_curvature_last < 0.0:
       return 0.0
-    if abs(desired) <= abs(self.desired_curvature_last):
+    if (abs(desired) < abs(self.desired_curvature_last) or
+        (abs(desired) == abs(self.desired_curvature_last) and not allow_plateau)):
       return 0.0
 
     target = max(abs(desired), abs(preview))
@@ -347,7 +369,8 @@ class FordLateralController:
       (target - direction * current) / MACH_E_TURN_IN_LAG_CURVATURE,
       0.0, 1.0,
     ))
-    return curvature_weight * lag_weight
+    plateau_weight = allow_plateau if abs(desired) == abs(self.desired_curvature_last) else 1.0
+    return curvature_weight * lag_weight * plateau_weight
 
   @staticmethod
   def _turn_in_lookahead_extra(v_ego: float) -> float:
@@ -524,6 +547,7 @@ class FordLateralController:
       self.path_angle_last = 0.0
       self.path_angle_driver_cooldown = 0.0
       self.desired_curvature_last = 0.0
+      self.turn_in_preview_hold_timer = 0.0
       return FordLateralResult()
 
     desired = float(actuators.curvature)
@@ -537,6 +561,7 @@ class FordLateralController:
       self.curvature_last = 0.0
       self.path_angle_last = 0.0
       self.desired_curvature_last = 0.0
+      self.turn_in_preview_hold_timer = 0.0
       return FordLateralResult(active=not (
         manual_turn and self.CP.carFingerprint in FORD_MANUAL_TURN_LATCH_CARS))
 
@@ -545,6 +570,8 @@ class FordLateralController:
     predicted = self._predicted_curvature(v_ego, lookahead)
     allow_opposite_preview = False
     if self.CP.carFingerprint in FORD_CONSERVATIVE_PREVIEW_CARS:
+      turn_in_plateau = self._turn_in_preview_plateau(
+        desired, current, v_ego, bool(CS.out.steeringPressed), self._lane_change()[0])
       turn_in_predicted = self._predicted_curvature(v_ego, lookahead + MACH_E_TURN_IN_LOOKAHEAD_EXTRA)
       direction_change_predicted = turn_in_predicted
       direction_change_weight = 0.0
@@ -582,12 +609,12 @@ class FordLateralController:
         turn_in_lookahead_extra = self._turn_in_lookahead_extra(v_ego)
         if (turn_in_lookahead_extra > MACH_E_TURN_IN_LOOKAHEAD_EXTRA and
             desired * self.desired_curvature_last >= 0.0 and
-            abs(desired) > abs(self.desired_curvature_last)):
+            (abs(desired) > abs(self.desired_curvature_last) or turn_in_plateau)):
           low_speed_turn_in_predicted = self._predicted_curvature(v_ego, lookahead + turn_in_lookahead_extra)
           if (desired * low_speed_turn_in_predicted > 0.0 and
               abs(low_speed_turn_in_predicted) > abs(turn_in_predicted)):
             turn_in_predicted = low_speed_turn_in_predicted
-        turn_in_weight = self._turn_in_preview_weight(desired, turn_in_predicted, current)
+        turn_in_weight = self._turn_in_preview_weight(desired, turn_in_predicted, current, turn_in_plateau)
         if turn_in_weight > 0.0:
           turn_in_target = float(np.copysign(max(abs(desired), abs(turn_in_predicted)), desired))
           predicted = float(np.interp(turn_in_weight, [0.0, 1.0], [predicted, turn_in_target]))
