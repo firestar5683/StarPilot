@@ -491,9 +491,12 @@ class Car:
           fault_active = True
       rejected = native_reset or native_latch_rejected(self.CP, native, state=CS if angle_panda_ready else None)
       rejection_ns = now_ns if native_reset else int(native.observedMonoTime) if rejected else 0
+      engagement_observation = ({"standard_active": bool(host_enabled and
+        (self.sm['carControl'].latActive or self.sm['carControl'].longActive))}
+        if getattr(self.aol_card_intent, 'observe_active_engagement', False) else {})
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
                                   standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
-                                                    else host_control_enabled))
+                                                    else host_control_enabled), **engagement_observation)
     if self.aol_card_intent is not None and preap_aol:
       self.CI.CS.preap_lateral_authorized = bool(
         native is not None and native.lateralAllowed and self.aol_card_intent.allowed_latch and
