@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -18,7 +19,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
 from openpilot.starpilot.ui.sounds_owner import SoundsOwner
-from openpilot.starpilot.ui.shell import ShellInput, ShellMode
+from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellSnapshot
 
 
 class SoundsSettingsTests(unittest.TestCase):
@@ -300,6 +301,58 @@ class SoundsSettingsTests(unittest.TestCase):
     self.assertEqual(repair.kind, "change")
     session._sounds_ui(repair)
     self.assertEqual(self.params.get("WarningSoftVolume"), AUTO)
+
+  def test_editor_touches_dispatch_with_retained_overview_page(self):
+    from openpilot.starpilot.ui import runtime_app
+    for expanded in (True, False):
+      for scroll in (0, 5):
+        for key in ("DisengageVolume", "PromptVolume", "SoundPack"):
+          for control in ("level", "done", *(("sidebar",) if expanded else ())):
+            with self.subTest(expanded=expanded, scroll=scroll, key=key, control=control):
+              self.params.put(key, "starpilot" if key == "SoundPack" else 42, block=True)
+              session = self.large_session()
+              session.sounds_scroll = scroll
+              session.sidebar_expanded = expanded
+              session.confirmed_offroad = Mock(return_value=True)
+              session.favorites = Mock()
+              session.view = Mock()
+              session.view.sounds.reset.return_value = False
+              session._on_destination_change = None
+              row = next(row for row in session.sounds_snapshot().rows if row.key == key)
+              session._sounds_ui(FeatureUiAction("open", row))
+              editor = replace(session.sounds_snapshot(), scroll=0, sidebar_expanded=expanded)
+              snapshot = ShellSnapshot(ShellMode.SETTINGS, Mock(), SettingsState(sidebar_expanded=expanded), Mock(),
+                                       selected=Destination.SOUNDS, sounds=editor)
+              session.snapshot = Mock(return_value=snapshot)
+              session.input = ShellInput(Profile.LARGE, session._emit)
+              session.sounds_request = Mock(wraps=session.sounds_request)
+              if control == "done":
+                x, y, width, height = sound_done_rect(editor)
+                x, y = x + width / 2, y + height / 2
+              elif control == "sidebar":
+                x, y = 240, 345
+              elif key == "SoundPack":
+                x, y = 2010, feature_row_top(editor) + 77
+              else:
+                _, (x, y, width, height), _ = next(button for button in sound_buttons(editor, editor.rows[0], feature_row_top(editor))
+                                                 if button[0] == "25")
+                x, y = x + width / 2, y + height / 2
+              with patch.object(runtime_app, "ui_state", SimpleNamespace(started=False, started_frame=0)):
+                session.press(ShellMode.SETTINGS, x, y)
+                session.move(ShellMode.SETTINGS, x, y)
+                self.assertTrue(session.release(ShellMode.SETTINGS, x, y))
+              self.assertEqual(session.sounds_scroll, scroll)
+              if control == "level":
+                session.sounds_request.assert_called_once()
+                if key != "SoundPack":
+                  self.assertEqual(self.params.get(key), 25)
+              else:
+                session.sounds_request.assert_not_called()
+                if control == "done":
+                  self.assertIsNone(session.sounds_edit_key)
+                  self.assertEqual(session.selected, Destination.SOUNDS)
+                else:
+                  self.assertEqual(session.selected, Destination.STAR)
 
   def test_done_returns_from_volume_pack_and_repair_without_writing(self):
     session = self.large_session()

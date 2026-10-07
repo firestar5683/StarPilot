@@ -1395,7 +1395,8 @@ class StarShellSession:
       return None
     if (pane := _FEATURE_SETTINGS_PANES.get(self.selected)) and self.profile == Profile.LARGE:
       state = getattr(snapshot, pane[0])
-      if (state.scroll != getattr(self, pane[1] + "_scroll") or
+      scroll = 0 if self.selected == Destination.SOUNDS and self.sounds_edit_key is not None else getattr(self, pane[1] + "_scroll")
+      if (state.scroll != scroll or
           state.page != getattr(self, pane[1] + "_page", state.page) or
           state.sidebar_expanded != self.sidebar_expanded):
         self.cancel()
