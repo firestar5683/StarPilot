@@ -26,6 +26,7 @@ STARPILOT_AUTO_MIN = 0.50
 ALERT_RAMP_TIME = 4 # seconds to ramp critical alerts to max volume
 ALERT_MAX_TIME = 8 # seconds before critical alerts switch to the max sound
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
+STREAM_REPORT_INTERVAL = 5.0
 FILTER_DT = 1. / (micd.SAMPLE_RATE / micd.FFT_SAMPLES)
 
 AMBIENT_DB = 26 # DB where MIN_VOLUME is applied
@@ -101,6 +102,8 @@ class Soundd:
     self.pending_stream_status = None
     self.stream_status_count = 0
     self.output_underflow_count = 0
+    self.reported_output_underflows = 0
+    self.stream_report_at = None
     self.axis_alerts = AxisAlerts()
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
@@ -163,13 +166,24 @@ class Soundd:
 
   def log_pending_stream_status(self, stream=None) -> None:
     status = self.pending_stream_status
-    if status is not None:
-      self.pending_stream_status = None
-      cloudlog.warning(f"soundd stream over/underflow: {status}")
-      if stream is not None:
-        cloudlog.info(f"soundd stream diagnostics: status_callbacks={self.stream_status_count} "
-                      + f"output_underflows={self.output_underflow_count} "
-                      + f"latency={stream.latency} cpu_load={stream.cpu_load}")
+    if status is None and self.output_underflow_count == self.reported_output_underflows:
+      return
+    now = time.monotonic()
+    if self.stream_report_at is not None and now - self.stream_report_at < STREAM_REPORT_INTERVAL:
+      return
+    self.pending_stream_status = None
+    self.stream_report_at = now
+    underflows = self.output_underflow_count
+    message = (f"soundd stream diagnostics: status={status} status_callbacks={self.stream_status_count} "
+               + f"output_underflows={underflows}")
+    if stream is not None:
+      message += f" latency={stream.latency} cpu_load={stream.cpu_load}"
+    # Output dropouts must reach errorLogMessage, which is retained in qlog.
+    if underflows > self.reported_output_underflows:
+      cloudlog.error(message)
+    else:
+      cloudlog.warning(message)
+    self.reported_output_underflows = underflows
 
   def update_alert(self, new_alert):
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_sound])
