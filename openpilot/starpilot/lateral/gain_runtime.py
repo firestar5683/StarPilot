@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 
-from openpilot.starpilot.lateral.bolt_policy import supported_cp
+from openpilot.starpilot.lateral.torque_runtime import gm_manual_supported_cp as supported_cp
+from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, MAX_DOCUMENT_BYTES, GainBasis, parse_document
 from openpilot.starpilot.saved_source import read_saved
 
@@ -20,9 +21,10 @@ def gain_basis(cp, controller) -> GainBasis:
 
 def _selected(params, cp, basis: GainBasis) -> float | None:
   try:
-    advanced, readable = read_saved(params, "AdvancedLateralTune", 64)
-    if not readable or advanced != b"1":
-      return None
+    if str(cp.carFingerprint) in BOLT_VEHICLES:
+      advanced, readable = read_saved(params, "AdvancedLateralTune", 64)
+      if not readable or advanced != b"1":
+        return None
     raw, readable = read_saved(params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES)
     if not readable or raw is None:
       return None

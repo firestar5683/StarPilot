@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 
-from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES
+from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, GM_VEHICLES
+from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as SELECTION_KEY, selection_from_bytes
+from openpilot.starpilot.lateral.torque_runtime import factor_edit_supported
 from openpilot.starpilot.lateral.torque_settings import (
   DOCUMENT_KEY, LEGACY_KEYS, FieldChoice, LegacyMode, PlatformProfile, bounds as torque_bounds,
   interpret_legacy, parse_document, replace_field, resolve_document, serialize_document,
@@ -26,6 +28,19 @@ class TorqueFeature:
     self._readable = owner._readable
     self._dependents = owner._dependents
 
+  def _factor_editable(self, fingerprint: str) -> bool:
+    if fingerprint not in GM_VEHICLES:
+      return True
+    cp = self.owner.vehicle_params()
+    if cp is None or not self._readable(SELECTION_KEY):
+      return False
+    selection = selection_from_bytes(cp, self._raw(SELECTION_KEY))
+    return selection.source != "invalid" and factor_edit_supported(cp, selection.mode)
+
+  def _torque_dependencies(self, fingerprint: str, field: str):
+    keys = ("ForceAutoTuneOff", *TORQUE_NUMBERS)
+    return self._dependents(*keys, *((SELECTION_KEY,) if field == "factor" and fingerprint in GM_VEHICLES and fingerprint not in BOLT_VEHICLES else ()))
+
   @staticmethod
   def _legacy_label(mode: LegacyMode, saved: float | None) -> str:
     if mode == LegacyMode.ABSENT:
@@ -39,7 +54,7 @@ class TorqueFeature:
     try:
       if capability is None:
         raise ValueError("Vehicle unavailable")
-      legacy = interpret_legacy(readings, (capability[5], capability[6], capability[7]))
+      legacy = interpret_legacy(readings, (capability[5], capability[6], capability[7]), fingerprint=capability[0])
       statuses = (self._legacy_label(legacy.factor_mode, legacy.factor_saved),
                   self._legacy_label(legacy.friction_mode, legacy.friction_saved))
       valid = True
@@ -61,7 +76,7 @@ class TorqueFeature:
       fingerprint = capability[0]
       basis = (capability[5], capability[6], capability[7])
       if raw is None:
-        legacy = interpret_legacy({key: None if fingerprint in BOLT_VEHICLES else self._raw(key) for key in TORQUE_NUMBERS}, basis)
+        legacy = interpret_legacy({key: None if fingerprint in GM_VEHICLES else self._raw(key) for key in TORQUE_NUMBERS}, basis, fingerprint=fingerprint)
         profiles = {fingerprint: PlatformProfile(basis,
                     FieldChoice("custom", legacy.factor) if legacy.factor is not None and fingerprint not in BOLT_VEHICLES else FieldChoice(),
                     FieldChoice("custom", legacy.friction) if legacy.friction is not None and fingerprint not in BOLT_VEHICLES else FieldChoice())}
@@ -86,7 +101,7 @@ class TorqueFeature:
       summary = []
       for field, label, current, choice in (("factor", "Lateral acceleration", basis[0], profile.factor),
                                             ("friction", "Friction", basis[2], profile.friction)):
-        low, high = torque_bounds(basis, field)
+        low, high = torque_bounds(basis, field, fingerprint=fingerprint)
         saved = f"{choice.custom_value:.4f}" if choice.mode == "custom" and choice.custom_value is not None else "Vehicle/learned"
         details.append(FeatureRow("", label, f"Saved {saved} · vehicle {current:.4f} · range {low:.4f}–{high:.4f}"))
         summary.append(f"{label} {saved}")
@@ -103,21 +118,24 @@ class TorqueFeature:
       if bolt and field == "factor":
         continue
       choice = profile.factor if field == "factor" else profile.friction
-      low, high = torque_bounds(basis, field)
-      dependencies = self._dependents("ForceAutoTuneOff", *TORQUE_NUMBERS)
+      low, high = torque_bounds(basis, field, fingerprint=fingerprint)
+      dependencies = self._torque_dependencies(fingerprint, field)
       supplied = basis[0 if field == "factor" else 2]
       value = active if active is not None else supplied
       displayed = str(round(value, 8))
+      editable = field != "factor" or self._factor_editable(fingerprint)
       rows.append(FeatureRow(f"torque:{field}:value", "Lat Accel" if field == "factor" else "Friction", displayed, raw,
                              step=0.05 if field == "factor" else 0.01, minimum=low, maximum=high,
-                             available=allowed, capability=capability, dependencies=dependencies,
+                             available=allowed and editable, capability=capability, dependencies=dependencies,
                              default_value="Vehicle/learned", default_key=f"torque:{field}:mode",
-                             reason="Supplied tune; edits saved for the next drive" if active is None else "Custom value; saved for the next drive"))
+                             reason=("Selected controller uses a fixed torque conversion; factor does not change its output" if not editable else
+                                     "Supplied tune; edits saved for the next drive" if active is None else "Custom value; saved for the next drive")))
       rows.append(FeatureRow(f"torque:{field}:reset", label + " — Reset to Default", "", raw,
                              available=allowed and active is not None, repair_value="Reset",
                              capability=capability, dependencies=dependencies))
     if bolt:
       rows.insert(0, FeatureRow("", "Manual friction", "Enable manual adjustments before the next drive. Saved friction changes then apply during that drive."))
+    if fingerprint in GM_VEHICLES:
       from openpilot.starpilot.ui.gain_feature import GainFeature
       rows.extend(GainFeature(self.owner).rows(capability, profiles, raw, allowed, repair_allowed))
     return True, tuple(rows)
@@ -152,7 +170,7 @@ class TorqueFeature:
           profiles = {}
       else:
         if request.expected is None:
-          legacy = interpret_legacy({key: None if fingerprint in BOLT_VEHICLES else self._raw(key) for key in TORQUE_NUMBERS}, basis)
+          legacy = interpret_legacy({key: None if fingerprint in GM_VEHICLES else self._raw(key) for key in TORQUE_NUMBERS}, basis, fingerprint=fingerprint)
           profiles = {fingerprint: PlatformProfile(basis,
                       FieldChoice("custom", legacy.factor) if legacy.factor is not None and fingerprint not in BOLT_VEHICLES else FieldChoice(),
                       FieldChoice("custom", legacy.friction) if legacy.friction is not None and fingerprint not in BOLT_VEHICLES else FieldChoice())}
@@ -180,6 +198,12 @@ class TorqueFeature:
           _, field, part = request.key.split(":")
           if fingerprint in BOLT_VEHICLES and field == "factor":
             return False
+          if fingerprint in GM_VEHICLES and field == "factor":
+            if SELECTION_KEY not in dict(request.dependencies):
+              return False
+            withdrawing = part == "reset" or part == "mode" and request.value == "Vehicle/learned"
+            if not withdrawing and not self._factor_editable(fingerprint):
+              return False
           if field not in ("factor", "friction") or part not in ("mode", "value", "reset"):
             return False
           profile = profiles.get(fingerprint)
@@ -189,7 +213,7 @@ class TorqueFeature:
               profiles = replace_field(profiles, fingerprint, basis, field, "source", None)
             elif request.value == "Custom":
               candidate = choice.custom_value if choice.custom_value is not None else basis[0 if field == "factor" else 2]
-              low, high = torque_bounds(basis, field)
+              low, high = torque_bounds(basis, field, fingerprint=fingerprint)
               if not low <= candidate <= high:
                 candidate = basis[0 if field == "factor" else 2]
               profiles = replace_field(profiles, fingerprint, basis, field, "custom", candidate)

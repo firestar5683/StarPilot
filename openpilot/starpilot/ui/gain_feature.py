@@ -2,9 +2,10 @@
 
 import json
 
-from openpilot.starpilot.lateral.bolt_policy import supported_cp
+from openpilot.starpilot.lateral.torque_runtime import gm_manual_supported_cp as supported_cp
+from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES
 from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as SELECTION_KEY, ControllerMode, selection_from_bytes
-from openpilot.starpilot.lateral.torque_settings import (DOCUMENT_KEY, GainBasis, FieldChoice, parse_document, replace_gain, serialize_document)
+from openpilot.starpilot.lateral.torque_settings import (DOCUMENT_KEY, GainBasis, FieldChoice, gain_bounds, parse_document, replace_gain, serialize_document)
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow
 
 
@@ -35,7 +36,7 @@ class GainFeature:
       return (FeatureRow("", "Steering response", "Controller selection unavailable"),)
     profile = profiles.get(capability[0])
     choice = profile.proportional_gain if profile is not None else FieldChoice()
-    dependencies = self.owner._dependents("AdvancedLateralTune", "ForceAutoTuneOff", SELECTION_KEY)
+    dependencies = self.owner._dependents(*(("AdvancedLateralTune",) if capability[0] in BOLT_VEHICLES else ()), "ForceAutoTuneOff", SELECTION_KEY)
     if choice.mode == "custom" and profile.gain_basis != basis:
       return (FeatureRow("torque_gain_rebase", "Review steering response",
                          "Controller or vehicle tune changed. Confirm this response for the selected controller.", raw,
@@ -44,14 +45,18 @@ class GainFeature:
                          choices=("Selected controller",), available=allowed, capability=capability, dependencies=dependencies,
                          default_value="Selected controller"))
     rows = [FeatureRow("", "Manual steering response",
-                       "Enable before the next drive. Higher values respond more strongly; lower values respond more gently.")]
+                       ("Enable before the next drive. Higher values respond more strongly; lower values respond more gently."
+                        if capability[0] in BOLT_VEHICLES else
+                        ("Changes apply to the selected controller during the next drive. " +
+                         "Higher values respond more strongly; lower values respond more gently.")))]
     rows.append(FeatureRow("torque:gain:mode", "Steering response source",
                            "Custom" if choice.mode == "custom" else "Selected controller", raw,
                            choices=("Selected controller", "Custom"), available=allowed, capability=capability, dependencies=dependencies,
                            default_value="Selected controller"))
     if choice.mode == "custom":
+      low, high = gain_bounds(capability[0], basis)
       rows.append(FeatureRow("torque:gain:value", "Steering response", f"{choice.custom_value:.2f}", raw,
-                             minimum=0.3, maximum=0.9, step=0.05, available=allowed,
+                             minimum=low, maximum=high, step=0.05, available=allowed,
                              default_value="Selected controller", default_key="torque:gain:mode",
                              capability=capability, dependencies=dependencies))
     return tuple(rows)
@@ -59,16 +64,19 @@ class GainFeature:
   def apply(self, request):
     owner = self.owner
     def current():
+      required = {"ForceAutoTuneOff", SELECTION_KEY}
+      if request.capability is not None and request.capability[0] in BOLT_VEHICLES:
+        required.add("AdvancedLateralTune")
       return (owner.authority("torque") and request.vehicle_fingerprint == owner.vehicle_fingerprint() and
               request.capability is not None and request.capability == owner._capability("torque") and
-              {"AdvancedLateralTune", "ForceAutoTuneOff", SELECTION_KEY}.issubset(key for key, _ in request.dependencies) and
+              required.issubset(key for key, _ in request.dependencies) and
               owner._readable(DOCUMENT_KEY) and owner._raw(DOCUMENT_KEY) == request.expected and
               all(owner._readable(key) and owner._raw(key) == value for key, value in request.dependencies))
     try:
-      if not current() or request.expected is None:
+      if not current() or request.expected is None and request.capability[0] in BOLT_VEHICLES:
         return False
       basis = self._basis(request.capability)
-      profiles = parse_document(request.expected)
+      profiles = {} if request.expected is None else parse_document(request.expected)
       prior = profiles.get(request.capability[0])
       choice = prior.proportional_gain if prior is not None else FieldChoice()
       review = request.key == "torque_gain_rebase"
@@ -80,7 +88,8 @@ class GainFeature:
         if request.value == "Selected controller":
           mode, value = "source", None
         elif request.value == "Custom":
-          mode, value = "custom", choice.custom_value if choice.custom_value is not None else 0.6
+          initial = 0.6 if request.capability[0] in BOLT_VEHICLES else basis.source_table[1][-1]
+          mode, value = "custom", choice.custom_value if choice.custom_value is not None else initial
         else:
           return False
       elif request.key == "torque:gain:value" and choice.mode == "custom":

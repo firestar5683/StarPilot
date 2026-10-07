@@ -10,7 +10,7 @@ from pathlib import Path
 from opendbc.car import structs
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource, TorqueTuning
-from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, IONIQ6_VEHICLES, TOYOTA_VEHICLES
+from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, GM_VEHICLES, IONIQ6_VEHICLES, TOYOTA_VEHICLES
 from openpilot.starpilot.lateral.torque_settings import (
   DOCUMENT_KEY, LEGACY_KEYS, MAX_DOCUMENT_BYTES, interpret_legacy, parse_document, resolve_document,
 )
@@ -22,11 +22,47 @@ def _move(old: float, new: float, step: float) -> float:
   return min(max(new, old - step), old + step)
 
 
+GM_TORQUE_POLICIES = frozenset({'bolt', 'volt', 'ordinary_ascm', 'ordinary_sdgm',
+                                    'ordinary_cc', 'ordinary_camera', 'silverado_cc', 'suburban'})
+
+
+def gm_manual_supported_cp(CP) -> bool:
+  """Reuse exact finalized torque policies; no brand-wide or controller-mode admission."""
+  if (str(CP.carFingerprint) not in GM_VEHICLES or str(CP.brand) != 'gm' or
+      CP.notCar or CP.passive or CP.dashcamOnly or
+      CP.steerControlType != structs.CarParams.SteerControlType.torque or CP.lateralTuning.which() != 'torque'):
+    return False
+  from openpilot.starpilot.lateral.controller_selection import policy_for
+  if str(CP.carFingerprint) not in BOLT_VEHICLES:
+    from opendbc.car.gm.aol import qualified_gm
+    if not qualified_gm(CP):
+      return False
+  return policy_for(CP) in GM_TORQUE_POLICIES
+
+
+def factor_edit_supported(CP, mode) -> bool:
+  """Fixed source conversion tables do not consume latAccelFactor numerically."""
+  from openpilot.starpilot.lateral.controller_selection import ControllerMode, policy_for
+  if not gm_manual_supported_cp(CP):
+    return False
+  identity = str(CP.carFingerprint)
+  if identity == 'CHEVROLET_SILVERADO':  # native interface table in both modes
+    return False
+  if mode == ControllerMode.STANDARD:
+    return True
+  policy = policy_for(CP)
+  return not (policy in ('bolt', 'volt', 'silverado_cc') or
+              policy == 'ordinary_sdgm' and identity == 'CADILLAC_XT4' or
+              policy == 'ordinary_camera' and identity == 'CHEVROLET_TRAX')
+
+
 def supported_cp(CP) -> bool:
   fingerprint = str(CP.carFingerprint)
   if fingerprint in BOLT_VEHICLES:
     from openpilot.starpilot.lateral.bolt_policy import supported_cp as bolt_supported_cp
     return bolt_supported_cp(CP)
+  if fingerprint in GM_VEHICLES:
+    return gm_manual_supported_cp(CP)
   platform = ((fingerprint in TOYOTA_VEHICLES and str(CP.brand) == 'toyota') or
               (fingerprint in IONIQ6_VEHICLES and str(CP.brand) == 'hyundai'))
   return (platform and
@@ -41,7 +77,7 @@ def supported_cp(CP) -> bool:
 
 def production_supported_cp(CP) -> bool:
   """Exact production consumer scope shared by the host and settings editor."""
-  return (supported_cp(CP) and str(CP.carFingerprint) in IONIQ6_VEHICLES | BOLT_VEHICLES and
+  return (supported_cp(CP) and str(CP.carFingerprint) in IONIQ6_VEHICLES | GM_VEHICLES and
           not CP.passive and not CP.notCar)
 
 
@@ -105,10 +141,10 @@ def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None 
     force_off = _bool(_raw(params, 'ForceAutoTuneOff'), False) if allow_learning is None else not allow_learning
     basis = (vehicle.lat_accel_factor, vehicle.lat_accel_offset, vehicle.friction)
     document = _raw(params, DOCUMENT_KEY)
-    if vehicle.vehicle in BOLT_VEHICLES and document is None:
+    if vehicle.vehicle in GM_VEHICLES and document is None:
       return TorqueSettings(valid=False)
     if document is None:
-      legacy = interpret_legacy({key: _raw(params, key) for key in LEGACY_KEYS}, basis)
+      legacy = interpret_legacy({key: _raw(params, key) for key in LEGACY_KEYS}, basis, fingerprint=vehicle.vehicle)
       factor, friction = legacy.factor, legacy.friction
     else:
       factor, friction, review = resolve_document(parse_document(document), vehicle.vehicle, basis)

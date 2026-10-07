@@ -8,7 +8,7 @@ import json
 import math
 from typing import cast
 
-from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, SUPPORTED_VEHICLES
+from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, GAIN_VEHICLES, GM_VEHICLES, SUPPORTED_VEHICLES
 
 DOCUMENT_KEY = "TorqueOverrideDocument"
 LEGACY_KEYS = ("SteerLatAccel", "SteerFriction", "SteerLatAccelStock", "SteerFrictionStock")
@@ -53,11 +53,13 @@ class LegacyChoice:
   friction_saved: float | None
 
 
-def bounds(basis: tuple[float, float, float], field: str) -> tuple[float, float]:
+def bounds(basis: tuple[float, float, float], field: str, *, fingerprint: str | None = None) -> tuple[float, float]:
   factor, _, friction = basis
   if field == "factor":
     return 0.5 * factor, 1.5 * factor
   if field == "friction":
+    if fingerprint in GM_VEHICLES and fingerprint not in BOLT_VEHICLES:
+      return 0.0, 1.0
     return 0.0, min(1.0, max(0.1, 2.0 * friction))
   raise ValueError("Unknown torque field")
 
@@ -85,7 +87,7 @@ def _number(raw: bytes | None) -> float | None:
   return value
 
 
-def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, float]) -> LegacyChoice:
+def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, float], *, fingerprint: str | None = None) -> LegacyChoice:
   """Preserve the old stock-marker and two-decimal CP equality semantics."""
   if not valid_basis(basis):
     raise ValueError("Invalid torque basis")
@@ -104,7 +106,7 @@ def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, fl
       result.append(None)
       modes.append(LegacyMode.STOCK)
     else:
-      low, high = bounds(basis, field)
+      low, high = bounds(basis, field, fingerprint=fingerprint)
       if not low <= value <= high:
         raise ValueError("Out-of-range torque setting")
       result.append(value)
@@ -166,11 +168,12 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
     gain = FieldChoice()
     gain_basis = None
     if "proportionalGain" in value:
-      if fingerprint not in BOLT_VEHICLES:
+      if fingerprint not in GAIN_VEHICLES:
         raise ValueError("Unsupported gain profile")
       gain = _choice(value["proportionalGain"])
       gain_basis = parse_gain_basis(value["gainBasis"])
-      if gain.mode == "custom" and (gain.custom_value is None or not 0.3 <= gain.custom_value <= 0.9):
+      low, high = gain_bounds(fingerprint, gain_basis)
+      if gain.mode == "custom" and (gain.custom_value is None or not low <= gain.custom_value <= high):
         raise ValueError("Out-of-range proportional gain")
     profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis)
   return profiles
@@ -209,7 +212,7 @@ def resolve_document(profiles: dict[str, PlatformProfile], fingerprint: str,
   result = []
   for field, choice in (("factor", profile.factor), ("friction", profile.friction)):
     if choice.mode == "custom":
-      low, high = bounds(basis, field)
+      low, high = bounds(basis, field, fingerprint=fingerprint)
       if choice.custom_value is None or not low <= choice.custom_value <= high:
         raise ValueError("Out-of-range torque profile")
       result.append(None if round(choice.custom_value, 2) == round(basis[0 if field == "factor" else 2], 2) else choice.custom_value)
@@ -227,7 +230,7 @@ def replace_field(profiles: dict[str, PlatformProfile], fingerprint: str, basis:
   if value is not None and not _finite_number(value):
     raise ValueError("Invalid torque edit")
   if mode == "custom":
-    low, high = bounds(basis, field)
+    low, high = bounds(basis, field, fingerprint=fingerprint)
     if value is None or not low <= value <= high:
       raise ValueError("Out-of-range torque edit")
   profile = profiles.get(fingerprint, PlatformProfile(basis, FieldChoice(), FieldChoice()))
@@ -258,11 +261,22 @@ def parse_gain_basis(value: object) -> GainBasis:
   return GainBasis(value["controller"], (tuple(table[0]), tuple(table[1])), tuple(basis))
 
 
+def gain_bounds(fingerprint: str, basis: GainBasis) -> tuple[float, float]:
+  # Keep the qualified five-Bolt range unchanged, including STANDARD.
+  if fingerprint in BOLT_VEHICLES:
+    return 0.3, 0.9
+  if fingerprint not in GAIN_VEHICLES:
+    raise ValueError("Unsupported gain profile")
+  source = basis.source_table[1][-1]
+  return 0.5 * source, 1.5 * source
+
+
 def replace_gain(profiles: dict[str, PlatformProfile], fingerprint: str, basis: GainBasis,
                  mode: str, value: float | None, *, review: bool = False) -> dict[str, PlatformProfile]:
-  if fingerprint not in BOLT_VEHICLES or mode not in ("source", "custom"):
+  if fingerprint not in GAIN_VEHICLES or mode not in ("source", "custom"):
     raise ValueError("Unsupported gain edit")
-  if value is not None and (not _finite_number(value) or not 0.3 <= value <= 0.9):
+  low, high = gain_bounds(fingerprint, basis)
+  if value is not None and (not _finite_number(value) or not low <= value <= high):
     raise ValueError("Out-of-range proportional gain")
   if mode == "custom" and value is None:
     raise ValueError("Missing proportional gain")
