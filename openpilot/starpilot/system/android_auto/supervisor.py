@@ -1088,23 +1088,31 @@ class Supervisor:
       from PIL import Image, ImageDraw, ImageFont
       from openpilot.common.basedir import BASEDIR
 
-      base = Path(BASEDIR)
-      logo_path = base / "starpilot" / "system" / "the_galaxy" / "assets" / "images" / "main_logo.png"
-      font_path = base / "selfdrive" / "assets" / "fonts" / "como-heavy.otf"
+      base = Path(BASEDIR) / "openpilot"
+      logo_path = base / "selfdrive" / "assets" / "images" / "starpilot_logo.png"
+      brand_font_path = base / "starpilot" / "ui" / "assets" / "fonts" / "Sora[wght].ttf"  # the logo wordmark's font
+      fallback_font_path = base / "selfdrive" / "assets" / "fonts" / "Inter-Black.ttf"  # if Sora cannot be set to weight 800
 
       bg_color = (10, 10, 22, 255)  # Cosmic void #0a0a16
       canvas = Image.new("RGBA", (request.width, request.height), bg_color)
 
+      # Text is drawn at 4x and shrunk: at car-screen sizes Sora's round letters (S, a, o) dip about half a
+      # pixel below the baseline, which renders as a 1 px step and makes the bottoms look crooked.
+      supersample = 4
       font_size = max(18, min(64, int(request.height * 0.06)))
       try:
-        font = ImageFont.truetype(str(font_path), font_size) if font_path.exists() else ImageFont.load_default()
+        font = ImageFont.truetype(str(brand_font_path), font_size * supersample)
+        font.set_variation_by_axes([800])
       except Exception:
-        font = ImageFont.load_default()
+        font = None
+      try:
+        font = font or ImageFont.truetype(str(fallback_font_path), font_size * supersample)
+      except Exception:
+        font, supersample = ImageFont.load_default(), 1
 
-      draw = ImageDraw.Draw(canvas)
-      bbox = draw.textbbox((0, 0), text, font=font)
-      text_w = bbox[2] - bbox[0]
-      text_h = bbox[3] - bbox[1]
+      bbox = font.getbbox(text)
+      text_w = -(-(bbox[2] - bbox[0]) // supersample)
+      text_h = -(-(bbox[3] - bbox[1]) // supersample)
 
       gap = max(12, int(request.height * 0.04))
       target_logo_h = int(min(request.height * 0.42, request.width * 0.35))
@@ -1122,8 +1130,13 @@ class Supervisor:
         text_y = (request.height - text_h) // 2
 
       text_x = (request.width - text_w) // 2
-      draw.text((text_x + 1, text_y + 1), text, font=font, fill=(30, 20, 50, 180))
-      draw.text((text_x, text_y), text, font=font, fill=(250, 248, 255, 255))
+      layer = Image.new("RGBA", ((text_w + 1) * supersample, (text_h + 1) * supersample), (0, 0, 0, 0))
+      draw = ImageDraw.Draw(layer)
+      origin = (-bbox[0], -bbox[1])
+      draw.text((origin[0] + supersample, origin[1] + supersample), text, font=font, fill=(30, 20, 50, 180))  # 1 px shadow
+      draw.text(origin, text, font=font, fill=(250, 248, 255, 255))
+      layer = layer.resize((text_w + 1, text_h + 1), Image.Resampling.LANCZOS)
+      canvas.alpha_composite(layer, (int(text_x), int(text_y)))
       return canvas.tobytes()
     except Exception:
       try:

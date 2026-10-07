@@ -91,7 +91,7 @@ export const Logs = {
         <p v-else-if="aaLogs.status === 'ready' && !aaLogs.sessions.length">No Android Auto sessions have been logged yet.</p>
         <div v-if="aaLogs.status === 'ready'" class="gx-crash-list">
           <div v-for="log in aaLogs.sessions" :key="log.name" class="gx-card gx-crash-row gx-aa-log">
-            <div><strong>{{ outcomeLabel(log.outcome) }}</strong><span>{{ log.car || 'Car not identified' }}{{ log.transport ? ' · ' + log.transport : '' }}{{ log.trigger ? ' · ' + log.trigger : '' }} · {{ reportDate(log.modifiedAt) }} · {{ reportSize(log.size) }}</span></div>
+            <div><strong>{{ outcomeLabel(log.outcome) }}</strong><span>{{ log.car || 'Car not identified' }}{{ log.transport ? ' · ' + log.transport : '' }}{{ log.trigger ? ' · ' + log.trigger : '' }}</span><span>{{ reportDate(log.modifiedAt) }} · {{ reportSize(log.size) }}</span></div>
             <a class="gx-btn gx-btn--tonal" :href="fileUrl(log.name)" download :aria-label="'Download ' + log.name"><i class="bi bi-download"></i></a>
           </div>
         </div>

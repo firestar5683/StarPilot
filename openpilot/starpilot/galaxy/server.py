@@ -28,7 +28,7 @@ from openpilot.starpilot.galaxy.crash_reports import CrashChanged, CrashMissing,
 from openpilot.starpilot.galaxy.device_name import DeviceName
 from openpilot.starpilot.galaxy.device_state import DeviceStateSource
 from openpilot.starpilot.galaxy.recording_library import RecordingLibrary
-from openpilot.starpilot.galaxy.drive_history import DriveHistory, DriveHistoryUnavailable, recording_details
+from openpilot.starpilot.galaxy.drive_history import DriveHistory, DriveHistoryUnavailable, SegmentInUse, SegmentMissing, recording_details
 from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
 from openpilot.starpilot.galaxy.recording_media import (RecordingMedia, RecordingMediaBusy, RecordingMediaChanged,
                                                        RecordingMediaMissing, RecordingMediaUnavailable,
@@ -1461,7 +1461,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/models/active', '/api/models/preferences', '/api/models/download', '/api/models/download_all',
                       '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest', '/api/models/jetlink',
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
-                      '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore', '/api/sentry/notifications',
+                      '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore', '/api/recordings/delete-videos', '/api/sentry/notifications',
                       '/api/navigation/search', '/api/navigation/action', '/api/drive-state/action',
                       '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
@@ -1772,6 +1772,35 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         except (OSError, RuntimeError):
           if self.settings_session() == identity:
             self.json(503, {'error': 'Driving history could not be saved'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path == '/api/recordings/delete-videos':
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          if type(payload) is not dict or set(payload) != {'segmentName'} or type(payload['segmentName']) is not str:
+            raise ValueError('Invalid segment selection')
+          with recordings_lock:
+            if self.settings_session() != identity:
+              self.json(401, {'error': 'Sign in to Galaxy'})
+              return
+            if not parked():
+              self.json(409, {'error': 'Turn off the vehicle before managing recordings'})
+              return
+            result = history.delete_videos(payload['segmentName'])
+        except ValueError:
+          self.json(400, {'error': 'Invalid segment selection'})
+        except SegmentMissing:
+          self.json(404, {'error': 'Recording no longer exists; refresh the inventory'})
+        except SegmentInUse:
+          self.json(409, {'error': 'This segment is still recording'})
+        except (OSError, AttributeError):
+          self.json(503, {'error': 'Videos could not be deleted'})
         else:
           if self.settings_session() == identity:
             self.json(200, result)
@@ -2108,9 +2137,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if not setup_state['bluetoothEnabled']:
           self.json(409, {'error': 'Turn on Bluetooth before pairing the car'})
           return
-        if setup_state['identity'].get('installed') is not True:
-          self.json(409, {'error': 'Verify your Android Auto package before pairing'})
-          return
+        # Bluetooth pairing and the Wi-Fi bootstrap need no identity; only projection does.
         source = None
         try:
           source = aa_source_registry().mint(identity)
