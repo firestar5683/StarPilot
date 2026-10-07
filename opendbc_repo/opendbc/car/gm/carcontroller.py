@@ -347,6 +347,7 @@ class CarController(CarControllerBase):
     self.volt_cc_last_cancel_frame = 0
     self.volt_cc_metric = False
     self.volt_cc_last_button_frame = 0
+    self.volt_cc_last_direction_frame = None
     self.volt_cc_consumed_source_ns = 0
 
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
@@ -1234,6 +1235,8 @@ class CarController(CarControllerBase):
                        all(math.isfinite(value) for value in (CS.out.cruiseState.speed, CS.out.vEgo, hud_v_cruise)) and
                        CS.out.cruiseState.speed < CS.out.vEgo < hud_v_cruise and
                        physical.button_credit_ns > 0 and physical.button_credit_ns != self.volt_cc_consumed_source_ns and
+                       (not self.volt_cc_profile or self.volt_cc_last_direction_frame is None or
+                        (self.frame - self.volt_cc_last_direction_frame) * DT_CTRL > .2) and
                        (not self.ordinary_cc_profile or self.ordinary_cc_cadence.can_send(self.frame, CruiseButtons.DECEL_SET)))
       if cancel_sent:
         self.volt_cc_last_button_frame = self.frame
@@ -1241,6 +1244,8 @@ class CarController(CarControllerBase):
         can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.DECEL_SET))
         if self.ordinary_cc_profile:
           self.ordinary_cc_cadence.note_sent(self.frame, CruiseButtons.DECEL_SET)
+        else:
+          self.volt_cc_last_direction_frame = self.frame
         self.volt_cc_consumed_source_ns = physical.button_credit_ns
         self.volt_cc_last_button_frame = self.frame
       elif not self.CP.openpilotLongitudinalControl or not ready or not CC.longActive:
@@ -1264,6 +1269,7 @@ class CarController(CarControllerBase):
         source_ns = physical.button_credit_ns
         if ((self.frame - self.volt_cc_last_button_frame) * DT_CTRL > rate and
             source_ns > 0 and source_ns != self.volt_cc_consumed_source_ns):
+          self.volt_cc_last_direction_frame = self.frame
           self.volt_cc_last_button_frame = self.frame
           self.volt_cc_consumed_source_ns = source_ns
           can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, button))
