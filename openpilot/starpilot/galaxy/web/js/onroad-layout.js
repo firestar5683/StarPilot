@@ -52,7 +52,8 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
   const positions = layout || Object.fromEntries(Object.entries(profile.widgets).map(([key, item]) => [key, item.default]))
   if (id === "speed_limit_actions") return Object.entries(profile.widgets).some(([key, other]) => {
     const at = positions[key]
-    return key !== id && key !== "speed_limit" && other.layer !== "underlay" && at && Number.isFinite(at.x) && Number.isFinite(at.y) &&
+    return key !== id && key !== "speed_limit" && other.layer !== "underlay" && at &&
+      !(key === "driving_mode_descriptions" && !at.enabled) && Number.isFinite(at.x) && Number.isFinite(at.y) &&
       intersects(at.x, at.y, other.resizable ? at.size ?? other.width : other.width,
         other.resizable ? at.size ?? other.height : other.height)
   })
@@ -93,7 +94,7 @@ export function validDocument(document, metadata) {
         typeof position.enabled === "boolean" &&
         Number.isFinite(position.x) && Number.isFinite(position.y) &&
         position.x >= limits.minX && position.x <= limits.maxX && position.y >= limits.minY && position.y <= limits.maxY &&
-        !overlapsReserved(profile, id, position.x, position.y, layout)
+        ((id === "driving_mode_descriptions" && !position.enabled) || !overlapsReserved(profile, id, position.x, position.y, layout))
     })
   })
 }
@@ -230,7 +231,15 @@ export class OnroadLayoutFeed {
 
 export const LayoutWidgetPreview = {
   props: ["widget", "palette", "profile", "scene"],
-  methods: { withAlpha },
+  methods: {
+    withAlpha,
+    modeLines(scene, profile) {
+      const aol = scene === "aol"
+      const experimental = ["experimental", "cem_stop_light", "cem_lead", "cem_curve"].includes(scene)
+      if (profile === "compact" && (aol || experimental)) return aol ? ["Always On", "Lateral"] : ["ACC -", "Experimental"]
+      return [aol ? "Always On Lateral" : experimental ? "ACC - Experimental" : "ACC - Chill"]
+    },
+  },
   template: `
     <g aria-hidden="true" class="gx-layout-widget-art" :fill="palette.text || '#ffffff'">
       <rect v-if="['driver_monitor', 'model_confidence', 'conditional_mode', 'following_distance'].includes(widget.kind)"
@@ -239,6 +248,13 @@ export const LayoutWidgetPreview = {
       <template v-if="widget.kind === 'current_speed'">
         <text x="290" y="200" text-anchor="middle" font-size="176" font-weight="700">65</text>
         <text x="290" y="285" text-anchor="middle" font-size="66" :fill="withAlpha(palette.text, 200 / 255)">mph</text>
+      </template>
+      <template v-else-if="widget.kind === 'driving_mode_descriptions'">
+        <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
+          :font-size="profile === 'large' ? 48 : 21" font-weight="600" stroke="#000000" :stroke-width="profile === 'large' ? 3 : 1.5" paint-order="stroke">
+          <tspan v-for="(line, index) in modeLines(scene, profile)" :key="index" :x="widget.width / 2"
+            :y="widget.height / 2 + (index - (modeLines(scene, profile).length - 1) / 2) * 25">{{ line }}</tspan>
+        </text>
       </template>
       <template v-else-if="widget.kind === 'cruise_limits'">
         <g v-for="(label, index) in ['MAX', 'LIMIT']" :key="label" :transform="'translate(0 ' + index * 211 + ')'">

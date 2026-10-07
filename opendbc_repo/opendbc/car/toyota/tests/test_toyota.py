@@ -21,6 +21,41 @@ def cars_with(flags):
 
 
 class TestToyotaInterfaces(unittest.TestCase):
+  def test_distance_command_matches_hud_bars_until_pcm_acknowledges(self):
+    from opendbc.car.toyota.tests.test_auto_hold import setup_hold, step_hold, decode
+
+    for bars in (1, 2, 3):
+      with self.subTest(bars=bars):
+        cp, controller, command, state = setup_hold(CAR.TOYOTA_COROLLA_TSS2, enabled=False)
+        command.enabled = command.longActive = True
+        command.hudControl.leadDistanceBars = bars
+        state.out.cruiseState.enabled = True
+        state.out.standstill = state.out.brakePressed = False
+        state.pcm_follow_distance = 0
+        requests = []
+        for _ in range(13):
+          for frame in step_hold(controller, command, state):
+            if frame[0] == 0x343:
+              requests.append(int(decode(cp, frame, 'ACC_CONTROL')['DISTANCE']))
+        self.assertEqual(requests, [1, 1, 0, 0, 1])
+        state.pcm_follow_distance = 4 - bars
+        for _ in range(6):
+          frames = step_hold(controller, command, state)
+        frame = next(frame for frame in frames if frame[0] == 0x343)
+        self.assertEqual(decode(cp, frame, 'ACC_CONTROL')['DISTANCE'], 0)
+
+    cp, controller, command, state = setup_hold(CAR.TOYOTA_PRIUS, enabled=False)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+    command.enabled = True
+    command.hudControl.leadDistanceBars = 1
+    state.out.cruiseState.enabled = True
+    state.pcm_follow_distance = 0
+    for _ in range(13):
+      self.assertFalse(any(frame[0] == 0x343 for frame in step_hold(controller, command, state)))
+    command.cruiseControl.cancel = True
+    frame = next(frame for frame in step_hold(controller, command, state) if frame[0] == 0x343)
+    self.assertEqual(decode(cp, frame, 'ACC_CONTROL')['DISTANCE'], 0)
+
   def test_corolla_rate_cut_is_decoded_and_preserves_sibling_boundary(self):
     from opendbc.car.toyota.tests.test_auto_hold import setup_hold, step_hold, decode
 

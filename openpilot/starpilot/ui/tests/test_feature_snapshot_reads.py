@@ -35,11 +35,13 @@ class FeatureSnapshotReadTests(unittest.TestCase):
 
   def test_duplicate_torque_sources_are_read_once_per_assembly(self):
     first = self.snapshot()
-    self.assertEqual(set(self.params.reads), {"ForceAutoTuneOff", "TorqueOverrideDocument"})
+    self.assertEqual(set(self.params.reads), {"ForceAutoTuneOff", "TorqueOverrideDocument", "PauseLateralSpeed",
+                                            "PauseLateralOnSignal", "LateralResumeDelay", "IsMetric"})
     self.assertEqual(len(self.params.reads), len(set(self.params.reads)))
     self.params.reads.clear()
     self.assertEqual(self.snapshot(), first)
-    self.assertEqual(set(self.params.reads), {"ForceAutoTuneOff", "TorqueOverrideDocument"})
+    self.assertEqual(set(self.params.reads), {"ForceAutoTuneOff", "TorqueOverrideDocument", "PauseLateralSpeed",
+                                            "PauseLateralOnSignal", "LateralResumeDelay", "IsMetric"})
     self.assertEqual(len(self.params.reads), len(set(self.params.reads)))
 
   def test_next_assembly_observes_replacement_and_unreadable_source(self):

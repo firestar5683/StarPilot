@@ -1,4 +1,7 @@
-from opendbc.car.hyundai.blended_stock_aol import qualified as qualified_blended_stock, WORDS as BLENDED_STOCK_WORDS
+from opendbc.car.hyundai.blended_stock_aol import (
+  qualified as qualified_blended_stock, qualified_alpha as qualified_blended_alpha,
+  WORDS as BLENDED_STOCK_WORDS, ALPHA_WORDS as BLENDED_ALPHA_WORDS,
+)
 from opendbc.car.hyundai.canfd_angle_aol import qualified as qualified_angle_aol, temporary_restriction, ANGLE_AOL_WORDS
 from opendbc.car.hyundai.classic_long_aol import (
   qualified as qualified_classic_long,
@@ -73,6 +76,11 @@ def ioniq6_settings_capable(CP) -> bool:
 
 
 def policy_for(CP) -> AolVehiclePolicy:
+  if qualified_blended_alpha(CP):
+    return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
+                            normal_runtime_supported=True, ordinary_axis_ack_required=qualified_blended_alpha(CP, marked_only=True),
+                            full_axis_runtime_required=qualified_blended_alpha(CP, marked_only=True),
+                            explicit_latch=True, alternative_experience_addition=32)
   if qualified_blended_stock(CP):
     return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
                             normal_runtime_supported=True, explicit_latch=True, alternative_experience_addition=32)
@@ -151,7 +159,7 @@ def policy_for(CP) -> AolVehiclePolicy:
 
 def native_profile_supported(model: int, param: int) -> bool:
   return (
-    (model == int(car.CarParams.SafetyModel.hyundai) and param in LONG_AOL_WORDS | BLENDED_STOCK_WORDS)
+    (model == int(car.CarParams.SafetyModel.hyundai) and param in LONG_AOL_WORDS | BLENDED_STOCK_WORDS | BLENDED_ALPHA_WORDS)
     or classic_native_profile_supported(model, param)
     or (
       model == int(car.CarParams.SafetyModel.hyundaiCanfd)
@@ -162,7 +170,7 @@ def native_profile_supported(model: int, param: int) -> bool:
 
 
 def native_accepts_cp(CP, model: int, param: int) -> bool:
-  if qualified_blended_stock(CP, marked_only=True):
+  if qualified_blended_alpha(CP, marked_only=True) or qualified_blended_stock(CP, marked_only=True):
     return model == int(car.CarParams.SafetyModel.hyundai) and param == CP.safetyConfigs[0].safetyParam
   if qualified_angle_aol(CP, marked_only=True):
     return model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == CP.safetyConfigs[0].safetyParam
@@ -188,6 +196,7 @@ def native_latch_rejected(CP, native) -> bool:
     (
       qualified_angle_aol(CP, marked_only=True)
       or qualified_blended_stock(CP, marked_only=True)
+      or qualified_blended_alpha(CP, marked_only=True)
       or qualified_classic_long(CP, marked_only=True)
       or qualified_ioniq6(CP)
       or qualified_non_scc(CP)
@@ -201,7 +210,7 @@ def native_latch_rejected(CP, native) -> bool:
 
 
 def create_intent(CP, settings):
-  if qualified_classic_long(CP):
+  if qualified_blended_alpha(CP) or qualified_classic_long(CP):
     from openpilot.starpilot.car.hyundai.classic_long_intent import ClassicLongCardIntent
 
     return ClassicLongCardIntent(CP, settings)

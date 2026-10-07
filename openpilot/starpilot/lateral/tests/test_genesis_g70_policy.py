@@ -150,10 +150,10 @@ def test_angle_taper_uses_actual_sent_torque_direction(angle, pid_output):
 
 
 @pytest.mark.parametrize('mph,desired,measured,jerk,expected', [
-  (65., 0., .10, 0., .06), (50., 0., .10, 0., 0.), (55., 0., .10, 0., .03),
-  (65., .25, .10, 0., .03), (65., 0., .25, 0., .03),
+  (65., 0., .10, 0., .09), (50., 0., .10, 0., 0.), (55., 0., .10, 0., .045),
+  (65., .25, .10, 0., .045), (65., 0., .25, 0., .045),
   (65., .35, .10, 0., 0.), (65., 0., .35, 0., 0.),
-  (65., 0., .10, .35, .03), (65., 0., .10, .50, 0.),
+  (65., 0., .10, .35, .045), (65., 0., .10, .50, 0.),
 ])
 def test_center_measurement_damping_gates(mph, desired, measured, jerk, expected):
   for direction in (-1., 1.):
@@ -171,7 +171,7 @@ def test_center_measurement_damping_update_and_recovery(direction):
   cs.steeringAngleDeg = -direction * .5
   output, _, moving = controller.update(True, cs, vm, params, False, 0., False, .2)
   assert moving.d * direction < 0.
-  assert abs(moving.d) <= .15
+  assert abs(moving.d) <= .225
   assert abs(output) <= controller.steer_max
   for _ in range(150):
     _, _, steady = controller.update(True, cs, vm, params, False, 0., False, .2)

@@ -60,6 +60,41 @@ class TestFastRequest(unittest.TestCase):
     self.updated.system_time_valid.assert_not_called()
     self.updater.fast_update.assert_called_once_with('SecretGoodStarPilot', 'a' * 40, rollback=False)
 
+  def test_normal_fetch_finalization_success_and_failure_return_idle(self):
+    # Retain the real fetch implementation while replacing its external Git/filesystem operations.
+    module = load_updater()
+    actual = module.Updater()
+    actual.params = self.params
+    actual._branches_checked = True
+    actual.branches = {"SecretGoodStarPilot": "a" * 40}
+    self.values["UpdaterTargetBranch"] = "SecretGoodStarPilot"
+    module.run = Mock(return_value="a" * 40)
+    module.setup_git_options = Mock()
+    module.set_consistent_flag = Mock()
+    module.validate_revision = Mock()
+    module.AGNOS = False
+    for failure in (False, True):
+      with self.subTest(failure=failure):
+        self.writes.clear()
+        self.values.pop("LastUpdateTime", None)
+        self.helper._control_request("download")
+        self.helper.sleep = Mock(side_effect=[None, StopLoop])
+        self.updated.system_time_valid = Mock(return_value=True)
+        module.finalize_update = Mock(side_effect=RuntimeError("copy failed") if failure else None)
+        self.updater.fetch_update.side_effect = actual.fetch_update
+        def set_params(success, count, error):
+          self.params.put("UpdateFailedCount", count)
+          if success:
+            self.updated.write_time_to_param(self.params, "LastUpdateTime")
+        self.updater.set_params.side_effect = set_params
+        with self.assertRaises(StopLoop):
+          self.updated.main()
+        states = [value for key, value in self.writes if key == "UpdaterState"]
+        self.assertIn("finalizing update...", states)
+        self.assertEqual(states[-1], "idle")
+        self.assertEqual("LastUpdateTime" in self.values, not failure)
+        module.finalize_update.assert_called_once()
+
   def test_fast_request_skips_staging_and_startup_delay(self):
     self.run_cycle()
     self.assertEqual(self.values['UpdaterState'], 'idle')

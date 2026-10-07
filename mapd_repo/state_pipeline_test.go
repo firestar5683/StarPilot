@@ -425,3 +425,40 @@ func TestExtendedRoadEvidenceClearsWhileDiagnosticsRemain(t *testing.T) {
 		t.Fatal("missing GPS leaked old position")
 	}
 }
+
+func TestCarGpsUnknownDirectionCannotPublishRoadLimit(t *testing.T) {
+	s := State{}
+	s.Init()
+	fix := uint64(10_000_000_000)
+	s.bootNow = func() uint64 { return fix + 100_000_000 }
+	sample := syntheticSample(t, cereal.GpsSourceCar, fix, 1, true, true)
+	tile := syntheticTile(t, 13.4112, true)
+	loader := func(m.Position) (maps.Offline, error) { return tile, nil }
+	sample.Location.SetBearingAccuracyDeg(1)
+	sample.Location.SetSpeedAccuracy(1)
+	s.ProcessGps(sample, true, loader, time.Unix(0, 0))
+	_, out := decodedOutput(t, &s)
+	if out.RoadStatus() != custom.MapdOut_SampleStatus_matchedLimit || out.GpsSource() != custom.MapdOut_GpsSource_car {
+		t.Fatal("measured car direction rejected")
+	}
+	for _, unknown := range []string{"bearing", "speed"} {
+		sample.Location.SetBearingAccuracyDeg(1)
+		sample.Location.SetSpeedAccuracy(1)
+		if unknown == "bearing" {
+			sample.Location.SetBearingAccuracyDeg(180)
+		} else {
+			sample.Location.SetSpeedAccuracy(100)
+		}
+		s.ProcessGps(sample, true, loader, time.Unix(0, 0))
+		_, out = decodedOutput(t, &s)
+		if out.RoadStatus() != custom.MapdOut_SampleStatus_noMatch || out.SpeedLimit() != 0 || out.WayId() != 0 || out.GpsSource() != custom.MapdOut_GpsSource_car {
+			t.Fatal("unknown uncertainty retained confident evidence", unknown)
+		}
+	}
+	sample.Source = cereal.GpsSourceExternal
+	s.ProcessGps(sample, true, loader, time.Unix(0, 0))
+	_, out = decodedOutput(t, &s)
+	if out.RoadStatus() != custom.MapdOut_SampleStatus_matchedLimit {
+		t.Fatal("hardware behavior changed")
+	}
+}

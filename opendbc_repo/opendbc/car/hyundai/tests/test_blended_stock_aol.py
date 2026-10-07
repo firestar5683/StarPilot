@@ -90,11 +90,12 @@ class MixedReceiveStream:
 
 @pytest.mark.parametrize('hda2', [False, True])
 @pytest.mark.parametrize('alpha', [False, True])
-def test_exact_stock_final_profile_and_alpha_stays_disabled(hda2, alpha):
+def test_exact_stock_profile_advertises_hdai_without_selecting_long(hda2, alpha):
   cp = params(hda2, alpha)
   assert qualified(cp) == (not hda2)
   assert cp.alternativeExperience == 0
-  assert not cp.alphaLongitudinalAvailable and not cp.openpilotLongitudinalControl
+  assert cp.alphaLongitudinalAvailable == (not hda2)
+  assert not cp.openpilotLongitudinalControl
   assert cp.safetyConfigs[0].safetyParam == (0x2010 if hda2 else 0x2000)
   cp.alternativeExperience = 32
   assert qualified(cp, marked_only=True) == (not hda2)
@@ -167,7 +168,8 @@ def test_actual_card_publication_and_controls_stock_only(hda2, aol, disabled, mo
     subscriber = messaging.sub_sock('carParams', timeout=100, conflate=True)
     ci = CarInterface(cp)
     card = Car(CI=ci, RI=RadarInterface(cp))
-    assert not card.CP.openpilotLongitudinalControl and not card.CP.alphaLongitudinalAvailable
+    assert not card.CP.openpilotLongitudinalControl
+    assert card.CP.alphaLongitudinalAvailable == (not hda2)
     assert card.CP.pcmCruise and card.CP.safetyConfigs[0].safetyParam == (0x2010 if hda2 else 0x2000)
     assert card.CP.alternativeExperience == (32 if aol and not hda2 else 0)
     expected = card.CP.to_dict()
@@ -455,3 +457,45 @@ def test_hda1_ordinary_stock_cruise_with_unused_independent_latch(experience):
     assert all(forwarding == 0 for _, _, _, forwarding in rows[:12] + rows[62:])
   else:
     assert all(forwarding == -1 for _, _, _, forwarding in rows)
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_actual_alpha_card_final_composition_and_restart_transport(enabled, monkeypatch):
+  import gc
+  from openpilot.common.params import Params
+  from openpilot.common.prefix import OpenpilotPrefix
+  from openpilot.selfdrive.car.card import Car
+  from opendbc.car.hyundai.radar_interface import RadarInterface
+  from opendbc.car.hyundai.blended_longitudinal import BlendedStartup, candidate_from_stock, Phase, Outcome, TakeoverResult
+  from openpilot.starpilot.car.hyundai.aol import policy_for
+  monkeypatch.setenv('SIMULATION', '1')
+  monkeypatch.setenv('REPLAY', '1')
+  monkeypatch.setenv('AOL_REPLAY_RUNTIME', '0')
+  with OpenpilotPrefix():
+    saved = Params()
+    saved.put_bool('OpenpilotEnabledToggle', True, block=True)
+    saved.put_bool('AlwaysOnLateral', enabled, block=True)
+    saved.put('LKASButtonControl', AOL_TOGGLE, block=True)
+    stock = params()
+    cp = candidate_from_stock(stock, alpha_requested=True, native_qualified=True)
+    owner = BlendedStartup(stock, cp, (lambda *a: None, lambda *a: None))
+    # This constructor regression supplies a prepared diagnostic result; actual
+    # matched UDS and full physical/native chain remain separate lifecycle tests.
+    owner.owner.phase = Phase.OWNED
+    owner.owner.result = TakeoverResult(Outcome.OWNED)
+    owner.source_floor_ns = 1
+    ci = CarInterface(cp)
+    card = Car(CI=ci, RI=RadarInterface(cp), startup_owner=owner)
+    assert card.aol_replay == enabled and card.aol_qualified == enabled
+    if enabled:
+      assert 'aolSafetyWire' in card.sm.services
+      assert 'aolIntentWire' in card.pm.sock
+    assert card.CP.safetyConfigs[0].safetyParam == 0x2004
+    assert card.CP.alternativeExperience == (32 if enabled else 0) and owner.prepared_for(card.CP)
+    assert card.CP.openpilotLongitudinalControl and not card.CP.pcmCruise
+    assert card.aol_card_intent is None or not card.aol_card_intent.allowed_latch
+    with structs.CarParams.from_bytes(saved.get('CarParams')) as published:
+      assert policy_for(published).full_axis_runtime_required == enabled
+      assert published.to_dict() == card.CP.to_dict()
+    del card, ci
+    gc.collect()

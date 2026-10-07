@@ -2,9 +2,7 @@
 
 #include "gm_bolt_cc_gate.h"
 
-static safety_config gm_init(uint16_t safety_param);
 static void gm_rx_hook(const CANPacket_t *msg);
-static bool gm_tx_hook(const CANPacket_t *msg);
 static bool gm_fwd_hook(int bus_num, int addr);
 static bool gm_aol_mode_valid(void);
 
@@ -215,19 +213,30 @@ static unsigned int gm_bolt_cc_tag(uint16_t word) {
 static bool gm_bolt_cc_selected;
 
 static safety_config gm_bolt_cc_init(uint16_t word) {
-  gm_bolt_cc_stock_main = false;
-  gm_bolt_cc_stock_only = (word == 0xE710U) || (word == 0xE711U) || (word == 0xE712U) || (word == 0xE713U);
-  const unsigned int tag = gm_bolt_cc_tag(word);
-  gm_bolt_cc_selected = tag != 0U;
-  safety_config ret = (tag != 0U) ? gm_bolt_cc_profile_init((uint16_t)tag) : gm_init(word);
-  gm_aol_initialize(gm_aol_profile_word(word) && gm_aol_mode_valid());
-  gm_aol_stock_only = gm_bolt_cc_stock_only || (word == 16U);
-  gm_aol_stock_gateway = word == 16U;
+  gm_hybrid_rejected = ((word & 0xFF00U) == 0xE800U) && ((word > 0xE805U) ||
+    ((alternative_experience != 0) && (alternative_experience != 32)));
+  gm_hybrid_selected = (word >= 0xE800U) && (word <= 0xE805U);
+  safety_config ret;
+  if (gm_hybrid_selected) {
+    gm_bolt_cc_selected = false;
+    ret = gm_hybrid_init(word);
+  } else {
+    gm_bolt_cc_stock_main = false;
+    gm_bolt_cc_stock_only = (word == 0xE710U) || (word == 0xE711U) || (word == 0xE712U) || (word == 0xE713U);
+    const unsigned int tag = gm_bolt_cc_tag(word);
+    gm_bolt_cc_selected = tag != 0U;
+    ret = (tag != 0U) ? gm_bolt_cc_profile_init((uint16_t)tag) : gm_init(word);
+    gm_aol_initialize(gm_aol_profile_word(word) && gm_aol_mode_valid());
+    gm_aol_stock_only = gm_bolt_cc_stock_only || (word == 16U) || (word == 0xC162U);
+    gm_aol_stock_gateway = word == 16U;
+  }
   return ret;
 }
 
 static void gm_bolt_cc_rx(const CANPacket_t *msg) {
-  if (gm_bolt_cc_selected) {
+  if (gm_hybrid_selected) {
+    gm_hybrid_rx(msg);
+  } else if (gm_bolt_cc_selected) {
     gm_bolt_cc_profile_rx(msg);
   } else {
     gm_rx_hook(msg);
@@ -236,16 +245,23 @@ static void gm_bolt_cc_rx(const CANPacket_t *msg) {
 }
 
 static void gm_bolt_cc_optional_rx(const CANPacket_t *msg) {
-  gm_one_pedal_observe(msg);
-  if (gm_bolt_cc_selected && (msg->addr == 0xBDU) && (msg->bus == 0U) && (GET_LEN(msg) == 7U)) {
-    gm_bolt_cc_profile_rx(msg);
+  if (gm_hybrid_selected) {
+    gm_hybrid_rx(msg);
+  } else {
+    gm_one_pedal_observe(msg);
+    if (gm_bolt_cc_selected && (msg->addr == 0xBDU) && (msg->bus == 0U) && (GET_LEN(msg) == 7U)) {
+      gm_bolt_cc_profile_rx(msg);
+    }
   }
 }
 
 static bool gm_bolt_cc_tx(const CANPacket_t *msg) {
-  return gm_bolt_cc_selected ? gm_bolt_cc_profile_tx(msg) : gm_tx_hook(msg);
+  return !gm_hybrid_rejected && (gm_hybrid_selected ? gm_hybrid_tx(msg) : (gm_bolt_cc_selected ? gm_bolt_cc_profile_tx(msg) : gm_tx_hook(msg)));
 }
 
 static bool gm_bolt_cc_fwd(int bus, int addr) {
-  return gm_bolt_cc_selected ? gm_bolt_cc_profile_fwd(bus, addr) : gm_fwd_hook(bus, addr);
+  bool block;
+  if (gm_hybrid_selected) { block = ((bus == 2) && (addr == 0x180)) || ((bus == 0) && (addr == 0x184)); }
+  else { block = gm_bolt_cc_selected ? gm_bolt_cc_profile_fwd(bus, addr) : gm_fwd_hook(bus, addr); }
+  return block;
 }

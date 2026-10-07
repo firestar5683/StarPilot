@@ -56,6 +56,38 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     state = self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     return next(item for item in state.rows if item.key == key)
 
+  def test_global_steering_pause_rows_units_defaults_and_angle_vehicle(self):
+    from opendbc.car.ford.values import CAR as FORD
+    for angle in (False, True):
+      if angle:
+        self.cp = interfaces[FORD.FORD_ESCAPE_MK4].get_non_essential_params(FORD.FORD_ESCAPE_MK4)
+      self.params.put_bool('IsMetric', False, block=True)
+      speed = self.row('torque', 'PauseLateralSpeed')
+      self.assertTrue(speed.available)
+      self.assertEqual((speed.value, speed.unit), ('0', 'mph'))
+      self.assertTrue(self.owner.apply(required_change(speed)))
+      stale = required_change(self.row('torque', 'PauseLateralSpeed'))
+      self.params.put_bool('IsMetric', True, block=True)
+      self.assertFalse(self.owner.apply(stale))
+      self.assertEqual(self.row('torque', 'PauseLateralSpeed').unit, 'km/h')
+      reset = row_default(self.row('torque', 'PauseLateralSpeed'))
+      assert reset is not None
+      self.assertTrue(self.owner.apply(reset))
+      self.assertEqual(self.params.get('PauseLateralSpeed'), 0.)
+      signal = self.row('torque', 'PauseLateralOnSignal')
+      self.assertTrue(self.owner.apply(required_change(signal)))
+      self.assertTrue(self.params.get_bool('PauseLateralOnSignal'))
+      self.assertTrue(self.owner.apply(required_change(self.row('torque', 'PauseLateralOnSignal'), -1)))
+      self.assertFalse(self.params.get_bool('PauseLateralOnSignal'))
+      self.assertFalse(self.owner.apply(replace(required_change(self.row('torque', 'LateralResumeDelay')), value='nan')))
+      Path(self.params.get_param_path('PauseLateralSpeed')).write_bytes(b'nan')
+      repair = self.row('torque', 'PauseLateralSpeed')
+      self.assertEqual(repair.repair_value, '0')
+      request = required_change(repair)
+      self.assertFalse(self.owner.apply(replace(request, value='5')))
+      self.assertTrue(self.owner.apply(request))
+      self.params.put('PauseLateralSpeed', 0., block=True)
+
   def test_default_clears_only_selected_torque_override_and_rejects_stale_source(self):
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:value"))))
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:friction:value"))))

@@ -53,7 +53,7 @@ def source():
   messages = Messages(clock)
   with patch('openpilot.cereal.messaging.SubMaster', return_value=messages) as factory:
     result = NavigationStatusSource(mono_clock=lambda: clock.mono, boot_clock=clock.boot)
-  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation']
+  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState']
   clock.mono += 100_000_000
   messages.fix('gpsLocationExternal')
   messages.fix('gpsLocation', stamp=clock.mono - 30_000_000, longitude=-90., latitude=40.)

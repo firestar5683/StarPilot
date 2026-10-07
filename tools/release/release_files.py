@@ -22,9 +22,10 @@ blacklist = [
 
 # Dependency sources are ordinary tracked files. A gitlink cannot be packaged
 # without a separate checkout, so fail rather than silently omitting its source.
-def release_files(root: str, include_big_model: bool = False) -> list[bytes]:
+def release_files(root: str, include_big_model: bool = False, *, require_provider: bool = False) -> list[bytes]:
   entries = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=root).split(b"\0")
   files = []
+  modes = {}
   for entry in entries:
     if not entry:
       continue
@@ -44,7 +45,13 @@ def release_files(root: str, include_big_model: bool = False) -> list[bytes]:
     if blacklisted:
       continue
 
+    modes[tracked_file] = mode
     files.append(tracked_file)
+  if require_provider or b"openpilot/starpilot/maps/shadow_lifecycle.py" in files:
+    for name, mode in ((b"openpilot/starpilot/maps/provider/mapd", b"100755"),
+                       (b"openpilot/starpilot/maps/provider/manifest.json", b"100644")):
+      if modes.get(name) != mode:
+        raise ValueError(f"Mapd Git package missing or invalid mode: {os.fsdecode(name)}; track the verified provider package")
   return files
 
 

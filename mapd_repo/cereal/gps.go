@@ -4,6 +4,9 @@ import (
 	"log/slog"
 	"math"
 
+	"capnproto.org/go/capnp/v3"
+	"pfeifer.dev/mapd/cereal/custom"
+
 	"pfeifer.dev/mapd/cereal/log"
 	ms "pfeifer.dev/mapd/settings"
 )
@@ -11,6 +14,7 @@ import (
 const (
 	externalFixMaxAge     = 500_000_000   // 10 Hz source: 500 ms
 	internalFixMaxAge     = 2_000_000_000 // 1 Hz source: 2 s
+	carFixMaxAge          = 2_500_000_000 // Optional CAN observation: 2.5 s
 	maxHorizontalAccuracy = 50.0          // input sanity ceiling, not road-match qualification
 	maxClockPairSkew      = 1_000_000     // an interrupted pair cannot date a source event
 	maxClockOffsetDrift   = 1_000_000     // a larger BOOTTIME/MONOTONIC step fences queued fixes
@@ -34,6 +38,7 @@ const (
 	GpsSourceNone GpsSource = iota
 	GpsSourceInternal
 	GpsSourceExternal
+	GpsSourceCar
 )
 
 type GpsSample struct {
@@ -54,6 +59,8 @@ type gpsCandidate struct {
 type GpsSub struct {
 	gpsLocation         Subscriber[log.GpsLocationData]
 	gpsLocationExternal Subscriber[log.GpsLocationData]
+	carGps              *Subscriber[custom.StarPilotCarState_Gps]
+	car                 gpsCandidate
 	internal            gpsCandidate
 	external            gpsCandidate
 	selected            GpsSource
@@ -74,6 +81,8 @@ func GpsFixFreshAt(source GpsSource, fixMonoTime, now uint64) bool {
 	switch source {
 	case GpsSourceExternal:
 		return now-fixMonoTime <= externalFixMaxAge
+	case GpsSourceCar:
+		return now-fixMonoTime <= carFixMaxAge
 	case GpsSourceInternal:
 		return now-fixMonoTime <= internalFixMaxAge
 	default:
@@ -93,11 +102,15 @@ func validLocation(location log.GpsLocationData) bool {
 }
 
 func (c *gpsCandidate) update(event DecodedEvent[log.GpsLocationData], clock clockSample, barrierMono uint64) bool {
+	return c.updateWithAge(event, clock, barrierMono, internalFixMaxAge)
+}
+
+func (c *gpsCandidate) updateWithAge(event DecodedEvent[log.GpsLocationData], clock clockSample, barrierMono, maxAge uint64) bool {
 	time := event.LogMonoTime // Python GPS Event.logMonoTime is CLOCK_MONOTONIC.
 	// A duplicated, out-of-order, future, or already expired event cannot
 	// renew the age of a cached fix or invalidate a newer one.
 	if time == 0 || time <= barrierMono || time <= c.lastSeenMonoTime ||
-		time > clock.monoAfter || clock.monoAfter-time > internalFixMaxAge {
+		time > clock.monoAfter || clock.monoAfter-time > maxAge {
 		return false
 	}
 	c.lastSeenMonoTime = time
@@ -120,6 +133,7 @@ func (c *gpsCandidate) update(event DecodedEvent[log.GpsLocationData], clock clo
 func (s *GpsSub) clearCandidates() {
 	s.internal = gpsCandidate{}
 	s.external = gpsCandidate{}
+	s.car = gpsCandidate{}
 }
 
 func (s *GpsSub) clockReady(clock clockSample) bool {
@@ -152,7 +166,7 @@ func (s *GpsSub) ReadSample() (sample GpsSample, success bool) {
 		clock = s.clock()
 	}
 	ready := s.clockReady(clock)
-	internalNew, externalNew := false, false
+	internalNew, externalNew, carNew := false, false, false
 	if event, ok := s.gpsLocation.ReadEvent(); ok && ready {
 		internalNew = s.internal.update(event, clock, s.barrierMono)
 	}
@@ -160,11 +174,25 @@ func (s *GpsSub) ReadSample() (sample GpsSample, success bool) {
 		externalNew = s.external.update(event, clock, s.barrierMono)
 	}
 
+	if s.carGps != nil {
+		if event, ok := s.carGps.ReadEvent(); ok && ready {
+			sourceTime := event.Value.SourceMonoTime()
+			if sourceTime > 0 && sourceTime <= event.LogMonoTime && event.LogMonoTime <= clock.monoAfter {
+				location, err := carGpsLocation(event.Value)
+				if err == nil {
+					carNew = s.car.updateWithAge(DecodedEvent[log.GpsLocationData]{Value: location, Valid: event.Valid && !math.IsNaN(float64(location.Speed())) && !math.IsInf(float64(location.Speed()), 0) && location.Speed() >= 0 && !math.IsNaN(location.Altitude()) && !math.IsInf(location.Altitude(), 0), LogMonoTime: sourceTime}, clock, s.barrierMono, carFixMaxAge)
+				}
+			}
+		}
+	}
+
 	source := GpsSourceNone
 	if ready && GpsFixFreshAt(GpsSourceExternal, s.external.fixMonoTime, clock.boot) {
 		source = GpsSourceExternal
 	} else if ready && GpsFixFreshAt(GpsSourceInternal, s.internal.fixMonoTime, clock.boot) {
 		source = GpsSourceInternal
+	} else if ready && GpsFixFreshAt(GpsSourceCar, s.car.fixMonoTime, clock.boot) {
+		source = GpsSourceCar
 	}
 	sample.SourceChanged = source != s.selected
 	if sample.SourceChanged {
@@ -183,6 +211,10 @@ func (s *GpsSub) ReadSample() (sample GpsSample, success bool) {
 		sample.Location = s.internal.location
 		sample.FixMonoTime = s.internal.fixMonoTime
 		sample.NewFix = internalNew
+	case GpsSourceCar:
+		sample.Location = s.car.location
+		sample.FixMonoTime = s.car.fixMonoTime
+		sample.NewFix = carNew
 	default:
 		return sample, false
 	}
@@ -199,11 +231,57 @@ func (s *GpsSub) Read() (locationData log.GpsLocationData, success bool) {
 func (s *GpsSub) Close() {
 	s.gpsLocation.Sub.Msgq.Close()
 	s.gpsLocationExternal.Sub.Msgq.Close()
+	if s.carGps != nil {
+		s.carGps.Sub.Msgq.Close()
+	}
 }
 
 func GetGpsSub() (gpsSub GpsSub) {
 	return GpsSub{
+		carGps:              optionalCarGpsSubscriber(),
 		gpsLocation:         NewSubscriber("gpsLocation", GpsLocationReader, true, ms.Settings.SubscriberSettings.ShadowGpsLocation),
 		gpsLocationExternal: NewSubscriber("gpsLocationExternal", GpsLocationExternalReader, true, ms.Settings.SubscriberSettings.ShadowGpsLocationExternal),
 	}
+}
+
+func optionalCarGpsSubscriber() (subscriber *Subscriber[custom.StarPilotCarState_Gps]) {
+	defer func() {
+		if recover() != nil {
+			subscriber = nil
+			slog.Warn("Optional car GPS subscriber unavailable")
+		}
+	}()
+	value := NewSubscriber("starpilotCarState", CarGpsReader, true, false)
+	return &value
+}
+
+func carGpsLocation(source custom.StarPilotCarState_Gps) (log.GpsLocationData, error) {
+	_, segment, err := capnp.NewMessage(capnp.SingleSegment(nil))
+	if err != nil {
+		return log.GpsLocationData{}, err
+	}
+	location, err := log.NewRootGpsLocationData(segment)
+	if err != nil {
+		return location, err
+	}
+	location.SetLatitude(source.Latitude())
+	location.SetLongitude(source.Longitude())
+	location.SetAltitude(source.Altitude())
+	location.SetSpeed(source.Speed())
+	location.SetBearingDeg(source.BearingDeg())
+	location.SetHorizontalAccuracy(source.HorizontalAccuracy())
+	location.SetVerticalAccuracy(source.VerticalAccuracy())
+	location.SetBearingAccuracyDeg(source.BearingAccuracyDeg())
+	location.SetSpeedAccuracy(source.SpeedAccuracy())
+	location.SetUnixTimestampMillis(source.UnixTimestampMillis())
+	location.SetHasFix(source.HasFix())
+	location.SetSource(log.GpsLocationData_SensorSource_car)
+	velocity, err := source.VNED()
+	if err != nil {
+		return location, err
+	}
+	if err := location.SetVNED(velocity); err != nil {
+		return location, err
+	}
+	return location, nil
 }

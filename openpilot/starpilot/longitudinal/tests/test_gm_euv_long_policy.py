@@ -166,11 +166,11 @@ class TestEuvLongitudinal(unittest.TestCase):
            patch('openpilot.selfdrive.controls.controlsd.messaging.SubMaster', side_effect=register):
         with self.assertRaises(Registered):
           Controls()
-      for service in ('radarState', 'deviceState'):
-        self.assertEqual(service in captured['services'], alpha)
-        if alpha:
-          self.assertIn(service, captured['options']['ignore_alive'])
-          self.assertIn(service, captured['options']['ignore_valid'])
+      self.assertEqual(captured['services'].count('deviceState'), 1)
+      self.assertEqual(captured['services'].count('radarState'), int(alpha))
+      for service in ('deviceState',) + (('radarState',) if alpha else ()):
+        for ignored in ('ignore_alive', 'ignore_valid', 'ignore_avg_freq'):
+          self.assertIn(service, captured['options'][ignored])
       self.assertIn('carState', captured['services'])
       self.assertIn('longitudinalPlan', captured['services'])
 

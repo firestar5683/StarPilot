@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "upstream_commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912",
+  "upstream_commit": "ab8c84c3989bab34969d83e78c5fad3ee5b95112",
   "opendbc_commit": "35f7e0813462607ef1d703e52313e7571e31405d",
   "unchanged_schemas": {
     "openpilot/cereal/deprecated.capnp": "b3aa5c13de40001ed7376cef858500fb003f7698f96131cd0db18d878fa1af0d",
@@ -9,12 +9,10 @@
     "opendbc_repo/opendbc/car/include/c++.capnp": "fb306076cd38c27af1aed20fac6395e9a46fbe5b5df6a248b5f1b6845a079c44",
     "opendbc_repo/opendbc/car/rlog.capnp": "76331a09f36764d08228ba1ed6c03419cc8cdfcc797db98c4d56fab52a6ac050"
   },
-  "log_sha256": "3f8906bd908494e20eb77b7d27536be541d4cf9f8d5277ae8528b3ee59a55673",
+  "log_sha256": "6e54f7f8b0b74ae224aae14e72dfeba6c1a5554b2611b5f43bb6a894a3fed6c1",
   "custom_header": "using Cxx = import \"/include/c++.capnp\";\n$Cxx.namespace(\"cereal\");\nusing Car = import \"/car.capnp\";\n\n@0xb526ba661d550a59;\n\n# custom.capnp: a home for empty structs reserved for custom forks\n# These structs are guaranteed to remain reserved and empty in mainline\n# cereal, so use these if you want custom events in your fork.\n\n# DO rename the structs\n# DON'T change the identifier (e.g. @0x81c2f05a394cf4af)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
   "historical_empty_slots": [
     1,
-    2,
-    3,
     5,
     6
   ],
@@ -164,6 +162,18 @@
       "body": "\n  hudControl @0 :HUDControl;\n  steeringLimitInfo @1 :SteeringLimitInfo;\n\n  struct HUDControl {\n    audibleAlert @0 :AudibleAlert;\n\n    enum AudibleAlert {\n      none @0;\n\n      engage @1;\n      disengage @2;\n      refuse @3;\n\n      warningSoft @4;\n      warningImmediate @5;\n\n      prompt @6;\n      promptRepeat @7;\n      promptDistracted @8;\n\n      # Random Events\n      angry @9;\n      continued @10;\n      dejaVu @11;\n      doc @12;\n      fart @13;\n      firefox @14;\n      goat @15;\n      hal9000 @16;\n      mail @17;\n      nessie @18;\n      noice @19;\n      startup @20;\n      thisIsFine @21;\n      uwu @22;\n    }\n  }\n\n  struct SteeringLimitInfo {\n    valid @0 :Bool;\n    modelLimitErrorDeg @1 :Float32;\n    resumeLimitErrorDeg @2 :Float32;\n    cooperativeLimitErrorDeg @3 :Float32;\n    cooperativeOffsetDeg @4 :Float32;\n    monoTime @5 :UInt64;\n    combinedLimitErrorDeg @6 :Float32;\n  }\n",
       "source_commit": "c2109496a72e85ca702ecef7aff53ff45adcfb8c",
       "source_path": "cereal/custom.capnp"
+    },
+    "3": {
+      "type_id": "0xda96579883444c35",
+      "name": "StarPilotLongitudinalPlan",
+      "body": "\n  version @0 :UInt16;\n  sourcePlanMonoTime @1 :UInt64;\n  modelMonoTime @2 :UInt64;\n  driveStartMonoTime @3 :UInt64;\n  forceStopHolding @4 :Bool;\n"
+    },
+    "2": {
+      "type_id": "0xf35cc4560bbf6ec2",
+      "name": "StarPilotCarState",
+      "body": "\n  accelPressed @0 :Bool;\n  alwaysOnLateralEnabled @1 :Bool;\n  brakeLights @2 :Bool;\n  dashboardSpeedLimit @3 :Float32;\n  decelPressed @4 :Bool;\n  distancePressed @5 :Bool;\n  distanceLongPressed @6 :Bool;\n  distanceVeryLongPressed @7 :Bool;\n  ecoGear @8 :Bool;\n  forceCoast @9 :Bool;\n  isParked @10 :Bool;\n  pauseLateral @11 :Bool;\n  pauseLongitudinal @12 :Bool;\n  sportGear @13 :Bool;\n  trafficModeEnabled @14 :Bool;\n  gasStack @15 :Bool;  # Compatibility with older StarPilot payloads\n  modePressed @16 :Bool;\n  customPressed @17 :Bool;\n  alwaysOnLateralAllowed @18 :Bool;\n  dashboardStopSign @19 :UInt8;  # 0 = no signal / platform doesn't publish\n  cancelPressed @20 :Bool;\n  cancelLongPressed @21 :Bool;\n  cancelVeryLongPressed @22 :Bool;\n  pedalMaxRegen @23 :Bool;  # pedal at max regen, driver should use brake for more decel\n  pedalLongActive @24 :Bool;  # Pre-AP pedal longitudinal mode is active (enableLongControl)\n  teslaCCEngaged @25 :Bool;  # rising edge of stock Tesla CC engaging (no-pedal mode)\n  teslaCCDisengaged @26 :Bool;  # falling edge of stock Tesla CC\n  teslaCCNotArmed @27 :Bool;  # lateral engaged but DI_cruiseState != STANDBY/ENABLED\n  accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal\n  decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal\n  pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled",
+      "source_commit": "6de77049b3c3dc77c7275e9ff724a96f9e72a19d",
+      "source_path": "cereal/custom.capnp"
     }
   },
   "reviewed_enum_additions": {
@@ -171,23 +181,5 @@
       "enum": "SafetyModel",
       "field": "teslaPreap @39;"
     }
-  },
-  "reviewed_log_additions": [
-    {
-      "scope": "enum EventName",
-      "fields": [
-        "teslaCCEngaged @105;",
-        "teslaCCDisengaged @106;",
-        "teslaCCNotArmed @107;"
-      ],
-      "reason": "Exact Tesla stock cruise alert event identifiers consumed by selfdrived alerts."
-    },
-    {
-      "scope": "struct LongitudinalPlan",
-      "fields": [
-        "forceStopHolding @40 :Bool;"
-      ],
-      "reason": "Fresh same-plan manual hold presentation; preserves joined hold/release contract."
-    }
-  ]
+  }
 }

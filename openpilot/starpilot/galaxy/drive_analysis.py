@@ -15,7 +15,7 @@ import time
 from openpilot.starpilot.flm.local_logs import DIR_FLAGS, FILE_FLAGS, MAX_COMPRESSED_BYTES, LocalLogUnavailable
 from openpilot.starpilot.flm.log_decode import LogDecodeError, decode_segment
 from openpilot.starpilot.galaxy.drive_history import MAX_ROOT_ENTRIES, MAX_SEGMENT_ENTRIES, MAX_STATS_SEGMENTS_PER_ROUTE, SEGMENT_NAME
-from openpilot.starpilot.models.catalog import BY_ID
+from openpilot.starpilot.models.catalog import model_entries
 from openpilot.starpilot.models.receipt import logged_model_load
 from openpilot.starpilot.models.status import ModelVariant
 
@@ -200,7 +200,8 @@ def _model_label(outputs, loads, selected):
     load = loads[index][1] if index >= 0 else None
     variant = 'Chestnut big' if big else 'Small'
     if load is not None and (load.variant is ModelVariant.CHESTNUT) == big:
-      label = f'{BY_ID[load.model_id].name} ({variant})'
+      entry = model_entries().get(load.model_id)
+      label = f'{entry.name if entry is not None else load.model_id} ({variant})'
     else:
       label = f'{variant} model (identity not recorded)'
     if label not in labels:

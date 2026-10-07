@@ -36,6 +36,17 @@ BOLT_IDS = (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
 
 
 def _configurations():
+  from opendbc.car.gm.tests.test_ordinary_cc import malibu_hybrid_params
+  from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+  for pedal in (False, True):
+    for removed in (False, True):
+      for alternate in (False, True):
+        for radar in ((False, True) if pedal else (False,)):
+          cp = malibu_hybrid_params(pedal=pedal, removed=removed, alternate=alternate, radar=radar)
+          yield cp
+          disabled = cp.as_reader().as_builder()
+          prepare_disable_longitudinal(disabled, True)
+          yield disabled
   from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
   for identity in BOLT_IDS:
     cp = pedal_params(identity, pedal=True, removed=True)
@@ -102,6 +113,13 @@ def _configurations():
       for be in (False, True):
         for release in (False, True):
           yield camera_pedal(identity, camera=camera, be=be, release=release)
+  from opendbc.car.gm.tests.test_ordinary_cc import malibu_f1_params
+  for release in (False, True):
+    cp = malibu_f1_params(release=release)
+    yield cp
+    disabled = cp.as_reader().as_builder()
+    VehicleStartupPreferences(disable_bolt_long=True).prepare(disabled)
+    yield disabled
   for identity in ORDINARY_CC_CAR:
     yield intercept_params(identity)
     for removed in (False, True):
@@ -239,6 +257,34 @@ class TestGmAol(unittest.TestCase):
       cs.cruiseState.available = False
       card.aol_card_intent.update(cs)
       self.assertFalse(card.aol_card_intent.allowed_latch)
+
+  def test_bolt_main_intent_ignores_unavailable_lkas_assignment(self):
+    from openpilot.starpilot.aol.intent import read_settings
+    from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      settings.put_bool('AlwaysOnLateral', True, block=True)
+      settings.put('LKASButtonControl', 9, block=True)
+      cp = pedal_params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x9D)
+      selected = self.card(cp, settings)
+      owner = selected.aol_card_intent
+      cs = structs.CarState(canValid=True, gearShifter='drive', vEgo=20.)
+      cs.cruiseState.available = True
+      for _ in range(2):
+        owner.settings = read_settings(settings)
+        owner.update(cs)
+        self.assertTrue(owner.allowed_latch)
+        self.assertEqual(settings.get('LKASButtonControl'), 9)
+      settings.put('MainCruiseButtonControl', 9, block=True)
+      owner = self.card(cp, settings).aol_card_intent
+      owner.update(cs)
+      self.assertFalse(owner.allowed_latch)
+      cs.buttonEvents = [structs.CarState.ButtonEvent(type='mainCruise', pressed=True)]
+      owner.update(cs)
+      self.assertTrue(owner.allowed_latch)
+      owner.update(cs, fault_active=True)
+      self.assertFalse(owner.allowed_latch)
 
   def test_actual_card_startup_default_off_and_main_cycle_fault_recovery(self):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):

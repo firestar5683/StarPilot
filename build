@@ -126,6 +126,8 @@ if [[ "${#shortcut_targets[@]}" -gt 0 ]]; then
   exit $?
 fi
 
+python3 "${ROOT_DIR}/tools/release/stage_mapd_provider.py" --source "${ROOT_DIR}" --require-tracked
+
 if [[ "${#original_args[@]}" -gt 0 ]]; then
   exec "${build_helper}" build "${original_args[@]}"
 fi

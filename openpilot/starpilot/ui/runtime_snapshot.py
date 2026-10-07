@@ -124,6 +124,14 @@ def _finite(value: Any, *, positive: bool = False) -> float | None:
   return number
 
 
+def _display_speed(value: Any) -> float | None:
+  try:
+    speed = float(value)
+  except (TypeError, ValueError, OverflowError):
+    return None
+  return max(0.0, speed) if math.isfinite(speed) else None
+
+
 def _model_confidence(model: Any | None) -> float | None:
   try:
     predictions = model.meta.disengagePredictions
@@ -377,9 +385,9 @@ class RuntimeSnapshotAdapter:
                        selfdrive is not None and selfdrive.enabled and car is not None and
                        bool(getattr(car, "canValid", False)) and not getattr(car, "canTimeout", True) and ui.CP is not None and
                        ui.CP.openpilotLongitudinalControl)
-    raw_speed = None if display_car is None else _finite(display_car.vEgoCluster)
+    raw_speed = None if display_car is None else _display_speed(display_car.vEgoCluster)
     if raw_speed is None or raw_speed == 0:
-      raw_speed = None if display_car is None else _finite(display_car.vEgo)
+      raw_speed = None if display_car is None else _display_speed(display_car.vEgo)
     display_car_valid = bool(display_car is not None and getattr(display_car, "canValid", False) and
                              not getattr(display_car, "canTimeout", True))
     timer_car_fresh = False

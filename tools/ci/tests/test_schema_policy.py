@@ -89,17 +89,25 @@ class SchemaPolicyTest(unittest.TestCase):
           schemas[path] = schemas[path].replace(original, replacement)
           self.assertTrue(any(f'historical slot {index}' in error for error in validate(schemas, self.policy, self.sync)))
 
-  def test_reviewed_log_additions_are_exact_and_required(self):
+  def test_upstream_plan_and_event_enums_cannot_be_extended_or_remapped(self):
     path = 'openpilot/cereal/log.capnp'
-    for reviewed in self.policy['reviewed_log_additions']:
-      for field in reviewed['fields']:
-        original = field.encode()
-        self.assertEqual(self.schemas[path].count(original), 1)
-        for changed in (b'', original.replace(b'@', b'@9', 1), original.replace(b';', b' :UInt32;', 1)):
-          with self.subTest(field=field, changed=changed):
-            schemas = self.schemas.copy()
-            schemas[path] = schemas[path].replace(original, changed)
-            self.assertTrue(validate(schemas, self.policy, self.sync))
+    self.assertIn(b'accelBoost @40 :Float32;', self.schemas[path])
+    self.assertNotIn(b'forceStopHolding', self.schemas[path])
+    self.assertNotIn(b'teslaCCEngaged', self.schemas[path])
+    mutations = (
+      (b'accelBoost @40 :Float32;', b'accelBoost @41 :Float32;'),
+      (b'accelBoost @40 :Float32;', b'accelBoost @40 :Float32;\n  forceStopHolding @41 :Bool;'),
+      (b'enum EventName @0x91f1992a1f77fb03 {', b'enum EventName @0x91f1992a1f77fb03 {\n    teslaCCEngaged @105;'),
+    )
+    for original, replacement in mutations:
+      with self.subTest(replacement=replacement):
+        schemas = self.schemas.copy()
+        self.assertIn(original, schemas[path])
+        schemas[path] = schemas[path].replace(original, replacement)
+        self.assertTrue(validate(schemas, self.policy, self.sync))
+        policy = copy.deepcopy(self.policy)
+        policy['reviewed_log_additions'] = [{'scope': 'struct LongitudinalPlan', 'fields': ['forceStopHolding @41 :Bool;']}]
+        self.assertTrue(validate(schemas, policy, self.sync))
 
   def test_historical_slot_comments_do_not_count_as_fields(self):
     path = 'openpilot/cereal/custom.capnp'
@@ -159,3 +167,17 @@ class SchemaPolicyTest(unittest.TestCase):
       self.assertIn(before, changed[path])
       changed[path] = changed[path].replace(before, after)
       self.assertTrue(validate(changed, self.policy, self.sync))
+
+  def test_longitudinal_companion_keeps_wire_prefix_and_allows_append(self):
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'forceStopHolding @4 :Bool;'
+    self.assertIn(original, self.schemas[path])
+    appended = self.schemas.copy()
+    appended[path] = appended[path].replace(original, original + b'\n  futureStatus @5 :UInt32;')
+    self.assertEqual(validate(appended, self.policy, self.sync), [])
+    for replacement in (b'', b'forceStopHolding @5 :Bool;', b'forceStopHolding @4 :UInt32;',
+                        b'changedHold @4 :Bool;'):
+      with self.subTest(replacement=replacement):
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(original, replacement)
+        self.assertTrue(any('occupied prefix changed' in error for error in validate(changed, self.policy, self.sync)))

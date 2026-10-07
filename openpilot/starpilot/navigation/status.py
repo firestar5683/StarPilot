@@ -1,12 +1,10 @@
-import math
 import time
 
 from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
 
 from openpilot.starpilot.navigation.wire import navigation_state
 
-GPS_TTL_NS = 2_500_000_000
-GPS_SOURCES = {"gpsLocationExternal": "ublox", "gpsLocation": "qcomdiag"}
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS as GPS_TTL_NS, GPS_SOURCES, bearing, observation
 
 
 def boot_time_ns():
@@ -60,25 +58,23 @@ class NavigationStatusSource:
       self.gps_offset_ns = offset
       return None
     candidates = []
-    for service, producer in GPS_SOURCES.items():
+    for service in GPS_SOURCES:
       try:
-        gps = self.sm[service]
-        stamp = int(self.sm.logMonoTime[service])
+        fix = observation(self.sm, service, after)
+        if fix is None:
+          continue
+        stamp, gps = fix
         receipt = int(self.sm.recv_time[service] * 1e9)
-        # Both current GPS producers call Python new_message (MONOTONIC).
-        # BOOTTIME pairing above detects suspend; it is not the envelope clock.
-        if (self.sm.seen[service] and self.sm.alive[service] and self.sm.valid[service] and gps.hasFix and
-            str(gps.source) == producer and self.gps_after_mono_ns < stamp <= after <= stamp + GPS_TTL_NS and
-            0 <= after - receipt <= GPS_TTL_NS and
-            all(math.isfinite(v) for v in (gps.longitude, gps.latitude, gps.horizontalAccuracy)) and
-            -180 <= gps.longitude <= 180 and -90 <= gps.latitude <= 90 and
-            0 < gps.horizontalAccuracy <= 25):
-          candidates.append((stamp, {'longitude': float(gps.longitude), 'latitude': float(gps.latitude),
-                                    **({'bearing': float(gps.bearingDeg)} if math.isfinite(getattr(gps, 'bearingDeg', float('nan'))) else {}),
-                                    'validForMs': min(stamp + GPS_TTL_NS - after, receipt + GPS_TTL_NS - after) / 1e6}))
+        if (self.sm.seen[service] and self.sm.alive[service] and self.gps_after_mono_ns < stamp and
+            0 <= after - receipt <= GPS_TTL_NS):
+          direction = bearing(gps)
+          candidates.append((service != "starpilotCarState", stamp,
+                             {'longitude': float(gps.longitude), 'latitude': float(gps.latitude),
+                              **({'bearing': direction} if direction is not None else {}),
+                              'validForMs': min(stamp + GPS_TTL_NS - after, receipt + GPS_TTL_NS - after) / 1e6}))
       except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RuntimeError):
         continue
-    return max(candidates, default=(0, None), key=lambda row: row[0])[1]
+    return max(candidates, default=(False, 0, None), key=lambda row: row[:2])[2]
 
   def close(self):
     for socket in getattr(self.sm, 'sock', {}).values():

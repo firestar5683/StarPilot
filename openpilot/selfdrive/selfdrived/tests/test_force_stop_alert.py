@@ -17,7 +17,7 @@ NOW = 10_000_000_000
 
 class Sources:
   def __init__(self):
-    names = ('deviceState', 'modelV2', 'longitudinalPlan', 'carControl')
+    names = ('deviceState', 'modelV2', 'longitudinalPlan', 'starpilotLongitudinalPlan', 'carControl')
     self.data = {name: getattr(messaging.new_message(name), name) for name in names}
     self.seen = self.valid = self.alive = dict.fromkeys(names, True)
     self.logMonoTime = dict.fromkeys(names, NOW - 10_000_000)
@@ -27,7 +27,13 @@ class Sources:
     self.data['deviceState'].startedMonoTime = NOW - 1_000_000_000
     plan = self.data['longitudinalPlan']
     plan.modelMonoTime = self.logMonoTime['modelV2']
-    plan.shouldStop = plan.forceStopHolding = True
+    plan.shouldStop = True
+    hold = self.data['starpilotLongitudinalPlan']
+    hold.version = 1
+    hold.sourcePlanMonoTime = self.logMonoTime['longitudinalPlan']
+    hold.modelMonoTime = plan.modelMonoTime
+    hold.driveStartMonoTime = self.data['deviceState'].startedMonoTime
+    hold.forceStopHolding = True
     self.data['carControl'].longActive = True
 
   def __getitem__(self, name):
@@ -59,7 +65,7 @@ class TestForceStopAlert(unittest.TestCase):
     return drive.AM.current_alert
 
   def test_hold_transport_defaults_false(self):
-    self.assertFalse(messaging.new_message('longitudinalPlan').longitudinalPlan.forceStopHolding)
+    self.assertFalse(messaging.new_message('starpilotLongitudinalPlan').starpilotLongitudinalPlan.forceStopHolding)
 
   def test_actual_alert_clears_immediately_and_does_not_reappear_before_planner_catches_release(self):
     for action in ('gas', 'resume', 'accel'):
@@ -77,9 +83,9 @@ class TestForceStopAlert(unittest.TestCase):
       cs.gasPressed, cs.buttonEvents = False, []
       drive.sm.frame += 1
       self.assertEqual(self.update(drive, cs).alert_text_1, '')
-      drive.sm['longitudinalPlan'].forceStopHolding = False
+      drive.sm['starpilotLongitudinalPlan'].forceStopHolding = False
       self.update(drive, cs)
-      drive.sm['longitudinalPlan'].forceStopHolding = True
+      drive.sm['starpilotLongitudinalPlan'].forceStopHolding = True
       self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
 
   def test_press_already_present_at_subscription_does_not_clear_hold(self):
@@ -98,15 +104,60 @@ class TestForceStopAlert(unittest.TestCase):
     for tick in range(151):
       now = NOW + tick * 10_000_000
       for name, period, phase in (('deviceState', 50, 0), ('modelV2', 5, 0),
-                                  ('longitudinalPlan', 5, 1), ('carControl', 1, 0)):
+                                  ('longitudinalPlan', 5, 1), ('starpilotLongitudinalPlan', 5, 2), ('carControl', 1, 0)):
         if tick % period == phase:
           drive.sm.logMonoTime[name] = now
           drive.sm.recv_time[name] = now / 1e9
           if name == 'longitudinalPlan':
             drive.sm[name].modelMonoTime = drive.sm.logMonoTime['modelV2']
+          elif name == 'starpilotLongitudinalPlan':
+            drive.sm[name].sourcePlanMonoTime = drive.sm.logMonoTime['longitudinalPlan']
+            drive.sm[name].modelMonoTime = drive.sm['longitudinalPlan'].modelMonoTime
+            drive.sm.logMonoTime[name] = drive.sm.logMonoTime['longitudinalPlan']
       drive.aol_car_state_log_ns = now
       drive.sm.frame += 1
       self.assertEqual(self.update(drive, cs, now).alert_text_1, 'Force Stop Holding', tick)
+
+  def test_companion_binding_and_expiration_do_not_latch_unmatched_hold(self):
+    for defect in ('version', 'drive', 'future', 'wrong_pair', 'withdrawn'):
+      drive, cs = fixture()
+      hold = drive.sm['starpilotLongitudinalPlan']
+      if defect == 'version':
+        hold.version = 2
+      elif defect == 'drive':
+        hold.driveStartMonoTime -= 1
+      elif defect == 'future':
+        hold.sourcePlanMonoTime = NOW + 1
+      elif defect == 'wrong_pair':
+        hold.sourcePlanMonoTime -= 1
+      else:
+        drive.sm.valid['starpilotLongitudinalPlan'] = False
+      self.assertEqual(self.update(drive, cs).alert_text_1, '', defect)
+    drive, cs = fixture()
+    self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
+    # Core arrives first: the prior matched pair bridges the bounded handoff.
+    drive.sm.logMonoTime['longitudinalPlan'] += 1_000_000
+    self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
+    self.assertEqual(self.update(drive, cs, NOW + 151_000_000).alert_text_1, '')
+    drive, cs = fixture()
+    self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
+    # Companion arrives first; its source binding cannot promote an unpaired hold.
+    hold = drive.sm['starpilotLongitudinalPlan']
+    hold.sourcePlanMonoTime += 1_000_000
+    drive.sm.logMonoTime['starpilotLongitudinalPlan'] += 1_000_000
+    self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
+    drive.sm.logMonoTime['longitudinalPlan'] = hold.sourcePlanMonoTime
+    self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
+
+  def test_physical_release_during_companion_withdrawal_stays_suppressed(self):
+    drive, cs = fixture()
+    self.assertEqual(self.update(drive, cs).alert_text_1, 'Force Stop Holding')
+    drive.sm.valid['starpilotLongitudinalPlan'] = False
+    cs.gasPressed = True
+    self.assertEqual(self.update(drive, cs).alert_text_1, '')
+    cs.gasPressed = False
+    drive.sm.valid['starpilotLongitudinalPlan'] = True
+    self.assertEqual(self.update(drive, cs).alert_text_1, '')
 
   def test_invalid_evidence_and_disengage_withdraw_without_overriding_other_alerts(self):
     for defect in ('stale', 'device_stale', 'previous_drive', 'model_mismatch', 'model_reference_stale',
@@ -131,7 +182,7 @@ class TestForceStopAlert(unittest.TestCase):
       elif defect == 'stock':
         drive.CP.openpilotLongitudinalControl = False
       elif defect == 'generic_stop':
-        drive.sm['longitudinalPlan'].forceStopHolding = False
+        drive.sm['starpilotLongitudinalPlan'].forceStopHolding = False
       else:
         cs.canValid = False
       drive.sm.frame += 1

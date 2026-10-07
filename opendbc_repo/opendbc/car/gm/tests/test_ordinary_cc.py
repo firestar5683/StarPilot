@@ -1,4 +1,5 @@
 import unittest
+import numpy as np
 
 from opendbc.car.gm.tests.test_ascm_intercept import params
 from opendbc.car.gm.values import CAR, ORDINARY_CC_CAR, is_ordinary_cc_profile, CruiseButtons, GMFlags
@@ -17,7 +18,57 @@ def qualified_frames(packer, counter):
   frames.append(packer.make_can_msg('EBCMWheelSpdRear', 0, {'RLWheelSpd': 60, 'RRWheelSpd': 60, 'RLWheelDir': 1, 'RRWheelDir': 1}))
   return frames
 
+
+def malibu_f1_params(*, release=False):
+  from opendbc.car import gen_empty_fingerprint
+  from opendbc.car.gm.interface import CarInterface
+  from opendbc.car.gm.values import MALIBU_CC_F1_SOURCES
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update(MALIBU_CC_F1_SOURCES)
+  return CarInterface.get_params(CAR.CHEVROLET_MALIBU_CC, fingerprint, [], False, release, False)
+
 class TestOrdinaryCc(unittest.TestCase):
+  def test_alternate_malibu_factory_and_parser_brake_sources(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.values import DBC, is_malibu_cc_f1_profile
+    for release in (False, True):
+      for disabled in (False, True):
+        cp = malibu_f1_params(release=release)
+        prepare_disable_longitudinal(cp, disabled)
+        self.assertTrue(is_malibu_cc_f1_profile(cp))
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC162 if disabled else 0xC161)
+        self.assertEqual(cp.pcmCruise, disabled)
+        self.assertEqual(cp.openpilotLongitudinalControl, not disabled)
+        ci = CarInterface(cp)
+        packer = CANPacker(DBC[CAR.CHEVROLET_MALIBU_CC][Bus.pt])
+        for tick in range(80):
+          raw, f1, c9 = ((20, 0, 0), (21, 0, 0), (0, 1, 0), (0, 0, 1), (0, 1, 1), (0, 0, 1), (0, 0, 0))[tick % 7]
+          frames = [frame for frame in qualified_frames(packer, tick % 4) if frame[0] not in (0xBE, 0xF1, 0xC9)]
+          frames += [packer.make_can_msg('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': raw, 'BrakePressed': f1}),
+                     packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': 1, 'BrakePressed': c9})]
+          out = ci.update([(1_000_000_000 + tick * 10_000_000, frames)])
+          self.assertEqual(out.brakePressed, bool(raw >= 21 or f1 or c9))
+          self.assertFalse(out.cruiseState.nonAdaptive)
+        self.assertTrue(out.canValid)
+        self.assertNotIn('ECMAcceleratorPos', ci.can_parsers[Bus.pt].vl)
+
+  def test_alternate_malibu_missing_source_is_final_no_output(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import MALIBU_CC_F1_SOURCES, is_malibu_cc_f1_profile
+    for address in MALIBU_CC_F1_SOURCES:
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0].update(MALIBU_CC_F1_SOURCES)
+      fingerprint[0].pop(address)
+      cp = CarInterface.get_params(CAR.CHEVROLET_MALIBU_CC, fingerprint, [], False, False, False)
+      self.assertTrue(cp.dashcamOnly)
+      self.assertFalse(cp.openpilotLongitudinalControl)
+      self.assertFalse(is_malibu_cc_f1_profile(cp))
+      self.assertEqual(cp.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+
   def test_actual_final_configuration_and_shared_owners(self):
     self.assertEqual(len(ORDINARY_CC_CAR), 8)
     for identity in ORDINARY_CC_CAR:
@@ -243,3 +294,247 @@ class TestOrdinaryCc(unittest.TestCase):
         with patch.object(card, 'volt_cc_control_current', return_value=True):
           card.controls_update(structs.CarState(canValid=False), structs.CarControl())
         self.assertTrue(ci.CC.volt_cc_metric)
+
+
+def malibu_hybrid_params(*, pedal=False, removed=False, alternate=False, radar=False, release=False):
+  from opendbc.car import gen_empty_fingerprint
+  from opendbc.car.gm.interface import CarInterface
+  from opendbc.car.gm.values import MALIBU_HYBRID_SOURCES
+  from opendbc.car.gm.radar_interface import RADAR_HEADER_MSG
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update(MALIBU_HYBRID_SOURCES)
+  fingerprint[0][0xF1 if alternate else 0xBE] = 6
+  if pedal:
+    fingerprint[0][0x201] = 6
+  if not removed:
+    fingerprint[2].update({0x320: 6, 0x180: 4})
+  if radar:
+    fingerprint[1][RADAR_HEADER_MSG] = 8
+  return CarInterface.get_params(CAR.CHEVROLET_MALIBU_HYBRID_CC, fingerprint, [], False, release, False)
+
+
+class TestMalibuHybridCc(unittest.TestCase):
+  def test_reached_factory_and_stock_reduction(self):
+    from opendbc.car.gm.values import malibu_hybrid_profile
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.hybrid_cc import policy_for as hybrid_policy
+    for release in (False, True):
+      for pedal in (False, True):
+        for removed in (False, True):
+          for alternate in (False, True):
+            for radar in ((False, True) if pedal else (False,)):
+              cp = malibu_hybrid_params(pedal=pedal, removed=removed, alternate=alternate, radar=radar, release=release)
+              profile = malibu_hybrid_profile(cp)
+              self.assertIsNotNone(profile)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE800 + 2 * int(pedal) + int(removed))
+              self.assertTrue(cp.openpilotLongitudinalControl)
+              self.assertFalse(cp.pcmCruise)
+              self.assertEqual(cp.radarUnavailable, not radar)
+              self.assertAlmostEqual(cp.steerActuatorDelay, .2)
+              self.assertEqual(cp.steerRatio, float(np.float32(15.8)))
+              self.assertEqual(lateral_policy_for(cp), 'ordinary_cc')
+              self.assertTrue(qualified_gm(cp))
+              self.assertTrue(longitudinal_supported(cp))
+              self.assertTrue(lane_centering_supported(cp))
+              policy = hybrid_policy(cp)
+              self.assertIsNotNone(policy)
+              self.assertEqual(policy.kp, ((0., 5., 15., 35.), tuple(float(np.float32(v))
+                                for v in (.095, .085, .065, .05))) if pedal else ((0.,), (0.,)))
+              from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+              control = LongControl(cp)
+              self.assertEqual(control.extension.kp, policy.kp)
+              self.assertEqual(control.stopping_decel_rate, float(np.float32(.8)) if pedal else 1.)
+              self.assertEqual(bool(policy.ignore_cruise_standstill), pedal)
+              self.assertAlmostEqual(policy.feedforward(.5, 10., 0.), .1 if pedal else .5)
+              prepare_disable_longitudinal(cp, True)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE804 + int(removed))
+              self.assertTrue(cp.pcmCruise)
+              self.assertFalse(cp.openpilotLongitudinalControl)
+              self.assertFalse(cp.autoResumeSng)
+              self.assertIsNotNone(malibu_hybrid_profile(cp))
+              self.assertTrue(qualified_gm(cp))
+              self.assertFalse(longitudinal_supported(cp))
+              self.assertIsNone(hybrid_policy(cp))
+              prepare_disable_longitudinal(cp, False)
+              self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xE804 + int(removed))
+
+  def test_semantic_unknown_packets_do_not_release_a_physical_press(self):
+    from opendbc.car.gm.hybrid_cc import HybridButtons, custom_bytes, standard_set_bytes
+    buttons = HybridButtons()
+
+    def receive(stamp, raw):
+      buttons.observe_packets([(stamp, [(0x1E1, raw, 0)])])
+      return buttons.update(True)[2]
+    self.assertEqual(receive(1, bytes.fromhex('000000410015ee')), [])
+    self.assertEqual(receive(2, custom_bytes('resume', 0, 0x41)), [(1, 2)])
+    for stamp, word in enumerate(('10ff', '1add', '659e', '6f7c'), 3):
+      self.assertEqual(receive(stamp, bytes.fromhex('0000004100' + word)), [])
+    self.assertEqual(receive(8, bytes.fromhex('00000041001fcc')), [(2, 1)])
+    self.assertEqual(receive(9, standard_set_bytes(2)), [(1, 3)])
+    self.assertEqual(receive(10, bytes.fromhex('000000410015ee')), [(3, 1)])
+    self.assertEqual(receive(200_000_000, bytes.fromhex('00000041001fcc')), [])
+    self.assertEqual(receive(200_000_001, bytes.fromhex('000000410015ee')), [])
+
+  def test_phase_credit_replay_expiry_and_requalification(self):
+    from opendbc.car.gm.hybrid_cc import PhysicalSlot, custom_bytes
+    slot = PhysicalSlot()
+    neutral = bytes.fromhex('000000410015ee')
+    slot.observe(1, neutral, bus=0)
+    self.assertFalse(slot.requalify(physical_ready=True))
+    packet = custom_bytes('resume', 1, 0x41)
+    self.assertTrue(slot.accept('resume', packet, 2, interval_ns=200_000_001, authorized=True))
+    slot.observe(3, bytes.fromhex('000000410315ee'), bus=0)
+    self.assertIsNone(slot.expected('resume', 3, interval_ns=0, authorized=True))
+    slot.observe(4, bytes.fromhex('000000410010ff'), bus=0)
+    slot.observe(5, neutral, bus=0)
+    self.assertIsNone(slot.expected('resume', 5, interval_ns=0, authorized=True))
+    slot.observe(100_000_006, bytes.fromhex('00000041001fcc'), bus=0)
+    self.assertFalse(slot.requalify(physical_ready=False))
+    self.assertTrue(slot.requalify(physical_ready=True))
+    slot.observe(100_000_007, neutral, bus=0)
+    self.assertEqual(slot.last_tx_ns, 2)
+    self.assertIsNone(slot.expected('resume', 100_000_007, interval_ns=200_000_001, authorized=True))
+
+  def test_fixed_near_stop_preserves_pedal_memory_and_release_slew(self):
+    from types import SimpleNamespace
+    from opendbc.car.gm.hybrid_cc import HybridPedalCommand
+    cp = malibu_hybrid_params(pedal=True)
+    command = HybridPedalCommand(cp)
+    cs = SimpleNamespace(vEgo=2., standstill=False, cruiseState=SimpleNamespace(standstill=False))
+    first = command.update(.5, True, cs, stopping=False, resume=False, orientation=None)
+    self.assertGreater(first, 0.)
+    saved = command.steady, command.active_last
+    cs.vEgo = .1
+    self.assertEqual(command.update(-.5, True, cs, stopping=True, resume=False, orientation=None), 0.)
+    self.assertEqual((command.steady, command.active_last), saved)
+    resumed = command.update(.5, True, cs, stopping=False, resume=True, orientation=None)
+    from opendbc.car.gm.silverado_cc import pedal_fraction, pedal_slew
+    self.assertEqual(resumed, pedal_slew(pedal_fraction(.5, .1), saved[0], .5, .1))
+
+  def test_healthy_inactive_resets_only_calc_memory(self):
+    from types import SimpleNamespace
+    from opendbc.car.gm.hybrid_cc import HybridPedalCommand
+    command = HybridPedalCommand(malibu_hybrid_params(pedal=True))
+    cs = SimpleNamespace(vEgo=2., standstill=False, cruiseState=SimpleNamespace(standstill=False))
+    self.assertGreater(command.update(.5, True, cs, stopping=False, resume=False, orientation=None), 0.)
+    self.assertEqual(command.update(.5, False, cs, stopping=False, resume=False, orientation=None), 0.)
+    self.assertEqual(command.steady, 0.)
+    self.assertFalse(command.active_last)
+
+  def test_final_factory_denies_malformed_required_camera(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import MALIBU_HYBRID_SOURCES, malibu_hybrid_profile
+    for address, wrong_length in ((0x180, 8), (0x320, 8)):
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0].update(MALIBU_HYBRID_SOURCES)
+      fingerprint[0][0xBE] = 6
+      fingerprint[2].update({0x180: 4, 0x320: 6})
+      fingerprint[2][address] = wrong_length
+      cp = CarInterface.get_params(CAR.CHEVROLET_MALIBU_HYBRID_CC, fingerprint, [], False, False, False)
+      self.assertTrue(cp.dashcamOnly)
+      self.assertIsNone(malibu_hybrid_profile(cp))
+      self.assertEqual(cp.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.noOutput)
+
+  def test_actual_stock_parser_uses_c9_brake_and_pt_cruise_without_lazy_camera(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    for alternate, removed in ((False, False), (True, False), (False, True), (True, True)):
+      cp = malibu_hybrid_params(pedal=True, removed=removed, alternate=alternate)
+      prepare_disable_longitudinal(cp, True)
+      ci = CarInterface(cp)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      for tick in range(80):
+        pressed = tick % 4 >= 2
+        frames = [frame for frame in pt_frames(packer, acc_cruise=4, cruise=True)
+                  if frame[0] not in (0xBE, 0xC9, 0x1E1)]
+        frames += [packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': 1, 'BrakePressed': int(pressed)}),
+                   packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                   packer.make_can_msg('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': 200, 'BrakePressed': 1})
+                   if alternate else packer.make_can_msg('ECMAcceleratorPos', 0, {'BrakePedalPos': 100}),
+                   (0x1E1, bytes.fromhex('000000010015ee' if tick % 2 else '00000001001fcc'), 0)]
+        if not removed:
+          frames += [packer.make_can_msg('ASCMLKASteeringCmd', 2, {}), packer.make_can_msg('AEBCmd', 2, {})]
+        out = ci.update([(1_000_000_000 + tick * 10_000_000, frames)])
+        self.assertEqual(out.brakePressed, pressed)
+        self.assertTrue(out.cruiseState.enabled)
+        self.assertTrue(out.cruiseState.standstill)
+        self.assertFalse(out.cruiseState.nonAdaptive)
+      self.assertTrue(out.canValid)
+      self.assertNotIn('GAS_SENSOR', ci.can_parsers[Bus.pt].vl)
+      if removed:
+        self.assertNotIn('ASCMLKASteeringCmd', ci.can_parsers[Bus.pt].vl)
+        self.assertNotIn('ASCMLKASteeringCmd', ci.can_parsers[Bus.cam].vl)
+      self.assertNotIn('ASCMActiveCruiseControlStatus', ci.can_parsers[Bus.cam].vl)
+
+  def test_driver_override_preserves_credit_without_semantic_enable(self):
+    from opendbc.car.gm.hybrid_cc import HybridButtons, standard_set_bytes
+    buttons = HybridButtons()
+    buttons.observe_packets([(1_000_000_000, [(0x1E1, bytes.fromhex('000000010015ee'), 0)])])
+    _, _, edges = buttons.update(True, enable_ready=False)
+    self.assertEqual(edges, [])
+    self.assertIsNone(buttons.semantic)
+    self.assertEqual(buttons.slot.expected('gas_set', 1_000_000_000,
+                                         interval_ns=520_000_000, authorized=True), standard_set_bytes(0))
+    buttons.observe_packets([(1_030_000_000, [(0x1E1, bytes.fromhex('00000001001fcc'), 0)])])
+    self.assertEqual(buttons.update(True, enable_ready=True)[2], [])
+    self.assertEqual(buttons.semantic, 1)
+    self.assertFalse(buttons.reset_pending)
+
+  def test_real_sensor_invalidity_withdraws_hybrid_commands_and_recovers_without_edge(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.gmcan import pedal_crc
+    from opendbc.car.gm.hybrid_cc import sources_current
+    from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
+    cp = malibu_hybrid_params(pedal=True, removed=True)
+    ci = CarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    control = structs.CarControl.new_message()
+    control.enabled = control.latActive = control.longActive = True
+    control.actuators.torque, control.actuators.accel = .1, .5
+    control.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
+    positive_pedal = positive_steer = cancelled = recovered = False
+    echo = []
+    for tick in range(160):
+      now = 1_000_000_000 + tick * 10_000_000
+      stock_active = tick >= 80
+      frames = [frame for frame in pt_frames(packer, cruise=stock_active) if frame[0] != 0x1E1]
+      frames += [packer.make_can_msg('EBCMRegenPaddle', 0, {}),
+                 (0x1E1, bytes.fromhex('000000010015ee' if tick % 2 else '00000001001fcc'), 0), *echo]
+      if not 108 <= tick < 132:
+        first = 4096 if 96 <= tick < 104 else 612
+        sensor = bytearray(first.to_bytes(2, 'big') + (285).to_bytes(2, 'big') + bytes((tick % 16, 0)))
+        sensor[-1] = pedal_crc(sensor)
+        if 104 <= tick < 108:
+          sensor[-1] ^= 1
+        frames.append((0x201, bytes(sensor), 0))
+      state = ci.update([(now, frames)])
+      _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
+      echo = [(address, data, 128) for address, data, bus in sent if address == 0x180 and bus == 0]
+      pedal = any(address == 0x200 and data[4] & 0x80 for address, data, _ in sent)
+      steering = any(address == 0x180 and ((data[0] & 7) or data[1]) for address, data, _ in sent)
+      cancel = any(address == 0x1E1 for address, _, _ in sent)
+      if 60 <= tick < 80:
+        positive_pedal |= pedal
+      if 80 <= tick < 96:
+        positive_steer |= steering
+        cancelled |= cancel
+      if 96 <= tick < 108 or 119 <= tick < 132:
+        self.assertFalse(sources_current(ci.CS, now))
+        self.assertFalse(pedal)
+        self.assertFalse(steering)
+        self.assertFalse(cancel)
+      if tick >= 132:
+        self.assertFalse(state.buttonEvents)
+        recovered |= sources_current(ci.CS, now) and cancel
+    self.assertTrue(positive_pedal)
+    self.assertTrue(positive_steer)
+    self.assertTrue(cancelled)
+    self.assertTrue(recovered)

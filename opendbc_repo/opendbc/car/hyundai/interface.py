@@ -39,7 +39,8 @@ class CarInterface(CarInterfaceBase):
     from opendbc.car.hyundai.gv70_startup import required as gv70_required
     from opendbc.car.hyundai.ev9_startup import required as ev9_required
     from opendbc.car.hyundai.torque_ev_startup import required as torque_ev_required
-    return required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp) or torque_ev_required(cp)
+    from opendbc.car.hyundai.blended_longitudinal import startup_required as blended_required
+    return blended_required(cp) or required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp) or torque_ev_required(cp)
 
   @staticmethod
   def startup_owner(cp, callbacks, *, requested):
@@ -301,10 +302,11 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalActuatorDelay = 0.22
 
     if is_blended(ret):
-      ret.alphaLongitudinalAvailable = False
       ret.openpilotLongitudinalControl = False
       ret.pcmCruise = True
       ret.stopAccel = -0.85
+      from opendbc.car.hyundai.blended_longitudinal import hdai_startup_qualified
+      ret.alphaLongitudinalAvailable = hdai_startup_qualified(ret, is_release=is_release)
 
     if candidate == CAR.KIA_OPTIMA_G4_FL:
       ret.steerActuatorDelay = 0.2

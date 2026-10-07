@@ -9,18 +9,17 @@ import uuid
 from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError
 from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
-GPS_MAX_AGE_NS = 2_500_000_000
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SOURCES, bearing, select_location
 
 
 def location(sm, now_ns: int):
-  candidates = []
-  for service in ('gpsLocationExternal', 'gpsLocation'):
-    stamp, gps = sm.logMonoTime[service], sm[service]
-    if (sm.valid[service] and 0 < stamp <= now_ns <= stamp + GPS_MAX_AGE_NS and gps.hasFix and
-        all(math.isfinite(v) for v in (gps.latitude, gps.longitude, gps.speed, gps.horizontalAccuracy)) and
-        -90 <= gps.latitude <= 90 and -180 <= gps.longitude <= 180 and 0 < gps.horizontalAccuracy <= 25):
-      candidates.append((stamp, (gps.longitude, gps.latitude), max(0., gps.speed), gps.bearingDeg if math.isfinite(gps.bearingDeg) else None))
-  return max(candidates, default=None, key=lambda row: row[0])
+  fix = select_location(sm, now_ns)
+  if fix is None:
+    return None
+  stamp, gps = fix
+  if not math.isfinite(gps.speed):
+    return None
+  return stamp, (gps.longitude, gps.latitude), max(0., gps.speed), bearing(gps)
 
 
 class RouteRuntime:
@@ -121,7 +120,7 @@ def main():
   from openpilot.common.swaglog import cloudlog
   owner = NavigationOwner()
   runtime = RouteRuntime(owner)
-  sm = messaging.SubMaster(['deviceState', 'gpsLocationExternal', 'gpsLocation'])
+  sm = messaging.SubMaster(['deviceState', *GPS_SOURCES])
   pm = messaging.PubMaster(['starpilotNavigation'])
   rate = Ratekeeper(1.)
   try:

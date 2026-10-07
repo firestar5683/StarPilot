@@ -1417,3 +1417,14 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .gx-aa-confirm { width: min(100%, 420px); }
 .gx-aa-confirm__actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .gx-aa-danger { background: var(--error); color: var(--on-error); }
+
+.gx-update-step { margin: var(--sp-4) 0; }
+.gx-update-step h4 { margin: 0 0 var(--sp-2); }
+.gx-update-step > .gx-btn { margin-bottom: var(--sp-2); }
+.gx-update-progress { margin: var(--sp-4) 0; }
+.gx-update-progress__heading { display: flex; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.gx-update-progress__track { height: 10px; border-radius: 999px; overflow: hidden; background: var(--surface-container-high); }
+.gx-update-progress__fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #5ec8c8, #8b6cc5); transition: width .3s ease; }
+.gx-update-progress__fill--indeterminate { width: 35%; animation: gx-update-progress 1.6s ease-in-out infinite; }
+@keyframes gx-update-progress { from { transform: translateX(-100%); } to { transform: translateX(385%); } }
+@media (prefers-reduced-motion: reduce) { .gx-update-progress__fill--indeterminate { width: 100%; animation: none; opacity: .6; } }

@@ -2,12 +2,13 @@
 
 import unicodedata
 
-from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, model_entries
 from openpilot.starpilot.models.status import ModelHealth, ModelStatus, ModelVariant
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
 
 
 def model_page(status: ModelStatus, manager: dict | None = None) -> FeatureSettingsState:
+  entries = model_entries()
   if status.health is ModelHealth.ACTIVE:
     health = "Active"
   elif status.health is ModelHealth.LOADING:
@@ -22,7 +23,7 @@ def model_page(status: ModelStatus, manager: dict | None = None) -> FeatureSetti
     health = "Model not running"
   variant = ("Chestnut big" if status.variant is ModelVariant.CHESTNUT else "Small") if status.loaded_id else "Unavailable"
   rows = (
-    FeatureRow("", "Requested model", BY_ID[status.requested_id].name if status.requested_id in BY_ID else "Unavailable",
+    FeatureRow("", "Requested model", entries[status.requested_id].name if status.requested_id in entries else "Unavailable",
                reason="Saved selection for the next start" if status.pending_next_start else "Current request"),
     FeatureRow("", "Runtime", health, reason="Updates while driving"),
     FeatureRow("", "Loaded variant", variant),
@@ -30,12 +31,12 @@ def model_page(status: ModelStatus, manager: dict | None = None) -> FeatureSetti
                reason="SHA-256 prefix" if status.artifact_sha256 else "No verified load receipt"),
   )
   if status.loaded_id:
-    rows += (FeatureRow("", "Loaded model", BY_ID[status.loaded_id].name if status.loaded_id in BY_ID else status.loaded_id),)
+    rows += (FeatureRow("", "Loaded model", entries[status.loaded_id].name if status.loaded_id in entries else status.loaded_id),)
   if status.fallback_reason == "chestnut-run-stalled":
-    rows += (FeatureRow("", "Fallback", BY_ID[status.loaded_id].name if status.loaded_id in BY_ID else "Active Small",
+    rows += (FeatureRow("", "Fallback", entries[status.loaded_id].name if status.loaded_id in entries else "Active Small",
                          reason="Chestnut output stopped; Small restarted for this drive"),)
   elif status.fallback_reason == "chestnut-load-failed":
-    rows += (FeatureRow("", "Fallback", BY_ID[status.loaded_id].name if status.loaded_id in BY_ID else "Active Small",
+    rows += (FeatureRow("", "Fallback", entries[status.loaded_id].name if status.loaded_id in entries else "Active Small",
                          reason="Chestnut load or run failed"),)
   elif status.fallback_reason == "selected-load-failed":
     rows += (FeatureRow("", "Fallback", "Bundled driving model", reason="Selected model load or run failed"),)
@@ -128,7 +129,7 @@ def model_display_text(value: str) -> str:
 
 
 def home_model_label(status: ModelStatus, commit: str = "") -> str:
-  entry = BY_ID.get(status.loaded_id or status.requested_id)
+  entry = model_entries().get(status.loaded_id or status.requested_id)
   if entry is None:
     return "Driving model unavailable"
   commit = commit.strip().lower()

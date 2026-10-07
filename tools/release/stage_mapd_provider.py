@@ -100,6 +100,11 @@ def stage_provider(source: Path, destination: Path) -> dict:
     _directories(destination)
   else:
     provider.mkdir(mode=0o755)
+  existing = [destination / PROVIDER / name for name in ('mapd', 'manifest.json')]
+  if any(path.exists() or path.is_symlink() for path in existing):
+    if validate_provider(destination) != manifest:
+      raise ValueError('release Mapd package differs from the validated package')
+    return manifest
   outputs = []
   try:
     for name, mode in (('mapd', 0o755), ('manifest.json', 0o644)):
@@ -127,8 +132,12 @@ def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--source', type=Path, required=True)
   parser.add_argument('--destination', type=Path)
+  parser.add_argument('--require-tracked', action='store_true')
   args = parser.parse_args()
   try:
+    if args.require_tracked:
+      from tools.release.release_files import release_files
+      release_files(str(args.source), require_provider=True)
     manifest = stage_provider(args.source, args.destination) if args.destination else validate_provider(args.source)
   except (OSError, ValueError, KeyError, TypeError, StopIteration) as error:
     parser.exit(1, f'Mapd release package unavailable: {error}\nBuild it in the source checkout with ./build --mapd.\n')

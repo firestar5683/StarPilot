@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { SoftwareStatusFeed, SoftwarePage, validSoftwareSnapshot } from "../web/js/software-status.js"
+import { SoftwareStatusFeed, SoftwarePage, validSoftwareSnapshot, softwareProgress } from "../web/js/software-status.js"
 
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
 const installed = { version: "fixture", branch: "Dom", commit: "a".repeat(40) }
@@ -296,7 +296,7 @@ assert.match(SoftwarePage.template, /Dom — Development/)
 assert.match(SoftwarePage.template, /Other branches…/)
 assert.match(SoftwarePage.template, /Additional branches from this installation's repository/)
 assert.match(SoftwarePage.template, /Check for updates/)
-assert.match(SoftwarePage.template, /Download update/)
+assert.match(SoftwarePage.template, /Normal Update/)
 assert.match(SoftwarePage.template, /Restart &amp; install/)
 assert.match(SoftwarePage.template, /displayVersion \?\? data\.installed\.version/)
 assert.match(SoftwarePage.template, /@click="askRollback">Previous version/ )
@@ -406,3 +406,30 @@ assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canRo
   assert.equal(h.feed.notice, "Installed build verified after reconnect.")
   h.feed.stop()
 }
+
+// Real stage progress remains indeterminate until measured numeric progress exists.
+assert.equal(softwareProgress(updater), null)
+assert.deepEqual(softwareProgress({...updater, state: "finalizing update..."}),
+  {active: true, percent: null, label: "Finalizing update", detail: ""})
+assert.equal(softwareProgress({...updater, state: "downloading..."}, {progress: {stage: "Downloading", detail: "", percent: 37}}).percent, 37)
+for (const percent of [NaN, Infinity, -1, 101]) {
+  assert.equal(validSoftwareSnapshot(snapshot({operations: {...operations, progress: {stage: "fetching", detail: "", percent}}})), false)
+}
+assert.equal(softwareProgress({...updater, state: "finalizing update..."}, {progress: {stage: "unavailable", detail: "Updater status unavailable", percent: null}}).active, false)
+assert.ok(validSoftwareSnapshot(snapshot({updater: {...updater, lastCheckedAt: null}})))
+assert.equal(validSoftwareSnapshot(snapshot({updater: {...updater, lastCheckedAt: 12}})), false)
+assert.match(SoftwarePage.template, /1\. Check for updates/)
+assert.match(SoftwarePage.template, /2\. Choose your update/)
+assert.match(SoftwarePage.template, /lastCheckedAt !== undefined \? 'Last checked' : 'Last successful activity'/)
+
+for (const progress of [{stage: "idle", detail: "", percent: null}, {stage: null, detail: null, percent: null}, {stage: "unknown", detail: "", percent: null}]) {
+  assert.ok(validSoftwareSnapshot(snapshot({operations: {...operations, progress}})))
+  assert.equal(softwareProgress(updater, {progress}), null)
+}
+for (const stage of ["complete", "error"]) {
+  const state = {...updater, state: "updating...", fast: {stage, detail: "Finished"}}
+  const progress = {stage, detail: "Finished", percent: null}
+  assert.equal(softwareProgress(state, {progress}).active, false)
+  assert.equal(softwareProgress(state, {progress}).percent, null)
+}
+assert.equal(softwareProgress({...updater, state: "finalizing update..."}, {progress: {stage: "finalizing", detail: null, percent: null}}).label, "Finalizing update")

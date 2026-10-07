@@ -125,18 +125,8 @@ def validate(schemas, policy, sync):
     log, count = re.subn(rf'(?m)^(\s*)\w+ @{ordinal} :Data;', rf'\g<1>{name} @{ordinal} :Data;', log)
     if count != 1:
       errors.append(f'log.capnp: reserved raw event @{ordinal} changed type or ordinal')
-  for reviewed in policy.get('reviewed_log_additions', []):
-    pattern = rf'({re.escape(reviewed["scope"])}(?:\s+@0x[0-9a-fA-F]+)?\s*\{{)([^}}]*)(\}})'
-    match = re.search(pattern, log)
-    if match is None:
-      errors.append('log.capnp: reviewed addition scope missing')
-      continue
-    body = match[2]
-    for field in reviewed['fields']:
-      body, count = re.subn(rf'(?m)^[ \t]*{re.escape(field)}[ \t]*\n', '', body)
-      if count != 1:
-        errors.append('log.capnp: reviewed addition missing or changed')
-    log = log[:match.start(2)] + body + log[match.end(2):]
+  if policy.get('reviewed_log_additions') or policy.get('reviewed_log_ordinal_remaps'):
+    errors.append('log.capnp: core schema exceptions are not permitted; use custom.capnp reserved structs')
   if sha256(log.encode()) != policy['log_sha256']:
     errors.append('log.capnp: changes outside the permitted reserved-event aliases')
   return errors

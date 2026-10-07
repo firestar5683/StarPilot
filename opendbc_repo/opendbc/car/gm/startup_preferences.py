@@ -1,7 +1,7 @@
 from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, ALT_ACCS, volt_cc_pedal_profile
 """Finalized GM speed-control choices; existing native envelopes are retained."""
 
-from opendbc.car.gm.values import (is_volt_gateway_profile, is_volt_cc_profile, is_ordinary_cc_profile,
+from opendbc.car.gm.values import (is_malibu_cc_f1_profile, MALIBU_CC_F1_STOCK_WORD, is_volt_gateway_profile, is_volt_cc_profile, is_ordinary_cc_profile,
                                   is_conventional_cc_pedal_profile, is_silverado_cc_pedal_profile, SILVERADO_CC_PEDAL_WORDS,
                                   CONVENTIONAL_CC_PEDAL_STOCK_WORDS, GMFlags)
 from opendbc.car.gm.values import (is_volt_ascm_longitudinal, is_volt_camera_longitudinal, is_volt_sdgm_profile,
@@ -9,6 +9,9 @@ from opendbc.car.gm.values import (is_volt_ascm_longitudinal, is_volt_camera_lon
 
 
 def disable_long_supported(cp) -> bool:
+  from opendbc.car.gm.values import malibu_hybrid_profile
+  if malibu_hybrid_profile(cp) is not None:
+    return True
   return (volt_cc_pedal_profile(cp) is not None or camera_acc_pedal_profile(cp) is not None or is_conventional_cc_pedal_profile(cp) or
           is_ordinary_cc_profile(cp) or is_volt_gateway_profile(cp) or is_volt_cc_profile(cp) or
           is_volt_ascm_longitudinal(cp) or is_volt_camera_longitudinal(cp) or is_volt_sdgm_profile(cp, longitudinal=True) or
@@ -16,6 +19,20 @@ def disable_long_supported(cp) -> bool:
 
 
 def prepare_disable_longitudinal(cp, requested: bool) -> None:
+  from opendbc.car.gm.values import malibu_hybrid_profile
+  hybrid = malibu_hybrid_profile(cp)
+  if requested and hybrid is not None:
+    cp.openpilotLongitudinalControl = False
+    cp.pcmCruise = True
+    cp.autoResumeSng = False
+    cp.safetyConfigs[0].safetyParam = 0xE804 + int(hybrid.removed)
+    return
+  if requested and is_malibu_cc_f1_profile(cp):
+    cp.openpilotLongitudinalControl = False
+    cp.pcmCruise = True
+    cp.autoResumeSng = False
+    cp.safetyConfigs[0].safetyParam = MALIBU_CC_F1_STOCK_WORD
+    return
   cc_profile = volt_cc_pedal_profile(cp)
   if requested and cc_profile is not None:
     cp.safetyConfigs[0].safetyParam = 0xE610 + 4 * int(cc_profile.radar) + 2 * int(cc_profile.removed) + int(cc_profile.brake_source.value == "F1")

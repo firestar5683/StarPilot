@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID, resolve_selection
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, model_entries, resolve_selection
 
 
 OUTPUT_MAX_AGE_NS = 250_000_000
@@ -71,6 +71,7 @@ def project_status(requested_id: str | None, process: ModelProcess | None, load:
   load receipt cannot make a new modeld process appear active. An output older
   than the load boundary cannot establish health after a restart.
   """
+  entries = model_entries()
   requested = resolve_selection(requested_id).model_id
   if not isinstance(now_mono_ns, int) or isinstance(now_mono_ns, bool) or now_mono_ns <= 0:
     raise ValueError("invalid model-status clock")
@@ -88,13 +89,13 @@ def project_status(requested_id: str | None, process: ModelProcess | None, load:
     return ModelStatus(requested, None, None, health, False, None, None)
   if (load.pid != process.pid or load.process_start_ticks != process.start_ticks or
       load.loaded_mono_ns <= 0 or load.loaded_mono_ns > now_mono_ns or
-      load.model_id not in BY_ID or not isinstance(load.variant, ModelVariant) or
+      load.model_id not in entries or not isinstance(load.variant, ModelVariant) or
       not isinstance(load.artifact_sha256, str) or len(load.artifact_sha256) != 64 or
       any(c not in "0123456789abcdef" for c in load.artifact_sha256)):
     health = ModelHealth.IDENTITY_UNAVAILABLE if output_is_fresh else ModelHealth.LOADING
     return ModelStatus(requested, None, None, health, False, None, None)
 
-  if load.model_id != BUNDLED_CURRENT and BY_ID[load.model_id].uses_external_gpu != (load.variant is ModelVariant.CHESTNUT):
+  if load.model_id != BUNDLED_CURRENT and entries[load.model_id].uses_external_gpu != (load.variant is ModelVariant.CHESTNUT):
     return ModelStatus(requested, None, None, ModelHealth.IDENTITY_UNAVAILABLE, False, None, None)
   pending = requested != load.model_id
   common = (requested, load.model_id, load.variant, pending, load.fallback_reason, load.artifact_sha256)

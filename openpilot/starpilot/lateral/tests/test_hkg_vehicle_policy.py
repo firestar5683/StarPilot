@@ -64,3 +64,67 @@ def test_invalid_torque_contract_cannot_select_vehicle_policy(vehicle, profile, 
     assert selection_from_bytes(other, None).mode == ControllerMode.STANDARD
   cp.lateralTuning.init('pid')
   assert policy_for(cp) is None
+
+
+@pytest.mark.parametrize('kph,desired,increment', (
+  (60., 0., 0.), (100., .65, 0.), (110., .65, .15), (120., .65, .30),
+  (120., -.65, .30), (120., 1.15, .15), (120., -1.15, .15),
+  (120., 1.5, 0.), (140., 0., .30), (140., -2., 0.),
+))
+def test_kona_2022_high_speed_friction_boundaries(monkeypatch, kph, desired, increment):
+  from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping
+  threshold = shaping.get_kona_ev_2022_friction_threshold(kph / 3.6, desired)
+  monkeypatch.setattr(shaping, 'KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN', 0.)
+  baseline = shaping.get_kona_ev_2022_friction_threshold(kph / 3.6, desired)
+  assert threshold == pytest.approx(baseline + increment)
+  assert baseline <= threshold <= baseline + .30
+
+
+def test_kona_2022_high_speed_friction_reaches_selected_controller(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.cereal import log
+  from opendbc.car.vehicle_model import VehicleModel
+  from opendbc.car.lateral import get_friction
+  from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping
+
+  cp = interfaces[CAR.HYUNDAI_KONA_EV_2022].get_non_essential_params(CAR.HYUNDAI_KONA_EV_2022)
+  cs = SimpleNamespace(vEgo=120. / 3.6, steeringAngleDeg=0., steeringPressed=False)
+  params = log.VehicleParameters.new_message(angleOffsetDeg=0., roll=0.)
+
+  def run():
+    controller = LatControlTorque(cp.as_reader(), interfaces[cp.carFingerprint](cp), .01, controller_mode=ControllerMode.STARPILOT)
+    for _ in range(60):
+      output, _, state = controller.update(True, cs, VehicleModel(cp), params, False, .0001, False, .28)
+    return controller, output, state
+
+  controller, output, state = run()
+  threshold = shaping.get_kona_ev_2022_friction_threshold(cs.vEgo, .65)
+  standard = shaping.get_standard_friction_threshold(cs.vEgo)
+  for direction in (-1., 1.):
+    small = get_friction(direction * .1, 0., threshold, controller.torque_params)
+    assert abs(small) < abs(get_friction(direction * .1, 0., standard, controller.torque_params))
+    assert small * direction > 0.
+    assert get_friction(direction, 0., threshold, controller.torque_params) == pytest.approx(
+      get_friction(direction, 0., standard, controller.torque_params))
+  monkeypatch.setattr(shaping, 'KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN', 0.)
+  baseline, base_output, base_state = run()
+  assert state.active and base_state.active
+  assert state.desiredLateralAccel == pytest.approx(base_state.desiredLateralAccel)
+  assert state.p == pytest.approx(base_state.p)
+  assert abs(state.f) < abs(base_state.f)
+  assert abs(output) < abs(base_output)
+  assert controller.steer_max == baseline.steer_max
+
+
+@pytest.mark.parametrize('vehicle', (CAR.HYUNDAI_IONIQ_5, CAR.HYUNDAI_KONA_NON_SCC))
+def test_kona_2022_friction_does_not_change_sibling_policies(monkeypatch, vehicle):
+  from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping
+
+  def unexpected(*_):
+    raise AssertionError('Kona 2022 friction used by sibling policy')
+
+  monkeypatch.setattr(shaping, 'get_kona_ev_2022_friction_threshold', unexpected)
+  cp = interfaces[vehicle].get_non_essential_params(vehicle)
+  controller = LatControlTorque(cp.as_reader(), interfaces[vehicle](cp), .01, controller_mode=ControllerMode.STARPILOT)
+  threshold, scale = controller.starpilot_extension.policy.friction_context(.1, 0., 0., 120. / 3.6)
+  assert threshold > 0. and scale > 0.

@@ -34,6 +34,21 @@ class TestVehicleSelection(unittest.TestCase):
     self.assertEqual(len(selected), 1)
     self.assertEqual(selected[0].label, 'Hyundai Ioniq 6')
 
+  def test_k4_2026_documentation_keeps_one_manual_platform_and_factory(self):
+    from opendbc.car.hyundai.interface import CarInterface
+    from opendbc.car.values import PLATFORMS
+
+    labels = {doc.name for doc in PLATFORMS[CAR.KIA_K4_2025].config.car_docs}
+    self.assertEqual(labels, {'Kia K4 (without HDA II) 2025', 'Kia K4 (without HDA II) 2026',
+                              'Kia K4 (with HDA II) 2025'})
+    selected = [choice for choice in self.owner.choices() if choice.platform == CAR.KIA_K4_2025]
+    self.assertEqual(len(selected), 1)
+    self.assertTrue(self.owner.choose(None, selected[0].platform).committed)
+    self.assertEqual(startup_candidate(self.params), CAR.KIA_K4_2025)
+    cp = CarInterface.get_params(startup_candidate(self.params), gen_empty_fingerprint(), [], False, False, False)
+    self.assertEqual(cp.carFingerprint, CAR.KIA_K4_2025)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+
   def test_strict_document_and_corrupt_source_preserved_until_explicit_repair(self):
     for bad in (b'{}', b'{"version":true,"platform":null}', b'{"version":1,"platform":"FAKE"}',
                 b'{"version":1,"platform":null,"platform":"KIA_XCEED_PHEV"}', b'\xff'):

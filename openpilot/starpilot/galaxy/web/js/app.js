@@ -63,7 +63,10 @@ const state = reactive({
 })
 const authState = reactive({ status: "checking", error: "", localAccess: false, gatewayAccess: false })
 const authForm = reactive({ password: "" })
-const auth = new LocalAuth({ publish: (update) => Object.assign(authState, update) })
+const auth = new LocalAuth({ publish: (update) => {
+  Object.assign(authState, update)
+  if (update.status === "unavailable") scheduleReconnect()
+} })
 
 
 
@@ -124,15 +127,27 @@ createApp({
       await auth.login(password)
     },
     async signOut() { await auth.logout() },
-    sessionExpired() { auth.expired(); auth.check() },
+    sessionExpired() { if (initializing) return; auth.expired(); initialize() },
   },
   mounted() {
     document.documentElement.dataset.theme = state.theme
+    this.visibility = () => {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+      if (!document.hidden && (state.error || authState.status === "unavailable") && !initializing) initialize()
+    }
+    document.addEventListener("visibilitychange", this.visibility)
     setRouteLeaveGuard((proceed) => {
       if (this.$refs.activeLayout) this.$refs.activeLayout.requestLeave(proceed)
       else if (this.$refs.activeSettings) this.$refs.activeSettings.requestRouteLeave(proceed)
       else proceed()
     })
+  },
+  beforeUnmount() {
+    reconnectEnabled = false
+    clearTimeout(reconnectTimer)
+    startupGeneration++
+    document.removeEventListener("visibilitychange", this.visibility)
   },
   template: `
     <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned, 'gx-nav-hidden': route.path === '/navigation'}">
@@ -227,9 +242,20 @@ startRouter()
 
 let startupGeneration = 0
 let reconnectTimer = null
+let initializing = false
+let reconnectEnabled = true
+function scheduleReconnect() {
+  if (!reconnectEnabled || document.hidden || initializing || reconnectTimer !== null) return
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    if (reconnectEnabled && !document.hidden && !initializing && (state.error || authState.status === "unavailable")) initialize()
+  }, 3000)
+}
 async function initialize() {
   const generation = ++startupGeneration
+  initializing = true
   clearTimeout(reconnectTimer)
+  reconnectTimer = null
   state.loading = !state.tools.length
   const loadingDelay = setTimeout(() => { if (generation === startupGeneration) state.startupPending = true }, 150)
   try {
@@ -246,7 +272,8 @@ async function initialize() {
     clearTimeout(loadingDelay)
     if (generation === startupGeneration) {
       state.loading = state.startupPending = false
-      if (state.error || authState.status === "unavailable") reconnectTimer = setTimeout(initialize, 3000)
+      initializing = false
+      if (state.error || authState.status === "unavailable") scheduleReconnect()
     }
   }
 }

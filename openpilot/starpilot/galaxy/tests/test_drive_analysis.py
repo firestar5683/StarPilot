@@ -7,6 +7,7 @@ from unittest import mock
 from openpilot.cereal import messaging
 import zstandard as zstd
 
+from openpilot.starpilot.models.catalog import BY_ID
 from openpilot.starpilot.galaxy import drive_analysis
 from openpilot.starpilot.galaxy.drive_analysis import analyze_route
 
@@ -156,7 +157,7 @@ class DriveAnalysisTest(unittest.TestCase):
     segment['files']['rlog'] = True
     result = analyze_route(self.root, selection(segment), permitted=lambda: True)
     self.assertTrue(result['complete'], result)
-    self.assertEqual(result['model'], f'{drive_analysis.BY_ID["sc23"].name} (Small)')
+    self.assertEqual(result['model'], f'{BY_ID["sc23"].name} (Small)')
     rlog.write_bytes(b'corrupt optional metadata')
     result = analyze_route(self.root, selection(segment), permitted=lambda: True)
     self.assertTrue(result['complete'], result)
@@ -169,7 +170,7 @@ class DriveAnalysisTest(unittest.TestCase):
               *self.sample(BASE + 500_000_000, 5, True), event('sentinel', BASE + 500_000_000, type='endOfRoute')]
     segment = write(self.root, 0, events)
     result = analyze_route(self.root, selection(segment), permitted=lambda: True)
-    self.assertEqual(result['model'], f'{drive_analysis.BY_ID["cinquev3"].name} (Chestnut big) → {drive_analysis.BY_ID["sc23"].name} (Small)')
+    self.assertEqual(result['model'], f'{BY_ID["cinquev3"].name} (Chestnut big) → {BY_ID["sc23"].name} (Small)')
     restart = messaging.new_message(None, valid=True)
     restart.logMonoTime = BASE + 150_000_000
     restart.logMessage = json.dumps({'msg': 'modeld init', 'module': 'modeld', 'process': 124})
@@ -177,7 +178,7 @@ class DriveAnalysisTest(unittest.TestCase):
     (self.root / segment['segmentName'] / 'rlog.zst').write_bytes(zstd.compress(b''.join(item.as_reader().as_builder().to_bytes() for item in events)))
     result = analyze_route(self.root, selection(segment), permitted=lambda: True)
     self.assertIn('Small model (identity not recorded)', result['model'])
-    self.assertNotIn(f'{drive_analysis.BY_ID["sc23"].name} (Small)', result['model'])
+    self.assertNotIn(f'{BY_ID["sc23"].name} (Small)', result['model'])
 
   def test_failed_or_unconfirmed_load_never_overrides_actual_output(self):
     events = [self.load_event('cinquev3', True), *self.model_events()]

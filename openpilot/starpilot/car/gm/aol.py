@@ -13,6 +13,7 @@ def policy_for(cp) -> AolVehiclePolicy:
   qualified = qualified_gm(cp)
   return AolVehiclePolicy(intent_supported=qualified, settings_supported=qualified,
                          runtime_supported=qualified, normal_runtime_supported=qualified,
+                         lkas_button_supported=False,
                          full_axis_runtime_required=qualified and int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE,
                          alternative_experience_addition=GM_AOL_ALTERNATIVE_EXPERIENCE if qualified else 0)
 
@@ -30,7 +31,7 @@ class GmAolCardIntent(AolCardIntent):
   """Main-following intent with explicit main-cycle recovery after fatal faults."""
 
   def __init__(self, settings):
-    super().__init__(settings)
+    super().__init__(settings, lkas_button_supported=False)
     self.requires_fault_observation = True
     self._main_cycle_required = False
 
@@ -55,6 +56,11 @@ def create_intent(cp, settings):
 def configuration_settings_policy(cp):
   """Saving stock Silverado lateral intent does not establish its physical source graph."""
   try:
+    if (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC and
+        not cp.notCar and not cp.passive and cp.lateralTuning.which() == 'torque' and
+        cp.steerControlType == CarParams.SteerControlType.torque and
+        int(cp.alternativeExperience) in (0, GM_AOL_ALTERNATIVE_EXPERIENCE)):
+      return AolVehiclePolicy(settings_supported=True, lkas_button_supported=False)
     if (cp.brand != 'gm' or cp.carFingerprint != CAR.CHEVROLET_SILVERADO_CC or
         cp.notCar or cp.passive or cp.networkLocation != CarParams.NetworkLocation.gateway or
         cp.transmissionType != CarParams.TransmissionType.automatic or not cp.radarUnavailable or
@@ -68,6 +74,6 @@ def configuration_settings_policy(cp):
     if (not all(math.isfinite(value) for value in (tune.latAccelFactor, tune.latAccelOffset, tune.friction)) or
         tune.latAccelFactor <= 0 or tune.friction < 0):
       return None
-    return AolVehiclePolicy(settings_supported=True)
+    return AolVehiclePolicy(settings_supported=True, lkas_button_supported=False)
   except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
     return None

@@ -76,11 +76,12 @@ def test_route_failure_backoff_and_no_parallel_requests(tmp_path):
 
 
 def test_location_requires_fix_accuracy_and_freshness():
-  gps = SimpleNamespace(latitude=0., longitude=0., speed=1., bearingDeg=0., horizontalAccuracy=5., hasFix=True)
+  gps = SimpleNamespace(source='qcomdiag', latitude=0., longitude=0., speed=1., bearingDeg=0., horizontalAccuracy=5., hasFix=True)
   class SM(dict):
     valid = {'gpsLocation': True, 'gpsLocationExternal': True}
     logMonoTime = {'gpsLocation': 10_000_000_000, 'gpsLocationExternal': 9_000_000_000}
-  sm = SM(gpsLocation=gps, gpsLocationExternal=gps)
+  sm = SM(gpsLocation=gps, gpsLocationExternal=SimpleNamespace(**{**vars(gps), 'source': 'ublox'}))
+  sm.valid['gpsLocationExternal'] = False
   assert location(sm, 11_000_000_000)[0] == 10_000_000_000
   assert location(sm, 13_000_000_000) is None
   gps.horizontalAccuracy = 30.

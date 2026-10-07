@@ -107,6 +107,7 @@ def main(argv=None):
   output = output_dir / f"{args.model}_driving_tinygrad.pkl"
   env = compile_env(args.gpu)
   with tempfile.TemporaryDirectory(prefix=f".{args.model}-compile-", dir=output_dir) as temporary:
+    env["TMPDIR"] = temporary
     staged = Path(temporary) / output.name
     command = [sys.executable, "-m", "openpilot.starpilot.models.compile", "--model-type", model_type,
                "--model-size", "512x256", "--camera-resolutions", "1928x1208", "1344x760",

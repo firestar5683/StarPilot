@@ -67,6 +67,11 @@ exit "${HELPER_EXIT:-0}"
     mapd = self.root / "scripts/build_mapd_provider.sh"
     mapd.write_text('#!/usr/bin/env bash\nprintf "mapd\\n" > "$ARGS_FILE"\n')
     mapd.chmod(0o755)
+    verifier = self.root / "tools/release/stage_mapd_provider.py"
+    verifier.parent.mkdir(parents=True)
+    verifier.write_text('import os, sys\nfrom pathlib import Path\n' +
+                        'Path("mapd-check").write_text("\\n".join(sys.argv[1:]))\n' +
+                        'sys.exit(int(os.getenv("MAPD_CHECK_EXIT", "0")))\n')
     self.env = os.environ.copy()
     self.env["ARGS_FILE"] = str(self.root / "args")
 
@@ -93,6 +98,17 @@ exit "${HELPER_EXIT:-0}"
     self.assertEqual(self.args(), ["build"])
     self.assertEqual(self.run_build("--verbose", "4").returncode, 0)
     self.assertEqual(self.args(), ["build", "--verbose", "4"])
+
+  def test_missing_map_package_stops_full_build_but_allows_repair(self):
+    self.env["MAPD_CHECK_EXIT"] = "9"
+    self.assertEqual(self.run_build().returncode, 9)
+    self.assertFalse((self.root / "args").exists())
+    self.assertEqual((self.root / "mapd-check").read_text().splitlines(),
+                     ["--source", str(self.root), "--require-tracked"])
+    (self.root / "mapd-check").unlink()
+    self.assertEqual(self.run_build("--mapd").returncode, 0)
+    self.assertEqual(self.args(), ["mapd"])
+    self.assertFalse((self.root / "mapd-check").exists())
 
   def test_firmware_assignments_require_environment_before_helper_dispatch(self):
     for prefix in (("--panda", "4"), ("4",)):

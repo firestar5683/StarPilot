@@ -56,6 +56,20 @@ export function snapshot() {
 }
 
 const data = snapshot()
+const withMode = copy(data)
+const modeId = "driving_mode_descriptions"
+withMode.metadata.profiles.compact.widgets[modeId] = {
+  ...widget("Driving Mode Descriptions", modeId, 168, 60, 162, 22), colors: { text: "#FFFFFFFF" },
+}
+withMode.document.layouts.compact[modeId] = { x: 162, y: 22, enabled: false }
+withMode.document.layouts.compact.speed_limit_actions.y = 45
+withMode.defaults = copy(withMode.document)
+assert.equal(validSnapshot(withMode), true)
+assert.equal(clampPlacement(withMode.metadata.profiles.compact, modeId, 162, 22, withMode.document.layouts.compact), null)
+withMode.document.layouts.compact[modeId].enabled = true
+assert.equal(validDocument(withMode.document, withMode.metadata), false)
+withMode.document.layouts.compact[modeId].y = 110
+assert.equal(validDocument(withMode.document, withMode.metadata), true)
 assert.equal(withAlpha("#AABBCC80", 200 / 255), "#AABBCC64")
 assert.equal(withAlpha("#AABBCCFF", .9), "#AABBCCe5")
 assert.equal(validSnapshot(data), true)

@@ -513,7 +513,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         from openpilot.common.params import Params
         from openpilot.starpilot.models.manager import ModelManager
         authority = context_source(Params())
-        model_manager_source = ModelManager(parked=authority.parked)
+        model_manager_source = ModelManager(parked=authority.parked, refresh_catalog=True)
         server.model_authority = authority
       server.model_manager_source = model_manager_source
       return model_manager_source

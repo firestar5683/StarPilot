@@ -26,6 +26,7 @@ from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.starpilot.car.hyundai.lateral_fault import LateralFaultLatch
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+from openpilot.starpilot.lateral.pause import LateralPause, read_settings as read_lateral_pause
 from openpilot.starpilot.lateral.model_turn_assist import ModelTurnAssist, update_twitch_guard
 from openpilot.starpilot.aol.runtime import current_axis, current_native, ordinary_lateral_requested, ordinary_axis_acknowledged
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed, allow_lateral_onset
@@ -71,7 +72,7 @@ class Controls:
                  'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
                  'driverMonitoringState', 'onroadEvents', 'driverAssistance'] +
                 (['aolAxisState', 'aolSafetyWire'] if self.aol_replay or self.ordinary_axis_ack_required else []))
-    optional = self.longitudinal_inputs.optional_services
+    optional = list(dict.fromkeys(self.longitudinal_inputs.optional_services + ['deviceState']))
     if optional:
       self.sm = messaging.SubMaster(services + optional, poll='selfdriveState',
                                     ignore_alive=optional, ignore_valid=optional, ignore_avg_freq=optional)
@@ -84,6 +85,7 @@ class Controls:
     self.desired_curvature = 0.0
     self.model_turn_assist = ModelTurnAssist()
     self.lane_centering_controller = LaneCenteringController()
+    self.lateral_pause = LateralPause(read_lateral_pause(self.params), self.params)
     self.lane_change_policy = lane_change_policy(read_lane_change(self.params))
     self.lane_change_smoother = LaneChangeSmoother()
     self.lane_centering_host = LaneCenteringHost(self.params) if lane_runtime_supported(self.CP) else None
@@ -199,6 +201,21 @@ class Controls:
     CC.latActive = allow_lateral_onset(self.CP, requested=bool(CC.latActive), normal_enabled=bool(CC.enabled),
                                       steering_pressed=bool(CS.steeringPressed),
                                       previous_active=bool(getattr(self, 'aol_previous_lateral_active', False)))
+
+    pause_now_ns = int(self.sm.logMonoTime['carState']) if os.getenv('REPLAY') == '1' else time.monotonic_ns()
+    self.lateral_pause.refresh(pause_now_ns)
+    pause_allowed = True
+    if self.lateral_pause.settings.speed_mps > 0:
+      device = self.sm['deviceState']
+      device_ns = int(self.sm.logMonoTime['deviceState'])
+      pause_drive = int(device.startedMonoTime) if (self.sm.seen['deviceState'] and self.sm.alive['deviceState'] and
+        self.sm.valid['deviceState'] and device.started and 0 < int(device.startedMonoTime) < device_ns <= pause_now_ns and
+        pause_now_ns - device_ns <= 2_000_000_000) else 0
+      pause_source = int(self.sm.logMonoTime['carState']) if (self.sm.seen['carState'] and self.sm.alive['carState'] and
+                                                            self.sm.valid['carState']) else 0
+      pause_allowed = self.lateral_pause.allowed(CS, now_ns=pause_now_ns, source_ns=pause_source, drive_id=pause_drive)
+
+    CC.latActive = bool(CC.latActive and pause_allowed)
 
     if self.torque_host is not None:
       # The optional source must not keep an active torque request through lost car state.
