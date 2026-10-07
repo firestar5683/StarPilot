@@ -17,3 +17,13 @@ The Ford lateral strategies, extended CAN constructors, camera-radar filtering a
 Relevant lineage includes the controller and integration work in [`db2bdff05`](https://github.com/BluePilotDev/bluepilot/commit/db2bdff05df103d71df62f45c2a3cb5211aba6e6) and [`d0aac605f`](https://github.com/BluePilotDev/bluepilot/commit/d0aac605f99d37e9da205e419f7989c1e9eaa386), extended CAN and safety work in [`8f8d6d15f`](https://github.com/BluePilotDev/bluepilot/commit/8f8d6d15f0a590f42b78de964ffb0d0af7f5d63d), and manual-turn detection in [`97867c1eb`](https://github.com/BluePilotDev/bluepilot/commit/97867c1eb57b7472f6fc3de62f0fef576e5a5497).
 
 The vehicle strategy and CAN/native owners preserve that attribution while adapting to the current controller interfaces and shared safety limits. Upstream contributors do not maintain or endorse this adaptation. Applicable notices are retained in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Android Auto
+
+**Original implementation — [DIdesigns (di31)](https://github.com/dirwin31):** Built the foundational pipeline in `openpilot/starpilot/system/android_auto`, including session supervision, wireless bootstrapping (BT/Wi-Fi), the HFP link, hardware H.264 encoding with GPU NV12 conversion, touch input, and core head-unit compatibility.
+
+**StarPilot integration — [Firestar](https://github.com/firestar5683):** Adapted the pipeline for StarPilot, adding the Bluetooth bridge, pairing workflows, and native car-screen projection UI.
+
+**Protocol and encoder groundwork — yummydirtx:** Parts of the protocol session, wire encoding, headless EGL and hardware encoder started from [yummydirtx/openpilot](https://github.com/yummydirtx/openpilot) `tools/android_auto`, adapted under the MIT license from revision `672a16f6183567c0ada53654f8527d97e1a483fa`; each adapted file names its source.
+
+Bluetooth and input protocol details were referenced from [aa-proxy-rs](https://github.com/aa-proxy/aa-proxy-rs) (GPL-2.0) and [open-android-auto](https://github.com/mrmees/open-android-auto) (GPL-3.0).
