@@ -62,7 +62,8 @@ from openpilot.starpilot.conditional_mode.card_input import conditional_manual_c
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
-from openpilot.starpilot.feature_runtime import requested as feature_requested
+from openpilot.starpilot.feature_runtime import (requested as feature_requested, enabled as feature_enabled,
+                                               slc_runtime_settings, slc_transport_capable)
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.vehicle_selection import startup_candidate
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
@@ -342,6 +343,25 @@ class Car:
       self.CP.alternativeExperience |= aol_policy.alternative_experience_addition
     self.vehicle_startup.finalize_aol_configuration(self.CI)
 
+    # Reserve optional transport from finalized capability, not saved admission.
+    self.slc_transport_available = slc_transport_capable(self.CP, os.environ)
+    if self.slc_transport_available:
+      if 'slcState' not in subscribed_services:
+        subscribed_services.append('slcState')
+        self.sm = messaging.SubMaster(subscribed_services)
+      for ignored in (self.sm.ignore_alive, self.sm.ignore_valid, self.sm.ignore_average_freq):
+        if 'slcState' not in ignored:
+          ignored.append('slcState')
+      if self.slc_command_sock is None:
+        self.slc_command_sock = messaging.sub_sock('slcCruiseCommand', conflate=False)
+      if 'slcDashboardObservation' not in self.pm.sock:
+        self.pm.sock['slcDashboardObservation'] = messaging.pub_sock('slcDashboardObservation')
+    self.slc_requested_configuration = self.read_slc_configuration()
+    self.slc_configuration = self.slc_requested_configuration
+    self.slc_replay = self.slc_configuration[0]
+    self.slc_control_enabled = self.slc_replay and self.slc_configuration[1].enabled
+    self.slc_source_floor_ns = 0
+
     # Write previous route's CarParams
     prev_cp = get_cache(self.params, "CarParamsPersistent")
     if prev_cp is not None:
@@ -365,6 +385,26 @@ class Car:
     # card is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.ioniq6_init_complete = True
+
+  def read_slc_configuration(self):
+    settings = slc_runtime_settings(self.params, self.CP, os.environ)
+    admitted = (self.slc_transport_available and not settings.errors and
+                feature_enabled(self.params, self.CP, 'slc', os.environ))
+    return bool(admitted), settings
+
+  def refresh_slc_configuration(self, now_ns: int) -> None:
+    configuration = getattr(self, 'slc_requested_configuration', None)
+    if configuration is None or configuration == getattr(self, 'slc_configuration', None):
+      return
+    self.slc_configuration = configuration
+    self.slc_replay = configuration[0]
+    self.slc_control_enabled = self.slc_replay and configuration[1].enabled
+    self.slc_source_floor_ns = max(getattr(self, 'slc_source_floor_ns', 0), now_ns)
+    self.slc_commands.clear()
+    self.slc_command_session = ''
+    self.slc_last_command_id = 0
+    # Keep the shared event producer and held suppression until physical release.
+    # Only SLC's sourced/issued work predating this admission is retired.
 
   def observe_distance_personality(self, CS: car.CarState, now_ns: int) -> None:
     tracker = getattr(self, 'distance_personality_tracker', None)
@@ -418,8 +458,14 @@ class Car:
 
     self.slc_receipts = []
     now_ns = int(self.can_log_mono_time) if REPLAY and hasattr(self, 'can_log_mono_time') else time.monotonic_ns()
+    self.refresh_slc_configuration(now_ns)
     evidence = getattr(self.CI.CS, 'dashboard_limit', None) if self.slc_replay else None
     observation = evidence.observation if evidence is not None else None
+    floor_ns = getattr(self, 'slc_source_floor_ns', 0)
+    if (observation is not None and floor_ns and
+        (observation.observed_ns <= floor_ns or int(self.sm.logMonoTime['slcState']) <= floor_ns or
+         int(self.sm['slcState'].frameMonoTime) <= floor_ns)):
+      observation = None
     control_log_ns = int(self.sm.logMonoTime['carControl'])
     host_enabled = bool(
       CS.canValid and not CS.canTimeout and
@@ -429,7 +475,7 @@ class Car:
       self.sm['carControl'].enabled)
     host_control_enabled = bool(self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and host_enabled)
     host_long_active = host_control_enabled and self.sm['carControl'].longActive
-    slc_long_active = self.slc_replay and host_long_active
+    slc_long_active = getattr(self, 'slc_control_enabled', self.slc_replay) and host_long_active
     pending = None
     if observation is not None and self.slc_replay:
       pending = slc_physical.pending_confirmation(
@@ -563,16 +609,18 @@ class Car:
                                         slc_replay=self.slc_replay, host_long_active=host_long_active, observed_ns=now_ns)
     if curve_receipt is not None:
       self.slc_receipts.append(curve_receipt)
-    if self.slc_replay and self.slc_command_sock is not None:
+    if self.slc_command_sock is not None:
       for _ in range(8):
         command_message = messaging.recv_one_or_none(self.slc_command_sock)
         if command_message is None:
           break
-        if command_message.valid:
+        if self.slc_replay and command_message.valid:
           self.slc_commands.append(command_message)
       for _ in range(len(self.slc_commands)):
         command_message = self.slc_commands.popleft()
         command = command_message.slcCruiseCommand
+        if int(command.issuedMonoTime) <= floor_ns:
+          continue
         if now_ns < int(command.issuedMonoTime):
           if now_ns <= int(command.expiresMonoTime):
             self.slc_commands.append(command_message)
@@ -988,8 +1036,8 @@ class Car:
       source_ns = int(self.sm.logMonoTime['carControl'])
       receipt_ns = int(self.sm.recv_time['carControl'] * 1e9)
       # Disabled torque/accel are commands; inactive curvature is only telemetry.
-      if (not native_bootstrap_supported(self.CP) or self.vehicle_startup.owner is not None or
-          self.volt_cc_selected or not CS.canValid or CS.canTimeout or
+      if (not self.aol_replay or not native_bootstrap_supported(self.CP) or self.vehicle_startup.owner is not None or
+          not CS.canValid or CS.canTimeout or
           not (self.sm.seen['carControl'] and self.sm.valid['carControl'] and self.sm.alive['carControl']) or
           not (0 < source_ns <= now_ns and now_ns - source_ns <= 150_000_000 and
                0 < receipt_ns <= now_ns and now_ns - receipt_ns <= 150_000_000) or
@@ -1117,7 +1165,7 @@ class Car:
       self.controls_update(CS, self.sm['carControl'])
     elif (not self.ci_initialized and self.sm.seen['onroadEvents'] and
           any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
-          native_bootstrap_supported(self.CP)):
+          self.aol_replay and native_bootstrap_supported(self.CP)):
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
 
     self.initialized_prev = initialized
@@ -1132,6 +1180,7 @@ class Car:
         self.aol_card_intent.settings = read_settings(self.params)
       now = time.monotonic()
       if now >= next_cruise_read:
+        self.slc_requested_configuration = self.read_slc_configuration()
         self.v_cruise_helper.intervals = read_cruise_intervals(self.params, pcm_cruise=self.CP.pcmCruise)
         next_cruise_read = now + 1.0
       time.sleep(0.1)
