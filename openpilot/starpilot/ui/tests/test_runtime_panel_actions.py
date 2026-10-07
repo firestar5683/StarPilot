@@ -395,6 +395,14 @@ class TestRuntimePanelActions(unittest.TestCase):
         self.ui.sm.frame += 1
         self.assertEqual(getattr(session.snapshot(ShellMode.SETTINGS), field).scroll, 0)
         self.assertEqual(getattr(session, offset), 0)
+        if destination in (Destination.SOUNDS, Destination.SYSTEM):
+          setattr(session, offset, 5)
+          setattr(session, prefix := offset.removesuffix("_scroll") + "_edit_key", "7")
+          state.return_value = FeatureSettingsState(rows=(rows[7],), editor=True)
+          self.ui.sm.frame += 1
+          self.assertEqual(getattr(session.snapshot(ShellMode.SETTINGS), field).scroll, 0)
+          self.assertEqual(getattr(session, offset), 5)
+          setattr(session, prefix, None)
 
   def test_large_feature_swipes_route_once_and_cancel_when_context_changes(self):
     from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
