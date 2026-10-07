@@ -63,6 +63,34 @@ class TestStartup(unittest.TestCase):
         ui.main()
       initialize.assert_not_called()
 
+  def test_display_scheduling_preserves_camera_precedence_and_other_devices(self):
+    from openpilot.selfdrive.ui import ui
+
+    for device, hardware in (("mici", True), ("tici", True), ("tizi", True), ("pc", False)):
+      with self.subTest(device=device), \
+           patch.object(ui, "COMMA_HARDWARE", hardware), patch.object(ui.HARDWARE, "get_device_type", return_value=device), \
+           patch.object(ui, "select_ui", return_value=startup.UiSelection(False, "fixture")), \
+           patch.object(ui.gui_app, "init_window"), \
+           patch.object(ui.gui_app, "render", return_value=iter(((False, 0., 0.), (True, .01, .005), (True, .01, .005)))), \
+           patch.object(ui, "MainLayout", return_value=object()), patch.object(ui, "MiciMainLayout", return_value=object()), \
+           patch.object(ui.messaging, "PubMaster"), patch.object(ui, "config_realtime_process") as realtime, \
+           patch.object(ui, "drop_realtime") as normal, patch.object(ui.os, "setpriority") as nice, \
+           patch.object(ui.os, "sched_getscheduler", return_value=0, create=True), \
+           patch.object(ui.os, "SCHED_OTHER", 0, create=True), patch.object(ui.os, "getpriority", return_value=0), \
+           patch.object(ui.os, "sched_getaffinity", return_value={0}, create=True), \
+           patch.object(ui, "set_core_affinity") as affinity:
+        ui.main()
+        realtime.assert_called_once_with(0, ui.Priority.UI)
+        if device == "mici":
+          normal.assert_called_once_with()
+          nice.assert_called_once_with(ui.os.PRIO_PROCESS, 0, 0)
+        else:
+          normal.assert_not_called()
+          nice.assert_not_called()
+        self.assertEqual(affinity.call_count, 2 if hardware else 0)
+        if hardware:
+          self.assertTrue(all(call.args == ([6] if device == "mici" else [5],) for call in affinity.call_args_list))
+
   def test_slc_publisher_gate_is_independent_of_ui_selection(self):
     self.assertTrue(startup.slc_action_transport_enabled({"STARPILOT_UI_DEV": "1"}))
     self.assertTrue(startup.slc_action_transport_enabled({"SLC_REPLAY_RUNTIME": "1"}))
