@@ -114,6 +114,48 @@ def owner_context(stamp: int, *, stop_time=8.0, slower=True, stopped=False):
 
 
 class TestSceneProjector(unittest.TestCase):
+  def test_standstill_filter_undershoot_requires_fresh_physical_zero_speed(self):
+    cases = ((-1.401298464324817e-45, True, 0., True),
+             (-0.0008391447481699288, True, 0., True),
+             (-0.001509889611043036, True, 0., True),
+             (-0.01, True, 0., True),
+             (-0.0101, True, 0., False),
+             (-0.0015, False, 0., False),
+             (-0.0015, True, 0.01, False),
+             (-0.0015, True, -0.01, False),
+             (float('nan'), True, 0., False),
+             (float('inf'), True, 0., False),
+             (-0.0015, True, float('nan'), False))
+    for speed, standstill, raw_speed, accepted in cases:
+      with self.subTest(speed=speed, standstill=standstill, raw_speed=raw_speed):
+        projector = SceneProjector()
+        sm = FakeSubMaster(serialized_scene(speed=0., lead_present=False), MONO - 5_000_000)
+        projector.project(sm, CP, now_mono_ns=MONO, now_boot_ns=BOOT, sample_skew_ns=1000)
+        event = MONO + 50_000_000
+        sm.stamp(event)
+        sm.payloads.update(serialized_scene(stamp=BOOT + 50_000_000, speed=speed,
+                                            standstill=standstill, lead_present=False))
+        car = messaging.new_message('carState', valid=True)
+        car.carState = sm.payloads['carState']
+        car.carState.vEgoRaw = raw_speed
+        sm.payloads['carState'] = messaging.log_from_bytes(car.to_bytes()).carState
+        result = projector.project(sm, CP, now_mono_ns=event + 1_000_000,
+                                   now_boot_ns=BOOT + 51_000_000, sample_skew_ns=1000,
+                                   safe_mode=False, owner_context=owner_context(event))
+        if accepted:
+          self.assertIsNotNone(result.authority)
+          self.assertEqual(result.scene.speed_mps, 0.)
+          self.assertTrue(result.ready)
+        else:
+          self.assertIsNone(result.authority)
+          self.assertIsNone(result.scene.speed_mps)
+        sm.seen['carState'] = False
+        missing = projector.project(sm, CP, now_mono_ns=event + 2_000_000,
+                                    now_boot_ns=BOOT + 52_000_000, sample_skew_ns=1000,
+                                    safe_mode=False, owner_context=owner_context(event))
+        self.assertIsNone(missing.authority)
+        self.assertIsNone(missing.scene.speed_mps)
+
   def test_fresh_committed_turn_retains_next_tick_slow_lead_filter_alpha(self):
     sm = FakeSubMaster(serialized_scene(speed=20.0, lead_present=False), MONO - 5_000_000)
     projector = SceneProjector()
@@ -476,6 +518,23 @@ class TestSceneProjector(unittest.TestCase):
     self.assertIsNone(repeated.lead_observation.tracked)
     self.assertIsNone(repeated.scene.lead)
     self.assertEqual(projector.lead_detector.filter_value, previous_filter)
+
+  def test_stationary_clear_endpoint_does_not_relax_spatial_path_validation(self):
+    from openpilot.starpilot.conditional_mode.projection import _horizon, _standstill_clear_horizon
+    from openpilot.starpilot.conditional_mode.tests.test_stop_commit_transport import CLEAR_97_X
+    model = messaging.new_message('modelV2').modelV2
+    model.position.x = CLEAR_97_X
+    self.assertIsNone(_horizon(model))
+    self.assertEqual(_standstill_clear_horizon(model), CLEAR_97_X[-1])
+    malformed = (list(CLEAR_97_X[:-1]), list(CLEAR_97_X), list(CLEAR_97_X), list(CLEAR_97_X), list(CLEAR_97_X))
+    malformed[1][3] = -.011
+    malformed[2][18] = malformed[2][17] - .001
+    malformed[3][0] = -2e-6
+    malformed[4][4] = float('nan')
+    for values in malformed:
+      with self.subTest(values=values):
+        model.position.x = values
+        self.assertIsNone(_standstill_clear_horizon(model))
 
   def test_headway_stale_and_real_negative_path_leave_raw_only(self):
     for origin, later_negative in ((-2e-6, False), (-6.64888977208733e-11, True)):
