@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -22,9 +23,15 @@ def icon_name(maneuver_type: str, modifier: str) -> str:
   return candidate if candidate in MANIFEST else 'direction_turn_straight.png'
 
 
+def arrival_time(remaining_seconds: float, now: datetime) -> str:
+  arrival = now + timedelta(seconds=max(0, remaining_seconds))
+  return arrival.strftime('%I:%M %p').lstrip('0')
+
+
 class NavigationCard:
-  def __init__(self, fonts):
+  def __init__(self, fonts, *, clock=None):
     self.fonts = fonts
+    self.clock = clock or (lambda: datetime.now().astimezone())
     self.collapsed = False
     self._key = None
     self._press = None
@@ -136,11 +143,20 @@ class NavigationCard:
     distance = 'Arrived' if nav.arrived else distance_text(nav.distance_m, state.metric)
     self.fonts.draw(distance, FontRole.BOLD, secondary_size, x, rect.y + rect.height - (42 if compact else 57),
                     rl.Color(199, 174, 247, 255))
-    if not compact and not nav.arrived:
-      remaining = f'{distance_text(nav.remaining_distance_m, state.metric)} - {max(1, round(nav.remaining_seconds / 60))} min'
-      measured = self.fonts.measure(remaining, FontRole.NORMAL, 22)
-      self.fonts.draw(remaining, FontRole.NORMAL, 22, rect.x + rect.width - padding - measured.width,
-                      rect.y + rect.height - 45, rl.Color(190, 187, 197, 255))
+    if not nav.arrived:
+      eta = arrival_time(nav.remaining_seconds, self.clock())
+      if compact:
+        remaining = f'ETA {eta}'
+        font_size = 18
+        y = rect.y + rect.height - 38
+      else:
+        remaining = (f'{distance_text(nav.remaining_distance_m, state.metric)} · '
+                     f'{max(1, round(nav.remaining_seconds / 60))} min · ETA {eta}')
+        font_size = 20
+        y = rect.y + rect.height - 43
+      measured = self.fonts.measure(remaining, FontRole.NORMAL, font_size)
+      self.fonts.draw(remaining, FontRole.NORMAL, font_size, rect.x + rect.width - padding - measured.width,
+                      y, rl.Color(190, 187, 197, 255))
 
   def close(self):
     for texture in self._textures.values():

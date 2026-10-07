@@ -123,11 +123,20 @@ for _profile, _geometry in {"large": (580, 68, 640, 344), "compact": (168, 60, 1
   _mode_widget["default"]["enabled"] = False
   PROFILES[_profile]["widgets"][MODE_WIDGET] = _mode_widget
 
+# It starts disabled so an upgrade never adds a new onroad element without the
+# driver's choice; validation below adds the placement to older documents.
+CLOCK_WIDGET = "clock"
+for _profile, _geometry in {"large": (300, 72, 780, 430), "compact": (140, 44, 168, 92)}.items():
+  _clock_widget = _widget("Clock", CLOCK_WIDGET, *_geometry)
+  _clock_widget["default"]["enabled"] = False
+  PROFILES[_profile]["widgets"][CLOCK_WIDGET] = _clock_widget
+
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}
 _ACTION_COLORS = {"cardFill": "#0C1820EB", "cardBorder": "#A6DFBEFF", "text": "#FFFFFFFF"}
 WIDGET_COLORS = {
   "large": {
     MODE_WIDGET: {"text": "#FFFFFFFF"},
+    CLOCK_WIDGET: {"text": "#FFFFFFFF"},
     "current_speed": {"text": None},
     "cruise_limits": {"cardFill": None, "cardBorder": None, "text": None},
     "speed_limit_actions": _ACTION_COLORS,
@@ -136,6 +145,7 @@ WIDGET_COLORS = {
   },
   "compact": {
     MODE_WIDGET: {"text": "#FFFFFFFF"},
+    CLOCK_WIDGET: {"text": "#FFFFFFFF"},
     "max_speed": {"text": None},
     "speed_limit_actions": _ACTION_COLORS,
     "driver_monitor": _FRAME_COLORS,
@@ -149,9 +159,9 @@ WIDGET_COLORS = {
 # Back-to-front order used when a layout first opts into custom layers.
 DEFAULT_WIDGET_ORDER = {
   "large": ("pip_left", "pip_right", "cruise_limits", "speed_limit_actions", "current_speed",
-            "steering_wheel", "torque_bar", "driver_monitor", MODE_WIDGET),
+            "steering_wheel", "torque_bar", "driver_monitor", MODE_WIDGET, CLOCK_WIDGET),
   "compact": ("pip_left", "pip_right", "speed_limit", "max_speed", "steering_wheel", "torque_bar",
-              "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET),
+              "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET, CLOCK_WIDGET),
 }
 
 
@@ -219,7 +229,9 @@ def validate_document(value):
   palette, layouts = value["palette"], value["layouts"]
   if type(palette) is not dict or set(palette) != set(PALETTE) or type(layouts) is not dict or set(layouts) != set(PROFILES):
     raise ValueError("Invalid customization fields")
-  if any(all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, *CAMERA_WIDGETS}) == keys for profile, keys in shape.items())
+  if any(all(type(layouts[profile]) is dict and
+             (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET, *CAMERA_WIDGETS}) == keys
+             for profile, keys in shape.items())
          for shape in (LEGACY_WIDGETS, DM_WIDGETS, ACTIONLESS_WIDGETS)):
     layouts = copy.deepcopy(layouts)
     cruise = layouts["large"]["cruise_limits"]
@@ -241,12 +253,12 @@ def validate_document(value):
     for profile in PROFILES:
       for key in ("driver_monitor", "torque_bar", "speed_limit_actions"):
         layouts[profile].setdefault(key, dict(PROFILES[profile]["widgets"][key]["default"]))
-  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, *CAMERA_WIDGETS}) == keys
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET, *CAMERA_WIDGETS}) == keys
          for profile, keys in RAILLESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for key in RAIL_WIDGETS:
       layouts["compact"][key] = dict(PROFILES["compact"]["widgets"][key]["default"])
-  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET}) == keys
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET}) == keys
          for profile, keys in CAMERALESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for profile in PROFILES:
@@ -267,8 +279,11 @@ def validate_document(value):
         layouts[profile][key] = position
   layouts = copy.deepcopy(layouts)
   for profile, data in PROFILES.items():
-    if type(layouts[profile]) is dict and set(layouts[profile]) == set(data["widgets"]) - {MODE_WIDGET}:
-      layouts[profile][MODE_WIDGET] = dict(data["widgets"][MODE_WIDGET]["default"])
+    if type(layouts[profile]) is dict:
+      missing = set(data["widgets"]) - set(layouts[profile])
+      if missing and missing <= {MODE_WIDGET, CLOCK_WIDGET}:
+        for optional in missing:
+          layouts[profile][optional] = dict(data["widgets"][optional]["default"])
   result = default_document()
   for key, color in palette.items():
     if type(color) is not str or re.fullmatch(r"#[0-9a-fA-F]{8}", color) is None:
@@ -331,7 +346,7 @@ def validate_document(value):
         if key in ("speed_limit_actions", "speed_limit") or widget.get("layer") == "underlay":
           continue
         placement = result["layouts"][profile][key]
-        if key == MODE_WIDGET and not placement["enabled"]:
+        if key in (MODE_WIDGET, CLOCK_WIDGET) and not placement["enabled"]:
           continue
         width, height = ((placement["size"],) * 2 if key == "steering_wheel" else
                          (widget["width"], widget["height"]))
@@ -342,8 +357,11 @@ def validate_document(value):
     orders = value['widgetOrder']
     if type(orders) is not dict or not orders.keys() <= PROFILES.keys():
       raise ValueError("Invalid widget layer profiles")
-    result['widgetOrder'] = {profile: validate_widget_order(order, PROFILES[profile]['widgets'])
-                             for profile, order in orders.items()}
+    result['widgetOrder'] = {}
+    for profile, order in orders.items():
+      if type(order) is list:
+        order = [*order, *(key for key in (MODE_WIDGET, CLOCK_WIDGET) if key not in order)]
+      result['widgetOrder'][profile] = validate_widget_order(order, PROFILES[profile]['widgets'])
   if 'speedSources' in value:
     result['speedSources'] = value['speedSources']
   if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_BYTES:

@@ -324,6 +324,31 @@ class Supervisor:
     except Exception as error:
       self.log("trust_failed", error=str(error))
 
+  def forget_receiver(self, address: str) -> bool:
+    """A Bluetooth pairing was deleted: drop it as the chosen car or companion, and its RFCOMM channel,
+    so it leaves the car pickers and auto-connect stops paging it. True if it was the chosen car."""
+    from openpilot.starpilot.system.android_auto.bt_sockets import normalize_address
+    address = normalize_address(address)
+    chosen = self.config["receiver_address"].upper() == address
+    if chosen and self._session_alive():
+      self.stop()
+    with self._lock:
+      companion = self.config.get("companion_address", "").upper() == address
+      cache = dict(self.config["rfcomm_cache"])
+      cached = cache.pop(address, None) is not None
+      if not (chosen or companion or cached):
+        return False  # nothing of this device was kept
+      self.config["rfcomm_cache"] = cache
+      if chosen:
+        if self._bluez is not None:
+          self._bluez.release()
+        self.config.update(receiver_address="", receiver_name="", companion_address="", companion_name="")
+      elif companion:
+        self.config.update(companion_address="", companion_name="")
+      identity_store.save_config(self.config)
+    self.log("car_forgotten", address=address, receiver=chosen, companion=companion)
+    return chosen
+
   def set_view(self, view: str) -> None:
     """Choose what the car shows; applies from the next projection session."""
     if view not in ("car", "mirror"):
@@ -838,7 +863,7 @@ class Supervisor:
       boot = WirelessBootstrap(rfcomm, self._bootstrap_log, device_serial=config["device_name"],
                                version_status=int(config.get("version_status", 0)))
       self._set(state="wifi_start")
-      result = boot.run(lambda credentials: lease.acquire(credentials, cancelled=self._stop.is_set), cancelled=self._stop.is_set)
+      result = boot.run(lambda credentials: lease.acquire(credentials, cancelled=boot.join_is_cancelled), cancelled=self._stop.is_set)
     except Exception:
       if source == "cache" and not self._stop.is_set() and self._status["last_stage"] in ("rfcomm", "wifi_start"):
         self._remember_channel(address, None)  # the car never answered there; ask it over SDP next time

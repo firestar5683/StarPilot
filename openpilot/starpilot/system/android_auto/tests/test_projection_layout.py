@@ -10,7 +10,7 @@ from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
   PROJECTION_WIDGETS, NAV_CARD, NAV_MAP,
 )
-from openpilot.starpilot.ui.onroad_customization import default_document, customization_metadata
+from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
 
 SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
@@ -72,18 +72,19 @@ class TestProjectionLayout(unittest.TestCase):
     self.assertEqual(converted['layouts']['compact'], base['layouts']['compact'])
     self.assertEqual(base, before)
 
-  def test_new_mode_widget_preserves_saved_projection_layout(self):
-    key = 'driving_mode_descriptions'
-    document = default_layout(SCREEN)
-    self.assertFalse(document['widgets'].pop(key)['enabled'])
-    document['widgets']['current_speed'].update(x=300, y=400, enabled=False)
-    migrated = validate_layout(document, SCREEN)
-    self.assertFalse(migrated['widgets'][key]['enabled'])
-    self.assertEqual({name: value for name, value in migrated['widgets'].items() if name != key}, document['widgets'])
-    migrated['widgets'][key].update(enabled=True, x=500, y=200)
-    self.assertEqual(validate_layout(migrated, SCREEN), migrated)
-    converted = projection_customization(migrated, default_document())
-    self.assertEqual(converted['layouts']['large'][key]['x'] + (migrated['canvas']['width'] - 1860) / 2, 500)
+  def test_new_optional_widgets_preserve_saved_projection_layout(self):
+    for key in (MODE_WIDGET, CLOCK_WIDGET):
+      with self.subTest(key=key):
+        document = default_layout(SCREEN)
+        self.assertFalse(document['widgets'].pop(key)['enabled'])
+        document['widgets']['current_speed'].update(x=300, y=400, enabled=False)
+        migrated = validate_layout(document, SCREEN)
+        self.assertFalse(migrated['widgets'][key]['enabled'])
+        self.assertEqual({name: value for name, value in migrated['widgets'].items() if name != key}, document['widgets'])
+        migrated['widgets'][key].update(enabled=True, x=500, y=200)
+        self.assertEqual(validate_layout(migrated, SCREEN), migrated)
+        converted = projection_customization(migrated, default_document())
+        self.assertEqual(converted['layouts']['large'][key]['x'] + (migrated['canvas']['width'] - 1860) / 2, 500)
 
   def test_existing_exact_commit_adapter_checks_revision_and_authority(self):
     with tempfile.TemporaryDirectory() as directory:

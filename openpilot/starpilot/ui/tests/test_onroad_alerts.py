@@ -74,6 +74,23 @@ def test_urgent_notice_interrupts_lane_fade_immediately():
   assert fonts.draw.call_args.args[0] == 'take control'
 
 
+def test_visible_pip_keeps_lane_text_without_the_full_width_banner():
+  fonts = Mock(profile=Profile.LARGE)
+  fonts.measure.return_value = NS(width=100, height=30)
+  renderer = onroad_alerts.AlertRenderer(fonts)
+  notice = OnroadAlert(AlertSize.SMALL, 'Steer Left', alert_type='preLaneChangeLeft/warning')
+  renderer.text_only_alert_names = frozenset({'preLaneChangeLeft'})
+  with patch.object(rl, 'draw_rectangle') as solid, patch.object(rl, 'draw_rectangle_gradient_v') as gradient:
+    renderer.render(rl.Rectangle(0, 0, 1860, 1080), notice)
+    solid.assert_not_called()
+    gradient.assert_not_called()
+    renderer.render(rl.Rectangle(0, 0, 1860, 1080), OnroadAlert())
+    solid.assert_not_called()
+    gradient.assert_not_called()
+  labels = [call.args[0] for call in fonts.draw.call_args_list]
+  assert len(labels) == 4 and set(labels) == {'Steer Left'}
+
+
 @pytest.mark.parametrize('event,direction,icon', [
   ('preLaneChangeLeft', -1, 'turn_signal_left.png'),
   ('preLaneChangeRight', 1, 'turn_signal_left.png'),

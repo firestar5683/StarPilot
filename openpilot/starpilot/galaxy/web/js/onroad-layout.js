@@ -287,10 +287,15 @@ export const LayoutWidgetPreview = {
       </template>
       <template v-else-if="widget.kind === 'driving_mode_descriptions'">
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
-          :font-size="profile === 'large' ? 48 : 21" font-weight="600" stroke="#000000" :stroke-width="profile === 'large' ? 3 : 1.5" paint-order="stroke">
+          :font-size="profile === 'large' ? 48 : 21" font-weight="600" style="filter: drop-shadow(2px 2px 1px #000000aa)">
           <tspan v-for="(line, index) in modeLines(scene, profile)" :key="index" :x="widget.width / 2"
             :y="widget.height / 2 + (index - (modeLines(scene, profile).length - 1) / 2) * 25">{{ line }}</tspan>
         </text>
+      </template>
+      <template v-else-if="widget.kind === 'clock'">
+        <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
+          :font-size="profile === 'large' ? 48 : 21" font-weight="600"
+          style="filter: drop-shadow(2px 2px 1px #000000aa)">3:42 PM</text>
       </template>
       <template v-else-if="widget.kind === 'cruise_limits'">
         <g v-for="(label, index) in ['MAX', 'LIMIT']" :key="label" :transform="'translate(0 ' + index * 211 + ')'">
@@ -499,6 +504,7 @@ export const OnroadLayoutPage = {
       .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled) },
     listWidgets() { return this.state.layerDrag ? this.state.layerDrag.rows.map(id => this.widgets.find(widget => widget.id === id)) : this.layerWidgets },
     selectionBox() {
+      if (!this.state.layerDrag) return null
       const widget = this.renderWidgets.find(widget => widget.id === this.state.selected)
       if (!widget) return null
       return { x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
@@ -1006,7 +1012,7 @@ export const OnroadLayoutPage = {
                     <text :x="zone.x + zone.width / 2" :y="zone.y + zone.height - 8" text-anchor="middle" :font-size="state.profile === 'large' ? 20 : 10" fill="#d8c8ff">{{ zone.label }}</text>
                   </g>
                 </g>
-                <g v-for="widget in renderWidgets" :key="widget.id" class="gx-layout__widget" :class="{'is-selected': state.selected === widget.id}"
+                <g v-for="widget in renderWidgets" :key="widget.id" class="gx-layout__widget" :class="{'is-selected': state.drag?.id === widget.id}"
                   :transform="'translate(' + layout[widget.id].x + ' ' + layout[widget.id].y + ')'" tabindex="0" role="button"
                   :aria-label="widget.label + ', x ' + layout[widget.id].x + ', y ' + layout[widget.id].y + '. Arrow keys move; Shift moves ten pixels; Delete removes.'"
                   :aria-pressed="state.selected === widget.id" @focus="state.selected = widget.id" @keydown="onKey(widget.id, $event)"

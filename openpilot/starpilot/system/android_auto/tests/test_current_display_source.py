@@ -45,6 +45,13 @@ class TestCurrentDisplaySource(unittest.TestCase):
     self.assertIn("pixels = readback.finish()", source)
     self.assertIn("producer.publish(request, pixels, in_flight_ns, pixel_format, advance=False)", source)
 
+  def test_nv12_path_fuses_scale_margins_and_conversion_without_an_output_texture(self):
+    source = (SOURCE / "current_car_ui.py").read_text()
+    self.assertIn("content = rl.load_render_texture(geometry.width, geometry.height)", source)
+    self.assertIn("margin_w=request.margin_w, margin_h=request.margin_h, compose=True", source)
+    self.assertIn("output = rl.load_render_texture(request.width, request.height) if converter is None else None", source)
+    self.assertIn("regions = converter.convert(content.texture) if converter is not None else rgba_regions", source)
+
   def test_view_uses_current_renderer(self):
     source = (SOURCE / "view.py").read_text()
     self.assertIn('"openpilot.starpilot.system.android_auto.current_car_ui"', source)

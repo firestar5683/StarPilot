@@ -6,7 +6,8 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import customization_metadata, MODE_WIDGET, WHEEL_SIZES, validate_widget_order
+from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, WHEEL_SIZES,
+                                                         customization_metadata, validate_widget_order)
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
 MAX_BYTES = 16384
@@ -56,6 +57,7 @@ def layout_metadata_for_viewport(viewport):
   widgets = profile['widgets']
   widgets['current_speed']['default']['x'] += (width - 1860) / 2
   widgets[MODE_WIDGET]['default']['x'] += (width - 1860) / 2
+  widgets[CLOCK_WIDGET]['default']['x'] += (width - 1860) / 2
   widgets['steering_wheel']['default']['x'] += width - 1860
   widgets['driver_monitor']['default']['y'] += height - 1080
   x, y, w, h = maximum_footprint(30, 30, width - 60, height - 60, width)
@@ -119,7 +121,7 @@ def validate_layout_for_viewport(value, viewport):
       type(value['version']) is not int or value['version'] != 1 or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
-      not set(metadata['widgets']) - set(value['widgets']) <= {MODE_WIDGET, *PROJECTION_WIDGETS}):
+      not set(metadata['widgets']) - set(value['widgets']) <= {MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
     raise ValueError('Projection layout does not match saved screen')
   result = copy.deepcopy(value)
   for key in set(metadata['widgets']) - set(value['widgets']):
@@ -127,7 +129,7 @@ def validate_layout_for_viewport(value, viewport):
   if 'widgetOrder' in value:
     order = value['widgetOrder']
     if type(order) is list:
-      order = [*order, *(key for key in (MODE_WIDGET, *PROJECTION_WIDGETS) if key not in order)]
+      order = [*order, *(key for key in (MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS) if key not in order)]
     result['widgetOrder'] = validate_widget_order(order, metadata['widgets'])
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
@@ -185,6 +187,7 @@ def projection_customization(document, base_customization):
   width, height = document['canvas']['width'], document['canvas']['height']
   shifts = {'current_speed': ((width - 1860) / 2, 0),
             MODE_WIDGET: ((width - 1860) / 2, 0),
+            CLOCK_WIDGET: ((width - 1860) / 2, 0),
             'steering_wheel': (width - 1860, 0), 'driver_monitor': (0, height - 1080)}
   native = PROFILES['large']['widgets']
   assert isinstance(native, dict)

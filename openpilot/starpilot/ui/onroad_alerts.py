@@ -16,6 +16,7 @@ class AlertRenderer:
     self._lane_renderer: NativeAlertRenderer | None = None
     self._lane_visible = False
     self._previous: OnroadAlert | None = None
+    self.text_only_alert_names: frozenset[str] = frozenset()
 
   def _center(self, text: str, role: FontRole, size: int, rect: rl.Rectangle, y: float,
               color: rl.Color = rl.WHITE, *, letter_spacing: float = 0) -> None:
@@ -24,8 +25,9 @@ class AlertRenderer:
     self.fonts.draw(text, role, size, rect.x + (rect.width - measured.width) / 2, y, color, spacing=spacing)
 
   def render(self, rect: rl.Rectangle, alert: OnroadAlert, *, signal_direction: int = 0) -> None:
+    event_name = alert.alert_type.split('/', 1)[0]
     if self.fonts.profile == Profile.COMPACT:
-      lane_event = alert.alert_type.split('/', 1)[0] in ('preLaneChangeLeft', 'preLaneChangeRight', 'laneChangeBlocked', 'laneChange',
+      lane_event = event_name in ('preLaneChangeLeft', 'preLaneChangeRight', 'laneChangeBlocked', 'laneChange',
                                                                     'steerTempUnavailable', 'steerTempUnavailableSilent')
       if lane_event or (self._lane_visible and alert.size == AlertSize.NONE):
         if self._lane_renderer is None:
@@ -54,11 +56,12 @@ class AlertRenderer:
       self._alpha.update(1)
     if self.fonts.profile == Profile.LARGE:
       height = rect.height if alert.size == AlertSize.FULL else 271 if alert.size == AlertSize.SMALL else 420
-      self._large(rect, alert, self._position.update(rect.y + rect.height - height))
+      self._large(rect, alert, self._position.update(rect.y + rect.height - height),
+                  text_only=alert.alert_type.split('/', 1)[0] in self.text_only_alert_names)
     else:
       self._compact(rect, alert, compact_y)
 
-  def _large(self, rect: rl.Rectangle, alert: OnroadAlert, animated_y: float) -> None:
+  def _large(self, rect: rl.Rectangle, alert: OnroadAlert, animated_y: float, *, text_only: bool = False) -> None:
     background_alpha = int(255 * 0.9 * self._alpha.x)
     title_color = rl.Color(255, 255, 255, background_alpha)
     subtitle_color = rl.Color(255, 255, 255, int(255 * 0.65 * self._alpha.x))
@@ -85,14 +88,24 @@ class AlertRenderer:
     title_h = self.fonts.measure(alert.text1, FontRole.BOLD, title_size, spacing=title_size * -0.02).height
     plateau_y = round(animated_y + (alert_height - title_h) / 2) - 2
     plateau_h = round(title_h) + 4
-    rl.draw_rectangle_gradient_v(int(rect.x), int(y), int(rect.width), int(plateau_y - y), rl.BLANK, color)
-    rl.draw_rectangle(int(rect.x), int(plateau_y), int(rect.width), plateau_h, color)
-    rl.draw_rectangle_gradient_v(int(rect.x), int(plateau_y + plateau_h), int(rect.width), int(y + alert_height - plateau_y - plateau_h),
-                                 color, rl.BLANK)
+    if not text_only:
+      rl.draw_rectangle_gradient_v(int(rect.x), int(y), int(rect.width), int(plateau_y - y), rl.BLANK, color)
+      rl.draw_rectangle(int(rect.x), int(plateau_y), int(rect.width), plateau_h, color)
+      rl.draw_rectangle_gradient_v(int(rect.x), int(plateau_y + plateau_h), int(rect.width), int(y + alert_height - plateau_y - plateau_h),
+                                   color, rl.BLANK)
     text_rect = rl.Rectangle(rect.x + 60, y, rect.width - 120, alert_height)
     title_y = animated_y + (alert_height - title_h) / 2
+    if text_only:
+      shadow = rl.Color(0, 0, 0, int(220 * self._alpha.x))
+      self._center(alert.text1, FontRole.BOLD, title_size,
+                   rl.Rectangle(text_rect.x + 3, text_rect.y, text_rect.width, text_rect.height),
+                   title_y + 3, shadow, letter_spacing=-0.02)
     self._center(alert.text1, FontRole.BOLD, title_size, text_rect, title_y, title_color, letter_spacing=-0.02)
     if alert.size == AlertSize.MID:
+      if text_only:
+        self._center(alert.text2, FontRole.NORMAL, 56,
+                     rl.Rectangle(text_rect.x + 2, text_rect.y, text_rect.width, text_rect.height),
+                     title_y + title_h + 2, rl.Color(0, 0, 0, int(200 * self._alpha.x)), letter_spacing=0.025)
       self._center(alert.text2, FontRole.NORMAL, 56, text_rect, title_y + title_h,
                    subtitle_color, letter_spacing=0.025)
 

@@ -7,6 +7,7 @@ LICENSE, while the application owns all state and action transport.
 """
 
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 import hashlib
 import json
@@ -15,7 +16,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui import clip
 from openpilot.system.ui.lib.application import gui_app
-from openpilot.starpilot.ui.onroad_customization import (MODE_WIDGET, RAIL_WIDGETS, offset, placement, rgba,
+from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, RAIL_WIDGETS, offset, placement, rgba,
                                                          widget_order, widget_size)
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 
@@ -57,6 +58,10 @@ def driving_mode_description(state: OnroadState) -> str:
   if state.lateral_active:
     return "Always On Lateral"
   return "Stock ACC" if state.stock_cruise_active else "Disengaged"
+
+
+def clock_text(now: datetime | None = None) -> str:
+  return (now or datetime.now().astimezone()).strftime('%I:%M %p').lstrip('0')
 
 
 def axis_status_color(state: OnroadState) -> rl.Color:
@@ -201,26 +206,43 @@ class OnroadView:
       return
     width, height = widget_size(state.customization, profile, MODE_WIDGET)
     size = 40 if profile == Profile.LARGE else 18
-    stroke = 2 if profile == Profile.LARGE else 1
     role = FontRole.SEMI_BOLD
     lines = [""]
     for word in driving_mode_description(state).split():
       candidate = f"{lines[-1]} {word}".strip()
-      if lines[-1] and self.fonts.measure(candidate, role, size).width > width - 2 * stroke:
+      if lines[-1] and self.fonts.measure(candidate, role, size).width > width - 4:
         lines.append(word)
       else:
         lines[-1] = candidate
     line_height = size * profile.font_scale * 1.2
     top = position["y"] + (height - len(lines) * line_height) / 2
     color = rl.Color(*rgba(state.customization, "text", profile, MODE_WIDGET))
-    shadow = rl.Color(0, 0, 0, color.a)
+    shadow = rl.Color(0, 0, 0, min(color.a, 170))
+    shadow_offset = 2 if profile == Profile.LARGE else 1
     for index, text in enumerate(lines):
       x = position["x"] + center_shift + (width - self.fonts.measure(text, role, size).width) / 2
       ink_top, ink_bottom = self.fonts.vertical_ink(text, role, size)
       y = top + index * line_height + (line_height - ink_bottom + ink_top) / 2 - ink_top
-      for dx, dy in ((-stroke, 0), (stroke, 0), (0, -stroke), (0, stroke)):
-        self.fonts.draw(text, role, size, x + dx, y + dy, shadow)
+      self.fonts.draw(text, role, size, x + shadow_offset, y + shadow_offset, shadow)
       self.fonts.draw(text, role, size, x, y, color)
+
+  def _clock(self, state: OnroadState, center_shift: float = 0) -> None:
+    profile = self.fonts.profile
+    position = placement(state.customization, profile, CLOCK_WIDGET)
+    if (not position["enabled"] or state.alert.size != AlertSize.NONE or
+        state.appearance.camera_view == CameraViewChoice.DRIVER or state.reverse_driver_camera):
+      return
+    width, height = widget_size(state.customization, profile, CLOCK_WIDGET)
+    size = 42 if profile == Profile.LARGE else 20
+    role = FontRole.SEMI_BOLD
+    text = clock_text()
+    measured = self.fonts.measure(text, role, size)
+    x = position["x"] + center_shift + (width - measured.width) / 2
+    y = position["y"] + (height - measured.height) / 2
+    color = rl.Color(*rgba(state.customization, "text", profile, CLOCK_WIDGET))
+    offset_px = 2 if profile == Profile.LARGE else 1
+    self.fonts.draw(text, role, size, x + offset_px, y + offset_px, rl.Color(0, 0, 0, min(color.a, 170)))
+    self.fonts.draw(text, role, size, x, y, color)
 
   def _ordered_widgets(self, content, state, *, driver_camera=False, stock_layer=None):
     profile = str(self.fonts.profile)
@@ -270,6 +292,7 @@ class OnroadView:
     if monitor := getattr(self, "driver_monitor_layer", None):
       submit("driver_monitor", lambda: monitor(content, state))
     submit(MODE_WIDGET, lambda: self._driving_mode(state, (width - 1860) / 2 if large else 0))
+    submit(CLOCK_WIDGET, lambda: self._clock(state, (width - 1860) / 2 if large else 0))
     for key in widget_order(state.customization, profile):
       if draw := callbacks.get(key):
         draw()
@@ -332,6 +355,7 @@ class OnroadView:
         for key in ("nav_home", "nav_work"):
           self.navigation_favorites.render(key, state)
         self._driving_mode(state, right_shift / 2)
+        self._clock(state, right_shift / 2)
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
@@ -428,6 +452,7 @@ class OnroadView:
       self.navigation.render(state)
       if not ordered:
         self._driving_mode(state)
+        self._clock(state)
       signals = state.border_signals
       direction = (-1 if signals.left_blinker else 1 if signals.right_blinker else 0) if signals else 0
       self.alert.render(frame, state.alert, signal_direction=direction)

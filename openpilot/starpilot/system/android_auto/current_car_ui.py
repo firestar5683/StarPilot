@@ -172,26 +172,27 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
     if not content.id:
       raise RuntimeError('Projection content target unavailable')
     resources.callback(rl.unload_render_texture, content)
-    output = rl.load_render_texture(request.width, request.height)
-    if not output.id:
-      raise RuntimeError('Projection output target unavailable')
-    resources.callback(rl.unload_render_texture, output)
     converter = None
     if request.flags & FLAG_NV12:
       try:
-        # The composed frame already carries the margins and the top-down flip,
-        # so it converts as is. Reading back NV12 moves 1.5 bytes per pixel
-        # instead of 4, and the encoder skips its own RGBA conversion on the CPU.
-        converter = gpu_nv12.Nv12Converter(request.width, request.height)
+        converter = gpu_nv12.Nv12Converter(request.width, request.height,
+                                           margin_w=request.margin_w, margin_h=request.margin_h, compose=True)
         resources.callback(converter.close)
       except Exception as error:
         print(f"NV12 conversion unavailable, publishing RGBA: {error}", flush=True)
         converter = None
+    # NV12 composes directly from the content texture. Only the RGBA fallback
+    # needs a second full-frame render target.
+    output = rl.load_render_texture(request.width, request.height) if converter is None else None
+    if output is not None:
+      if not output.id:
+        raise RuntimeError('Projection output target unavailable')
+      resources.callback(rl.unload_render_texture, output)
     pixel_format = FORMAT_NV12 if converter is not None else FORMAT_RGBA
     readback = create_readback(FrameReadback, frame_bytes(request.width, request.height, pixel_format),
                              asynchronous=bool(request.flags & FLAG_ASYNC_READBACK))
     resources.callback(lambda: readback.close())
-    rgba_regions = [(output.id, request.width, request.height, 0)]
+    rgba_regions = [(output.id, request.width, request.height, 0)] if output is not None else []
     pixel_format_name = 'nv12' if converter is not None else 'rgba'
     pipeline = f"{pixel_format_name}, {'async' if readback.asynchronous else 'sync'} readback"
     print(f"car view pipeline: {pipeline}", flush=True)
@@ -284,7 +285,12 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       rl.begin_texture_mode(content)
       try:
         rl.clear_background(rl.BLACK)
-        layout.render()
+        rl.rl_push_matrix()
+        try:
+          rl.rl_scalef(geometry.scale, geometry.scale, 1.0)
+          layout.render()
+        finally:
+          rl.rl_pop_matrix()
       finally:
         rl.end_texture_mode()
       layout.handle_touches(projected_touches(touch.drain(), geometry))
@@ -292,8 +298,9 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
         # The previous frame, read back while this one was drawn: waiting any
         # later only adds latency.
         publish_readback()
-      gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h, fit=True)
-      regions = converter.convert(output.texture) if converter is not None else rgba_regions
+      if output is not None:
+        gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h)
+      regions = converter.convert(content.texture) if converter is not None else rgba_regions
       producer.advance(request, captured_ns)
       readback.start(regions)
       in_flight_ns = captured_ns

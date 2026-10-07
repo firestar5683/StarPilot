@@ -10,6 +10,9 @@ from openpilot.starpilot.system.android_auto.identity import EXPIRY_WARNING_DAYS
 from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK_VIEWPORT
 
 CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
+DRIVER_MONITOR_HOLD_NS = 350_000_000
+BUBBLE_REDUNDANT_ALERTS = frozenset(('preLaneChangeLeft', 'preLaneChangeRight', 'laneChange',
+                                     'laneChangeBlocked', 'laneChangeBlockedLoud'))
 
 
 def certificate_notice(days_left: int | None) -> str:
@@ -101,6 +104,8 @@ class ProjectionOnroad:
       self.onroad = self.create_view(native.onroad, self.fonts, camera_layer=self._camera_layer, viewport=viewport)
       self._resources.callback(self._close_onroad)
       self.monitor = native.monitor(native.profile.LARGE)
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
       self.onroad.driver_monitor_layer = self._driver_monitor_layer
       self.pip = None
       self._pip_saved = None
@@ -158,8 +163,20 @@ class ProjectionOnroad:
   def _driver_monitor_layer(self, rect, state):
     ui = self.native.ui_state
     now_ns = time.monotonic_ns()
-    monitor = self.native.current_message(ui.sm, 'driverMonitoringState', now_ns, after_frame=ui.started_frame)
-    driver = self.native.current_message(ui.sm, 'driverStateV2', now_ns, after_frame=ui.started_frame)
+    # The two services are published independently. Requiring both to land in
+    # the same narrow control-freshness window made the AA graphic fade in and
+    # out. Keep the last jointly valid display observation across a brief gap.
+    monitor = self.native.display_message(ui.sm, 'driverMonitoringState', now_ns, after_frame=ui.started_frame)
+    driver = self.native.display_message(ui.sm, 'driverStateV2', now_ns, after_frame=ui.started_frame)
+    if monitor is not None and driver is not None:
+      self._monitor_pair = monitor, driver
+      self._monitor_pair_ns = now_ns
+    elif (self._monitor_pair is not None and self._monitor_pair_ns is not None and
+          0 <= now_ns - self._monitor_pair_ns <= DRIVER_MONITOR_HOLD_NS):
+      monitor, driver = self._monitor_pair
+    else:
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
     self.native.rl.rl_push_matrix()
     self.native.rl.rl_translatef(0, self.height - 1080, 0)
     try:
@@ -204,6 +221,7 @@ class ProjectionOnroad:
     if (saved is None or saved.enabled is not True or saved.mask is None or
         saved.invert is None or saved.on_blinker is None or saved.on_bsm is None):
       self.pip.deactivate()
+      self._set_pip_showing(False)
       return
     ui = native.ui_state
     # Display freshness: carState is 100 Hz, so the 20 ms control window often lapses within one drawn frame.
@@ -219,8 +237,15 @@ class ProjectionOnroad:
       if position['enabled']:
         width, height = native.widget_size(state.customization, 'large', key)
         placements[side] = native.pip_rect(position['x'], position['y'], width, height)
-    self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
-                    on_bsm=saved.on_bsm, invert=saved.invert, placements=placements, **({"submit": submit} if submit is not None else {}))
+    result = self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
+                             on_bsm=saved.on_bsm, invert=saved.invert, placements=placements,
+                             **({"submit": submit} if submit is not None else {}))
+    self._set_pip_showing(result == 'rendered')
+
+  def _set_pip_showing(self, showing):
+    alert = getattr(self.onroad, 'alert', None)
+    if alert is not None:
+      alert.text_only_alert_names = BUBBLE_REDUNDANT_ALERTS if showing else frozenset()
 
   def _with_certificate_notice(self, state, now_ns):
     """Show the certificate heads-up for the first seconds of each drive; a real alert always wins."""
@@ -262,8 +287,11 @@ class ProjectionOnroad:
       if self.favorites is not None:
         self.favorites.cancel()
       self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
       if self.pip is not None:
         self.pip.deactivate()
+        self._set_pip_showing(False)
       self._standby()
 
   def handle_touches(self, events):
