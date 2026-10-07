@@ -63,6 +63,51 @@ class TestVoltCcGas(unittest.TestCase):
     self.assertFalse(any(message[0] == 0x1E1 for message in repeated))
     self.assertEqual(safety.get_controls_allowed(), not release)
 
+  def test_real_ci_mixed_direction_and_single_frame_gas_set(self):
+    safety = libsafety_py.libsafety
+    release = safety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0
+    cp, ci, packer, prepared_ns = self.prepare(gas=False)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 20)
+    self.assertTrue(ci.CC.volt_cc_profile)
+    self.assertFalse(ci.CC.ordinary_cc_profile)
+    direction_frames = []
+    for tick in range(105):
+      now = prepared_ns + (tick + 1) * 10_000_000
+      gas = tick == 52
+      out, sources = feed(ci, packer, now, counter=tick % 4, gas=gas, stock=15., active=True)
+      for source in sources:
+        self.assertTrue(native('rx', source, now // 1000))
+      safety.safety_tick()
+      self.assertEqual(ci.CC.frame, tick)
+      cc = self.command(long_active=not gas)
+      cc.actuators.accel = 1.
+      _, messages = ci.apply(cc.as_reader(), now + 1000)
+      buttons = [message for message in messages if message[0] == 0x1E1]
+      for message in messages:
+        self.assertEqual(native('tx', message, (now + 1000) // 1000), not release, (tick, message))
+      if buttons:
+        self.assertEqual(len(buttons), 1)
+        button = (buttons[0][1][5] >> 4) & 7
+        self.assertIn(button, (2, 3))
+        direction_frames.append(tick)
+      if tick == 48:
+        self.assertEqual(len(buttons), 1)
+        self.assertEqual((buttons[0][1][5] >> 4) & 7, 2)
+      if tick == 52:
+        self.assertTrue(out.canValid and not out.canTimeout)
+        self.assertTrue(out.cruiseState.available and out.cruiseState.enabled and out.gasPressed)
+        self.assertLess(out.cruiseState.speed, out.vEgo)
+        self.assertLess(out.vEgo, cc.hudControl.setSpeed)
+        self.assertTrue(ci.CS.volt_cc_physical.current(now + 1000))
+        self.assertFalse(buttons, 'gas SET52 cannot follow actual RES48 after40ms')
+        self.assertIn(48, direction_frames)
+        self.assertEqual(safety.get_controls_allowed(), not release)
+        from opendbc.car.gm.gmcan import create_buttons
+        counterfactual = create_buttons(ci.CC.packer_pt, 0, (ci.CS.buttons_counter + 1) % 4, 3)
+        self.assertFalse(native('tx', counterfactual, (now + 1000) // 1000), 'same fresh physical credit/tuple is denied by native shared direction clock')
+    self.assertGreaterEqual(len(direction_frames), 3)
+    self.assertTrue(all(b - a > 20 for a, b in zip(direction_frames, direction_frames[1:], strict=False)))
+
   def test_original_reached_caller_conditions_and_current_health(self):
     for change in ('frame', 'enabled', 'long_active', 'hud_equal', 'stock_above', 'inactive', 'brake', 'regen', 'invalid', 'timeout', 'credit', 'disabled'):
       with self.subTest(change=change):
