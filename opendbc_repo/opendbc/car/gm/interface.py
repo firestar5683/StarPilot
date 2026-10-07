@@ -43,6 +43,11 @@ class CarInterface(CarInterfaceBase):
   def get_params(cls, candidate, fingerprint, car_fw, alpha_long, is_release, docs):
     return super().get_params(pedal_candidate(candidate, fingerprint), fingerprint, car_fw, alpha_long, is_release, docs)
 
+  def apply(self, c, now_nanos=None, *, startup_keepalive=False):
+    if startup_keepalive:
+      return self.CC.update(c, self.CS, now_nanos, startup_keepalive=True)
+    return super().apply(c, now_nanos)
+
   def update(self, can_packets):
     if malibu_hybrid_profile(self.CP) is not None:
       self.CS.hybrid_buttons.observe_packets(can_packets)

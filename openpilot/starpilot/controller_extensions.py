@@ -96,14 +96,16 @@ class ManualTurnInputs:
 
 class ResumePlanInputs:
   """Card-owned fresh plan evidence, independent of Controls' saved preference snapshot."""
-  def __init__(self):
+  def __init__(self, *, boottime=False):
+    self.boottime = boottime
     from openpilot.starpilot.longitudinal.inputs import ResumeFreshness
     self.sm = messaging.SubMaster(["deviceState", "carState", "longitudinalPlan"], frequency=25)
     self.freshness = ResumeFreshness()
 
   def update(self, now_ns):
     self.sm.update(0)
-    return (type(now_ns) is int and abs(time.monotonic_ns() - now_ns) <= 150_000_000 and
+    clock_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.boottime else time.monotonic_ns()
+    return (type(now_ns) is int and abs(clock_ns - now_ns) <= 150_000_000 and
             self.freshness.current(self.sm) and not self.sm['longitudinalPlan'].shouldStop)
 
 
@@ -148,7 +150,9 @@ def configure_controller(CI, params):
   from opendbc.car.gm.values import is_volt_longitudinal
   if controller is not None and is_volt_longitudinal(cp) and controller.volt_sng:
     try:
-      controller.volt_sng_plan_input = ResumePlanInputs()
+      from opendbc.car.gm.values import is_volt_sdgm_profile
+      controller.volt_sng_plan_input = ResumePlanInputs(
+        boottime=is_volt_sdgm_profile(cp, longitudinal=True) and cp.safetyConfigs[0].safetyParam == 0x5007)
     except OSError:
       controller.volt_sng_plan_input = None
       cloudlog.exception('Optional Volt resume input transport unavailable')

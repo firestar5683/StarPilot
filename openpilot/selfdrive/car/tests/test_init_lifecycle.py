@@ -26,6 +26,7 @@ class CardInitLifecycleTest(unittest.TestCase):
     card.vehicle_startup = VehicleStartupOwner()
     card.ci_initialized = False
     card.initialized_prev = False
+    card.aol_replay = False
     card.ioniq6_long_prearmed = False
     card.ioniq6_long_selected = False
     card.can_callbacks = (lambda wait_for_one=False: [], lambda frames: None)
@@ -115,6 +116,106 @@ class CardInitLifecycleTest(unittest.TestCase):
     self.assertEqual(len(sent), sent_before + 1)
     self.assertTrue(messaging.log_from_bytes(sent[-1]).valid)
     fake_ci.init.assert_called_once_with(cp, *card.can_callbacks)
+
+  def test_volt_sdgm_inactive_startup_continues_until_initialized(self):
+    from opendbc.car import Bus, structs
+    from opendbc.can import CANPacker
+    from opendbc.car.gm.values import DBC
+    from opendbc.car.gm.tests.test_volt_camera_control import feed_camera
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x180] = 4
+    fingerprint[0][0x2FF] = 8
+    fingerprint[0][0xBE] = 6
+    cp = GMInterface.get_params(GMCar.CHEVROLET_VOLT_2019, fingerprint, [], True, False, False)
+    self.assertEqual(cp.safetyConfigs[0].safetyParam, 0x5007)
+    cp.alternativeExperience = 32
+    card = Car.__new__(Car)
+    card.CP = cp
+    card.CI = GMInterface(cp)
+    card.vehicle_startup = VehicleStartupOwner()
+    card.ci_initialized = False
+    card.initialized_prev = False
+    card.aol_replay = True
+    card.ioniq6_long_prearmed = False
+    card.ioniq6_long_selected = False
+    card.can_callbacks = (lambda **_: [], lambda _: None)
+    card.params = SimpleNamespace(put_bool=Mock())
+    card.state_publish = Mock()
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    cs, _ = feed_camera(card.CI, packer, 22_000_000_000, active=False)
+    self.assertTrue(cs.canValid)
+    card.state_update = Mock(return_value=(cs, None))
+    control = structs.CarControl.new_message().as_reader()
+    panda = SimpleNamespace(safetyModel=cp.safetyConfigs[0].safetyModel, safetyParam=0x5007,
+                            alternativeExperience=cp.alternativeExperience, safetyRxChecksInvalid=True)
+    mono, boot = 20_000_000_000, 22_000_000_000
+
+    class SubMaster:
+      seen = dict.fromkeys(('carControl', 'pandaStates', 'onroadEvents'), True)
+      valid = dict.fromkeys(('carControl', 'pandaStates'), True)
+      alive = dict(valid)
+      logMonoTime = {'carControl': mono, 'pandaStates': boot}
+      recv_time = dict.fromkeys(('carControl', 'pandaStates'), mono / 1e9)
+      events = [SimpleNamespace(name=EventName.selfdriveInitializing)]
+
+      def __getitem__(self, key):
+        return {'carControl': control, 'pandaStates': [panda], 'onroadEvents': self.events}[key]
+
+      def all_alive(self, services):
+        return all(self.alive[name] for name in services)
+
+    card.sm = SubMaster()
+    sent = []
+    card.publish_sendcan = lambda frames, valid=True: sent.extend(frames)
+    # These saved requests cannot acquire startup brake ownership.
+    card.CI.CC.gm_auto_hold = True
+    card.CI.CC.volt_one_pedal = True
+    with patch('openpilot.selfdrive.car.card.time.monotonic_ns', return_value=mono), \
+         patch('openpilot.selfdrive.car.card.time.clock_gettime_ns', return_value=boot), \
+         patch.object(card.CI, 'apply', wraps=card.CI.apply) as apply, \
+         patch.object(card.CI, 'init', wraps=card.CI.init) as init:
+      self.assertFalse(card.startup_panda_configured())
+      self.assertTrue(card.startup_panda_configured(inactive_keepalive=True))
+      for _ in range(30):
+        card.step()
+      self.assertEqual(apply.call_count, 30)
+      init.assert_called_once()
+      card.params.put_bool.assert_called_once_with('ControlsReady', True)
+      self.assertEqual(card.CI.CC.gm_auto_hold_state.drive_ns, 0)
+      self.assertEqual(card.CI.CC.apply_brake, 0)
+      for call in apply.call_args_list:
+        cc, timestamp = call.args
+        self.assertEqual(timestamp, boot)
+        self.assertTrue(call.kwargs['startup_keepalive'])
+        self.assertFalse(cc.enabled or cc.latActive or cc.longActive)
+        self.assertEqual((cc.actuators.torque, cc.actuators.accel), (0., 0.))
+      self.assertTrue(sent)
+      for address, data, _ in sent:
+        if address == 0x180:
+          self.assertEqual(data[0] & 15, 0)
+          self.assertEqual(data[1], 0)
+        elif address == 0x315:
+          self.assertEqual(((data[0] & 15) << 8) | data[1], 0)
+        elif address == 0x2CB:
+          self.assertEqual(data[0] & 1, 0)
+      panda.safetyParam = 0x5087
+      card.step()
+      self.assertEqual(apply.call_count, 30)
+      panda.safetyParam = 0x5007
+      card.sm.logMonoTime['pandaStates'] = boot - 300_000_001
+      card.step()
+      self.assertEqual(apply.call_count, 30)
+      card.sm.logMonoTime['pandaStates'] = boot
+      active = structs.CarControl.new_message(latActive=True)
+      control = active.as_reader()
+      card.step()
+      self.assertEqual(apply.call_count, 30)
+      control = structs.CarControl.new_message().as_reader()
+      card.sm.events = []
+      card.step()
+      self.assertEqual(apply.call_count, 31)
+      self.assertEqual(apply.call_args.args[1], boot)
+      self.assertFalse(apply.call_args.kwargs)
 
 
 if __name__ == '__main__':

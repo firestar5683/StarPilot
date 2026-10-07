@@ -438,7 +438,7 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed = commanded_accel < -.02
     return self.regen_paddle_pressed
 
-  def update(self, CC, CS, now_nanos):
+  def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
     if ((self.camera_pedal_profile is not None and self.camera_pedal_profile.volt or self.volt_cc_pedal_profile is not None)
         and self.frame % 25 == 0):
       self.longitudinal_maneuver_mode = bool(self.longitudinal_maneuver_input is not None and
@@ -452,7 +452,7 @@ class CarController(CarControllerBase):
     one_pedal_enabled = (self.volt_one_pedal and is_volt_one_pedal(self.CP) and self.volt_one_pedal_input is not None and
                          self.volt_one_pedal_input.update(now_nanos))
     one_pedal_active = False
-    if is_gm_auto_hold(self.CP):
+    if not startup_keepalive and is_gm_auto_hold(self.CP):
       hold_enabled = self.gm_auto_hold and self.gm_auto_hold_input is not None and self.gm_auto_hold_input.update(now_nanos)
       physical_current = (pedal_hold_ready and bool(CS.gm_auto_hold_sources) and
                           all(0 < stamp <= now_nanos and now_nanos - stamp <= limit for stamp, limit in CS.gm_auto_hold_sources) and

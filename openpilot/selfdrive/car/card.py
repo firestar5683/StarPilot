@@ -55,6 +55,7 @@ from openpilot.starpilot.aol.wire import IntentState, encode_intent
 from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, IoniqMediaMapCache, WheelMapCache, Press, ioniq6_media_eligible
 from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
 from opendbc.car.gm.aol import native_bootstrap_supported, qualified_gm
+from opendbc.car.gm.values import is_volt_sdgm_profile
 from opendbc.car.gm.ordinary_cc import control_transport_required as gm_cc_transport_required
 from openpilot.starpilot.longitudinal.toyota_output_policy import CLOCK_PAIR_MAX_SKEW_NS, clock_pair_ns
 from openpilot.starpilot.longitudinal.cruise_intervals import read_cruise_intervals
@@ -969,7 +970,8 @@ class Car:
                     not ps.controlsAllowed and not ps.safetyRxChecksInvalid and
                     (ps.ignitionLine or ps.ignitionCan) for ps in pandas))
 
-  def startup_panda_configured(self):
+  def startup_panda_configured(self, *, inactive_keepalive=False):
+    # Inactive keepalives carry no axis authority during the first native RX health tick.
     now, boot = time.monotonic_ns(), time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     sm = self.sm
     stamp, receipt = int(sm.logMonoTime['pandaStates']), int(sm.recv_time['pandaStates'] * 1e9)
@@ -979,7 +981,8 @@ class Car:
                 0 < receipt <= now and now - receipt <= 300_000_000 and
                 len(pandas) == len(self.CP.safetyConfigs) and
                 all(ps.safetyModel == cfg.safetyModel and ps.safetyParam == cfg.safetyParam and
-                    ps.alternativeExperience == self.CP.alternativeExperience and not ps.safetyRxChecksInvalid
+                    ps.alternativeExperience == self.CP.alternativeExperience and
+                    (not ps.safetyRxChecksInvalid or inactive_keepalive and self.volt_sdgm_startup_keepalive())
                     for ps, cfg in zip(pandas, self.CP.safetyConfigs, strict=True)))
 
   def publish_sendcan(self, frames, valid=True):
@@ -1027,6 +1030,9 @@ class Car:
     self.volt_cc_now_boot_ns = boot_ns
     self.volt_cc_now_mono_ns = now_ns
     return True
+
+  def volt_sdgm_startup_keepalive(self):
+    return (is_volt_sdgm_profile(self.CP, longitudinal=True) and self.CP.safetyConfigs[0].safetyParam == 0x5007)
 
   def controls_update(self, CS: car.CarState, CC: car.CarControl, *, initialize_only=False):
     """control update loop, driven by carControl"""
@@ -1109,6 +1115,11 @@ class Car:
       self.ci_initialized = True
 
     if initialize_only:
+      if self.volt_sdgm_startup_keepalive() and self.startup_panda_configured(inactive_keepalive=True):
+        inactive = car.CarControl.new_message().as_reader()
+        self.last_actuators_output, can_sends = self.CI.apply(
+          inactive, time.clock_gettime_ns(time.CLOCK_BOOTTIME), startup_keepalive=True)
+        self.publish_sendcan(can_sends, valid=CS.canValid)
       return
 
     self.vehicle_startup.check()
@@ -1146,7 +1157,8 @@ class Car:
           return
       # send car controls over can
       now_nanos = (self.volt_cc_now_boot_ns if getattr(self, 'volt_cc_selected', False) else
-                   self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9))
+                   self.can_log_mono_time if REPLAY else
+                   time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_sdgm_startup_keepalive() else int(time.monotonic() * 1e9))
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
       self.publish_sendcan(can_sends, valid=CS.canValid)
 
@@ -1163,7 +1175,7 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
-    elif (not self.ci_initialized and self.sm.seen['onroadEvents'] and
+    elif ((not self.ci_initialized or self.volt_sdgm_startup_keepalive()) and self.sm.seen['onroadEvents'] and
           any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
           self.aol_replay and native_bootstrap_supported(self.CP)):
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
