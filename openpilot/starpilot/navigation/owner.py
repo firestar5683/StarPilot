@@ -573,9 +573,14 @@ class NavigationOwner:
     selected = self._retrieve(identity, search_id, caller, expected_revision, authorized, keep=False)
     return self._change(lambda doc: self._navigate(doc, selected), expected_revision, authorized)
 
-  def favorite_place(self, identity, search_id, caller, expected_revision, authorized):
+  def favorite_place(self, identity, search_id, caller, expected_revision, authorized, label=None):
+    self._validate_favorite_label(label)
     selected = self._retrieve(identity, search_id, caller, expected_revision, authorized, keep=True)
-    result = self._change(lambda doc: self._add_favorite(doc, selected), expected_revision, authorized)
+    def update(doc):
+      self._add_favorite(doc, selected)
+      if label is not None:
+        self._label_favorite(doc, selected['id'], label)
+    result = self._change(update, expected_revision, authorized)
     with self._lock:
       entry = self._searches.get((caller, search_id))
       if entry is not None and entry['revision'] == expected_revision:
@@ -604,9 +609,14 @@ class NavigationOwner:
       self._searches.clear()
     return self._change(lambda doc: doc.update(destination=None, routeChoice=0), expected_revision, authorized)
 
-  def favorite(self, value: dict, expected_revision: str, authorized) -> dict:
+  def favorite(self, value: dict, expected_revision: str, authorized, label=None) -> dict:
+    self._validate_favorite_label(label)
     selected = destination(value)
-    return self._change(lambda doc: self._add_favorite(doc, selected), expected_revision, authorized)
+    def update(doc):
+      self._add_favorite(doc, selected)
+      if label is not None:
+        self._label_favorite(doc, selected['id'], label)
+    return self._change(update, expected_revision, authorized)
 
   def remove_favorite(self, identity: str, expected_revision: str, authorized) -> dict:
     return self._change(lambda doc: doc.update(favorites=[row for row in doc['favorites'] if row['id'] != identity]),
@@ -614,17 +624,23 @@ class NavigationOwner:
 
   def label_favorite(self, identity: str, label, expected_revision: str, authorized) -> dict:
     """Mark a saved place as Home or Work (one each), or clear its label with None."""
+    self._validate_favorite_label(label)
+    return self._change(lambda doc: self._label_favorite(doc, identity, label), expected_revision, authorized)
+
+  @staticmethod
+  def _validate_favorite_label(label):
     if label is not None and label not in FAVORITE_LABELS:
       raise ValidationError('Choose Home or Work')
-    def update(doc):
-      if not any(row['id'] == identity for row in doc['favorites']):
-        raise ValidationError('Choose a saved place')
-      for row in doc['favorites']:
-        if row['id'] == identity or label is not None and row.get('label') == label:
-          row.pop('label', None)
-        if row['id'] == identity and label is not None:
-          row['label'] = label
-    return self._change(update, expected_revision, authorized)
+
+  @staticmethod
+  def _label_favorite(doc, identity, label):
+    if not any(row['id'] == identity for row in doc['favorites']):
+      raise ValidationError('Choose a saved place')
+    for row in doc['favorites']:
+      if row['id'] == identity or label is not None and row.get('label') == label:
+        row.pop('label', None)
+      if row['id'] == identity and label is not None:
+        row['label'] = label
 
   def remove_recent(self, identity: str, expected_revision: str, authorized) -> dict:
     return self._change(lambda doc: doc.update(recents=[row for row in doc['recents'] if row['id'] != identity]),

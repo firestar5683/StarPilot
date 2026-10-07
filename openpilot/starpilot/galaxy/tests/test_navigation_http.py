@@ -192,8 +192,9 @@ class NavigationHttpTest(unittest.TestCase):
     self.assertEqual([row['name'] for row in result['recents']],['Coffee Shop'])
     self.assertNotIn('pk.synthetic',json.dumps(result))
     self.assertEqual(self.action('selectPlace',id=identity,searchId=search['searchId'])[0],400)
-    status, saved, _ = self.action('favorite',destination=result['destination'])
+    status, saved, _ = self.action('favorite',destination=result['destination'],label='work')
     self.assertEqual(status,200)
+    self.assertEqual(saved['favorites'][0]['label'],'work')
     place = saved['favorites'][0]['id']
     status, labeled, _ = self.action('labelFavorite',id=place,label='home')
     self.assertEqual((status,labeled['favorites'][0]['label']),(200,'home'))
@@ -211,8 +212,9 @@ class NavigationHttpTest(unittest.TestCase):
                             'geometry':{'coordinates':[-90.,40.]}}]}
     with patch('openpilot.starpilot.navigation.owner.response_json',side_effect=[suggestion,feature,feature]):
       self.assertEqual(self.request('/api/navigation/search',payload=search,cookie=self.local_cookie)[0],200)
-      status, saved, _ = self.action('favoritePlace',id='poi/id',searchId=search['searchId'])
+      status, saved, _ = self.action('favoritePlace',id='poi/id',searchId=search['searchId'],label='home')
       self.assertEqual(status,200)
+      self.assertEqual(saved['favorites'][0]['label'],'home')
       self.assertEqual((saved['favorites'][0]['name'],saved['favorites'][0]['address'],saved['destination']),('Coffee Shop','1 Main St',None))
       status, chosen, _ = self.action('selectPlace',id='poi/id',searchId=search['searchId'])
       self.assertEqual((status,chosen['destination']['name']),(200,'Coffee Shop'))

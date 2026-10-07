@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { compile } from "../web/vendor/vue/vue.esm-browser.js"
-import { NavigationClient, NavigationPage, validDestination } from "../web/js/navigation.js"
+import { FavoriteChoices, NavigationClient, NavigationPage, validDestination } from "../web/js/navigation.js"
 
 const home = { id: "h1", name: "12 Elm St", latitude: 40.1, longitude: -90.1 }
 const gym = { id: "g1", name: "Elm Fitness", latitude: 40.3, longitude: -90.3 }
@@ -29,6 +29,11 @@ assert.equal(typed[0].body.searchId, typed[1].body.searchId, "one session for th
 assert.equal(typed[0].body.clientId, client.clientId)
 assert.equal(first.length, 2)
 assert.deepEqual(second.map((place) => place.name), ["Coffee a", "Coffee b"])
+const searchRequests = requests.length
+assert.deepEqual((await client.search("coffee")).results, second)
+assert.equal(requests.length, searchRequests, "Search reuses matching suggestions without another provider request")
+assert.equal(client.searchId, typed[0].body.searchId, "reused places keep their retrieval session")
+await client.suggest("coffee")
 assert.deepEqual(await client.suggest("co"), [], "two letters are too few to suggest")
 assert.equal(client.suggestions.length, 0)
 
@@ -110,4 +115,18 @@ assert.deepEqual(computed.usageRows.call({ data: { mapboxUsage: usage } }).map((
   [["Searches", 12, 495], ["Address lookups", 4, 99000], ["Routes", 3, 99000], ["Map views", 0, 198000]])
 
 compile(NavigationPage.template, { decodeEntities: (value) => value.replaceAll("&amp;", "&") })
+compile(FavoriteChoices.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
+const favoriteActions = [], favoritePage = { favorites: [], savedSearchIds: [], savedSuggestionPlaces: {}, favoritePicker: "selected",
+  client: { save: async (place, label) => { favoriteActions.push([place, label]); return {favorites:[{...home,label}]} } } }
+await methods.saveAs.call(favoritePage, home, "home")
+assert.deepEqual(favoriteActions[0], [home, "home"])
+assert.equal(favoritePage.favoritePicker, null)
+favoritePage.favorites = [{...home,label:"home"}]
+favoritePage.client.action = async (...args) => { favoriteActions.push(args); return {favorites:[home]} }
+await methods.saveAs.call(favoritePage, home, null)
+assert.deepEqual(favoriteActions.at(-1), ["labelFavorite", {id:home.id,label:null}], "Other clears Home/Work without removing the favorite")
+favoritePage.favoritePicker = "selected"
+favoritePage.client.action = async () => null
+await methods.saveAs.call(favoritePage, home, "work")
+assert.equal(favoritePage.favoritePicker, "selected", "failed saves leave the inline choices open")
 console.log("Navigation autocomplete: one session per typing burst, parallel polling, session reset, usage and template passed")

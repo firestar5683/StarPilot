@@ -8,7 +8,7 @@ import unittest
 from openpilot.starpilot.system.android_auto.display_profile import record_screen, read_screen
 from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
-  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP,
+  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, placement_size,
 )
 from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
@@ -72,6 +72,17 @@ class TestProjectionLayout(unittest.TestCase):
     self.assertEqual(converted['layouts']['compact'], base['layouts']['compact'])
     self.assertEqual(base, before)
 
+  def test_projection_clock_format_is_independent_and_migrates(self):
+    document = default_layout(SCREEN)
+    self.assertFalse(document['clock24Hour'])
+    document['clock24Hour'] = True
+    self.assertTrue(projection_customization(document, default_document())['clock24Hour'])
+    document.pop('clock24Hour')
+    self.assertFalse(validate_layout(document, SCREEN)['clock24Hour'])
+    document['clock24Hour'] = 1
+    with self.assertRaisesRegex(ValueError, 'clock format'):
+      validate_layout(document, SCREEN)
+
   def test_new_optional_widgets_preserve_saved_projection_layout(self):
     for key in (MODE_WIDGET, CLOCK_WIDGET):
       with self.subTest(key=key):
@@ -85,6 +96,27 @@ class TestProjectionLayout(unittest.TestCase):
         self.assertEqual(validate_layout(migrated, SCREEN), migrated)
         converted = projection_customization(migrated, default_document())
         self.assertEqual(converted['layouts']['large'][key]['x'] + (migrated['canvas']['width'] - 1860) / 2, 500)
+
+  def test_favorite_display_migrates_and_uses_its_actual_footprint(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    for key in FAVORITE_WIDGETS:
+      document['widgets'][key].pop('display')
+    original = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, original)
+    self.assertTrue(all(migrated['widgets'][key]['display'] == 'words' for key in FAVORITE_WIDGETS))
+    home = migrated['widgets']['nav_home']
+    home.update(display='icons', enabled=True, x=2740)
+    self.assertEqual(placement_size('nav_home', metadata['widgets']['nav_home'], home), (110, 110))
+    validated = validate_layout(migrated, SCREEN)
+    self.assertEqual(projection_customization(validated, default_document())['layouts']['large']['nav_home'], home)
+    self.assertEqual(validated['widgets']['nav_work']['display'], 'words')
+    for display in ('words', 'emoji', None, True, [], {}):
+      broken = copy.deepcopy(migrated)
+      broken['widgets']['nav_home']['display'] = display
+      with self.assertRaises(ValueError):
+        validate_layout(broken, SCREEN)
 
   def test_existing_exact_commit_adapter_checks_revision_and_authority(self):
     with tempfile.TemporaryDirectory() as directory:

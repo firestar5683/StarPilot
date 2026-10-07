@@ -2,7 +2,7 @@
 import time
 
 from openpilot.starpilot.navigation.owner import NavigationOwner
-from openpilot.starpilot.system.android_auto.projection_layout import FAVORITE_WIDGETS, FAVORITE_SIZE
+from openpilot.starpilot.system.android_auto.projection_layout import FAVORITE_WIDGETS, FAVORITE_SIZE, FAVORITE_ICON_SIZE
 from openpilot.starpilot.ui.onroad_customization import widget_order
 
 
@@ -52,7 +52,8 @@ class ProjectionFavorites:
       order = [*widget_order(state.customization, 'large'), *FAVORITE_WIDGETS]
     for key in reversed(order):
       if key in FAVORITE_WIDGETS and (placed := self.bounds(key, state)) is not None:
-        if placed['x'] <= x < placed['x'] + FAVORITE_SIZE[0] and placed['y'] <= y < placed['y'] + FAVORITE_SIZE[1]:
+        width, height = (FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE) if placed.get('display') == 'icons' else FAVORITE_SIZE
+        if placed['x'] <= x < placed['x'] + width and placed['y'] <= y < placed['y'] + height:
           return key
     return None
 

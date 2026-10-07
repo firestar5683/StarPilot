@@ -53,6 +53,18 @@ def test_clock_is_an_opt_in_widget_and_migrates_saved_layout_and_layer_order():
     assert migrated['widgetOrder'][profile][-1] == CLOCK_WIDGET
 
 
+def test_clock_format_preference_defaults_migrates_and_validates():
+  document = default_document()
+  assert document['clock24Hour'] is False
+  document['clock24Hour'] = True
+  assert validate_document(document)['clock24Hour'] is True
+  document.pop('clock24Hour')
+  assert validate_document(document)['clock24Hour'] is False
+  document['clock24Hour'] = 1
+  with pytest.raises(ValueError, match='clock format'):
+    validate_document(document)
+
+
 @pytest.mark.parametrize("widget,x,y", [("max_speed", 174, 19), ("steering_wheel", 174, 131)])
 def test_protected_compact_actions_reject_actual_overlap(widget, x, y):
   document = default_document()

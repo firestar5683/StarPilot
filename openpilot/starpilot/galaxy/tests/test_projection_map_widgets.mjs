@@ -19,13 +19,13 @@ metadata.widgets.nav_map = { label: "Map overlay", kind: "nav_map", width: 860, 
   default: { x: 1950, y: 625, enabled: false, width: 860, height: 410, opacity: 70 } }
 for (const [index, label] of ["Home", "Work"].entries()) {
   const key = `nav_${label.toLowerCase()}`
-  metadata.widgets[key] = { label, kind: key, width: 320, height: 110, colors: {},
-    default: { x: 2195 + index * 335, y: 280, enabled: false } }
+  metadata.widgets[key] = { label, kind: key, width: 320, height: 110, iconSize: 110, colors: {},
+    default: { x: 2195 + index * 335, y: 280, enabled: false, display: 'words' } }
 }
 metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 1, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 1, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-map", editable: true, valid: true,
@@ -93,7 +93,7 @@ Object.defineProperties(vm, {
   selectedWidget: { get: () => profile.widgets[vm.state.selected] },
   selectedPosition: { get: () => vm.state.draft.layouts.large[vm.state.selected] },
 })
-for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "reorderLayer"])
+for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "reorderLayer", "setFavoriteDisplay"])
   vm[name] = OnroadLayoutPage.methods[name].bind(vm)
 const pointer = (x, y) => ({ clientX: x, clientY: y, pointerId: 7, button: 0, preventDefault() {}, stopPropagation() {} })
 vm.startResize("nav_map", pointer(1950 + 860, 625 + 410))
@@ -131,6 +131,27 @@ assert.equal(savedFavorites.widgets.nav_home.enabled, false)
 assert.equal(savedFavorites.widgets.nav_work.enabled, false)
 assert.deepEqual(savedFavorites.widgetOrder, vm.state.draft.widgetOrder.large)
 assert.equal(validDocument(vm.state.draft, data.metadata), true)
+
+// Independent icon choices shrink the preview footprint and survive saving.
+vm.state.selected = 'nav_home'
+const undoBeforeDisplay = vm.state.history.undo.length
+vm.setFavoriteDisplay('icons')
+assert.deepEqual(widgetSize(profile.widgets.nav_home, vm.layout.nav_home), [110, 110])
+assert.equal(vm.layout.nav_work.display, 'words')
+assert.equal(vm.state.history.undo.length, undoBeforeDisplay + 1)
+vm.changePosition('nav_home', 2740, 700)
+assert.equal(vm.layout.nav_home.x, 2740, 'compact icons can sit close to the right edge')
+vm.setFavoriteDisplay('words')
+assert.equal(vm.layout.nav_home.x, 2530, 'switching back to words keeps the whole card on screen')
+assert.deepEqual(widgetSize(profile.widgets.nav_home, vm.layout.nav_home), [320, 110])
+vm.setFavoriteDisplay('icons')
+assert.equal(projectionPayload({revision:'display', document:vm.state.draft}, data.metadata).document.widgets.nav_home.display, 'icons')
+assert.equal(validDocument(vm.state.draft, data.metadata), true)
+for (const display of ['emoji', null, true, 1]) {
+  const invalid = copy(vm.state.draft)
+  invalid.layouts.large.nav_home.display = display
+  assert.equal(validDocument(invalid, data.metadata), false)
+}
 
 compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
 console.log("Projection widgets: map resizing/opacity, Home/Work add/move/order/remove, strict documents and payload passed")

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette } from "../web/js/onroad-layout.js"
+import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette } from "../web/js/onroad-layout.js"
 import { SettingsPage, SETTINGS_SECTIONS } from "../web/js/settings.js"
 import { loadCatalog } from "../web/js/startup.js"
 
@@ -229,6 +229,9 @@ assert.equal(vm.layout.current_speed.x, 700)
 vm.onKey("current_speed", { key: "ArrowRight", shiftKey: true, preventDefault() {} })
 assert.equal(vm.layout.current_speed.x, 710)
 vm.onKey("current_speed", { key: "Delete", preventDefault() {} })
+assert.equal(vm.state.removeConfirm, "current_speed")
+assert.equal(vm.layout.current_speed.enabled, true)
+vm.confirmRemove()
 assert.equal(vm.layout.current_speed.enabled, false)
 assert.equal(vm.inactiveWidgets.length, 1)
 vm.startDrag("current_speed", event(1300, 100), true)
@@ -423,6 +426,11 @@ assert.deepEqual(copy(stockEditor.state.draft), snapshot().document)
 assert.match(OnroadLayoutPage.template, /Reset to stock StarPilot/)
 assert.match(OnroadLayoutPage.template, /@click="undo"/)
 assert.match(OnroadLayoutPage.template, /@click="redo"/)
+assert.match(OnroadLayoutPage.template, /class="gx-layout__remove"/)
+assert.match(OnroadLayoutPage.template, /Remove widget/)
+assert.doesNotMatch(OnroadLayoutPage.template, />Remove from layout</)
+assert.match(OnroadLayoutPage.template, /:clock24-hour="!!state\.draft\.clock24Hour"/)
+assert.match(LayoutWidgetPreview.template, /clock24Hour \? '18:00' : '12:00 PM'/)
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 function feedFixture() {
@@ -531,6 +539,9 @@ const catalog = JSON.parse(readFileSync(new URL("../web/data/catalog.json", impo
 assert.ok(appSource.includes("['/theme_maker', '/theme_maker/android_auto'].includes(route.path)"))
 assert.ok(appSource.includes(':key="route.path" :projection="route.path ==='))
 assert.ok(appSource.includes('@target="go($event ==='))
+assert.match(appSource, /goFromMenu\(path\)/)
+assert.match(appSource, /requestLeave\(proceed, presentation\)/)
+assert.match(appSource, /@click="goFromMenu\(item\.path\)"/)
 assert.match(editorSource, /<LayoutWidgetPreview :widget="widget"/)
 assert.doesNotMatch(editorSource, /<LayoutWidgetPreview v-if="!state\.preview\.url"/)
 assert.match(editorSource, /<section v-if="state\.devicePreviewOpen" class="gx-layout__device"/)

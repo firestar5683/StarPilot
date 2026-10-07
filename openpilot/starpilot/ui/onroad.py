@@ -60,8 +60,9 @@ def driving_mode_description(state: OnroadState) -> str:
   return "Stock ACC" if state.stock_cruise_active else "Disengaged"
 
 
-def clock_text(now: datetime | None = None) -> str:
-  return (now or datetime.now().astimezone()).strftime('%I:%M %p').lstrip('0')
+def clock_text(now: datetime | None = None, use_24_hour: bool = False) -> str:
+  value = now or datetime.now().astimezone()
+  return value.strftime('%H:%M') if use_24_hour else value.strftime('%I:%M %p').lstrip('0')
 
 
 def axis_status_color(state: OnroadState) -> rl.Color:
@@ -235,7 +236,7 @@ class OnroadView:
     width, height = widget_size(state.customization, profile, CLOCK_WIDGET)
     size = 42 if profile == Profile.LARGE else 20
     role = FontRole.SEMI_BOLD
-    text = clock_text()
+    text = clock_text(use_24_hour=state.customization.get("clock24Hour", False))
     measured = self.fonts.measure(text, role, size)
     x = position["x"] + center_shift + (width - measured.width) / 2
     y = position["y"] + (height - measured.height) / 2

@@ -20,6 +20,7 @@ NAV_CARD, NAV_MAP = 'nav_card', 'nav_map'
 NAV_HOME, NAV_WORK = 'nav_home', 'nav_work'
 FAVORITE_WIDGETS = (NAV_HOME, NAV_WORK)
 FAVORITE_SIZE = (320, 110)
+FAVORITE_ICON_SIZE = 110
 PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *FAVORITE_WIDGETS)
 NAV_CARD_SIZE = (560, 195)
 MAP_MIN_SIZE = (280, 200)
@@ -83,9 +84,10 @@ def layout_metadata_for_viewport(viewport):
   for index, key in enumerate(FAVORITE_WIDGETS):
     label = ('Home', 'Work')[index]
     widgets[key] = {'label': label, 'kind': key, 'width': FAVORITE_SIZE[0], 'height': FAVORITE_SIZE[1], 'colors': {},
+                    'iconSize': FAVORITE_ICON_SIZE,
                     'note': f'Navigate to your saved {label} favorite. Tap again to end navigation. Set the address in The Galaxy.',
                     'default': {'x': width - 30 - 2 * FAVORITE_SIZE[0] - 15 + index * (FAVORITE_SIZE[0] + 15),
-                                'y': 280, 'enabled': False}}
+                                'y': 280, 'enabled': False, 'display': 'words'}}
   profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *FAVORITE_WIDGETS]
   return profile
 
@@ -97,12 +99,14 @@ def default_layout(screen):
 
 def default_layout_for_viewport(viewport):
   metadata = layout_metadata_for_viewport(viewport)
-  return {'version': 1, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  return {'version': 1, 'clock24Hour': False, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 
 
 def placement_size(key, widget, placement):
+  if key in FAVORITE_WIDGETS and placement.get('display') == 'icons':
+    return FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE
   if key == 'steering_wheel':
     return placement.get('size', 192), placement.get('size', 192)
   if key == NAV_MAP:
@@ -117,13 +121,19 @@ def validate_layout(value, screen):
 
 def validate_layout_for_viewport(value, viewport):
   metadata = layout_metadata_for_viewport(viewport)
-  if (type(value) is not dict or set(value) != {'version', 'canvas', 'widgets'} | ({'widgetOrder'} if 'widgetOrder' in value else set()) or
+  fields = {'version', 'canvas', 'widgets'}
+  if type(value) is dict:
+    fields |= {field for field in ('widgetOrder', 'clock24Hour') if field in value}
+  if (type(value) is not dict or set(value) != fields or
       type(value['version']) is not int or value['version'] != 1 or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
       not set(metadata['widgets']) - set(value['widgets']) <= {MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
     raise ValueError('Projection layout does not match saved screen')
   result = copy.deepcopy(value)
+  if 'clock24Hour' in value and type(value['clock24Hour']) is not bool:
+    raise ValueError('Invalid projection clock format')
+  result.setdefault('clock24Hour', False)
   for key in set(metadata['widgets']) - set(value['widgets']):
     result['widgets'][key] = dict(metadata['widgets'][key]['default'])
   if 'widgetOrder' in value:
@@ -134,10 +144,15 @@ def validate_layout_for_viewport(value, viewport):
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
     placement = result['widgets'][key]
+    if key in FAVORITE_WIDGETS and type(placement) is dict:
+      placement.setdefault('display', 'words')
     fields = ({'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set()) |
+              ({'display'} if key in FAVORITE_WIDGETS else set()) |
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
+    if key in FAVORITE_WIDGETS and placement['display'] not in ('words', 'icons'):
+      raise ValueError('Invalid favorite widget display')
     size = placement.get('size', 192)
     if key == 'steering_wheel' and (type(size) is not int or not WHEEL_SIZES['large'][0] <= size <= WHEEL_SIZES['large'][2]):
       raise ValueError('Invalid steering wheel size')
@@ -194,6 +209,7 @@ def projection_customization(document, base_customization):
   tx, ty, _, _ = maximum_footprint(30, 30, width - 60, height - 60, width)
   shifts['torque_bar'] = (tx - native['torque_bar']['default']['x'], ty - native['torque_bar']['default']['y'])
   result = copy.deepcopy(base_customization)
+  result['clock24Hour'] = document.get('clock24Hour', False)
   result.setdefault('widgetOrder', {}).pop('large', None)
   if 'widgetOrder' in document:
     result['widgetOrder']['large'] = list(document['widgetOrder'])

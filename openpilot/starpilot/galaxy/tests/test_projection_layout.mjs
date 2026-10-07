@@ -13,7 +13,7 @@ metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 1, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 1, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-screen-and-layout", editable: true, valid: true,
@@ -26,6 +26,9 @@ assert.equal(validSnapshot({ ...data, metadata: { ...data.metadata, projection: 
 assert.equal(validDocument(data.document, native.metadata), false)
 assert.deepEqual(projectionPayload({ revision: raw.revision, document: data.document }, data.metadata),
   { revision: raw.revision, document: raw.document })
+data.document.clock24Hour = true
+assert.equal(projectionPayload({ revision: raw.revision, document: data.document }, data.metadata).document.clock24Hour, true)
+data.document.clock24Hour = false
 assert.throws(() => editorSnapshot({ version: 1, screen: null, reason: "Connect Android Auto once" }), /Connect Android Auto once/)
 assert.equal(editorSnapshot({ ...raw, editable: false, reason: "Enable Android Auto" }).editable, false)
 assert.ok(!OnroadLayoutPage.template.includes('<section class="gx-layout__colors" aria-label="Path'))
@@ -33,15 +36,35 @@ assert.ok(OnroadLayoutPage.template.includes('v-if="!projection && colorFields.l
 assert.ok(OnroadLayoutPage.template.includes('v-if="!projection && state.profile ==='))
 compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("&amp;", "&") }) // Actual Vue compiler, including projection conditionals.
 
-const emissions = []
-const vm = { busy: false, dirty: true, state: { drag: null, discard: null },
-  hideDevicePreview() {}, $emit: (...args) => emissions.push(args), feed: { load() {} } }
-vm.leave = OnroadLayoutPage.methods.leave.bind(vm)
-OnroadLayoutPage.methods.requestLeave.call(vm, "projection")
-assert.equal(vm.state.discard, "projection")
+const emissions = [], leaveVm = { projection: true, busy: false, dirty: true,
+  state: { status: "ready", data: { editable: true }, draft: {}, drag: null, layerDrag: null, discard: null, leavePresentation: null, removeConfirm: null, error: "", needsReload: false },
+  hideDevicePreview() {}, $emit: (...args) => emissions.push(args), feed: { load() {}, async save() { return true } } }
+for (const name of ["pendingLeave", "inlineLeavePrompt", "modalLeavePrompt", "canSavePending"])
+  Object.defineProperty(leaveVm, name, { get: () => OnroadLayoutPage.computed[name].call(leaveVm) })
+for (const name of ["requestLeave", "cancelLeave", "leave", "saveAndLeave"])
+  leaveVm[name] = OnroadLayoutPage.methods[name].bind(leaveVm)
+leaveVm.requestLeave("device")
+assert.equal(leaveVm.state.discard, "device")
+assert.equal(leaveVm.inlineLeavePrompt, true)
+assert.equal(leaveVm.modalLeavePrompt, false)
 assert.deepEqual(emissions, [])
-vm.leave(vm.state.discard)
-assert.deepEqual(emissions, [["target", "projection"]])
+leaveVm.cancelLeave()
+let proceeded = 0
+leaveVm.requestLeave(() => { proceeded++ }, "modal")
+assert.equal(leaveVm.inlineLeavePrompt, false)
+assert.equal(leaveVm.modalLeavePrompt, true)
+assert.equal(await leaveVm.saveAndLeave(), true)
+assert.equal(proceeded, 1)
+assert.equal(leaveVm.state.discard, null)
+leaveVm.feed.save = async () => false
+leaveVm.requestLeave(() => { proceeded++ }, "modal")
+assert.equal(await leaveVm.saveAndLeave(), false)
+assert.equal(proceeded, 1)
+assert.equal(leaveVm.modalLeavePrompt, true)
+leaveVm.cancelLeave()
+assert.match(OnroadLayoutPage.template, /inlineLeavePrompt \? 'Leave without saving your changes\?'/)
+assert.match(OnroadLayoutPage.template, /v-if="modalLeavePrompt"/)
+assert.match(OnroadLayoutPage.template, /@click="saveAndLeave"/)
 
 const setup = OnroadLayoutPage.setup({ projection: true, mode: "local", unauthorized() {} })
 assert.equal(setup.feed.projection, true)
@@ -58,10 +81,10 @@ const feed = new OnroadLayoutFeed({ projection: true, publish: v => updates.push
 await feed.start()
 const draft = copy(feed.data.document)
 draft.layouts.large.current_speed.x += 20
-await feed.save(draft)
+assert.equal(await feed.save(draft), true)
 assert.equal(requests[0].url, "./api/android-auto/layout")
 assert.equal(requests[1].body.document.version, 1)
-assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["canvas", "version", "widgets"])
+assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["canvas", "clock24Hour", "version", "widgets"])
 assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
 feed.stop()

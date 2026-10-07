@@ -1658,7 +1658,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       'favoritePlace': {'id', 'searchId'}, 'removeFavorite': {'id'}, 'labelFavorite': {'id', 'label'},
                       'removeRecent': {'id'}, 'clearRecents': set(), 'selectRoute': {'index'}}
             action = payload.get('action')
-            if type(action) is not str or action not in fields or set(payload) != {'action', 'revision'} | fields[action]:
+            optional = {'label'} if action in ('favorite', 'favoritePlace') and 'label' in payload else set()
+            if type(action) is not str or action not in fields or set(payload) != {'action', 'revision'} | fields[action] | optional:
               raise ValidationError('Invalid navigation action')
             needs_park = action == 'configure' and isinstance(payload['patch'], dict) and 'token' in payload['patch']
             def authorized():
@@ -1682,9 +1683,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               elif action == 'selectRoute':
                 result = nav.select_route(payload['index'], **keywords)
               elif action == 'favorite':
-                result = nav.favorite(payload['destination'], **keywords)
+                result = nav.favorite(payload['destination'], **keywords, label=payload.get('label'))
               elif action == 'favoritePlace':
-                result = nav.favorite_place(payload['id'], payload['searchId'], identity, **keywords)
+                result = nav.favorite_place(payload['id'], payload['searchId'], identity, **keywords, label=payload.get('label'))
               elif action == 'clearRecents':
                 result = nav.clear_recents(**keywords)
               else:

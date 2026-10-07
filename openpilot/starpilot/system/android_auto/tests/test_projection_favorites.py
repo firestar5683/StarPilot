@@ -47,7 +47,7 @@ def state(*, ordered=False):
 
 def point(state, key):
   placed = state.customization['layouts']['large'][key]
-  return placed['x'] + 160, placed['y'] + 55
+  return placed['x'] + (55 if placed.get('display') == 'icons' else 160), placed['y'] + 55
 
 
 def tap(control, state, key):
@@ -57,8 +57,11 @@ def tap(control, state, key):
 
 
 @pytest.mark.parametrize('ordered', [True, False])
-def test_home_work_start_replace_and_end_navigation(favorites, ordered):
+@pytest.mark.parametrize('display', ['words', 'icons'])
+def test_home_work_start_replace_and_end_navigation(favorites, ordered, display):
   view = state(ordered=ordered)
+  for key in FAVORITE_WIDGETS:
+    view.customization['layouts']['large'][key]['display'] = display
   tap(favorites, view, 'nav_home')
   doc = favorites.owner.read()
   assert doc['destination']['name'] == 'My home'
@@ -125,6 +128,19 @@ def test_overlap_uses_saved_order_and_removed_widget_cannot_intercept(favorites)
   placements['nav_home']['enabled'] = False
   tap(favorites, view, 'nav_work')
   assert favorites.owner.read()['destination']['name'] == 'My work'
+
+
+def test_icon_touches_do_not_intercept_the_old_word_card_area(favorites):
+  view = state()
+  placed = view.customization['layouts']['large']['nav_home']
+  placed['display'] = 'icons'
+  assert favorites.hit(placed['x'] + 55, placed['y'] + 55, view) == 'nav_home'
+  assert favorites.hit(placed['x'] + 160, placed['y'] + 55, view) is None
+  assert favorites.hit(placed['x'] + 110, placed['y'] + 55, view) is None
+  x, y = placed['x'] + 55, placed['y'] + 55
+  favorites.touch('down', x, y, view, 1)
+  favorites.touch('up', x, y, view, 1)
+  assert favorites.owner.read()['destination']['name'] == 'My home'
 
 
 def test_old_layout_migrates_favorites_without_enabling_or_reordering_existing_widgets():

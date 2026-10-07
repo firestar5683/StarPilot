@@ -111,6 +111,21 @@ def test_saving_a_suggestion_keeps_the_other_results_choosable(owner):
   assert status['destination']['name'] == 'Coffee Shop'
 
 
+def test_save_home_and_work_in_one_change_without_changing_destination(owner):
+  saved = owner.favorite(ADDRESS, owner.read()['revision'], True, label='home')
+  old_revision = saved['revision']
+  result, _, _ = suggest(owner)
+  with patch('openpilot.starpilot.navigation.owner.response_json', return_value=FEATURE):
+    saved = owner.favorite_place(result['id'], result['searchId'], 'caller', old_revision, True, label='home')
+  assert [(row['name'], row.get('label')) for row in saved['favorites']] == [('Coffee Shop', 'home'), ('Old address', None)]
+  assert saved['destination']['name'] == 'Old address'
+  assert owner._searches[('caller', result['searchId'])]['revision'] == saved['revision']
+  before = owner.read()
+  with pytest.raises(ValidationError):
+    owner.favorite(ADDRESS, before['revision'], True, label='invalid')
+  assert owner.read() == before
+
+
 def test_legacy_settings_without_recents_still_load(owner):
   import json
   value = json.loads(owner.path.read_text())

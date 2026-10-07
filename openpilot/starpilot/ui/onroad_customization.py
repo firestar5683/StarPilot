@@ -205,7 +205,7 @@ def customization_metadata():
 
 
 def default_document():
-  return {"version": 4, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
+  return {"version": 4, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
     profile: {key: {**widget["default"], **({"size": WHEEL_SIZES[profile][1]} if key == "steering_wheel" else {})}
               for key, widget in data["widgets"].items()}
@@ -224,6 +224,10 @@ def validate_document(value):
       raise ValueError('Invalid speed source drawer preference')
   if value['version'] == 4 and 'widgetOrder' in value:
     fields.add('widgetOrder')
+  if 'clock24Hour' in value:
+    fields.add('clock24Hour')
+    if type(value['clock24Hour']) is not bool:
+      raise ValueError('Invalid clock format preference')
   if set(value) != fields:
     raise ValueError("Invalid customization fields")
   palette, layouts = value["palette"], value["layouts"]
@@ -364,6 +368,8 @@ def validate_document(value):
       result['widgetOrder'][profile] = validate_widget_order(order, PROFILES[profile]['widgets'])
   if 'speedSources' in value:
     result['speedSources'] = value['speedSources']
+  if 'clock24Hour' in value:
+    result['clock24Hour'] = value['clock24Hour']
   if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_BYTES:
     raise ValueError("Customization too large")
   return result

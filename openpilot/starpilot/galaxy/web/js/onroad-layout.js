@@ -6,6 +6,7 @@ import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
 import { editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
+import { GxDialog } from "./dialog.js"
 
 const PROFILES = ["large", "compact"]
 const COLORS = ["cardFill", "cardBorder", "text"]
@@ -32,6 +33,7 @@ export const withAlpha = (color, factor) => color.slice(0, 7) + Math.floor(parse
 
 // Steering wheels resize as a square ("size"); box widgets such as the Android Auto map take a width and height.
 export function widgetSize(widget, position) {
+  if (widget.iconSize && position?.display === "icons") return [widget.iconSize, widget.iconSize]
   if (widget.box) return [position?.width ?? widget.width, position?.height ?? widget.height]
   if (widget.resizable) return [position?.size ?? widget.width, position?.size ?? widget.height]
   return [widget.width, widget.height]
@@ -90,7 +92,9 @@ export function previewPoint(event, rect, profile) {
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : [])]) || document.version !== 4 || (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : [])]) || document.version !== 4 ||
+      (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
+      (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
       !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
       !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
@@ -111,7 +115,8 @@ export function validDocument(document, metadata) {
     return keysEqual(layout, Object.keys(profile.widgets)) && Object.entries(layout).every(([id, position]) => {
       const widget = profile.widgets[id], limits = placementLimits(profile, id, layout)
       const resizable = widget.resizable, box = widget.box, opacity = widget.opacity
-      return keysEqual(position, resizable ? ["x", "y", "enabled", "size"] : box ? ["x", "y", "enabled", "width", "height", "opacity"] : ["x", "y", "enabled"]) &&
+      return keysEqual(position, resizable ? ["x", "y", "enabled", "size"] : box ? ["x", "y", "enabled", "width", "height", "opacity"] : ["x", "y", "enabled", ...(widget.iconSize ? ["display"] : [])]) &&
+        (!widget.iconSize || ["words", "icons"].includes(position.display)) &&
         (!resizable || (Number.isInteger(position.size) && position.size >= resizable.min && position.size <= resizable.max)) &&
         (!box || (Number.isInteger(position.width) && position.width >= box.minWidth && position.width <= box.maxWidth &&
           Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight &&
@@ -176,6 +181,8 @@ export function validSnapshot(data) {
           widget.resizable.default !== widget.width || widget.width !== widget.height ||
           widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||
           widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
+      if (widget.iconSize != null && (!projection || !["nav_home", "nav_work"].includes(widget.kind) ||
+          !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
     }
   }
   return validDocument(data.document, data.metadata) && validDocument(data.defaults, data.metadata)
@@ -205,7 +212,7 @@ export class OnroadLayoutFeed {
   start() { this.stop(); this.active = true; this.data = null; this.needsReload = false; this.poller.start(); return this.load() }
   load(background = false) { return this.run(null, { background }) }
   save(document) {
-    if (!this.data?.editable || this.needsReload || !validDocument(document, this.data.metadata)) return
+    if (!this.data?.editable || this.needsReload || !validDocument(document, this.data.metadata)) return false
     return this.run({ revision: this.data.revision, document: clone(document) })
   }
 
@@ -253,8 +260,10 @@ export class OnroadLayoutFeed {
       this.needsReload = false
       this.publish({ status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
         notice: saving ? (this.projection ? "Android Auto layout saved." : "Colors and both layouts saved.") : "" })
+      return true
     } catch (error) {
       if (this.active && generation === this.generation) fail(connectionError(error))
+      return false
     } finally {
       if (this.request === request) {
         if (this.timer !== null) this.cancelTimer(this.timer)
@@ -266,7 +275,7 @@ export class OnroadLayoutFeed {
 }
 
 export const LayoutWidgetPreview = {
-  props: ["widget", "palette", "profile", "scene"],
+  props: ["widget", "palette", "profile", "scene", "clock24Hour"],
   methods: {
     withAlpha,
     modeLines(scene, profile) {
@@ -295,7 +304,7 @@ export const LayoutWidgetPreview = {
       <template v-else-if="widget.kind === 'clock'">
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
           :font-size="profile === 'large' ? 48 : 21" font-weight="600"
-          style="filter: drop-shadow(2px 2px 1px #000000aa)">3:42 PM</text>
+          style="filter: drop-shadow(2px 2px 1px #000000aa)">{{ clock24Hour ? '18:00' : '12:00 PM' }}</text>
       </template>
       <template v-else-if="widget.kind === 'cruise_limits'">
         <g v-for="(label, index) in ['MAX', 'LIMIT']" :key="label" :transform="'translate(0 ' + index * 211 + ')'">
@@ -379,8 +388,14 @@ export const LayoutWidgetPreview = {
       </g>
       <g v-else-if="['nav_home', 'nav_work'].includes(widget.kind)">
         <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
+        <g v-if="widget.display === 'icons'" transform="translate(23 23) scale(2.6667)" fill="none" stroke="#c7aef7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path v-if="widget.kind === 'nav_home'" d="M3 11 L12 3 L21 11 M5 9 V21 H10 V14 H14 V21 H19 V9" />
+          <path v-else d="M8 7 V4 H16 V7 M3 7 H21 V21 H3 Z M3 12 L10 15 H14 L21 12 M10 13 V17 H14 V13" />
+        </g>
+        <template v-else>
         <text :x="widget.width / 2" y="48" text-anchor="middle" font-size="34" font-weight="600" fill="#c7aef7">{{ widget.label }}</text>
         <text :x="widget.width / 2" y="89" text-anchor="middle" font-size="25" fill="#c7aef7">Navigate</text>
+        </template>
       </g>
       <g v-else-if="widget.kind === 'nav_card'">
         <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="39" fill="#0f0d17f5" stroke="#a07edcbe" stroke-width="2" />
@@ -422,12 +437,12 @@ export const LayoutWidgetPreview = {
 }
 
 export const OnroadLayoutPage = {
-  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice },
+  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog },
   props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close", "target"],
   setup(props) {
     const state = reactive({ status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
-      profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, colorError: "", placementError: "",
+      profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
       history: { undo: [], redo: [], group: null } })
     let deferred = null
@@ -497,6 +512,10 @@ export const OnroadLayoutPage = {
     stockChanged() { return !!this.state.draft && JSON.stringify(this.state.draft) !== JSON.stringify(this.state.data.defaults) },
     canUndo() { return this.state.history.undo.length > 0 },
     canRedo() { return this.state.history.redo.length > 0 },
+    pendingLeave() { return typeof this.state.discard === "function" || ["back", "device", "projection"].includes(this.state.discard) },
+    inlineLeavePrompt() { return this.projection && this.pendingLeave && this.state.leavePresentation !== "modal" },
+    modalLeavePrompt() { return this.projection && this.pendingLeave && this.state.leavePresentation === "modal" },
+    canSavePending() { return !!this.state.data?.editable && !this.state.error && !this.busy && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
@@ -516,7 +535,8 @@ export const OnroadLayoutPage = {
       const widget = { ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
         visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0) }
       const [width, height] = widgetSize(widget, this.layout[widget.id])
-      return { ...widget, width, height, ...(widget.box ? { opacity: this.layout[widget.id].opacity } : {}) } }) },
+      return { ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
+        ...(widget.box ? { opacity: this.layout[widget.id].opacity } : {}) } }) },
     inactiveWidgets() { return this.widgets.filter(({ id }) => !this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id)) },
     availableProfiles() { return this.state.data?.supportedProfiles || (this.state.data?.activeProfile ? [this.state.data.activeProfile] : []) },
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
@@ -707,6 +727,35 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = ""
     },
+    requestRemove(id = this.state.selected) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.layout?.[id]?.enabled || !Object.hasOwn(this.profile.widgets, id)) return
+      this.state.selected = id
+      this.state.removeConfirm = id
+    },
+    cancelRemove() { this.state.removeConfirm = null },
+    confirmRemove() {
+      const id = this.state.removeConfirm
+      this.state.removeConfirm = null
+      this.remove(id)
+    },
+    setClock24Hour(event) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "clock") return
+      const before = clone(this.state.draft)
+      this.state.draft.clock24Hour = event.target.checked
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    setFavoriteDisplay(display) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
+          !["words", "icons"].includes(display)) return
+      this.finishColorEdit()
+      const before = clone(this.state.draft)
+      this.selectedPosition.display = display
+      Object.assign(this.selectedPosition, clampPlacement(this.profile, this.state.selected,
+        this.selectedPosition.x, this.selectedPosition.y, this.layout))
+      this.recordChange(before)
+      this.state.notice = ""
+    },
     positionInput(axis, event) {
       const number = event.target.value.trim() === "" ? NaN : Number(event.target.value)
       if (Number.isFinite(number)) this.changePosition(this.state.selected,
@@ -740,7 +789,7 @@ export const OnroadLayoutPage = {
         event.preventDefault()
         const step = event.shiftKey ? 10 : 1, position = this.layout[id]
         this.changePosition(id, position.x + movement[0] * step, position.y + movement[1] * step)
-      } else if (["Delete", "Backspace"].includes(event.key)) { event.preventDefault(); this.remove(id) }
+      } else if (["Delete", "Backspace"].includes(event.key)) { event.preventDefault(); this.requestRemove(id) }
       else if (["Enter", " "].includes(event.key)) { event.preventDefault(); this.state.selected = id }
     },
     startDrag(id, event, fromTray = false) {
@@ -918,19 +967,36 @@ export const OnroadLayoutPage = {
         this.color(id, this.selectedColors[id].slice(0, 7) + value.toString(16).padStart(2, "0"), "alpha:" + id)
     },
     alpha(color) { return parseInt(color.slice(7), 16) },
-    requestLeave(action) {
+    requestLeave(action, presentation = "inline") {
       if (this.busy || this.state.drag || this.state.layerDrag) return
-      if (this.dirty) this.state.discard = action
+      this.state.removeConfirm = null
+      if (this.dirty) {
+        this.state.discard = action
+        this.state.leavePresentation = this.projection && (typeof action === "function" || ["back", "device", "projection"].includes(action)) ? presentation : "inline"
+      }
       else this.leave(action)
+    },
+    cancelLeave() {
+      if (this.busy) return
+      this.state.discard = null
+      this.state.leavePresentation = null
     },
     leave(action) {
       this.state.discard = null
+      this.state.leavePresentation = null
       if (typeof action === "function") { this.hideDevicePreview(); action() }
       else if (action === "back") { this.hideDevicePreview(); this.$emit("close") }
       else if (["projection", "device"].includes(action)) { this.hideDevicePreview(); this.$emit("target", action) }
       else this.feed.load()
     },
     save() { if (this.editable && this.dirty && !this.state.drag && !this.state.layerDrag) return this.feed.save(this.state.draft) },
+    async saveAndLeave() {
+      if (!this.canSavePending || !this.pendingLeave) return false
+      const action = this.state.discard
+      const saved = await this.feed.save(this.state.draft)
+      if (saved && this.state.discard === action) this.leave(action)
+      return saved
+    },
   },
   template: `
     <section class="gx-settings gx-layout" aria-label="Colors and layout">
@@ -946,19 +1012,25 @@ export const OnroadLayoutPage = {
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
-        <div class="gx-layout__savebar">
-          <span role="status">{{ state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
-
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canRedo || !!state.drag || !!state.layerDrag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy || !!state.drag || !!state.layerDrag" aria-label="Reload saved" title="Reload saved" @click="requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg><span class="gx-layout__action-label">Reload saved</span></button>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !stockChanged || !!state.drag || !!state.layerDrag" aria-label="Reset to stock StarPilot" title="Reset to stock StarPilot" @click="resetToStock"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="gx-layout__action-label">Reset to stock</span></button>
-          <button class="gx-btn" type="button" :disabled="!editable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
+        <div class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}">
+          <span role="status">{{ inlineLeavePrompt ? 'Leave without saving your changes?' : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
+          <template v-if="inlineLeavePrompt">
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
+            <button class="gx-btn gx-btn--danger" type="button" :disabled="busy" aria-label="Discard and leave" title="Discard and leave" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">Discard and leave</span></button>
+            <button class="gx-btn" type="button" :disabled="!canSavePending" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
+          </template>
+          <template v-else>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canRedo || !!state.drag || !!state.layerDrag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy || !!state.drag || !!state.layerDrag" aria-label="Reload saved" title="Reload saved" @click="requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg><span class="gx-layout__action-label">Reload saved</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !stockChanged || !!state.drag || !!state.layerDrag" aria-label="Reset to stock StarPilot" title="Reset to stock StarPilot" @click="resetToStock"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="gx-layout__action-label">Reset to stock</span></button>
+            <button class="gx-btn" type="button" :disabled="!editable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
+          </template>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <div v-if="state.discard" class="gx-card gx-layout__discard" role="alert">
+        <div v-if="state.discard && !inlineLeavePrompt && !modalLeavePrompt" class="gx-card gx-layout__discard" role="alert">
           <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
-          <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="state.discard = null">Keep editing</button>
+          <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="cancelLeave">Keep editing</button>
             <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
         </div>
         <template v-if="state.data && state.draft">
@@ -1018,13 +1090,21 @@ export const OnroadLayoutPage = {
                   :aria-pressed="state.selected === widget.id" @focus="state.selected = widget.id" @keydown="onKey(widget.id, $event)"
                   @pointerdown="startDrag(widget.id, $event)">
                   <rect class="gx-layout__hit" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="transparent" />
-                  <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" />
+                  <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" :clock24-hour="!!state.draft.clock24Hour" />
                   <rect class="gx-layout__selection" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="none" stroke="#b799ff" :stroke-width="state.profile === 'large' ? 5 : 1.5" stroke-dasharray="6 4" />
                   <g v-if="widget.box && state.selected === widget.id && editable" class="gx-layout__resize" role="button" :aria-label="'Resize ' + widget.label"
                     :transform="'translate(' + widget.width + ' ' + widget.height + ')'" @pointerdown="startResize(widget.id, $event)">
                     <circle r="34" fill="transparent" /><circle r="16" fill="#b799ff" stroke="#16121f" stroke-width="4" />
                     <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
                   </g>
+                </g>
+                <g v-for="widget in renderWidgets" :key="'remove-' + widget.id" class="gx-layout__remove"
+                  :transform="'translate(' + (layout[widget.id].x + widget.width - (state.profile === 'large' ? 38 : 12)) + ' ' + (layout[widget.id].y - (widget.visualInsetTop || 0) + (state.profile === 'large' ? 38 : 12)) + ')'"
+                  :tabindex="editable && !state.drag && !state.layerDrag ? 0 : -1" role="button" :aria-label="'Remove ' + widget.label" :class="{'is-disabled': !editable || !!state.drag || !!state.layerDrag}"
+                  @pointerdown.stop.prevent @click.stop="requestRemove(widget.id)" @keydown.enter.stop.prevent="requestRemove(widget.id)" @keydown.space.stop.prevent="requestRemove(widget.id)">
+                  <circle class="gx-layout__remove-hit" :r="state.profile === 'large' ? 66 : 22" />
+                  <circle class="gx-layout__remove-face" :r="state.profile === 'large' ? 38 : 12" />
+                  <path :d="state.profile === 'large' ? 'M-15 0 H15' : 'M-5 0 H5'" fill="none" stroke="white" :stroke-width="state.profile === 'large' ? 7 : 2.5" stroke-linecap="round" />
                 </g>
                 <rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
@@ -1102,6 +1182,16 @@ export const OnroadLayoutPage = {
                 </template>
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
+                <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
+                <div v-if="projection && selectedWidget.iconSize" class="gx-layout__favorite-display">
+                  <span>Show as</span>
+                  <div class="gx-segment" role="group" :aria-label="selectedWidget.label + ' display'">
+                    <button v-for="display in ['icons', 'words']" :key="display" class="gx-btn" type="button"
+                      :class="selectedPosition.display === display ? 'gx-btn--primary' : 'gx-btn--tonal'"
+                      :aria-pressed="selectedPosition.display === display" :disabled="!editable || !!state.drag || !!state.layerDrag"
+                      @click="setFavoriteDisplay(display)">{{ display === 'icons' ? 'Icons' : 'Words' }}</button>
+                  </div>
+                </div>
                 <div class="gx-layout__coordinates"><label>X<input class="gx-field" type="number" step="1" :min="limits.minX" :max="limits.maxX" :value="selectedPosition.x" :disabled="!editable || !!state.drag" @change="positionInput('x', $event)"></label>
                   <label>Y<input class="gx-field" type="number" step="1" :min="limits.minY" :max="limits.maxY" :value="selectedPosition.y" :disabled="!editable || !!state.drag" @change="positionInput('y', $event)"></label></div>
                 <span class="gx-note">Use arrow keys on a preview widget to move 1 pixel, or Shift + arrow for 10.</span>
@@ -1118,7 +1208,6 @@ export const OnroadLayoutPage = {
                   <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
                 </section>
                 <p v-if="!projection && !colorFields.length" class="gx-note">This widget uses its original status colors.</p>
-                <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !!state.drag" @click="remove()">Remove from layout</button>
               </div>
               </div>
               <section v-if="!projection" v-show="state.inspectorPanel === 'road'" class="gx-layout__colors" aria-label="Path and lane colors">
@@ -1145,5 +1234,23 @@ export const OnroadLayoutPage = {
           </div>
         </template>
       </template>
+      <GxDialog v-if="state.removeConfirm && profile" labelledby="gx-layout-remove-title" describedby="gx-layout-remove-body" alert @close="cancelRemove">
+        <div><h3 id="gx-layout-remove-title">Remove {{ profile.widgets[state.removeConfirm]?.label }}?</h3>
+          <p id="gx-layout-remove-body">Remove this widget from the {{ projection ? 'Android Auto' : state.profile === 'large' ? 'Big' : 'Small' }} layout? You can add it again from Inactive Widgets.</p></div>
+        <div class="gx-settings__controls">
+          <button type="button" class="gx-btn gx-btn--tonal" @click="cancelRemove">Cancel</button>
+          <button type="button" class="gx-btn gx-btn--danger" @click="confirmRemove">Remove widget</button>
+        </div>
+      </GxDialog>
+      <GxDialog v-if="modalLeavePrompt" labelledby="gx-layout-leave-title" describedby="gx-layout-leave-body" alert @close="cancelLeave">
+        <div><h3 id="gx-layout-leave-title">Leave without saving your changes?</h3>
+          <p id="gx-layout-leave-body">Save your Android Auto layout before leaving, keep editing, or discard this draft.</p></div>
+        <GxNotice v-if="state.error" tone="danger">{{ state.error }}</GxNotice>
+        <div class="gx-settings__controls">
+          <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="cancelLeave">Keep editing</button>
+          <button type="button" class="gx-btn gx-btn--danger" :disabled="busy" @click="leave(state.discard)">Discard and leave</button>
+          <button type="button" class="gx-btn" :disabled="!canSavePending" @click="saveAndLeave">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</button>
+        </div>
+      </GxDialog>
     </section>`,
 }

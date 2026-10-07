@@ -1,6 +1,7 @@
 """Fresh control axes drive the existing large and compact onroad indicators."""
 
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
@@ -9,7 +10,7 @@ from unittest.mock import Mock, patch
 import pyray as rl
 
 from openpilot.starpilot.ui import onroad
-from openpilot.starpilot.ui.onroad import axis_status_color, driving_mode_description
+from openpilot.starpilot.ui.onroad import axis_status_color, clock_text, driving_mode_description
 from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
 from openpilot.starpilot.ui.onroad_large_widgets import DISENGAGED, UnifiedSpeedWidget
@@ -125,6 +126,7 @@ class TestOnroadAxes(unittest.TestCase):
           view.torque_bar = Mock()
           view.unified_speed = Mock()
           view.navigation = Mock()
+          view.navigation_favorites = Mock()
           view.background_layer = None
           view.projection_viewport = None
           view._corner_cache = Mock()
@@ -267,6 +269,15 @@ class TestOnroadAxes(unittest.TestCase):
     touch.release(120, 530, self.state(True, False))
     self.assertEqual(requests, [])
     self.assertFalse(replace(active, lateral_active=False, longitudinal_active=False).cruise_active)
+
+  def test_clock_text_supports_12_and_24_hour_formats(self):
+    evening = datetime(2026, 10, 7, 18, 0)
+    self.assertEqual(clock_text(evening), "6:00 PM")
+    self.assertEqual(clock_text(evening, use_24_hour=True), "18:00")
+
+    midnight = datetime(2026, 10, 8, 0, 0)
+    self.assertEqual(clock_text(midnight), "12:00 AM")
+    self.assertEqual(clock_text(midnight, use_24_hour=True), "00:00")
 
 
 if __name__ == "__main__":
