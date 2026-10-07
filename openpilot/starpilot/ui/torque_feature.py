@@ -113,6 +113,9 @@ class TorqueFeature:
                          dependencies=self._dependents("ForceAutoTuneOff", *TORQUE_NUMBERS))
       return False, (FeatureRow("", "Torque profile", "Vehicle tune changed; custom values paused"), *details, rebase, reset)
     profile = profiles.get(fingerprint, PlatformProfile(basis, FieldChoice(), FieldChoice()))
+    from openpilot.starpilot.lateral.gm_geometry_runtime import read_geometry
+    cp = self.owner.vehicle_params()
+    force_auto = cp is not None and read_geometry(self.params, cp).force_auto
     rows: list[FeatureRow] = []
     for field, label, active in (("factor", "Lateral acceleration", factor), ("friction", "Friction", friction)):
       if bolt and field == "factor":
@@ -129,6 +132,7 @@ class TorqueFeature:
                              available=allowed and editable, capability=capability, dependencies=dependencies,
                              default_value="Vehicle/learned", default_key=f"torque:{field}:mode",
                              reason=("Selected controller uses a fixed torque conversion; factor does not change its output" if not editable else
+                                     "Saved choice temporarily ignored while Force auto is ON" if force_auto else
                                      "Supplied tune; edits saved for the next drive" if active is None else "Custom value; saved for the next drive")))
       rows.append(FeatureRow(f"torque:{field}:reset", label + " — Reset to Default", "", raw,
                              available=allowed and active is not None, repair_value="Reset",
@@ -138,7 +142,94 @@ class TorqueFeature:
     if fingerprint in GM_VEHICLES:
       from openpilot.starpilot.ui.gain_feature import GainFeature
       rows.extend(GainFeature(self.owner).rows(capability, profiles, raw, allowed, repair_allowed))
+    rows.extend(self._geometry_rows(capability, profiles, raw, allowed))
     return True, tuple(rows)
+
+  @staticmethod
+  def _geometry_token(cp):
+    from openpilot.starpilot.lateral.gm_geometry_runtime import geometry_basis
+    return json.dumps(geometry_basis(cp), separators=(",", ":"), allow_nan=False).encode()
+
+  def _geometry_rows(self, capability, profiles, raw, allowed):
+    from openpilot.starpilot.lateral.gm_geometry_runtime import geometry_basis, read_geometry
+    from openpilot.starpilot.lateral.torque_runtime import gm_manual_supported_cp
+    from openpilot.starpilot.lateral.torque_settings import GeometryProfile
+    cp = self.owner.vehicle_params()
+    if cp is None or not gm_manual_supported_cp(cp):
+      return []
+    fingerprint = capability[0]
+    profile = profiles.get(fingerprint)
+    basis = geometry_basis(cp)
+    geometry = profile.geometry if profile is not None else None
+    if geometry is not None and geometry.basis != basis:
+      return [FeatureRow("", "Vehicle model tuning", "Vehicle basis changed; saved geometry paused"),
+              FeatureRow("torque:geometry_reset:value", "Reset saved geometry", "Reset", raw,
+                         choices=("Reset",), available=allowed, capability=capability,
+                         related_source=self._geometry_token(cp), dependencies=self._dependents("ForceAutoTuneOff", SELECTION_KEY))]
+    geometry = geometry or GeometryProfile(basis)
+    token = self._geometry_token(cp)
+    dependencies = self._dependents("ForceAutoTuneOff", SELECTION_KEY)
+    selected = read_geometry(self.params, cp)
+    rows = []
+    learning_labels = {"source": "Selected controller", "force_auto": "Force auto", "force_off": "Force off"}
+    rows.append(FeatureRow("torque:learning:value", "Automatic torque learning", learning_labels[geometry.learning], raw,
+                           choices=tuple(learning_labels.values()), available=allowed, capability=capability,
+                           related_source=token, dependencies=dependencies,
+                           reason="Applies at next startup. Force off takes priority; Force auto temporarily ignores saved factor, friction and ratio."))
+    rows.append(FeatureRow("torque:automatic_delay:value", "Steering delay source", "Learned" if geometry.automatic_delay else "Vehicle/custom", raw,
+                           choices=("Learned", "Vehicle/custom"), available=allowed, capability=capability,
+                           related_source=token, dependencies=dependencies,
+                           reason="Full delay includes the vehicle actuator delay plus 0.2 seconds; estimator continues independently."))
+    for field, label, choice, supplied, low, high, step in (
+      ("ratio", "Steering ratio", geometry.ratio, basis[0], .5*basis[0], 1.5*basis[0], .1),
+      ("full_delay", "Full steering delay", geometry.full_delay, basis[1], .01, 1., .01),
+    ):
+      value = choice.custom_value if choice.mode == "custom" else supplied
+      suppressed = selected.force_auto if field == "ratio" else geometry.automatic_delay
+      rows.append(FeatureRow(f"torque:{field}:value", label, str(round(value, 8)), raw,
+                             step=step, minimum=low, maximum=high, available=allowed,
+                             related_source=token, capability=capability, dependencies=dependencies,
+                             default_value="Vehicle/learned" if field == "ratio" else "Vehicle full delay",
+                             default_key=f"torque:{field}:mode", unit="s" if field == "full_delay" else "",
+                             reason="Saved choice temporarily ignored by automatic source" if suppressed else "Custom value; estimator remains unchanged"))
+    return rows
+
+  def _edit_geometry(self, profiles, request, fingerprint, torque_basis):
+    from openpilot.starpilot.lateral.gm_geometry_runtime import geometry_basis
+    from openpilot.starpilot.lateral.torque_runtime import gm_manual_supported_cp
+    from openpilot.starpilot.lateral.torque_settings import GeometryProfile, replace_geometry
+    cp = self.owner.vehicle_params()
+    if cp is None or not gm_manual_supported_cp(cp) or request.related_source != self._geometry_token(cp):
+      raise ValueError("Changed geometry source")
+    if not {"ForceAutoTuneOff", SELECTION_KEY} <= dict(request.dependencies).keys():
+      raise ValueError("Missing geometry source evidence")
+    basis = geometry_basis(cp)
+    prior = profiles.get(fingerprint)
+    geometry = prior.geometry if prior is not None else None
+    geometry = geometry or GeometryProfile(basis)
+    _, field, part = request.key.split(":")
+    if field == "geometry_reset" and part == "value" and request.value == "Reset":
+      if prior is None:
+        raise ValueError("No saved geometry")
+      return {**profiles, fingerprint: replace(prior, geometry=None)}
+    if field == "learning" and part == "value":
+      value = {"Selected controller": "source", "Force auto": "force_auto", "Force off": "force_off"}[request.value]
+    elif field == "automatic_delay" and part == "value":
+      value = {"Learned": True, "Vehicle/custom": False}[request.value]
+    elif field in ("ratio", "full_delay"):
+      choice = getattr(geometry, field)
+      if part == "mode" and request.value in ("Vehicle/learned", "Vehicle full delay"):
+        value = FieldChoice("source", choice.custom_value)
+      elif part == "value":
+        value = FieldChoice("custom", float(request.value))
+      else:
+        raise ValueError("Unknown geometry edit")
+    else:
+      raise ValueError("Unknown geometry edit")
+    result = replace_geometry(profiles, fingerprint, torque_basis, basis, field, value)
+    if field == "full_delay":
+      result = replace_geometry(result, fingerprint, torque_basis, basis, "automatic_delay", False)
+    return result
 
   def apply(self, request: FeatureSettingsRequest) -> bool:
     """One guarded document replacement; the presentation never writes Params."""
@@ -192,6 +283,8 @@ class TorqueFeature:
           amended[fingerprint] = updated
           resolve_document(amended, fingerprint, basis)
           profiles = amended
+        elif request.key.startswith(("torque:ratio:", "torque:full_delay:", "torque:automatic_delay:", "torque:learning:", "torque:geometry_reset:")):
+          profiles = self._edit_geometry(profiles, request, fingerprint, basis)
         elif request.key.startswith("torque:"):
           if review:
             return False
@@ -231,15 +324,18 @@ class TorqueFeature:
         else:
           return False
       encoded = serialize_document(profiles)
+      geometry_request = request.key.startswith(("torque:ratio:", "torque:full_delay:", "torque:automatic_delay:",
+                                                 "torque:learning:", "torque:geometry_reset:"))
       # Fresh authority and source evidence immediately before the one Params replacement.
       if (not self.authority("torque") or self.vehicle_fingerprint() != request.vehicle_fingerprint or
           self._capability("torque") != capability or not self._readable(DOCUMENT_KEY) or
           self._raw(DOCUMENT_KEY) != request.expected or
+          geometry_request and request.related_source != self._geometry_token(self.owner.vehicle_params()) or
           request.key in TORQUE_CONFIRM_ACTIONS and not self.authority("parked_preferences") or
           any(not self._readable(name) or self._raw(name) != raw for name, raw in request.dependencies)):
         return False
       self.params.put(DOCUMENT_KEY, json.loads(encoded), block=True)
       saved = self._raw(DOCUMENT_KEY)
       return saved is not None and parse_document(saved) == profiles
-    except (OSError, ValueError, TypeError, OverflowError, UnicodeError):
+    except (OSError, ValueError, TypeError, KeyError, OverflowError, UnicodeError):
       return False
