@@ -40,6 +40,7 @@ from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSet
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.nostalgia import aol_no_entry, paddle_cancel, physical_cancel, saved_enabled as nostalgia_saved_enabled
+from openpilot.starpilot.lateral.low_speed_advisory import LowSpeedAdvisory
 from openpilot.starpilot.lateral.lane_change_status_wire import alert_wording, decode as decode_lane_status, fresh_for_model
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -104,6 +105,7 @@ class SelfdriveD:
     self.switchback_capable = ioniq6_media_eligible(self.CP) and not self.CP.passive and not self.CP.dashcamOnly and not self.CP.notCar
     self.switchback_status = SwitchbackStatusOwner()
     self.switchback_cooldown = SwitchbackCooldown()
+    self.low_speed_advisory = LowSpeedAdvisory()
     self.switchback_setting_ns = 0
     self.switchback_cooldown_ns = 300_000_000_000
     self.conditional_car_state_valid = False
@@ -342,7 +344,13 @@ class SelfdriveD:
     # Add car events, ignore if CAN isn't valid
     if CS.canValid:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
-      self.events.add_from_msg(car_events)
+      device = self.sm['deviceState']
+      drive_id = (int(device.startedMonoTime) if self.sm.seen['deviceState'] and self.sm.alive['deviceState'] and
+                  self.sm.valid['deviceState'] and device.started else 0)
+      show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed), drive_id=drive_id)
+      self.events.add_from_msg([event for event in car_events if event.name != EventName.belowSteerSpeed])
+      if show_low_speed:
+        self.events.add(EventName.belowSteerSpeed)
       if self.tesla_stock_consumer.binding is not None:
         now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
         companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
