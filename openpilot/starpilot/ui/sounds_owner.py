@@ -8,7 +8,7 @@ from pathlib import Path
 from openpilot.starpilot.audio.sound_pack import DEFAULT_PACK, PACK_ROOT, installed_packs, read_selection
 from openpilot.starpilot.saved_document import commit_exact
 
-from openpilot.starpilot.audio.alert_volume import AUTO, SPECS, VOLUMES, read_volume
+from openpilot.starpilot.audio.alert_volume import AUTO, MAX_RAW_BYTES, SPECS, VOLUMES, read_volume
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, FeatureSettingsState
 
 AUTO_PREFIX = "sounds:auto:"
@@ -44,7 +44,7 @@ class SoundsOwner:
                   "Follows ambient sound") if saved.value == AUTO else
                 "Fixed saved level" if saved.valid else
                 "Saved level cannot be read" if not saved.readable else "Choose Auto to repair")
-      if key == "WarningImmediateVolume" and saved.valid:
+      if key in ("WarningImmediateVolume", "WarningSoftVolume") and saved.valid:
         reason = (("StarPilot Auto keeps a 50% baseline; ramps to full volume" if selected == DEFAULT_PACK else
                    "Follows ambient sound; ramps to full volume") if saved.value == AUTO else
                   "Minimum starting level; still ramps to full volume")
@@ -91,18 +91,8 @@ class SoundsOwner:
       if not math.isfinite(number) or not number.is_integer() or not SPECS[request.key][1] <= number <= 100:
         return False
       selected = int(number)
-    first = read_volume(self.params, request.key)
-    if not first.readable or first.raw != request.expected:
-      return False
     # An explicit valid choice also repairs malformed bytes. There is no write
     # while reading state or opening either native page.
-    if not self.parked():
-      return False
-    final = read_volume(self.params, request.key)
-    if not final.readable or final.raw != request.expected:
-      return False
-    try:
-      self.params.put(request.key, selected, block=True)
-    except (OSError, KeyError, TypeError, ValueError):
-      return False
-    return read_volume(self.params, request.key).value == selected
+    result = commit_exact(self.params, key=request.key, max_bytes=MAX_RAW_BYTES, raw=str(selected).encode(),
+                          expected=request.expected, authorized=self.parked, temp_prefix=".sound-volume-")
+    return result.committed and result.verified

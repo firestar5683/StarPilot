@@ -370,6 +370,7 @@ class TestRuntimePanelActions(unittest.TestCase):
       with self.subTest(destination=destination):
         session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
         session.profile = runtime_app.Profile.LARGE
+        session.sounds_edit_key = None
         session.adapter = self._adapter()
         session._mode, session.selected = ShellMode.SETTINGS, destination
         session.compact_y = session.compact_scroll_x = 0
@@ -408,6 +409,7 @@ class TestRuntimePanelActions(unittest.TestCase):
         with self.subTest(destination=destination, expanded=expanded):
           session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
           session.profile = runtime_app.Profile.LARGE
+          session.sounds_edit_key = None
           session.adapter = self._adapter()
           session._mode, session.selected = ShellMode.SETTINGS, destination
           session.compact_y = session.compact_scroll_x = 0

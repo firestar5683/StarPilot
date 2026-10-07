@@ -44,10 +44,10 @@ from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placemen
 from openpilot.starpilot.ui.pip_warning import PiPWarningSource
 from openpilot.starpilot.spot_monitor.preferences import read_preferences as read_vasm_preferences
 from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns
-from openpilot.starpilot.ui.sounds_owner import SoundsOwner
+from openpilot.starpilot.ui.sounds_owner import AUTO_PREFIX as SOUND_AUTO_PREFIX, SoundsOwner
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureInput, FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureUiAction, row_change,
-  feature_scroll, feature_parent_page, feature_parent_title,
+  feature_scroll, feature_parent_page, feature_parent_title, sound_buttons,
 )
 from openpilot.starpilot.ui.lane_change_feature import KEYS as LANE_CHANGE_KEYS, RESET as LANE_CHANGE_RESET
 from openpilot.starpilot.models.runtime import ModelStatusSource
@@ -201,6 +201,7 @@ class StarShellSession:
     self.feature_root_page: str = FeaturePage.HUB
     self.feature_scroll = 0
     self.sounds_scroll = 0
+    self.sounds_edit_key: str | None = None
     self.appearance_scroll = 0
     self.display_scroll = 0
     self.slc_actions: SlcActionDispatcher | None = None
@@ -630,7 +631,14 @@ class StarShellSession:
     return ok
 
   def sounds_snapshot(self):
-    return self.sounds_owner.snapshot()
+    state = self.sounds_owner.snapshot()
+    if self.profile == Profile.LARGE:
+      rows = tuple(row for row in state.rows if not row.key.startswith(SOUND_AUTO_PREFIX))
+      if self.sounds_edit_key is not None:
+        row = next(row for row in rows if row.key == self.sounds_edit_key)
+        return replace(state, title=row.label, subtitle=row.reason, rows=(row,), parent_title="Sounds & Alerts")
+      state = replace(state, page="sounds:overview", rows=tuple(replace(row, page=row.key) for row in rows), subtitle="")
+    return state
 
   def sounds_request(self, request: FeatureSettingsRequest) -> bool:
     ok = self.sounds_owner.apply(request)
@@ -910,13 +918,31 @@ class StarShellSession:
       return
     state = self.sounds_snapshot()
     if action.kind == "back":
-      self.selected = Destination.STAR
-      self.sounds_scroll = 0
+      if self.sounds_edit_key is not None:
+        self.sounds_edit_key = None
+      else:
+        self.selected = Destination.STAR
+        self.sounds_scroll = 0
       self.input.cancel()
-    elif action.kind == "scroll":
+    elif action.kind == "open" and state.page == "sounds:overview" and action.row in state.rows and action.row.available:
+      self.sounds_edit_key = action.row.key
+      self.input.cancel()
+    elif action.kind == "scroll" and self.sounds_edit_key is None:
       self.sounds_scroll = feature_scroll(self.sounds_scroll, action.direction, len(state.rows))
-    elif action.kind == "change" and action.row is not None and action.row in state.rows:
-      request = row_change(action.row, action.direction)
+    elif action.kind in ("change", "action") and state.page == "sounds" and action.row is not None and action.row in state.rows:
+      buttons = sound_buttons(state, action.row)
+      if action.kind == "action":
+        if not 0 <= action.direction < len(buttons):
+          return
+        value, _, enabled = buttons[action.direction]
+        if not enabled or value in ("-", "+"):
+          return
+        request = FeatureSettingsRequest(action.row.key, action.row.source, value)
+      else:
+        if buttons and (action.direction not in (-1, 1) or not any(
+            value == ("-" if action.direction == -1 else "+") and enabled for value, _, enabled in buttons)):
+          return
+        request = row_change(action.row, action.direction)
       if request is not None:
         self.sounds_request(request)
     self._snapshot_cache = None
@@ -1128,8 +1154,9 @@ class StarShellSession:
       snapshot = replace(snapshot, features=feature)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SOUNDS:
       sounds = self.sounds_snapshot()
-      self.sounds_scroll = feature_scroll(self.sounds_scroll, 0, len(sounds.rows))
-      sounds = replace(sounds, scroll=self.sounds_scroll, sidebar_expanded=self.sidebar_expanded)
+      if self.sounds_edit_key is None:
+        self.sounds_scroll = feature_scroll(self.sounds_scroll, 0, len(sounds.rows))
+      sounds = replace(sounds, scroll=self.sounds_scroll if self.sounds_edit_key is None else 0, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, sounds=sounds)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.APPEARANCE:
       appearance = self.appearance_snapshot()
@@ -1272,6 +1299,7 @@ class StarShellSession:
             self.feature_scroll = 0
           elif destination == Destination.SOUNDS:
             self.sounds_scroll = 0
+            self.sounds_edit_key = None
           elif destination == Destination.APPEARANCE:
             self.appearance_scroll = 0
             self.appearance_page = "appearance"
