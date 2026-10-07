@@ -80,3 +80,49 @@ class DriveHistoryHTTPTest(unittest.TestCase):
         server.shutdown()
         worker.join(2)
         server.server_close()
+
+  def test_delete_videos_requires_session_and_keeps_logs(self):
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      segment = root / 'recordings/0000021e--371eaf116b--0'
+      segment.mkdir(parents=True)
+      for name in ('rlog.zst', 'qlog.zst', 'fcamera.hevc', 'qcamera.ts'):
+        (segment / name).write_bytes(b'fixture')
+      access = GalaxyAccessOwner(root / 'access')
+      access.configure('password123', lambda: True)
+      parked = [True]
+      server = make_server(port=0, owner=access, recordings=DriveHistory(segment.parent), parked=lambda: parked[0])
+      worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+      worker.start()
+      def request(path, payload, cookie=None):
+        headers = {'Forwarded': 'for=203.0.113.8', 'Content-Type': 'application/json',
+                   'Origin': f'http://127.0.0.1:{server.server_port}', **({'Cookie': cookie} if cookie else {})}
+        connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+        try:
+          connection.request('POST', path, json.dumps(payload), headers)
+          response = connection.getresponse()
+          return response.status, response.read(), dict(response.getheaders())
+        finally:
+          connection.close()
+      try:
+        route = '/api/recordings/delete-videos'
+        self.assertEqual(request(route, {'segmentName': segment.name})[0], 401)
+        self.assertTrue((segment / 'fcamera.hevc').exists())
+        cookie = request('/api/auth/login', {'password': 'password123'})[2]['Set-Cookie'].split(';', 1)[0]
+        self.assertEqual(request(route, {'segmentName': '../recordings'}, cookie)[0], 400)
+        self.assertEqual(request(route, {'segmentName': segment.name, 'extra': 1}, cookie)[0], 400)
+        self.assertEqual(request(route, {'segmentName': '0000021e--371eaf116b--7'}, cookie)[0], 404)
+        parked[0] = False
+        self.assertEqual(request(route, {'segmentName': segment.name}, cookie)[0], 409)
+        self.assertTrue((segment / 'fcamera.hevc').exists())
+        parked[0] = True
+        status, body, _ = request(route, {'segmentName': segment.name}, cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['deleted'], ['fcamera', 'qcamera'])
+        self.assertEqual(sorted(p.name for p in segment.iterdir()), ['qlog.zst', 'rlog.zst'])
+        (segment / 'rlog.lock').write_bytes(b'')
+        self.assertEqual(request(route, {'segmentName': segment.name}, cookie)[0], 409)
+      finally:
+        server.shutdown()
+        worker.join(2)
+        server.server_close()

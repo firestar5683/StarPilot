@@ -150,7 +150,7 @@ def test_native_pip_passes_only_qualified_visual_sides_without_replacing_oem_bsm
   with patch.object(runtime_app, "ui_state", SimpleNamespace(params=object(), sm=object(), started_frame=0)), \
        patch.object(runtime_app, "read_pip", return_value=saved), \
        patch.object(runtime_app, "read_vasm_preferences", return_value=vasm), \
-       patch.object(runtime_app, "current_message", return_value=car), \
+       patch.object(runtime_app, "display_message", return_value=car), \
        patch.object(runtime_app, "clock_pair_ns", return_value=(100, 100)), \
        patch.object(runtime_app.time, "monotonic_ns", return_value=100), \
        patch.dict("os.environ", {"STARPILOT_PIP_DEV": "1", "STARPILOT_VASM_DEVELOPMENT": "1"}):
@@ -161,7 +161,7 @@ def test_native_pip_passes_only_qualified_visual_sides_without_replacing_oem_bsm
     assert shell.pip_warning.sample.call_args.kwargs["settings_fingerprint"] == "b" * 64
   shell.pip_warning.sample.return_value = False, False
   with patch.object(runtime_app, "ui_state", SimpleNamespace(params=object(), sm=object(), started_frame=0)), \
-       patch.object(runtime_app, "current_message", return_value=car), \
+       patch.object(runtime_app, "display_message", return_value=car), \
        patch.object(runtime_app, "clock_pair_ns", return_value=(101, 101)), \
        patch.object(runtime_app.time, "monotonic_ns", return_value=101), \
        patch.dict("os.environ", {"STARPILOT_PIP_DEV": "1", "STARPILOT_VASM_DEVELOPMENT": "0"}):
@@ -169,14 +169,14 @@ def test_native_pip_passes_only_qualified_visual_sides_without_replacing_oem_bsm
     assert shell.pip_warning.sample.call_args.kwargs["enabled"] is False
     assert shell.pip_renderer.render.call_args.args[2].right_blindspot
   with patch.object(runtime_app, "ui_state", SimpleNamespace(params=object(), sm=object(), started_frame=0)), \
-       patch.object(runtime_app, "current_message", return_value=None), \
+       patch.object(runtime_app, "display_message", return_value=None), \
        patch.object(runtime_app.time, "monotonic_ns", return_value=102), \
        patch.dict("os.environ", {"STARPILOT_PIP_DEV": "1", "STARPILOT_VASM_DEVELOPMENT": "1"}):
     shell._render_pip(SimpleNamespace(x=0), state)
     assert shell.pip_warning.sample.call_args.kwargs["enabled"] is False
   rendered_before = shell.pip_renderer.render.call_count
   with patch.object(runtime_app, "ui_state", SimpleNamespace(params=object(), sm=object(), started_frame=0)), \
-       patch.object(runtime_app, "current_message", return_value=car), \
+       patch.object(runtime_app, "display_message", return_value=car), \
        patch.object(runtime_app, "clock_pair_ns", return_value=(102, 102)), \
        patch.dict("os.environ", {"STARPILOT_PIP_DEV": "0", "STARPILOT_VASM_DEVELOPMENT": "1"}), \
        patch.object(runtime_app.time, "monotonic_ns", return_value=102):
@@ -189,7 +189,7 @@ def test_native_pip_passes_only_qualified_visual_sides_without_replacing_oem_bsm
                       (True, runtime_app.car_schema.CarState.GearShifter.park)):
     car.canValid, car.gearShifter = valid, gear
     with patch.object(runtime_app, "ui_state", SimpleNamespace(params=object(), sm=object(), started_frame=0)), \
-         patch.object(runtime_app, "current_message", return_value=car), \
+         patch.object(runtime_app, "display_message", return_value=car), \
          patch.object(runtime_app, "clock_pair_ns", return_value=(103, 103)), \
          patch.object(runtime_app.time, "monotonic_ns", return_value=103), \
          patch.dict("os.environ", {"STARPILOT_PIP_DEV": "1", "STARPILOT_VASM_DEVELOPMENT": "1"}):
@@ -284,7 +284,7 @@ def test_renderer_uses_saved_widget_position_and_removal_deactivates_camera():
 
 
 
-def test_renderer_c4_uses_recent_side_and_does_not_poll_when_inactive():
+def test_renderer_c4_uses_recent_side_and_keeps_camera_warm_while_hidden():
   class Stream(PiPStream):
     def __init__(self):
       self.active = False
@@ -305,7 +305,14 @@ def test_renderer_c4_uses_recent_side_and_does_not_poll_when_inactive():
   signals = Signals(True, False, False, False, False)
   assert renderer.render(content, mask, signals, enabled=True,
                          on_blinker=True, on_bsm=True, invert=False, now=1) == "inactive"
-  assert stream.polls == 0
+  # Hidden, the cabin stream stays connected and current for the next blinker.
+  assert stream.active and stream.polls == 1
+  assert renderer.render(content, mask, signals, enabled=False,
+                         on_blinker=True, on_bsm=True, invert=False, now=1.5) == "inactive"
+  assert not stream.active and stream.polls == 1
+  assert renderer.render(content, None, signals, enabled=True,
+                         on_blinker=True, on_bsm=True, invert=False, now=1.6) == "inactive"
+  assert not stream.active and stream.polls == 1
   right = Signals(True, False, True, False, False)
   left = Signals(True, True, False, False, False)
   with patch.object(renderer, "_shader", return_value=object()), patch.object(renderer, "_texture", return_value=object()), \
@@ -321,6 +328,25 @@ def test_renderer_c4_uses_recent_side_and_does_not_poll_when_inactive():
     renderer.render(content, mask, left, enabled=True,
                     on_blinker=True, on_bsm=False, invert=False, now=4)
     assert draw.call_args.args[4:6] == (65, 40)
+
+
+def test_renderer_shows_first_blinker_frame_without_reconnecting():
+  frames = [SimpleNamespace(frame_id=i, width=100, height=100, stride=100) for i in range(1, 4)]
+  client = _Client(frames)
+  factory = Mock(return_value=client)
+  renderer = PiPRenderer("bubble", PiPStream(factory, require_boot_eof=False), frame_availability=Mock())
+  mask = Mask.parse({"width": 100, "height": 100, "center_left": [25, 50],
+                     "center_right": [75, 50], "crop_size": 20})
+  idle, blinker = Signals(True, False, False, False, False), Signals(True, True, False, False, False)
+  with patch.object(renderer, "_shader", return_value=object()), patch.object(renderer, "_texture", return_value=object()), \
+       patch.object(renderer, "_draw") as draw:
+    for now in (1.0, 1.05):
+      assert renderer.render(Rect(0, 0, 1800, 1020), mask, idle, enabled=True, on_blinker=True, on_bsm=True,
+                             invert=False, now=now) == "inactive"
+    assert renderer.render(Rect(0, 0, 1800, 1020), mask, blinker, enabled=True, on_blinker=True, on_bsm=True,
+                           invert=False, now=1.1) == "rendered"
+  assert draw.call_count == 1
+  assert factory.call_count == 1 and client.connect_calls == 1 and client.recv_calls == 3
 
 
 def test_padded_nv12_uses_actual_uv_offset_and_texture_stride():
@@ -419,6 +445,25 @@ def test_stream_lazy_connect_nonblocking_frame_expiry_and_release():
   assert stream.poll(1.6) is None  # failed connection cannot revive stale frame
   stream.close()
   assert stream.poll(2.0) is None
+
+
+def test_stream_keeps_new_client_until_first_frame_or_stale_window():
+  client = _Client([None, None, _Frame(4)])
+  stream = PiPStream(lambda: client, require_boot_eof=False)
+  stream.set_active(True)
+  assert stream.poll(1.0) is None  # nothing queued yet right after connect
+  assert stream.connected
+  assert stream.poll(1.2) is None
+  assert stream.poll(1.3) == _Frame(4)
+  assert client.connect_calls == 1
+
+  silent = _Client()
+  stream = PiPStream(lambda: silent, require_boot_eof=False)
+  stream.set_active(True)
+  assert stream.poll(1.0) is None
+  assert stream.poll(1.5) is None and stream.connected
+  assert stream.poll(1.51) is None
+  assert not stream.connected
 
 
 def test_stream_disconnect_reconnect_and_nonincreasing_frame_id():
@@ -626,7 +671,10 @@ class TestPiPSidecam(unittest.TestCase):
     test_frozen_shape_shaders_crop_and_mask_before_camera_reads()
 
   def test_renderer_selection(self):
-    test_renderer_c4_uses_recent_side_and_does_not_poll_when_inactive()
+    test_renderer_c4_uses_recent_side_and_keeps_camera_warm_while_hidden()
+
+  def test_renderer_warm_stream(self):
+    test_renderer_shows_first_blinker_frame_without_reconnecting()
 
   def test_padded_nv12(self):
     test_padded_nv12_uses_actual_uv_offset_and_texture_stride()

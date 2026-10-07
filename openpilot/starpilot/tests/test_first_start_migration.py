@@ -176,6 +176,14 @@ class TestFirstStartMigration(unittest.TestCase):
     self.assertEqual(self.values(), {key: value for key, value in original.items() if key != 'CarParamsCache'})
     self.assertEqual(migration.load_snapshot(next((self.storage / 'snapshots').iterdir())), original)
 
+  def test_initialized_retired_setting_is_archived_and_other_state_kept(self):
+    self.start()
+    original = {'ShareUsageStats': b'1', 'IsMetric': b'1', 'ForceStops': b'0'}
+    self.write(original)
+    self.start()
+    self.assertEqual(self.values(), {'IsMetric': b'1', 'ForceStops': b'0'})
+    self.assertEqual(migration.load_snapshot(next((self.storage / 'snapshots').iterdir())), original)
+
   def test_initialized_valid_car_caches_are_retained_without_archive(self):
     self.start()
     original = {key: b'envelope:' + key.encode() for key in self.cache.CACHE_KEYS}

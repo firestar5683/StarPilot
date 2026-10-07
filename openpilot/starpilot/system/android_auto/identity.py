@@ -83,13 +83,13 @@ def load_identity(directory: Path | None = None, now: datetime | None = None) ->
                   expires.isoformat() if expires is not None else "unknown", days_left)
 
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 # Before config versions, every save wrote these defaults, which pinned projection
 # at 12 fps / 4000 kbps. Unversioned files holding exactly them get today's defaults.
 LEGACY_DEFAULTS = {"fps": 12, "bitrate_kbps": 4000}
 # Before version 3 the car view could only publish RGBA, and every save wrote these off.
 # They were never a choice, so older files get today's defaults for them.
-V3_RESET = ("gpu_nv12", "async_readback")
+PIPELINE_RESET = ("gpu_nv12", "async_readback")
 
 DEFAULT_CONFIG = {
   "config_version": CONFIG_VERSION,
@@ -128,7 +128,7 @@ def load_config(path: Path | None = None) -> dict:
       if not isinstance(version, int) or version < 2:
         stored = {key: value for key, value in stored.items() if LEGACY_DEFAULTS.get(key, object()) != value}
       if not isinstance(version, int) or version < 3:
-        stored = {key: value for key, value in stored.items() if key not in V3_RESET}
+        stored = {key: value for key, value in stored.items() if key not in PIPELINE_RESET}
       config.update({key: value for key, value in stored.items() if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key]))})
   except (OSError, ValueError):
     pass
@@ -169,6 +169,19 @@ def expiry_warning(identity: Identity) -> str:
   if 0 <= identity.days_left <= EXPIRY_WARNING_DAYS:
     return f"Android Auto identity expires in {identity.days_left} days ({identity.expires[:10]}); renew it in The Galaxy"
   return ""
+
+
+def certificate_days_left(directory: Path | None = None, now: datetime | None = None) -> int | None:
+  """Whole days until the installed certificate expires (as ``Identity.days_left``), or None if unreadable.
+
+  Reads only the certificate, never the key, so the read-only car view can call it.
+  """
+  cert = (directory or IDENTITY_DIR) / CERT_NAME
+  try:
+    expires = _not_after(cert) if cert.is_file() else None
+  except (OSError, ValueError):
+    return None
+  return None if expires is None else (expires - (now or datetime.now(UTC))).days
 
 
 def session_log_order(path: Path) -> tuple[int, str]:

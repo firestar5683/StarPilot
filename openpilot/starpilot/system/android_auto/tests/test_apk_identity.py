@@ -141,6 +141,38 @@ def test_rejects_non_apk_and_oversized_code(tmp_path, ident, monkeypatch):
     apk_identity.extract_identity(make_apk(tmp_path, ident), root_sha256=ident["root_sha"])
 
 
+def test_rejections_carry_codes_for_galaxy(tmp_path, ident):
+  def code(path, **kwargs):
+    with pytest.raises(apk_identity.IdentityImportError) as error:
+      apk_identity.extract_identity(path, **kwargs)
+    return error.value.code, error.value.expires
+
+  junk = tmp_path / "junk.apk"
+  junk.write_bytes(b"not a zip")
+  assert code(junk) == ("NOT_PACKAGE", None)
+  assert code(make_apk(tmp_path, ident)) == ("WRONG_APP", None)
+  assert code(make_apk(tmp_path, ident, mask=bytes(256)), root_sha256=ident["root_sha"]) == ("UNSUPPORTED_VERSION", None)
+  later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=400)
+  expired, expires = code(make_apk(tmp_path, ident), root_sha256=ident["root_sha"], now=later)
+  assert expired == "EXPIRED" and datetime.datetime.fromisoformat(expires) < later
+
+  job = apk_identity.ImportJob(work_dir=tmp_path / "work", identity_dir=tmp_path / "identity")
+  job.start(path=junk)
+  job.thread.join(30)
+  assert job.status()["state"] == "failed" and job.status()["code"] == "NOT_PACKAGE"
+
+
+def test_status_reports_date_of_expired_identity(tmp_path):
+  cert, root, key_pem, _ = build_identity(days=0)
+  directory = tmp_path / "identity"
+  directory.mkdir()
+  for name, content in {"phone-cert.pem": cert, "phone-key.pem": key_pem, "root-cert.pem": root}.items():
+    (directory / name).write_bytes(content)
+  os.chmod(directory / "phone-key.pem", 0o600)
+  status = apk_identity.identity_status(directory)
+  assert not status["installed"] and status["expired"] and status["expires"][:10] == datetime.datetime.now(datetime.UTC).date().isoformat()
+
+
 def test_install_is_atomic_and_keeps_previous(tmp_path, ident):
   directory = tmp_path / "aa" / "identity"
   files = {"phone-cert.pem": ident["cert"], "phone-key.pem": ident["key"], "root-cert.pem": ident["root"]}
@@ -188,6 +220,17 @@ def test_status_reports_expiry(tmp_path):
   assert status["installed"] and status["days_left"] in (4, 5) and "renew" in status["warning"]
 
 
+def test_certificate_days_left_reads_only_the_certificate(tmp_path):
+  cert, _, _, _ = build_identity(days=5)
+  directory = tmp_path / "identity"
+  directory.mkdir()
+  assert identity_store.certificate_days_left(directory) is None
+  (directory / identity_store.CERT_NAME).write_bytes(cert)  # no key: the car view never reads it
+  assert identity_store.certificate_days_left(directory) in (4, 5)
+  (directory / identity_store.CERT_NAME).write_bytes(b"not a certificate")
+  assert identity_store.certificate_days_left(directory) is None
+
+
 def wait_job(job):
   job.thread.join(30)
   return job.status()
@@ -232,3 +275,10 @@ def test_real_android_auto_17_6_xapk():
   files, meta = apk_identity.extract_identity(REAL_XAPK)
   assert meta["root_sha256"] == apk_identity.GOOGLE_ROOT_SHA256 and "CarService" in meta["subject"]
   assert set(files) == {"phone-cert.pem", "phone-key.pem", "root-cert.pem"}
+
+
+def test_status_reports_corrupt_certificate_without_raising(tmp_path):
+  (tmp_path / identity_store.CERT_NAME).write_bytes(b"not a certificate")
+  status = apk_identity.identity_status(tmp_path)
+  assert status["installed"] is False and status["error"]
+  assert "expires" not in status

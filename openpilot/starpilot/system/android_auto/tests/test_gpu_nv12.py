@@ -12,6 +12,7 @@ from unittest import SkipTest
 
 import numpy as np
 import pytest
+from unittest.mock import Mock
 
 from openpilot.starpilot.system.android_auto import gpu_nv12, headless_egl
 
@@ -97,3 +98,20 @@ def test_composed_car_frame_converts_to_the_same_picture(gpu, width, height, mar
     converter.close()
     rl.unload_render_texture(output)
     rl.rl_unload_texture(texture_id)
+
+
+def test_failed_async_readback_reports_gl_error_and_falls_back_to_sync(monkeypatch):
+  gl = Mock()
+  gl.glFenceSync.return_value = 1
+  gl.glClientWaitSync.return_value = headless_egl.GL_WAIT_FAILED
+  gl.glGetError.return_value = 0x502
+  monkeypatch.setattr(headless_egl.C, "CDLL", lambda _name: gl)
+  readback = headless_egl.FrameReadback(16, asynchronous=True)
+  readback.start([(7, 2, 2, 0)])
+  with pytest.raises(RuntimeError, match="0x911d, GL error 0x502"):
+    readback.finish()
+  readback.release()
+  readback.fall_back_to_sync()
+  readback.start([(7, 2, 2, 0)])
+  assert not readback.asynchronous and readback.finish() is readback.pixels
+  readback.close()
