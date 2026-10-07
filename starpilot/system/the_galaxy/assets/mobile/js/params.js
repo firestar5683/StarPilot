@@ -72,6 +72,8 @@ const VEHICLE_SETTING_MAKES = {
   SubaruAvhStartup: ["Subaru"],
   SubaruRedneckCruise: ["Subaru"],
   SNGHack: ["Lexus", "Toyota"],
+  LockDoors: ["Lexus", "Toyota"],
+  UnlockDoors: ["Lexus", "Toyota"],
   ToyotaAutoHold: ["Lexus", "Toyota"],
 }
 
