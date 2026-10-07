@@ -72,7 +72,7 @@ BOOL_DEFAULTS = {
   "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
   "ReverseCruise": False, "ToyotaAutoHold": False, "VoltSNG": False, "GMAutoHold": False, "VoltOnePedalMode": False,
   "LongPitch": True, "DisableOpenpilotLongitudinal": False,
-  "SpeedLimitController": False, "ShowSpeedLimits": False,
+  "SpeedLimitController": False, "ShowSpeedLimits": True,
   "SLCConfirmation": False, "SLCConfirmationHigher": False, "SLCConfirmationLower": False,
   "PauseLateralOnSignal": False,
   "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
@@ -472,7 +472,7 @@ class FeatureSettingsOwner:
     if key == SLC_FALLBACK:
       return "2"
     if key == SLC_PRIORITY:
-      return "Dashboard"
+      return "Vision"
     if key == "IsMetric":
       return "0"
     if key.startswith("Offset") or key == "ForceStopDistanceOffset":

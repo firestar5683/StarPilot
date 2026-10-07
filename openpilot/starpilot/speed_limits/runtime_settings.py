@@ -59,12 +59,12 @@ def parse(values: Mapping[str, object]) -> Settings:
   """Translate saved labels without changing their meaning or enabling unsupported output."""
   try:
     control = _bool(values, "SpeedLimitController")
-    display = control or _bool(values, "ShowSpeedLimits")
+    display = control or _bool(values, "ShowSpeedLimits", True)
     document = od.validate(values['SLCOffsetSchedule']) if 'SLCOffsetSchedule' in values else None
     if document is od.NEEDS_REVIEW:
       raise ValueError('saved SLC offsets need review')
     metric = _bool(values, "IsMetric") if document is None else False  # presentation units do not own adopted control
-    first = values.get("SLCPriority1", "Dashboard")
+    first = values.get("SLCPriority1", "Vision")
     second = values.get("SLCPriority2", "Map Data")
     if type(first) is not str or type(second) is not str:
       raise ValueError("invalid saved SLC source priority")

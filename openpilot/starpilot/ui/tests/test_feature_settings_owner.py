@@ -485,6 +485,11 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.allowed and group == "preferences",
                                       vehicle_fingerprint=lambda: self.fingerprint)
     page = self.owner.snapshot("slc", parked=True, system_long=False, lateral_context=False, metric=False)
+    fresh_sign = next(row for row in page.rows if row.key == "ShowSpeedLimits")
+    self.assertEqual((fresh_sign.value, fresh_sign.default_value), ('On', 'On'))
+    self.params.put_bool('ShowSpeedLimits', False, block=True)
+    self.params.put('SLCPriority1', 'Dashboard', block=True)
+    page = self.owner.snapshot("slc", parked=True, system_long=False, lateral_context=False, metric=False)
     sign = next(row for row in page.rows if row.key == "ShowSpeedLimits")
     self.assertTrue(sign.available)
     self.assertIsNone(sign.vehicle_fingerprint)

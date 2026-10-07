@@ -9,6 +9,23 @@ from openpilot.starpilot.speed_limits.runtime_settings import MPH_TO_MPS, parse,
 
 
 class RuntimeSettingsTests(unittest.TestCase):
+  def test_fresh_vision_display_default_preserves_explicit_saved_choices(self):
+    from openpilot.starpilot.speed_limits.selection import Source
+    with tempfile.TemporaryDirectory() as directory:
+      params = Params(directory)
+      settings = read_params(params)
+      self.assertTrue(settings.display)
+      self.assertFalse(settings.enabled)
+      self.assertEqual(settings.selection.slots[0], Source.VISION)
+      params.put_bool('ShowSpeedLimits', False, block=True)
+      params.put('SLCPriority1', 'Dashboard', block=True)
+      saved = read_params(params)
+      self.assertFalse(saved.display)
+      self.assertFalse(saved.enabled)
+      self.assertEqual(saved.selection.slots[0], Source.DASHBOARD)
+      self.assertEqual(Path(params.get_param_path('ShowSpeedLimits')).read_bytes(), b'0')
+      self.assertEqual(Path(params.get_param_path('SLCPriority1')).read_bytes(), b'Dashboard')
+
   def test_corrupt_saved_values_disable_control_without_rewriting(self):
     cases = {'SLCConfirmation': b'invalid', 'SLCFallback': b'broken',
              'Offset3': b'bad', 'IsMetric': b'2', 'SLCPriority1': b'\xff'}

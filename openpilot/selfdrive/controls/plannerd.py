@@ -38,8 +38,44 @@ from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
 from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
 from openpilot.starpilot.conditional_mode.ui_action import observation as ui_manual_observation
 from openpilot.starpilot.longitudinal.cruise_ceiling import CurveCeiling
-from openpilot.starpilot.feature_runtime import enabled as feature_enabled, requested as feature_requested, slc_runtime_settings, vision_control_enabled
+from openpilot.starpilot.feature_runtime import (enabled as feature_enabled, requested as feature_requested,
+                                               slc_runtime_settings, slc_transport_capable, vision_control_enabled)
 import time
+
+
+class SavedSlcLifecycle:
+  """Refresh saved admission; each replacement starts an independent SLC session."""
+
+  def __init__(self, params, cp, environment):
+    self.params, self.cp, self.environment = params, cp, dict(environment)
+    self.runtime = None
+    self.configuration = None
+    self.last_refresh_ns = None
+
+  def refresh(self, now_ns: int, *, pending_actions=None, pending_cruise=None):
+    if self.last_refresh_ns is not None and 0 <= now_ns - self.last_refresh_ns < 1_000_000_000:
+      return self.runtime, False
+    self.last_refresh_ns = now_ns
+    admitted = feature_enabled(self.params, self.cp, 'slc', self.environment)
+    settings = slc_runtime_settings(self.params, self.cp, self.environment)
+    vision = admitted and feature_enabled(self.params, self.cp, 'vision', self.environment)
+    configuration = (admitted and not settings.errors, settings, vision,
+                     vision_control_enabled(self.params, self.cp),
+                     feature_enabled(self.params, self.cp, 'vision', {}))
+    if configuration == self.configuration:
+      return self.runtime, False
+    if self.runtime is not None:
+      self.runtime.reset()
+    self.configuration = configuration
+    if pending_actions is not None:
+      pending_actions.clear()
+    if pending_cruise is not None:
+      pending_cruise.clear()
+    self.runtime = (SlcRuntime(settings, vision_enabled=vision,
+                               vision_control_qualified=configuration[3],
+                               vision_display_qualified=configuration[4])
+                    if configuration[0] else None)
+    return self.runtime, True
 
 
 def profile_for_frame(host: ProfileHost | None, sm, CP, now_ns: int, *, traffic_mode: bool | None = False):
@@ -303,7 +339,7 @@ def starpilot_main():
   # Saved-on features start only for a finalized, supported driving owner. Their
   # current-source and longitudinal authority checks still run every frame.
   slc_replay = feature_enabled(params, CP, 'slc', os.environ)
-  slc_vision_development = slc_replay and feature_enabled(params, CP, 'vision', os.environ)
+  slc_available = slc_transport_capable(CP, os.environ)
   profile_replay = feature_enabled(params, CP, 'profile', os.environ)
   curve_replay = feature_enabled(params, CP, 'curve', os.environ)
   conditional_replay = feature_enabled(params, CP, 'conditional', os.environ)
@@ -335,12 +371,10 @@ def starpilot_main():
   pending_modes = deque(maxlen=8)
   pending_switchback = deque(maxlen=8)
   mode_settings = ConditionalSettingsOwner(params) if mode_owner is not None else None
-  slc_runtime = (SlcRuntime(slc_runtime_settings(params, CP, os.environ), vision_enabled=slc_vision_development,
-                            vision_control_qualified=vision_control_enabled(params, CP),
-                            vision_display_qualified=feature_enabled(params, CP, 'vision', {}))
-                 if slc_replay else None)
+  slc_lifecycle = SavedSlcLifecycle(params, CP, os.environ)
+  slc_runtime, _ = slc_lifecycle.refresh(0)
   slc_action_sock = (messaging.sub_sock("slcAction", conflate=False)
-                     if slc_runtime is not None or conditional_host is not None or mode_owner is not None else None)
+                     if slc_available or conditional_host is not None or mode_owner is not None else None)
   slc_cruise_sock = messaging.sub_sock("slcCruiseEvent", conflate=False)
   pending_slc_actions = deque(maxlen=64)
   pending_slc_cruise = deque(maxlen=64)
@@ -350,9 +384,9 @@ def starpilot_main():
   pending_traffic_events = deque(maxlen=64)
   drive_start_ns = 0
   publish_services = ['longitudinalPlan', 'starpilotLongitudinalPlan', 'driverAssistance']
-  if slc_runtime is not None or curve_host is not None or conditional_host is not None or traffic_owner is not None or mode_owner is not None:
+  if slc_available or curve_host is not None or conditional_host is not None or traffic_owner is not None or mode_owner is not None:
     publish_services.append('slcState')
-  if slc_runtime is not None:
+  if slc_available:
     publish_services.append('slcCruiseCommand')
   pm = messaging.PubMaster(publish_services)
   native_plan_checks = list(NATIVE_PLAN_INPUTS)
@@ -360,12 +394,10 @@ def starpilot_main():
   subscribed_services.append('deviceState')
   if conditional_host is not None:
     subscribed_services.append('starpilotRadarState')
-  if slc_runtime is not None:
-    subscribed_services.append('slcDashboardObservation')
-    if slc_vision_development:
-      subscribed_services.append('slcVisionObservation')
+  optional_slc = ['slcDashboardObservation', 'slcVisionObservation'] if slc_available else []
+  subscribed_services.extend(optional_slc)
   subscribed_services.append('starpilotNavigation')
-  optional_conditional = ['starpilotNavigation'] + (['starpilotRadarState'] if conditional_host is not None else [])
+  optional_conditional = ['starpilotNavigation'] + (['starpilotRadarState'] if conditional_host is not None else []) + optional_slc
   sm = messaging.SubMaster(subscribed_services, poll='modelV2',
                            ignore_alive=optional_conditional, ignore_valid=optional_conditional,
                            ignore_avg_freq=optional_conditional)
@@ -377,6 +409,10 @@ def starpilot_main():
         # Only explicit replay uses the recorded model timeline. In a live host,
         # modelV2 may lag newer inputs in the same SubMaster update.
         now_ns = int(sm.logMonoTime['modelV2']) if 'REPLAY' in os.environ else time.monotonic_ns()
+        slc_runtime, _ = slc_lifecycle.refresh(now_ns, pending_actions=pending_slc_actions,
+                                               pending_cruise=pending_slc_cruise)
+        if conditional_host is not None:
+          conditional_host.slc_runtime_enabled = slc_runtime is not None
         current_start_ns = (int(sm['deviceState'].startedMonoTime)
                             if 'deviceState' in subscribed_services and sm.valid['deviceState'] and
                             sm.alive['deviceState'] and 0 < sm.logMonoTime['deviceState'] <= now_ns else 0)

@@ -86,6 +86,12 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str]) -> bool:
   return bool(capable and (requested(params, feature) or powertrain_requested))
 
 
+def slc_transport_capable(cp, environment: Mapping[str, str]) -> bool:
+  """Reserve optional transport without admitting a saved request or control."""
+  return bool(environment.get('SLC_REPLAY_RUNTIME') == '1' or
+              (cp is not None and (ioniq6_long_eligible(cp) or gm_long_supported(cp) or gm_display_supported(cp))))
+
+
 def slc_runtime_settings(params, cp, environment: Mapping[str, str]):
   """Stock display startup cannot inherit a saved speed-control request."""
   settings = read_slc_settings(params)
