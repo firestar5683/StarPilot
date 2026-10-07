@@ -289,7 +289,7 @@ def get_genesis_g70_stabilized_output(output_torque: float, prev_output_torque: 
   return float(output_torque + speed_weight * (smoothed_output - output_torque))
 
 
-GENESIS_G70_CENTER_MEASUREMENT_DAMPING_MAX = 0.06
+GENESIS_G70_CENTER_MEASUREMENT_DAMPING_MAX = 0.09
 GENESIS_G70_CENTER_MEASUREMENT_DAMPING_SPEED_BP = [50.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
 GENESIS_G70_CENTER_MEASUREMENT_DAMPING_LAT_BP = [0.15, 0.35]
 GENESIS_G70_CENTER_MEASUREMENT_DAMPING_JERK_BP = [0.20, 0.50]
