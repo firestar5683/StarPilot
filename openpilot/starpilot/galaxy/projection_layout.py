@@ -1,12 +1,15 @@
 """Authenticated Galaxy owner for a separate, negotiated AA layout document."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from openpilot.starpilot.galaxy.onroad_layout import LayoutChanged
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.saved_source import read_saved
-from openpilot.starpilot.system.android_auto.display_profile import SCREEN_PATH, MAX_BYTES as SCREEN_MAX_BYTES, validate_screen
+from openpilot.starpilot.system.android_auto.display_profile import (
+  SCREEN_PATH, MAX_BYTES as SCREEN_MAX_BYTES, record_screen, validate_screen,
+)
 from openpilot.starpilot.system.android_auto.projection_layout import (
   DOCUMENT_KEY, MAX_BYTES, ProjectionLayoutSource, decode_layout, default_layout, layout_metadata, validate_layout,
 )
@@ -38,10 +41,13 @@ def _unique(pairs):
 
 
 class ProjectionLayoutOwner:
-  def __init__(self, params, parked, source=None, screen_path=None):
-    self.params, self.parked = params, parked
+  def __init__(self, params, parked, source=None, screen_path=None, require_enabled=True):
+    self.params, self.parked, self.require_enabled = params, parked, require_enabled
     self.source = source if source is not None else ProjectionLayoutSource()
     self.screen_source = _ScreenSource(screen_path if screen_path is not None else SCREEN_PATH)
+
+  def _enabled(self):
+    return not self.require_enabled or self.params.get_bool('AndroidAutoEnabled')
 
   def _screen(self):
     raw, readable = read_saved(self.screen_source, 'screen', SCREEN_MAX_BYTES)
@@ -65,7 +71,7 @@ class ProjectionLayoutOwner:
         valid = True
       except (ValueError, TypeError, UnicodeError, RecursionError):
         pass
-    enabled = self.params.get_bool('AndroidAutoEnabled')
+    enabled = self._enabled()
     available = bool(enabled and screen is not None and screen_readable and readable)
     reason = ('Enable Android Auto to edit its layout' if not enabled else
               'Connect Android Auto once to obtain the actual screen' if screen is None else
@@ -92,7 +98,7 @@ class ProjectionLayoutOwner:
     encoded = json.dumps(document, separators=(',', ':'), allow_nan=False).encode()
 
     def authorized():
-      if not session_valid() or not self.parked() or not self.params.get_bool('AndroidAutoEnabled'):
+      if not session_valid() or not self.parked() or not self._enabled():
         return False
       current, current_readable, current_screen = self._screen()
       return current_readable and current_screen is not None and current == screen_raw
@@ -105,3 +111,22 @@ class ProjectionLayoutOwner:
     if not result.committed or not result.verified:
       raise LayoutChanged('Projection layout could not be saved; reload while parked')
     return self.snapshot()
+
+
+# ./dev galaxy has no car and no writable /data: give it a private screen and edit it with Android Auto off.
+HOST_SCREEN = {'width': 1920, 'height': 1080, 'margin_width': 0, 'margin_height': 0, 'fps': 60, 'config_index': 0}
+
+
+def host_owner(params, parked, root=None, environ=os.environ):
+  """Return a host-runtime owner, or None on a device where the negotiated screen is authoritative."""
+  if environ.get('SP_HOST_RUNTIME') != '1':
+    return None
+  if root is None:
+    from openpilot.starpilot.system.android_auto.identity import DATA_DIR
+    root = DATA_DIR
+  root = Path(root)
+  screen_path = root / 'screen.json'
+  if not screen_path.exists():
+    record_screen(HOST_SCREEN, screen_path)
+  return ProjectionLayoutOwner(params, parked, ProjectionLayoutSource(root / 'layouts/document.json'), screen_path,
+                               require_enabled=False)

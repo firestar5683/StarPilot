@@ -118,6 +118,8 @@ component.feed.stop()
 assert.equal(component.state.draft, null)
 
 const earlierDocument = globalThis.document
+const earlierWindow = globalThis.window
+globalThis.window = new EventTarget()
 const listeners = new Map(), lifecycle = []
 globalThis.document = { hidden: false, addEventListener(name, fn) { listeners.set(name, fn) },
   removeEventListener(name) { listeners.delete(name) } }
@@ -133,4 +135,5 @@ ControllersPage.beforeUnmount.call(mounted)
 assert.deepEqual(lifecycle, ["start", "stop", "stop", "stop"])
 assert.equal(listeners.size, 0)
 globalThis.document = earlierDocument
+globalThis.window = earlierWindow
 console.log("Controller buttons: source status validation, draft preservation, polling, auth, parked denial and capture cleanup passed")

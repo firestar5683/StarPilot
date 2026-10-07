@@ -1,3 +1,4 @@
+import { guardUnload } from "./unload-guard.js"
 import { GxSummary } from "./summary.js"
 import { GxNotice } from "./notice.js"
 import { GalaxySelect } from "./galaxy-select.js"
@@ -122,11 +123,12 @@ export const LaboratoryPage = {
     } })
   },
   mounted() {
+    this._stopUnloadGuard = guardUnload(() => this.dirty || this.busy)
     this.visibility = () => { if (document.hidden) this.feed.stop(); else if (this.mode === "local") this.feed.start() }
     document.addEventListener("visibilitychange", this.visibility)
     if (this.mode === "local" && !document.hidden) this.feed.start()
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
+  beforeUnmount() { this._stopUnloadGuard(); document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
   methods: {
     statusLabel: laboratoryStatusLabel,
     can(action, model = null) { return !this.busy && laboratoryActionAllowed(this.status, action, model, this.configuration) },

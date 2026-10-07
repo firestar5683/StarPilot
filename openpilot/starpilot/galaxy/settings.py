@@ -26,7 +26,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
 )
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
-from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad
+from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad, host_parked
 from openpilot.starpilot.ui.pip_owner import EDITOR as PIP_EDITOR, FORMAT_PREFIX as PIP_FORMAT_PREFIX, RESET as PIP_RESET, PiPOwner, validated_editor_draft
 from openpilot.starpilot.ui.pip_preferences import read_pip
 from openpilot.starpilot.ui.sentry_owner import RESET as SENTRY_RESET, SentryOwner
@@ -201,6 +201,8 @@ class LiveContextSource:
 
   def offroad(self) -> bool:
     """Effective offroad mode also permits setup with the car powered on."""
+    if host_parked():
+      return not self.closed
     offroad, readable = read_saved(self.params, "IsOffroad", 8)
     if not readable or offroad != b"1":
       return False

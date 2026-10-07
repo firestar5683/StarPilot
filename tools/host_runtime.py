@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -12,8 +13,11 @@ from pathlib import Path
 import platform
 import shutil
 import signal
+import socket
 import subprocess
 import sys
+import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +30,10 @@ HELP = """Usage: ./dev <command> [args...]
   cabana        Build and run Cabana in its own concurrent cache.
   plotjuggler   Run PlotJuggler (alias: juggle).
   galaxy        Run authenticated Galaxy on loopback (optional --port).
+                --live releases the shared lock and follows edits under
+                openpilot/starpilot/galaxy, restarting for Python changes and
+                reloading the open page after each edit (--no-autoreload: refresh
+                by hand).
   python        Run Python with current source and native extensions.
   pytest        Run pytest with current source and native extensions.
   shell         Open a shell in the isolated host worktree.
@@ -45,8 +53,31 @@ VENDORS = ('msgq_repo', 'opendbc_repo', 'rednose_repo', 'teleoprtc_repo', 'tinyg
 # Never inherit a device/cross compiler or another project's editable imports.
 REMOVE_ENV = ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS',
               'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'PKG_CONFIG_PATH', 'CPATH', 'LIBRARY_PATH',
-              'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR')
+              'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'SP_HOST_PARKED')
 EXCLUDE_DIRS = {'.git', '.venv', '.venv-linux-arm64', '.host_runtime', '.comma_sysroot', '.cache', '__pycache__'}
+NATIVE_SUFFIXES = {'.a', '.so', '.dylib', '.o', '.os'}
+GALAXY = Path('openpilot/starpilot/galaxy')
+LIVE_RELOAD = 'starpilot-live-reload.js'
+LIVE_VERSION = 'starpilot-live-version.txt'
+LIVE_TAG = f'<script src="/{LIVE_RELOAD}"></script>'
+LIVE_SCRIPT = f"""// Added by ./dev galaxy --live to its host cache only: reload after each mirrored edit.
+{{
+  let seen = null
+  setInterval(async () => {{
+    try {{
+      const response = await fetch('/{LIVE_VERSION}', {{ cache: 'no-store' }})
+      if (!response.ok) return
+      const version = (await response.text()).trim()
+      if (seen !== null && version !== seen) {{
+        const event = new Event('beforeunload', {{ cancelable: true }})
+        if (!window.dispatchEvent(event)) return
+        location.reload()
+      }}
+      seen = version
+    }} catch {{}}
+  }}, 500)
+}}
+"""
 
 
 def run(arguments, *, cwd, env=None, capture=False):
@@ -95,6 +126,31 @@ def same_contents(source, destination):
   return True
 
 
+@contextmanager
+def file_lock(path, *, nonblocking=False):
+  with path.open('a+') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0))
+    yield
+
+
+@contextmanager
+def atomic_destination(path):
+  """Publish a complete file or symlink without truncating readers of the old inode."""
+  fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}-')
+  os.close(fd)
+  temporary = Path(temporary)
+  try:
+    yield temporary
+    os.replace(temporary, path)
+  finally:
+    temporary.unlink(missing_ok=True)
+
+
+def atomic_write(path, data):
+  with atomic_destination(path) as temporary:
+    temporary.write_bytes(data)
+
+
 class HostRuntime:
   def __init__(self, root, bucket, *, system=None, machine=None):
     self.root = Path(root).resolve()
@@ -119,7 +175,11 @@ class HostRuntime:
       try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
       except BlockingIOError:
-        print(f'Waiting for the {self.cache.name} host session to exit…', flush=True)
+        lock.seek(0)
+        owner = lock.read().strip()
+        detail = f' (owner PID {owner})' if owner.isdecimal() else ''
+        print(f'Waiting for the {self.cache.name} host session{detail} to exit…',
+              'Stop that session with Ctrl+C to continue.', flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
       lock.seek(0)
       lock.truncate()
@@ -132,48 +192,75 @@ class HostRuntime:
         self.lock_fd = None
         fcntl.flock(lock, fcntl.LOCK_UN)
 
+  def source_paths(self, *pathspec):
+    # Include uncommitted development, exclude ignored native/device outputs.
+    listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', *pathspec).split('\0')
+    return {Path(name) for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
+            and not (set(Path(name).suffixes) & NATIVE_SUFFIXES) and (self.root / name).is_file()}
+
+  def source_lock(self):
+    return file_lock(inside(self.cache / 'source-lock', self.cache))
+
+  def copy_source(self, name):
+    source = self.root / name
+    destination = inside(self.work / name, self.work)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_dir() and not destination.is_symlink():
+      shutil.rmtree(destination)
+    if source.is_symlink():
+      inside(source, self.root)
+      target = os.readlink(source)
+      if os.path.isabs(target):
+        raise RuntimeError(f'Absolute source symlink is not portable: {name}')
+      if destination.is_symlink() and os.readlink(destination) == target:
+        return
+      with atomic_destination(destination) as temporary:
+        temporary.unlink()
+        temporary.symlink_to(target)
+    elif destination.is_symlink() or not same_contents(source, destination):
+      old_mtime = destination.stat().st_mtime_ns if destination.exists() else None
+      with atomic_destination(destination) as temporary:
+        shutil.copy2(source, temporary)
+        if temporary.stat().st_mtime_ns == old_mtime:
+          os.utime(temporary, None)  # SCons must notice edits even when an editor keeps mtime.
+    elif source.stat().st_mode != destination.stat().st_mode:
+      destination.chmod(source.stat().st_mode)
+    if name.suffix == '.py':
+      # Timestamp-based bytecode can accept same-size edits within the same second.
+      for bytecode in (destination.parent / '__pycache__').glob(f'{destination.stem}.*.pyc'):
+        inside(bytecode, self.work).unlink(missing_ok=True)
+
+  def mirror(self, changed, removed):
+    """Serialize cache mutations and retain ownership of live-added files for later syncs."""
+    with self.source_lock():
+      return self._mirror(changed, removed)
+
+  def _mirror(self, changed, removed):
+    manifest = inside(self.cache / 'source-files.json', self.cache)
+    paths = set(json.loads(manifest.read_text())) if manifest.exists() else set()
+    copied = []
+    for name in removed:
+      path = inside(self.work / name, self.work)
+      path.unlink(missing_ok=True)
+      paths.discard(str(name))
+    for name in changed:
+      try:
+        self.copy_source(name)
+      except FileNotFoundError:
+        continue  # Do not acknowledge this edit; the watcher will retry it.
+      copied.append(name)
+      paths.add(str(name))
+    atomic_write(manifest, (json.dumps(sorted(paths)) + '\n').encode())
+    return copied
+
   def sync(self):
     inside(self.work, self.cache).mkdir(parents=True, exist_ok=True)
-    # Include uncommitted development, exclude ignored native/device outputs.
-    listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0')
-    paths = {name for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
-             and not (set(Path(name).suffixes) & {'.a', '.so', '.dylib', '.o', '.os'})
-             and (self.root / name).is_file()}
-    manifest = inside(self.cache / 'source-files.json', self.cache)
-    previous = set(json.loads(manifest.read_text())) if manifest.exists() else set()
-    for name in sorted(previous - paths):
-      path = inside(self.work / name, self.work)
-      if path.is_file() or path.is_symlink():
-        path.unlink()
-    for name in sorted(paths):
-      source = self.root / name
-      destination = inside(self.work / name, self.work)
-      destination.parent.mkdir(parents=True, exist_ok=True)
-      if source.is_symlink():
-        # Keep repository-relative links; never point the host cache at device builds.
-        inside(source, self.root)
-        target = os.readlink(source)
-        if os.path.isabs(target):
-          raise RuntimeError(f'Absolute source symlink is not portable: {name}')
-        if destination.is_symlink() and os.readlink(destination) == target:
-          continue
-        if destination.exists() or destination.is_symlink():
-          destination.unlink()
-        destination.symlink_to(target)
-      elif destination.is_symlink() or not same_contents(source, destination):
-        old_mtime = destination.stat().st_mtime_ns if destination.exists() else None
-        if destination.is_symlink():
-          destination.unlink()
-        elif destination.is_dir():
-          shutil.rmtree(destination)
-        shutil.copy2(source, destination)
-        # SCons' MD5-timestamp decider must notice edits even if an editor kept mtime.
-        if destination.stat().st_mtime_ns == old_mtime:
-          os.utime(destination, None)
-      elif source.stat().st_mode != destination.stat().st_mode:
-        destination.chmod(source.stat().st_mode)
-    self.sync_git()
-    manifest.write_text(json.dumps(sorted(paths)) + '\n')
+    paths = self.source_paths()
+    with self.source_lock():
+      manifest = inside(self.cache / 'source-files.json', self.cache)
+      previous = set(json.loads(manifest.read_text())) if manifest.exists() else set()
+      self._mirror(sorted(paths), [Path(name) for name in sorted(previous - set(map(str, paths)))])
+      self.sync_git()
 
   def sync_git(self):
     # Same read-only object sharing as `git clone --shared`, independent index/refs.
@@ -208,6 +295,7 @@ class HostRuntime:
                BASEDIR=str(self.work), PWD=str(self.work), PARAMS_ROOT=str(inside(self.cache / 'params', self.cache)),
                OPENPILOT_PREFIX=self.prefix, SP_HOST_PREFIX=self.prefix,
                SP_HOST_PARAMS_ROOT=str(self.cache / 'params'), SP_HOST_RUNTIME='1',
+               ANDROID_AUTO_DIR=str(inside(self.cache / 'android_auto', self.cache)),
                SP_SCONS_CACHE_DIR=str(self.cache / 'scons-cache'),
                SCONS_CACHE=str(self.cache / 'scons-cache'),
                NOBOARD='1', SIMULATION='1', SKIP_FW_QUERY='1', STARPILOT_UI_DEV='1',
@@ -247,8 +335,16 @@ class HostRuntime:
       targets += ['openpilot/tools/' + ('cabana/cabana' if command == 'cabana' else 'replay/replay')]
     run([self.venv / 'bin/python', '-m', 'SCons', f'-j{jobs}', *targets], cwd=self.work, env=self.environment())
 
+  def private_ipc(self):
+    ipc = Path('/tmp' if self.system == 'Darwin' else '/dev/shm') / f'msgq_{self.prefix}'
+    if ipc.is_symlink() or (ipc.exists() and (not ipc.is_dir() or ipc.stat().st_uid != os.getuid())):
+      raise RuntimeError(f'Private messaging path is not owned by this user: {ipc}')
+    ipc.mkdir(mode=0o700, exist_ok=True)
+
   def launch(self, command, jobs, arguments):
     env = self.environment()
+    if command in ('c3', 'c4', 'galaxy'):
+      env['SP_HOST_PARKED'] = '1'  # No car or drive-state publishers: parked-only setup stays usable.
     python = self.venv / 'bin/python'
     if command in ('c3', 'c4', 'onroad'):
       script = 'launch_onroad_desktop.sh' if command == 'onroad' else f'launch_ui_{command}_desktop.sh'
@@ -268,10 +364,7 @@ class HostRuntime:
       argv = [env.get('SHELL', '/bin/bash'), *arguments]
     else:
       argv = [python, *arguments]
-    ipc = Path('/tmp' if self.system == 'Darwin' else '/dev/shm') / f'msgq_{self.prefix}'
-    if ipc.is_symlink() or (ipc.exists() and (not ipc.is_dir() or ipc.stat().st_uid != os.getuid())):
-      raise RuntimeError(f'Private messaging path is not owned by this user: {ipc}')
-    ipc.mkdir(mode=0o700, exist_ok=True)
+    self.private_ipc()
     # Keep the bucket locked if this wrapper is killed while its child is alive.
     inherited = () if self.lock_fd is None else (self.lock_fd,)
     with subprocess.Popen([str(arg) for arg in argv], cwd=self.work, env=env, pass_fds=inherited) as child:
@@ -286,9 +379,169 @@ class HostRuntime:
         for sig, handler in previous.items():
           signal.signal(sig, handler)
 
+  def galaxy_sources(self):
+    """Content identities using the same source selection as sync(), including relative symlinks."""
+    found = {}
+    for name in self.source_paths(str(GALAXY)):
+      path = self.root / name
+      try:
+        identity = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+        found[name] = (path.is_symlink(), path.stat().st_mode, hashlib.sha256(identity).digest())
+      except FileNotFoundError:
+        continue
+    return found
+
+  def live_reload(self, version=None):
+    """Keep the cached page loading the reload script; publish a new edit version if given."""
+    with self.source_lock():
+      self._live_reload(version)
+
+  def _live_reload(self, version=None):
+    web = self.work / GALAXY / 'web'
+    if version is None and not (web / LIVE_VERSION).is_file():
+      version = time.time_ns()
+    if version is not None:
+      atomic_write(inside(web / LIVE_VERSION, self.work), f'{version}\n'.encode())
+    script = inside(web / LIVE_RELOAD, self.work)
+    if not script.is_file() or script.read_text() != LIVE_SCRIPT:
+      atomic_write(script, LIVE_SCRIPT.encode())
+    page = inside(web / 'index.html', self.work)
+    try:
+      html = page.read_text()
+    except FileNotFoundError:
+      return
+    # Another command's sync restores the checkout's page.
+    if LIVE_TAG not in html and '</body>' in html:
+      atomic_write(page, html.replace('</body>', f'  {LIVE_TAG}\n</body>', 1).encode())
+
+  def end_live_reload(self):
+    with self.source_lock():
+      web = self.work / GALAXY / 'web'
+      for name in (LIVE_RELOAD, LIVE_VERSION):
+        inside(web / name, self.work).unlink(missing_ok=True)
+      if (self.root / GALAXY / 'web/index.html').is_file():
+        self.copy_source(GALAXY / 'web/index.html')
+
+  def live_galaxy(self, arguments, *, autoreload=True, interval=0.5):
+    """One live owner per cache; desktop UI and replay may still run alongside."""
+    try:
+      with file_lock(inside(self.cache / 'galaxy-live-lock', self.cache), nonblocking=True):
+        return self._live_galaxy(arguments, autoreload=autoreload, interval=interval)
+    except BlockingIOError:
+      raise RuntimeError('A Galaxy live session already owns this host cache; stop it before starting another.') from None
+
+  def _live_galaxy(self, arguments, *, autoreload, interval):
+    argv = [str(self.venv / 'bin/python'), '-B', '-m', 'openpilot.starpilot.galaxy.server', *arguments]
+    env = self.environment() | {'SP_HOST_PARKED': '1'}
+    self.private_ipc()
+    # Without autoreload the cached page is left exactly as synced.
+    publish = self.live_reload if autoreload else lambda version=None: None
+    if autoreload:
+      print(f'Galaxy live: edits under {GALAXY} reload the open page; Python edits restart the server first.', flush=True)
+      print('Refresh an already-open page once.', flush=True)
+    else:
+      print(f'Galaxy live: refresh to see edits under {GALAXY}; Python edits restart the server.', flush=True)
+    print('Changes outside Galaxy need ./dev sync and a restart. Stop with Ctrl+C.', flush=True)
+    seen = self.galaxy_sources()
+    # Reconcile additions, edits and deletions made during preparation/building.
+    with self.source_lock():
+      manifest = self.cache / 'source-files.json'
+      previous_sources = set(map(Path, json.loads(manifest.read_text())))
+      removed = [name for name in previous_sources - seen.keys() if name.is_relative_to(GALAXY)]
+      copied = self._mirror(list(seen), removed)
+    seen = {name: seen[name] for name in copied}
+    child = None
+    interrupted = False
+    termination = None
+
+    def terminate(signum, _frame):
+      nonlocal termination
+      termination = signum
+
+    previous = {sig: signal.signal(sig, terminate) for sig in (signal.SIGTERM, signal.SIGHUP)}
+    try:
+      publish(time.time_ns())
+      child = subprocess.Popen(argv, cwd=self.work, env=env)
+      while True:
+        if termination is not None:
+          return 128 + termination
+        if child.poll() is not None:
+          result = child.returncode
+          return result if result >= 0 else 128 - result
+        time.sleep(interval)
+        publish()
+        current = self.galaxy_sources()
+        changed = [name for name, identity in current.items() if seen.get(name) != identity]
+        removed = [name for name in seen if name not in current]
+        if not changed and not removed:
+          continue
+        changed = self.mirror(changed, removed)
+        for name in removed:
+          seen.pop(name, None)
+        seen.update({name: current[name] for name in changed})
+        backend = [name for name in changed + removed
+                   if not name.is_relative_to(GALAXY / 'web')
+                   and not name.is_relative_to(GALAXY / 'tests')
+                   and not name.name.startswith('test_')]
+        if backend:
+          print(f'Galaxy live: restarting for {backend[0].relative_to(GALAXY)}', flush=True)
+          stop(child)
+          # Publish only once the old server is gone, so the page reloads onto the new one.
+          publish(time.time_ns())
+          child = subprocess.Popen(argv, cwd=self.work, env=env)
+        elif any(name.is_relative_to(GALAXY / 'web') for name in changed + removed):
+          publish(time.time_ns())
+    except KeyboardInterrupt:
+      interrupted = True
+      return 130
+    finally:
+      try:
+        if child is not None:
+          stop(child, interrupted=interrupted)
+        if autoreload:
+          self.end_live_reload()
+      finally:
+        for sig, handler in previous.items():
+          signal.signal(sig, handler)
+
+
+def galaxy_port_free(arguments):
+  """Fail before a long sync when another Galaxy, often a second --live, owns the port."""
+  parser = argparse.ArgumentParser(prog='./dev galaxy --live', add_help=False)
+  parser.add_argument('--port', type=int, default=8082)  # The server's own default.
+  parser.add_argument('--host', default='127.0.0.1')
+  known, _ = parser.parse_known_args(arguments)
+  with socket.socket() as probe:
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Matches the server's bind.
+    try:
+      probe.bind((known.host, known.port))
+    except OSError:
+      raise RuntimeError(f'Port {known.port} is already in use; stop the other Galaxy or pass --port.') from None
+
+
+def stop(child, *, interrupted=False, timeout=5):
+  # SIGINT is the server's clean shutdown path; it reaps its own camera and media helpers.
+  # A terminal Ctrl+C already delivered it, and a second one would cut that cleanup short.
+  first = (lambda: None) if interrupted else (lambda: child.send_signal(signal.SIGINT))
+  for send in (first, child.terminate, child.kill):
+    if child.poll() is not None:
+      return
+    send()
+    try:
+      child.wait(timeout)
+    except subprocess.TimeoutExpired:
+      pass
+
 
 def main(arguments=None):
   command, jobs, args = parse(sys.argv[1:] if arguments is None else arguments)
+  live = command == 'galaxy' and '--live' in args
+  autoreload = '--no-autoreload' not in args
+  if command == 'galaxy' and not autoreload and not live:
+    raise ValueError('--no-autoreload only applies to ./dev galaxy --live.')
+  if live:
+    args = [arg for arg in args if arg not in ('--live', '--no-autoreload')]
+    galaxy_port_free(args)
   if command == 'help':
     print(HELP)
     return 0
@@ -307,7 +560,11 @@ def main(arguments=None):
       runtime.prepare()
       if command != 'sync':
         runtime.build(command, jobs)
-        return runtime.launch(command, jobs, args)
+        if not live:
+          return runtime.launch(command, jobs, args)
+    if live:
+      # Hold the lock only while building, so ./c3, ./c4 and ./onroad can run alongside.
+      return runtime.live_galaxy(args, autoreload=autoreload)
   return 0
 
 

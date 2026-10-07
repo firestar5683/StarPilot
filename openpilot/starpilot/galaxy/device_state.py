@@ -3,7 +3,7 @@
 import threading
 import time
 
-from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
+from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS, host_parked
 
 
 TTL_NS = 3_000_000_000
@@ -24,6 +24,8 @@ class DeviceStateSource:
     with self.lock:
       if self.closed:
         return unknown
+      if host_parked():
+        return {'state': 'parked', 'maxAgeMs': TTL_NS // 1_000_000}
       try:
         if self.messages is None:
           from openpilot.cereal import messaging
