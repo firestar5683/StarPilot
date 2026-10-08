@@ -15,6 +15,7 @@ from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.starpilot.aol.intent import AolCardIntent, read_settings as read_aol_settings
 from openpilot.selfdrive.car.tests.test_hyundai_aol import candidate as ioniq6_candidate
 from openpilot.starpilot.conditional_mode.manual import ButtonTracker
+from openpilot.starpilot.lateral.low_speed_advisory import LowSpeedAdvisory
 
 
 ButtonType = car.CarState.ButtonEvent.Type
@@ -190,6 +191,7 @@ class TestDistancePersonalityClaim(unittest.TestCase):
     drive.CP = car.CarParams(openpilotLongitudinalControl=True, notCar=True)
     from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
     drive.tesla_stock_consumer = StockCruiseConsumer(drive.CP)
+    drive.low_speed_advisory = LowSpeedAdvisory()
     drive.params = MagicMock()
     drive.events = Events()
     drive.personality = 1

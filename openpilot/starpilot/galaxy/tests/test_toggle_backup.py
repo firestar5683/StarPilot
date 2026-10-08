@@ -94,7 +94,9 @@ class ToggleBackupTest(unittest.TestCase):
     worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
     worker.start()
     def stop():
-      server.shutdown(); worker.join(timeout=2); server.server_close()
+      server.shutdown()
+      worker.join(timeout=2)
+      server.server_close()
     self.addCleanup(stop)
     def request(path, payload=None, cookie='', origin=None):
       connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=10)
