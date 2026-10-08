@@ -59,6 +59,9 @@ def import_av():
   raise RuntimeError("No H.264 encoder available: " + "; ".join(errors))
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The software fallback uses zero-latency H.264 with no encoder-side frame queue.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class H264Encoder:
   backend = "libx264"
 

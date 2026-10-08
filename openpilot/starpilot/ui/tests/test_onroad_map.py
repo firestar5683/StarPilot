@@ -12,7 +12,7 @@ from openpilot.starpilot.navigation.road_tiles import (
 )
 from openpilot.starpilot.ui.onroad_map import (
   CAR_ANCHOR, ZOOM_FAST_M_PER_PX, ZOOM_SLOW_M_PER_PX, CanvasRequest, MapFix, MapInput, MapOverlay, TileReader,
-  build_canvas, line_strip, split_route, zoom_for_speed,
+  build_canvas, line_strip, route_guidance, split_route, zoom_for_speed,
 )
 from openpilot.starpilot.system.android_auto.tests import test_gpu_nv12
 
@@ -45,6 +45,34 @@ def test_split_route_at_the_car():
   done, ahead = split_route(route, (0.5, 4.0))
   assert done.tolist() == [[0, 0], [0, 4]] and ahead.tolist() == [[0, 4], [0, 10], [10, 10]]
   assert split_route(None, (0, 0)) == (None, None)
+
+
+def test_guidance_tracks_car_without_rebuilding_road_canvas():
+  center = world_xy(*CENTER)
+  route = np.array([(center[0], center[1] + .1), center, (center[0], center[1] - .1)])
+  done, ahead = split_route(route, center)
+  request = CanvasRequest(center, 1.0, 1536, ahead, done, ())
+  canvas = build_canvas(request, {}, CENTER[0])
+  assert canvas.layers == [], "driven route must not leave a bar baked into the road canvas"
+  position = (center[0], center[1] - .02)
+  _, ahead = split_route(route, position)
+  moved = route_guidance(ahead, request, CENTER[0])
+  assert len(moved) == 2
+  for (_, old), (_, new) in zip(canvas.guidance, moved, strict=True):
+    assert new[:, 1].max() < old[:, 1].max(), "guidance ends at the live car, even with the same canvas"
+  assert route_guidance(None, request, CENTER[0]) == []
+
+
+def test_reroute_with_same_endpoints_updates_geometry(tmp_path):
+  overlay = MapOverlay(tmp_path)
+  try:
+    route = ((36., -115.), (36.1, -115.1), (36.2, -115.2))
+    overlay._route(route)
+    previous = overlay._route_world.copy()
+    overlay._route((route[0], (36.15, -115.1), route[2]))
+    assert not np.array_equal(previous, overlay._route_world)
+  finally:
+    overlay.close()
 
 
 def test_zoom_widens_with_speed():

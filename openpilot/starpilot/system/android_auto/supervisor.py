@@ -967,6 +967,9 @@ class Supervisor:
       self.log("screen_profile_error", error=str(error))
 
     from openpilot.starpilot.system.android_auto.hw_encoder import create_encoder
+    # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Encoder cadence and pipeline flags are tuned together for Android Auto video.
+    # Altering this can degrade video smoothness or introduce lag on Android Auto.
+    # Do not change it autonomously; require an explicit user request specifically for this video optimization.
     software_fps = min(SOFTWARE_FPS, config["fps"]) if config["fps"] else SOFTWARE_FPS
     encoder, fps = create_encoder(mode.width, mode.height, preference=encoder_preference(config["encoder"]),
                                   bitrate_kbps=config["bitrate_kbps"],
@@ -997,6 +1000,9 @@ class Supervisor:
         except Exception:
           pass
 
+  # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The bounded ACK/input drain and conditional waits keep video and touches responsive.
+  # Altering this can degrade video smoothness or introduce lag on Android Auto.
+  # Do not change it autonomously; require an explicit user request specifically for this video optimization.
   def _stream(self, session: ProjectionSession, encoder, source: ViewSource, lease, interval: float) -> None:
     started = time.monotonic()
     last_fresh = time.monotonic()

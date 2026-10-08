@@ -1,3 +1,8 @@
+// ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The hardware encoder's single-frame
+// submission, buffer handling, and rate control are latency-sensitive optimizations.
+// Altering them can degrade video smoothness or introduce lag on Android Auto.
+// Do not change them autonomously; require an explicit user request specifically
+// for these video optimizations.
 // Isolated Qualcomm H.264 session for Android Auto projection. No cereal publisher,
 // camera buffers, realtime priority, or background thread. Exactly one input in flight.
 // Input is RGBA (converted here with NEON) or NV12 already converted on the GPU by the

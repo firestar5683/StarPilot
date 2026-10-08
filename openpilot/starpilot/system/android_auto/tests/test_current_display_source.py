@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 import unittest
 
-from openpilot.starpilot.system.android_auto.current_car_ui import create_readback, visible_geometry
+from openpilot.starpilot.system.android_auto.current_car_ui import create_readback, scale_scissors, visible_geometry
 from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
 from openpilot.starpilot.system.android_auto.frame_source import FrameRequest
 from openpilot.starpilot.system.android_auto.identity import DEFAULT_CONFIG
@@ -51,6 +51,17 @@ class TestCurrentDisplaySource(unittest.TestCase):
     self.assertIn("margin_w=request.margin_w, margin_h=request.margin_h, compose=True", source)
     self.assertIn("output = rl.load_render_texture(request.width, request.height) if converter is None else None", source)
     self.assertIn("regions = converter.convert(content.texture) if converter is not None else rgba_regions", source)
+
+  def test_scissors_follow_the_ui_scale(self):
+    # The UI clips in logical coordinates; the visible-size target needs them scaled like the drawing.
+    calls = []
+    rl = type("Rl", (), {})()
+    rl.begin_scissor_mode = lambda *args: calls.append(args)
+    scale_scissors(rl, 1.0)
+    rl.begin_scissor_mode(30, 30, 1800, 1020)
+    scale_scissors(rl, 800 / 1860)
+    rl.begin_scissor_mode(30, 30, 1800, 1020)
+    self.assertEqual(calls, [(30, 30, 1800, 1020), (12, 12, 775, 439)])
 
   def test_view_uses_current_renderer(self):
     source = (SOURCE / "view.py").read_text()

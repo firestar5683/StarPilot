@@ -108,6 +108,9 @@ def supported(width: int, height: int) -> bool:
   return width % 4 == 0 and height % 2 == 0
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Fused GPU composition/conversion reduces readback size and avoids CPU color conversion.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class Nv12Converter:
   def __init__(self, width: int, height: int, *, margin_w: int = 0, margin_h: int = 0, compose: bool = False):
     if not supported(width, height):

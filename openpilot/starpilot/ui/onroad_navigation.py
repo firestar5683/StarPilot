@@ -141,22 +141,19 @@ class NavigationCard:
     for i, text in enumerate(self._lines(nav.text, width, primary_size)):
       self.fonts.draw(text, FontRole.SEMI_BOLD, primary_size, x, y + i * (primary_size + 3))
     distance = 'Arrived' if nav.arrived else distance_text(nav.distance_m, state.metric)
-    self.fonts.draw(distance, FontRole.BOLD, secondary_size, x, rect.y + rect.height - (42 if compact else 57),
+    self.fonts.draw(distance, FontRole.BOLD, secondary_size, x, rect.y + rect.height - (58 if compact else 85),
                     rl.Color(199, 174, 247, 255))
     if not nav.arrived:
       eta = arrival_time(nav.remaining_seconds, self.clock())
-      if compact:
-        remaining = f'ETA {eta}'
-        font_size = 18
-        y = rect.y + rect.height - 38
-      else:
-        remaining = (f'{distance_text(nav.remaining_distance_m, state.metric)} · '
-                     f'{max(1, round(nav.remaining_seconds / 60))} min · ETA {eta}')
-        font_size = 20
-        y = rect.y + rect.height - 43
-      measured = self.fonts.measure(remaining, FontRole.NORMAL, font_size)
-      self.fonts.draw(remaining, FontRole.NORMAL, font_size, rect.x + rect.width - padding - measured.width,
-                      y, rl.Color(190, 187, 197, 255))
+      remaining = f'ETA {eta}'
+      font_size = 22 if compact else 32
+      y = rect.y + rect.height - (30 if compact else 44)
+      measured = self.fonts.measure(remaining, FontRole.SEMI_BOLD, font_size)
+      self.fonts.draw(remaining, FontRole.SEMI_BOLD, font_size, rect.x + rect.width - padding - measured.width,
+                      y, rl.Color(235, 225, 255, 255))
+      if not compact:
+        trip = f'{distance_text(nav.remaining_distance_m, state.metric)} | {max(1, round(nav.remaining_seconds / 60))} min'
+        self.fonts.draw(trip, FontRole.NORMAL, 20, rect.x + padding, y + 8, rl.Color(190, 187, 197, 255))
 
   def close(self):
     for texture in self._textures.values():

@@ -101,6 +101,9 @@ DEFAULT_CONFIG = {
   "verify_head_unit": True,    # verify the car's certificate against root-cert.pem when present
   "connection": "wireless",    # "wireless": Bluetooth + the car's Wi-Fi; "wired": USB cable from the car to the comma's USB-C port
   "view": "car",               # Separate StarPilot road view; legacy mirror has no source
+  # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The encoder, FPS, bitrate, rate control, NV12, and readback defaults below work together.
+  # Altering this can degrade video smoothness or introduce lag on Android Auto.
+  # Do not change it autonomously; require an explicit user request specifically for this video optimization.
   "encoder": "auto",           # comma always requires hardware; desktop tests may select software
   "fps": 0,                    # 0 = automatic (30 with hardware, 15 with software); otherwise a cap, 5-30
   "bitrate_kbps": 6000,

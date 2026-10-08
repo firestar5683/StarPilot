@@ -52,6 +52,9 @@ def normalize_access_unit(data: bytes, *, keyframe: bool) -> bytes:
   return result
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Hardware encoding and bounded frame submission avoid CPU stalls and encoder backlog.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class HardwareH264Encoder:
   backend = "qcom-v4l2"
 
@@ -135,6 +138,9 @@ class HardwareH264Encoder:
       self.lib.aa_encoder_destroy(handle)
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Backend selection and frame-rate budgets are part of the low-latency video pipeline.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 def create_encoder(width: int, height: int, *, preference: str, bitrate_kbps: int, margin_height: int,
                    software_fps: int, log, rate_control: str = "cbr") -> tuple[object, int]:
   """Return ``(encoder, fps)``: hardware at 30 fps when it works, else libx264."""

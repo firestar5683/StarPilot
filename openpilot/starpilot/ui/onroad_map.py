@@ -200,19 +200,24 @@ def build_canvas(request: CanvasRequest, tiles: dict[TileKey, RoadTile], latitud
     if len(strip):
       geometry.layers.append((premultiplied(style.fill), strip))
 
-  def route_points(world):
-    return ((world - (cx, cy)) * px_per_unit + side / 2).astype(np.float32)
-
-  for world, layers in ((request.route_done, ((ROUTE_DONE, 5.0),)),
-                        (request.route, ((ROUTE_GLOW, 17.0), (ROUTE_CORE, 7.0)))):
-    if world is not None and len(world) >= 2:
-      points = route_points(world)
-      for color, width in layers:
-        strip = line_strip(points, np.array([0, len(points)], np.int32), width * width_scale / 2, bounds)
-        if len(strip):
-          target = geometry.guidance if world is request.route else geometry.layers
-          target.append((premultiplied(color), strip))
+  geometry.guidance = route_guidance(request.route, request, latitude)
   return geometry
+
+
+def route_guidance(route, request: CanvasRequest, latitude: float):
+  """Build only the remaining route; the road canvas never bakes in a driven tail."""
+  if route is None or len(route) < 2:
+    return []
+  scale = meters_per_tile(latitude) * SUPERSAMPLE / request.m_per_px
+  points = ((route - request.center) * scale + request.side / 2).astype(np.float32)
+  width_scale = SUPERSAMPLE * min(1.35, max(0.7, math.sqrt(REFERENCE_M_PER_PX / request.m_per_px)))
+  bounds = (-8.0, -8.0, request.side + 8.0, request.side + 8.0)
+  layers = []
+  for color, width in ((ROUTE_GLOW, 17.0), (ROUTE_CORE, 7.0)):
+    strip = line_strip(points, np.array([0, len(points)], np.int32), width * width_scale / 2, bounds)
+    if len(strip):
+      layers.append((premultiplied(color), strip))
+  return layers
 
 
 def split_route(route: np.ndarray, position: tuple[float, float]) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -380,6 +385,7 @@ class MapOverlay:
     self._widget: rl.RenderTexture | None = None
     self._guidance: rl.RenderTexture | None = None
     self._route_layers: list[tuple[rl.Color, np.ndarray]] = []
+    self._guidance_key = None
     self._widget_size: tuple[int, int] | None = None
     self._shader: rl.Shader | None = None
     self._uniforms: dict[str, int] = {}
@@ -428,7 +434,7 @@ class MapOverlay:
     self.status = "live"
 
   def _route(self, route: tuple[tuple[float, float], ...]) -> None:
-    key = (len(route), route[:1], route[-1:])
+    key = route
     if key != self._route_key:
       self._route_key = key
       self._route_world = np.array([world_xy(lat, lon) for lat, lon in route], np.float64) if len(route) >= 2 else None
@@ -526,7 +532,7 @@ class MapOverlay:
       rl.end_blend_mode()
     finally:
       rl.end_texture_mode()
-    self._route_layers = geometry.guidance
+    self._guidance_key = None
     self._canvas_request = geometry.request
     self.has_roads = geometry.tiles_missing < len(geometry.request.tiles)
 
@@ -567,6 +573,13 @@ class MapOverlay:
         car_y = (self._world[1] - request.center[1]) * px_per_unit * SUPERSAMPLE + side / 2
         anchor = rl.Vector2(width / 2, height * CAR_ANCHOR)
         if guidance:
+          # Road geometry is cached across many frames. Trim guidance at the
+          # current interpolated position, not the position that built that cache.
+          key = (id(request), self._world, self._route_key)
+          if key != self._guidance_key:
+            _, ahead = split_route(self._route_world, self._world)
+            self._route_layers = route_guidance(ahead, request, self._latitude)
+            self._guidance_key = key
           rl.rl_push_matrix()
           try:
             rl.rl_translatef(anchor.x, anchor.y, 0)

@@ -458,7 +458,6 @@ export const NavigationPage = {
                 @input="typed" @focus="suggestOpen = true" @keydown.escape="closeSuggestions">
               <button v-if="query || results.length" type="button" class="gx-navigation__icon" aria-label="Clear search" @mousedown.prevent @click="clearQuery"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
             </div>
-            <button class="gx-btn" type="submit" :disabled="!available || query.trim().length < 2"><i class="bi bi-search" aria-hidden="true"></i> Search</button>
           </form>
           <div v-if="showQuick || showSuggestions" id="navigation-suggestions" class="gx-navigation__suggestions" @mousedown.prevent @focusout="onSearchFocusOut">
             <template v-if="showQuick">
@@ -531,18 +530,18 @@ export const NavigationPage = {
             <p v-if="busy || searchPending" role="status" class="gx-navigation__busy">{{ searchPending ? 'Searching…' : 'Working…' }}</p>
             <p v-if="searched && !busy && !error && results.length === 0" class="gx-card gx-navigation__section gx-note">No places found. Try a nearby town or a more specific address.</p>
             <ul v-if="results.length" class="gx-navigation__places" aria-label="Search results">
-              <li v-for="place in results" :key="place.id" class="gx-card">
-                <span><strong>{{ place.name }}</strong><small v-if="place.address || place.description" class="gx-note">{{ place.address || place.description }}</small></span><div class="gx-navigation__actions gx-actions">
-                  <button type="button" class="gx-navigation__icon" :aria-label="(isFavorite(place) ? 'Saved: ' : 'Save ') + place.name" :aria-pressed="isFavorite(place)" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
-                  <button type="button" class="gx-btn" :disabled="!available" @click="pick(place)"><i class="bi bi-arrow-up-right" aria-hidden="true"></i> Navigate</button>
-                </div>
+              <li v-for="place in results" :key="place.id" class="gx-navigation__row">
+                <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)" :aria-label="'Start navigation to ' + place.name">
+                  <i class="bi bi-arrow-up-right" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.address || place.description">{{ place.address || place.description }}</small><small class="gx-navigation__start">Start navigation</small></span>
+                </button>
+                <button type="button" class="gx-navigation__icon" :aria-label="(isFavorite(place) ? 'Saved: ' : 'Save ') + place.name" :aria-pressed="isFavorite(place)" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
                 <FavoriteChoices v-if="favoritePicker === favoriteKey(place)" :available="available" @choose="saveAs(place, $event)" />
               </li>
             </ul>
           </template>
         </div>
         <section class="gx-card gx-navigation__preview" aria-label="Route preview">
-          <div class="gx-navigation__preview-head"><div class="gx-navigation__step"><div><h3>Route preview</h3><p role="status">{{ stale ? 'Reconnecting · last received route' : statusLabel }}</p></div></div>
+          <div class="gx-navigation__preview-head"><div class="gx-navigation__step"><div><h3>Your route</h3><p role="status">{{ stale ? 'Reconnecting · last received route' : statusLabel }}</p></div></div>
             <span v-if="summary" class="gx-navigation__trip">{{ duration(summary.duration) }} · {{ distance(summary.distance) }}</span></div>
           <NavigationMap v-if="ready" :data="data" :stale="stale" />
           <div v-else class="gx-navigation__empty"><i class="bi bi-signpost-split" aria-hidden="true"></i><p>{{ mode !== 'local' ? 'Connect to your comma to use navigation.' : 'Set up navigation to show the map.' }}</p><button v-if="mode === 'local' && data" type="button" class="gx-btn gx-btn--tonal" @click="tab='setup'">Open navigation setup</button></div>

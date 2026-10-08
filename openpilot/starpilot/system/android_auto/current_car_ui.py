@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 import gc
+import math
 import os
 import signal
 import time
@@ -26,6 +27,9 @@ CAMERA_MAX_GAP = 0.1       # s; a shown camera silent this long stops pacing (th
 ASYNC_READBACK_FAILURES = 3  # consecutive failed asynchronous readbacks before the session reads back synchronously
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Camera-driven pacing avoids duplicate frames and uneven video cadence.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class CameraPacer:
   """Onroad, draw each frame of the camera on screen exactly once, as soon as it lands.
 
@@ -105,6 +109,25 @@ def projected_touches(events, geometry):
   return mapped
 
 
+def scale_scissors(rl, scale: float) -> None:
+  """Scale scissor rectangles like the matrix that draws the UI into the visible-size target.
+
+  The UI clips in logical coordinates, but raylib applies scissors in target pixels, unaffected by
+  rl_scalef. This is gui_app._patch_scissor_mode for a renderer that never opens a window; it runs
+  in its own process, so it touches only the car view.
+  """
+  if scale == 1.0:
+    return
+  if not hasattr(rl, "_orig_begin_scissor_mode"):
+    rl._orig_begin_scissor_mode = rl.begin_scissor_mode
+
+  def begin_scissor_mode_scaled(x, y, width, height):
+    return rl._orig_begin_scissor_mode(int(x * scale), int(y * scale),
+                                       int(math.ceil(width * scale)), int(math.ceil(height * scale)))
+
+  rl.begin_scissor_mode = begin_scissor_mode_scaled
+
+
 def wait_for_request(producer: FrameProducer) -> FrameRequest:
   deadline = time.monotonic() + STARTUP_WAIT_SECONDS
   while time.monotonic() < deadline:
@@ -168,10 +191,16 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
     resources.callback(layout.close)
     touch = TouchReceiver(touch_path or DEFAULT_TOUCH_SOCKET)
     resources.callback(touch.close)
-    content = rl.load_render_texture(geometry.logical_width, geometry.logical_height)
+    # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Visible-size targets, GPU NV12 conversion, and async readback limit GPU work and copies.
+    # Altering this can degrade video smoothness or introduce lag on Android Auto.
+    # Do not change it autonomously; require an explicit user request specifically for this video optimization.
+    # The UI draws in logical coordinates scaled by geometry.scale, so its target is the visible area:
+    # the NV12 pass reads it pixel for pixel and requires exactly that size.
+    content = rl.load_render_texture(geometry.width, geometry.height)
     if not content.id:
       raise RuntimeError('Projection content target unavailable')
     resources.callback(rl.unload_render_texture, content)
+    scale_scissors(rl, geometry.scale)
     converter = None
     if request.flags & FLAG_NV12:
       try:
@@ -233,6 +262,9 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       finally:
         readback.release()
 
+    # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: GC freezing and the frame loop below avoid periodic stalls and unnecessary waits.
+    # Altering this can degrade video smoothness or introduce lag on Android Auto.
+    # Do not change it autonomously; require an explicit user request specifically for this video optimization.
     # Everything built so far lives for the whole session. Frozen, it is never rescanned
     # by the collector, whose full passes over the UI's objects stall a frame every few seconds.
     gc.collect()
@@ -282,6 +314,13 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       if sampler is not None:
         sampler.onroad = ui_state.started
       layout.prepare()  # offscreen passes (the map) must not run inside the content target
+      # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Publish the previous frame before drawing the next; moving this later adds video latency.
+      # Altering this can degrade video smoothness or introduce lag on Android Auto.
+      # Do not change it autonomously; require an explicit user request specifically for this video optimization.
+      if readback.pending:
+        # Match AAComma: publish after CPU preparation, before queuing another
+        # frame's drawing. A busy renderer must not hold video until that draw ends.
+        publish_readback()
       rl.begin_texture_mode(content)
       try:
         rl.clear_background(rl.BLACK)
@@ -294,10 +333,6 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       finally:
         rl.end_texture_mode()
       layout.handle_touches(projected_touches(touch.drain(), geometry))
-      if readback.pending:
-        # The previous frame, read back while this one was drawn: waiting any
-        # later only adds latency.
-        publish_readback()
       if output is not None:
         gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h)
       regions = converter.convert(content.texture) if converter is not None else rgba_regions
