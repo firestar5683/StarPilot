@@ -46,6 +46,20 @@ def apply_creep_compensation(accel: float, v_ego: float, car_fingerprint: str, *
   return float(accel)
 
 
+def apply_brake_rate_limit(accel: float, gas: float, accel_last: float, v_ego: float, car_fingerprint: str,
+                          *, stopping: bool, standstill: bool, fcw: bool) -> tuple[float, float]:
+  mild_mach_e_braking = (
+    car_fingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and
+    -1.0 < gas < 0.0 and v_ego >= 5.0 and not (stopping or standstill or fcw)
+  )
+  if mild_mach_e_braking:
+    accel = max(accel, min(accel_last, 0.0) - 2.0 * CarControllerParams.ACC_CONTROL_STEP * DT_CTRL)
+    gas = accel
+  else:
+    accel = max(accel, accel_last - 3.5 * CarControllerParams.ACC_CONTROL_STEP * DT_CTRL)
+  return float(accel), float(gas)
+
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -252,9 +266,11 @@ class CarController(CarControllerBase):
         accel = apply_creep_compensation(accel, CS.out.vEgo, self.CP.carFingerprint,
                                          standstill=CS.out.standstill, stopping=stopping)
 
-        # The stock system has been seen rate limiting the brake accel to 5 m/s^3,
-        # however even 3.5 m/s^3 causes some overshoot with a step response.
-        accel = max(accel, self.accel - (3.5 * CarControllerParams.ACC_CONTROL_STEP * DT_CTRL))
+        accel, gas = apply_brake_rate_limit(
+          accel, gas, self.accel, CS.out.vEgo, self.CP.carFingerprint,
+          stopping=stopping, standstill=CS.out.standstill,
+          fcw=fcw_alert or CS.out.stockFcw or CS.out.stockAeb,
+        )
 
       accel = float(np.clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
       gas = float(np.clip(gas, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))

@@ -40,7 +40,7 @@ class CarInterface(CarInterfaceBase):
     ret.steerAtStandstill = True
 
     ret.longitudinalTuning.kiBP = [0.]
-    ret.longitudinalTuning.kiV = [0.5]
+    ret.longitudinalTuning.kiV = [0.3] if candidate == CAR.FORD_MUSTANG_MACH_E_MK1 else [0.5]
 
     if not ret.radarUnavailable and DBC[candidate][Bus.radar] == RADAR.DELPHI_MRR:
       # average of 33.3 Hz radar timestep / 4 scan modes = 60 ms
