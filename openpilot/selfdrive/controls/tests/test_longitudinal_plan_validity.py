@@ -29,10 +29,16 @@ class Sources(messaging.SubMaster):
 class Capture:
   def __init__(self):
     self.message = None
+    self.companion = None
 
   def send(self, service, message):
-    assert service == 'longitudinalPlan'
-    self.message = messaging.log_from_bytes(message.to_bytes())
+    assert service in ('longitudinalPlan', 'starpilotLongitudinalPlan')
+    decoded = messaging.log_from_bytes(message.to_bytes())
+    assert decoded.which() == service
+    if service == 'longitudinalPlan':
+      self.message = decoded
+    else:
+      self.companion = decoded
 
 
 class LongitudinalPlanValidityTest(unittest.TestCase):
@@ -45,10 +51,15 @@ class LongitudinalPlanValidityTest(unittest.TestCase):
       with self.subTest(delay_ns=delay_ns):
         plan = messaging.new_message('longitudinalPlan')
         plan.logMonoTime = sources.logMonoTime['modelV2'] + delay_ns
-        with patch('openpilot.selfdrive.controls.lib.longitudinal_planner.messaging.new_message', return_value=plan):
+        new_message = messaging.new_message
+        with patch('openpilot.selfdrive.controls.lib.longitudinal_planner.messaging.new_message',
+                   side_effect=lambda service, plan=plan, new_message=new_message: (
+                     plan if service == 'longitudinalPlan' else new_message(service))):
           planner.publish(sources, published)
         self.assertEqual(published.message.longitudinalPlan.modelMonoTime, sources.logMonoTime['modelV2'])
         self.assertAlmostEqual(published.message.longitudinalPlan.processingDelay, delay_ns / 1e9, places=8)
+        self.assertEqual(published.companion.logMonoTime, plan.logMonoTime)
+        self.assertEqual(published.companion.starpilotLongitudinalPlan.sourcePlanMonoTime, plan.logMonoTime)
 
   def test_optional_vision_frequency_and_dashboard_absence_do_not_invalidate_native_plan(self):
     cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)

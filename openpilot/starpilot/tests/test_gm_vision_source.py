@@ -156,6 +156,7 @@ class TestGmVisionSource(unittest.TestCase):
   def test_stock_ui_can_select_display_source_with_stale_request_guard(self):
     with OpenpilotPrefix():
       params = Params()
+      params.put('SLCPriority1', 'Dashboard', block=True)
       cp = configured(params, CAR.CHEVROLET_VOLT_CC, disable=True)
       owner = FeatureSettingsOwner(params, authority=lambda group: group == 'preferences',
                                    vehicle_fingerprint=lambda: cp.carFingerprint, vehicle_params=lambda: cp,

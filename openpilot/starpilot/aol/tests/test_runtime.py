@@ -772,7 +772,7 @@ class IpcAxisContractTests(unittest.TestCase):
       logMonoTime = {'aolSafetyWire': now}
       freq_ok = {'aolSafetyWire': True}
 
-      def update(self, _timeout):
+      def update(self, *args, **kwargs):
         pass
 
       def all_checks(self, _services=None):
@@ -1004,9 +1004,9 @@ class IpcAxisContractTests(unittest.TestCase):
         self.assertEqual(configured.alternativeExperience, cp.alternativeExperience)
       physical = selected.CS_prev
 
-    now = now[0]
+    receipt_now = now[0]
     # Synthetic zero-axis Panda configuration receipt is withheld until actual Card wrote ControlsReady.
-    native = SafetyState(1, True, now, now + 200_000_000, int(cp.safetyConfigs[0].safetyModel.raw),
+    native = SafetyState(1, True, receipt_now, receipt_now + 200_000_000, int(cp.safetyConfigs[0].safetyModel.raw),
                          int(cp.safetyConfigs[0].safetyParam), False, False, False, False, 'panda', 'drive-session')
 
     class SM(dict):
@@ -1014,10 +1014,10 @@ class IpcAxisContractTests(unittest.TestCase):
       valid = {'aolSafetyWire': True, 'aolIntentWire': False}
       alive = {'aolSafetyWire': True, 'aolIntentWire': False}
       seen = {'aolSafetyWire': False, 'aolIntentWire': False}
-      logMonoTime = {'aolSafetyWire': now}
+      logMonoTime = {'aolSafetyWire': receipt_now}
       freq_ok = {'aolSafetyWire': True}
 
-      def update(self, _timeout):
+      def update(self, *args, **kwargs):
         pass
 
       def all_checks(self, _services=None):
@@ -1051,15 +1051,15 @@ class IpcAxisContractTests(unittest.TestCase):
         sd.publish_selfdriveState = mock.Mock()
         self.enterContext(mock.patch.object(sd, 'update_events', lambda _cs, sd=sd: sd.events.clear()))
         message = messaging.new_message('carState')
-        message.valid, message.logMonoTime, message.carState = True, now, sd.CS_prev
+        message.valid, message.logMonoTime, message.carState = True, receipt_now, sd.CS_prev
         with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=message),
-              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now),
+              mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=receipt_now),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.SIMULATION', False),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.VisionIpcClient',
                          SimpleNamespace(available_streams=lambda *_args, **_kwargs: [])),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.cloudlog.event')):
-          for receipt in (None, replace(native, observedMonoTime=now - 250_000_000, validUntilMonoTime=now - 1),
+          for receipt in (None, replace(native, observedMonoTime=receipt_now - 250_000_000, validUntilMonoTime=receipt_now - 1),
                           replace(native, axisSessionId='old-session'), replace(native, safetyParam=native.safetyParam + 1)):
             sm.seen['aolSafetyWire'] = receipt is not None
             sm['aolSafetyWire'] = encode_safety(receipt) if receipt else b''
@@ -1277,7 +1277,7 @@ class UiProcessIntentTests(unittest.TestCase):
         if key == 'onroadEvents':
           return self.events.to_msg()
         raise KeyError(key)
-    card.sm = SM()
+    self.enterContext(mock.patch.object(card, 'sm', SM(), create=True))
     return card
 
   def observe(self, card, stamp, failed):

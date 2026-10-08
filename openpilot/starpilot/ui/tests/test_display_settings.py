@@ -50,7 +50,8 @@ class DisplaySettingsTests(unittest.TestCase):
     session.display_owner = self.owner
     session.power_owner = PowerOwner(self.params, lambda: self.parked)
     session.map_snapshot = Mock(return_value=FeatureSettingsState())
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False, "effective": None})
+    self.enterContext(patch.object(session, 'drive_state',
+                                  NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False, "effective": None}), create=True))
     session.display_scroll, session.display_edit_key = 0, None
     session.sidebar_expanded = expanded
     session._snapshot_cache = None

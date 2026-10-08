@@ -757,6 +757,7 @@ class RuntimeReplayTests(unittest.TestCase):
     replay.sm.logMonoTime['slcState'] = recorded_ns + 20_000_000
     replay.sm.logMonoTime['carControl'] = recorded_ns + 30_000_000
     packet.logMonoTime = recorded_ns + 30_000_000
+    packet.clear_write_flag()
     with (mock.patch.object(card, 'REPLAY', True),
           mock.patch.object(card.time, 'monotonic_ns', return_value=host_ns),
           mock.patch.object(card.messaging, 'drain_sock_raw', return_value=[packet.to_bytes()]),
@@ -1063,7 +1064,7 @@ class RuntimeReplayTests(unittest.TestCase):
     self.sm.advance(9_100_000_000)
     stale = runtime.step(self.sm, self.cp, now_ns=9_100_000_000)
     self.assertEqual(runtime._observations(self.sm, self.cp, 9_100_000_000)[Source.DASHBOARD].kind, ObservationKind.STALE)
-    self.assertEqual(stale.message.slcState.observationKind, 'unknown')  # unimplemented map source remains unknown
+    self.assertEqual(stale.message.slcState.observationKind, 'stale')  # both configured slots use the expired dashboard
     self.assertFalse(stale.message.slcState.hasCeiling)
     planner.update(self.sm, cruise_ceiling=stale.result.ceiling)
     self.assertEqual(planner.last_cruise_ceiling_status, 'absent')

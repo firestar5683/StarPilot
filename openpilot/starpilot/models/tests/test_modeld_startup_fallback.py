@@ -235,8 +235,10 @@ def test_native_ui_keeps_loading_during_enumeration_then_reports_failure(previou
   chestnut_enum = next(node for node in body if isinstance(node, ast.ClassDef) and node.name == "ChestnutState")
   ui_class = next(node for node in body if isinstance(node, ast.ClassDef) and node.name == "UIState")
   update = next(node for node in ui_class.body if isinstance(node, ast.FunctionDef) and node.name == "_update_chestnut_state")
+  display_time = next(node for node in ui_class.body if isinstance(node, ast.FunctionDef) and node.name == "display_time_ns")
   env: dict = {"Enum": Enum, "time": SimpleNamespace(monotonic_ns=lambda: 1_000_000_000)}
-  execute([chestnut_enum, update], env)
+  execute([chestnut_enum, update, display_time], env)
+  env["UIState"] = SimpleNamespace(display_time_ns=env["display_time_ns"])
   states = env["ChestnutState"]
 
   class Messages(dict):
@@ -338,9 +340,11 @@ def test_fallback_releases_only_chestnut_dependencies(opened):
   amd, unrelated = devices["AMD"], object()
   for device in devices.values():
     device.pending = {amd: "gpu fence", unrelated: "other fence"}
-  env = {"Device": devices}
+  env: dict[str, object] = {"Device": devices}
   execute([node], env)
-  env["drop_chestnut"]()
+  drop = env["drop_chestnut"]
+  assert callable(drop)
+  drop()
   for name in opened:
     assert unrelated in devices[name].pending
     assert (amd in devices[name].pending) is ("AMD" not in opened)

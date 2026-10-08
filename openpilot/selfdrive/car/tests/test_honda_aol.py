@@ -172,7 +172,8 @@ class HondaHostTests(unittest.TestCase):
       def update(self, can_packets):
         return None
 
-    with OpenpilotPrefix(), mock.patch.dict('os.environ', {'AOL_REPLAY_RUNTIME': '1', 'SIMULATION': '1'}):
+    with (OpenpilotPrefix(), mock.patch.dict('os.environ', {'AOL_REPLAY_RUNTIME': '1', 'SIMULATION': '1'}),
+          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.SIMULATION', False)):
       messaging.reset_context()
       params = Params()
       params.put_bool('OpenpilotEnabledToggle', True, block=True)
@@ -193,6 +194,7 @@ class HondaHostTests(unittest.TestCase):
       self.assertTrue(intent.seen['aolIntentWire'])
       self.assertTrue(decode_intent(intent['aolIntentWire']).allowedLatch)
       selfdrive.step()
+      self.assertFalse(selfdrive.initialized)  # Native acknowledgment must precede bootstrap.
       controls.sm.update(100)
       cc, _ = controls.state_control()
       self.assertFalse(cc.latActive or cc.longActive)  # no native capability/ack

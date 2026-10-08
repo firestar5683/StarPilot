@@ -108,7 +108,7 @@ class TestControllerCruise(unittest.TestCase):
     instance.CS_prev = self.cs
     vars(instance)['CI'] = SimpleNamespace(CS=SimpleNamespace(), update=lambda packets:self.cs)
     instance.car_gps_publisher = card.CarGpsPublisher()
-    instance.pm = SimpleNamespace(send=Mock())
+    self.enterContext(patch.object(instance, 'pm', SimpleNamespace(send=Mock()), create=True))
     vars(instance)['RI'] = SimpleNamespace(update=lambda packets:None)
     directory = tempfile.TemporaryDirectory()
     self.addCleanup(directory.cleanup)

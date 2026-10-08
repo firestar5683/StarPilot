@@ -31,12 +31,13 @@ class FakeMaster:
 class FakeAlerts:
   def __init__(self):
     self.alerts = []
+    self.current_alert = None
 
   def add_many(self, _frame, alerts):
     self.alerts = alerts
 
   def process_alerts(self, _frame, _clear):
-    pass
+    self.current_alert = max(self.alerts, key=lambda alert: alert.priority, default=None)
 
 
 class TestLaneChangeAlert(unittest.TestCase):

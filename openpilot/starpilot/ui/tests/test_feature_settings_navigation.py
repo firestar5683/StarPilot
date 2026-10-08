@@ -119,7 +119,7 @@ class FeatureNavigationTests(unittest.TestCase):
         with self.subTest(profile=profile):
           session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
           session._mode, session.profile = runtime_app.ShellMode.SETTINGS, profile
-          session._unavailable = lambda _reason: None
+          self.enterContext(patch.object(session, '_unavailable', lambda _reason: None))
           session.feature_owner = FeatureSettingsOwner(params, session._feature_authority,
             vehicle_fingerprint=lambda: vehicle.carFingerprint, vehicle_params=lambda: vehicle)
           with patch.object(runtime_app, 'ui_state', NS(CP=vehicle)):

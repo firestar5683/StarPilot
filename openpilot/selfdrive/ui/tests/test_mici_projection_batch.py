@@ -161,7 +161,7 @@ def test_transform_guard_preserves_render_projection_updates(renderer, monkeypat
 
 
 @pytest.mark.parametrize("renderer_class", [ModelRenderer, LargeModelRenderer])
-def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(renderer, renderer_class):
+def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(renderer, renderer_class, monkeypatch):
   import copy
 
   if renderer_class is LargeModelRenderer:
@@ -176,8 +176,8 @@ def test_radar_only_reuses_lane_geometry_without_changing_path_filters_or_clip(r
   renderer._road_edges = [ModelPoints(raw_points=points + np.array([0, y, 0], dtype=np.float32)) for y in (-6, 6)]
   renderer._lane_line_probs = np.array([.6, .9, .8, .5], dtype=np.float32)
   renderer._acceleration_x = np.array([.2] * 33, dtype=np.float32)
-  renderer._acceleration_x_filter = Mock()
-  renderer._acceleration_x_filter2 = Mock()
+  monkeypatch.setattr(renderer, "_acceleration_x_filter", Mock(), raising=False)
+  monkeypatch.setattr(renderer, "_acceleration_x_filter2", Mock(), raising=False)
   renderer._experimental_mode = False
   renderer._car_space_transform[1, 2] = 480
   renderer._path_offset_z = 1.22
@@ -231,7 +231,7 @@ def test_large_render_preserves_lead_cadence_and_lane_invalidation(renderer, mon
                 radarState=SimpleNamespace(leadOne=None))
   monkeypatch.setattr(model_renderer, "ui_state", SimpleNamespace(sm=sm, started_frame=0))
   view = object.__new__(LargeModelRenderer)
-  view._path = SimpleNamespace(raw_points=np.array([[10, 0, 0]], dtype=np.float32))
+  view._path = ModelPoints(raw_points=np.array([[10, 0, 0]], dtype=np.float32))
   view._longitudinal_control = True
   view._update_model = Mock()
   view._update_raw_points = Mock()

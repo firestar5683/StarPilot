@@ -73,7 +73,9 @@ def test_no_native_settings_or_favorite_registration(setup):
   assert all(row.key != KEY for row in state.rows)
   assert all(KEY not in keys for keys in FEATURE_KEYS.values())
   galaxy_row = next(row for row in gateway._state('vehicle', gateway.context.sample()).rows if row.key == KEY)
-  assert not owner.apply(row_change(galaxy_row))
+  request = row_change(galaxy_row)
+  assert request is not None
+  assert not owner.apply(request)
 
 
 @pytest.mark.parametrize('change', ['vehicle', 'vin', 'saved', 'session', 'preference'])

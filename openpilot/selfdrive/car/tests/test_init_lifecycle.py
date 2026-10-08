@@ -138,8 +138,9 @@ class CardInitLifecycleTest(unittest.TestCase):
     card.aol_replay = True
     card.ioniq6_long_prearmed = False
     card.ioniq6_long_selected = False
-    card.can_callbacks = (lambda **_: [], lambda _: None)
-    card.params = SimpleNamespace(put_bool=Mock())
+    card.can_callbacks = (lambda wait_for_one=False: [], lambda _: None)
+    params = SimpleNamespace(put_bool=Mock())
+    self.enterContext(patch.object(card, 'params', params, create=True))
     card.state_publish = Mock()
     packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
     cs, _ = feed_camera(card.CI, packer, 22_000_000_000, active=False)
@@ -164,9 +165,10 @@ class CardInitLifecycleTest(unittest.TestCase):
       def all_alive(self, services):
         return all(self.alive[name] for name in services)
 
-    card.sm = SubMaster()
+    sm = SubMaster()
+    self.enterContext(patch.object(card, 'sm', sm, create=True))
     sent = []
-    card.publish_sendcan = lambda frames, valid=True: sent.extend(frames)
+    self.enterContext(patch.object(card, 'publish_sendcan', lambda frames, valid=True: sent.extend(frames)))
     # These saved requests cannot acquire startup brake ownership.
     card.CI.CC.gm_auto_hold = True
     card.CI.CC.volt_one_pedal = True
@@ -180,7 +182,7 @@ class CardInitLifecycleTest(unittest.TestCase):
         card.step()
       self.assertEqual(apply.call_count, 30)
       init.assert_called_once()
-      card.params.put_bool.assert_called_once_with('ControlsReady', True)
+      params.put_bool.assert_called_once_with('ControlsReady', True)
       self.assertEqual(card.CI.CC.gm_auto_hold_state.drive_ns, 0)
       self.assertEqual(card.CI.CC.apply_brake, 0)
       for call in apply.call_args_list:
@@ -202,16 +204,16 @@ class CardInitLifecycleTest(unittest.TestCase):
       card.step()
       self.assertEqual(apply.call_count, 30)
       panda.safetyParam = 0x5007
-      card.sm.logMonoTime['pandaStates'] = boot - 300_000_001
+      sm.logMonoTime['pandaStates'] = boot - 300_000_001
       card.step()
       self.assertEqual(apply.call_count, 30)
-      card.sm.logMonoTime['pandaStates'] = boot
+      sm.logMonoTime['pandaStates'] = boot
       active = structs.CarControl.new_message(latActive=True)
       control = active.as_reader()
       card.step()
       self.assertEqual(apply.call_count, 30)
       control = structs.CarControl.new_message().as_reader()
-      card.sm.events = []
+      sm.events = []
       card.step()
       self.assertEqual(apply.call_count, 31)
       self.assertEqual(apply.call_args.args[1], boot)

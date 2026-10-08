@@ -177,7 +177,7 @@ class TestOnroadAxes(unittest.TestCase):
     state = self.state(True, True)
     for profile in (Profile.LARGE, Profile.COMPACT):
       view = onroad.OnroadView.__new__(onroad.OnroadView)
-      view.fonts = NS(profile=profile, draw=Mock())
+      self.enterContext(patch.object(view, 'fonts', NS(profile=profile, draw=Mock()), create=True))
       view._driving_mode(state)
       view.fonts.draw.assert_not_called()
       state.customization['layouts'][profile][MODE_WIDGET]['enabled'] = True

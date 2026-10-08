@@ -1,6 +1,4 @@
 import unittest
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,7 +7,7 @@ from opendbc.car.hyundai.blended_longitudinal import candidate_from_stock
 from opendbc.car.hyundai.tests.test_palisade_2023 import params
 from opendbc.car.hyundai.values import CarControllerParams, CAR
 from opendbc.car.hyundai.interface import CarInterface
-from openpilot.starpilot.longitudinal.output_max import final_output, OutputMaximum, KEY
+from openpilot.starpilot.longitudinal.output_max import final_output
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
@@ -103,14 +101,9 @@ class TestBlendedOutput(unittest.TestCase):
       output = control.update(True, self.cs, 3.5, False, CarInterface.get_pid_accel_limits(candidate, 0., 0.),
                               context=LongitudinalContext(experimental_mode=False))
       self.assertAlmostEqual(output, 3.5)
-      self.assertAlmostEqual(final_output(output, None, 0), 3.5)
-      with tempfile.TemporaryDirectory() as directory:
-        saved_params = SimpleNamespace(get_param_path=lambda key: str(Path(directory) / key))
-        maximum = OutputMaximum(saved_params, candidate)
-        self.assertAlmostEqual(final_output(output, maximum, 0), 3.5)
-        (Path(directory) / KEY).write_bytes(b'1.2')
-        self.assertAlmostEqual(final_output(output, maximum, 999_999_999), 3.5)
-        self.assertAlmostEqual(final_output(output, maximum, 1_000_000_000), 1.2)
+      self.assertAlmostEqual(final_output(output), 3.5)
+      self.assertAlmostEqual(final_output(5.), 4.)
+      self.assertAlmostEqual(final_output(-3.5), -3.5)
       self.assertEqual(CarControllerParams(stock).ACCEL_MAX, 2.)
       self.assertEqual(CarInterface.get_pid_accel_limits(stock, 0., 0.), (-3.5, 2.))
     sibling = CarInterface.get_params(CAR.HYUNDAI_IONIQ_6, {0: {}, 1: {}, 2: {}}, [], False, False, False)

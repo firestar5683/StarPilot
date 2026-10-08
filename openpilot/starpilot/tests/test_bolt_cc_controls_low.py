@@ -41,7 +41,7 @@ class TestBoltCcControlsLow(unittest.TestCase):
           self.assertEqual(cp.alternativeExperience, 0)
         cp.fingerprintSource = structs.CarParams.FingerprintSource.can
         cp.carFw = []
-        params.put('CarParams', cp.to_bytes(), block=True)
+        params.put('CarParams', cp.as_reader().as_builder().to_bytes(), block=True)
         controls = Controls()
         self.assertEqual(controls.CP.to_dict(), cp.to_dict())
         self.assertEqual(controls.CP.safetyConfigs[0].safetyParam, 0x1CD if stock_acc else 0x9D if pedal else 0xC121 if removed else 0xC120)
@@ -54,9 +54,15 @@ class TestBoltCcControlsLow(unittest.TestCase):
         drive_pedal_frames = low_pedal_frames = stock_withdrawals = 0
         last_feeds = {}
         internal_frames = 0
+        internal_status_frames = 0
         from opendbc.safety.tests.test_gm_bolt_pedal import TestGmBoltPedalSafety
         recorder = TestGmBoltPedalSafety()
         recorder.safety = libsafety_py.libsafety
+        if pedal and not stock_acc:
+          # An arbitrary host status cannot acquire the physical RX-owned feed.
+          libsafety_py.libsafety.reset_recorded_can()
+          self.assertFalse(native('tx', (0x3D1, bytes(8), 0), 900_000))
+          self.assertEqual(recorder.recorded(), [])
         for tick in range(360):
           now = 1_000_000_000 + tick * 10_000_000
           gas = 120 <= tick < 150
@@ -89,6 +95,7 @@ class TestBoltCcControlsLow(unittest.TestCase):
               self.assertEqual(bus, 0)
               self.assertEqual(payload, last_feeds[address])
               internal_frames += 1
+              internal_status_frames += int(address == 0x3D1)
           libsafety_py.libsafety.safety_tick()
           cs = ci.update([(now, frames)])
           self.assertTrue(cs.canValid)
@@ -161,7 +168,9 @@ class TestBoltCcControlsLow(unittest.TestCase):
           _, commands = ci.apply(cc.as_reader(), now + 1_000_000)
           for frame in commands:
             allowed = native('tx', frame, (now + 1_000_000) // 1000)
-            if pedal and frame[0] in (0xBD, 0x1F5):
+            if pedal and frame[0] in (0xBD, 0x1F5, 0x3D1):
+              # The host schedules these exact feeds; matching physical RX emits
+              # them internally. They never grant ordinary host TX permission.
               self.assertFalse(allowed)
               last_feeds[frame[0]] = frame[1]
             else:
@@ -213,6 +222,7 @@ class TestBoltCcControlsLow(unittest.TestCase):
         if pedal:
           if not stock_acc:
             self.assertGreater(internal_frames, 0)
+            self.assertGreater(internal_status_frames, 0)
           for index, button in enumerate((3, 1)):
             rearm = [frame for frame in frames if frame[0] not in (0x1E1, 0x201, 0xC9)]
             rearm.append(packer.make_can_msg("ECMEngineStatus", 0, {"CruiseMainOn": 1}))

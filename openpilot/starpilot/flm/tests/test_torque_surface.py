@@ -164,7 +164,7 @@ class TestGmSurface(unittest.TestCase):
     knobs['ff_gain_left'] = .6
     self.assertEqual(surface.knobs['ff_gain_left'], .3)
     with self.assertRaises(TypeError):
-      surface.knobs['ff_gain_left'] = .5
+      mock.Mock(wraps=setitem)(surface.knobs, 'ff_gain_left', .5)
     self.assertEqual(GmSurface.from_document(surface.document()).document(), surface.document())
     self.assertGreater(surface.deadband(5.), 0.)
     self.assertAlmostEqual(surface.base_threshold(10.), .20)

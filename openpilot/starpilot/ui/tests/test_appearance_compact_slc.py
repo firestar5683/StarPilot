@@ -33,6 +33,7 @@ class CompactVisualsSlcTests(unittest.TestCase):
   def test_sign_choice_stays_editable_with_system_long_off(self):
     with tempfile.TemporaryDirectory() as path:
       params = Params(path)
+      params.put_bool("ShowSpeedLimits", False, block=True)
       appearance = AppearanceOwner(params, lambda: True)
       feature = FeatureSettingsOwner(params, lambda group: group == "preferences", vehicle_fingerprint=lambda: None)
 
@@ -70,6 +71,7 @@ class CompactVisualsSlcTests(unittest.TestCase):
   def test_original_speed_limit_rows_refresh_with_parent_and_leave_control_off(self):
     with tempfile.TemporaryDirectory() as path:
       params = Params(path)
+      params.put_bool("ShowSpeedLimits", False, block=True)
       parked = True
       appearance = AppearanceOwner(params, lambda: parked)
       feature = FeatureSettingsOwner(params, lambda group: parked, vehicle_fingerprint=lambda: "TEST CAR")

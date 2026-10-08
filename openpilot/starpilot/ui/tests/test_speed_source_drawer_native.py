@@ -23,7 +23,8 @@ from openpilot.starpilot.ui import clip
 class DrawerNativeTest(unittest.TestCase):
   def test_qualified_source_rows_roundtrip_and_do_not_change_selection(self):
     sm, cp = replay_inputs()
-    runtime = Runtime(parse({'SpeedLimitController': True}), session_id='drawer-native')
+    runtime = Runtime(parse({'SpeedLimitController': True, 'SLCPriority1': 'Dashboard', 'SLCPriority2': 'Map Data'}),
+                      session_id='drawer-native')
     out = runtime.step(sm, cp, now_ns=START).message
     with log.Event.from_bytes(out.to_bytes()) as decoded:
       obs = speed_limit_from_message(decoded.slcState)
@@ -112,7 +113,7 @@ class DrawerNativeTest(unittest.TestCase):
 
   def test_disabled_and_invalid_rows_have_no_value_or_ui_authority(self):
     sm, cp = replay_inputs()
-    runtime = Runtime(parse({}), session_id='drawer-disabled')
+    runtime = Runtime(parse({'ShowSpeedLimits': False}), session_id='drawer-disabled')
     message = runtime.step(sm, cp, now_ns=START).message.slcState
     self.assertFalse(message.enabled)
     self.assertTrue(all(not row.enabled for row in message.sourceReadings))

@@ -55,12 +55,12 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.fingerprint = cp.carFingerprint
     self.owner.vehicle_params = lambda: cp
     self.owner.configuration_vehicle = lambda: True
-    original = cp.to_bytes()
+    original = cp.as_reader().as_builder().to_bytes()
     row = self._row('aol', 'AlwaysOnLateral')
     self.assertTrue(row.available)
     self.assertTrue(self.owner.apply(required_change(row)))
     self.assertFalse(qualified_gm(cp))
-    self.assertEqual(cp.to_bytes(), original)
+    self.assertEqual(cp.as_reader().as_builder().to_bytes(), original)
     self.owner.configuration_vehicle = lambda: False
     cp = malibu_hybrid_params(pedal=True, removed=True)
     row = self._row('vehicle', 'GMPedalLongitudinal')
@@ -78,7 +78,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     from openpilot.starpilot.aol.vehicle import policy_for
     self.params.put_bool('AlwaysOnLateral', False, block=True)
     cp = CarInterface.get_params(CAR.TOYOTA_PRIUS_RETROFIT, gen_empty_fingerprint(), [], False, False, False)
-    original = cp.to_bytes()
+    original = cp.as_reader().as_builder().to_bytes()
     self.fingerprint = cp.carFingerprint
     self.owner.vehicle_params = lambda: cp
     self.owner.configuration_vehicle = lambda: True
@@ -87,7 +87,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertIn('next startup', row.reason)
     self.assertTrue(self.owner.apply(required_change(row)))
     self.assertTrue(self.params.get_bool('AlwaysOnLateral'))
-    self.assertEqual(cp.to_bytes(), original)
+    self.assertEqual(cp.as_reader().as_builder().to_bytes(), original)
     self.assertFalse(policy_for(cp).runtime_supported)
     self.assertFalse(policy_for(cp).intent_supported)
     self.owner.configuration_vehicle = lambda: False
@@ -750,7 +750,7 @@ class TruckTuningFeatureTests(unittest.TestCase):
     path.write_bytes(b'1\n')
     row = self._row('vehicle', 'TruckTuning')
     request = row_default(row)
-    self.assertIsNotNone(request)
+    assert request is not None
     self.assertFalse(self.owner.apply(replace(request, value='On')))
     self.allowed = False
     self.assertFalse(self.owner.apply(request))
@@ -792,7 +792,7 @@ class EvPresetFeatureTests(unittest.TestCase):
     path = Path(self.params.get_param_path('EVTuning'))
     path.write_bytes(b'1\n')
     request = row_default(self._row('vehicle','EVTuning'))
-    self.assertIsNotNone(request)
+    assert request is not None
     self.assertFalse(self.owner.apply(replace(request,value='On')))
     self.allowed = False
     self.assertFalse(self.owner.apply(request))

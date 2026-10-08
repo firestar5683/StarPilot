@@ -313,7 +313,7 @@ class GlobalPowertrainPresetTests(unittest.TestCase):
     from opendbc.car.gm.values import CAR as GmCAR
     from openpilot.starpilot.longitudinal.profile_runtime import read_global_powertrain_preset, GlobalPowertrainPreset
     truck = params(GmCAR.CHEVROLET_SILVERADO, alpha=True)
-    before = truck.to_bytes()
+    before = truck.as_reader().as_builder().to_bytes()
     self.assertIsNone(read_global_powertrain_preset(self.params, truck))
     self.params.put_bool('EVTuning', True, block=True)
     self.assertEqual(read_global_powertrain_preset(self.params, truck), GlobalPowertrainPreset(True, False))
@@ -327,7 +327,7 @@ class GlobalPowertrainPresetTests(unittest.TestCase):
     stock = params(GmCAR.CHEVROLET_SILVERADO, alpha=True, release=True)
     self.assertIsNone(read_global_powertrain_preset(self.params, stock))
     self.assertIsNone(read_global_powertrain_preset(self.params, self.cp))
-    self.assertEqual(truck.to_bytes(), before)
+    self.assertEqual(truck.as_reader().as_builder().to_bytes(), before)
     path = Path(self.params.get_param_path('EVTuning'))
     path.write_bytes(b'1\n')
     self.assertIsNone(read_global_powertrain_preset(self.params, truck))

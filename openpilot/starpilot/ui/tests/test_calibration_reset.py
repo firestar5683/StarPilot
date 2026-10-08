@@ -26,16 +26,16 @@ class TestCalibrationReset(unittest.TestCase):
     self.ui = NS(params=self.params, engaged=False, ignition=False, is_offroad=lambda: True,
                  prime_state=NS(is_paired=lambda: False))
     self.enterContext(patch.object(device_layout, "ui_state", self.ui))
-    self.enterContext(patch.object(device_layout, "Params", return_value=self.params))
     self.enterContext(patch.object(device_layout, "calibration_reset", self.reset))
     self.enterContext(patch.object(device, "ui_state", self.ui))
     self.enterContext(patch.object(device, "calibration_reset", self.reset))
     self.enterContext(patch.object(gui_app, "font", return_value=rl.Font()))
     self.enterContext(patch.object(gui_app, "texture", return_value=NS(width=64, height=64)))
     self.pushed = self.enterContext(patch.object(gui_app, "push_widget"))
-    self.panel = device_layout.DeviceLayoutMici()
+    with patch.object(device_layout, "Params", return_value=self.params):
+      self.panel = device_layout.DeviceLayoutMici()
     self.button = next(item for item in self.panel._scroller._items
-                       if hasattr(item, "get_text") and item.get_text() == "reset calibration")
+                       if isinstance(item, device_layout.EngagedConfirmationButton) and item.get_text() == "reset calibration")
 
   def wait_for_reset(self):
     deadline = time.monotonic() + 3
@@ -44,6 +44,7 @@ class TestCalibrationReset(unittest.TestCase):
     self.assertFalse(self.reset.pending, "Calibration reset did not finish")
 
   def confirm(self):
+    assert self.button._click_callback is not None
     self.button._click_callback()
     self.pushed.call_args.args[0]._confirm_callback()
 
@@ -75,6 +76,7 @@ class TestCalibrationReset(unittest.TestCase):
 
   def test_confirmation_rechecks_engagement(self):
     self.params.put("CalibrationParams", b"saved", block=True)
+    assert self.button._click_callback is not None
     self.button._click_callback()
     confirm = self.pushed.call_args.args[0]._confirm_callback
     self.ui.engaged = True

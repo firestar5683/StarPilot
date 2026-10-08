@@ -107,7 +107,7 @@ class SlcFallbackTests(unittest.TestCase):
                         'SLCPriority1': 'Dashboard', 'SLCPriority2': 'Dashboard'})
       self.assertEqual(evaluate(self.step(settings), settings).reason, Reason.OTHER_FALLBACK)
     self.assertEqual(evaluate(absent, replace(self.settings, fallback_choice=True)).reason, Reason.INVALID_FALLBACK)
-    disabled = parse({'SpeedLimitController': False})
+    disabled = parse({'SpeedLimitController': False, 'ShowSpeedLimits': False})
     self.assertEqual(evaluate(self.step(disabled), disabled).reason, Reason.DISABLED)
     display = parse({'SpeedLimitController': False, 'ShowSpeedLimits': True})
     self.assertEqual(evaluate(self.step(display), display).reason, Reason.DISPLAY_ONLY)

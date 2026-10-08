@@ -35,10 +35,12 @@ class TestSavedTorquePage(unittest.TestCase):
     rows = {row['label']: row for row in page['rows']}
     self.assertEqual(set(rows), {'Steering Controller', 'Turn Assist', 'Prep My Vehicle for Tuning',
                                 'Automatic Steering Learning', 'Lat Accel', 'Lateral acceleration — Reset to Default',
-                                'Friction', 'Friction — Reset to Default'})
+                                'Friction', 'Friction — Reset to Default', 'Pause steering below',
+                                'Steering resume delay', 'Pause only while signaling'})
     self.assertIn('Saved vehicle settings', page['subtitle'])
     self.assertFalse(any(row['page'] for row in page['rows']))
-    for label in ('Steering Controller', 'Turn Assist', 'Prep My Vehicle for Tuning', 'Lat Accel', 'Friction'):
+    for label in ('Steering Controller', 'Turn Assist', 'Prep My Vehicle for Tuning', 'Lat Accel', 'Friction',
+                  'Pause steering below', 'Steering resume delay', 'Pause only while signaling'):
       self.assertTrue(rows[label]['available'], label)
     self.assertFalse(rows['Automatic Steering Learning']['available'])
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Friction')

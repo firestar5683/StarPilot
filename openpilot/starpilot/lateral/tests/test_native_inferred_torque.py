@@ -33,7 +33,9 @@ class TestNativeInferredTorque(unittest.TestCase):
       owner.params = params
       owner.authority = lambda group: True
       owner.vehicle_fingerprint = lambda: stock.vehicle
-      cap = (stock.vehicle, '', '', '', '', stock.lat_accel_factor, stock.lat_accel_offset, stock.friction)
+      owner.vehicle_params = lambda: cp
+      cap = (stock.vehicle, str(cp.brand), str(cp.steerControlType), str(cp.lateralTuning.which()),
+             bool(cp.dashcamOnly), stock.lat_accel_factor, stock.lat_accel_offset, stock.friction)
       owner._capability = lambda group: cap
       def raw(key):
         path = Path(params.get_param_path(key))

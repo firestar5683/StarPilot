@@ -238,29 +238,46 @@ def test_disengaged_notification_priority_duration_and_no_replayed_chime():
 
 
 def test_actual_selfdrived_alert_path_works_disengaged_and_resets_offroad(monkeypatch):
+  from openpilot.cereal import messaging
   from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
-  from openpilot.selfdrive.selfdrived.events import ET, Events
+  from openpilot.selfdrive.selfdrived.events import Events
+  from openpilot.selfdrive.selfdrived.state import StateMachine
+  from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
+  from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState
   daemon = SelfdriveD.__new__(SelfdriveD)
-  daemon.CP, daemon.sm, daemon.AM = vehicle(), Messages(), AlertManager()
+  daemon.CP, daemon.AM = vehicle(), AlertManager()
+  daemon.sm = messaging.SubMaster(['deviceState', 'radarTracks'])
   daemon.events, daemon.enabled, daemon.personality, daemon.is_metric = Events(), False, 1, True
-  daemon.state_machine = SimpleNamespace(current_alert_types=[ET.PERMANENT], soft_disable_timer=0)
+  daemon.state_machine = StateMachine()
   daemon.switchback_capable = False
-  daemon.switchback_cooldown = SimpleNamespace(allow=lambda *args, **kwargs: True)
-  daemon.force_stop_hold_alert = SimpleNamespace(active=lambda *args, **kwargs: False)
+  daemon.switchback_cooldown = SwitchbackCooldown()
+  daemon.force_stop_hold_alert = HoldAlertState()
   daemon.radar_recovery_enabled = True
   now = [10_000_000_000]
   daemon.switchback_setting_ns = now[0] + 100_000_000_000
   daemon.switchback_cooldown_ns = 0
   monkeypatch.setattr('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', lambda: now[0])
-  for tick in range(24):
-    now[0] += 100_000_000
-    daemon.sm.frame = tick * 10
-    daemon.sm.logMonoTime['radarTracks'] = now[0]
-    daemon.sm.errors['radarFault'] = tick == 1
-    daemon.sm.valid = {'radarTracks': tick != 1}
+
+  def publish(*, fault=False, started=True, update_device=False):
+    radar = messaging.new_message('radarTracks', valid=not fault, logMonoTime=now[0])
+    radar.radarTracks.errors.radarFault = fault
+    messages = [radar.as_reader()]
+    if update_device:
+      device = messaging.new_message('deviceState', valid=True, logMonoTime=now[0])
+      device.deviceState.started, device.deviceState.startedMonoTime = started, 1
+      messages.append(device.as_reader())
+    daemon.sm.update_msgs(now[0] / 1e9, messages)
+
+  device = messaging.new_message('deviceState', valid=True, logMonoTime=now[0] - 450_000_000)
+  device.deviceState.started, device.deviceState.startedMonoTime = True, 1
+  daemon.sm.update_msgs((now[0] - 450_000_000) / 1e9, [device.as_reader()])
+  for tick in range(48):
+    now[0] += 50_000_000
+    publish(fault=tick == 1, update_device=tick % 10 == 0)
+    daemon.sm.frame = tick * 5
     daemon.update_alerts(SimpleNamespace())
   assert not daemon.enabled and daemon.AM.current_alert.alert_type == ALERT_TYPE
-  daemon.sm.device.started = False
+  publish(started=False, update_device=True)
   daemon.sm.frame += 1
   daemon.update_alerts(SimpleNamespace())
   assert not daemon.enabled and daemon.AM.current_alert.alert_type != ALERT_TYPE

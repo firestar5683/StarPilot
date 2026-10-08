@@ -112,7 +112,7 @@ class TestGmManualTorque(unittest.TestCase):
       for document in (None,b'{',serialize_document(other_profile)):
         with OpenpilotPrefix(),patch.dict(os.environ,{'SIMULATION':'1','REPLAY':'1','TORQUE_REPLAY_RUNTIME':'0'}):
           saved=Params()
-          saved.put('CarParams',cp.to_bytes(),block=True)
+          saved.put('CarParams',cp.as_reader().as_builder().to_bytes(),block=True)
           saved.put('LateralControllerSelection',json.loads(replace_mode(None,cp,mode)),block=True)
           baseline=Controls()
           saved.put('SteerLatAccel',cp.lateralTuning.torque.latAccelFactor*1.1,block=True)
@@ -147,7 +147,7 @@ class TestGmManualTorque(unittest.TestCase):
       gain=gain_basis(cp,lateral)
       profiles=replace_gain(profiles,str(cp.carFingerprint),gain,'custom',.7)
       stored(saved,profiles)
-      native_cp=cp.to_bytes()
+      native_cp=cp.as_reader().as_builder().to_bytes()
       owner=None
       for legacy in (None,b'0',b'1',b'malformed'):
         lateral=LatControlTorque(cp.as_reader(),CarInterface(cp),.01)
@@ -163,7 +163,7 @@ class TestGmManualTorque(unittest.TestCase):
         owner=create_gain_owner(saved,cp,lateral)
         self.assertIsNotNone(owner)
         self.assertEqual(lateral.pid._k_p,[[0.],[.7]])
-        self.assertEqual(cp.to_bytes(),native_cp)
+        self.assertEqual(cp.as_reader().as_builder().to_bytes(),native_cp)
       raw=serialize_document(profiles)
       for invalid in (raw.replace(b'CHEVROLET_MALIBU_ASCM',b'UNKNOWN_GM'),b'{',raw.replace(b'0.8',b'NaN')):
         with self.assertRaises((ValueError,UnicodeError)):
@@ -178,7 +178,7 @@ class TestGmManualTorque(unittest.TestCase):
       for mode in ControllerMode:
         with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION':'1', 'REPLAY':'1', 'TORQUE_REPLAY_RUNTIME':'0'}):
           saved = Params()
-          saved.put('CarParams', cp.to_bytes(), block=True)
+          saved.put('CarParams', cp.as_reader().as_builder().to_bytes(), block=True)
           saved.put('LateralControllerSelection', json.loads(replace_mode(None, cp, mode)), block=True)
           baseline = Controls()
           self.assertIsNone(baseline.torque_host)
@@ -221,7 +221,7 @@ class TestGmManualTorque(unittest.TestCase):
     for mode in ControllerMode:
       with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION':'1','REPLAY':'1','TORQUE_REPLAY_RUNTIME':'0'}):
         saved = Params()
-        saved.put('CarParams', cp.to_bytes(), block=True)
+        saved.put('CarParams', cp.as_reader().as_builder().to_bytes(), block=True)
         choice = json.loads(replace_mode(None, cp, mode))
         saved.put('LateralControllerSelection', choice, block=True)
         baseline = Controls()
@@ -290,7 +290,7 @@ class TestGmManualTorque(unittest.TestCase):
     cp = volt_params(CAR.CHEVROLET_VOLT_CAMERA)
     with OpenpilotPrefix():
       saved=Params()
-      saved.put('CarParams',cp.to_bytes(),block=True)
+      saved.put('CarParams',cp.as_reader().as_builder().to_bytes(),block=True)
       saved.put_bool('AdvancedLateralTune',True,block=True)
       owner=FeatureSettingsOwner(saved,lambda _:True,vehicle_fingerprint=lambda:cp.carFingerprint,vehicle_params=lambda:cp)
       def rows():

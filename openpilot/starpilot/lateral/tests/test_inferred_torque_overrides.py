@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from opendbc.car.car_helpers import interfaces
 from openpilot.starpilot.lateral.torque_runtime import read_settings
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource, TorqueTuning
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, parse_document
@@ -31,7 +32,14 @@ class SavedParams:
 class Owner:
   def __init__(self, params):
     self.params = params
-    self.capability = ('HYUNDAI_IONIQ_6', '', '', '', '', 3.0, 0.0, 0.1)
+    self.cp = interfaces['HYUNDAI_IONIQ_6'].get_non_essential_params('HYUNDAI_IONIQ_6')
+    tune = self.cp.lateralTuning.torque
+    tune.latAccelFactor, tune.latAccelOffset, tune.friction = 3.0, 0.0, 0.1
+    self.capability = (str(self.cp.carFingerprint), str(self.cp.brand), str(self.cp.steerControlType),
+                       str(self.cp.lateralTuning.which()), bool(self.cp.dashcamOnly),
+                       float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction))
+  def vehicle_params(self):
+    return self.cp
   def authority(self, group):
     return True
   def vehicle_fingerprint(self):
@@ -51,8 +59,8 @@ class TestInferredTorque(unittest.TestCase):
     self.directory = tempfile.TemporaryDirectory()
     self.addCleanup(self.directory.cleanup)
     self.params = SavedParams(self.directory.name)
-    self.vehicle = TorqueTuning(TorqueSource.VEHICLE, 'HYUNDAI_IONIQ_6', 3.0, 0.0, 0.1)
     self.owner = Owner(self.params)
+    self.vehicle = TorqueTuning(TorqueSource.VEHICLE, self.owner.capability[0], *self.owner.capability[5:8])
     self.editor = TorqueFeature(self.owner)
   def rows(self):
     valid, rows = self.editor.rows(self.owner.capability, True)

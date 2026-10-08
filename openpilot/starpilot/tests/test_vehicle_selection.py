@@ -45,7 +45,9 @@ class TestVehicleSelection(unittest.TestCase):
     self.assertEqual(len(selected), 1)
     self.assertTrue(self.owner.choose(None, selected[0].platform).committed)
     self.assertEqual(startup_candidate(self.params), CAR.KIA_K4_2025)
-    cp = CarInterface.get_params(startup_candidate(self.params), gen_empty_fingerprint(), [], False, False, False)
+    candidate = startup_candidate(self.params)
+    assert candidate is not None
+    cp = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], False, False, False)
     self.assertEqual(cp.carFingerprint, CAR.KIA_K4_2025)
     self.assertFalse(cp.openpilotLongitudinalControl)
 

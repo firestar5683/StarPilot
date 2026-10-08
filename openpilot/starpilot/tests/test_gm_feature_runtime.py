@@ -10,7 +10,7 @@ from opendbc.car.gm.values import CAR
 from opendbc.car.gm.tests.test_camera_acc_pedal import CAMERA_IDS, fingerprint as camera_pedal_fingerprint
 from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
-from openpilot.starpilot.feature_runtime import enabled, slc_runtime_settings
+from openpilot.starpilot.feature_runtime import enabled, slc_runtime_settings, vision_control_enabled
 from openpilot.starpilot.longitudinal.profile_document import default_personality_profiles, profile_document
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
 
@@ -86,15 +86,17 @@ class TestGmFeatureRuntime(unittest.TestCase):
           self.assertTrue(longitudinal_supported(cp))
           for feature in ('conditional', 'curve', 'slc', 'profile'):
             self.assertTrue(enabled(params, cp, feature, {}), feature)
-          self.assertFalse(enabled(params, cp, 'vision', {}))
+          self.assertTrue(enabled(params, cp, 'vision', {}))
       for identity, kwargs in STOCK_CASES:
         with self.subTest(identity=identity, kwargs=kwargs):
           cp = configured(params, identity, **kwargs)
           self.assertFalse(cp.openpilotLongitudinalControl, (identity, kwargs, cp.safetyConfigs, cp.flags))
           self.assertFalse(longitudinal_supported(cp))
           self.assertTrue(display_supported(cp), (identity, kwargs, cp.safetyConfigs, cp.flags, cp.dashcamOnly))
-          for feature in ('conditional', 'curve', 'profile', 'vision'):
+          for feature in ('conditional', 'curve', 'profile'):
             self.assertFalse(enabled(params, cp, feature, {}), feature)
+          self.assertTrue(enabled(params, cp, 'vision', {}))
+          self.assertFalse(vision_control_enabled(params, cp))
           self.assertTrue(enabled(params, cp, 'slc', {}))
           settings = slc_runtime_settings(params, cp, {})
           self.assertTrue(settings.display)  # Saved controller-on also requests display.
@@ -109,8 +111,14 @@ class TestGmFeatureRuntime(unittest.TestCase):
       cp = configured(params, CAR.CHEVROLET_VOLT_CC)
       self.assertTrue(enabled(params, cp, 'conditional', {}))  # Readable factory CEM.
       self.assertTrue(enabled(params, cp, 'profile', {}))  # Fresh Comfort is the readable missing-document default.
-      for feature in ('curve', 'slc', 'vision'):
-        self.assertFalse(enabled(params, cp, feature, {}))
+      self.assertFalse(enabled(params, cp, 'curve', {}))
+      self.assertTrue(enabled(params, cp, 'slc', {}))
+      self.assertTrue(enabled(params, cp, 'vision', {}))
+      settings = slc_runtime_settings(params, cp, {})
+      self.assertTrue(settings.display)
+      self.assertFalse(settings.enabled)
+      self.assertTrue(settings.acceptance.display_only)
+      self.assertFalse(vision_control_enabled(params, cp))
       params.put('ConditionalModeConfig', json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.STOCK))), block=True)
       self.assertTrue(enabled(params, cp, 'conditional', {}))  # Owner retains Stock session lifecycle.
       params.put_bool('SafeMode', True, block=True)

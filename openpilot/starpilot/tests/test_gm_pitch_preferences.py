@@ -339,7 +339,9 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
           with patch.object(card, 'Params', return_value=self.saved), \
             patch.object(card, 'feature_requested', return_value=False), \
             patch.object(card.messaging, 'sub_sock', return_value=Mock()), \
-            patch.object(card.messaging, 'SubMaster', return_value=Mock()), \
+            patch.object(card.messaging, 'SubMaster', side_effect=lambda *_args, **kwargs: SimpleNamespace(
+              ignore_alive=list(kwargs.get('ignore_alive', [])), ignore_valid=list(kwargs.get('ignore_valid', [])),
+              ignore_average_freq=list(kwargs.get('ignore_average_freq', [])))), \
             patch.object(card.messaging, 'PubMaster', return_value=SimpleNamespace(sock={'sendcan': Mock()})), \
             patch.object(card, 'Ratekeeper', return_value=Mock()), \
             patch.object(card, 'get_cache', return_value=None), patch.object(card, 'put_cache'), \

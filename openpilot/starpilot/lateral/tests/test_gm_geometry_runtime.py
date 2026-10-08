@@ -167,8 +167,8 @@ class TestGmGeometryRuntime(unittest.TestCase):
       expected_delay = delay.to_dict()
       expected_delay['lateralDelay']['lateralDelay'] = delayed.lateralDelay.lateralDelay
       self.assertEqual(delayed.to_dict(),expected_delay)
-      self.assertEqual(original.to_bytes(), raw)
-      self.assertEqual(delay.to_bytes(), lag_raw)
+      self.assertEqual(original.as_reader().as_builder().to_bytes(), raw)
+      self.assertEqual(delay.as_reader().as_builder().to_bytes(), lag_raw)
       self.assertTrue((learner.kf.x==state).all() and (learner.kf.P==p).all())
       self.assertAlmostEqual(lag.initial_lag, cp.steerActuatorDelay+.2)
       stored(saved, edit(cp,profiles,'learning','force_auto'))
@@ -186,8 +186,8 @@ class TestGmGeometryRuntime(unittest.TestCase):
       owner.last_read_ns = None
       self.assertIs(owner.parameters(original),original)
       self.assertAlmostEqual(owner.delay(delay).lateralDelay.lateralDelay,cp.steerActuatorDelay+.2)
-      self.assertEqual(original.to_bytes(),raw)
-      self.assertEqual(delay.to_bytes(),lag_raw)
+      self.assertEqual(original.as_reader().as_builder().to_bytes(),raw)
+      self.assertEqual(delay.as_reader().as_builder().to_bytes(),lag_raw)
 
   def test_ui_guarded_geometry_choices_and_source_staleness(self):
     cp = volt_params(CAR.CHEVROLET_VOLT_CAMERA)
@@ -263,6 +263,7 @@ class TestGmGeometryRuntime(unittest.TestCase):
         self.assertEqual(row.default_key, f'torque:{field}:mode')
         request = row_default(row)
         self.assertIsNotNone(request, field)
+        assert request is not None
         self.assertEqual(request.key, row.default_key)
         self.assertTrue(owner.apply(request), field)
       publisher.last_read_ns = None
