@@ -178,7 +178,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
-                android_auto_client=None, navigation=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
+                android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
                 local_access=None, tmux_live=None, android_auto_logs=None):
   cloud = cloud_provider
 
@@ -308,6 +308,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         navigation_source = NavigationOwner()
       server.navigation_source = navigation_source
       return navigation_source
+
+  offline_maps_source = offline_maps
+
+  def offline_maps_owner():
+    nonlocal offline_maps_source
+    with navigation_lock:
+      if offline_maps_source is None:
+        from openpilot.starpilot.navigation.offline_owner import OfflineMapsOwner
+        offline_maps_source = OfflineMapsOwner(position=lambda: navigation_owner().position_store.read())
+      return offline_maps_source
 
   def statistics_owner():
     nonlocal drive_stats_source
@@ -551,11 +561,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         # The browser can retire an in-flight fetch or speculative connection.
         self.close_connection = True
 
-    def respond(self, status, body, content_type='application/json', cookie=None, *, asset_headers=None):
+    def respond(self, status, body, content_type='application/json', cookie=None, *, asset_headers=None, cache_control=None):
       self.send_response(status)
       self.send_header('Content-Type', content_type)
       self.send_header('Content-Length', str(len(body)))
-      self.send_header('Cache-Control', 'private, max-age=0, must-revalidate' if asset_headers else 'no-store')
+      self.send_header('Cache-Control', cache_control or ('private, max-age=0, must-revalidate' if asset_headers else 'no-store'))
       for key, value in (asset_headers or {}).items():
         self.send_header(key, value)
       self.send_header('X-Content-Type-Options', 'nosniff')
@@ -929,17 +939,41 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(400, {'error': 'Invalid map tile'})
           return
         try:
-          tile = navigation_owner().map_tile(*(int(value) for value in match.groups()))
+          query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=1)
+          theme = query.get('theme', ['light'])[0]
+          if set(query) - {'theme'} or theme not in ('light', 'dark'):
+            raise ValueError('Invalid map theme')
+        except ValueError:
+          self.json(400, {'error': 'Invalid map theme'})
+          return
+        try:
+          tile = navigation_owner().map_tile(*(int(value) for value in match.groups()), theme)
         except (OSError, ValueError, RuntimeError):
           self.json(503, {'error': 'Map tiles are unavailable'})
         else:
           if self.require_session():
-            self.respond(200, tile, 'image/png')
-      elif path == '/api/navigation/status':
+            # Map imagery is not private data; let the browser keep it while panning back and forth.
+            self.respond(200, tile, 'image/png', cache_control='private, max-age=900')
+      elif path == '/api/navigation/offline':
         if not self.require_session():
           return
         try:
-          result = navigation_owner().snapshot()
+          result = offline_maps_owner().snapshot()
+        except (OSError, ValueError, RuntimeError):
+          self.json(503, {'error': 'Offline maps are unavailable'})
+        else:
+          if self.require_session():
+            self.json(200, result)
+      elif path == '/api/navigation/status':
+        if not self.require_session():
+          return
+        # A poll that already holds the drawn route sends its key and skips the route lines.
+        try:
+          route_key = parse_qs(urlsplit(self.path).query, max_num_fields=1).get('routeKey', [''])[0]
+        except ValueError:
+          route_key = ''
+        try:
+          result = navigation_owner().snapshot(route_key if re.fullmatch(r'[0-9a-f]{16}', route_key) else None)
         except (OSError, ValueError, RuntimeError):
           self.json(503, {'error': 'Navigation status is unavailable'})
         else:
@@ -1488,7 +1522,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
                       '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore',
                       '/api/recordings/delete-videos', '/api/sentry/notifications',
-                      '/api/navigation/search', '/api/navigation/action', '/api/drive-state/action',
+                      '/api/navigation/search', '/api/navigation/action', '/api/navigation/offline', '/api/drive-state/action',
                       '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
@@ -1583,6 +1617,24 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
         return
+      if path == '/api/navigation/offline':
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          with effect_lock:
+            result = offline_maps_owner().action(payload)
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        except OSError:
+          self.json(503, {'error': 'Offline maps could not be saved. Try again shortly.'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        return
       if path in ('/api/navigation/search', '/api/navigation/action'):
         from openpilot.starpilot.navigation.owner import ConflictError, ValidationError
         identity = self.settings_session()
@@ -1593,21 +1645,26 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if type(payload) is not dict:
             raise ValidationError('Invalid navigation request')
           if path == '/api/navigation/search':
-            if set(payload) not in ({'query'}, {'query', 'searchId', 'clientId'}):
+            if set(payload) not in ({'query'}, {'query', 'searchId', 'clientId'}, {'query', 'searchId', 'clientId', 'autocomplete'}):
               raise ValidationError('Enter a destination to search')
-            result = {'results': (navigation_owner().search_places(payload['query'], identity, payload['searchId'], payload['clientId'])
+            if 'autocomplete' in payload and payload['autocomplete'] is not True:
+              raise ValidationError('Enter a destination to search')
+            result = {'results': (navigation_owner().search_places(payload['query'], identity, payload['searchId'], payload['clientId'],
+                                                                   autocomplete='autocomplete' in payload)
                                   if 'searchId' in payload else navigation_owner().search(payload['query']))}
           else:
             fields = {'configure': {'patch'}, 'select': {'destination'}, 'selectPlace': {'id', 'searchId'},
-                      'cancelSearch': {'searchId'}, 'clear': set(),
-                      'favorite': {'destination'}, 'removeFavorite': {'id'}, 'selectRoute': {'index'}}
+                      'cancelSearch': {'searchId'}, 'clear': set(), 'favorite': {'destination'},
+                      'favoritePlace': {'id', 'searchId'}, 'removeFavorite': {'id'}, 'labelFavorite': {'id', 'label'},
+                      'removeRecent': {'id'}, 'clearRecents': set(), 'selectRoute': {'index'}}
             action = payload.get('action')
-            if type(action) is not str or action not in fields or set(payload) != {'action', 'revision'} | fields[action]:
+            optional = {'label'} if action in ('favorite', 'favoritePlace') and 'label' in payload else set()
+            if type(action) is not str or action not in fields or set(payload) != {'action', 'revision'} | fields[action] | optional:
               raise ValidationError('Invalid navigation action')
             needs_park = action == 'configure' and isinstance(payload['patch'], dict) and 'token' in payload['patch']
             def authorized():
               return self.settings_session() == identity and (not needs_park or configuration_allowed())
-            with (nullcontext() if action == 'selectPlace' else effect_lock):
+            with (nullcontext() if action in ('selectPlace', 'favoritePlace') else effect_lock):
               if not authorized():
                 raise PermissionError('Park your car before changing the Mapbox key' if needs_park else 'Sign in to Galaxy')
               nav = navigation_owner()
@@ -1626,11 +1683,20 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               elif action == 'selectRoute':
                 result = nav.select_route(payload['index'], **keywords)
               elif action == 'favorite':
-                result = nav.favorite(payload['destination'], **keywords)
+                result = nav.favorite(payload['destination'], **keywords, label=payload.get('label'))
+              elif action == 'favoritePlace':
+                result = nav.favorite_place(payload['id'], payload['searchId'], identity, **keywords, label=payload.get('label'))
+              elif action == 'clearRecents':
+                result = nav.clear_recents(**keywords)
               else:
                 if type(payload['id']) is not str or not 1 <= len(payload['id']) <= 256:
                   raise ValidationError('Choose a saved place')
-                result = nav.remove_favorite(payload['id'], **keywords)
+                if action == 'removeRecent':
+                  result = nav.remove_recent(payload['id'], **keywords)
+                elif action == 'labelFavorite':
+                  result = nav.label_favorite(payload['id'], payload['label'], **keywords)
+                else:
+                  result = nav.remove_favorite(payload['id'], **keywords)
         except ConflictError as error:
           self.json(409, {'error': str(error)})
         except ValidationError as error:

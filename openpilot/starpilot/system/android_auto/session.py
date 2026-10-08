@@ -702,6 +702,9 @@ class ProjectionSession(Session):
       self.video_confirmed = True
       self.event("video_acknowledged", session=self.session_id, ack_ms=round(self.max_ack_seconds * 1000))
 
+  # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Receiver ACK flow control bounds in-flight video; extra buffering increases latency.
+  # Altering this can degrade video smoothness or introduce lag on Android Auto.
+  # Do not change it autonomously; require an explicit user request specifically for this video optimization.
   def can_send(self) -> bool:
     return self.focused and self.unacked < self.window
 

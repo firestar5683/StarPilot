@@ -41,7 +41,7 @@ class ViewSource:
     self.request = request
     self.mirror_path, self.car_path, self.touch_path = mirror_path, car_path, touch_path
     self.renderer_command = renderer_command or [sys.executable, "-m", "openpilot.starpilot.system.android_auto.current_car_ui",
-                                                 "--frames", car_path]
+                                                 "--frames", car_path, "--touch", touch_path]
     self.renderer_log = renderer_log
     self.process: subprocess.Popen | None = None
     self.touch: TouchSender | None = None
@@ -85,9 +85,7 @@ class ViewSource:
     finally:
       if output is not subprocess.DEVNULL:
         output.close()
-    # The current renderer has no reviewed input owner yet. Injected legacy
-    # renderers can retain their own touch receiver during isolated tests.
-    self.touch = None if any("current_car_ui" in part for part in self.renderer_command) else TouchSender(self.touch_path)
+    self.touch = TouchSender(self.touch_path)
     self.started_at = time.monotonic()
     self.log("car_view_started", pid=self.process.pid)
 

@@ -24,6 +24,13 @@ const { resolve } = require('node:path')
       json: { state: 'configured', authenticated: true, localAccess: true },
     })
     if (path === '/api/device/state') return route.fulfill({ json: { state: 'parked', maxAgeMs: 3000 } })
+    if (path === '/api/android-auto/logs') return route.fulfill({ json: { schemaVersion: 1,
+      sessions: [
+        { name: 'session-000003.jsonl', size: 51712, modifiedAt: 1791354093, outcome: "projected, then failed: finding android auto: Could not find the car's Android Auto service: [Errno 112] Host is down", car: 'Honda T20', transport: 'wireless', trigger: 'car_connected' },
+        { name: 'session-000002.jsonl', size: 716, modifiedAt: 1791340980, outcome: 'stopped at connecting_bluetooth', car: '', transport: 'wireless', trigger: 'manual' },
+      ],
+      others: [{ name: 'car_ui.log', size: 4096, modifiedAt: 1791354093 }],
+    } })
     if (path.startsWith('/api/settings/pages/')) {
       if (delayed) await new Promise(resolve => setTimeout(resolve, 600))
       const id = path.split('/').at(-1)
@@ -73,6 +80,25 @@ const { resolve } = require('node:path')
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `local ${width}px ${path}: no overflow`)
     }
   }
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto(base + '#/logs/android-auto')
+  await page.locator('.gx-aa-log').first().waitFor()
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Android Auto logs fit a phone viewport')
+  const phoneCards = await page.locator('.gx-aa-log').evaluateAll(cards => cards.map(card => {
+    const row = card.getBoundingClientRect(), body = card.querySelector('.gx-aa-log__body').getBoundingClientRect()
+    const download = card.querySelector('.gx-aa-log__download').getBoundingClientRect()
+    return { leftInset: body.left - row.left, rightInset: row.right - download.right, width: download.width, height: download.height }
+  }))
+  assert.ok(phoneCards.every(card => card.leftInset >= 11 && card.rightInset >= 11), 'log text and downloads are padded inside cards')
+  assert.ok(phoneCards.every(card => card.width === 44 && card.height === 44), 'individual downloads remain compact touch targets')
+  assert.deepEqual(await page.locator('.gx-aa-log__download').evaluateAll(links => links.map(link => link.getAttribute('download'))),
+    ['session-000003.jsonl', 'session-000002.jsonl', 'car_ui.log'])
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const desktop = await page.locator('.gx-aa-logs').evaluate(section => {
+    const bounds = section.getBoundingClientRect()
+    return { width: bounds.width, center: bounds.left + bounds.width / 2 }
+  })
+  assert.ok(desktop.width <= 960 && Math.abs(desktop.center - 640) < 1, 'Android Auto logs are centered and readable on desktop')
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto(base + '#/settings')
   const manage = page.getByRole('button', { name: 'Manage', exact: true }).first()

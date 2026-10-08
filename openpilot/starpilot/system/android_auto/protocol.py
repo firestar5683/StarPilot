@@ -8,7 +8,8 @@ import socket
 from typing import Any
 
 ANDROID_AUTO_SOCKET_PATH = "/tmp/starpilot-android-auto.sock"
-COMMAND_TIMEOUTS = {"stop": 12.0, "prepare_pairing": 20.0, "devices": 10.0, "select_receiver": 10.0, "bluetooth_action": 25.0}
+COMMAND_TIMEOUTS = {"stop": 12.0, "prepare_pairing": 20.0, "devices": 10.0, "select_receiver": 10.0, "bluetooth_action": 25.0,
+                    "forget_receiver": 15.0}
 
 
 class AndroidAutoClient:
@@ -67,3 +68,29 @@ class AndroidAutoClient:
 
   def devices(self) -> list[dict[str, Any]]:
     return list(self.call("devices").get("devices", []))
+
+
+def forget_car(address: str, client: AndroidAutoClient | None = None) -> bool:
+  """Clear Android Auto's chosen car (or companion) after its pairing was deleted; True if it was the chosen car.
+
+  Goes through android_autod when it runs, so its in-memory settings stay in step. Otherwise nothing
+  holds the settings, and the saved file is edited directly.
+  """
+  client = client or AndroidAutoClient()
+  if client.available:
+    return bool(client.call("forget_receiver", address=address).get("cleared"))
+  from openpilot.starpilot.system.android_auto import identity
+  address = address.strip().upper()
+  config = identity.load_config()
+  chosen = config["receiver_address"].upper() == address
+  companion = config["companion_address"].upper() == address
+  cache = dict(config["rfcomm_cache"])
+  if cache.pop(address, None) is None and not (chosen or companion):
+    return False
+  config["rfcomm_cache"] = cache
+  if chosen:
+    config.update(receiver_address="", receiver_name="", companion_address="", companion_name="")
+  elif companion:
+    config.update(companion_address="", companion_name="")
+  identity.save_config(config)
+  return chosen

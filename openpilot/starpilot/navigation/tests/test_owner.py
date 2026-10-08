@@ -71,3 +71,28 @@ def test_response_limits_and_private_failures():
   with patch('openpilot.starpilot.navigation.owner.time.monotonic', side_effect=[0, 11]):
     with pytest.raises(ValidationError, match='too long'):
       response_json(session, 'https://api.mapbox.com', {})
+
+
+def test_status_polls_skip_route_lines_the_client_already_holds(owner):
+  saved = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
+  selected = owner.select(PLACE, saved['revision'], True)
+  line = [{'latitude': 40.123456789, 'longitude': -90.987654321}, {'latitude': 40.2, 'longitude': -90.1}]
+  owner.runtime_source = lambda: {'revision': selected['revision'], 'status': 'guiding', 'instruction': None, 'route': line}
+  full = owner.snapshot()
+  assert full['route'][0] == {'latitude': 40.123457, 'longitude': -90.987654}, "drawn lines are sent at ~10 cm precision"
+  light = owner.snapshot(full['routeKey'])
+  assert light['routeUnchanged'] is True and 'route' not in light and 'alternatives' not in light
+  assert light['routeKey'] == full['routeKey'] and light['destination'] == full['destination']
+  line.append({'latitude': 40.3, 'longitude': -90.})
+  changed = owner.snapshot(full['routeKey'])
+  assert len(changed['route']) == 3 and changed['routeKey'] != full['routeKey'] and 'routeUnchanged' not in changed
+
+
+def test_reads_reparse_only_after_a_write(owner):
+  saved = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
+  first = owner.read()
+  first['favorites'].append('mutated by a caller')
+  with patch('openpilot.starpilot.navigation.owner.json.loads', side_effect=AssertionError('reparsed')):
+    assert owner.read()['favorites'] == [], "cached copies are independent of what callers change"
+  assert owner.select(PLACE, saved['revision'], True)['destination']['name'] == 'Home'
+  assert owner.read()['destination']['name'] == 'Home'

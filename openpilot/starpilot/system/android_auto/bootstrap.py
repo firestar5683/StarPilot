@@ -61,6 +61,9 @@ SECURITY_NAMES = {0: "unknown", 1: "open", 2: "wep64", 3: "wep128", 4: "wpa", 8:
 MAX_FRAME = 4096
 MAX_FRAMES = 64
 INITIAL_KICK_SECONDS = 2.5
+# Phone-side WifiPing while joining the receiver's Wi-Fi, so an impatient receiver (a wireless adapter) keeps the
+# idle RFCOMM link. Sent only to a receiver that pings us first: one that never pings may not expect them.
+JOIN_PING_INTERVAL = 2.0
 MAC_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
 
@@ -221,9 +224,11 @@ class WirelessBootstrap:
 
   def __init__(self, sock, log: Callable[..., None], *, device_serial: str = "starpilot",
                version_status: int = STATUS_SUCCESS, stage_timeout: float = 20.0, start_request_delay: float = 5.0,
-               initial_kick_delay: float = INITIAL_KICK_SECONDS):
+               initial_kick_delay: float = INITIAL_KICK_SECONDS, join_ping_interval: float = JOIN_PING_INTERVAL):
     self.sock = sock
     self.initial_kick_delay = initial_kick_delay
+    self.join_ping_interval = join_ping_interval
+    self.peer_uses_pings = False
     self.start_request_delay = start_request_delay
     self.log = log
     self.device_serial = device_serial
@@ -235,6 +240,11 @@ class WirelessBootstrap:
     self.send_lock = threading.Lock()
     self.frames_seen = 0
     self.cancelled: Callable[[], bool] = lambda: False
+    self.join_cancelled = threading.Event()
+
+  def join_is_cancelled(self) -> bool:
+    """For join_wifi: stop on user cancellation or once the handshake has failed."""
+    return self.join_cancelled.is_set() or self.cancelled()
 
   def send(self, message_id: int, payload: bytes = b"") -> None:
     with self.send_lock:
@@ -272,6 +282,7 @@ class WirelessBootstrap:
   def service(self, message_id: int, payload: bytes) -> bool:
     """Handle stage-independent frames; returns True when consumed."""
     if message_id == WIFI_PING_REQUEST:
+      self.peer_uses_pings = True
       self.send(WIFI_PING_RESPONSE, payload)
       return True
     if message_id == WIFI_PING_RESPONSE:
@@ -360,6 +371,13 @@ class WirelessBootstrap:
         credentials = setup_credentials or credentials
         self.log("bootstrap_setup_info", endpoint=setup_endpoint.__dict__ if setup_endpoint else None,
                  credentials=credentials.describe() if credentials else None)
+      elif message_id == WIFI_INFO_RESPONSE:
+        # Some receivers send the network before the endpoint; keep it so it is not asked for again.
+        # One that cannot be read is ignored as before, and the network is asked for after the endpoint.
+        try:
+          credentials = parse_info_response(payload)
+        except ValueError as error:
+          self.log("bootstrap_early_info_unreadable", error=str(error))
       else:
         self.log("bootstrap_ignored", message=NAMES.get(message_id, message_id))
     assert endpoint is not None
@@ -384,14 +402,29 @@ class WirelessBootstrap:
             credentials = parse_info_response(payload)
           except ValueError as error:
             raise BootstrapError(self.stage, str(error)) from error
+        elif message_id == WIFI_SETUP_INFO:
+          setup_endpoint, credentials = parse_setup_info(payload)
+          endpoint = setup_endpoint or endpoint
+        elif message_id == WIFI_START_REQUEST:
+          endpoint = parse_endpoint(payload) or endpoint
         else:
           self.log("bootstrap_ignored", message=NAMES.get(message_id, message_id))
     self.log("bootstrap_credentials", **credentials.describe())
     # Status is field 3 (fields 1/2 are ip/port); aa-proxy sends status alone to real head units.
     self.send(WIFI_START_RESPONSE, field(3, STATUS_SUCCESS))
 
-    # Stage 3: join Wi-Fi while continuing to answer RFCOMM pings.
+    self._join_network(credentials, join_wifi)
+    self.stage = "connecting_tcp"
+    return BootstrapResult(endpoint, credentials, head_unit, version)
+
+  def _join_network(self, credentials: WifiCredentials, join_wifi: Callable[[WifiCredentials], None]) -> None:
+    """Stage 3: join Wi-Fi while servicing RFCOMM. A failed handshake never leaves the join running.
+
+    join_wifi must honour join_is_cancelled with bounded I/O (NetworkLease does); otherwise a join that
+    finishes after the handshake failed could take Wi-Fi from the next attempt or from the user.
+    """
     self.stage = "joining_wifi"
+    self.join_cancelled.clear()
     outcome: dict = {}
 
     def worker():
@@ -403,17 +436,11 @@ class WirelessBootstrap:
 
     thread = threading.Thread(target=worker, name="aa_wifi_join", daemon=True)
     thread.start()
-    while thread.is_alive():
-      if cancelled():
-        raise BootstrapError(self.stage, "cancelled")
-      try:
-        message_id, payload = self.next_frame(0.25)
-      except BootstrapError as error:
-        if "did not answer" in str(error):
-          continue
-        raise
-      if not self.service(message_id, payload):
-        self.log("bootstrap_ignored", message=NAMES.get(message_id, message_id))
+    try:
+      self._wait_for_join(thread)
+    finally:
+      self.join_cancelled.set()
+      thread.join()  # bounded by join_wifi's D-Bus timeouts and cancellation checks
     if "error" in outcome:
       try:
         self.send(WIFI_CONNECT_STATUS, field(1, STATUS_NETWORK_UNAVAILABLE))
@@ -421,9 +448,25 @@ class WirelessBootstrap:
         pass
       error = outcome["error"]
       raise BootstrapError(self.stage, str(error)) from error
+    if self.cancelled():
+      raise BootstrapError(self.stage, "cancelled")
     self.send(WIFI_CONNECT_STATUS, field(1, STATUS_SUCCESS))
-    self.stage = "connecting_tcp"
-    return BootstrapResult(endpoint, credentials, head_unit, version)
+
+  def _wait_for_join(self, thread: threading.Thread) -> None:
+    next_ping = time.monotonic() + self.join_ping_interval
+    while thread.is_alive():
+      if self.cancelled():
+        raise BootstrapError(self.stage, "cancelled")
+      if self.join_ping_interval > 0 and self.peer_uses_pings and time.monotonic() >= next_ping:
+        # Joining and DHCP can take 10+ s (a Honda's access point ~55 s); keep the link visibly alive meanwhile.
+        next_ping = time.monotonic() + self.join_ping_interval
+        self.send(WIFI_PING_REQUEST, field(1, time.monotonic_ns() // 1_000_000))
+      try:
+        message_id, payload = self.next_frame(0.25)
+      except BootstrapTimeout:
+        continue
+      if not self.service(message_id, payload):
+        self.log("bootstrap_ignored", message=NAMES.get(message_id, message_id))
 
   def keepalive(self, stop: threading.Event) -> None:
     """Keep the RFCOMM link serviced for the life of the projection session."""

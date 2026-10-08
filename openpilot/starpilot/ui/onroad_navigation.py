@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -22,9 +23,15 @@ def icon_name(maneuver_type: str, modifier: str) -> str:
   return candidate if candidate in MANIFEST else 'direction_turn_straight.png'
 
 
+def arrival_time(remaining_seconds: float, now: datetime) -> str:
+  arrival = now + timedelta(seconds=max(0, remaining_seconds))
+  return arrival.strftime('%I:%M %p').lstrip('0')
+
+
 class NavigationCard:
-  def __init__(self, fonts):
+  def __init__(self, fonts, *, clock=None):
     self.fonts = fonts
+    self.clock = clock or (lambda: datetime.now().astimezone())
     self.collapsed = False
     self._key = None
     self._press = None
@@ -40,8 +47,15 @@ class NavigationCard:
       self._key, self.collapsed = state.navigation.key, False
     if self.fonts.profile == Profile.COMPACT:
       return rl.Rectangle(244, 18, 72, 72) if self.collapsed else rl.Rectangle(96, 16, 368, 142)
-    shift = state.viewport_width - 1860
-    return rl.Rectangle(1678 + shift, 415, 112, 112) if self.collapsed else rl.Rectangle(1230 + shift, 415, 560, 195)
+    # Android Auto layouts place the card; the comma keeps its fixed spot.
+    placed = state.customization["layouts"]["large"].get("nav_card")
+    if placed is not None:
+      if not placed["enabled"]:
+        return None
+      x, y = placed["x"], placed["y"]
+    else:
+      x, y = 1230 + state.viewport_width - 1860, 415
+    return rl.Rectangle(x + 448, y, 112, 112) if self.collapsed else rl.Rectangle(x, y, 560, 195)
 
   def press(self, x, y, state):
     self.cancel()
@@ -127,13 +141,19 @@ class NavigationCard:
     for i, text in enumerate(self._lines(nav.text, width, primary_size)):
       self.fonts.draw(text, FontRole.SEMI_BOLD, primary_size, x, y + i * (primary_size + 3))
     distance = 'Arrived' if nav.arrived else distance_text(nav.distance_m, state.metric)
-    self.fonts.draw(distance, FontRole.BOLD, secondary_size, x, rect.y + rect.height - (42 if compact else 57),
+    self.fonts.draw(distance, FontRole.BOLD, secondary_size, x, rect.y + rect.height - (58 if compact else 85),
                     rl.Color(199, 174, 247, 255))
-    if not compact and not nav.arrived:
-      remaining = f'{distance_text(nav.remaining_distance_m, state.metric)} - {max(1, round(nav.remaining_seconds / 60))} min'
-      measured = self.fonts.measure(remaining, FontRole.NORMAL, 22)
-      self.fonts.draw(remaining, FontRole.NORMAL, 22, rect.x + rect.width - padding - measured.width,
-                      rect.y + rect.height - 45, rl.Color(190, 187, 197, 255))
+    if not nav.arrived:
+      eta = arrival_time(nav.remaining_seconds, self.clock())
+      remaining = f'ETA {eta}'
+      font_size = 22 if compact else 32
+      y = rect.y + rect.height - (30 if compact else 44)
+      measured = self.fonts.measure(remaining, FontRole.SEMI_BOLD, font_size)
+      self.fonts.draw(remaining, FontRole.SEMI_BOLD, font_size, rect.x + rect.width - padding - measured.width,
+                      y, rl.Color(235, 225, 255, 255))
+      if not compact:
+        trip = f'{distance_text(nav.remaining_distance_m, state.metric)} | {max(1, round(nav.remaining_seconds / 60))} min'
+        self.fonts.draw(trip, FontRole.NORMAL, 20, rect.x + padding, y + 8, rl.Color(190, 187, 197, 255))
 
   def close(self):
     for texture in self._textures.values():

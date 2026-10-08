@@ -1,6 +1,6 @@
-"""Read-only headless producer for a separate large StarPilot projection view.
+"""Headless producer for a separate large StarPilot projection view.
 
-Frames are rendered only while requested. Projection does not receive touch input.
+Frames are rendered only while requested. Touch input controls navigation favorites.
 Onroad, each new camera frame is drawn exactly once, as soon as it lands (see
 CameraPacer). When the encoder takes NV12, the frame is converted on the GPU,
 and it can be read back without stalling the renderer.
@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 import gc
+import math
 import os
 import signal
 import time
@@ -26,6 +27,9 @@ CAMERA_MAX_GAP = 0.1       # s; a shown camera silent this long stops pacing (th
 ASYNC_READBACK_FAILURES = 3  # consecutive failed asynchronous readbacks before the session reads back synchronously
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Camera-driven pacing avoids duplicate frames and uneven video cadence.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class CameraPacer:
   """Onroad, draw each frame of the camera on screen exactly once, as soon as it lands.
 
@@ -90,6 +94,40 @@ def visible_geometry(request: FrameRequest) -> tuple[int, int, float, int, int]:
           round((geometry.height - geometry.logical_height * geometry.scale) / 2))
 
 
+def projected_touches(events, geometry):
+  """Undo the composition's fit/letterboxing inside the receiver's margins."""
+  from openpilot.starpilot.system.android_auto.touch import TouchEvent
+  width, height = geometry.logical_width * geometry.scale, geometry.logical_height * geometry.scale
+  left, top = (geometry.width - width) / 2, (geometry.height - height) / 2
+  mapped = []
+  for event in events:
+    x, y = (event.x * geometry.width - left) / width, (event.y * geometry.height - top) / height
+    if event.kind == 'cancel' or not 0 <= x <= 1 or not 0 <= y <= 1:
+      mapped.append(TouchEvent('cancel', 0, 0))
+    else:
+      mapped.append(TouchEvent(event.kind, x, y))
+  return mapped
+
+
+def scale_scissors(rl, scale: float, left: float = 0, top: float = 0) -> None:
+  """Scale scissor rectangles like the matrix that draws the UI into the visible-size target.
+
+  The UI clips in logical coordinates, but raylib applies scissors in target pixels, unaffected by
+  rl_scalef. This is gui_app._patch_scissor_mode for a renderer that never opens a window; it runs
+  in its own process, so it touches only the car view.
+  """
+  if scale == 1.0 and left == top == 0:
+    return
+  if not hasattr(rl, "_orig_begin_scissor_mode"):
+    rl._orig_begin_scissor_mode = rl.begin_scissor_mode
+
+  def begin_scissor_mode_scaled(x, y, width, height):
+    return rl._orig_begin_scissor_mode(int(left + x * scale), int(top + y * scale),
+                                       int(math.ceil(width * scale)), int(math.ceil(height * scale)))
+
+  rl.begin_scissor_mode = begin_scissor_mode_scaled
+
+
 def wait_for_request(producer: FrameProducer) -> FrameRequest:
   deadline = time.monotonic() + STARTUP_WAIT_SECONDS
   while time.monotonic() < deadline:
@@ -101,7 +139,7 @@ def wait_for_request(producer: FrameProducer) -> FrameRequest:
   raise TimeoutError("Android Auto did not request current UI frames")
 
 
-def run(frames_path: str) -> int:
+def run(frames_path: str, touch_path: str | None = None) -> int:
   if os.geteuid() == 0:
     raise RuntimeError("Car display must run as the comma user")
   parent = os.getppid()
@@ -123,6 +161,7 @@ def run(frames_path: str) -> int:
   from openpilot.starpilot.system.android_auto.headless_egl import FrameReadback, HeadlessContext
   from openpilot.starpilot.system.android_auto import gpu_nv12
   from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
+  from openpilot.starpilot.system.android_auto.touch import TouchReceiver, DEFAULT_TOUCH_SOCKET
   import pyray as rl
   from openpilot.system.ui.lib.application import gui_app
   from openpilot.selfdrive.ui.ui_state import ui_state
@@ -150,30 +189,41 @@ def run(frames_path: str) -> int:
     layout = ProjectionOnroad(viewport=viewport, customization=load_projection_layout(viewport),
                               certificate_days=certificate_days_left())
     resources.callback(layout.close)
-    content = rl.load_render_texture(geometry.logical_width, geometry.logical_height)
+    touch = TouchReceiver(touch_path or DEFAULT_TOUCH_SOCKET)
+    resources.callback(touch.close)
+    # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Visible-size targets, GPU NV12 conversion, and async readback limit GPU work and copies.
+    # Altering this can degrade video smoothness or introduce lag on Android Auto.
+    # Do not change it autonomously; require an explicit user request specifically for this video optimization.
+    # The UI draws in logical coordinates scaled by geometry.scale, so its target is the visible area:
+    # the NV12 pass reads it pixel for pixel and requires exactly that size.
+    content = rl.load_render_texture(geometry.width, geometry.height)
     if not content.id:
       raise RuntimeError('Projection content target unavailable')
     resources.callback(rl.unload_render_texture, content)
-    output = rl.load_render_texture(request.width, request.height)
-    if not output.id:
-      raise RuntimeError('Projection output target unavailable')
-    resources.callback(rl.unload_render_texture, output)
+    left = (geometry.width - geometry.logical_width * geometry.scale) / 2
+    top = (geometry.height - geometry.logical_height * geometry.scale) / 2
+    scale_scissors(rl, geometry.scale, left, top)
     converter = None
     if request.flags & FLAG_NV12:
       try:
-        # The composed frame already carries the margins and the top-down flip,
-        # so it converts as is. Reading back NV12 moves 1.5 bytes per pixel
-        # instead of 4, and the encoder skips its own RGBA conversion on the CPU.
-        converter = gpu_nv12.Nv12Converter(request.width, request.height)
+        converter = gpu_nv12.Nv12Converter(request.width, request.height,
+                                           margin_w=request.margin_w, margin_h=request.margin_h, compose=True)
         resources.callback(converter.close)
       except Exception as error:
         print(f"NV12 conversion unavailable, publishing RGBA: {error}", flush=True)
         converter = None
+    # NV12 composes directly from the content texture. Only the RGBA fallback
+    # needs a second full-frame render target.
+    output = rl.load_render_texture(request.width, request.height) if converter is None else None
+    if output is not None:
+      if not output.id:
+        raise RuntimeError('Projection output target unavailable')
+      resources.callback(rl.unload_render_texture, output)
     pixel_format = FORMAT_NV12 if converter is not None else FORMAT_RGBA
     readback = create_readback(FrameReadback, frame_bytes(request.width, request.height, pixel_format),
                              asynchronous=bool(request.flags & FLAG_ASYNC_READBACK))
     resources.callback(lambda: readback.close())
-    rgba_regions = [(output.id, request.width, request.height, 0)]
+    rgba_regions = [(output.id, request.width, request.height, 0)] if output is not None else []
     pixel_format_name = 'nv12' if converter is not None else 'rgba'
     pipeline = f"{pixel_format_name}, {'async' if readback.asynchronous else 'sync'} readback"
     print(f"car view pipeline: {pipeline}", flush=True)
@@ -214,6 +264,9 @@ def run(frames_path: str) -> int:
       finally:
         readback.release()
 
+    # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: GC freezing and the frame loop below avoid periodic stalls and unnecessary waits.
+    # Altering this can degrade video smoothness or introduce lag on Android Auto.
+    # Do not change it autonomously; require an explicit user request specifically for this video optimization.
     # Everything built so far lives for the whole session. Frozen, it is never rescanned
     # by the collector, whose full passes over the UI's objects stall a frame every few seconds.
     gc.collect()
@@ -222,6 +275,8 @@ def run(frames_path: str) -> int:
       now = time.monotonic()
       pending = producer.pending_request(now)
       if pending is None:
+        touch.drain()
+        layout.cancel_touch()
         if readback.pending:
           readback.release()
         if sampler is not None:
@@ -260,18 +315,30 @@ def run(frames_path: str) -> int:
       ui_state.update()
       if sampler is not None:
         sampler.onroad = ui_state.started
+      layout.prepare()  # offscreen passes (the map) must not run inside the content target
+      # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Publish the previous frame before drawing the next; moving this later adds video latency.
+      # Altering this can degrade video smoothness or introduce lag on Android Auto.
+      # Do not change it autonomously; require an explicit user request specifically for this video optimization.
+      if readback.pending:
+        # Match AAComma: publish after CPU preparation, before queuing another
+        # frame's drawing. A busy renderer must not hold video until that draw ends.
+        publish_readback()
       rl.begin_texture_mode(content)
       try:
         rl.clear_background(rl.BLACK)
-        layout.render()
+        rl.rl_push_matrix()
+        try:
+          rl.rl_translatef(left, top, 0)
+          rl.rl_scalef(geometry.scale, geometry.scale, 1.0)
+          layout.render()
+        finally:
+          rl.rl_pop_matrix()
       finally:
         rl.end_texture_mode()
-      if readback.pending:
-        # The previous frame, read back while this one was drawn: waiting any
-        # later only adds latency.
-        publish_readback()
-      gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h, fit=True)
-      regions = converter.convert(output.texture) if converter is not None else rgba_regions
+      layout.handle_touches(projected_touches(touch.drain(), geometry))
+      if output is not None:
+        gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h)
+      regions = converter.convert(content.texture) if converter is not None else rgba_regions
       producer.advance(request, captured_ns)
       readback.start(regions)
       in_flight_ns = captured_ns
@@ -287,8 +354,9 @@ def run(frames_path: str) -> int:
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--frames", required=True)
+  parser.add_argument("--touch")
   args = parser.parse_args()
-  return run(args.frames)
+  return run(args.frames, args.touch)
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ class HondaStockCardIntent(AolCardIntent):
     self._active_previous = bool(standard_active)
     now_ns = kwargs.get("now_ns", 0)
     rejected = self._native_rejection_ns < kwargs.get("native_rejection_ns", 0) <= now_ns
-    state = structs.CarState(**CS.to_dict())
+    state = CS
     events = []
     for event in CS.buttonEvents:
       if event.type == ButtonType.cancel:
@@ -51,8 +51,8 @@ class HondaStockCardIntent(AolCardIntent):
           self._perform(action)
       else:
         events.append(structs.CarState.ButtonEvent(**event.to_dict()))
-    available = bool(state.cruiseState.available)
-    healthy = state.canValid and not state.canTimeout
+    available = bool(CS.cruiseState.available)
+    healthy = CS.canValid and not CS.canTimeout
     if healthy:
       if self.main_pulse:
         events.append(structs.CarState.ButtonEvent(type=ButtonType.mainCruise, pressed=False))
@@ -69,8 +69,12 @@ class HondaStockCardIntent(AolCardIntent):
       self.cancel_held = False
       self.cancel_ticks = 0
       self.main_neutral = False
-    state.buttonEvents = events
-    super().update(state.as_reader(), **kwargs)
+    if events or len(CS.buttonEvents):
+      # Copy only when button events are rewritten; most frames have none.
+      state = structs.CarState(**CS.to_dict())
+      state.buttonEvents = events
+      CS = state.as_reader()
+    super().update(CS, **kwargs)
     if not available:
       self.allowed_latch = False
     if self.cancel_held:

@@ -123,11 +123,20 @@ for _profile, _geometry in {"large": (580, 68, 640, 344), "compact": (168, 60, 1
   _mode_widget["default"]["enabled"] = False
   PROFILES[_profile]["widgets"][MODE_WIDGET] = _mode_widget
 
+# It starts disabled so an upgrade never adds a new onroad element without the
+# driver's choice; validation below adds the placement to older documents.
+CLOCK_WIDGET = "clock"
+for _profile, _geometry in {"large": (300, 72, 780, 430), "compact": (140, 44, 168, 92)}.items():
+  _clock_widget = _widget("Clock", CLOCK_WIDGET, *_geometry)
+  _clock_widget["default"]["enabled"] = False
+  PROFILES[_profile]["widgets"][CLOCK_WIDGET] = _clock_widget
+
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}
 _ACTION_COLORS = {"cardFill": "#0C1820EB", "cardBorder": "#A6DFBEFF", "text": "#FFFFFFFF"}
 WIDGET_COLORS = {
   "large": {
     MODE_WIDGET: {"text": "#FFFFFFFF"},
+    CLOCK_WIDGET: {"text": "#FFFFFFFF"},
     "current_speed": {"text": None},
     "cruise_limits": {"cardFill": None, "cardBorder": None, "text": None},
     "speed_limit_actions": _ACTION_COLORS,
@@ -136,6 +145,7 @@ WIDGET_COLORS = {
   },
   "compact": {
     MODE_WIDGET: {"text": "#FFFFFFFF"},
+    CLOCK_WIDGET: {"text": "#FFFFFFFF"},
     "max_speed": {"text": None},
     "speed_limit_actions": _ACTION_COLORS,
     "driver_monitor": _FRAME_COLORS,
@@ -144,6 +154,26 @@ WIDGET_COLORS = {
     "following_distance": {**_FRAME_COLORS, "text": "#FFFFFFFF"},
   },
 }
+
+
+# Back-to-front order used when a layout first opts into custom layers.
+DEFAULT_WIDGET_ORDER = {
+  "large": ("pip_left", "pip_right", "cruise_limits", "speed_limit_actions", "current_speed",
+            "steering_wheel", "torque_bar", "driver_monitor", MODE_WIDGET, CLOCK_WIDGET),
+  "compact": ("pip_left", "pip_right", "speed_limit", "max_speed", "steering_wheel", "torque_bar",
+              "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET, CLOCK_WIDGET),
+}
+
+
+def validate_widget_order(order, widgets):
+  if (type(order) is not list or any(type(key) is not str for key in order) or
+      len(order) != len(widgets) or set(order) != set(widgets)):
+    raise ValueError("Invalid widget layer order")
+  return list(order)
+
+
+def widget_order(document, profile):
+  return document.get("widgetOrder", {}).get(str(profile), DEFAULT_WIDGET_ORDER[str(profile)])
 
 
 def widget_bounds(profile, widget):
@@ -165,6 +195,8 @@ def customization_metadata():
       widget["colors"] = dict(WIDGET_COLORS[name].get(key, {}))
     profile["widgets"]["steering_wheel"]["resizable"] = {
       "min": WHEEL_SIZES[name][0], "default": WHEEL_SIZES[name][1], "max": WHEEL_SIZES[name][2]}
+  for profile, data in profiles.items():
+    data["widgetOrder"] = list(DEFAULT_WIDGET_ORDER[profile])
   return {"profiles": profiles, "roadColorFields": [
     {"id": key, "label": label, "default": ROAD_COLORS[key]}
     for key, label in (("path", "Path"), ("pathEdge", "Path edges"), ("laneLines", "Outer lane lines"))], "paletteFields": [
@@ -173,7 +205,7 @@ def customization_metadata():
 
 
 def default_document():
-  return {"version": 4, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
+  return {"version": 4, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
     profile: {key: {**widget["default"], **({"size": WHEEL_SIZES[profile][1]} if key == "steering_wheel" else {})}
               for key, widget in data["widgets"].items()}
@@ -190,12 +222,20 @@ def validate_document(value):
     fields.add('speedSources')
     if type(value['speedSources']) is not bool:
       raise ValueError('Invalid speed source drawer preference')
+  if value['version'] == 4 and 'widgetOrder' in value:
+    fields.add('widgetOrder')
+  if 'clock24Hour' in value:
+    fields.add('clock24Hour')
+    if type(value['clock24Hour']) is not bool:
+      raise ValueError('Invalid clock format preference')
   if set(value) != fields:
     raise ValueError("Invalid customization fields")
   palette, layouts = value["palette"], value["layouts"]
   if type(palette) is not dict or set(palette) != set(PALETTE) or type(layouts) is not dict or set(layouts) != set(PROFILES):
     raise ValueError("Invalid customization fields")
-  if any(all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, *CAMERA_WIDGETS}) == keys for profile, keys in shape.items())
+  if any(all(type(layouts[profile]) is dict and
+             (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET, *CAMERA_WIDGETS}) == keys
+             for profile, keys in shape.items())
          for shape in (LEGACY_WIDGETS, DM_WIDGETS, ACTIONLESS_WIDGETS)):
     layouts = copy.deepcopy(layouts)
     cruise = layouts["large"]["cruise_limits"]
@@ -217,12 +257,12 @@ def validate_document(value):
     for profile in PROFILES:
       for key in ("driver_monitor", "torque_bar", "speed_limit_actions"):
         layouts[profile].setdefault(key, dict(PROFILES[profile]["widgets"][key]["default"]))
-  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, *CAMERA_WIDGETS}) == keys
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET, *CAMERA_WIDGETS}) == keys
          for profile, keys in RAILLESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for key in RAIL_WIDGETS:
       layouts["compact"][key] = dict(PROFILES["compact"]["widgets"][key]["default"])
-  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET}) == keys
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET}) == keys
          for profile, keys in CAMERALESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for profile in PROFILES:
@@ -243,8 +283,11 @@ def validate_document(value):
         layouts[profile][key] = position
   layouts = copy.deepcopy(layouts)
   for profile, data in PROFILES.items():
-    if type(layouts[profile]) is dict and set(layouts[profile]) == set(data["widgets"]) - {MODE_WIDGET}:
-      layouts[profile][MODE_WIDGET] = dict(data["widgets"][MODE_WIDGET]["default"])
+    if type(layouts[profile]) is dict:
+      missing = set(data["widgets"]) - set(layouts[profile])
+      if missing and missing <= {MODE_WIDGET, CLOCK_WIDGET}:
+        for optional in missing:
+          layouts[profile][optional] = dict(data["widgets"][optional]["default"])
   result = default_document()
   for key, color in palette.items():
     if type(color) is not str or re.fullmatch(r"#[0-9a-fA-F]{8}", color) is None:
@@ -307,15 +350,26 @@ def validate_document(value):
         if key in ("speed_limit_actions", "speed_limit") or widget.get("layer") == "underlay":
           continue
         placement = result["layouts"][profile][key]
-        if key == MODE_WIDGET and not placement["enabled"]:
+        if key in (MODE_WIDGET, CLOCK_WIDGET) and not placement["enabled"]:
           continue
         width, height = ((placement["size"],) * 2 if key == "steering_wheel" else
                          (widget["width"], widget["height"]))
         if (placement["x"] < actions["x"] + area["width"] and placement["x"] + width > actions["x"] and
             placement["y"] < actions["y"] + area["height"] and placement["y"] + height > actions["y"]):
           raise ValueError("Widget overlaps protected speed limit actions")
+  if 'widgetOrder' in value:
+    orders = value['widgetOrder']
+    if type(orders) is not dict or not orders.keys() <= PROFILES.keys():
+      raise ValueError("Invalid widget layer profiles")
+    result['widgetOrder'] = {}
+    for profile, order in orders.items():
+      if type(order) is list:
+        order = [*order, *(key for key in (MODE_WIDGET, CLOCK_WIDGET) if key not in order)]
+      result['widgetOrder'][profile] = validate_widget_order(order, PROFILES[profile]['widgets'])
   if 'speedSources' in value:
     result['speedSources'] = value['speedSources']
+  if 'clock24Hour' in value:
+    result['clock24Hour'] = value['clock24Hour']
   if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_BYTES:
     raise ValueError("Customization too large")
   return result

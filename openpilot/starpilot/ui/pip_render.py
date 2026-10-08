@@ -134,7 +134,7 @@ class PiPRenderer:
 
   def render(self, content: rl.Rectangle, mask: Mask | None, signals: Signals, *, enabled: bool,
              on_blinker: bool, on_bsm: bool, invert: bool,
-             now: float | None = None, placements: dict[str, Rect] | None = None) -> str:
+             now: float | None = None, placements: dict[str, Rect] | None = None, submit=None) -> str:
     if not enabled or mask is None or (placements is not None and not placements):
       self.deactivate()
       return "inactive"
@@ -184,7 +184,12 @@ class PiPRenderer:
       if placements is not None:
         rect = placements[side]
       warning = (signals.vasm_left or signals.left_blindspot) if side == "left" else (signals.vasm_right or signals.right_blindspot)
-      self._draw(shader, texture, frame, rect, crop.x, crop.y, crop.size, invert, warning=warning)
+      def draw(rect=rect, crop=crop, warning=warning):
+        self._draw(shader, texture, frame, rect, crop.x, crop.y, crop.size, invert, warning=warning)
+      if submit is None:
+        draw()
+      else:
+        submit(f"pip_{side}", draw)
     return "rendered"
 
   def _draw(self, shader: rl.Shader, texture: rl.Texture, frame, rect: Rect,

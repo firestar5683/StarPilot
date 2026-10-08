@@ -48,6 +48,10 @@ type State struct {
 	MatchedLimitMps           float32
 	lastMapLoadAttempt        time.Time
 	bootNow                   func() uint64
+	// The fix the current road result was computed from. The loop runs at
+	// 20 Hz and GPS arrives at 1-10 Hz; a repeated fix has the same answer.
+	roadFixMonoTime   uint64
+	roadFixGeneration uint64
 }
 
 func (s *State) Init() {
@@ -93,6 +97,7 @@ func (s *State) clearRoadDerived() {
 
 func (s *State) ResetRoadEvidence() {
 	s.clearRoadDerived()
+	s.roadFixMonoTime = 0
 	s.Data = maps.Offline{}
 	s.Position = m.Position{}
 	s.DistanceSinceLastPosition = 0
@@ -161,9 +166,17 @@ func (s *State) ProcessGps(sample cereal.GpsSample, success bool, load MapLoader
 	// Unknown CAN direction or speed uncertainty cannot create confident road evidence.
 	if sample.Source == cereal.GpsSourceCar && (math.IsNaN(float64(location.BearingAccuracyDeg())) || math.IsInf(float64(location.BearingAccuracyDeg()), 0) || location.BearingAccuracyDeg() <= 0 || location.BearingAccuracyDeg() >= 180 || math.IsNaN(float64(location.SpeedAccuracy())) || math.IsInf(float64(location.SpeedAccuracy()), 0) || location.SpeedAccuracy() >= 100) {
 		s.clearRoadDerived()
+		s.roadFixMonoTime = 0
 		s.RoadStatus = custom.MapdOut_SampleStatus_noMatch
 		return
 	}
+	if !sample.NewFix && !sample.SourceChanged && s.Data.Loaded && s.roadFixMonoTime != 0 &&
+		s.roadFixMonoTime == sample.FixMonoTime && s.roadFixGeneration == sample.SourceGeneration {
+		// Same fix, same verified tile: matching again would scan the tile for
+		// an identical answer. Freshness still expires in the deferred gate.
+		return
+	}
+	s.roadFixMonoTime = 0
 	box := s.Data.Box()
 	if !s.Data.Loaded || !box.PosInside(pos) {
 		// Retry missing coverage at most once a second while a fix remains in
@@ -185,6 +198,7 @@ func (s *State) ProcessGps(sample cereal.GpsSample, success bool, load MapLoader
 		return
 	}
 
+	s.roadFixMonoTime, s.roadFixGeneration = sample.FixMonoTime, sample.SourceGeneration
 	way, err := GetCurrentWay(s.CurrentWay, s.NextWays, &s.Data, location)
 	if err != nil || way.Way.Nodes.Len() < 2 {
 		s.clearRoadDerived()

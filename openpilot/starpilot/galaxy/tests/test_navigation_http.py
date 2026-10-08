@@ -80,6 +80,25 @@ class NavigationHttpTest(unittest.TestCase):
     finally:
       connection.close()
 
+  def test_map_theme_is_validated_and_forwarded(self):
+    self.navigation.map_tile = Mock(return_value=b'fixture tile')
+    for theme in ('light', 'dark'):
+      connection = http.client.HTTPConnection('127.0.0.1', self.local.server_port, timeout=2)
+      try:
+        connection.request('GET', f'/api/navigation/map/tiles/0/0/0.png?theme={theme}',
+                           headers={'Host': f'127.0.0.1:{self.local.server_port}', 'Cookie': self.local_cookie})
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(), b'fixture tile')
+        self.navigation.map_tile.assert_called_with(0, 0, 0, theme)
+      finally:
+        connection.close()
+    self.navigation.map_tile.reset_mock()
+    for query in ('theme=invalid', 'theme=', 'theme=light&theme=dark', 'style=custom'):
+      status, _, _ = self.request('/api/navigation/map/tiles/0/0/0.png?' + query, cookie=self.local_cookie)
+      self.assertEqual(status, 400)
+    self.navigation.map_tile.assert_not_called()
+
   def action(self, action, *, remote=False, **values):
     return self.request('/api/navigation/action', payload=dict(action=action, revision=self.navigation.snapshot()['revision'], **values),
                          remote=remote, cookie=self.remote_cookie if remote else self.local_cookie)
@@ -100,6 +119,16 @@ class NavigationHttpTest(unittest.TestCase):
         self.assertIsNone(result[1]['destination'])
         self.assertEqual(len(result[1]['favorites']), 1)
         self.assertEqual(self.action('removeFavorite', remote=remote, id=result[1]['favorites'][0]['id'])[1]['favorites'], [])
+
+  def test_autocomplete_search_requests(self):
+    self.action('configure', patch={'enabled': True, 'token': 'pk.test'})
+    search = {'query': 'cof', 'searchId': str(uuid.uuid4()), 'clientId': str(uuid.uuid4())}
+    with patch.object(self.navigation, 'search_places', return_value=[]) as places:
+      self.assertEqual(self.request('/api/navigation/search', payload={**search, 'autocomplete': True}, cookie=self.local_cookie)[0], 200)
+      self.assertTrue(places.call_args.kwargs['autocomplete'])
+      self.assertEqual(self.request('/api/navigation/search', payload=search, cookie=self.local_cookie)[0], 200)
+      self.assertFalse(places.call_args.kwargs['autocomplete'])
+      self.assertEqual(self.request('/api/navigation/search', payload={**search, 'autocomplete': 'yes'}, cookie=self.local_cookie)[0], 400)
 
   def test_alternative_route_action_uses_authenticated_revision(self):
     from openpilot.starpilot.navigation.route_engine import NavigationRoute
@@ -159,14 +188,47 @@ class NavigationHttpTest(unittest.TestCase):
       self.assertEqual(result['destination']['name'],'Coffee Shop')
       self.assertEqual(provider.call_count,2)
       self.assertEqual(provider.call_args_list[0].args[2]['session_token'],provider.call_args_list[1].args[2]['session_token'])
-    unmarked = dict(result['destination'])
-    unmarked.pop('temporary')
-    self.assertEqual(self.action('favorite',destination=unmarked)[0],400)
-    self.assertEqual(self.action('select',destination=unmarked)[0],400)
     self.assertIsNone(self.navigation.read()['destination'])
+    self.assertEqual(result['destination']['temporary'],True)
+    self.assertEqual(result['recents'],[])
     self.assertNotIn('Coffee Shop',self.navigation.path.read_text())
     self.assertNotIn('pk.synthetic',json.dumps(result))
     self.assertEqual(self.action('selectPlace',id=identity,searchId=search['searchId'])[0],400)
+    self.assertEqual(self.action('favorite',destination=result['destination'],label='work')[0],400)
+    status, saved, _ = self.action('favorite',destination={'name':'Work address','latitude':41.,'longitude':-91.},label='work')
+    self.assertEqual(status,200)
+    self.assertEqual(saved['favorites'][0]['label'],'work')
+    place = saved['favorites'][0]['id']
+    status, labeled, _ = self.action('labelFavorite',id=place,label='home')
+    self.assertEqual((status,labeled['favorites'][0]['label']),(200,'home'))
+    self.assertEqual(self.action('labelFavorite',id=place,label='gym')[0],400)
+    self.assertEqual(self.action('labelFavorite',id=place,label=None)[1]['favorites'][0].get('label'),None)
+    self.assertEqual(self.action('removeRecent',id=place)[1]['recents'],[])
+    self.assertEqual(self.action('clearRecents')[1]['recents'],[])
+    self.assertEqual(self.action('removeFavorite',id=place)[1]['favorites'],[])
+
+  def test_temporary_search_result_cannot_be_saved(self):
+    self.action('configure', patch={'token':'pk.synthetic','enabled':True})
+    search = {'query':'coffee', 'searchId':str(uuid.uuid4()), 'clientId':str(uuid.uuid4())}
+    suggestion = {'suggestions':[{'mapbox_id':'poi/id','name':'Coffee Shop','feature_type':'poi'}]}
+    with patch('openpilot.starpilot.navigation.owner.response_json',return_value=suggestion) as provider:
+      self.assertEqual(self.request('/api/navigation/search',payload=search,cookie=self.local_cookie)[0],200)
+      status, body, _ = self.action('favoritePlace',id='poi/id',searchId=search['searchId'],label='home')
+      self.assertEqual(status,400)
+      self.assertIn('cannot be saved',body['error'])
+      self.assertEqual(provider.call_count,1)
+    self.assertEqual(self.navigation.read()['favorites'],[])
+
+  def test_status_poll_with_route_key_omits_unchanged_route(self):
+    self.action('configure', patch={'token':'pk.synthetic','enabled':True})
+    status, full, _ = self.request('/api/navigation/status', cookie=self.local_cookie)
+    self.assertEqual(status,200)
+    status, light, _ = self.request('/api/navigation/status?routeKey=' + full['routeKey'], cookie=self.local_cookie)
+    self.assertEqual((status,light['routeUnchanged']),(200,True))
+    self.assertNotIn('route',light)
+    status, ignored, _ = self.request('/api/navigation/status?routeKey=bogus&x=1', cookie=self.local_cookie)
+    self.assertEqual(status,200)
+    self.assertIn('route',ignored)
 
   def test_slow_poi_retrieve_does_not_block_other_settings_actions(self):
     self.action('configure',patch={'token':'pk.synthetic','enabled':True})

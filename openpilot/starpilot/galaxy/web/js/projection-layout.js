@@ -8,7 +8,7 @@ export function editorSnapshot(raw) {
   const document = (value) => {
     if (value.version !== 1 || value.canvas?.width !== raw.metadata.width || value.canvas?.height !== raw.metadata.height)
       throw new Error("The saved Android Auto layout does not match its screen. Reload before editing.")
-    return { version: 4, palette: clone(colors.palette), layouts: { large: clone(value.widgets) },
+    return { version: 4, clock24Hour: value.clock24Hour === true, ...(value.widgetOrder ? { widgetOrder: { large: clone(value.widgetOrder) } } : {}), palette: clone(colors.palette), layouts: { large: clone(value.widgets) },
       widgetColors: { large: clone(colors.widgetColors) }, roadColors: { large: clone(colors.roadColors) } }
   }
   return { ...raw, projection: true, activeProfile: "large", document: document(raw.document), defaults: document(raw.defaults),
@@ -21,5 +21,7 @@ export function editorSnapshot(raw) {
 export function projectionPayload(body, metadata) {
   return { revision: body.revision, document: { version: 1,
     canvas: { width: metadata.profiles.large.width, height: metadata.profiles.large.height },
+    clock24Hour: body.document.clock24Hour === true,
+    ...(body.document.widgetOrder?.large ? { widgetOrder: clone(body.document.widgetOrder.large) } : {}),
     widgets: clone(body.document.layouts.large) } }
 }

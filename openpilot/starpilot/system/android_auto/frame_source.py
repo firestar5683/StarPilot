@@ -252,6 +252,9 @@ class FrameProducer:
   def due(self, request: FrameRequest, now_ns: int) -> bool:
     return self.capture_delay(request, now_ns) == 0.0
 
+  # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Capture slack and advance() preserve cadence without building a frame backlog.
+  # Altering this can degrade video smoothness or introduce lag on Android Auto.
+  # Do not change it autonomously; require an explicit user request specifically for this video optimization.
   def capture_delay(self, request: FrameRequest, now_ns: int) -> float:
     """Seconds until capture is due, with the same 25% pacing slack as due()."""
     return max(0, self._next_capture_ns - request.interval_us * 250 - now_ns) / 1e9

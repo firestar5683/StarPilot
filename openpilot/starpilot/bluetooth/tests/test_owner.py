@@ -95,6 +95,9 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.owner = BluetoothOwner(lambda: self.parked[0], bluez_factory=FakeBlueZ, radio_helper=self.helper,
                                 systemctl=self.systemctl, radio_preference=self.preference,
                                 timer_factory=FakeTimer, admission_lock=Path(self.temp.name) / 'adapter.lock')
+    forget_car = patch.object(BluetoothOwner, '_forget_android_auto_car')
+    self.forgotten_cars = forget_car.start()
+    self.addCleanup(forget_car.stop)
 
   def systemctl(self, command, **kwargs):
     self.commands.append((command, kwargs))
@@ -185,6 +188,7 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.assertEqual(FakeBlueZ.operations[-1], ('connect', 'AA:BB:CC:DD:EE:FF'))
     self.assertFalse(self.owner.request('disconnect', address='AA:BB:CC:DD:EE:FF')['devices'][0]['connected'])
     self.assertEqual(self.owner.request('forget', address='AA:BB:CC:DD:EE:FF')['devices'], [])
+    self.forgotten_cars.assert_called_once_with('AA:BB:CC:DD:EE:FF')
     self.assertFalse(self.owner.request('power', enabled=False)['powered'])
     self.assertEqual(self.commands[-1][0], ['sudo', '-n', 'systemctl', 'stop', 'starpilot-bluetooth-radio.service'])
     self.assertGreater(FakeBlueZ.closed, 0)

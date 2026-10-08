@@ -600,6 +600,26 @@ class BluetoothOwner:
       if self.pairing is not None and self.pairing.identity == identity:
         self.pairing.cancel()
 
+  @staticmethod
+  def _forget_android_auto_car(address: str) -> None:
+    """A deleted pairing also stops being Android Auto's car or companion, so it leaves the car pickers.
+
+    Runs in the background: clearing may first stop a running projection (whose daemon may be the
+    caller), and a failure here must not undo or delay the forget itself.
+    """
+    def worker():
+      try:
+        from openpilot.starpilot.system.android_auto.protocol import forget_car
+        forget_car(address)
+      except Exception as error:
+        try:
+          from openpilot.common.swaglog import cloudlog
+          cloudlog.warning(f"Android Auto car clear failed for {address}: {error}")
+        except Exception:
+          pass
+
+    threading.Thread(target=worker, name='android_auto_forget_car', daemon=True).start()
+
   def request(self, operation: str, *, address: str | None = None, enabled: bool | None = None,
               session: tuple | None = None, prompt_id: str | None = None, accepted: bool | None = None,
               value: str = '') -> dict:
@@ -696,6 +716,9 @@ class BluetoothOwner:
         threading.Thread(target=self._watch_pair, args=(pairing,), daemon=True).start()
       else:
         self._client().operation(operation, address)
+        if operation == 'forget':
+          assert address is not None
+          self._forget_android_auto_car(address)
       if operation == 'power' and not enabled:
         self.systemctl(['sudo', '-n', 'systemctl', 'stop', RADIO_UNIT], check=True, timeout=15)
         self.close()

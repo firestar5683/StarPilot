@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
 
@@ -7,7 +8,7 @@ import pytest
 
 from openpilot.cereal import messaging
 from openpilot.starpilot.ui.navigation_state import NavigationDisplay, distance_text, navigation_display
-from openpilot.starpilot.ui.onroad_navigation import ASSETS, MANIFEST, NavigationCard, icon_name
+from openpilot.starpilot.ui.onroad_navigation import ASSETS, MANIFEST, NavigationCard, arrival_time, icon_name
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.presentation import Profile
 
@@ -67,6 +68,10 @@ def test_distance_units(meters, metric, expected):
   assert distance_text(meters, metric) == expected
 
 
+def test_arrival_time_uses_remaining_route_duration():
+  assert arrival_time(18 * 60, datetime(2026, 10, 7, 15, 42)) == '4:00 PM'
+
+
 @pytest.mark.parametrize('profile', [Profile.COMPACT, Profile.LARGE])
 def test_tap_collapses_and_swipe_never_toggles(profile):
   card, observed = NavigationCard(Mock(profile=profile)), state()
@@ -103,13 +108,14 @@ def test_slc_decision_keeps_its_touch_priority():
 def test_renderer_keeps_actual_instruction_and_distance(profile):
   fonts = Mock(profile=profile)
   fonts.measure.side_effect = lambda text, role, size: NS(width=len(text) * size * .48)
-  card = NavigationCard(fonts)
+  card = NavigationCard(fonts, clock=lambda: datetime(2026, 10, 7, 15, 42))
   with patch.object(card, '_icon', return_value=NS(width=100, height=100)), \
        patch.object(rl, 'draw_rectangle_rounded'), patch.object(rl, 'draw_rectangle_rounded_lines_ex'), patch.object(rl, 'draw_texture_pro'):
     card.render(state())
   text = ' '.join(call.args[0] for call in fonts.draw.call_args_list)
   assert 'Turn left onto Main Street' in text
   assert '400 ft' in text
+  assert 'ETA 3:50 PM' in text
 
 
 def test_original_maneuver_assets_and_fallback_are_bounded():

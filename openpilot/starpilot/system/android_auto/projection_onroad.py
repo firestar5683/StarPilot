@@ -1,4 +1,4 @@
-"""Read-only large onroad composition for a separate projection frame."""
+"""Large onroad projection with navigation-only favorite actions."""
 
 from contextlib import ExitStack
 from dataclasses import replace
@@ -10,6 +10,9 @@ from openpilot.starpilot.system.android_auto.identity import EXPIRY_WARNING_DAYS
 from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK_VIEWPORT
 
 CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
+DRIVER_MONITOR_HOLD_NS = 350_000_000
+BUBBLE_REDUNDANT_ALERTS = frozenset(('preLaneChangeLeft', 'preLaneChangeRight', 'laneChange',
+                                     'laneChangeBlocked', 'laneChangeBlockedLoud'))
 
 
 def certificate_notice(days_left: int | None) -> str:
@@ -31,6 +34,7 @@ def native_dependencies():
   from openpilot.starpilot.ui.onroad import OnroadView
   from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
   from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
+  from openpilot.starpilot.ui.onroad_map import MapFeed, MapOverlay
   from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
   from openpilot.starpilot.ui.pip_preferences import read_pip
   from openpilot.starpilot.ui.pip_render import PiPRenderer
@@ -38,6 +42,7 @@ def native_dependencies():
   from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
   from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
   from openpilot.starpilot.ui.shell import ShellMode
+  from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites
 
   class ProjectionRoadCamera(AugmentedRoadView):
     """Current native calibrated camera/model without stock action widgets."""
@@ -70,11 +75,12 @@ def native_dependencies():
                          adapter=RuntimeSnapshotAdapter, current_message=current_message, display_message=display_message,
                          shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
                          pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size,
-                         alert=OnroadAlert, alert_size=AlertSize)
+                         alert=OnroadAlert, alert_size=AlertSize, map_overlay=MapOverlay, map_feed=MapFeed,
+                         favorites=ProjectionFavorites)
 
 
 class ProjectionOnroad:
-  """Display-only renderer: no shell, settings, network, pairing, or action owner."""
+  """Separate renderer with Home/Work navigation; native UIState stays read-only."""
 
   def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
@@ -98,6 +104,8 @@ class ProjectionOnroad:
       self.onroad = self.create_view(native.onroad, self.fonts, camera_layer=self._camera_layer, viewport=viewport)
       self._resources.callback(self._close_onroad)
       self.monitor = native.monitor(native.profile.LARGE)
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
       self.onroad.driver_monitor_layer = self._driver_monitor_layer
       self.pip = None
       self._pip_saved = None
@@ -106,7 +114,20 @@ class ProjectionOnroad:
         self.pip = native.pip_renderer("bubble")
         self._resources.callback(self.pip.close)
         self.onroad.pip_layer = self._pip_layer
+      self.map = None
+      self.map_feed = None
+      if self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
+        self.map = native.map_overlay(fonts=self.fonts)
+        self._resources.callback(self.map.close)
+        self.map_feed = native.map_feed()
+        self.onroad.map_layer = self._map_layer
       self.adapter = native.adapter(native.ui_state)
+      self._state = None
+      self.favorites = None
+      if getattr(native, 'favorites', None) is not None:
+        self.favorites = native.favorites(lambda: native.ui_state.started)
+        self.favorites.card_bounds = getattr(getattr(self.onroad, 'navigation', None), 'bounds', None)
+        self._resources.callback(self.favorites.close)
     except BaseException:
       self._resources.close()
       raise
@@ -143,8 +164,20 @@ class ProjectionOnroad:
   def _driver_monitor_layer(self, rect, state):
     ui = self.native.ui_state
     now_ns = time.monotonic_ns()
-    monitor = self.native.current_message(ui.sm, 'driverMonitoringState', now_ns, after_frame=ui.started_frame)
-    driver = self.native.current_message(ui.sm, 'driverStateV2', now_ns, after_frame=ui.started_frame)
+    # The two services are published independently. Requiring both to land in
+    # the same narrow control-freshness window made the AA graphic fade in and
+    # out. Keep the last jointly valid display observation across a brief gap.
+    monitor = self.native.display_message(ui.sm, 'driverMonitoringState', now_ns, after_frame=ui.started_frame)
+    driver = self.native.display_message(ui.sm, 'driverStateV2', now_ns, after_frame=ui.started_frame)
+    if monitor is not None and driver is not None:
+      self._monitor_pair = monitor, driver
+      self._monitor_pair_ns = now_ns
+    elif (self._monitor_pair is not None and self._monitor_pair_ns is not None and
+          0 <= now_ns - self._monitor_pair_ns <= DRIVER_MONITOR_HOLD_NS):
+      monitor, driver = self._monitor_pair
+    else:
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
     self.native.rl.rl_push_matrix()
     self.native.rl.rl_translatef(0, self.height - 1080, 0)
     try:
@@ -154,7 +187,31 @@ class ProjectionOnroad:
     finally:
       self.native.rl.rl_pop_matrix()
 
-  def _pip_layer(self, rect, state):
+  def _map_placement(self):
+    """The enabled map overlay's placement from this connection's layout, or None."""
+    if self.customization is None:
+      return None
+    placed = self.customization['widgets'].get('nav_map')
+    return placed if placed is not None and placed['enabled'] else None
+
+  def prepare(self):
+    """Before the frame's render target is bound: offscreen map work happens here."""
+    if self.favorites is not None:
+      self.favorites.refresh()
+      self.onroad.navigation_favorites.document = self.favorites.document
+      self.onroad.navigation_favorites.error = self.favorites.error
+    placed = self._map_placement()
+    if self.map is None or placed is None or not self.native.ui_state.started:
+      return
+    self.map.prepare(self.map_feed.read(self.native.ui_state.sm), placed['width'], placed['height'])
+
+  def _map_layer(self, rect, state):
+    placed = self._map_placement()
+    if placed is not None and self.map is not None:
+      self.map.draw(self.native.rl.Rectangle(placed['x'], placed['y'], placed['width'], placed['height']),
+                    placed['opacity'] / 100.0)
+
+  def _pip_layer(self, rect, state, *, submit=None):
     """The comma's blinker/blind-spot side-camera bubbles, at the AA layout's placements."""
     native = self.native
     now_ns = time.monotonic_ns()
@@ -165,6 +222,7 @@ class ProjectionOnroad:
     if (saved is None or saved.enabled is not True or saved.mask is None or
         saved.invert is None or saved.on_blinker is None or saved.on_bsm is None):
       self.pip.deactivate()
+      self._set_pip_showing(False)
       return
     ui = native.ui_state
     # Display freshness: carState is 100 Hz, so the 20 ms control window often lapses within one drawn frame.
@@ -180,8 +238,15 @@ class ProjectionOnroad:
       if position['enabled']:
         width, height = native.widget_size(state.customization, 'large', key)
         placements[side] = native.pip_rect(position['x'], position['y'], width, height)
-    self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
-                    on_bsm=saved.on_bsm, invert=saved.invert, placements=placements)
+    result = self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=saved.on_blinker,
+                             on_bsm=saved.on_bsm, invert=saved.invert, placements=placements,
+                             **({"submit": submit} if submit is not None else {}))
+    self._set_pip_showing(result == 'rendered')
+
+  def _set_pip_showing(self, showing):
+    alert = getattr(self.onroad, 'alert', None)
+    if alert is not None:
+      alert.text_only_alert_names = BUBBLE_REDUNDANT_ALERTS if showing else frozenset()
 
   def _with_certificate_notice(self, state, now_ns):
     """Show the certificate heads-up for the first seconds of each drive; a real alert always wins."""
@@ -215,13 +280,34 @@ class ProjectionOnroad:
           self._projection_customization = projection_customization(self.customization, state.customization)
           self._base_customization = state.customization
         state = replace(state, customization=self._projection_customization)
-      self.onroad.render(self._with_certificate_notice(state, now_ns))
+      self._state = self._with_certificate_notice(state, now_ns)
+      self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:
+      self._state = None
+      if self.favorites is not None:
+        self.favorites.cancel()
       self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
       if self.pip is not None:
         self.pip.deactivate()
+        self._set_pip_showing(False)
       self._standby()
+
+  def handle_touches(self, events):
+    if self.favorites is None:
+      return
+    if self._state is None or not self.native.ui_state.started:
+      self.favorites.cancel()
+      return
+    for event in events:
+      self.favorites.touch(event.kind, event.x * self.width, event.y * self.height,
+                           self._state, self.native.ui_state.started_frame)
+
+  def cancel_touch(self):
+    if self.favorites is not None:
+      self.favorites.cancel()
 
   def close(self):
     self._resources.close()

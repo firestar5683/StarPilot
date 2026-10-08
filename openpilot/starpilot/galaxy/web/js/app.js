@@ -75,7 +75,7 @@ const auth = new LocalAuth({ publish: (update) => {
 
 createApp({
   components: { BottomNav, GalaxyLoading, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, MenuTile },
-  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1 }),
+  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1, nextLayoutLeavePresentation: "inline" }),
   computed: {
     visibleTools() { return state.tools.filter(tool => tool.visibility !== "authenticated" ||
       (state.monitorMode === "local" && authState.status === "authenticated")).sort((a, b) =>
@@ -103,6 +103,12 @@ createApp({
     setPageActive(element, active) { element.inert = !active; element.setAttribute("aria-hidden", String(!active)) },
     reloadPage() { location.reload() },
     go(path) { navigate(path, () => { state.drawerOpen = false; state.searchPage = "" }) },
+    goFromMenu(path) {
+      state.drawerOpen = false
+      if (path === route.path) return
+      this.nextLayoutLeavePresentation = "modal"
+      this.go(path)
+    },
     openSearchHit(hit) { navigate("/settings", () => { state.drawerOpen = false; state.searchPage = hit.page }) },
     returnFromSearch() { state.searchPage = "" },
     returnToDriving() { this.go("/driving") },
@@ -139,7 +145,9 @@ createApp({
     setRouteLeaveGuard((proceed, { back } = {}) => {
       if (back && this.$refs.activeSettings?.navigateBack()) return
       if (back && state.searchPage) { this.returnFromSearch(); return }
-      if (this.$refs.activeLayout) this.$refs.activeLayout.requestLeave(proceed)
+      const presentation = this.nextLayoutLeavePresentation
+      this.nextLayoutLeavePresentation = "inline"
+      if (this.$refs.activeLayout) this.$refs.activeLayout.requestLeave(proceed, presentation)
       else if (this.$refs.activeSettings) this.$refs.activeSettings.requestRouteLeave(proceed)
       else proceed()
     })
@@ -151,8 +159,8 @@ createApp({
     document.removeEventListener("visibilitychange", this.visibility)
   },
   template: `
-    <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned, 'gx-nav-hidden': route.path === '/navigation'}">
-      <header v-if="route.path !== '/navigation'" class="gx-appbar">
+    <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}">
+      <header class="gx-appbar">
         <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" aria-label="Back" @click="routeBack"><i class="bi bi-arrow-left"></i></button>
         <div class="gx-appbar__pill">
           <button type="button" class="gx-appbar__home" aria-label="Galaxy Home" @click="go('/')"><span class="gx-brand" aria-hidden="true"></span><span class="gx-appbar__title">Galaxy</span></button>
@@ -168,15 +176,15 @@ createApp({
       <aside class="gx-drawer" :class="{open:state.drawerOpen || state.navPinned}" aria-label="Galaxy navigation">
         <div class="gx-drawer__header"><span class="gx-brand" aria-hidden="true"></span><span class="gx-drawer-title">Galaxy</span><button type="button" class="gx-icon-btn gx-drawer__pin" :aria-pressed="state.navPinned" :aria-label="state.navPinned ? 'Unpin navigation' : 'Pin navigation'" @click="togglePin"><i class="bi" :class="state.navPinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'"></i></button></div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Main</div>
-          <button v-for="item in NAV.slice(0,3)" :key="item.path" type="button" class="gx-nav-item" :class="{active:isActive(item.path)}" @click="go(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button>
+          <button v-for="item in NAV.slice(0,3)" :key="item.path" type="button" class="gx-nav-item" :class="{active:isActive(item.path)}" @click="goFromMenu(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button>
         </div>
-        <div class="gx-nav-section"><div class="gx-nav-section__title">Recordings</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="go('/recordings')"><i class="bi bi-camera-reels"></i><span>Recordings</span></button></div>
+        <div class="gx-nav-section"><div class="gx-nav-section__title">Recordings</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Recordings</span></button></div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Tools</div>
-          <button v-for="tool in visibleTools.filter(tool => tool.path !== '/galaxy')" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="go(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
+          <button v-for="tool in visibleTools.filter(tool => tool.path !== '/galaxy')" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="goFromMenu(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
 
         </div>
         <div class="gx-nav-footer"><DevicePicker />
-          <button type="button" class="gx-nav-item" :class="{active:isActive('/galaxy')}" @click="go('/galaxy')"><i class="bi bi-globe"></i><span>Install Galaxy / Tunnel</span></button>
+          <button type="button" class="gx-nav-item" :class="{active:isActive('/galaxy')}" @click="goFromMenu('/galaxy')"><i class="bi bi-globe"></i><span>Install Galaxy / Tunnel</span></button>
         </div>
       </aside>
       <main class="gx-content" :style="{'--route-direction': routeDirection}"><div class="gx-route-stage">
@@ -232,7 +240,7 @@ createApp({
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <GxState v-else :title="pageName">This capability is unavailable in this build. No operation was attempted.</GxState>
       </div></Transition></div></main>
-      <BottomNav v-if="route.path !== '/navigation'" :path="route.path" @navigate="go" />
+      <BottomNav :path="route.path" @navigate="go" />
     </div>
   `,
 }).component("GxState", GxState).component("GxNotice", GxNotice).mount("#galaxy-app")

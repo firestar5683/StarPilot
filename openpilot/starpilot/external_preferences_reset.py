@@ -52,7 +52,7 @@ def _fresh_navigation(raw, path):
   if not isinstance(value, dict) or document['token'] != value.get('token'):
     raise ValueError('Navigation credential cannot be preserved safely')
   return canonical_json({'version': 1, 'revision': uuid.uuid4().hex, 'enabled': False, 'token': document['token'],
-                         'destination': None, 'favorites': [], 'routeChoice': 0})
+                         'destination': None, 'favorites': [], 'recents': [], 'routeChoice': 0})
 
 
 def reset_external_preferences(storage, model_root):
@@ -82,7 +82,7 @@ def reset_external_preferences(storage, model_root):
           desired['navigation_settings'] = _fresh_navigation(original['navigation_settings'], paths['navigation_settings'])
         except (ValueError, UnicodeError, RecursionError):
           desired['navigation_settings'] = canonical_json({'version': 1, 'revision': uuid.uuid4().hex, 'enabled': False,
-                                                          'token': '', 'destination': None, 'favorites': [], 'routeChoice': 0})
+                                                          'token': '', 'destination': None, 'favorites': [], 'recents': [], 'routeChoice': 0})
           issues.append('Invalid navigation credential document archived; fresh navigation is disabled')
       journal = {'version': 2, 'snapshot': str(snapshot),
                  'desired': {key: base64.b64encode(raw).decode() for key, raw in desired.items()}, 'issues': issues}

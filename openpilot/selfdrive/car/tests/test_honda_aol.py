@@ -288,3 +288,16 @@ class HondaHostTests(unittest.TestCase):
       cc, _ = controls.state_control()
       self.assertFalse(cc.latActive or cc.longActive)
       self.assertTrue(card.aol_qualified)
+
+
+class CardAxisSessionTests(unittest.TestCase):
+  def test_native_lookup_uses_selfdrived_axis_session(self):
+    # pandad stamps aolSafetyWire with aolAxisState's session; card's own producer session never matches it.
+    card = Car.__new__(Car)
+    card.slc_producer_session = 'card'
+    card.sm = messaging.SubMaster(['aolAxisState'])
+    self.assertEqual(card.aol_axis_session(), 'card')
+    axis = messaging.new_message('aolAxisState')
+    axis.aolAxisState.sessionId = 'selfdrived'
+    card.sm.update_msgs(1.0, [axis.as_reader()])
+    self.assertEqual(card.aol_axis_session(), 'selfdrived')

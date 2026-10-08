@@ -131,6 +131,7 @@ procs = [
   PythonProcess("vasm_monitor", "openpilot.starpilot.spot_monitor.runtime", vasm_monitor, enabled=not PC),
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run, restart_on_exit=True),
   PythonProcess("navigationd", "openpilot.starpilot.navigation.runtime", always_run),
+  PythonProcess("navtilesd", "openpilot.starpilot.navigation.navtilesd", always_run, enabled=platform.system() == "Linux"),
   PythonProcess("galaxy", "openpilot.starpilot.galaxy.managed", galaxy_local),
   JetlinkProcess("jetlinkd", "openpilot.starpilot.system.jetlink.daemon", jetlink_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE,

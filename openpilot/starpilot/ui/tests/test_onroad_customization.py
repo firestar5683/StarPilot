@@ -10,8 +10,8 @@ import pyray as rl
 import pytest
 
 from openpilot.starpilot.ui.onroad_customization import (
-  MAX_BYTES, customization_metadata, default_document, offset, read_customization, validate_document, decode_document, widget_palette, rgba,
-  widget_size)
+  CLOCK_WIDGET, DEFAULT_WIDGET_ORDER, MAX_BYTES, customization_metadata, default_document, offset, read_customization,
+  validate_document, decode_document, widget_palette, rgba, widget_size)
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
 from openpilot.starpilot.ui.onroad_state import (
@@ -34,6 +34,35 @@ def test_defaults_and_metadata_are_independent_and_valid():
       assert offset(document, profile, key) == (0, 0)
   document["layouts"]["large"]["current_speed"]["x"] = 50
   assert default_document()["layouts"]["large"]["current_speed"]["x"] == 640
+
+
+def test_clock_is_an_opt_in_widget_and_migrates_saved_layout_and_layer_order():
+  document = default_document()
+  metadata = customization_metadata()['profiles']
+  for profile in ('large', 'compact'):
+    assert metadata[profile]['widgets'][CLOCK_WIDGET]['kind'] == CLOCK_WIDGET
+    assert document['layouts'][profile][CLOCK_WIDGET]['enabled'] is False
+    document['layouts'][profile].pop(CLOCK_WIDGET)
+  document['widgetOrder'] = {
+    profile: [key for key in DEFAULT_WIDGET_ORDER[profile] if key != CLOCK_WIDGET]
+    for profile in ('large', 'compact')
+  }
+  migrated = validate_document(document)
+  for profile in ('large', 'compact'):
+    assert migrated['layouts'][profile][CLOCK_WIDGET] == metadata[profile]['widgets'][CLOCK_WIDGET]['default']
+    assert migrated['widgetOrder'][profile][-1] == CLOCK_WIDGET
+
+
+def test_clock_format_preference_defaults_migrates_and_validates():
+  document = default_document()
+  assert document['clock24Hour'] is False
+  document['clock24Hour'] = True
+  assert validate_document(document)['clock24Hour'] is True
+  document.pop('clock24Hour')
+  assert validate_document(document)['clock24Hour'] is False
+  document['clock24Hour'] = 1
+  with pytest.raises(ValueError, match='clock format'):
+    validate_document(document)
 
 
 @pytest.mark.parametrize("widget,x,y", [("max_speed", 174, 19), ("steering_wheel", 174, 131)])

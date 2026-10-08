@@ -35,6 +35,9 @@ GL_TIMEOUT_EXPIRED, GL_WAIT_FAILED = 0x911B, 0x911D
 FENCE_TIMEOUT_NS = 200_000_000
 
 
+# ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The async PBO/fence lifecycle overlaps GPU readback with CPU work without queuing frames.
+# Altering this can degrade video smoothness or introduce lag on Android Auto.
+# Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class FrameReadback:
   """Read RGBA framebuffers into one packed frame, optionally without stalling on the GPU.
 

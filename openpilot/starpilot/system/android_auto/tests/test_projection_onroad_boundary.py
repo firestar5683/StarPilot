@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
 
 ROOT = Path(__file__).parents[1]
@@ -39,8 +40,36 @@ class FakeGraphics:
   @staticmethod
   def unload_texture(*_): pass
 
+  @staticmethod
+  def rl_push_matrix(): pass
+
+  @staticmethod
+  def rl_pop_matrix(): pass
+
+  @staticmethod
+  def rl_translatef(*_): pass
+
 
 class TestProjectionOnroad(unittest.TestCase):
+  def test_navigation_touch_owner_receives_coordinates_and_cancels_offroad(self):
+    native, _ = self.dependencies()
+    owner = Mock(document={'favorites': []}, error='')
+    native.favorites = lambda authorized: owner
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080))
+    self.addCleanup(view.close)
+    view.onroad.navigation_favorites = SimpleNamespace()
+    view.prepare()
+    self.assertEqual(view.onroad.navigation_favorites.document, owner.document)
+    native.ui_state.started = True
+    native.ui_state.started_frame = 9
+    view.render()
+    view.handle_touches([SimpleNamespace(kind='down', x=.25, y=.5)])
+    owner.touch.assert_called_once_with('down', 720, 540, view._state, 9)
+    native.ui_state.started = False
+    view.handle_touches([SimpleNamespace(kind='up', x=.25, y=.5)])
+    owner.cancel.assert_called_once()
+    self.assertEqual(owner.touch.call_count, 1)
+
   def dependencies(self, *, fail_view=False, fail_camera=False):
     events = []
     ui = SimpleNamespace(projection_read_only=True, started=False, _offroad_transition_callbacks=[],
@@ -73,6 +102,7 @@ class TestProjectionOnroad(unittest.TestCase):
         self.viewport = kwargs['projection_viewport']
         self.steering_wheel = SimpleNamespace(_texture=None)
         self.driver_monitor_layer = None
+        self.alert = SimpleNamespace(text_only_alert_names=frozenset())
 
       def render(self, *_): events.append('road_render')
       def close(self): events.append('view_closed')
@@ -111,7 +141,9 @@ class TestProjectionOnroad(unittest.TestCase):
 
     class Renderer:
       def __init__(self, shape): events.append(('pip', shape))
-      def render(self, rect, mask, signals, **kwargs): calls.append((rect, mask, signals, kwargs))
+      def render(self, rect, mask, signals, **kwargs):
+        calls.append((rect, mask, signals, kwargs))
+        return 'rendered'
       def deactivate(self): events.append('pip_off')
       def close(self): events.append('pip_closed')
 
@@ -134,17 +166,48 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertEqual(calls, [('content', 'mask', (True, True, False, False, True),
                               {'enabled': True, 'on_blinker': True, 'on_bsm': True, 'invert': False,
                                'placements': {'left': (10, 20, 600, 600)}})])
+    self.assertEqual(view.onroad.alert.text_only_alert_names, projection.BUBBLE_REDUNDANT_ALERTS)
 
     saved.enabled = False
     view._pip_read_ns = None
     view._pip_layer('content', SimpleNamespace(customization={}))
     self.assertEqual(len(calls), 1)
     self.assertEqual(events[-1], 'pip_off')
+    self.assertEqual(view.onroad.alert.text_only_alert_names, frozenset())
     before = len(events)
     view.render()  # offroad standby releases the cabin camera
     self.assertEqual(events[before:before + 2], ['pip_off', 'draw'])
     view.close()
     self.assertIn('pip_closed', events)
+
+  def test_driver_monitor_holds_a_joint_display_observation_across_brief_service_skew(self):
+    native, _ = self.dependencies()
+    calls = []
+    values = {'driverMonitoringState': object(), 'driverStateV2': object()}
+    native.ui_state.is_onroad = lambda: True
+    native.display_message = lambda _sm, name, *_a, **_k: values[name]
+    native.monitor = lambda *_: SimpleNamespace(render=lambda *_a, **kwargs: calls.append(kwargs))
+    view = projection.ProjectionOnroad(dependencies=native)
+    clock = [1_000_000_000]
+    original = projection.time
+    projection.time = SimpleNamespace(monotonic_ns=lambda: clock[0])
+    try:
+      view._driver_monitor_layer(None, object())
+      first = calls[-1]
+      values['driverMonitoringState'] = None
+      clock[0] += projection.DRIVER_MONITOR_HOLD_NS
+      view._driver_monitor_layer(None, object())
+      held = calls[-1]
+      clock[0] += 1
+      view._driver_monitor_layer(None, object())
+      expired = calls[-1]
+    finally:
+      projection.time = original
+      view.close()
+    self.assertTrue(first['fresh'])
+    self.assertTrue(held['fresh'])
+    self.assertIs(held['monitor'], first['monitor'])
+    self.assertFalse(expired['fresh'])
 
   def test_certificate_notice_text_covers_only_the_last_two_weeks(self):
     self.assertEqual(projection.certificate_notice(None), '')

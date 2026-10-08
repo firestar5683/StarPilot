@@ -154,7 +154,7 @@ class Car:
     self.conditional_replay = os.getenv('CONDITIONAL_MODE_REPLAY_RUNTIME') == '1' or feature_requested(self.params, 'conditional')
     subscribed_services = ['pandaStates', 'carControl', 'onroadEvents', 'deviceState']
     if self.aol_replay:
-      subscribed_services.extend(('aolSafetyWire', 'managerState'))
+      subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
     if self.slc_replay:
       subscribed_services.append('slcState')
     self.sm = messaging.SubMaster(subscribed_services)
@@ -326,7 +326,7 @@ class Car:
     aol_policy = aol_policy_for(self.CP)
     if aol_policy.full_axis_runtime_required and not self.aol_replay:
       self.aol_replay = True
-      subscribed_services.extend(('aolSafetyWire', 'managerState'))
+      subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
       self.sm = messaging.SubMaster(subscribed_services)
       self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
@@ -502,15 +502,11 @@ class Car:
           self.sm.updated['onroadEvents'] and
           self.sm.valid['onroadEvents'] and 0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
         fault_active = self.aol_disarming_fault(CS, event_ns, now_ns)
-      angle_aol = qualified_angle_aol(self.CP, marked_only=True)
-      ford_aol = qualified_ford_aol(self.CP, marked_only=True)
-      honda_aol = qualified_honda_stock_aol(self.CP, marked_only=True)
-      mazda_aol = qualified_mazda_aol(self.CP, marked_only=True)
-      preap_aol = qualified_tesla_preap(self.CP, marked_only=True)
+      angle_aol, ford_aol, honda_aol, mazda_aol, preap_aol = self.aol_permission_owners()
       permission_owner = angle_aol or ford_aol or honda_aol or mazda_aol or preap_aol
       angle_panda_ready = not permission_owner or self.startup_panda_configured()
       native = (
-        current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if permission_owner else None)
+        current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_axis_session() if permission_owner else None)
         if self.aol_card_intent.explicit_latch and (permission_owner or self.sm.updated['aolSafetyWire'])
         else None
       )
@@ -681,6 +677,22 @@ class Car:
     return disarming_fault(self.sm['onroadEvents'], CS,
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
       temporary_selfdrive_lagging=qualified_gm(self.CP))
+
+  def aol_permission_owners(self) -> tuple[bool, bool, bool, bool, bool]:
+    # CP is fixed once the drive starts; these checks ran five times per 100 Hz frame.
+    cached = getattr(self, '_aol_owner_cache', None)
+    if cached is None or cached[0] is not self.CP:
+      owners = tuple(bool(check(self.CP, marked_only=True)) for check in (
+        qualified_angle_aol, qualified_ford_aol, qualified_honda_stock_aol, qualified_mazda_aol, qualified_tesla_preap))
+      cached = self._aol_owner_cache = (self.CP, owners)
+    return cached[1]
+
+  def aol_axis_session(self) -> str:
+    # pandad stamps aolSafetyWire with selfdrived's aolAxisState session, not card's producer session.
+    seen = getattr(self.sm, 'seen', {})
+    if 'aolAxisState' in seen and seen['aolAxisState'] and self.sm['aolAxisState'].sessionId:
+      return str(self.sm['aolAxisState'].sessionId)
+    return self.slc_producer_session
 
   def observe_aol_calibration(self, CS, now_ns: int, standard_enabled: bool) -> None:
     calibration_events = None

@@ -80,7 +80,7 @@ def read_frame(size, regions, asynchronous=False):
 @pytest.mark.parametrize("width,height,margin_w,margin_h", [(32, 18, 0, 0), (32, 18, 4, 2), (32, 20, 3, 5), (40, 18, 0, 6)])
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_composed_car_frame_converts_to_the_same_picture(gpu, width, height, margin_w, margin_h, asynchronous):
-  """current_car_ui composes (fit, margins, flip) into the output target, then converts that target as is."""
+  """The RGBA fallback's explicit composition retains exact NV12 colors."""
   rl = gpu
   logical_w, logical_h = 31, 18  # the projection's logical canvas, scaled to fit the visible area
   pixels = np.random.default_rng(11).integers(0, 256, (logical_h, logical_w, 4), dtype=np.uint8)
@@ -93,6 +93,29 @@ def test_composed_car_frame_converts_to_the_same_picture(gpu, width, height, mar
     gpu_nv12.compose_rgba(source, output, margin_w, margin_h, fit=True)
     rgba = read_frame(width * height * 4, [(output.id, width, height, 0)])
     nv12 = read_frame(width * height * 3 // 2, converter.convert(output.texture), asynchronous)
+    assert nv12 == gpu_nv12.reference_nv12(rgba, width, height)
+  finally:
+    converter.close()
+    rl.unload_render_texture(output)
+    rl.rl_unload_texture(texture_id)
+
+
+@pytest.mark.parametrize("width,height,margin_w,margin_h", [(32, 18, 0, 0), (32, 18, 4, 2), (32, 20, 3, 5)])
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_fused_projection_conversion_matches_rgba_composition(gpu, width, height, margin_w, margin_h, asynchronous):
+  """The fast car path folds margins and vertical orientation into NV12 conversion."""
+  rl = gpu
+  visible_w, visible_h = width - margin_w, height - margin_h
+  pixels = np.random.default_rng(17).integers(0, 256, (visible_h, visible_w, 4), dtype=np.uint8)
+  buffer = rl.ffi.from_buffer(pixels)
+  texture_id = rl.rl_load_texture(rl.ffi.cast("void *", buffer), visible_w, visible_h, 7, 1)
+  source = rl.Texture(texture_id, visible_w, visible_h, 1, 7)
+  output = rl.load_render_texture(width, height)
+  converter = gpu_nv12.Nv12Converter(width, height, margin_w=margin_w, margin_h=margin_h, compose=True)
+  try:
+    gpu_nv12.compose_rgba(source, output, margin_w, margin_h)
+    rgba = read_frame(width * height * 4, [(output.id, width, height, 0)])
+    nv12 = read_frame(width * height * 3 // 2, converter.convert(source), asynchronous)
     assert nv12 == gpu_nv12.reference_nv12(rgba, width, height)
   finally:
     converter.close()
