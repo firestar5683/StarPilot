@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "tools/replay/camera.h"
+#include "tools/replay/display_clock.h"
 #include "tools/replay/seg_mgr.h"
 #include "tools/replay/timeline.h"
 
@@ -57,7 +58,7 @@ public:
   inline double toSeconds(uint64_t mono_time) const { return (mono_time - route_start_ts_) / 1e9; }
   inline double minSeconds() const { return min_seconds_; }
   inline double maxSeconds() const { return max_seconds_; }
-  inline void setSpeed(float speed) { speed_ = speed; }
+  void setSpeed(float speed);
   inline float getSpeed() const { return speed_; }
   inline const std::string &carFingerprint() const { return car_fingerprint_; }
   inline const std::shared_ptr<std::vector<Timeline::Entry>> getTimeline() const { return timeline_.getEntries(); }
@@ -84,12 +85,13 @@ private:
                                                    std::vector<Event>::const_iterator last,
                                                    int &last_processed_segment,
                                                    uint64_t &segment_start_time);
-  void publishMessage(const Event *e);
+  bool publishMessage(const Event *e);
   void publishFrame(const Event *e);
   void checkSeekProgress();
 
   std::unique_ptr<SegmentManager> seg_mgr_;
   Timeline timeline_;
+  ReplayDisplayClock display_clock_;
 
   pthread_t stream_thread_id = 0;
   std::thread stream_thread_;

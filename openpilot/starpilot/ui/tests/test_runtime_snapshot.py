@@ -97,6 +97,63 @@ def ui_fake():
 
 
 class TestRuntimeSnapshot(unittest.TestCase):
+  def test_replay_uses_recorded_time_without_rewriting_messages(self):
+    from openpilot.tools.replay.display_clock import ClockSample
+    ui = ui_fake()
+    ui.replay_clock = object()
+    ui.replay_sample = ClockSample(NOW, None, NOW * 1000, epoch=1, valid=True)
+    ui.sm.replay_sample = ui.replay_sample
+    ui.sm['selfdriveState'].personality = 'relaxed'
+    before = dict(ui.sm.logMonoTime)
+    state = NativeRuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD).onroad
+    self.assertTrue(state.engaged)
+    self.assertEqual(state.personality, 2)
+    self.assertEqual(state.observed_ns, NOW)
+    self.assertEqual(ui.sm.logMonoTime, before)
+    ui.replay_sample = ClockSample(None, None, NOW * 1000, epoch=1)
+    ui.sm.replay_sample = ui.replay_sample
+    self.assertFalse(NativeRuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD).onroad.engaged)
+
+  def test_replay_pause_holds_visuals_but_publisher_death_does_not(self):
+    from openpilot.tools.replay.display_clock import ClockSample
+    ui = ui_fake()
+    ui.replay_clock = object()
+    ui.replay_sample = ClockSample(NOW, None, NOW * 1000, epoch=1, paused=True, valid=True)
+    ui.sm.replay_sample = ui.replay_sample
+    ui.sm['selfdriveState'].alertText1 = 'Recorded alert'
+    ui.sm['selfdriveState'].alertSize = NS(raw=1)
+    state = NativeRuntimeSnapshotAdapter(ui).build(ShellMode.ONROAD).onroad
+    self.assertTrue(state.engaged)
+    self.assertEqual(state.alert.text1, 'Recorded alert')
+    ui.sm.replay_sample = ClockSample(None, None, NOW * 1000, epoch=1, paused=True)
+    self.assertEqual(current_alert(ui.sm, NOW, after_frame=1).size, AlertSize.NONE)
+
+  def test_replay_has_no_parked_control_authority(self):
+    from openpilot.tools.replay.display_clock import ClockSample
+    ui = ui_fake()
+    ui.replay_clock = object()
+    ui.started = False
+    ui.replay_sample = ClockSample(NOW, NOW, NOW * 1000, epoch=1, valid=True)
+    ui.sm.replay_sample = ui.replay_sample
+    adapter = NativeRuntimeSnapshotAdapter(ui)
+    self.assertFalse(adapter.confirmed_offroad())
+    self.assertFalse(adapter.build(ShellMode.HOME).device.offroad)
+
+  def test_replay_epoch_resets_projectors_and_saved_layout_cache(self):
+    from openpilot.tools.replay.display_clock import ClockSample
+    ui = ui_fake()
+    ui.replay_clock = object()
+    ui.replay_sample = ClockSample(NOW, None, NOW * 1000, epoch=1, valid=True)
+    ui.sm.replay_sample = ui.replay_sample
+    adapter = NativeRuntimeSnapshotAdapter(ui)
+    adapter.build(ShellMode.ONROAD)
+    previous = adapter._conditional
+    ui.replay_sample = ClockSample(NOW - 1_000_000_000, None, NOW * 1000, epoch=2, valid=True)
+    ui.sm.replay_sample = ui.replay_sample
+    state = adapter.build(ShellMode.ONROAD).onroad
+    self.assertIsNot(adapter._conditional, previous)
+    self.assertFalse(state.engaged)
+
   def test_home_panda_presence_is_independent_of_ignition(self):
     for panda_type in (log.PandaState.PandaType.dos, log.PandaState.PandaType.tres, log.PandaState.PandaType.cuatro):
       for ignition in (False, True):

@@ -90,6 +90,7 @@ void Replay::stop() {
     stream_thread_.join();
     rInfo("shutdown: done");
   }
+  display_clock_.stop();
 }
 
 bool Replay::load() {
@@ -134,6 +135,7 @@ void Replay::seekTo(double seconds, bool relative) {
   interruptStream([&]() {
     current_segment_.store(target_segment);
     cur_mono_time_ = route_start_ts_ + target_time * 1e9;
+    display_clock_.seek(cur_mono_time_);
     cur_which_ = cereal::Event::Which::INIT_DATA;
     seeking_to_.store(target_time, std::memory_order_relaxed);
     return false;
@@ -166,9 +168,19 @@ void Replay::pause(bool pause) {
     interruptStream([=]() {
       rWarning("%s at %.2f s", pause ? "paused..." : "resuming", currentSeconds());
       user_paused_ = pause;
+      display_clock_.pause(pause);
       return !pause;
     });
   }
+}
+
+void Replay::setSpeed(float speed) {
+  if (!std::isfinite(speed) || speed <= 0.0f) return;
+  interruptStream([&]() {
+    speed_ = speed;
+    display_clock_.set_speed(speed);
+    return events_ready_;
+  });
 }
 
 void Replay::handleSegmentMerge() {
@@ -244,8 +256,8 @@ void Replay::startStream(const std::shared_ptr<Segment> segment) {
   stream_thread_ = std::thread(&Replay::streamThread, this);
 }
 
-void Replay::publishMessage(const Event *e) {
-  if (event_filter_ && event_filter_(e)) return;
+bool Replay::publishMessage(const Event *e) {
+  if (event_filter_ && event_filter_(e)) return false;
 
   if (!sm_) {
     if (!pm_) pm_ = std::make_unique<PubMaster>(active_services_);  // consumers with an event filter never need one
@@ -254,12 +266,14 @@ void Replay::publishMessage(const Event *e) {
     if (ret == -1) {
       rWarning("stop publishing %s due to multiple publishers error", sockets_[e->which]);
       sockets_[e->which] = nullptr;
+      return false;
     }
   } else {
     capnp::FlatArrayMessageReader reader(e->data);
     auto event = reader.getRoot<cereal::Event>();
     sm_->update_msgs(nanos_since_boot(), {{sockets_[e->which], event}});
   }
+  return true;
 }
 
 void Replay::publishFrame(const Event *e) {
@@ -400,7 +414,29 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
     if (interrupt_requested_) break;
 
     if (evt.eidx_segnum == -1) {
-      publishMessage(&evt);
+      bool published = publishMessage(&evt);
+      if (published && display_clock_.active()) {
+        // These Python publishers use CLOCK_MONOTONIC; native envelopes can use CLOCK_BOOTTIME.
+        if (evt.which == cereal::Event::Which::SELFDRIVE_STATE || evt.which == cereal::Event::Which::CAR_CONTROL ||
+            evt.which == cereal::Event::Which::MODEL_V2) {
+          display_clock_.published(evt.mono_time, speed_);
+        }
+        if (evt.which == cereal::Event::Which::SPOT_MONITOR_STATE) {
+          capnp::FlatArrayMessageReader reader(evt.data);
+          auto event = reader.getRoot<cereal::Event>();
+          auto pair = event.getSpotMonitorState().getObservation();
+          const auto mono = pair.getObservedMonoTime();
+          const auto boot = pair.getObservedBootTime();
+          const auto eof = pair.getSourceFrameEofBootTime();
+          if (event.getValid() && pair.getVersion() == 1 && pair.getSequence() > 0 &&
+              mono > 0 && mono == evt.mono_time && eof > 0 && eof <= boot && boot - eof <= 500000000ULL &&
+              eof <= std::numeric_limits<uint64_t>::max() - 500000000ULL &&
+              pair.getValidUntilBootTime() == eof + 500000000ULL) {
+            display_clock_.published(mono, speed_);
+            display_clock_.observe_boot_pair(mono, boot);
+          }
+        }
+      }
     } else if (camera_server_) {
       if (speed_ > 1.0) {
         camera_server_->waitForSent();

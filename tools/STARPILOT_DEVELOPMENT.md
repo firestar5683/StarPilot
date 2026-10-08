@@ -108,6 +108,22 @@ a private session name. Playback uses the current native terminal controls.
 Route access may require authentication or download the route the developer
 requests. This is log playback; it does not run a driving manager or send CAN.
 
+The UI uses the route's recorded device type, registered saved settings and
+compatible versioned caches. Message freshness follows recorded time, including
+playback speed, pause and seeking; recorded messages are not rewritten. Seeking
+clears the previous display observations. A dead replay publisher invalidates
+the display clock even while paused. Recorded wheel actions are not executed.
+An explicit `--c3`, `--c4` or `--all` overrides the screen format while retaining
+the recorded device identity.
+
+Some preferences, including custom layouts, may be absent from the log. Supply
+`--params /absolute/path/to/saved/params` to supplement them with a flat saved
+Params snapshot. The snapshot is read only; credentials and unqualified binary
+caches are excluded. Without that snapshot, missing settings use defaults, so
+the preview cannot reproduce unlogged preferences. Displays requiring both
+recorded monotonic and boot clocks remain unavailable until a recorded clock
+pair establishes their relationship.
+
 `./onroad -alert` previews a synthetic critical visual alert in the private
 replay session; it never publishes car control. `./onroad --cem` and `--csc`
 show labeled synthetic CEM and curve visuals in that private UI session. They

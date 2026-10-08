@@ -1039,6 +1039,9 @@ class GuiApplication:
 
   @staticmethod
   def big_ui() -> bool:
+    from openpilot.tools.replay.display_clock import DisplayClockReader
+    if DisplayClockReader.enabled():
+      return BIG_UI
     return HARDWARE.get_device_type() in ('tici', 'tizi') or BIG_UI
 
 

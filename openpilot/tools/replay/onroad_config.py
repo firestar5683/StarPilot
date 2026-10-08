@@ -1,18 +1,26 @@
-"""Route metadata and bounded saved-display seeding for disposable host replay."""
+"""Route metadata and recorded settings for disposable host replay."""
 
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Sequence
+import json
+import math
+import os
+import stat
 import sys
 
-from openpilot.common.params import Params
+from openpilot.common.params import Params, ParamKeyType, UnknownKeyName
 from openpilot.common.version import terms_version, training_version
+from openpilot.starpilot.schema_cache import CACHE_KEYS, inspect_cache
 from openpilot.tools.lib.logreader import LogReader, ReadMode, parse_direct, parse_indirect
 from openpilot.tools.lib.route import SegmentRange
 
 
 DEMO_ROUTE = "5beb9b58bd12b691/0000010a--a51155e496"
-DISPLAY_BOOL_KEYS = frozenset(("IsMetric", "HideSpeed", "HideMaxSpeed", "HideSteeringWheel", "EnableTorqueBarWidget"))
+PRIVATE_KEYS = frozenset(("AccessToken", "GithubSshKeys", "GithubUsername", "SecOCKey", "PairingEmail",
+                          "AthenadUploadQueue", "AthenadRecentlyViewedRoutes", "UsageStatsState", "UsageStatsStatus"))
+MAX_PARAM_BYTES = 32 * 1024 * 1024
+DEVICE_TYPES = frozenset(("tici", "tizi", "mici"))
 VALUE_OPTIONS = frozenset(("-a", "--allow", "-b", "--block", "-c", "--cache", "-s", "--start",
                            "-x", "--playback", "-d", "--data_dir"))
 FLAG_OPTIONS = frozenset(("--cabin", "--dcam", "--wide-road", "--ecam", "--no-loop", "--no-cache",
@@ -103,8 +111,38 @@ def select_ui_target(init_data) -> str:
   return "c4" if str(getattr(init_data, "deviceType", "")).lower() in ("mici", "c4") else "c3"
 
 
+def replay_device_type(init_data) -> str:
+  value = str(getattr(init_data, "deviceType", "")).lower()
+  return value if value in DEVICE_TYPES else "pc"
+
+
+def seed_param(params: Params, key: str, raw: bytes) -> bool:
+  if key in PRIVATE_KEYS or not raw or len(raw) > MAX_PARAM_BYTES:
+    return False
+  try:
+    kind = params.get_type(key)
+    if kind == ParamKeyType.BYTES:
+      if key not in CACHE_KEYS or inspect_cache(key, raw).status != "valid":
+        return False
+      value = raw
+    elif kind == ParamKeyType.BOOL:
+      if raw not in (b"0", b"1"):
+        return False
+      value = raw == b"1"
+    else:
+      value = params.cpp2python(key, raw)
+      if value is None or kind == ParamKeyType.FLOAT and not math.isfinite(value):
+        return False
+      if kind == ParamKeyType.JSON:
+        json.dumps(value, allow_nan=False)
+    params.put(key, value, block=True)
+    return True
+  except (UnknownKeyName, UnicodeError, TypeError, ValueError):
+    return False
+
+
 def seed_display_params(init_data, params: Params) -> int:
-  """Copy only exact, registered display booleans; no tokens or opaque docs."""
+  """Restore registered typed settings and verified cache envelopes, never credentials."""
   try:
     entries = init_data.params.entries
   except (AttributeError, TypeError):
@@ -112,19 +150,40 @@ def seed_display_params(init_data, params: Params) -> int:
   count = 0
   for entry in entries:
     name = str(entry.key)
-    if name not in DISPLAY_BOOL_KEYS:
-      continue
     raw = bytes(entry.value)
-    if raw not in (b"0", b"1"):
-      continue
-    params.put_bool(name, raw == b"1", block=True)
-    count += 1
+    count += seed_param(params, name, raw)
   return count
 
 
-def seed_preview(init_data, params: Params) -> int:
+def seed_snapshot(directory: str, params: Params) -> int:
+  root = Path(directory)
+  if not root.is_absolute() or not root.is_dir():
+    raise ValueError("--params must name an absolute directory of saved Param files")
+  count = 0
+  for key in params.all_keys():
+    name = key.decode()
+    if name in PRIVATE_KEYS:
+      continue
+    try:
+      fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+      continue
+    try:
+      info = os.fstat(fd)
+      if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PARAM_BYTES:
+        raise ValueError(f"Invalid saved Param file: {name}")
+      with os.fdopen(fd, "rb", closefd=False) as file:
+        count += seed_param(params, name, file.read(MAX_PARAM_BYTES + 1))
+    finally:
+      os.close(fd)
+  return count
+
+
+def seed_preview(init_data, params: Params, snapshot: str | None = None) -> int:
   count = seed_display_params(init_data, params)
-  params.put("HasAcceptedTerms", terms_version, block=True)
-  params.put("CompletedTrainingVersion", training_version, block=True)
-  params.put_bool("OpenpilotEnabledToggle", True, block=True)
+  if snapshot is not None:
+    count += seed_snapshot(snapshot, params)
+  for key, value in (("HasAcceptedTerms", terms_version), ("CompletedTrainingVersion", training_version)):
+    if params.get(key) is None:
+      params.put(key, value, block=True)
   return count

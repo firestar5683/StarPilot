@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import os
 import select
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,7 @@ from unittest.mock import patch
 
 from openpilot.common.params import Params
 from openpilot.tools.replay.onroad import _block_alert_service, _ipc_root, owned_ipc_namespace, parse_onroad_args, run, seed_replay_params, supervise
-from openpilot.tools.replay.onroad_config import first_log_identifier, parse_replay_args, seed_preview, select_ui_target
+from openpilot.tools.replay.onroad_config import first_log_identifier, parse_replay_args, seed_preview, select_ui_target, replay_device_type
 
 
 class TestOnroadHost(unittest.TestCase):
@@ -243,19 +244,76 @@ assert seen[-2:] == ['full', 'clear'], seen
       local.unlink()
       self.assertIsNone(first_log_identifier(args))
 
-  def test_seed_only_registered_display_booleans_in_disposable_params(self):
+  def test_seed_recorded_typed_settings_and_preserve_explicit_choices(self):
     with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, OPENPILOT_PREFIX="replay-test-seed"):
       params = Params(directory)
       entries = [SimpleNamespace(key="IsMetric", value=b"1"), SimpleNamespace(key="HideSpeed", value=b"0"),
                  SimpleNamespace(key="HideMaxSpeed", value=b"not-a-bool"),
+                 SimpleNamespace(key="CameraView", value=b"3"),
+                 SimpleNamespace(key="OpenpilotEnabledToggle", value=b"0"),
+                 SimpleNamespace(key="ConditionalModeConfig", value=b'{"version":1,"mode":"cem"}'),
+                 SimpleNamespace(key="LaneCenteringStrength", value=b"nan"),
+                 SimpleNamespace(key="CarParamsPersistent", value=b"unversioned"),
                  SimpleNamespace(key="AccessToken", value=b"secret")]
       init = SimpleNamespace(params=SimpleNamespace(entries=entries))
-      self.assertEqual(seed_preview(init, params), 2)
+      self.assertEqual(seed_preview(init, params), 5)
       self.assertIs(params.get("IsMetric"), True)
       self.assertIs(params.get("HideSpeed"), False)
       self.assertIsNone(params.get("HideMaxSpeed"))
       self.assertIsNone(params.get("AccessToken"))
-      self.assertIs(params.get("OpenpilotEnabledToggle"), True)
+      self.assertIsNone(params.get("CarParamsPersistent"))
+      self.assertIsNone(params.get("LaneCenteringStrength"))
+      self.assertEqual(params.get("CameraView"), 3)
+      self.assertEqual(params.get("ConditionalModeConfig"), {"version": 1, "mode": "cem"})
+      self.assertIs(params.get("OpenpilotEnabledToggle"), False)
+
+  def test_saved_snapshot_supplements_unlogged_preferences_without_modifying_source(self):
+    with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, OPENPILOT_PREFIX="replay-test-snapshot"):
+      root = Path(directory)
+      saved = root / "saved"
+      saved.mkdir()
+      raw = b'{"version":1,"mode":"stock"}'
+      (saved / "ConditionalModeConfig").write_bytes(raw)
+      (saved / "HideSpeed").write_bytes(b"1")
+      (saved / "AccessToken").write_bytes(b"secret")
+      params = Params(str(root / "target"))
+      init = SimpleNamespace(params=SimpleNamespace(entries=[SimpleNamespace(key="HideSpeed", value=b"0")]))
+      self.assertEqual(seed_preview(init, params, str(saved)), 3)
+      self.assertIs(params.get("HideSpeed"), True)
+      self.assertEqual(params.get("ConditionalModeConfig"), {"version": 1, "mode": "stock"})
+      self.assertIsNone(params.get("AccessToken"))
+      self.assertEqual((saved / "ConditionalModeConfig").read_bytes(), raw)
+      plan = parse_onroad_args(["--params", str(saved), "--demo"])
+      self.assertEqual(plan.params_snapshot, str(saved))
+      self.assertNotIn("--params", plan.replay_args)
+
+  def test_saved_snapshot_rejects_symlinks_and_replay_device_keeps_tizi_identity(self):
+    with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, OPENPILOT_PREFIX="replay-test-snapshot"):
+      root = Path(directory)
+      saved = root / "saved"
+      saved.mkdir()
+      (saved / "IsMetric").symlink_to(root / "missing")
+      with self.assertRaises(OSError):
+        seed_preview(None, Params(str(root / "target")), str(saved))
+    self.assertEqual(replay_device_type(SimpleNamespace(deviceType="tizi")), "tizi")
+    self.assertEqual(replay_device_type(SimpleNamespace(deviceType="mici")), "mici")
+    self.assertEqual(replay_device_type(None), "pc")
+
+  def test_seed_valid_cache_retains_its_existing_schema_provenance(self):
+    from opendbc.car import structs as car
+    from openpilot.starpilot.schema_cache import get_cache, put_cache
+    with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, OPENPILOT_PREFIX="replay-test-cache"):
+      source = Params(str(Path(directory) / "source"))
+      cp = car.CarParams.new_message(carFingerprint="HYUNDAI IONIQ 6 2023", openpilotLongitudinalControl=True)
+      put_cache(source, "CarParamsPersistent", cp, block=True)
+      raw = Path(source.get_param_path("CarParamsPersistent")).read_bytes()
+      target = Params(str(Path(directory) / "target"))
+      init = SimpleNamespace(params=SimpleNamespace(entries=[SimpleNamespace(key="CarParamsPersistent", value=raw)]))
+      self.assertEqual(seed_preview(init, target), 1)
+      with car.CarParams.from_bytes(get_cache(target, "CarParamsPersistent")) as restored:
+        self.assertEqual(restored.carFingerprint, cp.carFingerprint)
+        self.assertTrue(restored.openpilotLongitudinalControl)
+      self.assertEqual(Path(target.get_param_path("CarParamsPersistent")).read_bytes(), raw)
 
   def test_seed_uses_replay_namespace_not_runner_namespace(self):
     with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, OPENPILOT_PREFIX="starpilot-dev-original"):
@@ -320,3 +378,203 @@ assert seen[-2:] == ['full', 'clear'], seen
         if proc.poll() is None:
           proc.kill()
           proc.wait(timeout=2)
+
+
+class TestReplayDisplayClock(unittest.TestCase):
+  def test_epoch_reset_clears_real_submaster_structs_and_lists(self):
+    from openpilot.cereal import messaging
+    from openpilot.selfdrive.ui.ui_state import UIState
+    state = object.__new__(UIState)
+    with patch.dict(os.environ, OPENPILOT_PREFIX=self.prefix):
+      state.sm = messaging.SubMaster(['carControl', 'modelV2', 'pandaStates', 'onroadEvents'])
+      state.sm.update_msgs(time.monotonic(), [messaging.new_message('carControl', valid=True),
+                                             messaging.new_message('modelV2', valid=True),
+                                             messaging.new_message('pandaStates', 1, valid=True),
+                                             messaging.new_message('onroadEvents', 1, valid=True)])
+      state.started = True
+      state.chestnut_output_seen = True
+      state._reset_replay_state()
+    self.assertFalse(state.started or state.chestnut_output_seen)
+    self.assertEqual(len(state.sm['pandaStates']), 0)
+    self.assertEqual(len(state.sm['onroadEvents']), 0)
+    self.assertFalse(any(state.sm.valid.values()))
+    self.assertFalse(any(state.sm.seen.values()))
+    self.assertFalse(state.sm['carControl'].latActive)
+
+  def test_native_writer_and_python_reader_share_host_clock_and_lifecycle(self):
+    source = '''#include <iostream>
+#include "tools/replay/display_clock.h"
+int main() {
+  ReplayDisplayClock clock;
+  if (!clock.active()) return 2;
+  clock.published(30000000000ULL, 1.0);
+  std::cout << "ready" << std::endl;
+  char command;
+  while (std::cin >> command) {
+    if (command == 'p') clock.pause(true);
+    if (command == 's') clock.seek(2000000000ULL);
+    if (command == 'n') clock.published(2000000000ULL, 1.0);
+    if (command == 'q') { clock.stop(); break; }
+    std::cout << "done" << std::endl;
+  }
+}'''
+    with tempfile.TemporaryDirectory() as directory:
+      cpp, binary = Path(directory) / "clock.cc", Path(directory) / "clock"
+      cpp.write_text(source)
+      include = Path(__file__).resolve().parents[3]
+      compiler = shlex.split(os.environ.get('CXX', 'c++'))
+      subprocess.run([*compiler, '-std=c++17', '-pthread', '-I', str(include), str(cpp), '-o', str(binary)],
+                     check=True, capture_output=True, timeout=30)
+      process = subprocess.Popen([str(binary)], env={**os.environ, **self.env}, stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+      try:
+        self.assertEqual(process.stdout.readline().strip(), 'ready')
+        sample = self.reader.sample()
+        self.assertTrue(sample.valid)
+        self.assertLess(abs(sample.now_ns - 30_000_000_000), 250_000_000)
+        process.stdin.write('p\n')
+        process.stdin.flush()
+        self.assertEqual(process.stdout.readline().strip(), 'done')
+        paused = self.reader.sample()
+        time.sleep(.3)
+        self.assertTrue(self.reader.sample().valid)
+        self.assertEqual(self.reader.sample().now_ns, paused.now_ns)
+        process.stdin.write('s\n')
+        process.stdin.flush()
+        self.assertEqual(process.stdout.readline().strip(), 'done')
+        seek = self.reader.sample()
+        self.assertFalse(seek.valid)
+        self.assertEqual(seek.epoch, sample.epoch + 1)
+        process.stdin.write('n\n')
+        process.stdin.flush()
+        self.assertEqual(process.stdout.readline().strip(), 'done')
+        self.assertEqual(self.reader.sample().now_ns, 2_000_000_000)
+        process.stdin.write('q\n')
+        process.stdin.flush()
+        self.assertEqual(process.wait(timeout=3), 0)
+        self.assertFalse(self.reader.sample().valid)
+      finally:
+        if process.poll() is None:
+          process.kill()
+          process.wait(timeout=3)
+
+  def setUp(self):
+    from openpilot.tools.replay.display_clock import DisplayClockReader, RECORD
+    self.reader_type = DisplayClockReader
+    self.record = RECORD
+    self.prefix = f"replay-clocktest-{os.getpid()}-{time.time_ns()}"
+    self.root = self.enterContext(owned_ipc_namespace(self.prefix))
+    self.path = self.root / "display-clock"
+    self.path.write_bytes(bytes(RECORD.size))
+    self.path.chmod(0o600)
+    self.env = {"SP_HOST_RUNTIME": "1", "OPENPILOT_PREFIX": self.prefix, "SP_REPLAY_CLOCK_PATH": str(self.path)}
+    self.reader = DisplayClockReader(self.env)
+    self.addCleanup(self.reader.close)
+
+  def write(self, **changes):
+    from openpilot.tools.replay.display_clock import MAGIC, VALID
+    fields = {"sequence": 2, "magic": MAGIC, "version": 1, "flags": VALID, "epoch": 1,
+              "route_ns": 30_000_000_000, "host_ns": 10_000_000_000, "speed": 1., "boot_offset": 0,
+              "heartbeat": 10_000_000_000, "reserved": 0}
+    fields.update(changes)
+    self.path.write_bytes(self.record.pack(*fields.values()))
+
+  def test_recorded_time_speed_and_explicit_pause_keep_clock_domains_separate(self):
+    from openpilot.tools.replay.display_clock import PAUSED, VALID
+    self.write(speed=2.)
+    sample = self.reader.sample(10_100_000_000)
+    self.assertTrue(sample.valid)
+    self.assertEqual(sample.now_ns, 30_200_000_000)
+    self.assertEqual(sample.host_ns, 10_100_000_000)
+    self.assertIsNone(sample.boot_ns)
+    self.write(flags=VALID | PAUSED, route_ns=30_200_000_000, host_ns=10_100_000_000,
+               heartbeat=10_400_000_000)
+    sample = self.reader.sample(10_500_000_000)
+    self.assertTrue(sample.valid and sample.paused)
+    self.assertEqual(sample.now_ns, 30_200_000_000)
+    self.write(route_ns=30_200_000_000, host_ns=10_500_000_000, heartbeat=10_500_000_000, speed=.5)
+    self.assertEqual(self.reader.sample(10_600_000_000).now_ns, 30_250_000_000)
+
+  def test_unknown_boot_offset_differs_from_valid_zero_and_recorded_suspend_offset(self):
+    from openpilot.tools.replay.display_clock import BOOT_KNOWN, VALID
+    self.write()
+    self.assertIsNone(self.reader.sample(10_000_000_000).boot_ns)
+    self.write(flags=VALID | BOOT_KNOWN)
+    self.assertEqual(self.reader.sample(10_000_000_000).boot_ns, 30_000_000_000)
+    self.write(flags=VALID | BOOT_KNOWN, boot_offset=9_000_000_000)
+    self.assertEqual(self.reader.sample(10_000_000_000).boot_ns, 39_000_000_000)
+
+  def test_seek_epoch_is_visible_but_invalid_until_new_publication(self):
+    from openpilot.tools.replay.display_clock import SEEKING, VALID
+    self.write()
+    self.assertEqual(self.reader.sample(10_000_000_000).epoch, 1)
+    self.write(flags=SEEKING, epoch=2, route_ns=2_000_000_000)
+    sample = self.reader.sample(10_000_000_000)
+    self.assertFalse(sample.valid)
+    self.assertEqual(sample.epoch, 2)
+    self.assertIsNone(sample.now_ns)
+    self.write(flags=VALID, epoch=2, route_ns=2_000_000_000)
+    sample = self.reader.sample(10_100_000_000)
+    self.assertTrue(sample.valid)
+    self.assertEqual((sample.epoch, sample.now_ns), (2, 2_100_000_000))
+
+  def test_dead_publisher_torn_record_and_invalid_metadata_fail_closed(self):
+    from openpilot.tools.replay.display_clock import BOOT_KNOWN, HEARTBEAT_MAX_AGE_NS, VALID
+    self.write()
+    self.assertTrue(self.reader.sample(10_000_000_000 + HEARTBEAT_MAX_AGE_NS).valid)
+    self.assertFalse(self.reader.sample(10_000_000_001 + HEARTBEAT_MAX_AGE_NS).valid)
+    for changes in ({"sequence": 3}, {"sequence": 0}, {"magic": 0}, {"version": 2}, {"flags": 16},
+                    {"epoch": 0}, {"speed": float("nan")}, {"speed": 0}, {"reserved": 1},
+                    {"heartbeat": 10_000_000_001}, {"host_ns": 10_000_000_001},
+                    {"flags": VALID | BOOT_KNOWN, "boot_offset": -1}):
+      with self.subTest(changes=changes):
+        self.write(**changes)
+        self.assertFalse(self.reader.sample(10_000_000_000).valid)
+
+  def test_only_exact_owned_context_path_regular_file_size_and_modes_are_admitted(self):
+    self.reader.close()
+    self.write()
+    for changes in ({"SP_HOST_RUNTIME": "0"}, {"OPENPILOT_PREFIX": "replay-other"},
+                    {"SP_REPLAY_CLOCK_PATH": str(self.root / "other")}, {"OPENPILOT_PREFIX": "../replay-other"}):
+      with self.subTest(changes=changes):
+        self.assertFalse(self.reader_type.enabled({**self.env, **changes}))
+        reader = self.reader_type({**self.env, **changes})
+        self.assertFalse(reader.sample(10_000_000_000).valid)
+        reader.close()
+    self.path.chmod(0o644)
+    reader = self.reader_type(self.env)
+    self.assertFalse(reader.sample(10_000_000_000).valid)
+    reader.close()
+
+    self.path.chmod(0o600)
+    for size in (self.record.size - 1, self.record.size + 1):
+      self.path.write_bytes(bytes(size))
+      reader = self.reader_type(self.env)
+      self.assertFalse(reader.sample(10_000_000_000).valid)
+      reader.close()
+    self.write()
+    self.root.chmod(0o750)
+    reader = self.reader_type(self.env)
+    self.assertFalse(reader.sample(10_000_000_000).valid)
+    reader.close()
+    self.root.chmod(0o700)
+    target = self.root / "other"
+    self.path.rename(target)
+    self.path.symlink_to(target)
+    reader = self.reader_type(self.env)
+    self.assertFalse(reader.sample(10_000_000_000).valid)
+    reader.close()
+    self.path.unlink()
+    target.rename(self.path)
+    os.link(self.path, target)
+    reader = self.reader_type(self.env)
+    self.assertFalse(reader.sample(10_000_000_000).valid)
+    reader.close()
+
+  def test_enabled_context_stays_enabled_when_clock_file_is_missing(self):
+    self.reader.close()
+    self.path.unlink()
+    self.assertTrue(self.reader_type.enabled(self.env))
+    reader = self.reader_type(self.env)
+    self.assertFalse(reader.sample(10_000_000_000).valid)
+    reader.close()

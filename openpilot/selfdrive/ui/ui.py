@@ -44,10 +44,10 @@ def main():
                                              borrowed_messages=True, evidence_wait_ms=0)
     preview_authority = LiveContextSource(ui_state.params, messages=ui_state.sm,
                                           borrowed_messages=True, evidence_wait_ms=0)
-    controllers = ControllerRuntime(ui_state.params, actions=layout.star._favorite_actions,
+    controllers = None if ui_state.replay_clock is not None else ControllerRuntime(ui_state.params, actions=layout.star._favorite_actions,
                                     favorites=layout.star.favorites_owner.snapshot,
                                     invoke_favorite=layout.star.favorites_owner.invoke, authority=controller_authority)
-    preview = LayoutPreviewRuntime(ui_state.params, (Profile.LARGE if BIG_UI else Profile.COMPACT).value,
+    preview = None if ui_state.replay_clock is not None else LayoutPreviewRuntime(ui_state.params, (Profile.LARGE if BIG_UI else Profile.COMPACT).value,
                                    offroad_hint=ui_state.is_offroad, authority=preview_authority)
   else:
     layout = MainLayout() if BIG_UI else MiciMainLayout()
@@ -84,7 +84,8 @@ def main():
           preview.close()
       finally:
         try:
-          controllers.close()
+          if controllers is not None:
+            controllers.close()
         finally:
           layout.close()
 

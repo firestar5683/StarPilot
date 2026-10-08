@@ -80,3 +80,14 @@ class TestHostLaunch(unittest.TestCase):
     with patch.dict(os.environ, SP_C3_COMPILE_ONLY="1"), patch.object(host_launch, "seed_developer_defaults") as seed:
       self.assertEqual(host_launch.main(["large", "--any-ui-arg"]), 0)
       seed.assert_not_called()
+
+  def test_recorded_hardware_identity_requires_private_host_replay(self):
+    from openpilot.common.hardware.pc.hardware import HardwarePc
+    hardware = HardwarePc()
+    with patch.dict(os.environ, SP_HOST_RUNTIME="1", SP_REPLAY_DEVICE_TYPE="tizi", OPENPILOT_PREFIX="replay-device"):
+      self.assertEqual(hardware.get_device_type(), "tizi")
+      os.environ["OPENPILOT_PREFIX"] = "d"
+      self.assertEqual(hardware.get_device_type(), "pc")
+      os.environ["OPENPILOT_PREFIX"] = "replay-device"
+      os.environ["SP_REPLAY_DEVICE_TYPE"] = "unknown"
+      self.assertEqual(hardware.get_device_type(), "pc")

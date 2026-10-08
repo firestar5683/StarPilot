@@ -2,6 +2,7 @@ import numpy as np
 import os
 import time
 import threading
+import capnp
 from collections.abc import Callable
 from enum import Enum
 from openpilot.cereal import messaging, log
@@ -17,6 +18,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.usb import cable_connected, get_usb_state, is_chestnut_usb_id
 from openpilot.starpilot.models.manager import ModelManager
+from openpilot.tools.replay.display_clock import DisplayClockReader
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 PARAM_UPDATE_TIME = 1 / 5.0
@@ -86,6 +88,8 @@ class UIState:
 
   def _initialize(self):
     prewarm_cache_contracts()
+    self.replay_clock = DisplayClockReader() if DisplayClockReader.enabled() else None
+    self.replay_sample = None
     self.projection_read_only = os.environ.get("STARPILOT_PROJECTION_READ_ONLY") == "1"
     params = Params()
     self.params = ProjectionParams(params) if self.projection_read_only else params
@@ -124,7 +128,7 @@ class UIState:
       ignore_avg_freq=["starpilotSelfdriveState", "starpilotLateralState"],
     )
 
-    self.prime_state = ProjectionPrimeState(self.params) if isinstance(self.params, ProjectionParams) else PrimeState()
+    self.prime_state = ProjectionPrimeState(self.params) if self.replay_clock is not None or isinstance(self.params, ProjectionParams) else PrimeState()
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
@@ -139,7 +143,7 @@ class UIState:
     self.always_on_dm: bool = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.chestnut_present: bool = False
-    self._gpu_artifacts = ModelManager()
+    self._gpu_artifacts = None if self.replay_clock is not None else ModelManager()
     self._gpu_artifacts_at: float | None = None
     self.chestnut_compiled: bool = False
     self.chestnut_checking: bool = False
@@ -189,6 +193,21 @@ class UIState:
     return not self.started
 
   def update(self) -> None:
+    if getattr(self, "replay_clock", None) is not None:
+      sample = self.replay_clock.sample()
+      if sample.epoch is not None and (self.replay_sample is None or sample.epoch != self.replay_sample.epoch):
+        self._reset_replay_state()
+      self.replay_sample = sample
+      self.sm.replay_sample = sample
+      self.sm.update(0)
+      self._update_state()
+      self._update_status()
+      now = time.monotonic()
+      if self._projection_params_at is None or now - self._projection_params_at >= 1.0:
+        self.update_params()
+        self._projection_params_at = now
+      self._update_chestnut_state()
+      return
     if self.projection_read_only:
       self.sm.update(0)
       self._update_state()
@@ -208,6 +227,29 @@ class UIState:
     self._update_status()
     self._update_chestnut_state()
     device.update()
+
+  def display_time_ns(self) -> int:
+    if getattr(self, "replay_clock", None) is not None:
+      return self.replay_sample.now_ns if self.replay_sample is not None and self.replay_sample.valid else 0
+    return time.monotonic_ns()
+
+  def _reset_replay_state(self) -> None:
+    for service, socket in self.sm.sock.items():
+      messaging.drain_sock_raw(socket)
+      for field in ("seen", "updated", "alive", "valid"):
+        getattr(self.sm, field)[service] = False
+      for field in ("recv_frame", "recv_time", "logMonoTime"):
+        getattr(self.sm, field)[service] = 0
+      try:
+        empty = messaging.new_message(service)
+      except capnp.lib.capnp.KjException:
+        empty = messaging.new_message(service, 0)
+      self.sm.data[service] = getattr(empty.as_reader(), service)
+    self.started = self._started_prev = self._engaged_prev = False
+    self.started_frame = self.sm.frame
+    self.chestnut_output_seen = False
+    self.chestnut_present = False
+    self.status = UIStatus.DISENGAGED
 
   def _params_refresh_worker(self):
     drop_realtime()
@@ -278,7 +320,7 @@ class UIState:
     if (self.started and self.sm.updated["selfdriveState"] and self.sm.valid["selfdriveState"] and
         self.sm.alive["selfdriveState"] and self.sm.recv_frame["selfdriveState"] > self.started_frame):
       stamp = self.sm.logMonoTime["selfdriveState"]
-      if 0 < stamp <= time.monotonic_ns() <= stamp + 250_000_000:
+      if 0 < stamp <= UIState.display_time_ns(self) <= stamp + 250_000_000:
         self.personality = log.LongitudinalPersonality.schema.enumerants[self.sm["selfdriveState"].personality]
 
   def _update_chestnut_state(self) -> None:
@@ -293,7 +335,9 @@ class UIState:
     model_seen = self.sm.recv_frame["modelV2"] > self.started_frame
     model_stamp = self.sm.logMonoTime["modelV2"]
     model_fresh = (model_seen and self.sm.valid["modelV2"] and self.sm.alive["modelV2"] and
-                   0 < model_stamp <= time.monotonic_ns() <= model_stamp + 250_000_000)
+                   0 < model_stamp <= UIState.display_time_ns(self) <= model_stamp + 250_000_000)
+    if getattr(self, "replay_clock", None) is not None:
+      self.chestnut_present = detected
     if model_fresh and self.sm["modelV2"].big:
       self.chestnut_output_seen = True
     if not self.chestnut_present:
@@ -315,7 +359,11 @@ class UIState:
     # For slower operations
     # Update longitudinal control state
     CP_bytes = get_cache(self.params, "CarParamsPersistent")
-    if CP_bytes is not None:
+    if (getattr(self, "replay_clock", None) is not None and
+        self.sm.seen["carParams"] and self.sm.valid["carParams"]):
+      self.CP = self.sm["carParams"]
+      self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+    elif CP_bytes is not None:
       self.CP = messaging.log_from_bytes(CP_bytes, car.CarParams)
       # The saved Alpha Long choice can survive an unavailable configuration.
       self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
@@ -331,6 +379,9 @@ class UIState:
     self.chestnut_active = raw_chestnut if type(raw_chestnut) is bool else (
       True if raw_chestnut in (b"1", "1") else False if raw_chestnut in (b"0", "0") else None)
     self.chestnut_loading = self.params.get_bool("ChestnutLoading")
+    if getattr(self, "replay_clock", None) is not None:
+      self.chestnut_compiled = self.chestnut_active is True or self.chestnut_output_seen
+      return
     now = time.monotonic()
     if not self.started and (self._gpu_artifacts_at is None or now < self._gpu_artifacts_at or now - self._gpu_artifacts_at >= 1.):
       self.chestnut_compiled, self.chestnut_checking = self._gpu_artifacts.selected_gpu_status()

@@ -268,6 +268,8 @@ class StarShellSession:
     self._favorite_claimed = False
 
   def _favorite_authority(self) -> bool:
+    if getattr(ui_state, "replay_clock", None) is not None:
+      return False
     if self._mode != ShellMode.ONROAD:
       return False
     state = self.snapshot(ShellMode.ONROAD).onroad
@@ -425,6 +427,8 @@ class StarShellSession:
     return actions
 
   def _poll_wheel(self, now_ns):
+    if getattr(ui_state, "replay_clock", None) is not None:
+      return
     for _ in range(32):
       event = messaging.recv_one_or_none(self._wheel_sock)
       if event is None:

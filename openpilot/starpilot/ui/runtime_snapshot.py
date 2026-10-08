@@ -67,12 +67,15 @@ def _clock_pair(mono_clock: Callable[[], int], boot_clock: Callable[[], int]) ->
 def _message_at_age(sm: Any, service: str, now_ns: int, after_frame: int, max_age_ns: int,
                     *, recv_now_ns: int | None = None) -> Any | None:
   try:
+    replay = getattr(sm, "replay_sample", None)
+    if replay is not None and not replay.valid:
+      return None
     stamp = int(sm.logMonoTime[service])
     if (not sm.valid[service] or not sm.alive[service] or stamp <= 0 or stamp > now_ns or
         now_ns - stamp > max_age_ns or int(sm.recv_frame[service]) <= after_frame):
       return None
-    if recv_now_ns is not None:
-      receipt_age = recv_now_ns - int(sm.recv_time[service] * 1e9)
+    if recv_now_ns is not None and not (replay is not None and replay.paused):
+      receipt_age = (replay.host_ns if replay is not None else recv_now_ns) - int(sm.recv_time[service] * 1e9)
       if not 0 <= receipt_age <= max_age_ns:
         return None
     return sm[service]
@@ -87,6 +90,11 @@ def current_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0,
   max_age_ns = int(2e9 / frequency) if frequency else 1_000_000_000
   if service == "pandaStates":
     if boot_now_ns is None:
+      replay = getattr(sm, "replay_sample", None)
+      if replay is not None:
+        if not replay.valid or replay.boot_ns is None:
+          return None
+        return _message_at_age(sm, service, replay.boot_ns, after_frame, max_age_ns, recv_now_ns=replay.host_ns)
       pair = _clock_pair(time.monotonic_ns, _boot_time_ns)
       if pair is None:
         return None
@@ -103,6 +111,9 @@ def display_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0)
 def current_curve_message(sm: Any, now_ns: int, *, after_frame: int = 0) -> Any | None:
   """Read the nested Curve payload without treating SLC's Event.valid as its validity."""
   try:
+    replay = getattr(sm, "replay_sample", None)
+    if replay is not None and not replay.valid:
+      return None
     stamp = int(sm.logMonoTime["slcState"])
     frequency = SERVICE_LIST["slcState"].frequency
     max_age_ns = int(2e9 / frequency) if frequency else 1_000_000_000
@@ -190,10 +201,14 @@ def current_alert(sm: Any, now_ns: int, *, after_frame: int) -> OnroadAlert:
     service = 'selfdriveState'
     stamp = int(sm.logMonoTime[service])
     receipt = int(sm.recv_time[service] * 1e9)
-    if (not sm.valid[service] or int(sm.recv_frame[service]) <= after_frame or
-        stamp <= 0 or stamp > now_ns or receipt <= 0 or receipt > now_ns):
+    replay = getattr(sm, "replay_sample", None)
+    if replay is not None and not replay.valid:
       return OnroadAlert()
-    missing_ns = now_ns - receipt
+    receipt_now = replay.host_ns if replay is not None else now_ns
+    if (not sm.valid[service] or int(sm.recv_frame[service]) <= after_frame or
+        stamp <= 0 or stamp > now_ns or receipt <= 0 or receipt > receipt_now):
+      return OnroadAlert()
+    missing_ns = 0 if replay is not None and replay.paused else receipt_now - receipt
     if missing_ns > _ALERT_TRANSPORT_TIMEOUT_NS:
       previous = sm[service]
       if bool(previous.enabled) and missing_ns < _ALERT_TRANSPORT_TIMEOUT_NS + _ALERT_CRITICAL_TIMEOUT_NS:
@@ -282,6 +297,7 @@ class RuntimeSnapshotAdapter:
     self._device_offset_ns: int | None = None
     self._last_pair_offset_ns: int | None = None
     self._pair_failed = False
+    self._replay_epoch: int | None = None
 
   def _parked(self, ui: Any, pair: tuple[int, int, int] | None) -> bool:
     if pair is None:
@@ -319,6 +335,8 @@ class RuntimeSnapshotAdapter:
 
   def confirmed_offroad(self) -> bool:
     """Recheck transport evidence without changing presentation state."""
+    if getattr(self.ui_state, "replay_clock", None) is not None:
+      return False
     return self._parked(self.ui_state, _clock_pair(self._mono_clock, self._boot_clock))
 
   def connectivity_allowed(self) -> bool:
@@ -328,7 +346,15 @@ class RuntimeSnapshotAdapter:
   def build(self, mode: ShellMode, selected: Destination = Destination.STAR, *, compact_y: float = 0,
             compact_scroll_x: float = 0, sidebar_expanded: bool = True, now_ns: int | None = None,
             menu_only: bool = False) -> ShellSnapshot:
-    now_ns = time.monotonic_ns() if now_ns is None else now_ns
+    replay = getattr(self.ui_state, "replay_sample", None)
+    if getattr(self.ui_state, "replay_clock", None) is not None:
+      if replay is not None and replay.epoch != self._replay_epoch:
+        self.__init__(self.ui_state, self.galaxy_access, self.bluetooth_powered,
+                      mono_clock=self._mono_clock, boot_clock=self._boot_clock)
+        self._replay_epoch = replay.epoch
+      now_ns = replay.now_ns if replay is not None and replay.valid else 0
+    else:
+      now_ns = time.monotonic_ns() if now_ns is None else now_ns
     if mode != ShellMode.ONROAD or self._last_mode != ShellMode.ONROAD:
       self._onroad_ancillary = None
     if mode == ShellMode.ONROAD and self._last_mode == ShellMode.SETTINGS:
@@ -347,13 +373,17 @@ class RuntimeSnapshotAdapter:
       self._conditional_read_ns = now_ns
     sm = ui.sm
     device = current_message(sm, "deviceState", now_ns)
-    pair = _clock_pair(self._mono_clock, self._boot_clock)
+    if getattr(ui, "replay_clock", None) is not None:
+      pair = ((replay.now_ns, replay.boot_ns, replay.boot_ns - replay.now_ns)
+              if replay is not None and replay.valid and replay.boot_ns is not None else None)
+    else:
+      pair = _clock_pair(self._mono_clock, self._boot_clock)
     pandas = current_message(sm, "pandaStates", now_ns, boot_now_ns=now_ns + pair[2]) if pair is not None else None
     panda_connected = bool(pandas and any(p.pandaType != log.PandaState.PandaType.unknown for p in pandas))
     # UIState owns drive transitions. Health-message freshness governs actions,
     # not the lifetime of the camera, widget filters, and engagement animations.
     started = bool(ui.started)
-    confirmed_offroad = self._parked(ui, pair)
+    confirmed_offroad = self._parked(ui, pair) if getattr(ui, "replay_clock", None) is None else False
     after = ui.started_frame if ui.started else 0
     drive_id = int(getattr(sm["deviceState"], "startedMonoTime", 0)) if started else 0
     car = current_message(sm, "carState", now_ns, after_frame=after) if started else None
@@ -445,7 +475,10 @@ class RuntimeSnapshotAdapter:
         except (AttributeError, OSError, TypeError, ValueError):
           self._traffic_profile_valid = False
         self._traffic_context_ns = now_ns
-      pair = paired_clocks_ns()
+      if getattr(ui, "replay_clock", None) is not None:
+        pair = (replay.now_ns, replay.boot_ns) if replay is not None and replay.valid and replay.boot_ns is not None else None
+      else:
+        pair = paired_clocks_ns()
       if pair is not None and abs(pair[0] - now_ns) <= 10_000_000:
         fingerprint = settings_fingerprint(self._traffic_settings.refresh(now_ns))
         traffic = self._traffic.project(
@@ -517,6 +550,11 @@ class RuntimeSnapshotAdapter:
     experimental = bool(display_selfdrive.experimentalMode) if display_selfdrive is not None else _flag(params, "ExperimentalMode")
     observed_experimental = bool(display_selfdrive.experimentalMode) if display_selfdrive is not None else False
     persona = _personality(_text(params, "LongitudinalPersonality", "1"))
+    if display_selfdrive is not None:
+      try:
+        persona = _personality(log.LongitudinalPersonality.schema.enumerants[str(display_selfdrive.personality)])
+      except (AttributeError, KeyError, TypeError, ValueError):
+        pass
     torque = observe_torque_feedback(
       display_car, display_control, display_controls,
       display_message(sm, "carOutput", now_ns, after_frame=after) if started else None,
