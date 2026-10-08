@@ -2,7 +2,7 @@ name: safety qualification
 
 on:
   push:
-    branches: [master, Domathon]
+    branches: [master, Domathon, SecretGoodStarPilot]
   pull_request:
   workflow_dispatch:
 

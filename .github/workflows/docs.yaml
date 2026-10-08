@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+      - Domathon
+      - SecretGoodStarPilot
   pull_request:
   workflow_call:
     inputs:

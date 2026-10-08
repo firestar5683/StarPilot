@@ -19,6 +19,9 @@ concurrency:
   group: tests-ci-run-${{ inputs.run_number }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && github.run_id || github.head_ref || github.ref }}-${{ github.workflow }}-${{ github.event_name }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CI: 1
   PYTHONPATH: ${{ github.workspace }}
@@ -34,15 +37,24 @@ jobs:
     - name: Validate tracked dependencies
       run: python3 tools/vendor/check.py --revision HEAD
     - run: ./tools/op.sh setup
+      id: setup
     - name: Build native dependencies for packaging tests
+      id: build
       run: scons -j2 openpilot/common/libparams_c.so msgq_repo/msgq/ipc_pyx.so
-    - name: Test dependency and packaging tools
-      run: |
-        python3 -m unittest discover -s tools/vendor/tests -v
-        python3 -m pytest -q tools/release/tests
-        python3 -m unittest discover -s tools/ci/tests -v
-        python3 -m unittest discover -s openpilot/system/updated/tests -v
+    - name: Test dependency tools
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m unittest discover -s tools/vendor/tests -v
+    - name: Test release packaging
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m pytest -q tools/release/tests
+    - name: Test CI tools
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m unittest discover -s tools/ci/tests -v
+    - name: Test updater
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m unittest discover -s openpilot/system/updated/tests -v
     - name: Check setup and release shell syntax
+      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
       run: |
         for script in tools/op.sh tools/release/*.sh openpilot/selfdrive/test/setup_device_ci.sh; do
           bash -n "$script"
@@ -170,28 +182,35 @@ jobs:
         GOTOOLCHAIN: local
       run: go mod download
     - run: ./tools/op.sh setup
+      id: setup
     - name: Build openpilot
+      id: build
       run: scons
     - name: Run unit tests
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 20 }}
       env:
         RAYLIB_BACKEND: headless
       run: tools/op.sh test --json-output unit-test-results.json
     - name: Test custom module-level pytest cases
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: 10
       env:
         RAYLIB_BACKEND: headless
       run: python3 tools/ci/run_host_tests.py --pytest
     - name: Test GM vehicle configurations and CAN behavior
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: 5
       run: tools/op.sh test opendbc_repo/opendbc/car/gm/tests --json-output gm-test-results.json
     - name: Test native independent-axis protocol
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       run: |
         openpilot/selfdrive/pandad/tests/test_panda_usb
         openpilot/selfdrive/pandad/tests/test_pandad_canprotocol
         openpilot/selfdrive/pandad/tests/test_aol_protocol
         openpilot/selfdrive/pandad/tests/test_aol_wire
     - name: Test map provider to host messaging
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       working-directory: mapd_repo
       timeout-minutes: 5
       env:
