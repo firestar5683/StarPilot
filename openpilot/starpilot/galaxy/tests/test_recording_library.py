@@ -1,4 +1,5 @@
 import os
+import errno
 import io
 import tarfile
 import http.client
@@ -7,12 +8,33 @@ import threading
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openpilot.starpilot.galaxy.drive_history import DriveHistory
-from openpilot.starpilot.galaxy.recording_library import RecordingLibrary
+from openpilot.starpilot.galaxy.recording_library import RecordingLibrary, attribute
 from openpilot.starpilot.galaxy.recording_media import RecordingMediaChanged
 
 ROUTE = '00000042--abcdef1234'
+
+
+class RecordingAttributeTest(unittest.TestCase):
+  def test_missing_host_xattr_api_has_no_metadata(self):
+    with patch.dict(vars(os)):
+      vars(os).pop('getxattr', None)
+      self.assertEqual(attribute(42, 'user.preserve'), b'')
+
+  def test_supported_xattr_api_preserves_recorded_metadata(self):
+    with patch.object(os, 'getxattr', return_value=b'1', create=True) as getxattr:
+      self.assertEqual(attribute(42, 'user.preserve'), b'1')
+    getxattr.assert_called_once_with(42, 'user.preserve')
+
+  def test_missing_attribute_is_empty_but_permission_failure_propagates(self):
+    for code in (errno.ENODATA, errno.ENOTSUP):
+      with patch.object(os, 'getxattr', side_effect=OSError(code, 'unavailable'), create=True):
+        self.assertEqual(attribute(42, 'user.preserve'), b'')
+    with patch.object(os, 'getxattr', side_effect=OSError(errno.EACCES, 'denied'), create=True):
+      with self.assertRaises(PermissionError):
+        attribute(42, 'user.preserve')
 
 
 class RecordingLibraryTest(unittest.TestCase):

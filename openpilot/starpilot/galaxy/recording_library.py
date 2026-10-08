@@ -21,8 +21,11 @@ def display_name(value):
 
 
 def attribute(fd, key):
+  getxattr = getattr(os, 'getxattr', None)
+  if getxattr is None:
+    return b''
   try:
-    return os.getxattr(fd, key)
+    return getxattr(fd, key)
   except OSError as error:
     if error.errno in (errno.ENODATA, errno.ENOTSUP):
       return b''
