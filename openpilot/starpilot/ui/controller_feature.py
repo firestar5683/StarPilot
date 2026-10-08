@@ -153,7 +153,8 @@ class ControllerFeature:
     fixed_vehicle_tune = not controller_uses_native_learning(selection)
     value = ('Off' if fixed_vehicle_tune or raw == b'1' else 'On') if valid else 'Invalid saved preference'
     reason = ('StarPilot uses the vehicle tune. ' + TUNING_GUIDANCE
-              if fixed_vehicle_tune else 'Saved for the next drive. Turn on if you want this controller to learn torque values.')
+              if fixed_vehicle_tune else 'Saved for the next drive. Turn on only if you want ' +
+              CHOICES[selection.mode == ControllerMode.STARPILOT] + ' to learn torque values.')
     return FeatureRow(LEARNING_OFF_KEY, 'Automatic Steering Learning', value, raw, ('Off', 'On') if valid else (),
                       available=valid and not fixed_vehicle_tune and self.authority('preferences'),
                       reason=reason if valid else 'Saved controller or learning preference is unreadable or invalid.',

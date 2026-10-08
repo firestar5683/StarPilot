@@ -211,5 +211,23 @@ class TestControllerFeature(unittest.TestCase):
     self.assertFalse(gateway.confirm(expired['intent'], 'session', b'generation'))
 
 
+  def test_native_and_galaxy_learning_help_names_actual_learning_controller(self):
+    import json
+    from openpilot.starpilot.lateral.controller_selection import replace_mode
+    self.cp = interfaces[TOYOTA.TOYOTA_RAV4_TSS2].get_non_essential_params(TOYOTA.TOYOTA_RAV4_TSS2)
+    for mode, label in ((ControllerMode.STANDARD, "Stock Controller"),
+                        (ControllerMode.STARPILOT, "StarPilot Controller")):
+      with self.subTest(mode=mode):
+        self.params.put(DOCUMENT_KEY, json.loads(replace_mode(None, self.cp, mode)), block=True)
+        state = self.owner.snapshot('torque', parked=False, system_long=False, lateral_context=False, metric=False)
+        learning_rows = [row for row in state.rows if row.key == 'ForceAutoTuneOff']
+        self.assertEqual(len(learning_rows), 1)
+        row = learning_rows[0]
+        self.assertEqual(row.label, 'Automatic Steering Learning')
+        self.assertTrue(row.available)
+        self.assertEqual(row.value, 'On')
+        self.assertEqual(row.reason, 'Saved for the next drive. Turn on only if you want ' + label + ' to learn torque values.')
+        self.assertEqual(_projection(row, 'torque')['reason'], row.reason)
+
 if __name__ == '__main__':
   unittest.main()
