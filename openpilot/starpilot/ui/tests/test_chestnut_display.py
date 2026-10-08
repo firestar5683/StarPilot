@@ -108,6 +108,7 @@ def test_offroad_selection_rechecks_without_a_ui_restart():
     assert artifacts.selected_gpu_status.call_count == 3
 
 
+@pytest.mark.parametrize('recv_frame', [0, 9, 20])
 @pytest.mark.parametrize('state,small_engaged,texture', [
   (ChestnutState.LOADING, False, 'white'),
   (ChestnutState.ACTIVE, False, 'green'),
@@ -116,7 +117,7 @@ def test_offroad_selection_rechecks_without_a_ui_restart():
   (ChestnutState.DISCONNECTED, True, 'crossed'),
   (ChestnutState.ACTIVE, True, 'green'),
 ])
-def test_native_gpu_icons_render_for_loading_active_and_small_engagement(state, small_engaged, texture):
+def test_native_gpu_icons_render_for_loading_active_and_small_engagement(state, small_engaged, texture, recv_frame):
   from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 
   icons = {key: SimpleNamespace(name=key, width=60, height=44) for key in ('white', 'green', 'orange', 'crossed')}
@@ -126,7 +127,7 @@ def test_native_gpu_icons_render_for_loading_active_and_small_engagement(state, 
                   _txt_wheel=SimpleNamespace(height=50))
   renderer._chestnut_alpha_filter = Mock()
   renderer._chestnut_alpha_filter.update.return_value = 1.
-  ui = SimpleNamespace(sm=SimpleNamespace(recv_frame={'selfdriveState': 20}), started_frame=10, chestnut_state=state)
+  ui = SimpleNamespace(sm=SimpleNamespace(recv_frame={'selfdriveState': recv_frame}), started_frame=10, chestnut_state=state)
   with patch('openpilot.selfdrive.ui.mici.onroad.hud_renderer.ui_state', ui), \
        patch('openpilot.selfdrive.ui.mici.onroad.hud_renderer.rl.get_time', return_value=10.), \
        patch('openpilot.selfdrive.ui.mici.onroad.hud_renderer.rl.draw_texture_ex') as draw:
