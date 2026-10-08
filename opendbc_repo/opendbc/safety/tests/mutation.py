@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -287,6 +288,138 @@ def enumerate_sites(input_source, preprocessed_file):
     out.append(site)
     counts[s.mutator] += 1
   return out, counts, build_incompatible_site_ids, txt
+
+
+def equivalent_division_candidates(source, sites, excluded_ids):
+  """Recognize only closed unsigned-int division used directly in a comparison.
+
+  Replacing one literal may preserve the entire quotient. An unchanged quotient
+  AND C type preserves the comparison for every value of its other operand.
+  This deliberately does not reason about variable expressions or conversions.
+  """
+  parser = ts.Parser(ts.Language(ts_c.language()))
+  tree = parser.parse(_prepare_for_parsing(source).encode())
+  literals = {}
+  stack = [tree.root_node]
+  while stack:
+    node = stack.pop()
+    if node.type == "number_literal":
+      literals[node.start_byte, node.end_byte] = node
+    stack.extend(node.children)
+
+  def unwrap(node):
+    while node is not None and node.type == "parenthesized_expression" and len(node.named_children) == 1:
+      node = node.named_children[0]
+    return node
+
+  def outer(node):
+    while node.parent is not None and node.parent.type == "parenthesized_expression":
+      node = node.parent
+    return node
+
+  def unsigned_literal(node):
+    node = unwrap(node)
+    if node is None or node.type != "number_literal":
+      return None
+    token = source[node.start_byte:node.end_byte]
+    # Only the U suffix; decimal/hex, with no signed/octal/long/type ambiguity.
+    if re.fullmatch(r"(?:0|[1-9][0-9]*|0[xX][0-9a-fA-F]+)[uU]", token) is None:
+      return None
+    parsed = _parse_int_literal(token)
+    return (node, parsed[0]) if parsed is not None and parsed[0] <= 0xFFFFFFFF else None
+
+  records = []
+  for site in sites:
+    if site.mutator != "boundary" or site.site_id in excluded_ids:
+      continue
+    literal = literals.get((site.op_start, site.op_end))
+    if literal is None:
+      continue
+    division = outer(literal).parent
+    if division is None or division.type != "binary_expression":
+      continue
+    operator = division.child_by_field_name("operator")
+    if operator is None or operator.type != "/":
+      continue
+    left, right = (unsigned_literal(division.child_by_field_name(field)) for field in ("left", "right"))
+    comparison = outer(division).parent
+    if left is None or right is None or comparison is None or comparison.type != "binary_expression":
+      continue
+    comparison_op = comparison.child_by_field_name("operator")
+    if comparison_op is None or comparison_op.type not in COMPARISON_OPERATOR_MAP:
+      continue
+    mutated = unsigned_literal(literal)
+    parsed_mutated = _parse_int_literal(site.mutated_op)
+    if mutated is None or parsed_mutated is None or parsed_mutated[2].lower() != "u" or parsed_mutated[0] > 0xFFFFFFFF:
+      continue
+    numerator, denominator = left[1], right[1]
+    next_numerator = parsed_mutated[0] if left[0] == literal else numerator
+    next_denominator = parsed_mutated[0] if right[0] == literal else denominator
+    if denominator == 0 or next_denominator == 0 or numerator // denominator != next_numerator // next_denominator:
+      continue
+    original = source[division.start_byte:division.end_byte]
+    offset = site.op_start - division.start_byte
+    if original[offset:offset + len(site.original_op)] != site.original_op:
+      raise RuntimeError("equivalence literal no longer matches preprocessed source")
+    changed = original[:offset] + site.mutated_op + original[offset + len(site.original_op):]
+    records.append({"site_id": site.site_id, "source": str(site.origin_file.relative_to(ROOT)),
+                    "line": site.origin_line, "mutator": site.mutator, "original_op": site.original_op,
+                    "mutated_op": site.mutated_op, "op_start": site.op_start, "op_end": site.op_end,
+                    "expression_start": division.start_byte, "expression_end": division.end_byte,
+                    "comparison_start": comparison.start_byte, "comparison_end": comparison.end_byte,
+                    "comparison_operator": comparison_op.type, "original_expression": original,
+                    "mutated_expression": changed, "c_type": "unsigned int", "value": numerator // denominator,
+                    "proof_kind": "closed-unsigned-division-v1"})
+  return records
+
+
+def division_proof_source(records):
+  lines = ["/* Compiler proof of equal closed unsigned-int division expressions. */"]
+  for record in records:
+    original, changed = record["original_expression"], record["mutated_expression"]
+    for expression in (original, changed):
+      lines.append(f'_Static_assert(__builtin_types_compatible_p(__typeof__({expression}), unsigned int), "unsigned int type");')
+      lines.append(f'_Static_assert(({expression}) == {record["value"]}U, "quotient value");')
+    lines.append(f'_Static_assert(({original}) == ({changed}), "equivalent quotient");')
+  return "\n".join(lines) + "\n"
+
+
+def prove_equivalent_divisions(source, sites, excluded_ids):
+  records = equivalent_division_candidates(source, sites, excluded_ids)
+  if not records:
+    return []
+  compiler = Path(shutil.which("cc") or "").resolve()
+  if not compiler.is_file():
+    raise RuntimeError("equivalence proof requires the actual C compiler")
+  proof = division_proof_source(records)
+  flags = ["-fPIC", "-g0", "-O0", "-DALLOW_DEBUG", "-Werror", "-std=gnu11", "-fno-builtin", "-fsyntax-only", "-x", "c", "-"]
+  result = subprocess.run([str(compiler), *flags], input=proof, cwd=ROOT, capture_output=True, text=True, timeout=30)
+  if result.returncode:
+    raise RuntimeError(f"equivalence compiler proof failed: {result.stderr[-4096:]}")
+  version = subprocess.run([str(compiler), "--version"], cwd=ROOT, capture_output=True, text=True, timeout=30)
+  target = subprocess.run([str(compiler), "-dumpmachine"], cwd=ROOT, capture_output=True, text=True, timeout=30)
+  if version.returncode or target.returncode or not version.stdout.strip() or not re.fullmatch(r"[a-zA-Z0-9_.+-]+", target.stdout.strip()):
+    raise RuntimeError("equivalence compiler identity is unavailable")
+  receipt = {"compiler_argv": [str(compiler), *flags], "compiler_version": version.stdout.strip(),
+             "compiler_target": target.stdout.strip(), "compiler_sha256": hashlib.sha256(compiler.read_bytes()).hexdigest(),
+             "compiler_flags": flags, "proof_source_sha256": hashlib.sha256(proof.encode()).hexdigest()}
+  return [{**record, **receipt} for record in records]
+
+
+def verify_equivalence_artifact(path):
+  """Reconstruct proofs from pinned real inputs, rather than trusting the claims."""
+  raw = path.read_bytes()
+  artifact = json.loads(raw)
+  with tempfile.TemporaryDirectory(prefix="mutation-equivalence-verify-") as directory:
+    sites, _, excluded, source = enumerate_sites(ROOT / SAFETY_C_REL, Path(directory) / "source.i")
+    if artifact["discovered"] != len(sites) or artifact["preprocessed_source_sha256"] != hashlib.sha256(source.encode()).hexdigest():
+      raise RuntimeError("equivalence discovery/source identity changed")
+    if {item["site_id"] for item in artifact["pruned_build_incompatible"]} != excluded:
+      raise RuntimeError("constant-context partition changed")
+    proofs = prove_equivalent_divisions(source, sites, excluded)
+    if artifact["proven_equivalent"] != proofs:
+      raise RuntimeError("equivalence partition or compiler proof changed")
+  return hashlib.sha256(raw).hexdigest()
 
 
 def _build_core_tests(catalog):
@@ -593,9 +726,13 @@ def require_full_baseline(catalog, sites, lib_path, verbose):
 
 
 def write_results_json(path: Path, *, discovered_sites, pruned_ids, results, site_targets,
-                       preprocessed_source: str, baseline_sec: float) -> None:
+                       preprocessed_source: str, baseline_sec: float, proven_equivalent=()) -> None:
   """Retain complete bounded diagnostics without changing mutation verdicts."""
-  expected_ids = {site.site_id for site in discovered_sites} - set(pruned_ids)
+  equivalent_ids = {item["site_id"] for item in proven_equivalent}
+  if (len(equivalent_ids) != len(proven_equivalent) or equivalent_ids & set(pruned_ids) or
+      not equivalent_ids <= {site.site_id for site in discovered_sites}):
+    raise RuntimeError("equivalence partition must contain unique, independently pruned sites")
+  expected_ids = {site.site_id for site in discovered_sites} - set(pruned_ids) - equivalent_ids
   result_ids = [result.site.site_id for result in results]
   if len(result_ids) != len(set(result_ids)) or set(result_ids) != expected_ids:
     raise RuntimeError("mutation result artifact requires one outcome for every executed site")
@@ -629,7 +766,8 @@ def write_results_json(path: Path, *, discovered_sites, pruned_ids, results, sit
   sources = {str(site.origin_file.relative_to(ROOT)): hashlib.sha256(site.origin_file.read_bytes()).hexdigest()
              for site in discovered_sites}
   artifact = {
-    "schema_version": 1,
+    "schema_version": 2,
+    "proven_equivalent": list(proven_equivalent),
     "safety_input_sha256": hashlib.sha256((ROOT / SAFETY_C_REL).read_bytes()).hexdigest(),
     "source_sha256": sources,
     "preprocessed_source_sha256": hashlib.sha256(preprocessed_source.encode()).hexdigest(),
@@ -671,7 +809,13 @@ def main():
   parser.add_argument("--list-only", action="store_true", help="list discovered candidates and exit")
   parser.add_argument("--verbose", action="store_true", help="print extra debug output")
   parser.add_argument("--results-json", type=Path, help="optional per-candidate result and diagnostic artifact")
+  parser.add_argument("--verify-equivalence-artifact", type=Path, help=argparse.SUPPRESS)
   args = parser.parse_args()
+  if args.verify_equivalence_artifact is not None:
+    if args.list_only or args.results_json is not None or args.max_mutants:
+      parser.error("equivalence verification is separate from execution")
+    print(verify_equivalence_artifact(args.verify_equivalence_artifact), flush=True)
+    return 0
   if args.list_only and args.results_json is not None:
     parser.error("--results-json requires a full mutation run")
 
@@ -700,6 +844,10 @@ def main():
     selected_site_ids = {s.site_id for s in sites}
     build_incompatible_ids &= selected_site_ids
     pruned_compile_sites = len(build_incompatible_ids)
+    proven_equivalent = prove_equivalent_divisions(preprocessed_source, sites, build_incompatible_ids)
+    equivalent_ids = {record["site_id"] for record in proven_equivalent}
+    sites = [site for site in sites if site.site_id not in equivalent_ids]
+    print(f"Proven equivalent: {len(proven_equivalent)} closed unsigned division mutants", flush=True)
     if pruned_compile_sites > 0:
       sites = [s for s in sites if s.site_id not in build_incompatible_ids]
       print(f"Pruned {pruned_compile_sites} build-incompatible mutants from constant-expression contexts", flush=True)
@@ -756,7 +904,7 @@ def main():
     if args.results_json is not None:
       write_results_json(args.results_json, discovered_sites=discovered_sites,
                          pruned_ids=build_incompatible_ids, results=results, site_targets=site_targets,
-                         preprocessed_source=preprocessed_source, baseline_sec=baseline_sec)
+                         preprocessed_source=preprocessed_source, baseline_sec=baseline_sec, proven_equivalent=proven_equivalent)
 
     survivors = sorted((r for r in results if r.outcome == "survived"), key=lambda r: r.site.site_id)
     if survivors:
@@ -783,6 +931,7 @@ def main():
     print(colorize("Mutation summary", ANSI_BOLD), flush=True)
     print(f"  discovered: {discovered_count}", flush=True)
     print(f"  pruned_build_incompatible: {pruned_compile_sites}", flush=True)
+    print(f"  proven_equivalent: {len(proven_equivalent)}", flush=True)
     print(f"  total: {len(sites)}", flush=True)
     print(f"  killed: {colorize(str(counts['killed']), ANSI_GREEN)}", flush=True)
     print(f"  survived: {colorize(str(counts['survived']), ANSI_RED)}", flush=True)
@@ -794,14 +943,6 @@ def main():
 
     if counts["infra_error"] > 0:
       return 2
-
-    # TODO: fix these surviving mutants and delete this block
-    known_survivors = {
-      ("opendbc/safety/lateral.h", 188, "boundary"),
-      ("opendbc/safety/lateral.h", 218, "boundary"),
-      ("opendbc/safety/lateral.h", 219, "boundary"),
-    }
-    survivors = [r for r in survivors if (str(r.site.origin_file.relative_to(ROOT)), r.site.origin_line, r.site.mutator) not in known_survivors]
 
     if survivors:
       return 1

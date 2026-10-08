@@ -172,7 +172,8 @@ class TestSafetyQualificationRunner(TestCase):
   def test_mutation_summary_exposes_survivors_even_if_upstream_exempts_them(self):
     output = "Found 4461 unique candidates\n  pruned_build_incompatible: 3\n  killed: 4455\n  survived: 2\n  infra_error: 1\n"
     self.assertEqual(qualification.parse_mutation_summary(output),
-                     {"candidates": 4461, "total": None, "killed": 4455, "survived": 2, "infra_error": 1, "pruned_build_incompatible": 3})
+                     {"candidates": 4461, "total": None, "killed": 4455, "survived": 2, "infra_error": 1, "pruned_build_incompatible": 3,
+                      "proven_equivalent": 0})
 
   def test_full_mutation_requires_matching_artifact_and_subprocess_success(self):
     log = "\n".join(("Found 1 unique candidates", "  pruned_build_incompatible: 0", "  total: 1",

@@ -139,6 +139,8 @@ def parse_mutation_summary(output):
   for label in ("total", "killed", "survived", "infra_error", "pruned_build_incompatible"):
     match = re.search(rf"^  {label}: (\d+)$", plain, re.MULTILINE)
     summary[label] = int(match.group(1)) if match else None
+  match = re.search(r"^  proven_equivalent: (\d+)$", plain, re.MULTILINE)
+  summary["proven_equivalent"] = int(match.group(1)) if match else 0
   return summary
 
 
@@ -160,11 +162,16 @@ def complete_mutation_artifact(path, summary, *, digest_out=None):
     artifact = json.loads(raw)
     results = artifact["results"]
     pruned = artifact["pruned_build_incompatible"]
+    equivalent = artifact.get("proven_equivalent", [])
+    version = artifact["schema_version"]
     target_sets = artifact["target_sets"]
     sources = artifact["source_sha256"]
     def digest(value):
       return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
-    if (type(artifact["schema_version"]) is not int or artifact["schema_version"] != 1 or
+    if (type(version) is not int or version not in (1, 2) or
+        (version == 1 and bool(equivalent)) or
+        (version == 2 and "proven_equivalent" not in artifact) or
+        type(equivalent) is not list or len(equivalent) != summary.get("proven_equivalent", 0) or
         type(artifact["discovered"]) is not int or artifact["discovered"] != summary["candidates"] or
         type(results) is not list or type(pruned) is not list or type(target_sets) is not list or
         len(pruned) != summary["pruned_build_incompatible"] or
@@ -186,10 +193,12 @@ def complete_mutation_artifact(path, summary, *, digest_out=None):
         return False
     ids = [item["site_id"] for item in results]
     pruned_ids = [item["site_id"] for item in pruned]
-    if (any(type(site_id) is not int for site_id in ids + pruned_ids) or
+    equivalent_ids = [item["site_id"] for item in equivalent]
+    if (any(type(site_id) is not int for site_id in ids + pruned_ids + equivalent_ids) or
         len(ids) != len(set(ids)) or len(pruned_ids) != len(set(pruned_ids)) or
-        set(ids) & set(pruned_ids) or len(ids) + len(pruned_ids) != artifact["discovered"] or
-        set(ids + pruned_ids) != set(range(artifact["discovered"]))):
+        len(equivalent_ids) != len(set(equivalent_ids)) or set(equivalent_ids) & set(ids + pruned_ids) or
+        set(ids) & set(pruned_ids) or len(ids) + len(pruned_ids) + len(equivalent_ids) != artifact["discovered"] or
+        set(ids + pruned_ids + equivalent_ids) != set(range(artifact["discovered"]))):
       return False
     for label in ("killed", "survived", "infra_error"):
       if sum(item["outcome"] == label for item in results) != summary[label]:
@@ -201,17 +210,26 @@ def complete_mutation_artifact(path, summary, *, digest_out=None):
                 item["source"] in sources and type(item["line"]) is int and item["line"] > 0 and
                 item["outcome"] in ("killed", "survived", "infra_error") and
                 (item["outcome"] == "infra_error" or (item["failure_kind"] is None and item["exit_code"] is None)) and
-                all(type(item[key]) is str and item[key] for key in ("mutator", "original_op", "mutated_op")) and
+                all(type(item[key]) is str and item[key] for key in ("mutator", "original_op")) and
+                type(item["mutated_op"]) is str and
+                (bool(item["mutated_op"]) or (item["mutator"] == "remove_negation" and item["original_op"] == "!")) and
                 all(type(item[key]) is str for key in ("details", "stderr_tail", "stdout_tail", "unittest_output_tail")) and
                 (item["failure_kind"] is None or type(item["failure_kind"]) is str) and
                 (item["exit_code"] is None or type(item["exit_code"]) is int)
                 for item in results) and
             all(item["source"] in sources and type(item["line"]) is int and item["line"] > 0
                 for item in pruned))
+    if valid and version == 2:
+      # Independent rediscovery binds ID/offset/context/source/compiler/value,
+      # including an empty claimed partition. Never reinterpret v1 survivors.
+      proof = subprocess.run([sys.executable, str(SAFETY_TESTS / "mutation.py"),
+                              "--verify-equivalence-artifact", str(path)],
+                             cwd=ROOT / "opendbc_repo", capture_output=True, text=True, timeout=60)
+      valid = proof.returncode == 0 and proof.stdout.strip() == hashlib.sha256(raw).hexdigest()
     if valid and digest_out is not None:
       digest_out.append(hashlib.sha256(raw).hexdigest())
     return valid
-  except (OSError, ValueError, TypeError, KeyError, IndexError, RecursionError, OverflowError):
+  except (OSError, ValueError, TypeError, KeyError, IndexError, RecursionError, OverflowError, subprocess.SubprocessError):
     return False
 
 
@@ -481,7 +499,7 @@ suite = unittest.TestLoader().discover('panda/tests', pattern='test_*.py')
           self.artifacts[artifact.name] = artifact_digest[0]
         counts = self.summary
         reconciled = (all(counts[key] is not None for key in ("candidates", "pruned_build_incompatible", "total", "killed", "survived", "infra_error")) and
-                      counts["candidates"] - counts["pruned_build_incompatible"] == counts["total"] ==
+                      counts["candidates"] - counts["pruned_build_incompatible"] - counts["proven_equivalent"] == counts["total"] ==
                       counts["killed"] + counts["survived"] + counts["infra_error"])
         return code == 0 and reconciled and artifact_valid and counts["survived"] == 0 and counts["infra_error"] == 0
       return code == 0 and self.summary["candidates"] is not None and self.summary["candidates"] > 0
