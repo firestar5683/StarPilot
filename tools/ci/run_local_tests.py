@@ -98,11 +98,16 @@ def main(arguments=None):
                             *(['--download'] if args.download else [])], cwd=ROOT, env=environment)
 
   if platform.system() == 'Darwin':
-    for prefix in ('/opt/homebrew', '/usr/local'):
-      directory = Path(prefix) / 'opt/coreutils/libexec/gnubin'
-      if directory.is_dir():
-        environment['PATH'] = str(directory) + os.pathsep + environment.get('PATH', '')
-        break
+    for formula in ('coreutils', 'gnu-sed'):
+      for prefix in ('/opt/homebrew', '/usr/local'):
+        directory = Path(prefix) / f'opt/{formula}/libexec/gnubin'
+        if directory.is_dir():
+          environment['PATH'] = str(directory) + os.pathsep + environment.get('PATH', '')
+          break
+    sed = shutil.which('sed', path=environment.get('PATH'))
+    if sed is None or 'GNU sed' not in subprocess.run(
+        [sed, '--version'], env=environment, capture_output=True, text=True, check=False).stdout:
+      parser.error('GNU sed is required for the updater checks; install gnu-sed (brew install gnu-sed on macOS)')
   if shutil.which('timeout', path=environment.get('PATH')) is None:
     parser.error('GNU timeout is required for the updater checks; install coreutils (brew install coreutils on macOS)')
   shared_memory = '/tmp' if platform.system() == 'Darwin' else '/dev/shm'

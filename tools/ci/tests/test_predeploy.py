@@ -11,6 +11,23 @@ from tools.ci import run_local_tests
 
 
 class TestPredeploy(unittest.TestCase):
+  def test_local_mac_rejects_bsd_sed_before_checks_run(self):
+    with tempfile.TemporaryDirectory() as temporary:
+      sed = Path(temporary) / 'sed'
+      sed.write_text('#!/bin/sh\necho "sed: illegal option -- -" >&2\nexit 1\n')
+      sed.chmod(0o755)
+      with (patch.dict(os.environ, {'SP_HOST_RUNTIME': '1'}),
+            patch.object(run_local_tests.platform, 'system', return_value='Darwin'),
+            patch.object(Path, 'is_dir', return_value=False),
+            patch.object(run_local_tests.shutil, 'which', return_value=str(sed)),
+            patch.object(run_local_tests, 'run') as invoke,
+            patch('sys.stderr') as stderr):
+        with self.assertRaises(SystemExit) as error:
+          run_local_tests.main(['--output', str(Path(temporary) / 'results')])
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn('brew install gnu-sed', ''.join(call.args[0] for call in stderr.write.call_args_list))
+        invoke.assert_not_called()
+
   def test_local_command_preserves_failure_and_uses_isolated_host(self):
     with tempfile.TemporaryDirectory() as temporary, \
          patch.dict(os.environ, {'SP_HOST_RUNTIME': '0'}), \
