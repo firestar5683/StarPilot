@@ -70,6 +70,36 @@ def test_actual_favorite_value_callback_reads_units_and_publishes_absolute_recei
   assert len(sender.events) == 1
 
 
+@pytest.mark.parametrize('metric', [False, True])
+def test_galaxy_speed_edit_reaches_native_callback_without_activation_or_stale_overwrite(native_session, metric):
+  from openpilot.starpilot.galaxy.favorites import FavoritesGateway
+  from openpilot.starpilot.galaxy.settings import AuthorityContext
+  _, session, ui, sender, _ = native_session
+  ui.params.put_bool('IsMetric', metric, block=True)
+  slots = default_slots()
+  slots[0].update(enabled=True, show_onroad=False, key=SET_SPEED, label='Cruise', value=30)
+  slots[1].update(enabled=True, show_onroad=True, key=BOOKMARK, label='Mark')
+  owner = session.favorites_owner
+  owner.save(slots, owner.snapshot().revision)
+  old_request = owner.snapshot().slots[0].request
+  gateway = FavoritesGateway(ui.params, NS(sample=lambda: AuthorityContext(False, None, None)))
+  try:
+    data = gateway.snapshot()
+    data['slots'][0]['value'] = 45
+    saved = gateway.save({'revision': data['revision'], 'slots': data['slots']}, session_valid=lambda: True)
+    assert saved['slots'] == [{**slots[0], 'value': 45}, *slots[1:]]
+    assert gateway.snapshot()['slots'] == saved['slots']
+    assert sender.events == []
+    assert not owner.invoke(old_request).success
+    assert sender.events == []
+    assert owner.invoke(owner.snapshot().slots[0].request).success
+    event = messaging.log_from_bytes(sender.events[-1][1])
+    assert str(event.slcAction.kind) == 'cruiseSet'
+    assert event.slcAction.controllerCruise.targetSpeedMps == pytest.approx(45 / 3.6 if metric else 45 * .44704)
+  finally:
+    gateway.close()
+
+
 def test_card_receipt_invokes_real_native_bookmark_and_quick_select_callback(native_session, monkeypatch):
   runtime, session, ui, _, calls = native_session
   source, publisher = WheelPublisher(ui.params), Publisher()

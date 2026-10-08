@@ -98,6 +98,31 @@ class TestFavoritesHttp(unittest.TestCase):
     self.assertEqual(self.request(payload={"revision": data["revision"], "slots": data["slots"]}, cookie=cookie)[0], 200)
     self.assertEqual(json.loads(Path(self.params.get_param_path(FAVORITE_SLOTS_PARAM)).read_text())[1], slots[1])
 
+  def test_speed_edit_persists_and_preserves_other_slots_with_revision_protection(self):
+    slots = default_slots()
+    slots[0] = {"enabled": True, "show_onroad": False, "key": SET_SPEED, "label": "Cruise", "value": 30}
+    slots[1] = {"enabled": True, "show_onroad": True, "key": BOOKMARK, "label": "Mark"}
+    slots[2] = {"enabled": False, "show_onroad": False, "key": "OldUnsupportedSetting", "label": "Keep me"}
+    path = Path(self.params.get_param_path(FAVORITE_SLOTS_PARAM))
+    path.write_text(json.dumps(slots))
+    cookie = self.login()
+    _, data, _ = self.request(cookie=cookie)
+    data["slots"][0]["value"] = 45
+    payload = {"revision": data["revision"], "slots": data["slots"]}
+    code, saved, _ = self.request(payload=payload, cookie=cookie)
+    self.assertEqual(code, 200)
+    expected = [{**slots[0], "value": 45}, *slots[1:]]
+    self.assertEqual(saved["slots"], expected)
+    self.assertEqual(json.loads(path.read_text()), expected)
+    code, reloaded, _ = self.request(cookie=cookie)
+    self.assertEqual(code, 200)
+    self.assertEqual(reloaded["slots"], expected)
+    self.assertNotEqual(reloaded["revision"], payload["revision"])
+    payload["slots"][0]["value"] = 60
+    self.assertEqual(self.request(payload=payload, cookie=cookie)[0], 409)
+    self.assertEqual(json.loads(path.read_text()), expected)
+    self.assertEqual(self.request("/api/favorites/action", {"key": SET_SPEED}, cookie)[0], 405)
+
 
 if __name__ == "__main__":
   unittest.main()

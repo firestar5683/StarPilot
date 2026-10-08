@@ -4,6 +4,10 @@ import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { GalaxySelect } from "./galaxy-select.js"
 
+function validSpeedValue(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 5 && value <= 145
+}
+
 export function validFavorites(data) {
   return !!data && typeof data.revision === "string" && !!data.revision && typeof data.editable === "boolean" &&
     typeof data.valid === "boolean" && Array.isArray(data.slots) && data.slots.length === 3 &&
@@ -34,7 +38,7 @@ export class FavoritesFeed {
   load() { return this.run() }
   update(index, patch) {
     if (!this.data?.editable || this.request || this.needsReload || !Number.isInteger(index) || index < 0 || index > 2 ||
-        !patch || Object.keys(patch).some((key) => !["key", "label", "enabled", "show_onroad"].includes(key))) return
+        !patch || Object.keys(patch).some((key) => !["key", "label", "enabled", "show_onroad", "value"].includes(key))) return
     const slots = this.data.slots.map((slot) => ({ ...slot }))
     if (Object.hasOwn(patch, "key")) {
       const option = this.data.options.find((entry) => entry.key === patch.key)
@@ -44,6 +48,7 @@ export class FavoritesFeed {
       if (!option) Object.assign(slots[index], { enabled: false, show_onroad: false })
     }
     Object.assign(slots[index], patch)
+    if (Object.hasOwn(patch, "value") && (slots[index].key !== "__starpilot_controller_action__:set_speed" || !validSpeedValue(patch.value))) return
     return this.run({ revision: this.data.revision, slots })
   }
   async run(body = null) {
@@ -109,7 +114,7 @@ export const FavoritesPage = {
     },
     speed(index, event) {
       const value = Number(event.target.value)
-      if (!Number.isFinite(value) || value < 5 || value > 145) return false
+      if (!validSpeedValue(value)) return false
       return this.feed.update(index, { value })
     },
     label(index, event) {
