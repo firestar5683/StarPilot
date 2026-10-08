@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 from opendbc.car.pedal import supported_pedal_detected
 import numpy as np
-from opendbc.car import get_safety_config, structs, uds
+from opendbc.can.dbc import DBC as CANDBC
+from opendbc.car import Bus, get_safety_config, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.honda.hondacan import CanBus
-from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HondaSafetyFlags, MANUAL_TRANS_CARS, MODIFIED_EPS_FW
+from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HondaSafetyFlags, MANUAL_TRANS_CARS, MODIFIED_EPS_FW, DBC
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.radar_interface import RadarInterface
@@ -77,7 +78,7 @@ class CarInterface(CarInterfaceBase):
 
     if candidate in MANUAL_TRANS_CARS and all(msg not in fingerprint[CAN.pt] for msg in (0x191, 0x1A3)):
       ret.transmissionType = TransmissionType.manual
-    elif 0x191 in fingerprint[CAN.pt] and candidate != CAR.ACURA_RDX:
+    elif 0x191 in fingerprint[CAN.pt] and "GEARBOX_CVT" in CANDBC(DBC[candidate][Bus.pt]).name_to_msg:
       # Traditional CVTs, gearshift position in GEARBOX_CVT
       ret.transmissionType = TransmissionType.cvt
     else:

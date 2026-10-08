@@ -92,3 +92,41 @@ def test_named_188_automatic_source_uses_real_gear_decoder(candidate):
     assert (frame[0], len(frame[1])) == (0x188, 6)
     state = ci.update([(1_000_000_000 + tick * 100_000_000, [frame])])
     assert state.gearShifter == expected
+
+
+@pytest.mark.parametrize("candidate", (CAR.HONDA_CRV_SA, CAR.ACURA_RDX))
+@pytest.mark.parametrize("unrelated_dlc", (0, 6, 8, 64))
+def test_unrelated_191_does_not_select_missing_cvt_decoder(candidate, unrelated_dlc):
+  messages = CANDBC(DBC[candidate][Bus.pt]).name_to_msg
+  assert "GEARBOX_CVT" not in messages
+  assert (messages["GEARBOX_AUTO"].address, messages["GEARBOX_AUTO"].size) == (0x188, 6)
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0].update({0x188: 6, 0x191: unrelated_dlc})
+  cp = CarInterface.get_params(candidate, fingerprint, [], False, False, False)
+  assert cp.transmissionType == structs.CarParams.TransmissionType.automatic
+  ci = CarInterface(cp)
+  ci.update([])
+  assert ci.CS.gearbox_msg == "GEARBOX_AUTO"
+  packer = CANPacker(DBC[candidate][Bus.pt])
+  for tick, (value, expected) in enumerate(((8, structs.CarState.GearShifter.drive), (2, structs.CarState.GearShifter.reverse))):
+    frame = packer.make_can_msg("GEARBOX_AUTO", CanBus(cp).pt, {"GEAR_SHIFTER": value})
+    state = ci.update([(1_000_000_000 + tick * 100_000_000, [frame])])
+    assert state.gearShifter == expected
+
+
+def test_real_191_cvt_source_still_selects_and_decodes_cvt():
+  candidate = CAR.HONDA_CIVIC
+  message = CANDBC(DBC[candidate][Bus.pt]).name_to_msg["GEARBOX_CVT"]
+  assert (message.address, message.size) == (0x191, 8)
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0][message.address] = message.size
+  cp = CarInterface.get_params(candidate, fingerprint, [], False, False, False)
+  assert cp.transmissionType == structs.CarParams.TransmissionType.cvt
+  ci = CarInterface(cp)
+  ci.update([])
+  assert ci.CS.gearbox_msg == "GEARBOX_CVT"
+  packer = CANPacker(DBC[candidate][Bus.pt])
+  for tick, (value, expected) in enumerate(((4, structs.CarState.GearShifter.drive), (2, structs.CarState.GearShifter.reverse))):
+    frame = packer.make_can_msg("GEARBOX_CVT", CanBus(cp).pt, {"GEAR_SHIFTER": value})
+    state = ci.update([(1_000_000_000 + tick * 100_000_000, [frame])])
+    assert state.gearShifter == expected
