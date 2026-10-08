@@ -67,12 +67,11 @@ class LongIndicator(Widget):
     plan = sm['longitudinalPlan']
     has_lead = self._sidebar_long_active is not False and sm.alive['longitudinalPlan'] and plan.hasLead
 
-    e2e = has_lead and plan.longitudinalPlanSource == log.LongitudinalPlan.LongitudinalPlanSource.e2e
     white_f, green_f = self._lead_car_filters
     if self._sidebar_long_active is False:
       white_f.x, green_f.x = 0.35, 0.0
-    white_alpha = white_f.update(0.0 if e2e else 0.9 if has_lead else 0.35)
-    green_alpha = green_f.update(float(e2e))
+    white_alpha = white_f.update(0.0 if has_lead else 0.35)
+    green_alpha = green_f.update(float(has_lead))
 
     white, green = self._txt_lead_car
     self._draw_centered(white, rect, 100, white_alpha * alpha)

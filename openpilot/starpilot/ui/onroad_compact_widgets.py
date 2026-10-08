@@ -12,7 +12,7 @@ import pyray as rl
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.ui.onroad_customization import offset as widget_offset, placement, rgba, widget_size
-from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadState, compact_sign_obscured_by_actions
+from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadState, compact_sign_obscured_by_actions, is_lane_change_notice
 from openpilot.starpilot.ui.onroad_curve import controlling as curve_controlling
 from openpilot.starpilot.ui.onroad_conditional import reason as conditional_reason, status as conditional_status, stop_active
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole
@@ -245,7 +245,7 @@ class MiciSidebarWidgets:
       if widget is not None and key != widget:
         continue
       position = placement(state.customization, "compact", key)
-      if not position["enabled"] or (position["x"] < sidebar.x and state.alert.size != AlertSize.NONE):
+      if not position["enabled"] or (position["x"] < sidebar.x and state.alert.size != AlertSize.NONE and not is_lane_change_notice(state.alert)):
         continue
       bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
       draw_widget_frame(bounds, state.customization, "compact", key)
@@ -253,7 +253,7 @@ class MiciSidebarWidgets:
 
   def render_personality(self, rect: rl.Rectangle, state: OnroadState) -> None:
     position = placement(state.customization, "compact", "following_distance")
-    if not position["enabled"] or (position["x"] < rect.x + rect.width - 60 and state.alert.size != AlertSize.NONE):
+    if not position["enabled"] or (position["x"] < rect.x + rect.width - 60 and state.alert.size != AlertSize.NONE and not is_lane_change_notice(state.alert)):
       return
     bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
     draw_widget_frame(bounds, state.customization, "compact", "following_distance")
@@ -298,7 +298,7 @@ class MiciSidebarWidgets:
   def _confidence_ball(self, rect: rl.Rectangle, state: OnroadState) -> None:
     radius = 18
     center_x, center_y = rect.x + rect.width / 2, rect.y + rect.height / 2
-    active = (state.lateral_active or state.longitudinal_active) and state.alert.size == AlertSize.NONE
+    active = (state.lateral_active or state.longitudinal_active) and (state.alert.size == AlertSize.NONE or is_lane_change_notice(state.alert))
     stamp = state.stock_confidence_source_stamp_ns if state.stock_confidence_source_fresh else None
     if (stamp is None or state.model_confidence is None or state.stock_confidence_drive_frame != self._confidence_drive_frame or
         self._confidence_stamp_ns is not None and (stamp < self._confidence_stamp_ns or stamp - self._confidence_stamp_ns > 200_000_000)):

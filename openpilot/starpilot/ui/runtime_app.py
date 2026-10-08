@@ -64,7 +64,7 @@ from openpilot.starpilot.ui.bluetooth_status import BluetoothStatusSource
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
 from openpilot.starpilot.ui.network_panel import NetworkPanelBridge
 from openpilot.starpilot.ui.slc_action_dispatch import SlcActionDispatcher
-from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, SlcUiRequest, is_personality_notice
+from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, SlcUiRequest, is_personality_notice, is_lane_change_notice
 from openpilot.starpilot.ui.onroad_favorites import OnroadFavorites
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
 from openpilot.starpilot.favorites.owner import FavoritesOwner
@@ -295,7 +295,7 @@ class StarShellSession:
 
   def _render_personality(self, rect, state):
     indicator = self.camera_owner._long_indicator
-    indicator.set_should_draw(state.alert.size == AlertSize.NONE)
+    indicator.set_should_draw(state.alert.size == AlertSize.NONE or is_lane_change_notice(state.alert))
     indicator.render_sidebar(rect, personality=state.personality,
                              longitudinal_active=state.longitudinal_active, traffic_mode=state.traffic_mode)
 
