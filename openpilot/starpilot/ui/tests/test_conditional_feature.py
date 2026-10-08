@@ -4,6 +4,7 @@ from openpilot.starpilot.ui.presentation import BitmapFonts
 
 
 from pathlib import Path
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import os
 import tempfile
 import unittest
+import warnings
 from unittest.mock import patch
 
 from openpilot.common.params import Params
@@ -19,9 +21,11 @@ from opendbc.car.hyundai.values import CAR, HyundaiFlags
 from openpilot.starpilot.conditional_mode.button_actions import MEDIA_KEYS
 from openpilot.starpilot.ui.wheel_feature import PREFIX as BUTTON_PREFIX
 from openpilot.starpilot.conditional_mode.preferences import MPH_TO_MPS, SavedPreferences, decode_preferences, encode_preferences
-from openpilot.starpilot.conditional_mode.actions import commit, commit_manual, stock_document
+from openpilot.starpilot.conditional_mode.actions import commit, commit_manual, commit_mode, stock_document
+from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner, read_mode_sources
+from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
-from openpilot.starpilot.conditional_mode.manual_saved import SavedCodes, decode as decode_manual, encode as encode_manual
+from openpilot.starpilot.conditional_mode.manual_saved import KEY as MANUAL_KEY, SavedCodes, decode as decode_manual, encode as encode_manual
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeaturePage, FeatureRow, FeatureSettingsRequest, row_change
 from openpilot.starpilot.ui import feature_settings_compact as compact
@@ -49,6 +53,126 @@ class ConditionalFeatureTests(unittest.TestCase):
                                       ("conditional", "preferences", "parked_preferences"),
                                       vehicle_fingerprint=lambda: getattr(self.cp, "carFingerprint", None),
                                       vehicle_params=lambda: self.cp)
+
+  def test_four_saved_modes_round_trip_through_actual_baseline_owner(self):
+    original = SavedPreferences(cem=replace(SavedPreferences().cem, speed_mps=13.0))
+    self.params.put("ConditionalModeConfig", json.loads(encode_preferences(original)), block=True)
+    manual = encode_manual(SavedCodes())
+    Path(self.params.get_param_path(MANUAL_KEY)).write_bytes(manual)
+    drive = SelfdriveD.__new__(SelfdriveD)
+    drive.params, drive.CP = self.params, self.cp
+    drive.conditional_settings = ConditionalSettingsOwner(self.params)
+    drive.conditional_replay = False
+    now = 1_000_000_000
+    for value, choice, baseline in (("Experimental", ModeChoice.STOCK, True), ("Chill", ModeChoice.STOCK, False),
+                                    ("Conditional Experimental", ModeChoice.CEM, False), ("Conditional Chill", ModeChoice.CCM, False)):
+      row = self.row("conditional:mode")
+      self.assertEqual(row.choices, ("Chill", "Experimental", "Conditional Experimental", "Conditional Chill"))
+      self.assertTrue(self.owner.apply(replace(required_change(row), value=value)))
+      self.assertEqual(self.row("conditional:mode").value, value)
+      saved = decode_preferences(Path(self.params.get_param_path("ConditionalModeConfig")).read_bytes())
+      self.assertEqual(saved.mode, choice)
+      self.assertEqual(saved.cem, original.cem)
+      self.assertEqual(saved.ccm, original.ccm)
+      self.assertEqual(Path(self.params.get_param_path(MANUAL_KEY)).read_bytes(), manual)
+      drive.refresh_saved_driving_mode(now)
+      drive.update_conditional_mode(None)
+      self.assertEqual(drive.experimental_mode, baseline)
+      now += 100_000_000
+    self.assertTrue(self.owner.apply(replace(required_change(self.row("conditional:mode")), value="Experimental")))
+    self.params.put_bool("SafeMode", True, block=True)
+    drive.refresh_saved_driving_mode(now)
+    drive.update_conditional_mode(None)
+    self.assertFalse(drive.experimental_mode)
+
+  def test_actual_firmware_data_round_trip_and_changed_firmware_rejects_request(self):
+    from opendbc.car.honda.fingerprints import FW_VERSIONS
+    from opendbc.car.honda.values import CAR as HONDA
+    (ecu, address, subaddress), versions = next(iter(FW_VERSIONS[HONDA.HONDA_CIVIC_BOSCH].items()))
+    firmware = self.cp.init("carFw", 1)[0]
+    firmware.ecu, firmware.address, firmware.subAddress = ecu, address, subaddress or 0
+    firmware.fwVersion, firmware.brand = versions[0], "honda"
+    self.assertIsInstance(self.cp.to_dict()["carFw"][0]["fwVersion"], bytes)
+    row = self.row("conditional:mode")
+    self.assertIsNotNone(row.capability)
+    for malformed in ((), (self.cp.carFingerprint,), (self.cp.carFingerprint, "invalid")):
+      self.assertFalse(self.owner.apply(replace(required_change(row), value="Experimental", capability=malformed)))
+    self.assertTrue(self.owner.apply(replace(required_change(row), value="Experimental")))
+    self.assertEqual(self.row("conditional:mode").value, "Experimental")
+    self.assertTrue(self.owner.apply(replace(required_change(self.row("conditional:mode")), value="Chill")))
+    request = replace(required_change(self.row("conditional:mode")), value="Experimental")
+    firmware.fwVersion = versions[0] + b"changed"
+    self.assertFalse(self.owner.apply(request))
+    self.assertFalse(self.params.get_bool("ExperimentalMode"))
+    # Hashing copies the full CP instead of marking the live builder serialized.
+    with warnings.catch_warnings():
+      warnings.simplefilter("error", UserWarning)
+      self.cp.to_bytes()
+
+  def test_mode_request_rejects_changed_baseline_safe_mode_and_final_cp(self):
+    for change in ("baseline", "safe", "cp"):
+      self.params.put_bool("ExperimentalMode", False, block=True)
+      self.params.put_bool("SafeMode", False, block=True)
+      self.cp.carVin = "VIN1"
+      request = replace(required_change(self.row("conditional:mode")), value="Experimental")
+      if change == "baseline":
+        self.params.put_bool("ExperimentalMode", True, block=True)
+      elif change == "safe":
+        self.params.put_bool("SafeMode", True, block=True)
+      else:
+        self.cp.carVin = "VIN2"
+      before = self.params.get("ConditionalModeConfig")
+      self.assertFalse(self.owner.apply(request), change)
+      self.assertEqual(self.params.get("ConditionalModeConfig"), before)
+    self.params.put_bool("SafeMode", False, block=True)
+    self.cp.openpilotLongitudinalControl = False
+    row = self.row("conditional:mode")
+    self.assertNotIn("Experimental", row.choices)
+    self.assertFalse(self.owner.apply(replace(required_change(row), value="Experimental")))
+    Path(self.params.get_param_path("ExperimentalMode")).write_bytes(b"01")
+    self.assertFalse(self.row("conditional:mode").available)
+    self.assertEqual(Path(self.params.get_param_path("ExperimentalMode")).read_bytes(), b"01")
+
+  def test_mode_second_write_failure_restores_both_sources_and_reports_rollback_failure(self):
+    self.params.put_bool("ExperimentalMode", False, block=True)
+    old = self.params.get("ConditionalModeConfig")
+    baseline_path = Path(self.params.get_param_path("ExperimentalMode"))
+    original_replace = os.replace
+    attempts = 0
+
+    def fail_second(source, destination):
+      nonlocal attempts
+      attempts += 1
+      if attempts == 2:
+        self.assertEqual(read_mode_sources(self.params), ((b"", False), (b"", False), (b"", False)))
+        raise OSError("second replacement failed")
+      return original_replace(source, destination)
+
+    with patch("openpilot.starpilot.conditional_mode.actions.os.replace", side_effect=fail_second):
+      result = commit_mode(self.params, stock_document(), b"1", expected=old, expected_baseline=b"0",
+                           expected_units=None, expected_safe=None, authorized=lambda: True)
+    self.assertFalse(result.committed)
+    self.assertFalse(result.verified)
+    self.assertFalse(result.rollback_failed)
+    self.assertEqual(self.params.get("ConditionalModeConfig"), old)
+    self.assertEqual(baseline_path.read_bytes(), b"0")
+    attempts = 0
+
+    def fail_write_and_rollback(source, destination):
+      nonlocal attempts
+      attempts += 1
+      if attempts >= 2:
+        raise OSError("replacement and restoration failed")
+      return original_replace(source, destination)
+
+    self.params.put("ConditionalModeConfig", json.loads(encode_preferences(SavedPreferences())), block=True)
+    old = Path(self.params.get_param_path("ConditionalModeConfig")).read_bytes()
+    with patch("openpilot.starpilot.conditional_mode.actions.os.replace", side_effect=fail_write_and_rollback):
+      result = commit_mode(self.params, stock_document(), b"1", expected=old, expected_baseline=b"0",
+                           expected_units=None, expected_safe=None, authorized=lambda: True)
+    self.assertFalse(result.committed)
+    self.assertFalse(result.verified)
+    self.assertTrue(result.rollback_failed)
 
   def test_saved_mode_and_conditions_can_change_during_drive_with_exact_source(self):
     self.parked = False
@@ -128,7 +252,7 @@ class ConditionalFeatureTests(unittest.TestCase):
     self.assertEqual(saved.mode, ModeChoice.STOCK)
     self.assertNotEqual(saved.cem.signal_lane_detection, decode_preferences(original).cem.signal_lane_detection)
     mode = self.row("conditional:mode")
-    self.assertTrue(self.owner.apply(FeatureSettingsRequest(mode.key, mode.source, "Chill", dependencies=mode.dependencies)))
+    self.assertTrue(self.owner.apply(replace(required_change(mode), value="Chill")))
     self.assertEqual(decode_preferences(path.read_bytes()).mode, ModeChoice.STOCK)
 
   def test_core_configuration_without_car_params_keeps_media_vehicle_bound(self):

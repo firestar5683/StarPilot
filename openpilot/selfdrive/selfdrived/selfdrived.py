@@ -38,7 +38,7 @@ from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
 from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner, SwitchbackCooldown, ModeActionOwner
 from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
-from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
+from openpilot.starpilot.conditional_mode.runtime_settings import (ConditionalSettingsOwner, experimental_requested, read_mode_sources)
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.nostalgia import aol_no_entry, paddle_cancel, physical_cancel, saved_enabled as nostalgia_saved_enabled
@@ -795,9 +795,9 @@ class SelfdriveD:
     self.events_prev = self.events.names.copy()
 
   def update_conditional_mode(self, CS):
-    # The Params thread owns the stock request; only this thread publishes the
-    # effective choice. Conditional proposals cannot race a Params assignment.
-    self.experimental_mode = self.requested_experimental_mode
+    # Conditional document and baseline come from one accepted owner snapshot;
+    # only this thread publishes their effective choice.
+    self.experimental_mode = self.requested_experimental_mode if not self.conditional_replay else False
     self.conditional_result = ConsumerResult(self.experimental_mode, False, 'unavailable')
     if not self.conditional_replay:
       return
@@ -813,6 +813,10 @@ class SelfdriveD:
     verdict = self.conditional_settings.verdict(snapshot, now_mono_ns=now_ns, drive_id=drive_id)
     configured = (verdict.status == 'ready' and verdict.selection is not None and
                   snapshot is not None and verdict.revision == snapshot.revision)
+    baseline = bool(configured and experimental_requested(snapshot.experimental_raw, snapshot.experimental_readable,
+                                                         snapshot.safe_mode_raw, True, self.CP))
+    self.requested_experimental_mode = baseline
+    self.experimental_mode = baseline
     required = ('deviceState', 'modelV2', 'carControl')
     fresh = all(self.sm.seen[service] and self.sm.valid[service] and self.sm.alive[service] and
                 0 < self.sm.logMonoTime[service] <= now_ns and
@@ -827,7 +831,7 @@ class SelfdriveD:
       self.sm['slcState'], now_ns=now_ns, now_boot_ns=boot_ns, sample_skew_ns=skew_ns,
       message_ns=int(self.sm.logMonoTime['slcState']), receipt_ns=int(self.sm.recv_time['slcState'] * 1e9),
       drive_id=drive_id, model_ns=int(self.sm.logMonoTime['modelV2']), car_state_ns=self.aol_car_state_log_ns,
-      authority=authority, stock_experimental=self.requested_experimental_mode,
+      authority=authority, stock_experimental=baseline,
       choice=verdict.selection.choice if configured else ModeChoice.STOCK,
       settings_fingerprint=settings_fingerprint(snapshot) if configured else None)
     self.experimental_mode = result.experimental
@@ -891,6 +895,14 @@ class SelfdriveD:
 
     self.CS_prev = CS
 
+  def refresh_saved_driving_mode(self, now_ns: int):
+    if self.conditional_replay:
+      assert self.conditional_settings is not None
+      self.conditional_settings.refresh(now_ns, force=True, wait=True)
+    else:
+      _, (baseline, readable), (safe, safe_readable) = read_mode_sources(self.params, wait=True)
+      self.requested_experimental_mode = experimental_requested(baseline, readable, safe, safe_readable, self.CP)
+
   def params_thread(self, evt):
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
@@ -900,9 +912,7 @@ class SelfdriveD:
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
       self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
       self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
-      self.requested_experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
-      if self.conditional_settings is not None:
-        self.conditional_settings.refresh(time.monotonic_ns())
+      self.refresh_saved_driving_mode(time.monotonic_ns())
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 

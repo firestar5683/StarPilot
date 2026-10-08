@@ -6,6 +6,8 @@ from unittest.mock import patch
 import json
 import tempfile
 import unittest
+import os
+from pathlib import Path
 
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
@@ -16,7 +18,11 @@ from openpilot.starpilot.conditional_mode.policy import ManualIntent, ModeChoice
 from openpilot.starpilot.conditional_mode.preferences import SavedPreferences, encode_preferences, manual_for_drive
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner, DOCUMENT_KEY
 from openpilot.starpilot.conditional_mode.status import StatusPublisher, observation, settings_fingerprint
-from openpilot.starpilot.conditional_mode.tests.test_projection import BOOT, CP, MONO, FakeSubMaster, serialized_scene
+from openpilot.starpilot.conditional_mode.tests.test_projection import BOOT, CP, MONO, FakeSubMaster, serialized_scene, owner_context
+from opendbc.car.honda.interface import CarInterface
+from opendbc.car.honda.values import CAR
+from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
+from openpilot.starpilot.ui.feature_settings_state import FeaturePage, row_change
 
 
 class TestModeTransport(unittest.TestCase):
@@ -32,8 +38,8 @@ class TestModeTransport(unittest.TestCase):
     self.produce(MONO)
     self.consume(None, MONO)
 
-  def produce(self, now, *, intent=ManualIntent.FORCE_EXPERIMENTAL, lat=False, long=True, outer=None):
-    sm = FakeSubMaster(serialized_scene(stamp=BOOT + now - MONO - 2_000_000), now - 2_000_000)
+  def produce(self, now, *, intent=ManualIntent.FORCE_EXPERIMENTAL, lat=False, long=True, outer=None, scene=None, context=None):
+    sm = FakeSubMaster(serialized_scene(stamp=BOOT + now - MONO - 2_000_000, **(scene or {})), now - 2_000_000)
     control = messaging.new_message('carControl')
     control.carControl.longActive = long
     control.carControl.latActive = lat
@@ -47,6 +53,7 @@ class TestModeTransport(unittest.TestCase):
       drive_id=self.drive_id,
       settings_owner=self.owner,
       manual=manual_for_drive(intent, self.drive_id, self.drive_id + 1),
+      owner_context=context,
       selected_t_follow_s=1.45,
       selected_t_follow_observed_mono_ns=now - 2_000_000,
     )
@@ -73,6 +80,96 @@ class TestModeTransport(unittest.TestCase):
     }
     values.update(changes)
     return self.consumer.sample(payload, **values)
+
+  def test_shared_chill_selector_preserves_committed_stop_in_actual_selfdrived(self):
+    cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH)
+    cp.openpilotLongitudinalControl = True
+    ui = FeatureSettingsOwner(self.params, lambda group: group == 'preferences',
+                              vehicle_fingerprint=lambda: cp.carFingerprint, vehicle_params=lambda: cp)
+    drive = SelfdriveD.__new__(SelfdriveD)
+    drive.params, drive.CP = self.params, cp
+    drive.conditional_replay = True
+    drive.conditional_settings, drive.conditional_consumer = self.owner, self.consumer
+    drive.conditional_car_state_valid = drive.initialized = drive.enabled = True
+    drive.aol_replay = False
+    scene = {'speed': 10.0, 'horizon': 40.0, 'lead_present': False}
+    for tick in range(1, 31):
+      now = MONO + tick * 50_000_000
+      event, _, _ = self.produce(now, intent=ManualIntent.NONE, scene=scene, context=owner_context(now - 2_000_000))
+      self.consume(event, now)
+    self.assertTrue(self.host.projector.stop_detector.committed)
+    row = next(row for row in ui.snapshot(FeaturePage.CONDITIONAL, parked=True, system_long=True,
+                                         lateral_context=False, metric=False).rows if row.key == 'conditional:mode')
+    request = row_change(row)
+    assert request is not None
+    accepted = self.owner.refresh(MONO + 30 * 50_000_000, force=True)
+
+    def model_tick(tick, choice, after_verdict=None):
+      now = MONO + tick * 50_000_000
+      event, proposal, sm = self.produce(now, intent=ManualIntent.FORCE_CHILL, scene=scene,
+                                        context=owner_context(now - 2_000_000))
+      self.assertIs(proposal.choice, choice)
+      self.assertEqual(proposal.decision.reason.value, 'cem_stop')
+      self.assertTrue(event.slcState.conditionalMode.hasOverride)
+      device = messaging.new_message('deviceState', valid=True)
+      device.deviceState.started = True
+      device.deviceState.startedMonoTime = self.drive_id
+      sm.payloads['deviceState'] = messaging.log_from_bytes(device.to_bytes()).deviceState
+      sm.payloads['slcState'] = messaging.log_from_bytes(event.as_reader().as_builder().to_bytes()).slcState
+      for service in ('deviceState', 'slcState'):
+        sm.logMonoTime[service] = now
+        sm.recv_time[service] = now / 1e9
+        sm.seen[service] = sm.alive[service] = sm.valid[service] = True
+      drive.sm, drive.aol_car_state_log_ns = sm, now - 2_000_000
+      original_verdict = self.owner.verdict
+
+      def interleaved_verdict(snapshot, **kwargs):
+        verdict = original_verdict(snapshot, **kwargs)
+        if after_verdict is not None:
+          after_verdict()
+        return verdict
+
+      with patch('openpilot.selfdrive.selfdrived.selfdrived.paired_clocks_ns', return_value=(now, BOOT + now - MONO, 1000)), \
+           patch.object(self.owner, 'verdict', side_effect=interleaved_verdict):
+        drive.update_conditional_mode(sm['carState'])
+      self.assertTrue(drive.conditional_result.accepted)
+      self.assertTrue(drive.experimental_mode)
+      self.assertTrue(self.host.projector.stop_detector.committed)
+
+    original_replace = os.replace
+    sampled = False
+
+    def sample_between_pair_replacements(source, destination):
+      nonlocal sampled
+      if Path(destination).name == 'ExperimentalMode':
+        sampled = True
+        # commit_mode holds the actual writer lock with its document already
+        # replaced. A model tick must keep the prior accepted pair and stop.
+        now = MONO + 31 * 50_000_000
+        self.assertIs(self.owner.refresh(now, force=True), accepted)
+        self.assertEqual(self.owner.current.verified_mono_ns, accepted.verified_mono_ns)
+        model_tick(31, ModeChoice.CEM)
+      return original_replace(source, destination)
+
+    with patch('openpilot.starpilot.conditional_mode.actions.os.replace', side_effect=sample_between_pair_replacements):
+      self.assertTrue(ui.apply(replace(request, value='Chill')))
+    self.assertTrue(sampled)
+    self.assertFalse(self.params.get_bool('ExperimentalMode'))
+    drive.refresh_saved_driving_mode(MONO + 32 * 50_000_000)
+    def refresh_experimental_between_main_snapshot_and_baseline():
+      row = next(row for row in ui.snapshot(FeaturePage.CONDITIONAL, parked=True, system_long=True,
+                                           lateral_context=False, metric=False).rows if row.key == 'conditional:mode')
+      change = row_change(row)
+      assert change is not None
+      self.assertTrue(ui.apply(replace(change, value='Experimental')))
+      drive.refresh_saved_driving_mode(MONO + 32 * 50_000_000)
+      self.assertEqual(self.owner.current.experimental_raw, b'1')
+
+    model_tick(32, ModeChoice.STOCK, after_verdict=refresh_experimental_between_main_snapshot_and_baseline)
+    self.assertFalse(drive.requested_experimental_mode)  # Main consumed its captured Chill pair.
+    drive.refresh_saved_driving_mode(MONO + 33 * 50_000_000)
+    model_tick(33, ModeChoice.STOCK)
+    self.assertTrue(drive.requested_experimental_mode)
 
   def test_both_directions_and_independent_longitudinal_authority(self):
     now = MONO + 50_000_000
@@ -156,6 +253,8 @@ class TestModeTransport(unittest.TestCase):
     drive.requested_experimental_mode = True
     drive.update_conditional_mode(None)
     self.assertTrue(drive.experimental_mode)
+    self.params.put_bool('ExperimentalMode', True, block=True)
+    self.owner.refresh(MONO, force=True)
     drive.conditional_replay = True
     drive.conditional_settings = self.owner
     drive.conditional_consumer = self.consumer

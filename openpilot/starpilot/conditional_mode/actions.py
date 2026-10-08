@@ -113,6 +113,7 @@ class CommitResult:
   committed: bool
   verified: bool
   manual_cleared: bool = False
+  rollback_failed: bool = False
 
 
 def commit(params, raw: bytes, expected: bytes | None, expected_units: bytes | None,
@@ -177,6 +178,94 @@ def commit(params, raw: bytes, expected: bytes | None, expected_units: bytes | N
     if temporary is not None:
       try:
         os.unlink(temporary)
+      except OSError:
+        pass
+
+
+
+def commit_mode(params, raw: bytes, baseline: bytes, *, expected: bytes | None, expected_baseline: bytes | None,
+                expected_units: bytes | None, expected_safe: bytes | None, authorized: Callable[[], bool]) -> CommitResult:
+  """Commit the selector's document and baseline together for locked readers.
+
+  Params.put and ordinary document commits use this same lock. If either
+  replacement fails, restore both original sources before releasing it.
+  """
+  if baseline not in (b"0", b"1") or expected_baseline not in (None, b"0", b"1") or expected_safe not in (None, b"0", b"1"):
+    return CommitResult(False, False)
+  try:
+    if encode_preferences(decode_preferences(raw)) != raw or not authorized():
+      return CommitResult(False, False)
+  except PreferenceError:
+    return CommitResult(False, False)
+
+  def sources_match() -> bool:
+    return all(read_saved(params, key, limit) == (source, True) for key, limit, source in (
+      (DOCUMENT_KEY, MAX_DOCUMENT_BYTES, expected), ("ExperimentalMode", 8, expected_baseline),
+      ("IsMetric", 8, expected_units), ("SafeMode", 8, expected_safe)))
+
+  temporary: list[str] = []
+  lock_fd = None
+  replaced = False
+  try:
+    destinations = (Path(params.get_param_path(DOCUMENT_KEY)), Path(params.get_param_path("ExperimentalMode")))
+    root = destinations[0].parent.parent
+
+    def stage(value: bytes | None) -> str | None:
+      if value is None:
+        return None
+      with tempfile.NamedTemporaryFile(prefix=".tmp_conditional_mode_", dir=root, delete=False) as source:
+        temporary.append(source.name)
+        source.write(value)
+        source.flush()
+        os.fsync(source.fileno())
+        return source.name
+
+    staged = (stage(raw), stage(baseline))
+    rollback = (stage(expected), stage(expected_baseline))
+    lock_fd = os.open(root / ".lock", os.O_CREAT | os.O_RDONLY, 0o775)
+    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if not authorized() or not sources_match():
+      return CommitResult(False, False)
+    directory_fd = os.open(destinations[0].parent, os.O_RDONLY)
+    try:
+      try:
+        for source, destination in zip(staged, destinations, strict=True):
+          assert source is not None
+          os.replace(source, destination)
+          replaced = True
+        os.fsync(directory_fd)
+        if not authorized() or read_saved(params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES) != (raw, True) or \
+           read_saved(params, "ExperimentalMode", 8) != (baseline, True):
+          raise OSError("Mode commit verification failed")
+        return CommitResult(True, True)
+      except (OSError, ValueError, TypeError):
+        if not replaced:
+          return CommitResult(False, False)
+        restored = True
+        for source, destination in zip(rollback, destinations, strict=True):
+          try:
+            if source is None:
+              destination.unlink(missing_ok=True)
+            else:
+              os.replace(source, destination)
+          except OSError:
+            restored = False
+        try:
+          os.fsync(directory_fd)
+          restored = restored and sources_match()
+        except OSError:
+          restored = False
+        return CommitResult(False, False, rollback_failed=not restored)
+    finally:
+      os.close(directory_fd)
+  except (OSError, ValueError, TypeError):
+    return CommitResult(False, False)
+  finally:
+    if lock_fd is not None:
+      os.close(lock_fd)
+    for source in temporary:
+      try:
+        os.unlink(source)
       except OSError:
         pass
 

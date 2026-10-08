@@ -1,6 +1,9 @@
 """Actual temporary-Params receipts for the read-only conditional owner."""
 
 from dataclasses import replace
+import fcntl
+import os
+from types import SimpleNamespace
 import json
 from pathlib import Path
 import tempfile
@@ -12,7 +15,7 @@ from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.preferences import CEMOptions, SavedPreferences, encode_preferences
 from openpilot.starpilot.conditional_mode.runtime_settings import (
   DOCUMENT_KEY, REFRESH_NS, SAFE_MODE_KEY, ConditionalSettingsOwner,
-  DocumentState, SafeModeState,
+  DocumentState, SafeModeState, experimental_requested, read_mode_sources,
 )
 
 
@@ -28,6 +31,38 @@ class ConditionalRuntimeSettingsTest(unittest.TestCase):
 
   def saved(self, mode: ModeChoice = ModeChoice.CEM) -> SavedPreferences:
     return SavedPreferences(mode=mode, cem=replace(CEMOptions(), speed_mps=10.0))
+
+  def test_mode_reader_excludes_inflight_pair_and_rejects_invalid_baseline(self):
+    self.params.put_bool("ExperimentalMode", True, block=True)
+    self.params.put_bool("SafeMode", False, block=True)
+    cp = SimpleNamespace(openpilotLongitudinalControl=True, passive=False)
+    first = self.owner.refresh(1_000_000_000)
+    self.assertTrue(experimental_requested(first.experimental_raw, first.experimental_readable,
+                                           first.safe_mode_raw, True, cp))
+    lock = os.open(self.path(DOCUMENT_KEY).parent.parent / ".lock", os.O_RDONLY)
+    try:
+      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      self.assertEqual(read_mode_sources(self.params), ((b"", False), (b"", False), (b"", False)))
+      deferred = self.owner.refresh(1_100_000_000, force=True)
+      self.assertIs(deferred, first)
+      self.assertEqual(deferred.verified_mono_ns, 1_000_000_000)
+      self.assertTrue(self.owner.affirm(deferred, now_mono_ns=1_100_000_000))
+      expired = self.owner.refresh(2_000_000_001, force=True)
+      self.assertIs(expired, first)
+      self.assertFalse(self.owner.affirm(expired, now_mono_ns=2_000_000_001))
+    finally:
+      os.close(lock)
+    recovered = self.owner.refresh(1_200_000_000, force=True)
+    self.assertTrue(recovered.experimental_readable)
+    self.path("ExperimentalMode").write_bytes(b"01")
+    invalid = self.owner.refresh(1_300_000_000, force=True)
+    self.assertGreater(invalid.revision, recovered.revision)
+    self.assertFalse(experimental_requested(invalid.experimental_raw, invalid.experimental_readable,
+                                            invalid.safe_mode_raw, True, cp))
+    self.assertEqual(self.path("ExperimentalMode").read_bytes(), b"01")
+
+  def test_legacy_params_without_path_api_fail_closed(self):
+    self.assertEqual(read_mode_sources(SimpleNamespace()), ((b"", False), (b"", False), (b"", False)))
 
   def test_absent_is_known_factory_cem_and_safe_mode_false(self):
     snapshot = self.owner.refresh(1_000_000_000)

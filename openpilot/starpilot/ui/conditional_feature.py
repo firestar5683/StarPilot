@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import fields, replace
+import hashlib
 
 from openpilot.starpilot.conditional_mode.button_actions import (
   BUTTON_PREFIX, MEDIA_KEYS, DISTANCE_KEYS, capture_sources, commit_assignment, display_action, media_capability,
@@ -10,7 +11,7 @@ from openpilot.starpilot.conditional_mode.button_actions import (
 )
 
 from openpilot.starpilot.conditional_mode.actions import (
-  BOOLEAN_FIELDS, DOCUMENT_KEY, MANUAL_RESET, MODE, NUMBER_FIELDS, PREFIX, RESET, commit, commit_manual,
+  BOOLEAN_FIELDS, DOCUMENT_KEY, MANUAL_RESET, MODE, NUMBER_FIELDS, PREFIX, RESET, commit, commit_manual, commit_mode,
   display_number, edit, field_limit, stock_document,
 )
 from openpilot.starpilot.conditional_mode.preferences import (
@@ -19,6 +20,7 @@ from openpilot.starpilot.conditional_mode.preferences import (
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.conditional_mode.manual_saved import KEY as MANUAL_KEY, read_codes
 from openpilot.starpilot.conditional_mode.preferences import encode_preferences
+from openpilot.starpilot.conditional_mode.runtime_settings import experimental_available, read_mode_sources
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest
 
@@ -31,7 +33,7 @@ LABELS = {
   "signal_lane_detection": "Signal lane detection", "signal_lane_width_m": "Signal lane width",
   "set_speed_margin_mps": "Set speed margin", "launch_assist": "Launch assist",
 }
-MODES = ("Chill", "Conditional Experimental", "Conditional Chill")
+MODES = ("Chill", "Experimental", "Conditional Experimental", "Conditional Chill")
 SIGNAL_LANE_FIELDS = frozenset(("signal_lane_detection", "signal_lane_width_m"))
 SIGNAL_LANE_HELP = {
   "signal_lane_detection": "Distinguish a turn from a lane change using the space beside your car. With this on, a turn signal requests " +
@@ -42,6 +44,17 @@ SIGNAL_LANE_HELP = {
 MEDIA_LABELS = ("MODE press", "MODE long press", "MODE very long press",
                 "Star button", "Star button long press", "Star button very long press")
 
+
+
+def _mode_capability(cp) -> tuple | None:
+  if cp is None:
+    return None
+  try:
+    reader = cp.as_reader() if hasattr(cp, "as_reader") else cp
+    encoded = reader.as_builder().to_bytes()
+    return (str(cp.carFingerprint), hashlib.sha256(encoded).hexdigest())
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return None
 
 def _display(number: float) -> str:
   return f"{number:.2f}".rstrip("0").rstrip(".") if number else "0"
@@ -147,12 +160,19 @@ class ConditionalFeature:
     manual_dependencies = dependencies + ((MANUAL_KEY, manual.raw), ("SafeMode", safe))
     manual_available = repair_allowed and safe_readable and safe in (None, b"0", b"1")
     if page == "conditional":
-      choice = {"stock": MODES[0], "conditional_experimental": MODES[1],
-                "conditional_chill": MODES[2]}[preferences.mode.value]
-      rows.append(FeatureRow(MODE, "Saved driving mode", choice, document, MODES, default_value=MODES[0],
-                             available=allowed, reason="Chill uses the normal driving mode; conditional modes switch automatically when their conditions match."
-                             if allowed else unavailable,
-                             dependencies=dependencies))
+      (mode_document, mode_readable), (baseline, baseline_readable), (mode_safe, mode_safe_readable) = read_mode_sources(self.owner.params)
+      mode_valid = (mode_readable and mode_document == document and baseline_readable and baseline in (None, b"0", b"1") and
+                    mode_safe_readable and mode_safe in (None, b"0", b"1"))
+      choice = {"stock": "Experimental" if baseline == b"1" else "Chill",
+                "conditional_experimental": "Conditional Experimental", "conditional_chill": "Conditional Chill"}[preferences.mode.value]
+      cp = self.owner.vehicle_params()
+      choices = MODES if choice == "Experimental" or experimental_available(cp) and mode_safe in (None, b"0") else tuple(
+        mode for mode in MODES if mode != "Experimental")
+      rows.append(FeatureRow(MODE, "Saved driving mode", choice if mode_valid else "Unavailable", document,
+                             choices if mode_valid else (), default_value=MODES[0], available=allowed and mode_valid,
+                             reason="Choose Chill, Experimental, or automatic switching from your saved conditions." if allowed and mode_valid else unavailable,
+                             vehicle_fingerprint=self.owner.vehicle_fingerprint(), capability=_mode_capability(cp),
+                             dependencies=dependencies + (("ExperimentalMode", baseline), ("SafeMode", mode_safe))))
       rows.append(FeatureRow("", "Experimental conditions", "Saved options", page="conditional/cem", available=True))
       rows.append(FeatureRow("", "Chill conditions", "Saved options", page="conditional/ccm", available=True))
       if manual.status in ("invalid", "read_error"):
@@ -217,6 +237,34 @@ class ConditionalFeature:
       result = commit_assignment(self.owner.params, key=key, choice=request.value,
                                  expected=request.expected, dependencies=request.dependencies,
                                  authorized=authorized_button)
+      return result.committed and result.verified
+    if request.key == MODE:
+      (document, readable), (baseline, baseline_readable), (safe, safe_readable) = read_mode_sources(self.owner.params)
+      units, units_readable = read_saved(self.owner.params, "IsMetric", 8)
+      dependencies = (("IsMetric", units), ("ExperimentalMode", baseline), ("SafeMode", safe))
+      if (not readable or not baseline_readable or not safe_readable or not units_readable or
+          document != request.expected or request.dependencies != dependencies or
+          baseline not in (None, b"0", b"1") or safe not in (None, b"0", b"1") or request.value not in MODES):
+        return False
+
+      def authorized_mode() -> bool:
+        cp = self.owner.vehicle_params()
+        return bool(self.owner.authority("preferences") and
+                    (request.value != "Experimental" or request.capability is not None and
+                     _mode_capability(cp) == request.capability and self.owner.vehicle_fingerprint() == request.capability[0] and
+                     experimental_available(cp) and safe in (None, b"0")))
+
+      if not authorized_mode():
+        return False
+      try:
+        preferences = SavedPreferences() if document is None else decode_preferences(document)
+        value = "Stock" if request.value in ("Chill", "Experimental") else request.value
+        raw = edit(preferences, MODE, value, metric=units == b"1")
+      except PreferenceError:
+        return False
+      next_baseline = b"1" if request.value == "Experimental" else b"0" if request.value == "Chill" else baseline or b"0"
+      result = commit_mode(self.owner.params, raw, next_baseline, expected=document, expected_baseline=baseline,
+                           expected_units=units, expected_safe=safe, authorized=authorized_mode)
       return result.committed and result.verified
     if (request.key in (RESET, MANUAL_RESET) and not request.confirmation) or \
        request.capability is not None or request.vehicle_fingerprint is not None:

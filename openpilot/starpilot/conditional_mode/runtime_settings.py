@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+import fcntl
+import os
+from pathlib import Path
 import secrets
 from typing import Any
 
@@ -21,6 +24,7 @@ from openpilot.starpilot.saved_source import read_saved
 
 DOCUMENT_KEY = 'ConditionalModeConfig'
 SAFE_MODE_KEY = 'SafeMode'
+EXPERIMENTAL_KEY = 'ExperimentalMode'
 REFRESH_NS = 1_000_000_000
 REVERIFY_NS = REFRESH_NS // 2
 
@@ -51,6 +55,8 @@ class SettingsSnapshot:
   document_raw: bytes | None
   safe_mode_raw: bytes | None
   preferences: SavedPreferences | None
+  experimental_raw: bytes | None = None
+  experimental_readable: bool = True
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,37 @@ def _read(params: Any, key: str, limit: int) -> tuple[bytes | None, bool]:
   except (OSError, TypeError, ValueError):
     return b'', False
 
+
+
+def read_mode_sources(params: Any, *, wait: bool = False, defer_busy: bool = False) -> tuple[
+  tuple[bytes | None, bool], tuple[bytes | None, bool], tuple[bytes | None, bool]
+]:
+  """Read one coherent source pair. Only background callers may wait for a writer."""
+  lock_fd = None
+  try:
+    root = Path(params.get_param_path(DOCUMENT_KEY)).parent.parent
+    lock_fd = os.open(root / '.lock', os.O_CREAT | os.O_RDONLY, 0o775)
+    fcntl.flock(lock_fd, fcntl.LOCK_SH if wait else fcntl.LOCK_SH | fcntl.LOCK_NB)
+    return (_read(params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES),
+            _read(params, EXPERIMENTAL_KEY, 8), _read(params, SAFE_MODE_KEY, 8))
+  except BlockingIOError:
+    if defer_busy:
+      raise
+    return (b'', False), (b'', False), (b'', False)
+  except (AttributeError, OSError, TypeError, ValueError):
+    return (b'', False), (b'', False), (b'', False)
+  finally:
+    if lock_fd is not None:
+      os.close(lock_fd)
+
+
+def experimental_available(cp: Any) -> bool:
+  return bool(cp is not None and getattr(cp, 'openpilotLongitudinalControl', None) is True and
+              not getattr(cp, 'passive', False) and not getattr(cp, 'dashcamOnly', False) and not getattr(cp, 'notCar', False))
+
+
+def experimental_requested(raw: bytes | None, readable: bool, safe_raw: bytes | None, safe_readable: bool, cp: Any) -> bool:
+  return bool(readable and raw == b'1' and safe_readable and safe_raw in (None, b'0') and experimental_available(cp))
 
 def _document(raw: bytes | None, readable: bool) -> tuple[DocumentState, SavedPreferences | None]:
   if not readable:
@@ -108,35 +145,41 @@ class ConditionalSettingsOwner:
     snapshot = SettingsSnapshot(
       self.owner_token, 1 if previous is None else previous.revision + 1,
       now_mono_ns, now_mono_ns, DocumentState.READ_ERROR, SafeModeState.READ_ERROR,
-      None, None, None,
+      None, None, None, None, False,
     )
     self.current = snapshot
     self.last_refresh_ns = now_mono_ns
     return snapshot
 
-  def refresh(self, now_mono_ns: int) -> SettingsSnapshot:
+  def refresh(self, now_mono_ns: int, *, force: bool = False, wait: bool = False) -> SettingsSnapshot:
     """Perform a bounded disk read when due; errors invalidate prior authority."""
     if type(now_mono_ns) is not int or now_mono_ns <= 0:
       return self._unavailable(0)
     if self.last_refresh_ns is not None and now_mono_ns < self.last_refresh_ns:
       return self._unavailable(now_mono_ns)
-    if self.current is not None and self.last_refresh_ns is not None and now_mono_ns - self.last_refresh_ns < REVERIFY_NS:
+    if not force and self.current is not None and self.last_refresh_ns is not None and now_mono_ns - self.last_refresh_ns < REVERIFY_NS:
       return self.current
 
-    document_raw, document_readable = _read(self.params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES)
-    safe_raw, safe_readable = _read(self.params, SAFE_MODE_KEY, 8)
+    try:
+      sources = read_mode_sources(self.params, wait=wait, defer_busy=True)
+    except BlockingIOError:
+      # A paired write is not corrupt data. Keep the accepted revision while its
+      # original authority is live; neither read unlocked bytes nor renew its age.
+      return self.current if self.current is not None else self._unavailable(now_mono_ns)
+    (document_raw, document_readable), (experimental_raw, experimental_readable), (safe_raw, safe_readable) = sources
     document_state, preferences = _document(document_raw, document_readable)
     safe_state = _safe_mode(safe_raw, safe_readable)
     previous = self.current
     same_source = bool(previous is not None and previous.document_raw == document_raw and
                        previous.safe_mode_raw == safe_raw and previous.document_state is document_state and
-                       previous.safe_mode_state is safe_state and previous.preferences == preferences)
+                       previous.safe_mode_state is safe_state and previous.preferences == preferences and
+                       previous.experimental_raw == experimental_raw and previous.experimental_readable == experimental_readable)
     snapshot = SettingsSnapshot(
       self.owner_token,
       previous.revision if same_source and previous is not None else (1 if previous is None else previous.revision + 1),
       previous.observed_mono_ns if same_source and previous is not None else now_mono_ns,
       now_mono_ns,
-      document_state, safe_state, document_raw, safe_raw, preferences,
+      document_state, safe_state, document_raw, safe_raw, preferences, experimental_raw, experimental_readable,
     )
     self.current = snapshot
     self.last_refresh_ns = now_mono_ns
@@ -169,8 +212,8 @@ class ConditionalSettingsOwner:
       return SettingsVerdict(status, current.revision if current is not None else None,
                              current.observed_mono_ns if current is not None else None,
                              None, None, None, safe)
-    assert current is not None and current.preferences is not None
-    selection = saved_selection_for_drive(current.preferences, drive_id)
-    return SettingsVerdict('ready' if selection is not None else 'invalid_drive', current.revision,
-                           current.observed_mono_ns, selection, current.preferences.cem,
-                           current.preferences.ccm, safe)
+    assert snapshot is not None and snapshot.preferences is not None
+    selection = saved_selection_for_drive(snapshot.preferences, drive_id)
+    return SettingsVerdict('ready' if selection is not None else 'invalid_drive', snapshot.revision,
+                           snapshot.observed_mono_ns, selection, snapshot.preferences.cem,
+                           snapshot.preferences.ccm, False)
