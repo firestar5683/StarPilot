@@ -414,6 +414,16 @@ int main() {
     if (command == 'p') clock.pause(true);
     if (command == 's') clock.seek(2000000000ULL);
     if (command == 'n') clock.published(2000000000ULL, 1.0);
+    if (command == 'o') {
+      clock.pause(false);
+      clock.published(18446744073709551615ULL, 1.0);
+      clock.pause(true);
+    }
+    if (command == 'b') {
+      clock.pause(false);
+      clock.published(18446462598732840960ULL, 1.0);
+      clock.pause(true);
+    }
     if (command == 'q') { clock.stop(); break; }
     std::cout << "done" << std::endl;
   }
@@ -423,7 +433,8 @@ int main() {
       cpp.write_text(source)
       include = Path(__file__).resolve().parents[3]
       compiler = shlex.split(os.environ.get('CXX', 'c++'))
-      subprocess.run([*compiler, '-std=c++17', '-pthread', '-I', str(include), str(cpp), '-o', str(binary)],
+      warnings = ['-Werror', '-Wimplicit-const-int-float-conversion'] if sys.platform == 'darwin' else ['-Werror']
+      subprocess.run([*compiler, *warnings, '-std=c++17', '-pthread', '-I', str(include), str(cpp), '-o', str(binary)],
                      check=True, capture_output=True, timeout=30)
       process = subprocess.Popen([str(binary)], env={**os.environ, **self.env}, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -431,6 +442,8 @@ int main() {
         self.assertEqual(process.stdout.readline().strip(), 'ready')
         sample = self.reader.sample()
         self.assertTrue(sample.valid)
+        assert sample.now_ns is not None
+        assert sample.epoch is not None
         self.assertLess(abs(sample.now_ns - 30_000_000_000), 250_000_000)
         process.stdin.write('p\n')
         process.stdin.flush()
@@ -449,6 +462,18 @@ int main() {
         process.stdin.flush()
         self.assertEqual(process.stdout.readline().strip(), 'done')
         self.assertEqual(self.reader.sample().now_ns, 2_000_000_000)
+        process.stdin.write('o\n')
+        process.stdin.flush()
+        self.assertEqual(process.stdout.readline().strip(), 'done')
+        self.assertFalse(self.reader.sample().valid)
+        process.stdin.write('b\n')
+        process.stdin.flush()
+        self.assertEqual(process.stdout.readline().strip(), 'done')
+        below_overflow = self.reader.sample()
+        self.assertTrue(below_overflow.valid)
+        assert below_overflow.now_ns is not None
+        self.assertGreaterEqual(below_overflow.now_ns, 18_446_462_598_732_840_960)
+        self.assertLess(below_overflow.now_ns, 2**64)
         process.stdin.write('q\n')
         process.stdin.flush()
         self.assertEqual(process.wait(timeout=3), 0)
@@ -457,6 +482,9 @@ int main() {
         if process.poll() is None:
           process.kill()
           process.wait(timeout=3)
+        for stream in (process.stdin, process.stdout, process.stderr):
+          if stream is not None:
+            stream.close()
 
   def setUp(self):
     from openpilot.tools.replay.display_clock import DisplayClockReader, RECORD

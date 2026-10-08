@@ -167,7 +167,7 @@ private:
   void reanchor_locked(uint64_t host_ns) {
     if ((state_.flags & VALID) && !(state_.flags & PAUSED) && host_ns >= state_.host_ns) {
       long double route_ns = state_.route_ns + (host_ns - state_.host_ns) * static_cast<long double>(state_.speed);
-      if (route_ns >= std::numeric_limits<uint64_t>::max()) state_.flags &= ~VALID;
+      if (route_ns >= std::ldexp(1.0L, 64)) state_.flags &= ~VALID;
       else state_.route_ns = static_cast<uint64_t>(route_ns);
     }
     state_.host_ns = host_ns;
