@@ -5,6 +5,7 @@ import numpy as np
 import time
 from time import monotonic_ns
 from threading import get_native_id
+from collections import deque
 from pathlib import Path
 
 
@@ -108,6 +109,69 @@ def _callback_thread_snapshot(tid):
   return snapshot
 
 
+def _read_callback_schedstat(tid):
+  with Path(f"/proc/self/task/{tid}/schedstat").open() as source:
+    values = tuple(map(int, source.read(128).split()))
+  if len(values) != 3 or any(value < 0 for value in values):
+    raise ValueError("invalid callback schedstat")
+  return values
+
+
+class _CallbackSchedulerHistory:
+  MAX_GAP_NS = 100_000_000
+
+  def __init__(self):
+    self.tid = None
+    self.samples = deque(maxlen=128)
+
+  def sample(self, tid):
+    if tid != self.tid:
+      self.samples.clear()
+      self.tid = tid
+    if tid is None:
+      return
+    try:
+      begin = monotonic_ns()
+      counters = _read_callback_schedstat(tid)
+      end = monotonic_ns()
+    except (OSError, ValueError, IndexError, AttributeError):
+      self.samples.clear()
+      return
+    if end < begin or end - begin > self.MAX_GAP_NS:
+      self.samples.clear()
+      return
+    if self.samples and (begin < self.samples[-1][1] or
+                         any(new < old for new, old in zip(counters, self.samples[-1][2], strict=True))):
+      self.samples.clear()
+    self.samples.append((begin, end, counters))
+
+  def bracket(self, tid, event_end, event_gap):
+    unknown = {"available": False}
+    if tid != self.tid or event_gap is None or event_gap <= 0:
+      return unknown
+    event_start = event_end - event_gap
+    before = [i for i, sample in enumerate(self.samples) if sample[1] <= event_start]
+    after = [i for i, sample in enumerate(self.samples) if sample[0] >= event_end]
+    if not before or not after:
+      return unknown
+    window = list(self.samples)[before[-1]:after[0] + 1]
+    if len(window) < 2:
+      return unknown
+    first, last = window[0], window[-1]
+    max_gap = max(right[1] - left[0] for left, right in zip(window, window[1:], strict=False))
+    if (max_gap > self.MAX_GAP_NS or event_start - first[1] > self.MAX_GAP_NS or
+        last[0] - event_end > self.MAX_GAP_NS):
+      return unknown
+    return {"available": True, "tid": tid,
+            "event_gap_start_ns": event_start, "event_gap_end_ns": event_end,
+            "sample_before_begin_ns": first[0], "sample_before_end_ns": first[1],
+            "sample_after_begin_ns": last[0], "sample_after_end_ns": last[1],
+            "runtime_delta_ns": last[2][0] - first[2][0],
+            "runqueue_delta_ns": last[2][1] - first[2][1],
+            "timeslices_delta": last[2][2] - first[2][2],
+            "max_sample_gap_ns": max_gap, "sample_count": len(window)}
+
+
 class Soundd:
   def __init__(self, params=None, pack_root=PACK_ROOT):
     self.volume_params = params if params is not None else Params()
@@ -136,6 +200,7 @@ class Soundd:
     self.last_callback_work_ns = None
     self.last_native_audio_time = None
     self.callback_tid = None
+    self.callback_scheduler_history = _CallbackSchedulerHistory()
     self.underflow_timing = None
     self.axis_alerts = AxisAlerts()
 
@@ -247,6 +312,9 @@ class Soundd:
       if underflows > self.reported_output_underflows:
         snapshot = json.dumps(_callback_thread_snapshot(tid), separators=(",", ":"), sort_keys=True)
         message += f" callback_thread_snapshot_current={snapshot} snapshot_mono={now:.9f}"
+        history = getattr(self, "callback_scheduler_history", None)
+        bracket = history.bracket(tid, started_ns, gap_ns) if history is not None else {"available": False}
+        message += " callback_scheduler_bracket=" + json.dumps(bracket, separators=(",", ":"), sort_keys=True)
     if stream is not None:
       message += f" latency={stream.latency} cpu_load={stream.cpu_load}"
     # Output dropouts must reach errorLogMessage, which is retained in qlog.
@@ -328,6 +396,7 @@ class Soundd:
       cloudlog.info(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}, {stream.latency=}")
       while True:
         sm.update(0)
+        self.callback_scheduler_history.sample(self.callback_tid)
         self.log_pending_stream_status(stream)
         self.refresh_saved_volumes(time.monotonic())
         self.load_sounds()

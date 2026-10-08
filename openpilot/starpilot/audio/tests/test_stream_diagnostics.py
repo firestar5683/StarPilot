@@ -50,7 +50,8 @@ def test_underflow_counters_preserve_signal_and_log_on_service_thread():
       + " underflow_callback_mono=1.085333333 callback_gap_ms=85.333 callback_work_ms=2.000"
       + " callback_period_ms=0.083 previous_callback_work_ms=1.000 native_current_time=unknown"
       + " native_output_dac_time=unknown native_callback_gap_ms=unknown callback_tid=42"
-      + ' callback_thread_snapshot_current={"tid":42} snapshot_mono=2.000000000 latency=0.2 cpu_load=0.01')
+      + ' callback_thread_snapshot_current={"tid":42} snapshot_mono=2.000000000'
+      + ' callback_scheduler_bracket={"available":false} latency=0.2 cpu_load=0.01')
     snapshot.assert_called_once_with(42)
     daemon.log_pending_stream_status(SimpleNamespace(latency=0.2, cpu_load=0.01))
     assert error.call_count == 1
