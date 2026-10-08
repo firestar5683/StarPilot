@@ -1,4 +1,5 @@
 from concurrent.futures import Future
+import ctypes
 from concurrent.futures.process import BrokenProcessPool
 import importlib.util
 from collections import Counter
@@ -38,6 +39,36 @@ class TestMutationInfrastructureAccounting(unittest.TestCase):
   @staticmethod
   def site():
     return mutation.MutationSite(1, 0, 1, 0, 1, 1, "==", "!=", "comparison", Path("safety.h"), 1)
+
+  def test_static_assert_candidates_remain_accounted_without_runtime_instrumentation(self):
+    source = mutation.SAFETY_DIR / "helpers.h"
+    code = '\n'.join((f'#line 1 "{source}"',
+                       '_Static_assert(sizeof(int) == 4, "global word size");',
+                       'int permit(int value) {',
+                       '  _Static_assert(sizeof(int) == 4, "local word size");',
+                       '  return value <= 3;', '}', ''))
+    with TemporaryDirectory() as directory:
+      root = Path(directory)
+      original = root / "input.c"
+      original.write_text(code)
+      sites, _counts, pruned, preprocessed = mutation.enumerate_sites(original, root / "input.i")
+      static_sites = {site.site_id for site in sites if site.origin_line in (1, 3)}
+      self.assertTrue(static_sites)
+      self.assertEqual(pruned, static_sites)
+      self.assertEqual({site.mutator for site in sites if site.site_id in pruned}, {"comparison", "boundary"})
+      self.assertEqual({site.site_id for site in sites}, set(range(len(sites))))
+      executable = [site for site in sites if site.site_id not in pruned]
+      self.assertTrue(executable)
+      library = root / "constant-context.so"
+      mutation.compile_mutated_library(preprocessed, executable, library)
+      native = ctypes.CDLL(str(library))
+      native.permit.argtypes, native.permit.restype = [ctypes.c_int], ctypes.c_int
+      native.mutation_set_active_mutant.argtypes = [ctypes.c_int]
+      native.mutation_set_active_mutant(-1)
+      self.assertEqual((native.permit(3), native.permit(4)), (1, 0))
+      comparison = next(site for site in executable if site.mutator == "comparison")
+      native.mutation_set_active_mutant(comparison.site_id)
+      self.assertEqual((native.permit(3), native.permit(4)), (0, 1))
 
   def test_worker_crash_is_infrastructure_error(self):
     site = self.site()

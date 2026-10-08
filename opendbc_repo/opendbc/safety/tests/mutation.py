@@ -133,9 +133,13 @@ def _site_key(site):
 
 
 def _is_in_constexpr_context(node):
-  """Check if a node is inside a static or file-scope variable initializer."""
+  """Find contexts that cannot contain the runtime mutant selector."""
   current = node.parent
   while current is not None:
+    if current.type == "call_expression":
+      function = current.child_by_field_name("function")
+      if function is not None and function.text == b"_Static_assert":
+        return True
     if current.type == "init_declarator":
       decl = current.parent
       if decl and decl.type == "declaration":
@@ -698,7 +702,7 @@ def main():
     pruned_compile_sites = len(build_incompatible_ids)
     if pruned_compile_sites > 0:
       sites = [s for s in sites if s.site_id not in build_incompatible_ids]
-      print(f"Pruned {pruned_compile_sites} build-incompatible mutants from constant-expression initializers", flush=True)
+      print(f"Pruned {pruned_compile_sites} build-incompatible mutants from constant-expression contexts", flush=True)
     if not sites:
       print("Failed to build mutation library: all sites were pruned as build-incompatible", flush=True)
       return 2

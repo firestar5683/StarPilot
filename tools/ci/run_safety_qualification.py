@@ -233,6 +233,9 @@ class Gate:
                           "LIBSAFETY_PREBUILT", "GCOV_PREFIX", "GCOV_PREFIX_STRIP", "CC", "CXX",
                           "CFLAGS", "CXXFLAGS", "LDFLAGS", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
       self.env.pop(inherited_key, None)
+    self.env.pop("SAFETY_COVERAGE", None)
+    if name == "coverage":
+      self.env["SAFETY_COVERAGE"] = "1"
     self.env["PATH"] = str(Path(self.python).parent) + os.pathsep + self.env.get("PATH", "")
     (output / "params").mkdir()
     self.commands = []
@@ -425,12 +428,15 @@ def main():
     (output / "generated-before.json").write_text(json.dumps(generated_before, indent=2) + "\n")
     extension = ".dylib" if sys.platform == "darwin" else ".so"
     prerequisite = f"openpilot/common/libparams_c{extension}"
-    built, _ = gate.run("build-imports", ["scons", "--minimal", "-j4", prerequisite,
-                                         "msgq_repo/msgq/ipc_pyx.so"], timeout=3600)
+    prerequisites = [prerequisite, "msgq_repo/msgq/ipc_pyx.so"]
+    if args.gate in ("coverage", "mutation-full"):
+      # The full catalog includes actual Card consumers importing the longitudinal planner.
+      prerequisites.append("openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so")
+    built, _ = gate.run("build-imports", ["scons", "--minimal", "-j4", *prerequisites], timeout=3600)
     if built:
       raise RuntimeError("native host import prerequisites failed")
-    gate.hash_artifact(ROOT / prerequisite)
-    gate.hash_artifact(ROOT / "msgq_repo/msgq/ipc_pyx.so")
+    for artifact in prerequisites:
+      gate.hash_artifact(ROOT / artifact)
     origins_ok = check_import_origins(gate.python, gate.env, output / "imports.log")
     if origins_ok:
       imported_before = imported_module_hashes(output / "imports.log")

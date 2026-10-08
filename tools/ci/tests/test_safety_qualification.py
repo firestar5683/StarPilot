@@ -29,6 +29,16 @@ class TestSafetyQualificationRunner(TestCase):
                          "failure_kind": None, "exit_code": None, "stderr_tail": "", "stdout_tail": "",
                          "unittest_output_tail": ""}]}
 
+  def test_coverage_instrumentation_is_required_and_does_not_leak_to_other_gates(self):
+    for name, inherited in (("coverage", "0"), ("coverage", "1"), ("mutation-full", "1"), ("mutation-list", "1")):
+      with self.subTest(gate=name, inherited=inherited), tempfile.TemporaryDirectory() as td, \
+           patch.dict(os.environ, {"SAFETY_COVERAGE": inherited}):
+        gate = qualification.Gate(name, Path(td), sys.executable)
+        if name == "coverage":
+          self.assertEqual(gate.env["SAFETY_COVERAGE"], "1")
+        else:
+          self.assertNotIn("SAFETY_COVERAGE", gate.env)
+
   def test_source_identity_includes_gate_and_workflow_inputs(self):
     identity = qualification.source_identity()
     self.assertFalse(any("/obj/" in path or "/gen/" in path for path in identity))
@@ -240,11 +250,13 @@ class TestSafetyQualificationRunner(TestCase):
            patch.object(qualification, "source_identity", return_value={"source.py": "hash"}), \
            patch.object(qualification, "source_head", return_value="commit"), \
            patch.object(qualification, "generated_identity", return_value={}), \
-           patch.object(qualification.Gate, "run", return_value=(0, "")), \
+           patch.object(qualification.Gate, "run", return_value=(0, "")) as invoke, \
            patch.object(qualification, "check_import_origins", return_value=True), \
            patch.object(qualification, "imported_module_hashes", return_value={}), \
            patch.object(qualification.Gate, "execute", side_effect=RuntimeError("fixture crash")):
         self.assertEqual(qualification.main(), 1)
+        self.assertIn("openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
+                      invoke.call_args_list[0].args[1])
       report = json.loads((output / "results.json").read_text())
       self.assertFalse(report["passed"])
       self.assertIn("fixture crash", report["error"])
