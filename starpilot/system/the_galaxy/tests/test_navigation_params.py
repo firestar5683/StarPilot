@@ -6,6 +6,8 @@ from openpilot.common.params import ParamKeyType
 
 from test_dashboard_stats import MODULE_DIR, _install_server_import_stubs
 
+from openpilot.starpilot.system.the_galaxy import sentry_backend
+
 
 def _load_server_module():
   import importlib.util
@@ -285,8 +287,8 @@ def test_controller_selfie_is_saved_to_sentry_history(monkeypatch, tmp_path):
   client, fake_params = _params_client(monkeypatch, {"IsOffroad": False}, "mici")
   recorded = []
   monkeypatch.setattr(the_galaxy, "_get_live_driver_jpeg", lambda: b"jpeg-data")
-  monkeypatch.setattr(the_galaxy, "_sentry_event_roots", lambda: (tmp_path,))
-  monkeypatch.setattr(the_galaxy, "_record_sentry_event", lambda event: recorded.append(event))
+  monkeypatch.setattr(sentry_backend, "_sentry_event_roots", lambda: (tmp_path,))
+  monkeypatch.setattr(sentry_backend, "_record_sentry_event", lambda event: recorded.append(event))
 
   response = client.post("/api/sentry/selfie")
 
@@ -295,7 +297,7 @@ def test_controller_selfie_is_saved_to_sentry_history(monkeypatch, tmp_path):
   assert event["kind"] == "selfie"
   assert event["message"] == "Comma Selfie"
   assert (tmp_path / event["eventId"] / "driver.jpg").read_bytes() == b"jpeg-data"
-  assert the_galaxy._normalize_sentry_event(event)["kind"] == "selfie"
+  assert sentry_backend._normalize_sentry_event(event)["kind"] == "selfie"
   assert fake_params.get("SentryModeLastEvent") is not None
 
 
