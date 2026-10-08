@@ -16,10 +16,9 @@ class TestRoutes(unittest.TestCase):
         assert platform in set(tested_platforms) | set(non_tested_cars), \
           f"Missing test route for {platform}. Add a route to opendbc/car/tests/routes.py"
 
-
   def test_explicit_unrecorded_configuration_gaps(self):
     self.assertEqual(set(unrecorded_route_gaps), {
-      GM.CHEVROLET_VOLT_CC, TOYOTA.TOYOTA_PRIUS_RETROFIT, TESLA.TESLA_MODEL_S_HW1,
+      GM.CHEVROLET_VOLT_CC, GM.CHEVROLET_MALIBU_HYBRID_CC, TOYOTA.TOYOTA_PRIUS_RETROFIT, TESLA.TESLA_MODEL_S_HW1,
     })
     self.assertFalse(set(unrecorded_route_gaps) & {route.car_model for route in routes})
     self.assertTrue(set(unrecorded_route_gaps) <= set(non_tested_cars))

@@ -23,7 +23,12 @@ class TestGMAutoIdentity(unittest.TestCase):
   def test_restored_tables_and_joint_discovery(self):
     for identity, digest in EXPECTED.items():
       variants = self.inventory[identity]
-      self.assertEqual(hashlib.sha256(json.dumps(variants, sort_keys=True, separators=(',', ':')).encode()).hexdigest(), digest)
+      if identity == 'gm.CHEVROLET_MALIBU_CC':
+        self.assertEqual(len(variants), 2)
+        self.assertEqual(hashlib.sha256(json.dumps(variants[1:], sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+                         '1cfbba5e0c98945d6bbc6a9d40df14b26e9782bc256889438c91b71d54a65c9b')
+      original = variants[:1] if identity == 'gm.CHEVROLET_MALIBU_CC' else variants
+      self.assertEqual(hashlib.sha256(json.dumps(original, sort_keys=True, separators=(',', ':')).encode()).hexdigest(), digest)
       for index, variant in enumerate(variants):
         with self.subTest(identity=identity, variant=index):
           self.assertEqual(self.candidates(variant.items()), [identity])
@@ -40,7 +45,9 @@ class TestGMAutoIdentity(unittest.TestCase):
           remaining = eliminate(SimpleNamespace(address=address, dat=bytes(length)), remaining)
         if remaining == [identity]:
           with self.subTest(identity=identity, variant=index):
-            self.assertEqual(self.candidates(variant.items()), [identity])
+            expected = (['gm.CHEVROLET_MALIBU_HYBRID_CC', 'gm.CHEVROLET_MALIBU_CC']
+                        if identity == 'gm.CHEVROLET_MALIBU_HYBRID_CC' else [identity])
+            self.assertEqual(self.candidates(variant.items()), expected)
 
   def test_pedal_frame_preserves_original_supported_tables(self):
     identity = 'gm.CHEVROLET_BOLT_CC_2017'
@@ -54,7 +61,8 @@ class TestGMAutoIdentity(unittest.TestCase):
     from opendbc.car import Bus, gen_empty_fingerprint
     from opendbc.car.gm.fingerprints import FINGERPRINTS
     from opendbc.car.gm.interface import CarInterface
-    from opendbc.car.gm.values import CAR, DBC, GMFlags, ORDINARY_CC_WORD, is_ordinary_cc_profile, control_flags
+    from opendbc.car.gm.values import (CAR, DBC, GMFlags, ORDINARY_CC_WORD, MALIBU_CC_F1_WORD,
+                                     MALIBU_CC_F1_STOCK_WORD, is_ordinary_cc_profile, control_flags)
     from opendbc.car import structs
     from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
     from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
@@ -67,6 +75,9 @@ class TestGMAutoIdentity(unittest.TestCase):
         self.assertEqual(discovered, [identity])
         fp = gen_empty_fingerprint()
         fp[0].update(variant)
+        f1 = car == CAR.CHEVROLET_MALIBU_CC and 0xBE not in variant
+        expected_flags = int(GMFlags.CC_LONG | (GMFlags.NO_ACCELERATOR_POS_MSG if f1 else 0))
+        expected_word = MALIBU_CC_F1_WORD if f1 else ORDINARY_CC_WORD
         for alpha, release in ((False, False), (True, False), (True, True)):
           cp = CarInterface.get_params(car, fp, [], alpha, release, False)
           self.assertEqual(cp.carFingerprint, car)
@@ -75,17 +86,17 @@ class TestGMAutoIdentity(unittest.TestCase):
           self.assertFalse(cp.pcmCruise)
           self.assertFalse(cp.alphaLongitudinalAvailable)
           self.assertFalse(cp.dashcamOnly)
-          self.assertEqual(control_flags(cp), int(GMFlags.CC_LONG))
+          self.assertEqual(control_flags(cp), expected_flags)
           self.assertEqual(cp.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.gm)
-          self.assertEqual(cp.safetyConfigs[0].safetyParam, ORDINARY_CC_WORD)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, expected_word)
           disabled = cp.as_reader().as_builder()
           preferences = VehicleStartupPreferences(disable_bolt_long=True)
           preferences.prepare(disabled, fingerprints=fp)
           preferences.finalize(disabled)
           self.assertTrue(is_ordinary_cc_profile(disabled), identity)
           self.assertFalse(disabled.openpilotLongitudinalControl)
-          self.assertFalse(disabled.pcmCruise)
-          self.assertEqual(disabled.safetyConfigs[0].safetyParam, ORDINARY_CC_WORD)
+          self.assertEqual(disabled.pcmCruise, f1)
+          self.assertEqual(disabled.safetyConfigs[0].safetyParam, MALIBU_CC_F1_STOCK_WORD if f1 else expected_word)
           ci = CarInterface(cp)
           packer = CANPacker(DBC[car][Bus.pt])
           for tick in range(40):
@@ -104,7 +115,6 @@ class TestGMAutoIdentity(unittest.TestCase):
           self.assertFalse(out.canTimeout, identity)
 
   def test_discovered_2017_bolt_parser_with_actual_pedal_and_camera_configuration(self):
-    from unittest.mock import patch
     from opendbc.car import Bus, gen_empty_fingerprint
     from opendbc.car.gm.fingerprints import FINGERPRINTS
     from opendbc.car.gm.interface import CarInterface
@@ -125,7 +135,7 @@ class TestGMAutoIdentity(unittest.TestCase):
                 fp = gen_empty_fingerprint()
                 fp[0].update(variant)
                 if camera:
-                  fp[2][0x180] = 4
+                  fp[2].update({0x180: 4, 0x320: 8})
                 cp = CarInterface.get_params(car, fp, [], alpha, False, False)
                 VehicleStartupPreferences(disable_bolt_long=disabled).prepare(cp, fingerprints=fp)
                 self.assertEqual(bool(cp.flags & GMFlags.PEDAL_LONG), present)
@@ -139,10 +149,24 @@ class TestGMAutoIdentity(unittest.TestCase):
                                                pedal_present=present, camera_present=camera)
                 self.assertFalse(missing_bsm.canValid)
 
+  def test_sparse_hybrid_fingerprint_cannot_select_an_automatic_identity(self):
+    from types import SimpleNamespace
+    from opendbc.car.car_helpers import can_fingerprint
+    identity = 'gm.CHEVROLET_MALIBU_HYBRID_CC'
+    variants = self.inventory[identity]
+    self.assertEqual(len(variants), 1)
+    messages = [SimpleNamespace(address=address, dat=bytes(length), src=0)
+                for address, length in variants[0].items()]
+    self.assertEqual(self.candidates(variants[0].items()),
+                     [identity, 'gm.CHEVROLET_MALIBU_CC'])
+    selected, observed = can_fingerprint(lambda **_kwargs: [messages])
+    self.assertIsNone(selected)
+    self.assertEqual(observed[0], variants[0])
+
   def test_ambiguous_and_manual_identities_remain_unadvertised(self):
     for name in ('CHEVROLET_BOLT_ACC_2022_2023', 'CHEVROLET_BOLT_ACC_2022_2023_PEDAL',
                  'CHEVROLET_BOLT_CC_2022_2023', 'CHEVROLET_TRAX',
-                 'CHEVROLET_VOLT_CC', 'CHEVROLET_MALIBU_HYBRID_CC'):
+                 'CHEVROLET_VOLT_CC'):
       self.assertNotIn('gm.' + name, self.inventory)
 
 

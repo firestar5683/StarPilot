@@ -1,6 +1,6 @@
 import pytest
 
-from opendbc.car import Bus, gen_empty_fingerprint
+from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.pedal import supported_pedal_detected
 from opendbc.car.gm.interface import CarInterface as GMInterface
 from opendbc.car.gm.values import PEDAL_BOLT_CAR, GMFlags
@@ -26,9 +26,36 @@ def test_bolt_factory_hardware_drives_activation(identity, length):
   cp = GMInterface.get_params(identity, fp, [], False, False, False)
   assert bool(cp.flags & GMFlags.PEDAL_LONG) == (length == 6)
   if length == 6:
-    assert cp.openpilotLongitudinalControl and not cp.pcmCruise
-    ci = GMInterface(cp)
-    assert 0x201 in ci.can_parsers[Bus.pt].message_states
+    # Hardware detection alone does not qualify a removed-camera installation.
+    assert cp.dashcamOnly and not cp.openpilotLongitudinalControl
+    assert cp.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.noOutput
+
+
+@pytest.mark.parametrize("identity", tuple(PEDAL_BOLT_CAR))
+@pytest.mark.parametrize("removed", (False, True))
+def test_bolt_factory_requires_selected_physical_topology(identity, removed):
+  fp = gen_empty_fingerprint()
+  fp[0][0x201] = 6
+  required = {0x184: 8, 0x34A: 5, 0x348: 5, 0xC9: 8, 0x1C4: 8, 0x1E1: 7,
+              0x1F5: 8, 0xBD: 7, 0x232: 8, 0x3D1: 8, 0xBE: 6}
+  if removed:
+    fp[0].update(required)
+  else:
+    fp[2][0x320] = 8
+  cp = GMInterface.get_params(identity, fp, [], False, False, False)
+  assert cp.flags & GMFlags.PEDAL_LONG
+  assert cp.openpilotLongitudinalControl and not cp.pcmCruise and not cp.dashcamOnly
+  assert cp.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.gm
+  ci = GMInterface(cp)
+  assert 0x201 in ci.can_parsers[Bus.pt].message_states
+  if removed:
+    for address in required:
+      incomplete = gen_empty_fingerprint()
+      incomplete[0].update({key: value for key, value in fp[0].items() if key != address})
+      denied = GMInterface.get_params(identity, incomplete, [], False, False, False)
+      assert denied.flags & GMFlags.PEDAL_LONG
+      assert denied.dashcamOnly and not denied.openpilotLongitudinalControl
+      assert denied.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.noOutput
 
 
 @pytest.mark.parametrize("identity", IDENTITIES)
@@ -94,7 +121,7 @@ def test_real_get_car_final_identity_keeps_observed_firmware_and_vin(identity, m
                                     fwVersion=b'fixture-observed-camera', brand='gm')]
   monkeypatch.setattr(car_helpers, 'fingerprint', lambda *_args: (getattr(CAR, identity), fp,
                       'fixture-observed-vin', firmware, structs.CarParams.FingerprintSource.can, True))
-  ci = car_helpers.get_car(lambda: [], lambda _frames: None, lambda _enabled: None,
+  ci = car_helpers.get_car(list, lambda _frames: None, lambda _enabled: None,
                            alpha_long_allowed=False, is_release=False)
   assert ci.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
   assert ci.CP.carVin == 'fixture-observed-vin'

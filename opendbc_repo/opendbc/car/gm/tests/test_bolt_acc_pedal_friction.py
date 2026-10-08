@@ -44,6 +44,7 @@ class TestBoltAccPedalFriction(unittest.TestCase):
     state.gearShifter = structs.CarState.GearShifter.low
     state.cruiseState.available = True
     cs = SimpleNamespace(out=state.as_reader(), pedal_sensor_healthy=True,
+                         bolt_pedal_stock_active=False, bolt_pedal_stock_ts_nanos=0,
                          pedal_sensor_ts_nanos=950_000_000, stock_acc_status_ts_nanos=950_000_000,
                          bolt_pedal_gear_ts_nanos=950_000_000, bolt_pedal_main_ts_nanos=950_000_000,
                          cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,

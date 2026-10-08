@@ -323,6 +323,7 @@ class TestBlendedLifecycle(unittest.TestCase):
     car.state_update = lambda: (CS, None)
     car.state_publish = lambda *args: calls.append('state')
     car.CP = SimpleNamespace(passive=False)
+    car.ci_initialized = False
 
     class SM(dict):
       seen = {'onroadEvents': False}

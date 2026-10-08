@@ -786,6 +786,8 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.CP = cp
     card_owner.vehicle_startup = VehicleStartupOwner()
     card_owner.ci_initialized = False
+    from openpilot.starpilot.gps.publisher import CarGpsPublisher
+    card_owner.car_gps_publisher = CarGpsPublisher()
     card_owner.initialized_prev = False
     card_owner.ioniq6_long_selected = True
     card_owner.ioniq6_long_pending = True
@@ -802,6 +804,7 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.can_callbacks = (lambda wait_for_one=False: [], lambda frames: None)
     card_owner.params = SimpleNamespace(put_bool=Mock())
     card_owner.slc_replay = card_owner.curve_replay = card_owner.conditional_replay = card_owner.aol_replay = False
+    card_owner.slc_command_sock = None
     card_owner.aol_card_intent = None
     card_owner.wheel_publisher = SimpleNamespace(observe=Mock(return_value=()), publish=Mock(), suppress_distance_release=False)
     card_owner.wheel_commands = ()
