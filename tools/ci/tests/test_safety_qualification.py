@@ -1,8 +1,13 @@
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import signal
+import threading
+import time
 import tempfile
 from unittest import TestCase, skipUnless
 from unittest.mock import patch
@@ -300,6 +305,136 @@ class TestSafetyQualificationRunner(TestCase):
       self.assertTrue(qualification.check_import_origins(gate.python, gate.env, Path(td) / "imports-baseline.log"))
       gate.env["PYTHONPATH"] = str(fake) + os.pathsep + gate.env["PYTHONPATH"]
       self.assertFalse(qualification.check_import_origins(gate.python, gate.env, Path(td) / "imports.log"))
+
+  def test_mutation_stream_matches_captured_text_exit_and_summary(self):
+    script = ("import os,sys,time; "
+              + "os.write(1,b'out\\r'); time.sleep(0.02); os.write(1,b'\\n'); "
+              + "os.write(2,b'err\\r\\n'); os.write(1,b'\\xe2'); time.sleep(0.02); "
+              + "os.write(1,b'\\x82\\xac\\nFound 2 unique candidates\\n  total: 2\\n  killed: 2\\n'); "
+              + "sys.exit(int(sys.argv[1]))")
+    for name, exit_code in (("mutation-full", 0), ("mutation-list", 7), ("coverage", 0)):
+      with self.subTest(gate=name), tempfile.TemporaryDirectory() as td:
+        gate = qualification.Gate(name, Path(td), sys.executable)
+        argv = [sys.executable, "-c", script, str(exit_code)]
+        baseline = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  text=True, env=gate.env, cwd=td, check=False)
+        visible = io.StringIO()
+        with redirect_stdout(visible):
+          code, text = gate.run("mutation", argv, cwd=td)
+        self.assertEqual((code, text), (baseline.returncode, baseline.stdout))
+        self.assertEqual((Path(td) / "mutation.log").read_text(), text)
+        self.assertEqual(visible.getvalue(), text if name.startswith("mutation-") else "")
+        self.assertEqual(qualification.parse_mutation_summary(text), qualification.parse_mutation_summary(baseline.stdout))
+        self.assertEqual(gate.commands[0]["exit_code"], exit_code)
+
+  def test_mutation_progress_is_visible_and_logged_before_child_exits(self):
+    ready = threading.Event()
+
+    class Visible(io.StringIO):
+      def write(self, text):
+        count = super().write(text)
+        if "ready" in self.getvalue():
+          ready.set()
+        return count
+
+    with tempfile.TemporaryDirectory() as td:
+      output = Path(td)
+      release = output / "release"
+      script = ("import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); "
+                + "sys.stdout.write('ready'); sys.stdout.flush(); "
+                + "exec('while not p.exists(): time.sleep(0.01)'); print(' done',flush=True)")
+      gate = qualification.Gate("mutation-full", output, sys.executable)
+      results, errors = [], []
+
+      def invoke():
+        try:
+          results.append(gate.run("mutation", [sys.executable, "-c", script, str(release)], cwd=td, timeout=5))
+        except Exception as error:
+          errors.append(error)
+
+      worker = threading.Thread(target=invoke)
+      with redirect_stdout(Visible()):
+        worker.start()
+        try:
+          self.assertTrue(ready.wait(3), "No progress until child exit")
+          self.assertTrue(worker.is_alive())
+          self.assertEqual((output / "mutation.log").read_text(), "ready")
+        finally:
+          release.touch()
+          worker.join(6)
+      self.assertFalse(worker.is_alive())
+      self.assertEqual(errors, [])
+      self.assertEqual(results, [(0, "ready done\n")])
+
+  def test_mutation_timeout_kills_descendant_group_and_keeps_partial_text(self):
+    with tempfile.TemporaryDirectory() as td:
+      output = Path(td)
+      marker = output / "descendant-survived"
+      descendant = ("import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); "
+                    + "p.with_suffix('.ready').write_text('ready'); time.sleep(3); p.write_text('alive')")
+      script = ("import pathlib,subprocess,sys,time; "
+                + "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]]); "
+                + "p=pathlib.Path(sys.argv[2]).with_suffix('.ready'); "
+                + "exec('while not p.exists(): time.sleep(0.01)'); print('partial',flush=True); time.sleep(10)")
+      gate = qualification.Gate("mutation-full", output, sys.executable)
+      original_popen = subprocess.Popen
+      processes = []
+
+      def spawn(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+      visible = io.StringIO()
+      start = time.monotonic()
+      with redirect_stdout(visible), patch.object(qualification.subprocess, "Popen", side_effect=spawn):
+        code, text = gate.run("mutation", [sys.executable, "-c", script, descendant, str(marker)], cwd=td, timeout=1)
+      self.assertLess(time.monotonic() - start, 2.5)
+      self.assertTrue(marker.with_suffix(".ready").exists())
+      self.assertEqual(code, 124)
+      self.assertEqual(processes[0].returncode, -signal.SIGKILL)
+      self.assertEqual(text, "partial\n\nTimed out; process group killed\n")
+      self.assertEqual(visible.getvalue(), text)
+      self.assertEqual((output / "mutation.log").read_text(), text)
+      self.assertEqual(gate.commands[0]["exit_code"], 124)
+      time.sleep(3.2)
+      self.assertFalse(marker.exists(), "Descendant survived timeout group cleanup")
+
+  def test_mutation_sink_failure_cleans_up_child_before_returning_error(self):
+    class Broken(io.StringIO):
+      def write(self, text):
+        raise BrokenPipeError("sink closed")
+
+    with tempfile.TemporaryDirectory() as td:
+      gate = qualification.Gate("mutation-full", Path(td), sys.executable)
+      original_popen = subprocess.Popen
+      processes = []
+
+      def spawn(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+      script = "import time; print('partial',flush=True); time.sleep(10)"
+      with redirect_stdout(Broken()), patch.object(qualification.subprocess, "Popen", side_effect=spawn):
+        code, text = gate.run("mutation", [sys.executable, "-c", script], cwd=td, timeout=2)
+      self.assertEqual((code, text), (127, "BrokenPipeError: sink closed\n"))
+      self.assertEqual(processes[0].returncode, -signal.SIGKILL)
+      self.assertTrue(processes[0].stdout.closed)
+      self.assertEqual((Path(td) / "mutation.log").read_text(), text)
+
+  def test_mutation_log_open_failure_does_not_launch_child(self):
+    with tempfile.TemporaryDirectory() as td:
+      output = Path(td)
+      gate = qualification.Gate("mutation-full", output, sys.executable)
+      (output / "mutation.log").mkdir()
+      marker = output / "child-started"
+      script = "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('started')"
+      with patch.object(qualification.subprocess, "Popen", wraps=subprocess.Popen) as spawn:
+        with self.assertRaises(IsADirectoryError):
+          gate.run("mutation", [sys.executable, "-c", script, str(marker)], cwd=td)
+      spawn.assert_not_called()
+      self.assertFalse(marker.exists())
 
   def test_timeout_fails_and_records_bounded_log(self):
     with tempfile.TemporaryDirectory() as td:

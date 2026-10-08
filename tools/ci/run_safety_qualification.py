@@ -2,12 +2,16 @@
 """Run isolated, source-pinned safety qualification gates without nested uv setup."""
 
 import argparse
+import codecs
+from contextlib import ExitStack
+import io
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import signal
 import stat
@@ -275,22 +279,76 @@ class Gate:
     self.commands = []
     self.artifacts = {}
 
-  def run(self, label, argv, *, cwd=ROOT, timeout=3600):
-    start = time.monotonic()
+  @staticmethod
+  def stream_output(proc, log, timeout):
+    assert proc.stdout is not None
+    decoder = io.IncrementalNewlineDecoder(
+      codecs.getincrementaldecoder(proc.stdout.encoding)(errors=proc.stdout.errors), translate=True)
+    chunks = []
+    deadline = time.monotonic() + timeout
+    timed_out = False
+
+    def emit(text):
+      chunks.append(text)
+      log.write(text)
+      log.flush()
+      sys.stdout.write(text)
+      sys.stdout.flush()
+
     try:
-      proc = subprocess.Popen(argv, cwd=cwd, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              text=True, start_new_session=True)
+      with selectors.DefaultSelector() as selector:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        while selector.get_map():
+          remaining = deadline - time.monotonic()
+          if not timed_out and remaining <= 0:
+            os.killpg(proc.pid, signal.SIGKILL)
+            timed_out = True
+          for key, _ in selector.select(None if timed_out else max(0, remaining)):
+            data = os.read(key.fd, 65536)
+            emit(decoder.decode(data, final=not data))
+            if not data:
+              selector.unregister(key.fileobj)
       try:
-        content, _ = proc.communicate(timeout=timeout)
-        code = proc.returncode
+        proc.wait(timeout=None if timed_out else max(0, deadline - time.monotonic()))
       except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
-        content, _ = proc.communicate()
-        code = 124
-        content += "\nTimed out; process group killed\n"
+        proc.wait()
+        timed_out = True
+    except BaseException:
+      try:
+        os.killpg(proc.pid, signal.SIGKILL)
+      except ProcessLookupError:
+        pass
+      proc.wait()
+      raise
+    finally:
+      proc.stdout.close()
+    if timed_out:
+      emit("\nTimed out; process group killed\n")
+    return (124 if timed_out else proc.returncode), "".join(chunks)
+
+  def run(self, label, argv, *, cwd=ROOT, timeout=3600):
+    start = time.monotonic()
+    log = self.output / f"{label}.log"
+    try:
+      with ExitStack() as stack:
+        stream_log = (stack.enter_context(log.open("w"))
+                      if label == "mutation" and self.name in ("mutation-list", "mutation-full") else None)
+        proc = subprocess.Popen(argv, cwd=cwd, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, start_new_session=True)
+        if stream_log is not None:
+          code, content = self.stream_output(proc, stream_log, timeout)
+        else:
+          try:
+            content, _ = proc.communicate(timeout=timeout)
+            code = proc.returncode
+          except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            content, _ = proc.communicate()
+            code = 124
+            content += "\nTimed out; process group killed\n"
     except OSError as exc:
       code, content = 127, f"{type(exc).__name__}: {exc}\n"
-    log = self.output / f"{label}.log"
     log.write_text(content)
     self.commands.append({"label": label, "argv": [str(arg) for arg in argv], "cwd": str(cwd),
                           "exit_code": code, "seconds": round(time.monotonic() - start, 3), "log": log.name})
