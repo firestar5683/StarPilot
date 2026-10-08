@@ -21,6 +21,7 @@ from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.gm.distance_button import GMDistanceButtons
+from opendbc.car.gm.interface import CarInterface as GMInterface
 from opendbc.car.gm.profiles import profiles_supported as gm_profiles_supported
 from opendbc.car.hyundai.ioniq6_handoff import (IONIQ6_LONG_PREARM_ENABLED, HandoffOutcome,
                                                 IONIQ6_ECAN_BUS, TimestampedCanPacket, build_ioniq6_hda2_long_candidate,
@@ -1127,7 +1128,8 @@ class Car:
       self.ci_initialized = True
 
     if initialize_only:
-      if self.volt_sdgm_startup_keepalive() and self.startup_panda_configured(inactive_keepalive=True):
+      if (isinstance(self.CI, GMInterface) and self.volt_sdgm_startup_keepalive() and
+          self.startup_panda_configured(inactive_keepalive=True)):
         inactive = car.CarControl.new_message().as_reader()
         self.last_actuators_output, can_sends = self.CI.apply(
           inactive, time.clock_gettime_ns(time.CLOCK_BOOTTIME), startup_keepalive=True)

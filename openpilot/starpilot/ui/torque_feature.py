@@ -185,6 +185,7 @@ class TorqueFeature:
       ("full_delay", "Full steering delay", geometry.full_delay, basis[1], .01, 1., .01),
     ):
       value = choice.custom_value if choice.mode == "custom" else supplied
+      assert value is not None
       suppressed = selected.force_auto if field == "ratio" else geometry.automatic_delay
       rows.append(FeatureRow(f"torque:{field}:value", label, str(round(value, 8)), raw,
                              step=step, minimum=low, maximum=high, available=allowed,

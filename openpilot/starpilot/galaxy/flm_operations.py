@@ -28,11 +28,12 @@ def validate_action(operation: str, payload: object) -> dict:
       raise ValueError('Invalid training source')
   elif operation in ('recommend', 'save-report'):
     required = {'operationId', 'feedback'} | ({'token', 'generatedId', 'id', 'label'} if operation == 'save-report' else set())
-    if set(fields) != required or type(fields.get('feedback')) is not dict:
+    feedback = fields.get('feedback')
+    if set(fields) != required or type(feedback) is not dict:
       raise ValueError('Invalid report profile request')
-    if (set(fields['feedback']) - {'acceptedDimensions', 'ignoredDimensions'} or
+    if (set(feedback) - {'acceptedDimensions', 'ignoredDimensions'} or
         any(type(values) is not list or len(values) > 128 or any(type(key) is not str or len(key) > 128 for key in values)
-            for values in fields['feedback'].values())):
+            for values in feedback.values())):
       raise ValueError('Invalid evidence feedback')
     validate_action('report', {'operationId': fields.get('operationId')})
     if operation == 'save-report':

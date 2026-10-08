@@ -430,7 +430,7 @@ class SceneProjector:
         if (horizon is None and self.stop_detector.committed and model_should_stop is False and
             speed is not None and speed <= STANDSTILL_SPEED_NOISE_MPS and
             _field(car, 'standstill') is True and _number(_field(car, 'vEgoRaw'), high=80.0) == 0.0):
-          # A stationary model can backstep millimetres near its origin before
+          # A stationary model can backstep millimeters near its origin before
           # projecting forward. Use that endpoint only to clear an existing stop;
           # curve/lead geometry and cold stop acquisition retain strict validation.
           stop_horizon = _standstill_clear_horizon(model)

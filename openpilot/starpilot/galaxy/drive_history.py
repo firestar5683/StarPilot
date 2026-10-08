@@ -105,7 +105,7 @@ class DriveHistory:
     self.max_segments_per_route = max_segments_per_route
     self.max_segments = max_segments
 
-  def delete_videos(self, name: str) -> dict:
+  def delete_videos(self, name: object) -> dict:
     return delete_segment_videos(self.root, name)
 
   def snapshot(self) -> dict:
@@ -181,7 +181,7 @@ class SegmentMissing(Exception):
   pass
 
 
-def delete_segment_videos(root: Path, name: str) -> dict:
+def delete_segment_videos(root: Path, name: object) -> dict:
   if type(name) is not str or '/' in name or SEGMENT_NAME.fullmatch(name) is None:
     raise ValueError('Invalid segment identity')
   try:

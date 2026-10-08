@@ -64,7 +64,7 @@ class ProjectionParams:
 class ProjectionPrimeState:
   """Saved pairing label only; projection never starts the API or alert owner."""
 
-  def __init__(self, params: ProjectionParams):
+  def __init__(self, params: ProjectionParams | Params):
     self.params = params
 
   def is_paired(self) -> bool:
@@ -230,7 +230,8 @@ class UIState:
 
   def display_time_ns(self) -> int:
     if getattr(self, "replay_clock", None) is not None:
-      return self.replay_sample.now_ns if self.replay_sample is not None and self.replay_sample.valid else 0
+      sample = self.replay_sample
+      return sample.now_ns if sample is not None and sample.valid and sample.now_ns is not None else 0
     return time.monotonic_ns()
 
   def _reset_replay_state(self) -> None:

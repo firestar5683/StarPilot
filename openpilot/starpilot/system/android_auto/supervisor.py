@@ -17,6 +17,7 @@ on Stop. Nothing here runs as root or touches vehicle control.
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import socket
@@ -1142,8 +1143,8 @@ class Supervisor:
         font, supersample = ImageFont.load_default(), 1
 
       bbox = font.getbbox(text)
-      text_w = -(-(bbox[2] - bbox[0]) // supersample)
-      text_h = -(-(bbox[3] - bbox[1]) // supersample)
+      text_w = math.ceil((bbox[2] - bbox[0]) / supersample)
+      text_h = math.ceil((bbox[3] - bbox[1]) / supersample)
 
       gap = max(12, int(request.height * 0.04))
       target_logo_h = int(min(request.height * 0.42, request.width * 0.35))

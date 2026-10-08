@@ -1,11 +1,19 @@
 """Frozen Dom evidence classification and trial generation; no learner or Params writer."""
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 import math
 import numpy as np
 from openpilot.starpilot.flm.gm_recommend import (FLM_FRICTION_SPEED_KNOTS, get_flm_supported_vehicle_knobs,
   get_gm_base_friction_threshold, get_standard_friction_threshold, get_hkg_canfd_base_friction_threshold, normalize_flm_overrides)
-GENERIC_PARAM_METADATA = {
+class GenericParamMetadata(TypedDict):
+  min: float
+  max: float
+  precision: float
+  deltaType: str
+  safeLiveTrial: bool
+
+
+GENERIC_PARAM_METADATA: dict[str, GenericParamMetadata] = {
   "SteerDelay": {"min": 0.01, "max": 1.0, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
   "SteerFriction": {"min": 0.0, "max": 1.0, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
   "SteerKP": {"min": 0.1, "max": 1.5, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
@@ -70,18 +78,18 @@ class FLMSample:
   actual_la: float
   desired_la: float
   desired_jerk: float
-  error: float
-  error_rate: float
-  p: float
-  i: float
-  d: float
-  f: float
+  error: float | None
+  error_rate: float | None
+  p: float | None
+  i: float | None
+  d: float | None
+  f: float | None
   output: float
   steering_angle_deg: float
-  steering_torque: float
-  cmd_torque: float
-  out_torque: float
-  roll_deg: float
+  steering_torque: float | None
+  cmd_torque: float | None
+  out_torque: float | None
+  roll_deg: float | None
 
 
 def _speed_band_label(v_ego: float) -> str:

@@ -27,8 +27,10 @@ def manual_profile(raw, fingerprint, basis):
     if profile.gain_basis.torque_basis != basis:
       raise ValueError('Wrong FLM gain basis')
     low, high = gain_bounds(fingerprint, profile.gain_basis)
-    if profile.proportional_gain.mode == 'custom' and not low <= profile.proportional_gain.custom_value <= high:
-      raise ValueError('Out-of-range FLM gain')
+    if profile.proportional_gain.mode == 'custom':
+      value = profile.proportional_gain.custom_value
+      if value is None or not low <= value <= high:
+        raise ValueError('Out-of-range FLM gain')
   return profile
 
 

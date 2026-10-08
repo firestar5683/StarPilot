@@ -205,7 +205,7 @@ class FlmAnalysisOwner:
         error = 'not_parked'
       # Completion effects acquire the HTTP effect guard before this owner's
       # lock. Never invoke a callback while holding the owner lock.
-      if error is None and not canceled.is_set() and reaped and gm_context is not None and self._completed is not None:
+      if error is None and result is not None and not canceled.is_set() and reaped and gm_context is not None and self._completed is not None:
         try:
           result['gmEvidence']['progressRecorded'] = self._completed(result) is True
         except Exception:

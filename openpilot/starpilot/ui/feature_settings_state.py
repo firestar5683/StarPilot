@@ -164,8 +164,9 @@ def feature_footer_top(state: FeatureSettingsState) -> float:
 def feature_footer_buttons(state: FeatureSettingsState) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
   left = 520 if state.sidebar_expanded else 20
   y = FEATURE_FOOTER_CENTER - FEATURE_FOOTER_BUTTON_HEIGHT / 2
-  return tuple((center - FEATURE_FOOTER_BUTTON_WIDTH / 2, y, FEATURE_FOOTER_BUTTON_WIDTH, FEATURE_FOOTER_BUTTON_HEIGHT)
-               for center in ((left + 25 + 1320) / 2, (1320 + 2120) / 2))
+  buttons = tuple((center - FEATURE_FOOTER_BUTTON_WIDTH / 2, y, FEATURE_FOOTER_BUTTON_WIDTH, FEATURE_FOOTER_BUTTON_HEIGHT)
+                  for center in ((left + 25 + 1320) / 2, (1320 + 2120) / 2))
+  return buttons[0], buttons[1]
 
 
 def feature_footer_target(x: float, y: float, state: FeatureSettingsState) -> int | None:

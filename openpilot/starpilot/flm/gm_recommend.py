@@ -236,7 +236,8 @@ def canonical_trial(context, generated):
   if 'SteerFriction' in delta:
     profile = replace(profile, friction=FieldChoice('custom', delta['SteerFriction']))
   if 'SteerKP' in delta:
-    basis = GainBasis(cap['controller'], tuple(tuple(row) for row in context['gainTable']), tuple(cap['basis']))
+    speed_row, gain_row = context['gainTable']
+    basis = GainBasis(cap['controller'], (tuple(speed_row), tuple(gain_row)), tuple(cap['basis']))
     profile = replace(profile, proportional_gain=FieldChoice('custom', delta['SteerKP']), gain_basis=basis)
   geometry = profile.geometry or GeometryProfile(tuple(context['geometryBasis']))
   if any(key in delta for key in ('SteerRatio', 'SteerDelay', 'UseAutoSteerDelay', 'ForceAutoTune', 'ForceAutoTuneOff')):

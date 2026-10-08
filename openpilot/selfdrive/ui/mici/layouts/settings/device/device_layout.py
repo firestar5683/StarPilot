@@ -211,7 +211,7 @@ class DeviceLayoutMici(NavScroller):
     return native_parked(ui_state) and not ui_state.params.get_bool("IsDriverViewEnabled")
 
   def _reset_calibration(self) -> None:
-    if not ui_state.engaged:
+    if not ui_state.engaged and isinstance(ui_state.params, Params):
       calibration_reset.request(ui_state.params)
 
   def _reset_driver_monitoring(self) -> None:
