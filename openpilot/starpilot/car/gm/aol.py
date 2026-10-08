@@ -3,7 +3,7 @@
 import math
 
 from opendbc.car.structs import CarParams
-from opendbc.car.gm.values import CAR, control_flags
+from opendbc.car.gm.values import CAR, control_flags, camera_acc_pedal_profile, is_volt_ascm_longitudinal
 from opendbc.car.gm.aol import GM_AOL_ALTERNATIVE_EXPERIENCE, GM_AOL_WORDS, qualified_gm
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent
@@ -77,3 +77,12 @@ def configuration_settings_policy(cp):
     return AolVehiclePolicy(settings_supported=True, lkas_button_supported=False)
   except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
     return None
+
+
+def intent_disarming_fault(cp, events, state, **context):
+  """An ASCM Volt ACC fault withdraws axes without erasing main-armed intent."""
+  from openpilot.cereal import log
+  from openpilot.starpilot.aol.intent import disarming_fault
+  if qualified_gm(cp) and camera_acc_pedal_profile(cp) is None and is_volt_ascm_longitudinal(cp):
+    events = [event for event in events if event.name != log.OnroadEvent.EventName.accFaulted]
+  return disarming_fault(events, state, **context)

@@ -33,7 +33,7 @@ from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
-from openpilot.starpilot.aol.intent import AolProcessFaultContext, disarming_fault, independent_axis_requested, read_settings
+from openpilot.starpilot.aol.intent import AolProcessFaultContext, independent_axis_requested, read_settings
 from opendbc.car.honda.stock_aol import (
   qualified as qualified_honda_stock_aol, native_observation as honda_native_observation,
   temporary_restriction as honda_temporary_restriction,
@@ -680,7 +680,8 @@ class Car:
                                             resume=self.vehicle_startup.consume_cruise_resume())
 
   def aol_disarming_fault(self, CS, event_ns: int, now_ns: int) -> bool:
-    return disarming_fault(self.sm['onroadEvents'], CS,
+    from openpilot.starpilot.car.gm.aol import intent_disarming_fault
+    return intent_disarming_fault(self.CP, self.sm['onroadEvents'], CS,
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
       temporary_selfdrive_lagging=qualified_gm(self.CP))
 
