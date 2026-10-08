@@ -541,23 +541,26 @@ class TestRuntimePanelActions(unittest.TestCase):
   def test_camera_and_calibration_use_native_dialogs_and_confirmation(self):
     with patch.object(runtime_app.gui_app, "push_widget") as pushed, \
          patch.object(native_device, "ConfirmDialog", side_effect=lambda *a, **k: NS(callback=k["callback"])), \
-         patch.object(native_device, "ui_state", self.ui):
+         patch.object(native_device, "ui_state", self.ui), \
+         patch.object(native_device, "calibration_reset") as reset:
+      self.device._calibration_reset_pending = False
+      reset.request.return_value = True
       with patch("openpilot.selfdrive.ui.onroad.cabin_camera_dialog.CabinCameraDialog", return_value="camera"):
         self.assertTrue(self.layout._deliver_settings_request(DeviceAction(DeviceRequest.PREVIEW_DRIVER_CAMERA)))
       pushed.assert_called_once_with("camera")
       self.assertTrue(self.layout._deliver_settings_request(DeviceAction(DeviceRequest.RESET_CALIBRATION)))
       dialog = pushed.call_args.args[0]
-      self.device._params.remove.assert_not_called()
+      reset.request.assert_not_called()
       dialog.callback(native_device.DialogResult.CANCEL)
-      self.device._params.remove.assert_not_called()
+      reset.request.assert_not_called()
       self.ui.sm["pandaStates"][0].ignitionLine = True
       self.ui.sm["deviceState"].started = True
       dialog.callback(native_device.DialogResult.CONFIRM)
-      self.device._params.remove.assert_not_called()
+      reset.request.assert_not_called()
       self.ui.sm["deviceState"].started = False
       dialog.callback(native_device.DialogResult.CONFIRM)
-      self.assertEqual(self.device._params.remove.call_count, 4)
-      self.device._params.put_bool.assert_called_once_with("OnroadCycleRequested", True, block=True)
+      reset.request.assert_called_once_with(self.device._params)
+      self.assertTrue(self.device._calibration_reset_pending)
 
   def test_galaxy_never_opens_comma_pairing_or_infers_manage_from_home_pairing(self):
     with patch("openpilot.selfdrive.ui.widgets.pairing_dialog.PairingDialog") as comma_dialog, \

@@ -17,6 +17,7 @@ from openpilot.system.ui.lib.application import gui_app, MousePos
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.selfdrive.ui.ui_state import device, ui_state
 from openpilot.starpilot.ui.slc_offset_feature import native_parked
+from openpilot.starpilot.ui.calibration_reset import calibration_reset
 from openpilot.system.ui.widgets.html_render import HtmlRenderer
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 
@@ -158,18 +159,12 @@ class DeviceLayoutMici(NavScroller):
     def reboot_callback():
       ui_state.params.put_bool("DoReboot", True, block=True)
 
-    def reset_calibration_callback():
-      params = ui_state.params
-      params.remove("CalibrationParams")
-      params.remove("LiveTorqueParameters")
-      params.remove("LiveParametersV2")
-      params.remove("LiveDelay")
-      params.put_bool("OnroadCycleRequested", True, block=True)
-
     reset_calibration_btn = EngagedConfirmationButton("reset calibration", "reset", gui_app.texture("icons_mici/settings/device/lkas.png", 122, 64),
-                                                      reset_calibration_callback,
+                                                      self._reset_calibration,
                                                       description="Mount the device within 4° left or right and 5° up or 9° down. openpilot calibrates " +
                                                                   "continuously; resetting is rarely needed. Resetting clears learned calibration.")
+    reset_calibration_btn.set_enabled(lambda: not ui_state.engaged and not calibration_reset.pending
+                                             and not ui_state.params.get_bool("OnroadCycleRequested"))
 
     reboot_btn = EngagedConfirmationCircleButton("reboot", gui_app.texture("icons_mici/settings/device/reboot.png", 64, 70),
                                                  reboot_callback, exit_on_confirm=False)
@@ -215,6 +210,10 @@ class DeviceLayoutMici(NavScroller):
   def _can_reset_driver_monitoring(self) -> bool:
     return native_parked(ui_state) and not ui_state.params.get_bool("IsDriverViewEnabled")
 
+  def _reset_calibration(self) -> None:
+    if not ui_state.engaged:
+      calibration_reset.request(ui_state.params)
+
   def _reset_driver_monitoring(self) -> None:
     if not self._can_reset_driver_monitoring():
       return
@@ -223,6 +222,8 @@ class DeviceLayoutMici(NavScroller):
 
   def _update_state(self):
     super()._update_state()
+    if error := calibration_reset.take_error():
+      gui_app.push_widget(BigDialog("", error))
     if self._pending_pairing_grow_animation:
       btn_right = self._pairing_button.rect.x + self._pairing_button.rect.width
       visible_right = self._rect.x + self._rect.width

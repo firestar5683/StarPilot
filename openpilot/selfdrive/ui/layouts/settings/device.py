@@ -6,6 +6,7 @@ from openpilot.cereal import messaging, log
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.starpilot.schema_cache import get_cache
+from openpilot.starpilot.ui.calibration_reset import calibration_reset
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.onroad.cabin_camera_dialog import CabinCameraDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -37,6 +38,7 @@ class DeviceLayout(Widget):
     self._params = Params()
     self._select_language_dialog: MultiOptionDialog | None = None
     self._fcc_dialog: HtmlModal | None = None
+    self._calibration_reset_pending = False
 
     items = self._initialize_items()
     self._scroller = self._child(Scroller(items, line_separator=True, spacing=0))
@@ -51,6 +53,8 @@ class DeviceLayout(Widget):
     self._reset_calib_btn = button_item(lambda: tr("Reset Calibration"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_calibration']),
                                         callback=self._reset_calibration_prompt)
     self._reset_calib_btn.set_description_opened_callback(self._update_calib_description)
+    self._reset_calib_btn.set_enabled(lambda: not ui_state.engaged and not calibration_reset.pending
+                                            and not self._params.get_bool("OnroadCycleRequested"))
 
     self._power_off_btn = dual_button_item(lambda: tr("Reboot"), lambda: tr("Power Off"),
                                            left_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
@@ -78,6 +82,14 @@ class DeviceLayout(Widget):
   def _render(self, rect):
     self._scroller.render(rect)
 
+  def _update_state(self):
+    super()._update_state()
+    if self._calibration_reset_pending and not calibration_reset.pending:
+      self._calibration_reset_pending = False
+      self._update_calib_description()
+    if error := calibration_reset.take_error():
+      gui_app.push_widget(alert_dialog(tr(error)))
+
   def _show_language_dialog(self):
     def handle_language_selection(result: DialogResult):
       if result == DialogResult.CONFIRM and self._select_language_dialog:
@@ -100,12 +112,7 @@ class DeviceLayout(Widget):
       if ui_state.engaged or result != DialogResult.CONFIRM or (action_guard is not None and not action_guard()):
         return
 
-      self._params.remove("CalibrationParams")
-      self._params.remove("LiveTorqueParameters")
-      self._params.remove("LiveParametersV2")
-      self._params.remove("LiveDelay")
-      self._params.put_bool("OnroadCycleRequested", True, block=True)
-      self._update_calib_description()
+      self._calibration_reset_pending = calibration_reset.request(self._params) or self._calibration_reset_pending
 
     dialog = ConfirmDialog(tr("Are you sure you want to reset calibration?"), tr("Reset"), callback=reset_calibration)
     gui_app.push_widget(dialog)
