@@ -13,10 +13,10 @@ from openpilot.selfdrive.ui.mici.onroad import long_indicator as indicator
 def display(monkeypatch):
   class Messages(dict):
     recv_frame = {'selfdriveState': 12}
-    alive = {'longitudinalPlan': True}
-  sm = Messages(selfdriveState=NS(enabled=True, personality=NS(raw=1), alertSize=log.SelfdriveState.AlertSize.none),
+    alive = {'longitudinalPlan': True, 'carControl': True}
+  sm = Messages(selfdriveState=NS(enabled=True, active=True, personality=NS(raw=1), alertSize=log.SelfdriveState.AlertSize.none),
                 longitudinalPlan=NS(hasLead=True, longitudinalPlanSource=log.LongitudinalPlan.LongitudinalPlanSource.e2e),
-                onroadEvents=[])
+                carControl=NS(longActive=True), onroadEvents=[])
   state = NS(sm=sm, started_frame=10, has_longitudinal_control=True)
   monkeypatch.setattr(indicator, 'ui_state', state)
   monkeypatch.setattr(indicator.rl, 'get_time', lambda: 1.)
@@ -111,7 +111,7 @@ def test_sidebar_keeps_selected_personality_without_claiming_active_control(disp
   for _ in range(60):
     widget.render_sidebar(rl.Rectangle(476, 160, 60, 80), personality=0)
   draws = widget._draw_centered.call_args_list[-8:]
-  assert draws[0].args[3] == pytest.approx(.35, abs=.001)
+  assert draws[0].args[3] == pytest.approx(1., abs=.001)
   assert draws[1].args[3] < .001
   assert draws[2].args[3] > .89
   assert draws[4].args[3] == pytest.approx(.35, abs=.001)
@@ -129,7 +129,7 @@ def test_sidebar_disengagement_clears_active_lead_and_gas_override_immediately(d
   state.sm['onroadEvents'] = [NS(name=log.OnroadEvent.EventName.gasPressedOverride)]
   widget.render_sidebar(rect, personality=1, longitudinal_active=False)
   draws = widget._draw_centered.call_args_list[-8:]
-  assert draws[0].args[3] == pytest.approx(.35, abs=.001)
+  assert draws[0].args[3] == pytest.approx(1., abs=.001)
   assert draws[1].args[3] == 0.0
   assert draws[2].args[3] > .89
   assert draws[4].args[3] > .89

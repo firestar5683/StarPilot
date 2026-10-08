@@ -297,7 +297,7 @@ class StarShellSession:
     indicator = self.camera_owner._long_indicator
     indicator.set_should_draw(state.alert.size == AlertSize.NONE or is_lane_change_notice(state.alert))
     indicator.render_sidebar(rect, personality=state.personality,
-                             longitudinal_active=state.longitudinal_active, traffic_mode=state.traffic_mode)
+                             longitudinal_active=state.cruise_active, traffic_mode=state.traffic_mode)
 
   def _favorite_actions(self):
     actions = mapped_actions(lambda page: self.feature_snapshot(page, favorite=True), self.feature_request,

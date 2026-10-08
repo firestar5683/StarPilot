@@ -65,13 +65,17 @@ class LongIndicator(Widget):
   def _draw_lead_car(self, rect: rl.Rectangle, alpha: float) -> None:
     sm = ui_state.sm
     plan = sm['longitudinalPlan']
-    has_lead = self._sidebar_long_active is not False and sm.alive['longitudinalPlan'] and plan.hasLead
+    has_lead = sm.alive['longitudinalPlan'] and plan.hasLead
+    longitudinal_active = (self._sidebar_long_active if self._sidebar_long_active is not None else
+                           sm.alive['carControl'] and sm['carControl'].longActive)
+    engaged_lead = has_lead and longitudinal_active
+    white_target = 0.0 if engaged_lead else (1.0 if has_lead else 0.35)
 
     white_f, green_f = self._lead_car_filters
-    if self._sidebar_long_active is False:
-      white_f.x, green_f.x = 0.35, 0.0
-    white_alpha = white_f.update(0.0 if has_lead else 0.35)
-    green_alpha = green_f.update(float(has_lead))
+    if not longitudinal_active:
+      white_f.x, green_f.x = white_target, 0.0
+    white_alpha = white_f.update(white_target)
+    green_alpha = green_f.update(float(engaged_lead))
 
     white, green = self._txt_lead_car
     self._draw_centered(white, rect, 100, white_alpha * alpha)
