@@ -226,6 +226,7 @@ class MiciSidebarWidgets:
 
   def __init__(self, fonts: BitmapFonts | None = None):
     self.fonts = fonts
+    self.personality_renderer = None
     self._confidence_filter = FirstOrderFilter(-0.5, 0.5, 1 / 60)
     self._confidence_drive_frame: int | None = None
     self._confidence_stamp_ns: int | None = None
@@ -233,14 +234,22 @@ class MiciSidebarWidgets:
   def render(self, rect: rl.Rectangle, state: OnroadState) -> None:
     sidebar = rl.Rectangle(rect.x + rect.width - 60, rect.y, 60, rect.height)
     rl.draw_rectangle(int(sidebar.x), int(sidebar.y), int(sidebar.width), int(sidebar.height), rl.BLACK)
-    for key, render in (("model_confidence", self._confidence_ball), ("conditional_mode", self._conditional),
-                        ("following_distance", self._personality)):
+    for key, render in (("model_confidence", self._confidence_ball), ("conditional_mode", self._conditional)):
       position = placement(state.customization, "compact", key)
       if not position["enabled"] or (position["x"] < sidebar.x and state.alert.size != AlertSize.NONE):
         continue
       bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
       draw_widget_frame(bounds, state.customization, "compact", key)
       render(bounds, state)
+    self.render_personality(rect, state)
+
+  def render_personality(self, rect: rl.Rectangle, state: OnroadState) -> None:
+    position = placement(state.customization, "compact", "following_distance")
+    if not position["enabled"] or (position["x"] < rect.x + rect.width - 60 and state.alert.size != AlertSize.NONE):
+      return
+    bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
+    draw_widget_frame(bounds, state.customization, "compact", "following_distance")
+    self._personality(bounds, state)
 
   def _conditional(self, center: rl.Rectangle, state: OnroadState) -> None:
     conditional = conditional_status(state)
@@ -349,16 +358,21 @@ class MiciSidebarWidgets:
 
   def _personality(self, rect: rl.Rectangle, state: OnroadState) -> None:
     cx, cy = rect.x + rect.width / 2, rect.y + rect.height / 2
-    bottom_y, lane_top_y = cy + 24, cy - 24
-    color = rl.Color(*rgba(state.customization, "text", "compact", "following_distance"))
-    _line(cx - 25, bottom_y, cx - 13, lane_top_y, color, 3)
-    _line(cx + 25, bottom_y, cx + 13, lane_top_y, color, 3)
     accent = rl.Color(200, 32, 48, 255) if state.traffic_mode else rl.Color(112, 192, 216, 255)
-    stack_count = 1 if state.traffic_mode else state.personality + 1
-    for y, half_width in ((cy + 12, 18), (cy - 1, 14), (cy - 14, 10))[:stack_count]:
-      _line(cx - half_width, y, cx + half_width, y, accent, 5)
-      _line(cx - half_width, y, cx - half_width - 3, y + 7, accent, 4)
-      _line(cx + half_width, y, cx + half_width + 3, y + 7, accent, 4)
+    if self.personality_renderer is not None:
+      label = state.traffic_display is not None and state.traffic_display.state in ('active', 'paused', 'off')
+      bounds = rl.Rectangle(rect.x, rect.y, rect.width, rect.height - 14 if label else rect.height)
+      self.personality_renderer(bounds, state)
+    else:
+      bottom_y, lane_top_y = cy + 24, cy - 24
+      color = rl.Color(*rgba(state.customization, "text", "compact", "following_distance"))
+      _line(cx - 25, bottom_y, cx - 13, lane_top_y, color, 3)
+      _line(cx + 25, bottom_y, cx + 13, lane_top_y, color, 3)
+      stack_count = 1 if state.traffic_mode else state.personality + 1
+      for y, half_width in ((cy + 12, 18), (cy - 1, 14), (cy - 14, 10))[:stack_count]:
+        _line(cx - half_width, y, cx + half_width, y, accent, 5)
+        _line(cx - half_width, y, cx - half_width - 3, y + 7, accent, 4)
+        _line(cx + half_width, y, cx + half_width + 3, y + 7, accent, 4)
     if state.traffic_display is not None and self.fonts is not None and state.alert.size != AlertSize.FULL:
       short = {'active': 'TRF', 'paused': 'PAUSE', 'off': 'OFF'}.get(state.traffic_display.state)
       if short is None:

@@ -354,6 +354,7 @@ class OnroadView:
       rail = rl.Rectangle(0, 0, 536, 240)
       if use_stock:
         stock_layer(rail, state)
+        self.compact_sidebar.render_personality(rail, state)
       else:
         self.compact_sidebar.render(rail, state)
     clip.begin_scissor_mode(0, 0, 476, 240)

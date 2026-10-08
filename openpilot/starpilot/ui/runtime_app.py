@@ -177,10 +177,8 @@ class StarShellSession:
       if profile == Profile.COMPACT:
         self.view.onroad.stock_confidence_layer = lambda rect, state: render_stock_confidence(camera_owner, rect, state)
         self.view.onroad.stock_confidence_reset = camera_owner.reset_stock_confidence_layer
-        self.view.onroad.extra_overlays = lambda rect, state: camera_owner.render_model_source_layer(
-          rect, show_long_indicator=state.alert.size == AlertSize.NONE and
-                                   state.appearance.camera_view != CameraViewChoice.DRIVER and not state.reverse_driver_camera and
-                                   self.view.onroad.compact_hud._set_speed_alpha.x <= 1e-2)
+        self.view.onroad.extra_overlays = lambda rect, state: camera_owner.render_model_source_layer(rect, show_long_indicator=None)
+        self.view.onroad.compact_sidebar.personality_renderer = self._render_personality
     except Exception:
       self.fonts.close()
       raise
@@ -291,6 +289,12 @@ class StarShellSession:
     self._driver_monitor_layer.render(state, monitor=monitor, driver=driver,
                                       fresh=monitor is not None and driver is not None,
                                       onroad=ui_state.is_onroad(), top_icons=top_icons)
+
+  def _render_personality(self, rect, state):
+    indicator = self.camera_owner._long_indicator
+    indicator.set_should_draw(state.alert.size == AlertSize.NONE)
+    indicator.render_sidebar(rect, personality=state.personality,
+                             longitudinal_active=state.longitudinal_active, traffic_mode=state.traffic_mode)
 
   def _favorite_actions(self):
     actions = mapped_actions(lambda page: self.feature_snapshot(page, favorite=True), self.feature_request,

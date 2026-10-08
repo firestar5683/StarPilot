@@ -21,14 +21,19 @@ def test_native_chestnut_status_accepts_typed_params(raw, expected):
   assert state.chestnut_active is expected
 
 
-def test_custom_model_source_layer_uses_native_status_animation():
+@pytest.mark.parametrize('indicator', [False, None])
+def test_custom_model_source_layer_uses_native_status_animation(indicator):
   view = Mock(spec=AugmentedRoadView, _hud_renderer=Mock(), _long_indicator=Mock())
   rect = rl.Rectangle(0, 0, 476, 240)
-  AugmentedRoadView.render_model_source_layer(view, rect)
+  AugmentedRoadView.render_model_source_layer(view, rect, show_long_indicator=indicator)
   view._hud_renderer._update_state.assert_called_once_with()
   view._hud_renderer._draw_model_source.assert_called_once_with(rect)
-  view._long_indicator.set_should_draw.assert_called_once_with(False)
-  view._long_indicator.render.assert_called_once_with(rect)
+  if indicator is None:
+    view._long_indicator.set_should_draw.assert_not_called()
+    view._long_indicator.render.assert_not_called()
+  else:
+    view._long_indicator.set_should_draw.assert_called_once_with(False)
+    view._long_indicator.render.assert_called_once_with(rect)
 
 
 @pytest.mark.parametrize('compiled', [False, True])

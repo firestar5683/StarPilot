@@ -259,11 +259,12 @@ class AugmentedRoadView(CameraView):
       gui_app.measure_frame_phase("model", self._model_renderer.render_with_lead, rect, lead_indicator,
                                   lead_info_mode, lead_info_metric, lateral_active=lateral_active, paint=paint)
 
-  def render_model_source_layer(self, rect: rl.Rectangle, *, show_long_indicator: bool = False) -> None:
+  def render_model_source_layer(self, rect: rl.Rectangle, *, show_long_indicator: bool | None = False) -> None:
     self._hud_renderer._update_state()
     self._hud_renderer._draw_model_source(rect)
-    self._long_indicator.set_should_draw(show_long_indicator)
-    self._long_indicator.render(rect)
+    if show_long_indicator is not None:
+      self._long_indicator.set_should_draw(show_long_indicator)
+      self._long_indicator.render(rect)
 
   def render_stock_confidence_layer(self, rect: rl.Rectangle, *, lateral_active: bool = False) -> None:
     self._confidence_ball.render_with_lateral(rect, lateral_active)
