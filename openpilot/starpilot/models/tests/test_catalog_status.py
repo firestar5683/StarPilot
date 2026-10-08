@@ -1,15 +1,20 @@
 import hashlib
+import json
 from pathlib import Path
 import unittest
 
-from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, CATALOG, DEFAULT_SMALL, resolve_selection
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, CATALOG, CATALOG_PATH, DEFAULT_SMALL, resolve_selection
 from openpilot.starpilot.models.status import (ModelHealth, ModelLoad, ModelOutput, ModelProcess,
                                               ModelVariant, project_status)
 
 
 class TestModelCatalogStatus(unittest.TestCase):
   def test_catalog_pins_current_source_and_lists_model_metadata(self):
-    self.assertEqual(len(CATALOG), 100)
+    manifest_ids = [row['id'] for row in json.loads(CATALOG_PATH.read_text())['models']]
+    self.assertEqual(len(manifest_ids), len(set(manifest_ids)))
+    catalog_ids = [entry.model_id for entry in CATALOG]
+    self.assertEqual(len(catalog_ids), len(set(catalog_ids)))
+    self.assertCountEqual(catalog_ids, [BUNDLED_CURRENT, *manifest_ids])
     entry = resolve_selection(None)
     self.assertEqual(entry.model_id, DEFAULT_SMALL)
     source = Path(__file__).resolve().parents[4] / entry.source_path

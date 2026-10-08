@@ -697,11 +697,16 @@ class ModelManagerTest(unittest.TestCase):
     self.assertFalse(any("/models/" in url for url in self.urls))
 
   def test_unpublished_catalog_is_visible_but_not_selectable(self):
-    self.assertEqual(len(catalog(self.root)), 99)
+    manifest_ids = [row['id'] for row in json.loads(CATALOG_PATH.read_text())['models']]
+    self.assertEqual(len(manifest_ids), len(set(manifest_ids)))
+    self.assertCountEqual(catalog(self.root), manifest_ids)
     self.manager.snapshot()
     if self.manager.verify_worker is not None:
       self.manager.verify_worker.join(2)
     models = self.manager.snapshot()['models']
+    visible_ids = [row['value'] for row in models]
+    self.assertEqual(len(visible_ids), len(set(visible_ids)))
+    self.assertCountEqual(visible_ids, manifest_ids)
     self.assertEqual(sum(row['selectable'] for row in models), 1)
     self.assertTrue(all(row.get('unavailableReason') for row in models if not row['selectable']))
 
