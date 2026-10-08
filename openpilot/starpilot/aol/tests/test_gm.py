@@ -1349,3 +1349,44 @@ class TestGmAol(unittest.TestCase):
           self.assertFalse(selected.aol_card_intent.allowed_latch)
         finally:
           selected.vehicle_startup.close()
+
+  def test_sdgm_optional_saved_selection_actual_card_controls_cap(self):
+    from opendbc.car.gm.values import CarControllerParams, is_gm_auto_hold, is_volt_one_pedal, volt_sdgm_accepted_accel_max
+    from openpilot.starpilot.saved_source import read_saved
+    for c9 in (False, True):
+      for held, one_pedal, word in ((True, False, 0x5487 if c9 else 0x5087),
+                                    (False, True, 0xD108 if c9 else 0xD107),
+                                    (True, True, 0xD118 if c9 else 0xD117)):
+        with self.subTest(word=hex(word)), OpenpilotPrefix(), \
+             patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+          settings = Params()
+          for key, value in (('AlwaysOnLateral', True), ('AlphaLongitudinalEnabled', True),
+                             ('DisableOpenpilotLongitudinal', False), ('SafeMode', False),
+                             ('GMAutoHold', held), ('VoltOnePedalMode', one_pedal)):
+            settings.put_bool(key, value, block=True)
+          saved = {key: read_saved(settings, key, 8) for key in ('GMAutoHold', 'VoltOnePedalMode')}
+          selected = self.card(sdgm_params(brake_c9=c9), settings)
+          try:
+            cp = selected.CP
+            self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+            self.assertTrue(cp.openpilotLongitudinalControl)
+            self.assertFalse(cp.pcmCruise)
+            self.assertEqual(cp.alternativeExperience, 32)
+            self.assertTrue(is_gm_auto_hold(cp))
+            self.assertEqual(is_volt_one_pedal(cp), one_pedal)
+            self.assertEqual(selected.CI.CC.gm_auto_hold, held)
+            self.assertEqual(selected.CI.CC.volt_one_pedal, one_pedal)
+            self.assertEqual(CarControllerParams(cp).MAX_GAS, 2041)
+            self.assertEqual(selected.CI.CC.params.MAX_GAS, 2041)
+            controls = Controls()
+            self.assertEqual(controls.CP.to_dict(), cp.to_dict())
+            upper = volt_sdgm_accepted_accel_max(cp, 20.)
+            limits = controls.CI.get_pid_accel_limits(cp, 20., 20.)
+            self.assertEqual(limits[1], upper)
+            cs = structs.CarState(vEgo=20., canValid=True, gearShifter='drive')
+            controls.LoC.update(True, cs, upper + 10., False, limits)
+            self.assertEqual(controls.LoC.pid.pos_limit, upper)
+            self.assertLessEqual(controls.LoC.last_output_accel, upper)
+            self.assertEqual({key: read_saved(settings, key, 8) for key in saved}, saved)
+          finally:
+            selected.vehicle_startup.close()

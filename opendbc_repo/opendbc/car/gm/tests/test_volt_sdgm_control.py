@@ -138,7 +138,7 @@ class TestVoltSdgmControl(unittest.TestCase):
 
 
 class TestVoltSdgmAcceptedEnvelope(unittest.TestCase):
-  def test_factory_selector_and_legacy_aliases_do_not_borrow_default_cap(self):
+  def test_factory_selector_and_optional_aliases_share_original_accepted_cap(self):
     from opendbc.car.gm.values import CarControllerParams, is_volt_sdgm_accepted_envelope
     from opendbc.car.gm.tests.test_volt_transitions import volt_sdgm_pedal_params
     from opendbc.car.gm.tests.test_volt_grade import params
@@ -149,8 +149,8 @@ class TestVoltSdgmAcceptedEnvelope(unittest.TestCase):
       for word in ((0x5487, 0xD108, 0xD118) if c9 else (0x5087, 0xD107, 0xD117)):
         marked = cp.as_reader().as_builder()
         marked.safetyConfigs[0].safetyParam = word
-        self.assertFalse(is_volt_sdgm_accepted_envelope(marked))
-        self.assertEqual(CarControllerParams(marked).MAX_GAS, 2698)
+        self.assertTrue(is_volt_sdgm_accepted_envelope(marked))
+        self.assertEqual(CarControllerParams(marked).MAX_GAS, 2041)
       for field, value in (('brand', 'hyundai'), ('carFingerprint', CAR.HOLDEN_ASTRA),
                            ('passive', True), ('dashcamOnly', True), ('notCar', True),
                            ('openpilotLongitudinalControl', False), ('pcmCruise', True)):

@@ -1294,7 +1294,11 @@ static safety_config gm_init(uint16_t safety_param) {
   if (gm_volt_camera_long || gm_volt_sdgm_long) {
     gm_long_limits = &GM_BOLT_EUV_LONG_LIMITS;
   }
-  if (!gm_camera_pedal && ((camera_param == 0x5007U) || (camera_param == 0x5407U))) {
+  const bool volt_sdgm_accepted_envelope = (safety_param == 0x5007U) || (safety_param == 0x5407U) ||
+    (safety_param == 0x5087U) || (safety_param == 0x5487U) ||
+    (safety_param == 0xD107U) || (safety_param == 0xD108U) ||
+    (safety_param == 0xD117U) || (safety_param == 0xD118U);
+  if (!gm_camera_pedal && volt_sdgm_accepted_envelope) {
     static const LongitudinalLimits GM_VOLT_SDGM_ACCEPTED_LIMITS = {
       .max_gas = 2041 * GM_GAS_TO_CAN,
       .min_gas = -540 * GM_GAS_TO_CAN,

@@ -412,7 +412,7 @@ def is_volt_sdgm_profile(cp: CarParams, *, longitudinal=False) -> bool:
 
 def is_volt_sdgm_accepted_envelope(cp: CarParams) -> bool:
   return (camera_acc_pedal_profile(cp) is None and is_volt_sdgm_profile(cp, longitudinal=True) and
-          gm_control_word(cp) in (0x5007, 0x5407))
+          gm_control_word(cp) in (0x5007, 0x5407, 0x5087, 0x5487))
 
 
 def volt_sdgm_accepted_accel_max(cp: CarParams, speed: float) -> float:
