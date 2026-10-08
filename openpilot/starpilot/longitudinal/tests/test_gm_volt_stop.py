@@ -346,6 +346,57 @@ class TestVoltStop(unittest.TestCase):
     time.sleep(.16)
     self.assertFalse(provider.update(time.monotonic_ns()))
 
+  def test_ascm_card_resume_uses_physical_clock_and_monotonic_plan_with_two_second_offset(self):
+    from opendbc.car.gm.tests.test_ascm_intercept import params as ascm_params
+    from openpilot.starpilot.controller_extensions import configure_controller
+    from openpilot.starpilot.longitudinal.tests.test_gm_volt_long_policy import SubMasterFixture
+    mono, boot = 20_000_000_000, 22_000_000_000
+    cp = ascm_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, accelerator=True, radar=True)
+    cp.safetyConfigs[0].safetyParam = 0xD114
+    self.assertEqual(cp.alternativeExperience, 0)
+    from openpilot.common.params import Params
+    from openpilot.selfdrive.car.card import Car
+    self.enterContext(OpenpilotPrefix())
+    self.enterContext(patch.dict('os.environ', {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}))
+    saved = Params()
+    for key in ('OpenpilotEnabledToggle', 'AlwaysOnLateral', 'VoltSNG', 'GMAutoHold', 'VoltOnePedalMode'):
+      saved.put_bool(key, True, block=True)
+    saved.put_bool('SafeMode', False, block=True)
+    ci = CarInterface(cp)
+    card = Car(CI=ci, RI=CarInterface.RadarInterface(cp))
+    self.assertEqual(card.CP.alternativeExperience, 32)
+    self.assertEqual(card.CP.safetyConfigs[0].safetyParam, 0xD114)
+    self.assertTrue(card.volt_startup_keepalive())
+    provider = ci.CC.volt_sng_plan_input
+    sm = SubMasterFixture(mono)
+    self.enterContext(patch.object(sm, 'update', lambda timeout: None, create=True))
+    self.enterContext(patch.object(provider, 'sm', sm))
+    self.assertTrue(provider.boottime)
+    provider.freshness.offset_ns = boot - mono
+    provider.freshness.floor_ns = mono - 1_000_000_000
+    with patch('openpilot.starpilot.controller_extensions.time.monotonic_ns', return_value=mono), \
+         patch('openpilot.starpilot.controller_extensions.time.clock_gettime_ns', return_value=boot), \
+         patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(mono, boot)):
+      self.assertTrue(provider.update(boot))
+      self.assertFalse(provider.update(mono))
+      sm['longitudinalPlan'].shouldStop = True
+      self.assertFalse(provider.update(boot))
+      sm['longitudinalPlan'].shouldStop = False
+      sm.logMonoTime['longitudinalPlan'] = mono - 150_000_001
+      self.assertFalse(provider.update(boot))
+      sm.logMonoTime['longitudinalPlan'] = boot - 20_000_000
+      self.assertFalse(provider.update(boot))
+      sm.logMonoTime['longitudinalPlan'] = mono - 20_000_000
+      sm.valid['longitudinalPlan'] = False
+      self.assertFalse(provider.update(boot))
+      sm.valid['longitudinalPlan'] = True
+      self.assertTrue(provider.update(boot))
+    # Outside the exact ASCM independent-axis profile, retain the prior clock.
+    cp.alternativeExperience = 0
+    with patch('openpilot.starpilot.controller_extensions.messaging.SubMaster', return_value=sm):
+      configure_controller(ci, None)
+    self.assertFalse(ci.CC.volt_sng_plan_input.boottime)
+
   def test_frozen_card_opt_in_qualifies_plan_when_controls_snapshot_is_off(self):
     from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
     from openpilot.starpilot.controller_extensions import configure_controller

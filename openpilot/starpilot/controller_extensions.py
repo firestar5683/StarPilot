@@ -150,9 +150,10 @@ def configure_controller(CI, params):
   from opendbc.car.gm.values import is_volt_longitudinal
   if controller is not None and is_volt_longitudinal(cp) and controller.volt_sng:
     try:
-      from opendbc.car.gm.values import is_volt_sdgm_profile
+      from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal, is_volt_sdgm_profile
       controller.volt_sng_plan_input = ResumePlanInputs(
-        boottime=is_volt_sdgm_profile(cp, longitudinal=True) and cp.safetyConfigs[0].safetyParam == 0x5007)
+        boottime=(is_volt_sdgm_profile(cp, longitudinal=True) and cp.safetyConfigs[0].safetyParam == 0x5007 or
+                  cp.alternativeExperience == 32 and not cp.flags & GMFlags.PEDAL_LONG and is_volt_ascm_longitudinal(cp)))
     except OSError:
       controller.volt_sng_plan_input = None
       cloudlog.exception('Optional Volt resume input transport unavailable')

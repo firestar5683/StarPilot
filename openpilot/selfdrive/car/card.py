@@ -56,7 +56,8 @@ from openpilot.starpilot.aol.wire import IntentState, encode_intent
 from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, IoniqMediaMapCache, WheelMapCache, Press, ioniq6_media_eligible
 from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
 from opendbc.car.gm.aol import native_bootstrap_supported, qualified_gm
-from opendbc.car.gm.values import is_volt_sdgm_profile
+from opendbc.car.gm.values import CAR as GM_CAR, GMFlags, is_volt_ascm_longitudinal, is_volt_sdgm_profile
+from opendbc.car.gm.lateral import lane_centering_supported as gm_lane_centering_supported
 from opendbc.car.gm.ordinary_cc import control_transport_required as gm_cc_transport_required
 from openpilot.starpilot.longitudinal.toyota_output_policy import CLOCK_PAIR_MAX_SKEW_NS, clock_pair_ns
 from openpilot.starpilot.longitudinal.cruise_intervals import read_cruise_intervals
@@ -344,6 +345,8 @@ class Car:
       self.CP.safetyConfigs[0].safetyParam |= aol_policy.safety_param_addition
       self.CP.alternativeExperience |= aol_policy.alternative_experience_addition
     self.vehicle_startup.finalize_aol_configuration(self.CI)
+    if isinstance(self.CI, GMInterface) and self.CI.CC is not None and self.CI.CC.volt_sng_plan_input is not None:
+      self.CI.CC.volt_sng_plan_input.boottime = self.volt_startup_keepalive()
 
     # Reserve optional transport from finalized capability, not saved admission.
     self.slc_transport_available = slc_transport_capable(self.CP, os.environ)
@@ -996,7 +999,7 @@ class Car:
                 len(pandas) == len(self.CP.safetyConfigs) and
                 all(ps.safetyModel == cfg.safetyModel and ps.safetyParam == cfg.safetyParam and
                     ps.alternativeExperience == self.CP.alternativeExperience and
-                    (not ps.safetyRxChecksInvalid or inactive_keepalive and self.volt_sdgm_startup_keepalive())
+                    (not ps.safetyRxChecksInvalid or inactive_keepalive and self.volt_startup_keepalive())
                     for ps, cfg in zip(pandas, self.CP.safetyConfigs, strict=True)))
 
   def publish_sendcan(self, frames, valid=True):
@@ -1005,6 +1008,10 @@ class Car:
       # CAN producer/parser and pandad send age use BOOTTIME; Python controls/device envelopes use MONOTONIC.
       builder = messaging.log_from_bytes(packet).as_builder()
       builder.logMonoTime = int(getattr(self, 'volt_cc_now_boot_ns', 0))
+      packet = builder.to_bytes()
+    elif self.volt_startup_keepalive():
+      builder = messaging.log_from_bytes(packet).as_builder()
+      builder.logMonoTime = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
       packet = builder.to_bytes()
     if self.vehicle_startup.owner is not None:
       with self.vehicle_startup.send_lock:
@@ -1047,6 +1054,13 @@ class Car:
 
   def volt_sdgm_startup_keepalive(self):
     return (is_volt_sdgm_profile(self.CP, longitudinal=True) and self.CP.safetyConfigs[0].safetyParam == 0x5007)
+
+  def volt_startup_keepalive(self):
+    return (self.volt_sdgm_startup_keepalive() or
+            self.CP.alternativeExperience == 32 and not self.CP.flags & GMFlags.PEDAL_LONG and
+            (is_volt_ascm_longitudinal(self.CP) or
+             self.CP.carFingerprint == GM_CAR.CHEVROLET_VOLT_ASCM and self.CP.pcmCruise and
+             not self.CP.openpilotLongitudinalControl and gm_lane_centering_supported(self.CP)))
 
   def controls_update(self, CS: car.CarState, CC: car.CarControl, *, initialize_only=False):
     """control update loop, driven by carControl"""
@@ -1129,7 +1143,7 @@ class Car:
       self.ci_initialized = True
 
     if initialize_only:
-      if (isinstance(self.CI, GMInterface) and self.volt_sdgm_startup_keepalive() and
+      if (isinstance(self.CI, GMInterface) and self.volt_startup_keepalive() and
           self.startup_panda_configured(inactive_keepalive=True)):
         inactive = car.CarControl.new_message().as_reader()
         self.last_actuators_output, can_sends = self.CI.apply(
@@ -1173,7 +1187,7 @@ class Car:
       # send car controls over can
       now_nanos = (self.volt_cc_now_boot_ns if getattr(self, 'volt_cc_selected', False) else
                    self.can_log_mono_time if REPLAY else
-                   time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_sdgm_startup_keepalive() else int(time.monotonic() * 1e9))
+                   time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_startup_keepalive() else int(time.monotonic() * 1e9))
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
       self.publish_sendcan(can_sends, valid=CS.canValid)
 
@@ -1190,7 +1204,7 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
-    elif ((not self.ci_initialized or self.volt_sdgm_startup_keepalive()) and self.sm.seen['onroadEvents'] and
+    elif ((not self.ci_initialized or self.volt_startup_keepalive()) and self.sm.seen['onroadEvents'] and
           any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
           self.aol_replay and native_bootstrap_supported(self.CP)):
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
