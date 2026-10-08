@@ -13,6 +13,7 @@ class TestHyundaiBlendedStock(unittest.TestCase):
 
   def select(self, hda2):
     self.bus = int(hda2)
+    self.steer_counter = 0
     self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2010 if hda2 else 0x2000), 0)
     self.safety.init_tests()
 
@@ -27,6 +28,10 @@ class TestHyundaiBlendedStock(unittest.TestCase):
     data = bytearray(16)
     raw = torque + 1024
     data[5], data[6] = (raw & 0x7F) << 1, ((raw >> 7) & 0xF) | (int(request) << 4)
+    from opendbc.car.hyundai.hyundaicanfd import hkg_can_fd_checksum
+    data[2] = self.steer_counter
+    self.steer_counter = (self.steer_counter + 1) & 255
+    data[:2] = hkg_can_fd_checksum(0x50, None, data).to_bytes(2, 'little')
     return common.make_msg(0, 0x50, dat=bytes(data))
 
   def test_scc_source_counter_and_explicit_crc_omission(self):
@@ -103,7 +108,8 @@ class TestHyundaiBlendedStock(unittest.TestCase):
     for index, allowed in enumerate(mask):
       for bit in range(8):
         if not allowed & (1 << bit):
-          data = bytearray(payloads[0]); data[index] |= 1 << bit
+          data = bytearray(payloads[0])
+          data[index] |= 1 << bit
           self.assertFalse(self.safety.safety_tx_hook(common.make_msg(1, 0x485, dat=bytes(data))))
     self.assertEqual(self.safety.safety_fwd_hook(2, 0x485), 0)
     self.assertEqual(self.safety.safety_fwd_hook(0, 0x485), 2)
@@ -114,7 +120,8 @@ class TestHyundaiBlendedStock(unittest.TestCase):
 
   def test_required_sources_and_timeout(self):
     for hda2 in (False, True):
-      for omitted in (None, 'EMS16', 'WHL_SPD11', 'TCS13', 'MDPS12', 'CLU11', 'SCC11', 'SCC12'):
+      sources = (None, 'EMS16', 'WHL_SPD11', 'TCS13', 'MDPS12', 'CLU11', 'SCC11', 'SCC12')
+      for omitted in sources + (('CAM_0x2a4',) if hda2 else ()):
         self.select(hda2)
         for name, values, fix in (
           ('EMS16', {'AliveCounter': 0}, checksum), ('WHL_SPD11', {}, checksum),
@@ -127,6 +134,9 @@ class TestHyundaiBlendedStock(unittest.TestCase):
           self.assertTrue(self.safety.safety_rx_hook(common.make_msg(self.bus, 0x420)))
         if omitted != 'SCC12':
           self.assertTrue(self.safety.safety_rx_hook(self.scc(0)))
+        if hda2 and omitted != 'CAM_0x2a4':
+          camera = common.CANPackerSafety('hyundai_palisade_2023_generated')
+          self.assertTrue(self.safety.safety_rx_hook(camera.make_can_msg_safety('CAM_0x2a4', 2, {})))
         self.safety.set_timer(1000)
         self.safety.safety_tick()
         self.assertEqual(self.safety.safety_config_valid(), omitted is None)

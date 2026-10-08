@@ -13,6 +13,7 @@ class TestHyundaiBlendedAlpha(unittest.TestCase):
 
   def select(self, hda2):
     self.bus = int(hda2)
+    self.primary_counter = 0
     self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai,
                                                0x2014 if hda2 else 0x2004), 0)
     self.safety.init_tests()
@@ -22,6 +23,10 @@ class TestHyundaiBlendedAlpha(unittest.TestCase):
     raw = torque + 1024
     data[5] = (raw & 0x7F) << 1
     data[6] = ((raw >> 7) & 0xF) | (int(request) << 4)
+    from opendbc.car.hyundai.hyundaicanfd import hkg_can_fd_checksum
+    data[2] = self.primary_counter
+    self.primary_counter = (self.primary_counter + 1) & 255
+    data[:2] = hkg_can_fd_checksum(0x50, None, data).to_bytes(2, 'little')
     return common.make_msg(0, 0x50, dat=bytes(data))
 
   def mirror(self, torque, request):
@@ -65,7 +70,8 @@ class TestHyundaiBlendedAlpha(unittest.TestCase):
       self.safety.set_controls_allowed(True)
       for address in (0x38D, 0x4F1):
         self.assertFalse(self.safety.safety_tx_hook(common.make_msg(self.bus, address)))
-      self.assertEqual(self.safety.safety_tx_hook(common.make_msg(0, 0x51, 32)), hda2)
+      packet = self.packer.make_can_msg_safety('ADRV_0x51', 0, {})
+      self.assertEqual(self.safety.safety_tx_hook(packet), hda2)
       modified = bytearray(32)
       modified[3] = 1
       self.assertFalse(self.safety.safety_tx_hook(common.make_msg(0, 0x51, dat=bytes(modified))))
@@ -205,6 +211,7 @@ class TestHyundaiBlendedAlphaAol(unittest.TestCase):
     self.safety.set_alternative_experience(0)
 
   def reset(self, word=0x2004, experience=32):
+    self.bus = int(word == 0x2014)
     self.safety.init_tests()
     self.safety.set_alternative_experience(experience)
     self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, word), 0)
@@ -231,12 +238,79 @@ class TestHyundaiBlendedAlphaAol(unittest.TestCase):
     for name, values, checked in messages:
       if name != omit:
         self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety(
-          name, 0, values, fix_checksum=checksum if checked else None)))
+          name, self.bus, values, fix_checksum=checksum if checked else None)))
+    if self.bus == 1:
+      self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety(
+        'CAM_0x2a4', 2, {'COUNTER': c % 256})))
     self.now += 10_000
 
   def warm(self):
     for _ in range(8):
       self.feed()
+
+  def test_hdai_withdrawal_consumes_valid_counter_without_output_credit(self):
+    from opendbc.car.hyundai.hyundaican import hyundai_checksum
+
+    def lkas_checksum(msg):
+      address, data, bus = msg
+      return address, bytes([hyundai_checksum(data[1:8])]) + data[1:8], bus
+
+    def primary(counter, torque=0):
+      return self.packer.make_can_msg_safety('LKAS11', 0, {
+        'CF_Lkas_MsgCount': counter, 'CR_Lkas_StrToqReq': torque,
+        'CF_Lkas_ActToi': int(torque != 0),
+      }, fix_checksum=lkas_checksum)
+
+    for word in (0x2000, 0x2004):
+      with self.subTest(word=word):
+        self.counter, self.now = 0, 1_000_000
+        self.reset(word)
+        if word == 0x2004 and self.release:
+          self.assertFalse(self.safety.safety_tx_hook(primary(0, 2)))
+          self.assertEqual(self.request(1), 0)
+          self.assertFalse(self.safety.get_controls_allowed())
+          continue
+
+        # Stock SCC remains a real receiver owner; alpha owns its SCC output.
+        def physical(lda=False, owner_word=word):
+          if owner_word == 0x2000:
+            self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety('SCC11', 0, {})))
+            self.assertTrue(self.safety.safety_rx_hook(self.packer.make_can_msg_safety(
+              'SCC12', 0, {'COUNTER': self.counter % 16, 'MainMode_ACC': 1, 'ACCMode': 0})))
+          self.feed(lda=lda)
+
+        for _ in range(8):
+          physical()
+        physical(lda=True)
+        self.assertEqual(self.request(1), 1, 'Fresh physical LDA edge and checked RX graph own lateral only')
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertTrue(self.safety.safety_tx_hook(primary(0)))
+        self.assertTrue(self.safety.safety_tx_hook(primary(1, 2)))
+        self.assertEqual(self.safety.safety_fwd_hook(2, 0x340), -1)
+
+        self.assertEqual(self.request(0), 0)
+        self.assertFalse(self.safety.safety_tx_hook(primary(2, 4)), 'Queued active command must deny after host withdrawal')
+        self.assertTrue(self.safety.safety_tx_hook(primary(3)), 'First following neutral consumes the next real sender counter')
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertEqual(self.request(1), 1)
+        self.assertEqual(self.safety.safety_fwd_hook(2, 0x340), 0, 'Neutral acceptance cannot restore forwarding ownership')
+
+        wrong_bus = primary(4)
+        self.assertFalse(self.safety.safety_tx_hook(common.make_msg(1, 0x340, dat=bytes(wrong_bus[0].data[0:8]))))
+        self.assertTrue(self.safety.safety_tx_hook(primary(4)), 'Wrong bus cannot consume a valid primary counter')
+        bad_crc = bytearray(primary(5)[0].data[0:8])
+        bad_crc[0] ^= 1
+        self.assertFalse(self.safety.safety_tx_hook(common.make_msg(0, 0x340, dat=bytes(bad_crc))))
+        self.assertEqual(self.request(1), 0, 'CRC failure clears physical authority')
+        self.assertFalse(self.safety.get_controls_allowed())
+        physical()
+        self.assertEqual(self.request(1), 0, 'Fresh neutral sensor data cannot recreate an enable token')
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertTrue(self.safety.safety_tx_hook(primary(5)))
+        self.assertEqual(self.safety.safety_fwd_hook(2, 0x340), 0)
+        self.assertFalse(self.safety.safety_tx_hook(primary(5)), 'Duplicate counter remains denied')
+        self.assertEqual(self.request(1), 0)
+        self.assertFalse(self.safety.get_controls_allowed())
 
   def test_main_off_cancel_and_heartbeat_loss_revoke_physical_token(self):
     for cause in ('main_off', 'cancel', 'heartbeat'):
@@ -272,6 +346,43 @@ class TestHyundaiBlendedAlphaAol(unittest.TestCase):
       packet = self.packer.make_can_msg_safety('CLU13', 0, {'CF_Clu_LdwsLkasSW': pressed})
       self.assertTrue(self.safety.safety_rx_hook(packet))
     self.assertEqual(self.request(1), 0)
+
+  def test_hda2_lateral_only_mirror_requires_final_accepted_primary(self):
+    if self.release:
+      self.reset(0x2014)
+      self.assertFalse(self.safety.safety_tx_hook(TestHyundaiBlendedAlpha.mirror(self, 0, False)))
+      return
+    for rejection in ('none', 'crc', 'counter', 'request', 'expired', 'authority'):
+      with self.subTest(rejection=rejection):
+        self.counter = 0
+        self.reset(0x2014)
+        self.warm()
+        self.feed(lda=True)
+        self.assertEqual(self.request(3), 1)
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.safety.set_torque_driver(0, 0)
+
+        def primary(counter):
+          return self.packer.make_can_msg_safety('LKAS', 0,
+            {'COUNTER': counter, 'TORQUE_REQUEST': 3, 'STEER_REQ': 1})
+        first = primary(0)
+        self.assertTrue(self.safety.safety_tx_hook(first))
+        self.assertTrue(self.safety.safety_tx_hook(TestHyundaiBlendedAlpha.mirror(self, 3, True)))
+        packet = primary(1)
+        if rejection == 'crc':
+          data = bytearray(packet[0].data[0:16])
+          data[0] ^= 1
+          packet = common.make_msg(0, 0x50, dat=bytes(data))
+        elif rejection == 'counter':
+          packet = first
+        self.assertEqual(self.safety.safety_tx_hook(packet), rejection not in ('crc', 'counter'))
+        if rejection == 'expired':
+          self.safety.set_timer(self.now + 10_001)
+        elif rejection == 'authority':
+          self.request(0)
+        mirror = TestHyundaiBlendedAlpha.mirror(self, 3, rejection != 'request')
+        self.assertEqual(self.safety.safety_tx_hook(mirror), rejection == 'none')
+        self.assertFalse(self.safety.safety_tx_hook(mirror))
 
   def test_token_is_lateral_only_and_long_enable_remains_physical(self):
     self.reset()
@@ -351,3 +462,151 @@ class TestHyundaiBlendedAlphaAol(unittest.TestCase):
         for address in (0x340, 0x364, 0x485, 0x420, 0x421):
           self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
           self.assertEqual(self.safety.safety_fwd_hook(0, address), 2)
+
+
+class TestHyundaiBlendedHda2Integrity(unittest.TestCase):
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.packer = common.CANPackerSafety('hyundai_palisade_2023_generated')
+    self.safety.set_alternative_experience(0)
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2010), 0)
+    self.safety.init_tests()
+
+  def test_adrv_successive_counter_crc_shape_and_bus_fail_closed(self):
+    release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
+    self.safety.set_alternative_experience(0)
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2014), 0)
+    self.safety.init_tests()
+
+    def adrv(counter):
+      return self.packer.make_can_msg_safety('ADRV_0x51', 0, {'COUNTER': counter})
+
+    if release:
+      for counter in (255, 0, 1):
+        self.assertFalse(self.safety.safety_tx_hook(adrv(counter)))
+      self.assertFalse(self.safety.get_controls_allowed())
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+      return
+
+    for counter in (255, 0, 1):
+      self.assertTrue(self.safety.safety_tx_hook(adrv(counter)), 'Consecutive accepted ADRV packets wrap at eight bits')
+    for counter in (255, 0):
+      self.assertTrue(self.safety.safety_tx_hook(self.packer.make_can_msg_safety('LKAS', 0, {'COUNTER': counter, 'TORQUE_REQUEST': 0})),
+                      'ADRV progression must not consume the separate primary steering counter')
+    for rejection in ('duplicate', 'jump', 'crc', 'bus', 'shape'):
+      with self.subTest(rejection=rejection):
+        self.safety.set_alternative_experience(0)
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2014), 0)
+        self.safety.init_tests()
+        self.assertTrue(self.safety.safety_tx_hook(adrv(42)))
+        packet = adrv(42 if rejection == 'duplicate' else 44 if rejection == 'jump' else 43)
+        if rejection in ('crc', 'bus', 'shape'):
+          data = bytearray(packet[0].data[0:32])
+          if rejection == 'crc':
+            data[0] ^= 1
+          packet = common.make_msg(1 if rejection == 'bus' else 0, 0x51,
+                                   dat=bytes(data[:8] if rejection == 'shape' else data))
+        self.assertFalse(self.safety.safety_tx_hook(packet))
+        self.assertFalse(self.safety.get_controls_allowed(), 'Rejected or neutral ADRV traffic cannot grant vehicle control')
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        # Integrity failure clears sequence/authority. Whitelist bus/length denial
+        # never enters the selected hook and retains its expected next counter.
+        recovery = 43 if rejection in ('bus', 'shape') else 97
+        self.assertTrue(self.safety.safety_tx_hook(adrv(recovery)))
+        self.assertFalse(self.safety.get_controls_allowed(), 'Reanchoring a neutral sequence cannot restore authority')
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.assertFalse(self.safety.safety_tx_hook(adrv(recovery)))
+
+  def test_primary_counter_crc_and_bus_are_independent_guards(self):
+    packet = self.packer.make_can_msg_safety('LKAS', 0, {'COUNTER': 255, 'TORQUE_REQUEST': 0})
+    self.assertTrue(self.safety.safety_tx_hook(packet))
+    self.assertFalse(self.safety.safety_tx_hook(packet))
+    wrapped = self.packer.make_can_msg_safety('LKAS', 0, {'COUNTER': 0, 'TORQUE_REQUEST': 0})
+    self.assertTrue(self.safety.safety_tx_hook(wrapped))
+    data = bytearray(wrapped[0].data[0:16])
+    data[2] = 1
+    self.assertFalse(self.safety.safety_tx_hook(common.make_msg(0, 0x50, dat=bytes(data))))
+    corrected = self.packer.make_can_msg_safety('LKAS', 0, {'COUNTER': 1, 'TORQUE_REQUEST': 0})
+    wrong_bus = common.make_msg(1, 0x50, dat=bytes(corrected[0].data[0:16]))
+    self.assertFalse(self.safety.safety_tx_hook(wrong_bus))
+    self.assertTrue(self.safety.safety_tx_hook(corrected))
+
+  def test_valid_rejected_torque_consumes_sequence_without_output_credit(self):
+    for word in (0x2010, 0x2014):
+      with self.subTest(word=word):
+        self.safety.set_alternative_experience(0)
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, word), 0)
+        self.safety.init_tests()
+        if word == 0x2014 and self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0:
+          continue
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, word), 0)
+        self.safety.set_torque_driver(0, 0)
+
+        def primary(counter, torque=0):
+          return self.packer.make_can_msg_safety('LKAS', 0, {
+            'COUNTER': counter, 'TORQUE_REQUEST': torque, 'STEER_REQ': int(torque != 0),
+          })
+        self.assertTrue(self.safety.safety_tx_hook(primary(0)))
+        rejected = primary(1, 385)
+        self.assertFalse(self.safety.safety_tx_hook(rejected))
+        self.assertFalse(self.safety.safety_tx_hook(primary(1)))
+        if word == 0x2014:
+          raw = 385 + 1024
+          mirror = bytearray(8)
+          mirror[2], mirror[3] = raw & 255, ((raw >> 8) & 7) | 8
+          self.assertFalse(self.safety.safety_tx_hook(common.make_msg(1, 0x340, dat=bytes(mirror))))
+        self.assertTrue(self.safety.safety_tx_hook(primary(2)))
+        bad = bytearray(primary(3)[0].data[0:16])
+        bad[0] ^= 1
+        self.assertFalse(self.safety.safety_tx_hook(common.make_msg(0, 0x50, dat=bytes(bad))))
+        valid = primary(3)
+        self.assertTrue(self.safety.safety_tx_hook(valid))
+        self.assertFalse(self.safety.safety_tx_hook(valid))
+        self.assertFalse(self.safety.safety_tx_hook(rejected))
+
+  def test_camera_observation_survives_authority_clear_but_not_expiry_or_reset(self):
+    self.safety.set_alternative_experience(32)
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2010), 0)
+    self.safety.init_tests()
+    self.safety.set_timer(1_000_000)
+    camera = self.packer.make_can_msg_safety('CAM_0x2a4', 2, {'COUNTER': 7, 'BYTE3': 0x5A})
+    copy = self.packer.make_can_msg_safety('CAM_0x2a4', 0, {'COUNTER': 7, 'BYTE3': 0x5A})
+    self.assertTrue(self.safety.safety_rx_hook(camera))
+    self.assertTrue(self.safety.safety_tx_hook(copy))
+    # Missing PT graph withdraws authority, not the independently validated camera observation.
+    self.safety.safety_tick()
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.assertTrue(self.safety.safety_tx_hook(copy))
+    cancel = self.packer.make_can_msg_safety('CLU11', 1, {'CF_Clu_CruiseSwState': 4})
+    self.assertTrue(self.safety.safety_rx_hook(cancel))
+    self.safety.aol_set_host_request(0)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.assertTrue(self.safety.safety_tx_hook(copy))
+    self.safety.set_timer(1_400_000)
+    bad = bytearray(camera[0].data[0:24])
+    bad[0] ^= 1
+    self.assertFalse(self.safety.safety_rx_hook(common.make_msg(2, 0x2A4, dat=bytes(bad))))
+    self.safety.set_timer(1_500_001)
+    self.assertFalse(self.safety.safety_tx_hook(copy))
+    self.safety.set_timer(1_600_000)
+    fresh = self.packer.make_can_msg_safety('CAM_0x2a4', 2, {'COUNTER': 8, 'BYTE3': 0x5A})
+    fresh_copy = self.packer.make_can_msg_safety('CAM_0x2a4', 0, {'COUNTER': 8, 'BYTE3': 0x5A})
+    self.assertTrue(self.safety.safety_rx_hook(fresh))
+    self.assertTrue(self.safety.safety_tx_hook(fresh_copy))
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2010), 0)
+    self.safety.init_tests()
+    self.assertFalse(self.safety.safety_tx_hook(fresh_copy))
+
+  def test_forwarding_matches_actual_output_destination_for_both_experiences(self):
+    if self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0:
+      return
+    for experience in (0, 32):
+      self.safety.set_alternative_experience(experience)
+      self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x2014), 0)
+      self.safety.init_tests()
+      for address in (0x340, 0x485):
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+        self.assertEqual(self.safety.safety_fwd_hook(0, address), 2)
+      for address in (0x50, 0x2A4):
+        self.assertEqual(self.safety.safety_fwd_hook(2, address), -1 if experience == 0 else 0)
+        self.assertEqual(self.safety.safety_fwd_hook(0, address), 2)

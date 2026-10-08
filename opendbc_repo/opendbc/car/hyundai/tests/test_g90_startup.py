@@ -342,3 +342,32 @@ def test_actual_card_owner_publication_and_controls(mode, aol, lda, monkeypatch)
       del controls, card, ci, subscriber
       live_ci.clear()
       gc.collect()
+
+
+class TestLegacyLongStartup(unittest.TestCase):
+  def test_exact_factory_candidate_and_stock_fallback(self):
+    from opendbc.car.hyundai.legacy_long_aol import candidate, qualified, ordinary_word
+    from opendbc.car.hyundai.legacy_long_startup import LegacyLongStartup
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.hyundai.values import HyundaiFlags
+    for identity in (CAR.GENESIS_G80, CAR.KIA_XCEED_PHEV):
+      for lda in (False, True):
+        fp = gen_empty_fingerprint()
+        if lda:
+          fp[0][0x391] = 8
+        stock = CarInterface.get_params(identity, fp, [], alpha_long=True, is_release=False, docs=False)
+        self.assertFalse(stock.openpilotLongitudinalControl)
+        self.assertTrue(stock.pcmCruise)
+        self.assertTrue(stock.alphaLongitudinalAvailable)
+        active = candidate(stock, requested=True)
+        self.assertIsNotNone(active)
+        self.assertTrue(qualified(active))
+        self.assertEqual(active.radarUnavailable, True if identity == CAR.GENESIS_G80 else stock.radarUnavailable)
+        self.assertEqual(active.safetyConfigs[0].safetyParam, ordinary_word(active))
+        self.assertEqual(bool(active.flags & HyundaiFlags.HAS_LDA_BUTTON), lda)
+        owner = LegacyLongStartup(active, (list, lambda frames: None), stock_cp=stock)
+        returned = owner.prepare(admission=lambda: False)
+        self.assertEqual(returned.to_dict(), stock.to_dict())
+        release = CarInterface.get_params(identity, fp, [], alpha_long=True, is_release=True, docs=False)
+        self.assertIsNone(candidate(release, requested=True))
+        self.assertFalse(release.openpilotLongitudinalControl)

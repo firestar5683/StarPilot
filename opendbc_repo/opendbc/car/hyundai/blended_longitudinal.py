@@ -193,24 +193,31 @@ class BlendedLongitudinalController:
     return messages
 
 
-def hdai_startup_qualified(cp, *, is_release=False, allow_marked=False):
-  """Developer-only classic mixed owner; HDAII remains independently disabled."""
+def mixed_startup_qualified(cp, *, is_release=False, allow_marked=False):
+  """Exact prepared mixed owner; stock topology remains immutable."""
   from opendbc.car import structs
   from opendbc.car.hyundai.hyundaicanfd import CanBus
   declared = int(CAR.HYUNDAI_PALISADE_2023.config.flags)
+  hda2 = bool(cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG)
   dynamic = int(HyundaiFlags.HAS_LDA_BUTTON | HyundaiFlags.SEND_LFA)
+  if hda2:
+    dynamic |= int(HyundaiFlags.CANFD_LKA_STEER_MSG | HyundaiFlags.USE_FCA)
   if (is_release or int(cp.flags) & ~dynamic != declared or not alpha_eligible(cp) or cp.passive or cp.dashcamOnly or cp.notCar or
       cp.brand != 'hyundai' or cp.steerControlType != structs.CarParams.SteerControlType.torque or
-      cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG or
       cp.alternativeExperience not in ((0, 32) if allow_marked else (0,)) or
       len(cp.safetyConfigs) != 1):
     return False
   safety = cp.safetyConfigs[0]
-  word = 0x2004 if cp.openpilotLongitudinalControl and not cp.pcmCruise else 0x2000
+  word = (0x2014 if hda2 else 0x2004) if cp.openpilotLongitudinalControl and not cp.pcmCruise else (0x2010 if hda2 else 0x2000)
   buses = CanBus(cp)
   return (safety.safetyModel == structs.CarParams.SafetyModel.hyundai and safety.safetyParam == word and
           (cp.openpilotLongitudinalControl != cp.pcmCruise) and
-          (buses.ECAN, buses.CAM) == (0, 2))
+          (buses.ECAN, buses.ACAN, buses.CAM) == ((1, 0, 2) if hda2 else (0, 1, 2)))
+
+
+def hdai_startup_qualified(cp, *, is_release=False, allow_marked=False):
+  return (not cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG and
+          mixed_startup_qualified(cp, is_release=is_release, allow_marked=allow_marked))
 
 
 def startup_required(cp):
@@ -501,5 +508,5 @@ class BlendedStartup:
 
 def startup_owner(cp, callbacks, *, requested):
   candidate = candidate_from_stock(cp, alpha_requested=requested,
-                                   native_qualified=cp.alphaLongitudinalAvailable and hdai_startup_qualified(cp))
+                                   native_qualified=cp.alphaLongitudinalAvailable and mixed_startup_qualified(cp))
   return None if candidate is None else BlendedStartup(cp, candidate, callbacks)

@@ -337,13 +337,13 @@ class TestBlendedLifecycle(unittest.TestCase):
 
 
 class TestBlendedStartupScope(unittest.TestCase):
-  def test_factory_availability_does_not_select_long_and_excludes_hdaii_release(self):
+  def test_factory_availability_does_not_select_long_and_excludes_release(self):
     from opendbc.car.hyundai.tests.test_palisade_2023 import params
     from opendbc.car.hyundai.blended_longitudinal import startup_owner
     for topology in ('hdai', '110', 'hdaii'):
       for release in (False, True):
         cp = params(topology, alpha=True, release=release)
-        enabled = topology != 'hdaii' and not release
+        enabled = not release
         self.assertEqual(cp.alphaLongitudinalAvailable, enabled)
         self.assertFalse(cp.openpilotLongitudinalControl)
         self.assertTrue(cp.pcmCruise)
@@ -353,7 +353,7 @@ class TestBlendedStartupScope(unittest.TestCase):
         owner = startup_owner(cp, callbacks, requested=True)
         self.assertEqual(owner is not None, enabled)
         if owner is not None:
-          self.assertEqual(owner.owner.cp.safetyConfigs[0].safetyParam, 0x2004)
+          self.assertEqual(owner.owner.cp.safetyConfigs[0].safetyParam, 0x2014 if topology == 'hdaii' else 0x2004)
           self.assertIs(owner.prepare(admission=lambda: False), cp)
           owner.close()
         self.assertEqual(cp.to_dict(), before)
@@ -465,17 +465,18 @@ class TestBlendedStartupScope(unittest.TestCase):
     from openpilot.starpilot.car.hyundai.aol import policy_for
     from openpilot.starpilot.aol.intent import AolSettings
     from openpilot.starpilot.car.hyundai.aol import create_intent
-    cp = candidate_from_stock(params(), alpha_requested=True, native_qualified=True)
-    for experience in (0, 32):
-      cp.alternativeExperience = experience
-      self.assertEqual(policy_for(cp).full_axis_runtime_required, experience == 32)
-      intent = create_intent(cp, AolSettings(False, 0., 0, 0, (0, 0, 0), (0, 0, 0)))
-      self.assertFalse(intent.allowed_latch)
-    for experience in (1, 33):
-      cp.alternativeExperience = experience
-      self.assertFalse(policy_for(cp).runtime_supported)
-    cp = candidate_from_stock(params('hdaii'), alpha_requested=True, native_qualified=True)
-    self.assertFalse(policy_for(cp).runtime_supported)
+    for topology in ('hdai', 'hdaii'):
+      with self.subTest(topology=topology):
+        cp = candidate_from_stock(params(topology), alpha_requested=True, native_qualified=True)
+        for experience in (0, 32):
+          cp.alternativeExperience = experience
+          self.assertTrue(policy_for(cp).runtime_supported)
+          self.assertEqual(policy_for(cp).full_axis_runtime_required, experience == 32)
+          intent = create_intent(cp, AolSettings(False, 0., 0, 0, (0, 0, 0), (0, 0, 0)))
+          self.assertFalse(intent.allowed_latch)
+        for experience in (1, 33):
+          cp.alternativeExperience = experience
+          self.assertFalse(policy_for(cp).runtime_supported)
 
 
 if __name__ == '__main__':

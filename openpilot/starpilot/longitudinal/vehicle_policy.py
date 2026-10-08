@@ -28,6 +28,10 @@ def policy_for(cp, startup_preferences=None):
 
 
 def stopping_decel_rate(cp, policy):
+  from opendbc.car.hyundai.legacy_long_aol import stopping_decel_rate as legacy_stop_rate
+  rate = legacy_stop_rate(cp)
+  if rate is not None:
+    return rate
   from opendbc.car.toyota.prius_longitudinal import stopping_decel_rate as prius_filter_stop_rate
   rate = prius_filter_stop_rate(cp)
   if rate is not None:

@@ -55,7 +55,7 @@ class TestPalisade2023(unittest.TestCase):
           self.assertEqual(cp.safetyConfigs[-1].safetyParam, 0x2010 if hdaii else 0x2000)
           self.assertEqual(cp.safetyConfigs[-1].safetyModel, structs.CarParams.SafetyModel.hyundai)
           self.assertEqual(cp.steerControlType, structs.CarParams.SteerControlType.torque)
-          self.assertEqual(cp.alphaLongitudinalAvailable, not hdaii and not release)
+          self.assertEqual(cp.alphaLongitudinalAvailable, not release)
           self.assertFalse(cp.openpilotLongitudinalControl or cp.dashcamOnly)
           self.assertTrue(cp.pcmCruise)
           self.assertAlmostEqual(cp.stopAccel, -.85, places=6)

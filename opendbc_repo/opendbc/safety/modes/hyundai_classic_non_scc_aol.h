@@ -19,6 +19,15 @@ static bool classic_long_aol_enabled = false;
 static bool classic_long_main_neutral = false;
 static bool classic_long_main_pressed = false;
 
+static bool legacy_long_param(uint16_t param) {
+  return (param == 0xE900U) || (param == 0xE901U) || (param == 0xE902U) || (param == 0xE903U) ||
+         (param == 0xE910U) || (param == 0xE911U) || (param == 0xE912U) || (param == 0xE913U);
+}
+
+static bool legacy_long_aol_param(uint16_t param) {
+  return (param == 0xE902U) || (param == 0xE903U) || (param == 0xE912U) || (param == 0xE913U);
+}
+
 static bool classic_long_aol_param(uint16_t param) {
   return ((param & 0x0404U) == 0x0404U) && ((param & 0xF3B8U) == 0U) && ((param & 3U) != 3U);
 }

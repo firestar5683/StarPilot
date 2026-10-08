@@ -162,3 +162,128 @@ def test_actual_card_published_cp_controls_and_disabled_loop(identity, alpha, di
     finally:
       del controls, card, ci, subscriber
       gc.collect()
+
+
+@pytest.mark.parametrize('identity', (CAR.GENESIS_G80, CAR.KIA_XCEED_PHEV))
+@pytest.mark.parametrize('lda', (False, True))
+def test_prepared_legacy_candidate_exact_axis_contract(identity, lda):
+  from opendbc.car.hyundai.legacy_long_aol import candidate, ordinary_word
+  cp = candidate(params(identity, lda=lda), requested=True)
+  assert cp is not None and qualified(cp)
+  before = cp.to_dict()
+  policy = policy_for(cp)
+  cp.safetyConfigs[0].safetyParam |= policy.safety_param_addition
+  cp.alternativeExperience = policy.alternative_experience_addition
+  assert qualified(cp, marked_only=True)
+  assert native_accepts(cp, int(cp.safetyConfigs[0].safetyModel.raw), aol_word(cp))
+  assert cp.safetyConfigs[0].safetyParam == ordinary_word(cp) + 2
+  assert cp.longitudinalTuning.to_dict() == before['longitudinalTuning']
+  assert cp.steerActuatorDelay == before['steerActuatorDelay']
+  for word in (4, 6, 0xE904, 0xE914):
+    bad = cp.as_reader().as_builder()
+    bad.safetyConfigs[0].safetyParam = word
+    assert not qualified(bad)
+  for field in ('passive', 'dashcamOnly', 'notCar', 'pcmCruise'):
+    bad = cp.as_reader().as_builder()
+    setattr(bad, field, True)
+    assert not qualified(bad)
+
+
+@pytest.mark.parametrize('identity', (CAR.GENESIS_G80, CAR.KIA_XCEED_PHEV))
+@pytest.mark.parametrize('radar_available', (False, True))
+def test_legacy_candidate_radar_state_and_consumed_stopping_rate(identity, radar_available):
+  from opendbc.car.hyundai.legacy_long_aol import candidate, aol_word
+  from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+  stock = params(identity)
+  stock.radarUnavailable = not radar_available
+  active = candidate(stock, requested=True)
+  assert active is not None
+  assert active.radarUnavailable == (True if identity == CAR.GENESIS_G80 else not radar_available)
+  assert stock.radarUnavailable == (not radar_available)
+  assert active.longitudinalTuning.to_dict() == stock.longitudinalTuning.to_dict()
+  for marked in (False, True):
+    cp = active.as_reader().as_builder()
+    if marked:
+      cp.safetyConfigs[0].safetyParam = aol_word(cp)
+      cp.alternativeExperience = 32
+    control = LongControl(cp)
+    assert control.extension is not None
+    assert control.stopping_decel_rate == 0.8
+  assert LongControl(stock).stopping_decel_rate == 1.0
+  malformed = active.as_reader().as_builder()
+  malformed.safetyConfigs[0].safetyParam = 4
+  assert LongControl(malformed).stopping_decel_rate == 1.0
+
+
+@pytest.mark.parametrize('family', ('legacy', 'classic_long', 'mixed', 'mixed_alpha', 'classic', 'non_scc', 'canfd_stock', 'canfd_long', 'ioniq6', 'angle'))
+@pytest.mark.parametrize('marked', (False, True))
+def test_retained_marked_cp_saved_off_restarts_axis_transport(family, marked, monkeypatch):
+  from opendbc.car.hyundai.legacy_long_aol import candidate
+  from opendbc.car.hyundai.blended_longitudinal import candidate_from_stock
+  from opendbc.car.hyundai.tests.test_blended_stock_aol import params as mixed_params
+  from openpilot.common.params import Params
+  from openpilot.common.prefix import OpenpilotPrefix
+  from openpilot.selfdrive.controls.controlsd import Controls
+  from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+  from openpilot.starpilot.feature_runtime import enabled
+
+  monkeypatch.setenv('SIMULATION', '1')
+  monkeypatch.setenv('REPLAY', '1')
+  monkeypatch.setenv('AOL_REPLAY_RUNTIME', '0')
+  from openpilot.starpilot.aol.tests.test_classic_scc_profiles import params as classic_params
+  from openpilot.starpilot.aol.tests.test_non_scc_profiles import params as non_scc_params
+  from openpilot.starpilot.aol.tests.test_canfd_stock_profiles import params as canfd_params
+  from opendbc.car.hyundai.torque_ev_startup import candidate as canfd_candidate
+
+  from opendbc.car.hyundai.tests.test_stock_angle_aol import source_profile
+  from opendbc.car.hyundai.tests.test_ioniq6_stock_parser import params as ioniq6_params
+
+  factories = {
+    'legacy': lambda: candidate(params(CAR.GENESIS_G80), requested=True),
+    'classic_long': params,
+    'mixed': mixed_params,
+    'mixed_alpha': lambda: candidate_from_stock(mixed_params(), alpha_requested=True, native_qualified=True),
+    'classic': lambda: classic_params(CAR.HYUNDAI_SONATA),
+    'non_scc': lambda: non_scc_params(CAR.KIA_FORTE),
+    'canfd_stock': lambda: canfd_params(CAR.KIA_EV6),
+    'canfd_long': lambda: canfd_candidate(canfd_params(CAR.HYUNDAI_IONIQ_5), requested=True, is_release=False),
+    'ioniq6': lambda: ioniq6_params(False)[0],
+    'angle': lambda: source_profile(CAR.KIA_EV9),
+  }
+  cp = factories[family]()
+  assert cp is not None
+  if marked:
+    policy = policy_for(cp)
+    cp.safetyConfigs[0].safetyParam |= policy.safety_param_addition
+    cp.alternativeExperience = policy.alternative_experience_addition
+  with OpenpilotPrefix():
+    saved = Params()
+    saved.put_bool('AlwaysOnLateral', False, block=True)
+    saved.put('CarParams', cp.to_bytes(), block=True)
+    policy = policy_for(cp)
+    assert policy.full_axis_runtime_required == marked
+    assert policy.ordinary_axis_ack_required == (marked or family == 'angle')
+    assert enabled(saved, cp, 'aol', {'AOL_REPLAY_RUNTIME': '0'}) == marked
+    if marked:
+      negatives = [('passive', True)]
+      if family != 'ioniq6':
+        negatives.append(('alternativeExperience', 1))
+      for field, value in negatives:
+        bad = cp.as_reader().as_builder()
+        setattr(bad, field, value)
+        assert not policy_for(bad).full_axis_runtime_required
+      bad = cp.as_reader().as_builder()
+      bad.safetyConfigs[0].safetyParam = 0xFFFF
+      assert not policy_for(bad).full_axis_runtime_required
+    controls = drive = None
+    try:
+      controls = Controls()
+      drive = SelfdriveD(CP=cp)
+      assert controls.aol_replay == marked
+      assert drive.aol_replay == marked
+      assert drive.axis_transport_required == (marked or family == 'angle')
+      assert not saved.get_bool('AlwaysOnLateral')
+      assert controls.CP.to_dict() == cp.to_dict()
+    finally:
+      del controls, drive
+      gc.collect()

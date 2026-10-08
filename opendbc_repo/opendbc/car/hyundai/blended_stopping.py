@@ -10,7 +10,7 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 
 
 def eligible(cp):
-  if not blended_longitudinal.hdai_startup_qualified(cp, allow_marked=True):
+  if not blended_longitudinal.mixed_startup_qualified(cp, allow_marked=True):
     return False
   word = 0x2014 if cp.flags & HyundaiFlags.CANFD_LKA_STEER_MSG else 0x2004
   if (not cp.openpilotLongitudinalControl or cp.pcmCruise or cp.passive or

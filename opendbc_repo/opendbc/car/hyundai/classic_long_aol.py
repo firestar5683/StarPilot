@@ -10,14 +10,23 @@ LONG_AOL_WORDS = frozenset(AOL_MARKER | 4 | gas | limits | lda for gas in (0, 1,
 
 
 def ordinary_word(cp):
+  from opendbc.car.hyundai.legacy_long_aol import CARS, ordinary_word as legacy_word
+  if cp.carFingerprint in CARS:
+    return legacy_word(cp)
   return stock_word(cp) | int(HyundaiSafetyFlags.LONG)
 
 
 def aol_word(cp):
+  from opendbc.car.hyundai.legacy_long_aol import CARS, aol_word as legacy_word
+  if cp.carFingerprint in CARS:
+    return legacy_word(cp)
   return ordinary_word(cp) | AOL_MARKER | (int(HyundaiSafetyFlags.HAS_LDA_BUTTON) if int(cp.flags) & int(HyundaiFlags.HAS_LDA_BUTTON) else 0)
 
 
 def qualified(cp, *, marked_only=False):
+  from opendbc.car.hyundai.legacy_long_aol import CARS, qualified as legacy_qualified
+  if cp.carFingerprint in CARS:
+    return legacy_qualified(cp, marked_only=marked_only)
   if cp.brand != 'hyundai' or cp.carFingerprint not in CLASSIC_LONG_IDS:
     return False
   declared = int(CAR[cp.carFingerprint].config.flags)
@@ -57,6 +66,6 @@ def native_accepts(cp, model, param):
   return (
     qualified(cp, marked_only=True)
     and cp.alternativeExperience == AOL_EXPERIENCE
-    and model == int(structs.CarParams.SafetyModel.hyundai)
+    and model == int(cp.safetyConfigs[0].safetyModel.raw)
     and param == aol_word(cp)
   )

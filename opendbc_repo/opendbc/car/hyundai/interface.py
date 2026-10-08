@@ -40,10 +40,16 @@ class CarInterface(CarInterfaceBase):
     from opendbc.car.hyundai.ev9_startup import required as ev9_required
     from opendbc.car.hyundai.torque_ev_startup import required as torque_ev_required
     from opendbc.car.hyundai.blended_longitudinal import startup_required as blended_required
-    return blended_required(cp) or required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp) or torque_ev_required(cp)
+    from opendbc.car.hyundai.legacy_long_startup import required as legacy_required
+    return legacy_required(cp) or blended_required(cp) or required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp) or torque_ev_required(cp)
 
   @staticmethod
   def startup_owner(cp, callbacks, *, requested):
+    from opendbc.car.hyundai.legacy_long_aol import candidate as legacy_candidate
+    from opendbc.car.hyundai.legacy_long_startup import LegacyLongStartup
+    legacy_cp = legacy_candidate(cp, requested=requested)
+    if legacy_cp is not None:
+      return LegacyLongStartup(legacy_cp, callbacks, stock_cp=cp)
     from opendbc.car.hyundai.g90_startup import G90Startup, required
     if required(cp):
       return G90Startup(cp, callbacks) if requested else None
@@ -255,7 +261,8 @@ class CarInterface(CarInterfaceBase):
       # The prepared owner alone promotes the saved developer choice before CI construction.
       ret.alphaLongitudinalAvailable = not is_release
       alpha_long = False
-    ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
+    from opendbc.car.hyundai.legacy_long_aol import CARS as legacy_long_cars
+    ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable and candidate not in legacy_long_cars
     if (candidate in (CAR.KIA_CARNIVAL_2025, CAR.KIA_CARNIVAL_HEV_4TH_GEN) and
         ret.flags & HyundaiFlags.CANFD_ALT_BUTTONS and 0x1aa in fingerprint[CAN.ECAN] and
         not ret.openpilotLongitudinalControl):
@@ -305,8 +312,8 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = False
       ret.pcmCruise = True
       ret.stopAccel = -0.85
-      from opendbc.car.hyundai.blended_longitudinal import hdai_startup_qualified
-      ret.alphaLongitudinalAvailable = hdai_startup_qualified(ret, is_release=is_release)
+      from opendbc.car.hyundai.blended_longitudinal import mixed_startup_qualified
+      ret.alphaLongitudinalAvailable = mixed_startup_qualified(ret, is_release=is_release)
 
     if candidate == CAR.KIA_OPTIMA_G4_FL:
       ret.steerActuatorDelay = 0.2
@@ -325,6 +332,12 @@ class CarInterface(CarInterfaceBase):
     if candidate == CAR.KIA_EV9:
       from opendbc.car.hyundai.ccnc_ev_stock import qualified as ev9_stock_qualified
       ret.alphaLongitudinalAvailable = not is_release and ev9_stock_qualified(ret)
+
+    from opendbc.car.hyundai.legacy_long_aol import CARS as legacy_long_cars, topology_owned
+    if candidate in legacy_long_cars:
+      ret.openpilotLongitudinalControl = False
+      ret.pcmCruise = True
+      ret.alphaLongitudinalAvailable = not is_release and topology_owned(ret)
 
     return ret
 

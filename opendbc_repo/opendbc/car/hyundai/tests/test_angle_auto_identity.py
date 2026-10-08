@@ -142,7 +142,8 @@ class TestAngleAutoIdentity(unittest.TestCase):
         card = Car(CI=ci, RI=RadarInterface(cp))
         self.assertEqual(card.CP.carFingerprint, car)
         self.assertFalse(card.CP.openpilotLongitudinalControl)
-        saved.put('CarParams', card.CP.to_bytes(), block=True)
+        with structs.CarParams.from_bytes(saved.get('CarParams')) as published:
+          self.assertEqual(published.to_dict(), card.CP.to_dict())
         controls = Controls()
         self.assertEqual(controls.CP.carFingerprint, car)
         self.assertIsInstance(controls.LaC, LatControlAngle)

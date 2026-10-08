@@ -132,3 +132,58 @@ class TestHyundaiClassicLongAol(unittest.TestCase):
       self.feed(wrong_bus=1)
       self.request(1)
     self.assertEqual(self.request(3), 0)
+
+
+class TestHyundaiLegacyLongAol(unittest.TestCase):
+  setUp = TestHyundaiClassicLongAol.setUp
+  tearDown = TestHyundaiClassicLongAol.tearDown
+  reset = TestHyundaiClassicLongAol.reset
+  rx = TestHyundaiClassicLongAol.rx
+  request = TestHyundaiClassicLongAol.request
+  feed = TestHyundaiClassicLongAol.feed
+
+  def test_legacy_lda_bit_selects_real_physical_source_without_longitudinal_grant(self):
+    for word in (0xE902, 0xE903, 0xE912, 0xE913):
+      for source, signal in (('BCM_PO_11', 'LDA_BTN'), ('CLU13', 'CF_Clu_LdwsLkasSW')):
+        with self.subTest(word=word, source=source):
+          self.reset(word, mode=CarParams.SafetyModel.hyundaiLegacy)
+          gas_word = 2 if word & 1 else 0
+          for _ in range(6):
+            self.feed(gas_word)
+          self.assertEqual(self.request(0), 0)
+          self.rx(source, {signal: 1})
+          self.assertEqual(self.request(3), 0, 'Held at source initialization is not a physical enable edge')
+          self.request(0)
+          self.rx(source, {signal: 0})
+          self.rx(source, {signal: 1}, bus=1)
+          self.assertEqual(self.request(3), 0, 'A wrong-bus LDA press cannot authorize either axis')
+          self.request(0)
+          self.rx(source, {signal: 1})
+          expected = 1 if not self.release and word & 0x10 else 0
+          self.assertEqual(self.request(3), expected)
+          self.assertFalse(self.safety.get_controls_allowed(), 'LDA permission is independent of normal longitudinal engagement')
+          self.assertEqual(self.request(2), 0, 'The physical LDA gesture cannot grant longitudinal control')
+          self.assertEqual(self.request(1), expected)
+          self.reset(word, mode=CarParams.SafetyModel.hyundaiLegacy)
+          self.assertEqual(self.request(3), 0, 'Reinitializing the registered mode clears the physical token')
+
+  def test_exact_legacy_graph_without_disabled_scc(self):
+    for word in (0xE902, 0xE903):
+      self.reset(word, mode=CarParams.SafetyModel.hyundaiLegacy)
+      if self.release:
+        self.assertEqual(self.request(3), 0)
+        self.assertFalse(self.safety.get_controls_allowed())
+        continue
+      gas_word = 2 if word == 0xE903 else 0
+      for _ in range(6):
+        self.feed(gas_word)
+      self.feed(gas_word, main=True)
+      self.assertEqual(self.request(3), 1)
+      self.feed(gas_word, main=True, button=2)
+      self.feed(gas_word, main=True)
+      self.assertTrue(self.safety.get_controls_allowed())
+      self.assertEqual(self.request(3), 3)
+      self.now += 400000
+      self.safety.set_timer(self.now)
+      self.safety.safety_tick()
+      self.assertEqual(self.request(3), 0)

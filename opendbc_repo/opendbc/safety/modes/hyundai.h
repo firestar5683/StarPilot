@@ -80,7 +80,7 @@ static const CanMsg HYUNDAI_TX_MSGS[] = {
 // Classic-mode-only meanings. CANFD Carnival/angle bit8192 is untouched.
 // Exact stock words deliberately do not admit blended alpha-long or other flags.
 static bool hyundai_blended_stock = false;
-// Experimental mixed longitudinal safety contract; host admission remains disabled.
+// Exact prepared mixed longitudinal profiles.
 static bool hyundai_blended_alpha = false;
 static bool hyundai_blended_cancel_armed = false;
 static bool hyundai_blended_tcs_seen = false;
@@ -126,81 +126,97 @@ static uint8_t hyundai_ray_pedal_checksum(const CANPacket_t *msg) {
 
 static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
   uint8_t cnt = 0;
-  if (msg->addr == 0x260U) {
-    cnt = (msg->data[7] >> 4) & 0x3U;
-  }
-  if (msg->addr == 0x386U) {
-    cnt = ((msg->data[3] >> 6) << 2) | (msg->data[1] >> 6);
-  }
-  if (msg->addr == 0x394U) {
-    cnt = (msg->data[1] >> 5) & 0x7U;
-  } else if (msg->addr == 0x421U) {
-    cnt = hyundai_blended_stock ? ((msg->data[1] >> 4U) & 0xFU) : (msg->data[7] & 0xFU);
-  } else if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
-    cnt = msg->data[4] & 0xFU;
+  if (hyundai_blended_hda2 && (msg->addr == 0x2A4U)) {
+    cnt = msg->data[2];
   } else {
-    // Retain the counter already selected above for other addresses.
-  }
-  if (msg->addr == 0x4F1U) {
-    cnt = (msg->data[3] >> 4) & 0xFU;
+    if (msg->addr == 0x260U) {
+      cnt = (msg->data[7] >> 4) & 0x3U;
+    }
+    if (msg->addr == 0x386U) {
+      cnt = ((msg->data[3] >> 6) << 2) | (msg->data[1] >> 6);
+    }
+    if (msg->addr == 0x394U) {
+      cnt = (msg->data[1] >> 5) & 0x7U;
+    } else if (msg->addr == 0x421U) {
+      cnt = hyundai_blended_stock ? ((msg->data[1] >> 4U) & 0xFU) : (msg->data[7] & 0xFU);
+    } else if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
+      cnt = msg->data[4] & 0xFU;
+    } else {
+      // Retain the counter already selected above for other addresses.
+    }
+    if (msg->addr == 0x4F1U) {
+      cnt = (msg->data[3] >> 4) & 0xFU;
+    }
   }
   return cnt;
 }
 
 static uint32_t hyundai_get_checksum(const CANPacket_t *msg) {
-  uint8_t chksum = 0;
-  if (msg->addr == 0x260U) {
-    chksum = msg->data[7] & 0xFU;
+  uint32_t result = 0U;
+  if (hyundai_blended_hda2 && (msg->addr == 0x2A4U)) {
+    result = GET_BYTES_LE(msg, 0, 2);
+  } else {
+    uint8_t chksum = 0;
+    if (msg->addr == 0x260U) {
+      chksum = msg->data[7] & 0xFU;
+    }
+    if (msg->addr == 0x386U) {
+      chksum = ((msg->data[7] >> 6) << 2) | (msg->data[5] >> 6);
+    }
+    if (msg->addr == 0x394U) {
+      chksum = msg->data[6] & 0xFU;
+    }
+    if (msg->addr == 0x421U) {
+      chksum = msg->data[7] >> 4;
+    }
+    if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
+      chksum = msg->data[5];
+    }
+    result = chksum;
   }
-  if (msg->addr == 0x386U) {
-    chksum = ((msg->data[7] >> 6) << 2) | (msg->data[5] >> 6);
-  }
-  if (msg->addr == 0x394U) {
-    chksum = msg->data[6] & 0xFU;
-  }
-  if (msg->addr == 0x421U) {
-    chksum = msg->data[7] >> 4;
-  }
-  if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
-    chksum = msg->data[5];
-  }
-  return chksum;
+  return result;
 }
 
 static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
-  uint8_t chksum = 0;
-  if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
-    chksum = hyundai_ray_pedal_checksum(msg);
-  } else if (msg->addr == 0x386U) {
-    // count the bits
-    for (int i = 0; i < 8; i++) {
-      uint8_t b = msg->data[i];
-      for (int j = 0; j < 8; j++) {
-        uint8_t bit = 0;
-        // exclude checksum and counter
-        if (((i != 1) || (j < 6)) && ((i != 3) || (j < 6)) && ((i != 5) || (j < 6)) && ((i != 7) || (j < 6))) {
-          bit = (b >> (uint8_t)j) & 1U;
-        }
-        chksum += bit;
-      }
-    }
-    chksum = (chksum ^ 9U) & 15U;
+  uint32_t result = 0U;
+  if (hyundai_blended_hda2 && (msg->addr == 0x2A4U)) {
+    result = hyundai_common_canfd_compute_checksum(msg);
   } else {
-    // sum of nibbles
-    for (int i = 0; i < 8; i++) {
-      if ((msg->addr == 0x394U) && (i == 7)) {
-        continue;  // exclude
+    uint8_t chksum = 0;
+    if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
+      chksum = hyundai_ray_pedal_checksum(msg);
+    } else if (msg->addr == 0x386U) {
+      // count the bits
+      for (int i = 0; i < 8; i++) {
+        uint8_t b = msg->data[i];
+        for (int j = 0; j < 8; j++) {
+          uint8_t bit = 0;
+          // exclude checksum and counter
+          if (((i != 1) || (j < 6)) && ((i != 3) || (j < 6)) && ((i != 5) || (j < 6)) && ((i != 7) || (j < 6))) {
+            bit = (b >> (uint8_t)j) & 1U;
+          }
+          chksum += bit;
+        }
       }
-      uint8_t b = msg->data[i];
-      if (((msg->addr == 0x260U) && (i == 7)) || ((msg->addr == 0x394U) && (i == 6)) || ((msg->addr == 0x421U) && (i == 7))) {
-        b &= (msg->addr == 0x421U) ? 0x0FU : 0xF0U;  // remove checksum
+      chksum = (chksum ^ 9U) & 15U;
+    } else {
+      // sum of nibbles
+      for (int i = 0; i < 8; i++) {
+        if ((msg->addr == 0x394U) && (i == 7)) {
+          continue;  // exclude
+        }
+        uint8_t b = msg->data[i];
+        if (((msg->addr == 0x260U) && (i == 7)) || ((msg->addr == 0x394U) && (i == 6)) || ((msg->addr == 0x421U) && (i == 7))) {
+          b &= (msg->addr == 0x421U) ? 0x0FU : 0xF0U;  // remove checksum
+        }
+        chksum += (b % 16U) + (b / 16U);
       }
-      chksum += (b % 16U) + (b / 16U);
+      chksum = (16U - (chksum %  16U)) % 16U;
     }
-    chksum = (16U - (chksum %  16U)) % 16U;
-  }
 
-  return chksum;
+    result = chksum;
+  }
+  return result;
 }
 
 // A held cancel pair cannot survive an intervening inhibit or stale source.
@@ -459,7 +475,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
     if (!hyundai_blended_mirror_pending || (torque != hyundai_blended_mirror_torque) ||
         (request != hyundai_blended_mirror_request) ||
         (safety_get_ts_elapsed(microsecond_timer_get(), hyundai_blended_mirror_ts) > 10000U) ||
-        (!controls_allowed && ((torque != 0) || request))) {
+        (!lateral_controls_allowed() && ((torque != 0) || request))) {
       tx = false;
     }
     hyundai_blended_mirror_pending = false;
@@ -485,12 +501,6 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
     bool steer_req = GET_BIT(msg, 52U);
     if (steer_torque_cmd_checks(desired_torque, steer_req, HYUNDAI_STEERING_LIMITS)) {
       tx = false;
-    }
-    if (hyundai_blended_alpha) {
-      hyundai_blended_mirror_pending = tx && !relay_malfunction && !safety_rx_checks_invalid;
-      hyundai_blended_mirror_torque = desired_torque;
-      hyundai_blended_mirror_request = steer_req;
-      hyundai_blended_mirror_ts = microsecond_timer_get();
     }
   }
 
@@ -522,6 +532,13 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   }
 
   tx &= blended_aol_integrity(msg);
+  if (hyundai_blended_alpha && hyundai_blended_hda2 && (msg->addr == 0x50U)) {
+    hyundai_blended_mirror_pending = tx && !relay_malfunction && !safety_rx_checks_invalid;
+    const uint32_t mirror_torque_raw = (((uint32_t)msg->data[6] & 0xFU) << 7U) | ((uint32_t)msg->data[5] >> 1U);
+    hyundai_blended_mirror_torque = (int)mirror_torque_raw - 1024;
+    hyundai_blended_mirror_request = GET_BIT(msg, 52U);
+    hyundai_blended_mirror_ts = microsecond_timer_get();
+  }
   blended_aol_tx(msg, tx);
   return tx;
 }
@@ -561,15 +578,40 @@ static void hyundai_classic_scc_aol_rx_config(safety_config *config, bool legacy
   }
 }
 
-static safety_config hyundai_init(uint16_t param) {
-  static const CanMsg HYUNDAI_REFRESH_TX_MSGS[] = {
-    HYUNDAI_COMMON_TX_MSGS(0, true)
-  };
-  static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
+static RxCheck hyundai_long_rx_checks[] = {
+  HYUNDAI_COMMON_RX_CHECKS(false)
+};
+
+static void hyundai_long_rx_variant(bool legacy) {
+  hyundai_long_rx_checks[1].msg[0].ignore_checksum = legacy;
+  hyundai_long_rx_checks[1].msg[0].ignore_counter = legacy;
+  hyundai_long_rx_checks[1].msg[0].max_counter = legacy ? 0U : 15U;
+  hyundai_long_rx_checks[2].msg[0].ignore_checksum = legacy;
+  hyundai_long_rx_checks[2].msg[0].ignore_counter = legacy;
+  hyundai_long_rx_checks[2].msg[0].max_counter = legacy ? 0U : 7U;
+}
+
+#ifdef ALLOW_DEBUG
+static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
     HYUNDAI_LONG_COMMON_TX_MSGS(0, false)
     {0x38D, 0, 8, .check_relay = false}, // FCA11 Bus 0
     {0x483, 0, 8, .check_relay = false}, // FCA12 Bus 0
     {0x7D0, 0, 8, .check_relay = false}, // radar UDS TX addr Bus 0 (for radar disable)
+  };
+#endif
+
+static safety_config hyundai_init(uint16_t param) {
+#ifndef ALLOW_DEBUG
+  static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
+      HYUNDAI_LONG_COMMON_TX_MSGS(0, false)
+      {0x38D, 0, 8, .check_relay = false}, // FCA11 Bus 0
+      {0x483, 0, 8, .check_relay = false}, // FCA12 Bus 0
+      {0x7D0, 0, 8, .check_relay = false}, // radar UDS TX addr Bus 0 (for radar disable)
+    };
+#endif
+  hyundai_long_rx_variant(false);
+  static const CanMsg HYUNDAI_REFRESH_TX_MSGS[] = {
+    HYUNDAI_COMMON_TX_MSGS(0, true)
   };
 
   static const CanMsg HYUNDAI_LONG_REFRESH_TX_MSGS[] = {
@@ -611,6 +653,9 @@ static safety_config hyundai_init(uint16_t param) {
   hyundai_blended_hda2 |= (param == 0x2014U);
 #endif
   hyundai_blended_stock |= hyundai_blended_alpha;
+  if (hyundai_blended_hda2) {
+    gen_crc_lookup_table_16(0x1021U, hyundai_canfd_crc_lut);
+  }
   hyundai_ray_pedal = param == 0x9805U;
   hyundai_ray_pedal_healthy = false;
   hyundai_ray_pedal_ts = 0U;
@@ -631,9 +676,11 @@ static safety_config hyundai_init(uint16_t param) {
       {0x398, 0, 8, .check_relay = false},
     };
     static const CanMsg alpha_hda2_tx[] = {
-      {0x50, 0, 16, .check_relay = true}, {0x2A4, 0, 24, .check_relay = true},
+      {0x50, 0, 16, .check_relay = true, .disable_static_blocking = true},
+      {0x2A4, 0, 24, .check_relay = true, .disable_static_blocking = true},
       {0x51, 0, 32, .check_relay = false}, {0x730, 1, 8, .check_relay = false},
-      {0x340, 1, 8, .check_relay = true}, {0x485, 1, 8, .check_relay = true},
+      {0x340, 1, 8, .check_relay = true, .disable_static_blocking = true},
+      {0x485, 1, 8, .check_relay = true, .disable_static_blocking = true},
       {0x420, 1, 8, .check_relay = true}, {0x421, 1, 8, .check_relay = true},
       {0x389, 1, 8, .check_relay = true}, {0x38D, 1, 8, .check_relay = false},
       {0x363, 1, 8, .check_relay = false},
@@ -642,7 +689,10 @@ static safety_config hyundai_init(uint16_t param) {
       {0x39C, 1, 8, .check_relay = false}, {0x43A, 1, 8, .check_relay = false},
     };
     if (hyundai_blended_hda2) {
-      static RxCheck alpha_hda2_rx[] = {HYUNDAI_BLENDED_ALPHA_RX_CHECKS(1, 50U)};
+      static RxCheck alpha_hda2_rx[] = {
+        HYUNDAI_BLENDED_ALPHA_RX_CHECKS(1, 50U)
+        {.msg = {{0x2A4, 2, 24, 20U, .max_counter = 255U, .ignore_quality_flag = true}, {0}, {0}}},
+      };
       ret = BUILD_SAFETY_CFG(alpha_hda2_rx, alpha_hda2_tx);
     } else {
       static RxCheck alpha_hda1_rx[] = {
@@ -668,6 +718,12 @@ static safety_config hyundai_init(uint16_t param) {
       {0x2A4, 0, 24, .check_relay = true},
       {0x485, 1, 8, .check_relay = true},
     };
+    static const CanMsg blended_hda2_aol_tx[] = {
+      {0x50, 0, 16, .check_relay = true, .disable_static_blocking = true},
+      {0x4F1, 1, 4, .check_relay = false},
+      {0x2A4, 0, 24, .check_relay = true, .disable_static_blocking = true},
+      {0x485, 1, 8, .check_relay = true, .disable_static_blocking = true},
+    };
     static const CanMsg blended_aol_tx_msgs[] = {
       {0x340, 0, 8, .check_relay = true, .disable_static_blocking = true},
       {0x4F1, 0, 4, .check_relay = false},
@@ -675,8 +731,12 @@ static safety_config hyundai_init(uint16_t param) {
       {0x364, 0, 8, .check_relay = true, .disable_static_blocking = true},
     };
     if (hyundai_blended_hda2) {
-      static RxCheck blended_hda2_rx[] = {HYUNDAI_BLENDED_COMMON_RX_CHECKS(1, 50U)};
-      ret = BUILD_SAFETY_CFG(blended_hda2_rx, blended_hda2_tx);
+      static RxCheck blended_hda2_rx[] = {
+        HYUNDAI_BLENDED_COMMON_RX_CHECKS(1, 50U)
+        {.msg = {{0x2A4, 2, 24, 20U, .max_counter = 255U, .ignore_quality_flag = true}, {0}, {0}}},
+      };
+      ret = blended_aol_enabled ? BUILD_SAFETY_CFG(blended_hda2_rx, blended_hda2_aol_tx) :
+                                BUILD_SAFETY_CFG(blended_hda2_rx, blended_hda2_tx);
     } else {
       static RxCheck blended_rx[] = {HYUNDAI_BLENDED_COMMON_RX_CHECKS(0, 100U)};
       ret = blended_aol_enabled ? BUILD_SAFETY_CFG(blended_rx, blended_aol_tx_msgs) : BUILD_SAFETY_CFG(blended_rx, blended_tx);
@@ -696,9 +756,6 @@ static safety_config hyundai_init(uint16_t param) {
     SET_TX_MSGS(ray_tx_msgs, ret);
   } else if (hyundai_longitudinal) {
     // Use CLU11 (buttons) to manage controls allowed instead of SCC cruise state
-    static RxCheck hyundai_long_rx_checks[] = {
-      HYUNDAI_COMMON_RX_CHECKS(false)
-    };
 
     static RxCheck hyundai_fcev_long_rx_checks[] = {
       HYUNDAI_COMMON_RX_CHECKS(false)
@@ -853,8 +910,19 @@ static safety_config hyundai_legacy_init(uint16_t param) {
     HYUNDAI_SCC12_ADDR_CHECK(0)
   };
 
-  hyundai_common_init(param);
-  classic_non_scc_aol_configure(param, true);
+  const bool legacy_long = legacy_long_param(param);
+  uint16_t normalized = param;
+  if (legacy_long) {
+    normalized = ((param & 1U) != 0U) ? 6U : 4U;
+    if (legacy_long_aol_param(param)) {
+      normalized |= 0x0400U;
+    }
+    if ((param & 0x10U) != 0U) {
+      normalized |= 0x0800U;
+    }
+  }
+  hyundai_common_init(normalized);
+  classic_non_scc_aol_configure(normalized, !legacy_long);
   hyundai_legacy = true;
   hyundai_blended_stock = false;
   hyundai_blended_hda2 = false;
@@ -867,6 +935,20 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   hyundai_longitudinal = false;
   hyundai_camera_scc = false;
   safety_config ret = BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
+  if ((param & 0xFF00U) == 0xE900U) {
+    const safety_config denied = {0};
+    ret = denied;
+#ifdef ALLOW_DEBUG
+    const bool marked = legacy_long_aol_param(param);
+    const bool alternative_matches = marked ? ((unsigned int)alternative_experience == 32U) : ((unsigned int)alternative_experience == 0U);
+    if (legacy_long && alternative_matches) {
+      hyundai_long_rx_variant(true);
+      hyundai_longitudinal = true;
+      SET_RX_CHECKS(hyundai_long_rx_checks, ret);
+      SET_TX_MSGS(HYUNDAI_LONG_TX_MSGS, ret);
+    }
+#endif
+  }
   hyundai_classic_scc_aol_rx_config(&ret, true);
   return ret;
 }

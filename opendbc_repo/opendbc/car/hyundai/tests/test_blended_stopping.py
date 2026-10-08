@@ -13,9 +13,6 @@ State = car.CarControl.Actuators.LongControlState
 
 class TestBlendedStopping(unittest.TestCase):
   def setUp(self):
-    self.scope = patch('opendbc.car.hyundai.blended_longitudinal.hdai_startup_qualified', return_value=True)
-    self.scope.start()
-    self.addCleanup(self.scope.stop)
     self.cp = candidate_from_stock(params(), alpha_requested=True, native_qualified=True)
     self.cs = car.CarState()
     self.cs.canValid = True
@@ -82,7 +79,7 @@ class TestBlendedStopping(unittest.TestCase):
         self.assertNotEqual(control.long_control_state, State.starting)
 
   def test_exact_policy_gate_stock_and_fca_topology(self):
-    with patch('opendbc.car.hyundai.blended_longitudinal.hdai_startup_qualified', return_value=False):
+    with patch('opendbc.car.hyundai.blended_longitudinal.mixed_startup_qualified', return_value=False):
       self.assertIsNone(self.control().extension)
     self.assertIsNone(LongControl(params()).extension)
     hdai = params()

@@ -15,10 +15,10 @@ from opendbc.safety.tests.libsafety import libsafety_py
 
 class TestXceedPhevPort(unittest.TestCase):
   @staticmethod
-  def params(alpha_long=False):
+  def params(alpha_long=False, *, release=False):
     fingerprint = gen_empty_fingerprint()
     fingerprint[1][RADAR_START_ADDR] = 8
-    return CarInterface.get_params(CAR.KIA_XCEED_PHEV, fingerprint, [], alpha_long, False, False)
+    return CarInterface.get_params(CAR.KIA_XCEED_PHEV, fingerprint, [], alpha_long, release, False)
 
   def test_saved_firmware_and_stock_legacy_hybrid_configuration(self):
     versions = FW_VERSIONS[CAR.KIA_XCEED_PHEV]
@@ -29,12 +29,12 @@ class TestXceedPhevPort(unittest.TestCase):
     exact, matches = match_fw_to_car(observed, '', allow_exact=True, allow_fuzzy=False, log=False)
     self.assertTrue(exact)
     self.assertEqual(matches, {CAR.KIA_XCEED_PHEV, CAR.KIA_CEED_PHEV})
-    for alpha_long in (False, True):
-      cp = self.params(alpha_long)
+    for alpha_long, release in ((False, False), (True, False), (False, True), (True, True)):
+      cp = self.params(alpha_long, release=release)
       self.assertTrue(cp.flags & HyundaiFlags.LEGACY)
       self.assertTrue(cp.flags & HyundaiFlags.HYBRID)
       self.assertTrue(cp.flags & HyundaiFlags.MANDO_RADAR)
-      self.assertFalse(cp.alphaLongitudinalAvailable)
+      self.assertEqual(cp.alphaLongitudinalAvailable, not release)
       self.assertFalse(cp.openpilotLongitudinalControl)
       self.assertTrue(cp.pcmCruise)
       self.assertFalse(cp.radarUnavailable)

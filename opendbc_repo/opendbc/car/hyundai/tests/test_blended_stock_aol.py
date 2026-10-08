@@ -92,18 +92,18 @@ class MixedReceiveStream:
 @pytest.mark.parametrize('alpha', [False, True])
 def test_exact_stock_profile_advertises_hdai_without_selecting_long(hda2, alpha):
   cp = params(hda2, alpha)
-  assert qualified(cp) == (not hda2)
+  assert qualified(cp)
   assert cp.alternativeExperience == 0
-  assert cp.alphaLongitudinalAvailable == (not hda2)
+  assert cp.alphaLongitudinalAvailable
   assert not cp.openpilotLongitudinalControl
   assert cp.safetyConfigs[0].safetyParam == (0x2010 if hda2 else 0x2000)
   cp.alternativeExperience = 32
-  assert qualified(cp, marked_only=True) == (not hda2)
+  assert qualified(cp, marked_only=True)
   cp.safetyConfigs[0].safetyParam |= 4
   assert not qualified(cp)
 
 
-@pytest.mark.parametrize('hda2', (False,))
+@pytest.mark.parametrize('hda2', (False, True))
 def test_independent_stream_physical_latch_native_tx_and_handover(hda2):
   cp = params(hda2)
   cp.alternativeExperience = 32
@@ -169,9 +169,9 @@ def test_actual_card_publication_and_controls_stock_only(hda2, aol, disabled, mo
     ci = CarInterface(cp)
     card = Car(CI=ci, RI=RadarInterface(cp))
     assert not card.CP.openpilotLongitudinalControl
-    assert card.CP.alphaLongitudinalAvailable == (not hda2)
+    assert card.CP.alphaLongitudinalAvailable
     assert card.CP.pcmCruise and card.CP.safetyConfigs[0].safetyParam == (0x2010 if hda2 else 0x2000)
-    assert card.CP.alternativeExperience == (32 if aol and not hda2 else 0)
+    assert card.CP.alternativeExperience == (32 if aol else 0)
     expected = card.CP.to_dict()
     with structs.CarParams.from_bytes(saved.get('CarParams')) as published:
       assert published.to_dict() == expected
@@ -190,7 +190,7 @@ def test_actual_card_publication_and_controls_stock_only(hda2, aol, disabled, mo
     gc.collect()
 
 
-@pytest.mark.parametrize('hda2', (False,))
+@pytest.mark.parametrize('hda2', (False, True))
 @pytest.mark.parametrize('missing', ['EMS16', 'WHL_SPD11', 'TCS13', 'MDPS12', 'CLU11', 'SCC11', 'SCC12'])
 def test_required_literal_source_absence_cannot_authorize(hda2, missing):
   cp = params(hda2)
@@ -216,7 +216,7 @@ def test_required_literal_source_absence_cannot_authorize(hda2, missing):
   assert not state.canValid
 
 
-@pytest.mark.parametrize('hda2', (False,))
+@pytest.mark.parametrize('hda2', (False, True))
 def test_native_held_startup_and_wrong_bus_are_not_fresh_gestures(hda2):
   for wrong_bus in (None, 'BCM_PO_11'):
     cp = params(hda2)
@@ -239,7 +239,7 @@ def test_native_held_startup_and_wrong_bus_are_not_fresh_gestures(hda2):
       assert safety.aol_get_permission_mask() == 0
 
 
-@pytest.mark.parametrize('hda2', (False,))
+@pytest.mark.parametrize('hda2', (False, True))
 def test_ae0_physical_tracker_is_inactive_until_final_ae32(hda2):
   cp = params(hda2)
   ci = CarInterface(cp)
@@ -254,7 +254,7 @@ def test_ae0_physical_tracker_is_inactive_until_final_ae32(hda2):
   assert sources.active
 
 
-@pytest.mark.parametrize('hda2', (False,))
+@pytest.mark.parametrize('hda2', (False, True))
 @pytest.mark.parametrize('corruption', ('crc', 'replay', 'wrong_bus', 'inactive'))
 def test_real_controller_invalid_replacement_does_not_acquire_forwarding(hda2, corruption):
   cp = params(hda2)
@@ -299,7 +299,7 @@ def test_real_controller_invalid_replacement_does_not_acquire_forwarding(hda2, c
   assert safety.safety_fwd_hook(2, addr) == 0
 
 
-@pytest.mark.parametrize('hda2', (False,))
+@pytest.mark.parametrize('hda2', (False, True))
 def test_real_controller_crc_fault_revokes_token_then_fresh_gesture_recovers(hda2):
   cp = params(hda2)
   cp.alternativeExperience = 32
@@ -387,13 +387,13 @@ def test_blended_native_main_uses_scc12_not_acceleration_payload(hda2, experienc
 
 
 @pytest.mark.parametrize('experience', (0, 32))
-def test_hda2_independent_axis_remains_unsupported(experience):
+def test_hda2_independent_axis_uses_physical_stock_owner(experience):
   from openpilot.starpilot.car.hyundai.aol import policy_for, native_accepts_cp
 
   cp = params(True)
   cp.alternativeExperience = experience
-  assert not qualified(cp) and not policy_for(cp).intent_supported
-  assert not native_accepts_cp(cp, cp.safetyConfigs[0].safetyModel.raw, 0x2010)
+  assert qualified(cp) and policy_for(cp).intent_supported
+  assert native_accepts_cp(cp, cp.safetyConfigs[0].safetyModel.raw, 0x2010) == (experience == 32)
   ci = CarInterface(cp)
   stream = MixedReceiveStream(ci)
   safety = libsafety_py.libsafety
@@ -408,8 +408,8 @@ def test_hda2_independent_axis_remains_unsupported(experience):
       assert safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data))
     safety.set_aol_test_heartbeat(True)
     safety.safety_tick()
-    safety.aol_set_host_request(1)
-    assert safety.aol_get_permission_mask() == 0
+    safety.aol_set_host_request(1 if tick >= 40 else 0)
+    assert safety.aol_get_permission_mask() == (1 if experience == 32 and tick >= 40 else 0)
     with patch('time.clock_gettime_ns', return_value=now):
       cs = ci.update([(now, frames)])
     if tick >= 20:
@@ -499,3 +499,61 @@ def test_actual_alpha_card_final_composition_and_restart_transport(enabled, monk
       assert published.to_dict() == card.CP.to_dict()
     del card, ci
     gc.collect()
+
+
+def test_mixed_canfd_checksum_registration_is_address_scoped():
+  from opendbc.car.hyundai.hyundaicanfd import hkg_can_fd_checksum
+  from opendbc.car.hyundai.blended_longitudinal_can import create_blended_adrv_messages
+  from opendbc.car.hyundai.hyundaicanfd import CanBus
+  packer = CANPacker(DBC[CAR.HYUNDAI_PALISADE_2023][Bus.pt])
+  for name in ('LKAS', 'CAM_0x2a4', 'ADRV_0x51'):
+    address, data, _ = packer.make_can_msg(name, 0, {})
+    assert int.from_bytes(data[:2], 'little') == hkg_can_fd_checksum(address, None, bytearray(data))
+    assert packer.dbc.name_to_msg[name].sigs['CHECKSUM'].calc_checksum is not None
+  for name in ('SCC11', 'SCC12', 'SCC14', 'LFAHDA_MFC'):
+    assert packer.dbc.name_to_msg[name].sigs['CHECKSUM'].calc_checksum is None
+  cp = params(hda2=True)
+  for counter in range(258):
+    frame = create_blended_adrv_messages(packer, CanBus(cp), counter)[0]
+    assert frame[0] == 0x51 and frame[2] == 0
+    assert frame[1][3:] == bytes(29)
+    # A prior packer call consumed initial0; the same original named-counter law wraps255→0.
+    assert frame[1][2] == (counter + 1) & 255
+
+
+def test_hda2_pt_recovery_before_next_camera_preserves_copy_without_authority():
+  cp = params(True)
+  cp.alternativeExperience = 32
+  ci = CarInterface(cp)
+  stream = MixedReceiveStream(ci)
+  safety = libsafety_py.libsafety
+  safety.set_alternative_experience(32)
+  assert safety.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, 0x2010) == 0
+  safety.init_tests()
+  saw_withdrawal = saw_recovery_copy = False
+  for tick in range(105):
+    now = stream.now + tick * 10_000_000
+    frames = stream.frames(tick, omit='SCC12' if 60 <= tick < 90 else None)
+    if 80 <= tick < 100:
+      frames = [frame for frame in frames if frame[0] != 0x2A4]
+    safety.set_timer((now // 1000) & 0xFFFFFFFF)
+    for address, data, bus in frames:
+      assert safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data))
+    safety.safety_tick()
+    safety.set_aol_test_heartbeat(True)
+    safety.aol_set_host_request(0)
+    assert safety.aol_get_permission_mask() == 0
+    with patch('time.clock_gettime_ns', return_value=now):
+      state = ci.update([(now, frames)])
+    _, outgoing = ci.apply(structs.CarControl().as_reader(), now)
+    copies = [frame for frame in outgoing if frame[0] == 0x2A4]
+    if tick == 85:
+      assert not state.canValid and not copies
+      saw_withdrawal = True
+    if tick == 90:
+      assert state.canValid and copies
+      assert not any(frame[0] == 0x2A4 for frame in frames)
+      saw_recovery_copy = True
+    for address, data, bus in outgoing:
+      assert safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data)), (tick, hex(address), data.hex())
+  assert saw_withdrawal and saw_recovery_copy

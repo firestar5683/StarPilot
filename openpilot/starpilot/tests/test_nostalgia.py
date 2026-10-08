@@ -76,7 +76,18 @@ def test_normal_aol_owner_needs_saved_request_and_exact_tagged_ioniq_cp():
     assert feature_enabled(params, tagged, 'aol', {})
     Path(params.get_param_path('AlwaysOnLateral')).write_bytes(b'01')
     assert not feature_requested(params, 'aol')
-    assert not feature_enabled(params, tagged, 'aol', {})
+    from openpilot.starpilot.aol.intent import read_settings
+    from openpilot.starpilot.aol.vehicle import policy_for
+    from openpilot.starpilot.car.hyundai.aol import create_intent
+    assert policy_for(tagged).full_axis_runtime_required
+    assert feature_enabled(params, tagged, 'aol', {})
+    settings = read_settings(params)
+    assert not settings.enabled
+    owner = create_intent(tagged, settings)
+    for state in (_car(), _car(_button(ButtonType.lkas, True)), _car(_button(ButtonType.lkas, False))):
+      owner.update(state)
+      assert not owner.allowed_latch
+      assert not owner.output(state)[0]
 
 
 def test_only_factual_ioniq_press_cancels_longitudinal():

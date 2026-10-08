@@ -57,7 +57,7 @@ class G90Startup(HyundaiECUStartup):
       packets = self.callbacks[0]()
       stamped = [(int(getattr(packet, 'log_mono_time_ns', 0)), list(packet)) for packet in packets]
       if any(stamp <= 0 for stamp, _ in stamped):
-        raise RuntimeError('G90 stock warmup requires actual timestamped CAN')
+        raise RuntimeError(f'{self.label} stock warmup requires actual timestamped CAN')
       state = ci.update(stamped)
       now = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
       parser = ci.can_parsers[Bus.pt]
@@ -75,4 +75,4 @@ class G90Startup(HyundaiECUStartup):
         return
       time.sleep(.005)
     self.outcome = Outcome.ABORT_UNCERTAIN
-    raise RuntimeError('G90 stock SCC sources did not become fresh before publication')
+    raise RuntimeError(f'{self.label} stock SCC sources did not become fresh before publication')

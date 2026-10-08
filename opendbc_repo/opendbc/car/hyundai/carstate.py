@@ -125,6 +125,7 @@ class CarState(CarStateBase):
     self.cluster_speed_counter = CLUSTER_SAMPLE_RATE
 
     self.params = CarControllerParams(CP)
+    self.blended_camera_current = False
     self.ray_pedal_valid = False
     self.ray_pedal_state = 5
 
@@ -307,6 +308,8 @@ class CarState(CarStateBase):
     if is_blended(self.CP):
       if self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
         self.lfa_block_msg = copy.copy(cp_cam.vl["CAM_0x2a4"])
+        from opendbc.car.hyundai.blended_stock_aol import camera_current
+        self.blended_camera_current = camera_current(cp_cam)
         self.lkas11 = {}
       else:
         self.msg_364 = copy.copy(cp_cam.vl["ALERTS_364"])

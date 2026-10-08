@@ -271,7 +271,8 @@ class CarController(CarControllerBase):
             sys_warning, sys_state, CC.enabled, hud_control.leftLaneVisible, hud_control.rightLaneVisible,
             left_lane_warning, right_lane_warning, {}, include_alerts=False, counter_mod=0xF,
             fcw_opt_usm=2 if apply_steer_req or icon == 3 else 1))
-        if self.frame % 5 == 0:
+        if (self.frame % 5 == 0 and CS.out.canValid and not CS.out.canTimeout and
+            CS.blended_camera_current):
           can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg, False))
       else:
         can_sends.extend(hyundaican.create_lkas11_can_canfd_blended(

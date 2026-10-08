@@ -31,6 +31,7 @@ def source_profile(identity):
 def test_actual_final_card_params_and_angle_controls(identity, enabled):
   from openpilot.common.params import Params
   from openpilot.common.prefix import OpenpilotPrefix
+  from openpilot.starpilot.aol.vehicle import policy_for
   from openpilot.selfdrive.car.card import Car
   from openpilot.selfdrive.controls.controlsd import Controls
   from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle
@@ -57,8 +58,12 @@ def test_actual_final_card_params_and_angle_controls(identity, enabled):
     controls = Controls()
     assert isinstance(controls.LaC, LatControlAngle)
     assert controls.CP.to_dict() == card.CP.to_dict()
-    if enabled:
-      assert not controls.ordinary_axis_ack_required
+    expected_ack = enabled or identity in (CAR.HYUNDAI_IONIQ_5_PE, CAR.KIA_EV9)
+    assert controls.ordinary_axis_ack_required is expected_ack
+    assert policy_for(controls.CP).full_axis_runtime_required is enabled
+    subscribed = controls.aol_replay or expected_ack
+    assert ('aolAxisState' in controls.sm.data) is subscribed
+    assert ('aolSafetyWire' in controls.sm.data) is subscribed
     del controls, card, ci
     gc.collect()
 

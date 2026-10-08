@@ -2,6 +2,12 @@
 
 static bool blended_aol_enabled = false;
 static bool blended_aol_long = false;
+static bool blended_aol_hda2 = false;
+static bool blended_adrv_counter_seen = false;
+static uint8_t blended_adrv_counter = 0U;
+static bool blended_camera_seen = false;
+static uint8_t blended_camera_data[24] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
+static uint32_t blended_camera_ts = 0U;
 static bool blended_aol_main_seen = false;
 static bool blended_aol_main = false;
 static uint32_t blended_aol_main_ts = 0U;
@@ -16,8 +22,8 @@ static uint32_t blended_aol_token_ts = 0U;
 static unsigned int blended_aol_token_source = 3U;
 static bool blended_aol_counter_seen = false;
 static uint8_t blended_aol_counter = 0U;
-static bool blended_aol_owned[3] = {false, false, false};
-static uint32_t blended_aol_tx_ts[3] = {0U, 0U, 0U};
+static bool blended_aol_owned[4] = {false, false, false, false};
+static uint32_t blended_aol_tx_ts[4] = {0U, 0U, 0U, 0U};
 
 static void blended_aol_clear(void) {
   blended_aol_main_seen = false;
@@ -25,6 +31,10 @@ static void blended_aol_clear(void) {
   blended_aol_main_ts = 0U;
   blended_aol_counter_seen = false;
   blended_aol_counter = 0U;
+  blended_adrv_counter_seen = false;
+  blended_adrv_counter = 0U;
+  blended_aol_owned[3] = false;
+  blended_aol_tx_ts[3] = 0U;
   blended_aol_token = false;
   blended_aol_claimed = false;
   blended_aol_session = false;
@@ -44,6 +54,9 @@ static void blended_aol_clear(void) {
 static void blended_aol_reset(void) {
   blended_aol_enabled = false;
   blended_aol_long = false;
+  blended_aol_hda2 = false;
+  blended_camera_seen = false;
+  blended_camera_ts = 0U;
   blended_aol_counter_seen = false;
   blended_aol_counter = 0U;
   blended_aol_clear();
@@ -108,8 +121,15 @@ static uint8_t blended_aol_permission_mask(void) {
 }
 
 static void blended_aol_rx(const CANPacket_t *msg) {
+  if (blended_aol_hda2 && msg_matches(msg, 0x2A4U, 2U, 24U)) {
+    for (unsigned int i = 0U; i < 24U; i++) {
+      blended_camera_data[i] = msg->data[i];
+    }
+    blended_camera_seen = true;
+    blended_camera_ts = microsecond_timer_get();
+  }
   if (blended_aol_enabled) {
-    const unsigned int pt = 0U;
+    const unsigned int pt = blended_aol_hda2 ? 1U : 0U;
     const uint32_t now = microsecond_timer_get();
     if (blended_aol_long && msg_matches(msg, 0x394U, pt, 8U)) {
       blended_aol_main_seen = true;
@@ -161,9 +181,10 @@ static void blended_aol_rx(const CANPacket_t *msg) {
 static void blended_aol_configure(uint16_t param) {
   blended_aol_reset();
 #ifdef ALLOW_DEBUG
-  blended_aol_long = param == 0x2004U;
+  blended_aol_long = (param == 0x2004U) || (param == 0x2014U);
 #endif
-  blended_aol_enabled = ((param == 0x2000U) || blended_aol_long) && ((unsigned int)alternative_experience == 32U);
+  blended_aol_hda2 = (param == 0x2010U) || (param == 0x2014U);
+  blended_aol_enabled = ((param == 0x2000U) || (param == 0x2010U) || blended_aol_long) && ((unsigned int)alternative_experience == 32U);
   if (blended_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = blended_aol_reset,
@@ -178,8 +199,44 @@ static void blended_aol_configure(uint16_t param) {
 
 static bool blended_aol_integrity(const CANPacket_t *msg) {
   bool valid = true;
-  const unsigned int steering = 0x340U;
-  if (blended_aol_enabled && (msg->addr == steering)) {
+  const unsigned int steering = blended_aol_hda2 ? 0x50U : 0x340U;
+  if (blended_aol_hda2 && ((msg->addr == 0x50U) || (msg->addr == 0x51U) || (msg->addr == 0x2A4U))) {
+    unsigned int length = 24U;
+    if (msg->addr == 0x50U) {
+      length = 16U;
+    } else if (msg->addr == 0x51U) {
+      length = 32U;
+    } else {
+      // The remaining admitted camera message retains its 24-byte shape.
+    }
+    const uint32_t xor_out = (length == 16U) ? 0x041DU : 0U;
+    valid = msg_matches(msg, msg->addr, 0U, length) &&
+      (GET_BYTES_LE(msg, 0, 2) == (hyundai_common_canfd_compute_checksum(msg) ^ xor_out));
+    if (valid && (msg->addr == 0x50U) && blended_aol_counter_seen) {
+      valid = msg->data[2] == (uint8_t)(blended_aol_counter + 1U);
+    }
+    if (valid && (msg->addr == 0x51U) && blended_adrv_counter_seen) {
+      valid = msg->data[2] == (uint8_t)(blended_adrv_counter + 1U);
+    }
+    if (valid && (msg->addr == 0x50U)) {
+      blended_aol_counter = msg->data[2];
+      blended_aol_counter_seen = true;
+    }
+    if (valid && (msg->addr == 0x51U)) {
+      blended_adrv_counter = msg->data[2];
+      blended_adrv_counter_seen = true;
+    }
+    if (valid && (msg->addr == 0x2A4U)) {
+      valid = blended_camera_seen &&
+        (safety_get_ts_elapsed(microsecond_timer_get(), blended_camera_ts) <= 500000U) &&
+        (msg->data[2] == blended_camera_data[2]) && (msg->data[7] == 0U);
+      for (unsigned int i = 3U; i < 24U; i++) {
+        if (i != 7U) {
+          valid &= msg->data[i] == blended_camera_data[i];
+        }
+      }
+    }
+  } else if (blended_aol_enabled && (msg->addr == steering)) {
     valid = msg_matches(msg, steering, 0U, 8U);
     uint8_t counter = 0U;
     if (valid) {
@@ -195,6 +252,12 @@ static bool blended_aol_integrity(const CANPacket_t *msg) {
       const unsigned int mask = 15U;
       valid = counter == ((blended_aol_counter + 1U) & mask);
     }
+    if (valid) {
+      blended_aol_counter = counter;
+      blended_aol_counter_seen = true;
+    }
+  } else {
+    // Messages outside the owned integrity paths retain the existing verdict.
   }
   if (!valid) {
     blended_aol_clear();
@@ -205,22 +268,20 @@ static bool blended_aol_integrity(const CANPacket_t *msg) {
 static void blended_aol_tx(const CANPacket_t *msg, bool accepted) {
   if (blended_aol_enabled) {
     bool accepted_current = accepted;
-    const uint32_t addresses[3] = {0x340U, 0x364U, 0x485U};
+    const uint32_t addresses[4] = {blended_aol_hda2 ? 0x50U : 0x340U, blended_aol_hda2 ? 0x2A4U : 0x364U, 0x485U, 0x340U};
+    const unsigned int count = (blended_aol_hda2 && blended_aol_long) ? 4U : 3U;
     if ((msg->addr == addresses[0]) && (msg->bus == 0U)) {
-      const bool active = GET_BIT(msg, 27U);
-      if (accepted) {
-        blended_aol_counter = ((msg->data[4] >> 4U) & 0xFU);
-        blended_aol_counter_seen = true;
-      }
+      const bool active = GET_BIT(msg, blended_aol_hda2 ? 52U : 27U);
       if (!accepted || !active) {
-        for (unsigned int i = 0U; i < 3U; i++) {
+        for (unsigned int i = 0U; i < count; i++) {
           blended_aol_owned[i] = false;
         }
       }
       accepted_current &= active;
     }
-    for (unsigned int i = 0U; i < 3U; i++) {
-      if ((msg->addr == addresses[i]) && (msg->bus == 0U)) {
+    for (unsigned int i = 0U; i < count; i++) {
+      const unsigned int bus = blended_aol_hda2 && (i >= 2U) ? 1U : 0U;
+      if ((msg->addr == addresses[i]) && (msg->bus == bus)) {
         blended_aol_owned[i] = accepted_current && ((i == 0U) || (blended_aol_owned[0] &&
           safety_get_ts_elapsed(microsecond_timer_get(), blended_aol_tx_ts[0]) <= AOL_HOST_REQUEST_TIMEOUT_US)) && aol_rx_healthy() && (controls_allowed || (blended_aol_permission_mask() != 0U));
         blended_aol_tx_ts[i] = microsecond_timer_get();
@@ -231,10 +292,12 @@ static void blended_aol_tx(const CANPacket_t *msg, bool accepted) {
 
 static bool blended_aol_fwd(int bus, int addr) {
   bool blocked = blended_aol_long && !blended_aol_enabled && (bus == 2) &&
-    ((addr == 0x340) || (addr == 0x364) || (addr == 0x485));
+    ((addr == (blended_aol_hda2 ? 0x50 : 0x340)) ||
+     (addr == (blended_aol_hda2 ? 0x2A4 : 0x364)) || (!blended_aol_hda2 && (addr == 0x485)));
   if (blended_aol_enabled && (bus == 2) && aol_rx_healthy() && (controls_allowed || (blended_aol_permission_mask() != 0U))) {
-    const uint32_t addresses[3] = {0x340U, 0x364U, 0x485U};
-    for (unsigned int i = 0U; i < 3U; i++) {
+    const uint32_t addresses[4] = {blended_aol_hda2 ? 0x50U : 0x340U, blended_aol_hda2 ? 0x2A4U : 0x364U, 0x485U, 0x340U};
+    const unsigned int count = blended_aol_hda2 ? 2U : 3U;
+    for (unsigned int i = 0U; i < count; i++) {
       blocked |= (addr == (int)addresses[i]) && blended_aol_owned[i] &&
         (safety_get_ts_elapsed(microsecond_timer_get(), blended_aol_tx_ts[i]) <= AOL_HOST_REQUEST_TIMEOUT_US);
     }
