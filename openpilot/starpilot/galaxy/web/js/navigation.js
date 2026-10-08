@@ -316,6 +316,10 @@ export const NavigationPage = {
         route ? {distance:route.distanceMeters,duration:route.durationSeconds} : null
     },
     statusLabel() {
+      if (this.data?.status === 'waitingForLocation' && this.data.route?.length)
+        return 'Route preview from last saved location'
+      if (this.data?.status === 'routing' && this.data.location?.lastKnown)
+        return 'Finding a route from last saved location…'
       return ({ disabled: "Navigation is off", needsKey: "Add your Mapbox key to get started", noDestination: "Where would you like to go?",
         waitingForLocation: "Waiting for GPS", routing: "Finding your route…", guiding: "Route guidance", arrived: "You have arrived",
         routeUnavailable: "A route could not be found", stale: "Waiting for navigation" })[this.data?.status] || "Connecting to navigation…"

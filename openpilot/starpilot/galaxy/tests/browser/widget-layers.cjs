@@ -16,8 +16,13 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
     page.on('pageerror', error => errors.push(error.message))
     await page.route('http://layers.test/**', async route => {
       const pathname = new URL(route.request().url()).pathname
+      if (pathname === '/data/runtime.json') return route.fulfill({json:{schemaVersion:1, monitor:'local'}})
+      if (pathname === '/api/auth/session') return route.fulfill({json:{state:'configured', authenticated:true, localAccess:true}})
+      if (pathname === '/api/device/state') return route.fulfill({json:{state:'parked', maxAgeMs:3000}})
+      if (pathname === '/' && new URL(route.request().url()).searchParams.has('shell')) return route.fulfill({contentType:'text/html', body:
+        `<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/css/galaxy.css"><link rel="stylesheet" href="/css/settings.css"><div id="galaxy-app"></div><script type="module" src="/js/app.js"></script>`})
       if (pathname.startsWith('/api/')) return route.fulfill({json: pathname === '/api/android-auto/layout' ? projection : snapshot})
-      if (pathname === '/') return route.fulfill({contentType:'text/html', body:`<link rel="stylesheet" href="/css/galaxy.css"><link rel="stylesheet" href="/css/settings.css"><main class="gx-content"><div id="app"></div></main><script type="module">
+      if (pathname === '/') return route.fulfill({contentType:'text/html', body:`<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/css/galaxy.css"><link rel="stylesheet" href="/css/settings.css"><main class="gx-content"><div id="app"></div></main><script type="module">
         import {createApp} from '/vendor/vue/vue.esm-browser.js';
         import {OnroadLayoutPage} from '/js/onroad-layout.js';
         window.editor = createApp(OnroadLayoutPage, {mode:'local', projection:new URLSearchParams(location.search).has('projection'), unauthorized:()=>{}}).mount('#app');
@@ -53,7 +58,7 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
     assert.equal(await page.getByRole('button', {name:/Move .* (forward|backward)/}).count(), 0)
     await page.setViewportSize({width:390,height:844})
     await rows.first().evaluate(row => row.scrollIntoView({block:'center'}))
-    const handle = await rows.first().boundingBox()
+    const handle = await rows.first().locator('.gx-layout__row-grip').boundingBox()
     const target = await rows.nth(1).boundingBox()
     const client = await page.context().newCDPSession(page)
     await client.send('Emulation.setTouchEmulationEnabled', {enabled:true})
@@ -81,12 +86,27 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
     await page.getByRole('combobox', {name:'Selected widget', exact:true}).waitFor()
     assert.equal(await page.evaluate(() => JSON.stringify(window.editor.state.draft)), beforeTap)
     await page.getByRole('button', {name:'Widgets', exact:true}).click()
-    await rows.first().click()
+    await rows.first().locator('.gx-layout__layer-name').click()
     await page.getByRole('combobox', {name:'Selected widget', exact:true}).waitFor()
     // Both outputs retain the same workspace and all editor features at phone and desktop sizes.
     for (const aa of [false, true]) {
       await page.goto('http://layers.test/' + (aa ? '?projection=1' : ''))
       await rows.first().waitFor()
+      // Swiping names scrolls the page without rearranging widgets or starting an edit.
+      await page.setViewportSize({width:390, height:844})
+      await client.send('Emulation.setTouchEmulationEnabled', {enabled:true})
+      await rows.first().scrollIntoViewIfNeeded()
+      const name = await rows.first().locator('.gx-layout__layer-name').boundingBox()
+      const beforeScroll = await page.evaluate(() => ({draft:JSON.stringify(window.editor.state.draft), y:scrollY}))
+      const scrollX = name.x + name.width / 2, scrollY = name.y + name.height / 2
+      await client.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:touch(scrollX, scrollY)})
+      for (const distance of [30, 60, 100, 150])
+        await client.send('Input.dispatchTouchEvent', {type:'touchMove', touchPoints:touch(scrollX, scrollY - distance)})
+      await client.send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]})
+      await page.waitForFunction(y => scrollY > y, beforeScroll.y)
+      assert.equal(await page.evaluate(() => JSON.stringify(window.editor.state.draft)), beforeScroll.draft)
+      assert.equal(await page.evaluate(() => window.editor.state.layerDrag), null)
+      assert.equal(await page.evaluate(() => window.editor.state.inspectorPanel), 'widgets')
       // Device preview receives the tentative order before release on both outputs.
       await page.setViewportSize({width:1280, height:1000})
       await client.send('Emulation.setTouchEmulationEnabled', {enabled:false})
@@ -124,8 +144,11 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
         await page.getByRole('button', {name:'Edit widget', exact:true}).click()
         assert.equal(await page.getByRole('combobox', {name:'Selected widget', exact:true}).isVisible(), true)
         assert.equal(await page.getByLabel('X', {exact:true}).isVisible(), true)
-        await page.locator('.gx-layout__remove').first().click()
+        assert.equal(await page.locator('svg.gx-layout__preview .gx-layout__remove').count(), 0)
+        await page.getByRole('button', {name:'Widgets', exact:true}).click()
+        await rows.first().locator('.gx-layout__remove').click()
         await page.getByRole('button', {name:'Remove widget', exact:true}).click()
+        await page.getByRole('button', {name:'Edit widget', exact:true}).click()
         assert.equal(await page.getByRole('button', {name:'Add to layout', exact:true}).isVisible(), true)
         await page.getByRole('button', {name:'Add to layout', exact:true}).click()
         if (!aa) {
@@ -180,6 +203,43 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
           assert.equal(await leaveDialog.getByRole('button', {name, exact:true}).isVisible(), true)
         await leaveDialog.getByRole('button', {name:'Keep editing', exact:true}).click()
         assert.equal(await page.evaluate(() => window.leaveCompleted), undefined)
+      }
+    }
+    // Exercise the actual menu/route guard while the widget list is scrolled on phones.
+    for (const route of ['/theme_maker', '/theme_maker/android_auto']) {
+      for (const width of [360, 390, 1280]) {
+        await page.setViewportSize({width, height:844})
+        await page.goto('http://layers.test/?shell=1#' + route)
+        await rows.first().waitFor()
+        await page.getByRole('button', {name:'Edit widget', exact:true}).click()
+        const x = page.getByLabel('X', {exact:true})
+        await x.fill(String(Number(await x.inputValue()) + 1))
+        await x.press('Tab')
+        await page.getByRole('button', {name:'Widgets', exact:true}).click()
+        await rows.last().scrollIntoViewIfNeeded()
+        await page.getByRole('button', {name:'Menu', exact:true}).click()
+        await page.getByRole('complementary', {name:'Galaxy navigation'}).getByRole('button', {name:'Tools', exact:true}).click()
+        const dialog = page.getByRole('alertdialog', {name:'Leave without saving your changes?'})
+        await dialog.waitFor()
+        assert.equal(new URL(page.url()).hash, '#' + route, 'navigation waits for confirmation')
+        const bounds = await dialog.boundingBox()
+        assert(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 844)
+        assert.equal(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), true)
+        for (const name of ['Keep editing', 'Discard and leave', 'Save changes']) {
+          const button = dialog.getByRole('button', {name, exact:true})
+          assert.equal(await button.isVisible(), true)
+          assert((await button.boundingBox()).height >= 48)
+        }
+        await page.screenshot({path:`/private/tmp/theme-leave-${route.endsWith('android_auto') ? 'aa' : 'comma'}-${width}.png`})
+        await dialog.getByRole('button', {name:'Keep editing', exact:true}).click()
+        assert.equal(await dialog.count(), 0)
+        assert.equal(new URL(page.url()).hash, '#' + route)
+        assert.equal(await page.getByRole('button', {name:'Save changes', exact:true}).isEnabled(), true)
+        await page.getByRole('button', {name:'Menu', exact:true}).click()
+        await page.getByRole('complementary', {name:'Galaxy navigation'}).getByRole('button', {name:'Tools', exact:true}).click()
+        await dialog.getByRole('button', {name:'Discard and leave', exact:true}).click()
+        await page.waitForURL('**#/tools')
+        assert.equal(await dialog.count(), 0)
       }
     }
     assert.deepEqual(errors, [])

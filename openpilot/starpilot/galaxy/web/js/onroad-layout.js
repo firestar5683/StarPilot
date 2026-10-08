@@ -514,7 +514,7 @@ export const OnroadLayoutPage = {
     canRedo() { return this.state.history.redo.length > 0 },
     pendingLeave() { return typeof this.state.discard === "function" || ["back", "device", "projection"].includes(this.state.discard) },
     inlineLeavePrompt() { return this.projection && this.pendingLeave && this.state.leavePresentation !== "modal" },
-    modalLeavePrompt() { return this.projection && this.pendingLeave && this.state.leavePresentation === "modal" },
+    modalLeavePrompt() { return this.pendingLeave && this.state.leavePresentation === "modal" },
     canSavePending() { return !!this.state.data?.editable && !this.state.error && !this.busy && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
@@ -590,7 +590,7 @@ export const OnroadLayoutPage = {
       if (!this.editable || this.state.drag || this.state.layerDrag || event.button !== 0) return
       this._suppressLayerClick = false
       event.currentTarget.setPointerCapture(event.pointerId)
-      const rect = event.currentTarget.getBoundingClientRect()
+      const rect = event.currentTarget.closest("[data-layer-id]").getBoundingClientRect()
       this.state.selected = id
       this.state.layerDrag = { id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY,
         x: rect.x, y: rect.y, width: rect.width, offsetX: event.clientX - rect.x, offsetY: event.clientY - rect.y,
@@ -972,7 +972,7 @@ export const OnroadLayoutPage = {
       this.state.removeConfirm = null
       if (this.dirty) {
         this.state.discard = action
-        this.state.leavePresentation = this.projection && (typeof action === "function" || ["back", "device", "projection"].includes(action)) ? presentation : "inline"
+        this.state.leavePresentation = (typeof action === "function" || ["back", "device", "projection"].includes(action)) ? presentation : "inline"
       }
       else this.leave(action)
     },
@@ -1098,14 +1098,6 @@ export const OnroadLayoutPage = {
                     <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
                   </g>
                 </g>
-                <g v-for="widget in renderWidgets" :key="'remove-' + widget.id" class="gx-layout__remove"
-                  :transform="'translate(' + (layout[widget.id].x + widget.width - (state.profile === 'large' ? 38 : 12)) + ' ' + (layout[widget.id].y - (widget.visualInsetTop || 0) + (state.profile === 'large' ? 38 : 12)) + ')'"
-                  :tabindex="editable && !state.drag && !state.layerDrag ? 0 : -1" role="button" :aria-label="'Remove ' + widget.label" :class="{'is-disabled': !editable || !!state.drag || !!state.layerDrag}"
-                  @pointerdown.stop.prevent @click.stop="requestRemove(widget.id)" @keydown.enter.stop.prevent="requestRemove(widget.id)" @keydown.space.stop.prevent="requestRemove(widget.id)">
-                  <circle class="gx-layout__remove-hit" :r="state.profile === 'large' ? 66 : 22" />
-                  <circle class="gx-layout__remove-face" :r="state.profile === 'large' ? 38 : 12" />
-                  <path :d="state.profile === 'large' ? 'M-15 0 H15' : 'M-5 0 H5'" fill="none" stroke="white" :stroke-width="state.profile === 'large' ? 7 : 2.5" stroke-linecap="round" />
-                </g>
                 <rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
               <section v-if="state.devicePreviewOpen" class="gx-layout__device" v-show="state.previewMode === 'device'" aria-label="Device preview">
@@ -1138,16 +1130,19 @@ export const OnroadLayoutPage = {
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
-              <p class="gx-note">Tap a widget to edit; drag its row to reorder. Top is front; bottom is back. Alerts stay above widgets.</p>
-              <div class="gx-layout__widget-list"><button v-for="widget in listWidgets" :key="widget.id" class="gx-btn gx-btn--tonal gx-layout__layer" :data-layer-id="widget.id"
-                type="button" :aria-label="widget.label" :aria-pressed="state.selected === widget.id"
-                :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}"
-                title="Tap to edit; drag to reorder. Up and down keys reorder."
-                @pointerdown="startLayerDrag($event, widget.id)" @pointermove="moveLayerDrag($event)"
-                @pointerup="endLayerDrag($event)" @pointercancel="endLayerDrag($event, true)" @lostpointercapture="endLayerDrag($event, true)"
-                @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)">
-                <span class="gx-layout__row-grip" aria-hidden="true">⠿</span><span class="gx-layout__layer-name">{{ widget.label }}</span>
-              </button></div>
+              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets.</p>
+              <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
+                :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
+                <button class="gx-layout__row-grip gx-icon-btn" type="button" :aria-label="'Reorder ' + widget.label" :disabled="!editable || !!state.drag"
+                  title="Drag to reorder. Up and down keys reorder."
+                  @pointerdown="startLayerDrag($event, widget.id)" @pointermove="moveLayerDrag($event)"
+                  @pointerup="endLayerDrag($event)" @pointercancel="endLayerDrag($event, true)" @lostpointercapture="endLayerDrag($event, true)"
+                  @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">⠿</span></button>
+                <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
+                  @click="selectWidget(widget.id)">{{ widget.label }}</button>
+                <button class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editable || !!state.drag || !!state.layerDrag"
+                  @click="requestRemove(widget.id)"><span aria-hidden="true">−</span></button>
+              </div></div>
               <Teleport to="body"><div v-if="state.layerDrag?.moved" class="gx-layout__drag-ghost" aria-hidden="true"
                 :style="{left: state.layerDrag.x + 'px', top: state.layerDrag.y + 'px', width: state.layerDrag.width + 'px'}">
                 <span aria-hidden="true">⠿</span><strong>{{ selectedWidget.label }}</strong><span>↕</span>
@@ -1155,7 +1150,7 @@ export const OnroadLayoutPage = {
               <details class="gx-layout__tray"><summary>Inactive Widgets · {{ inactiveWidgets.length }}</summary><p class="gx-note">In Arrange widgets, drag onto the preview, or select Add.</p>
                 <div v-for="widget in inactiveWidgets" :key="widget.id" class="gx-layout__tray-item">
                   <button class="gx-layout__drag-handle" type="button" :disabled="!editable || state.previewMode !== 'layout'" :aria-label="'Drag ' + widget.label + ' onto preview'"
-                    @pointerdown="startDrag(widget.id, $event, true)"><i class="bi bi-grip-vertical" aria-hidden="true"></i>{{ widget.label }}</button>
+                    @pointerdown="startDrag(widget.id, $event, true)"><i class="bi bi-grip-vertical" aria-hidden="true"></i></button><span class="gx-layout__inactive-name">{{ widget.label }}</span>
                   <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !!state.drag" @click="add(widget.id)">Add</button>
                 </div>
                 <p v-if="!inactiveWidgets.length" class="gx-note">All available widgets are on this layout.</p>
@@ -1242,11 +1237,11 @@ export const OnroadLayoutPage = {
           <button type="button" class="gx-btn gx-btn--danger" @click="confirmRemove">Remove widget</button>
         </div>
       </GxDialog>
-      <GxDialog v-if="modalLeavePrompt" labelledby="gx-layout-leave-title" describedby="gx-layout-leave-body" alert @close="cancelLeave">
-        <div><h3 id="gx-layout-leave-title">Leave without saving your changes?</h3>
-          <p id="gx-layout-leave-body">Save your Android Auto layout before leaving, keep editing, or discard this draft.</p></div>
+      <GxDialog v-if="modalLeavePrompt" class="gx-layout__leave-dialog" labelledby="gx-layout-leave-title" describedby="gx-layout-leave-body" alert @close="cancelLeave">
+        <div class="gx-layout__leave-copy"><h3 id="gx-layout-leave-title">Leave without saving your changes?</h3>
+          <p id="gx-layout-leave-body">Save your {{ projection ? 'Android Auto' : 'comma' }} layout before leaving, keep editing, or discard this draft.</p></div>
         <GxNotice v-if="state.error" tone="danger">{{ state.error }}</GxNotice>
-        <div class="gx-settings__controls">
+        <div class="gx-layout__leave-actions">
           <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="cancelLeave">Keep editing</button>
           <button type="button" class="gx-btn gx-btn--danger" :disabled="busy" @click="leave(state.discard)">Discard and leave</button>
           <button type="button" class="gx-btn" :disabled="!canSavePending" @click="saveAndLeave">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</button>

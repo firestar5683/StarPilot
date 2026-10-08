@@ -163,3 +163,80 @@ def test_published_navigation_reaches_status_and_control_consumers(tmp_path, rou
       assert snapshot is not None and snapshot['status'] == 'guiding'
       instruction = current_instruction(sm, time.monotonic_ns())
       assert (instruction is not None) is bool(active_drive)
+
+
+def saved_origin_runtime(tmp_path, monkeypatch):
+  # These routing tests do not need the native Params library or boot-specific IPC paths.
+  monkeypatch.setattr(NavigationOwner, '_is_metric', lambda self: True)
+  owner = NavigationOwner(tmp_path, runtime_source=lambda: None, transient_root=tmp_path / 'runtime')
+  settings = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
+  owner.select({'name': 'Destination', 'longitude': .01, 'latitude': 0.}, settings['revision'], True)
+  executor = Executor()
+  executor.calls = []
+  submit = executor.submit
+  def record_submit(*args):
+    executor.calls.append(args)
+    return submit(*args)
+  executor.submit = record_submit
+  return owner, executor, RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
+
+
+def test_saved_origin_preview_without_live_guidance(tmp_path, monkeypatch, route):
+  owner, executor, runtime = saved_origin_runtime(tmp_path, monkeypatch)
+  assert runtime.update(10, None, 1)['status'] == 'waitingForLocation'
+  assert not executor.jobs
+  owner.position_store.record({'longitude': 0., 'latitude': 0., 'bearing': 90.})
+  assert runtime.update(11, None, 1)['status'] == 'routing'
+  assert executor.calls[0][2] == (0., 0.)
+  executor.jobs[0].set_result(route)
+  preview = runtime.update(12, None, 1)
+  assert preview['route'] == route.preview()
+  assert preview['status'] == 'waitingForLocation'
+  assert preview['locationMonoTime'] == 0 and not preview['controlValid']
+  assert preview['instruction'] == {} and preview['nextManeuver'] == {}
+  assert owner.route_options(owner.read()['revision'])[0]['distanceMeters'] == route.total_distance
+  owner.runtime_source = lambda: {**preview, 'instruction': None}
+  snapshot = owner.snapshot()
+  assert snapshot['route'] and snapshot['location']['lastKnown']
+  assert snapshot['location']['validForMs'] == 0 and snapshot['instruction'] is None
+  for now in range(13, 20):
+    assert runtime.update(now, None, 1)['route'] == route.preview()
+  assert len(executor.jobs) == 1
+
+
+@pytest.mark.parametrize('completed', [False, True])
+def test_live_fix_replaces_saved_origin_request(tmp_path, monkeypatch, route, completed):
+  owner, executor, runtime = saved_origin_runtime(tmp_path, monkeypatch)
+  owner.position_store.record({'longitude': 0., 'latitude': 0.})
+  runtime.update(10, None, 1)
+  if completed:
+    executor.jobs[0].set_result(route)
+    runtime.update(11, None, 1)
+  live = (12, (.001, 0.), 5., 90.)
+  result = runtime.update(12, live, 1)
+  assert not result['controlValid'] and result['route'] == []
+  if not completed:
+    assert len(executor.jobs) == 1
+    executor.jobs[0].set_result(route)
+    result = runtime.update(13, live, 1)
+    assert not result['controlValid'] and result['route'] == []
+  assert len(executor.jobs) == 2 and executor.calls[1][2] == (.001, 0.)
+  executor.jobs[1].set_result(route)
+  result = runtime.update(14, live, 1)
+  assert result['status'] == 'guiding' and result['controlValid']
+
+
+def test_saved_origin_failure_backoff_and_destination_change(tmp_path, monkeypatch, route):
+  owner, executor, runtime = saved_origin_runtime(tmp_path, monkeypatch)
+  owner.position_store.record({'longitude': 0., 'latitude': 0.})
+  runtime.update(10, None, 0)
+  executor.jobs[0].set_exception(ValueError('route unavailable'))
+  assert runtime.update(11, None, 0)['status'] == 'routeUnavailable'
+  runtime.update(12, None, 0)
+  assert len(executor.jobs) == 1
+  runtime.update(30_000_000_012, None, 0)
+  assert len(executor.jobs) == 2
+  owner.clear(owner.read()['revision'], True)
+  executor.jobs[1].set_result(route)
+  result = runtime.update(30_000_000_013, None, 0)
+  assert result['status'] == 'noDestination' and result['route'] == []

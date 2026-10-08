@@ -35,6 +35,7 @@ class RouteRuntime:
     self.routes = []
     self.future = None
     self.fetch_key = None
+    self.preview_only = False
     self.retry_after = 0
     self.off_route_since = 0
     self.arrived_since = 0
@@ -54,7 +55,14 @@ class RouteRuntime:
     if key != self.key:
       self.key, self.route = key, None
       self.routes = []
+      self.preview_only = False
       self.retry_after = self.off_route_since = self.arrived_since = 0
+    # A saved origin can draw a preview, but a fresh fix must calculate its own route.
+    if position is not None and self.preview_only:
+      self.route, self.routes = None, []
+      self.retry_after = 0
+      self.fetch_key = None  # reject an in-flight request from the saved origin
+      self.preview_only = False
     base_status = ('disabled' if not settings['enabled'] else 'needsKey' if not settings['token'] else
                    'noDestination' if settings['destination'] is None else 'waitingForLocation')
     result = {'sessionId': self.session, 'frameMonoTime': now_ns, 'startedMonoTime': drive_id,
@@ -82,9 +90,20 @@ class RouteRuntime:
       if selected_route is not self.route:
         self.off_route_since = self.arrived_since = 0
       self.route = selected_route
-    if base_status != 'waitingForLocation' or position is None:
-      if self.route is not None and base_status == 'waitingForLocation':
+    if base_status != 'waitingForLocation':
+      return result
+    if position is None:
+      if self.route is not None:
         result['route'] = self.route.preview()
+      else:
+        saved = self.owner.position_store.read()
+        if saved is not None:
+          result['status'] = 'routeUnavailable' if self.retry_after > now_ns else 'routing'
+          if self.future is None and now_ns >= self.retry_after:
+            self.preview_only = True
+            self.fetch_key = self.key
+            self.future = self.executor.submit(self.engine.fetch, settings['token'],
+                                               (saved['longitude'], saved['latitude']), settings['destination'], saved.get('bearing'))
       return result
     stamp, coordinates, speed, bearing = position
     result['locationMonoTime'] = stamp

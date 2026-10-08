@@ -16,6 +16,12 @@ assert.equal(routePath([place]), "")
 assert.match(routePath([place, { latitude: 41.1, longitude: -88.1 }]), /^M[\d.,]+ L[\d.,]+$/)
 assert(!routePath([{ latitude: 0, longitude: 179.9 }, { latitude: 0, longitude: -179.9 }]).includes("NaN"))
 
+assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), status: "waitingForLocation", route: [place] } }),
+  "Route preview from last saved location")
+assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), status: "waitingForLocation" } }), "Waiting for GPS")
+assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), status: "routing", location: { ...place, lastKnown: true } } }),
+  "Finding a route from last saved location…")
+
 function setup() {
   const requests = [], states = [], timers = new Map()
   let sequence = 0, unauthorized = 0

@@ -434,7 +434,7 @@ export const NavigationMap = {
   },
   template: `<section class="gx-navigation-map" aria-label="Interactive navigation map">
     <canvas tabindex="0" ref="canvas" aria-label="Map. Drag to pan, pinch or double-tap to zoom" />
-    <div v-if="!locationFresh && lastLocation" class="gx-navigation-map__last">Last known position · waiting for GPS</div>
+    <div v-if="!locationFresh && lastLocation" class="gx-navigation-map__last">{{ data?.route?.length ? 'Preview from last saved location · GPS unavailable' : 'Last saved location · GPS unavailable' }}</div>
     <div class="gx-navigation-map__controls">
     <button v-if="data?.route?.length" type="button" class="gx-navigation-map__control" @click="overview" aria-label="Show whole route" title="Show whole route"><i class="bi bi-bounding-box" aria-hidden="true"></i></button>
     <button type="button" class="gx-navigation-map__control" @click="map.changeZoom(1)" aria-label="Zoom in"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
