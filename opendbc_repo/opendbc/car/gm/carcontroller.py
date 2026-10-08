@@ -994,6 +994,10 @@ class CarController(CarControllerBase):
           self.apply_brake = hold_brake
           at_full_stop = CS.out.cruiseState.standstill
           near_stop = CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE
+          if self.volt_ascm_long and self.camera_pedal_profile is None:
+            # Retain the inactive gas/regen cadence while friction owns the hold.
+            can_sends.append(gmcan.create_gas_regen_command(
+              self.packer_pt, CanBus.POWERTRAIN, self.params.INACTIVE_REGEN, idx, False, False))
         can_sends.append(gmcan.create_friction_brake_command(self.packer_ch, friction_brake_bus, self.apply_brake,
                                                              idx, CC.enabled, near_stop, at_full_stop, self.CP,
                                                              auto_hold=hold_brake is not None or one_pedal_braking))

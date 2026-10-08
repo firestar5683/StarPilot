@@ -30,6 +30,28 @@ def one_pedal_profiles(*, release=False):
 
 
 class TestVoltAlternateBrake(unittest.TestCase):
+  def _assert_hold_gas(self, cp, commands, counter):
+    from opendbc.can.dbc import DBC as Database
+    gas = [message for message in commands if message[0] == 0x2CB]
+    if cp.carFingerprint != CAR.CHEVROLET_VOLT_ASCM:
+      self.assertEqual(gas, [])
+      return
+    self.assertEqual(len(gas), 1)
+    self.assertEqual(gas[0][2], 0)
+    data = bytes(gas[0][1])
+    self.assertEqual(len(data), 8)
+    message = Database(DBC[cp.carFingerprint][Bus.pt]).msgs[0x2CB]
+    expected = {"GasRegenCmdActive": 0, "GasRegenFullStopActive": 0,
+                "GasRegenAccType": 1, "GasRegenCmd": -650, "RollingCounter": counter}
+    for field, value in expected.items():
+      signal = message.sigs[field]
+      raw = signal.get_raw_value(data)
+      if signal.is_signed and raw & (1 << (signal.size - 1)):
+        raw -= 1 << signal.size
+      self.assertEqual(raw * signal.factor + signal.offset, value, field)
+    checksum = (1 << 24) | ((0xFF - data[1]) << 16) | ((0xFF - data[2]) << 8) | ((0x100 - data[3] - counter) & 0xFF)
+    self.assertEqual(int.from_bytes(data[4:8], "big"), checksum)
+
   def test_one_pedal_matches_pinned_original_scalar_histories(self):
     import json
     from pathlib import Path
@@ -199,7 +221,7 @@ class TestVoltAlternateBrake(unittest.TestCase):
             if 390 <= tick < 410 and amount:
               stopped_positive = True
               self.assertEqual(data[0] >> 4, 0xD)
-              self.assertFalse(any(message[0] == 0x2CB for message in commands))
+              self._assert_hold_gas(cp, commands, data[4] & 3)
             if 420 <= tick < 440 and amount:
               immediate_release = True
               if out.vEgo < ci.CC.params.NEAR_STOP_BRAKE_PHASE:
@@ -504,7 +526,7 @@ class TestVoltAlternateBrake(unittest.TestCase):
             raw_brake = ((brakes[0][1][0] & 15) << 8) | brakes[0][1][1]
             self.assertEqual((0x1000 - raw_brake) & 0xFFF, 100 if sdgm else 80)
           seen_hold = True
-          self.assertFalse(any(message[0] == 0x2CB for message in commands))
+          self._assert_hold_gas(cp, commands, brakes[0][1][4] & 3)
           self.assertGreaterEqual(tick, 340)
           self.assertFalse(regen or unavailable or gas or unknown_gear or main_off)
           self.assertFalse(not ice and 370 <= tick < 470)
