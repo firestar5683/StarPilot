@@ -9,9 +9,10 @@ from openpilot.common.hardware import COMMA_HARDWARE
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.egl import init_egl, create_egl_image, destroy_egl_image, bind_egl_image_to_texture, EGLImage
 from openpilot.system.ui.widgets import Widget
-from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 
 CONNECTION_RETRY_INTERVAL = 0.2  # seconds between connection attempts
+ROAD_STREAMS = (VisionStreamType.VISION_STREAM_NARROW_ROAD, VisionStreamType.VISION_STREAM_WIDE_ROAD)
 
 VERSION = """
 #version 300 es
@@ -47,9 +48,23 @@ if COMMA_HARDWARE:
     in vec2 fragTexCoord;
     uniform samplerExternalOES texture0;
     out vec4 fragColor;
+    uniform int engaged;
+    uniform int road_camera;
     void main() {
       vec4 color = texture(texture0, fragTexCoord);
-      fragColor = vec4(pow(color.rgb, vec3(1.0/1.28)), color.a);
+      if (road_camera == 1) {
+        if (engaged == 1) {
+          float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+          color.rgb = mix(vec3(gray), color.rgb, 0.2);
+          color.rgb = clamp((color.rgb - 0.5) * 1.2 + 0.5, 0.0, 1.0);
+          color.rgb = pow(color.rgb, vec3(1.0/1.28));
+        } else {
+          color.rgb *= 0.85;
+        }
+      } else {
+        color.rgb = pow(color.rgb, vec3(1.0/1.28));
+      }
+      fragColor = vec4(color.rgb, color.a);
     }
     """
 else:
@@ -58,10 +73,22 @@ else:
     uniform sampler2D texture0;
     uniform sampler2D texture1;
     out vec4 fragColor;
+    uniform int engaged;
+    uniform int road_camera;
     void main() {
       float y = texture(texture0, fragTexCoord).r;
       vec2 uv = texture(texture1, fragTexCoord).ra - 0.5;
-      fragColor = vec4(y + 1.402*uv.y, y - 0.344*uv.x - 0.714*uv.y, y + 1.772*uv.x, 1.0);
+      vec3 rgb = vec3(y + 1.402*uv.y, y - 0.344*uv.x - 0.714*uv.y, y + 1.772*uv.x);
+      if (road_camera == 1) {
+        if (engaged == 1) {
+          float gray = dot(rgb, vec3(0.299, 0.587, 0.114));
+          rgb = mix(vec3(gray), rgb, 0.2);
+          rgb = clamp((rgb - 0.5) * 1.2 + 0.5, 0.0, 1.0);
+        } else {
+          rgb *= 0.85;
+        }
+      }
+      fragColor = vec4(rgb, 1.0);
     }
     """
 
@@ -84,6 +111,10 @@ class CameraView(Widget):
     self.last_connection_attempt: float = 0.0
     self.shader = rl.load_shader_from_memory(VERTEX_SHADER, FRAME_FRAGMENT_SHADER)
     self._texture1_loc: int = rl.get_shader_location(self.shader, "texture1") if not COMMA_HARDWARE else -1
+    self._engaged_loc = rl.get_shader_location(self.shader, "engaged")
+    self._engaged_val = rl.ffi.new("int[1]", [1])
+    self._road_camera_loc = rl.get_shader_location(self.shader, "road_camera")
+    self._road_camera_val = rl.ffi.new("int[1]", [int(stream_type in ROAD_STREAMS)])
 
     self.frame: VisionBuf | None = None
     self.texture_y: rl.Texture | None = None
@@ -256,6 +287,7 @@ class CameraView(Widget):
 
     # Render with shader
     rl.begin_shader_mode(self.shader)
+    self._update_texture_color_filtering()
     rl.draw_texture_pro(self.egl_texture, src_rect, dst_rect, rl.Vector2(0, 0), 0.0, rl.WHITE)
     rl.end_shader_mode()
 
@@ -275,9 +307,16 @@ class CameraView(Widget):
 
     # Render with shader
     rl.begin_shader_mode(self.shader)
+    self._update_texture_color_filtering()
     rl.set_shader_value_texture(self.shader, self._texture1_loc, self.texture_uv)
     rl.draw_texture_pro(self.texture_y, src_rect, dst_rect, rl.Vector2(0, 0), 0.0, rl.WHITE)
     rl.end_shader_mode()
+
+  def _update_texture_color_filtering(self):
+    self._engaged_val[0] = int(ui_state.status != UIStatus.DISENGAGED)
+    self._road_camera_val[0] = int(self._stream_type in ROAD_STREAMS)
+    rl.set_shader_value(self.shader, self._engaged_loc, self._engaged_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+    rl.set_shader_value(self.shader, self._road_camera_loc, self._road_camera_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
 
   def _ensure_connection(self) -> bool:
     if not self.client.is_connected():
