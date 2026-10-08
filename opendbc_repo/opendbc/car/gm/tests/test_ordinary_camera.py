@@ -314,6 +314,7 @@ class TestTruckTuning(unittest.TestCase):
       configure_controller(ci, object())
       self.assertIsInstance(ci.CC.truck_tuning_input, TruckTuningPreference)
       before = cp.to_bytes()
+      cp.clear_write_flag()
       owner = ci.CC.truck_tuning_input
       self.assertFalse(owner.update(1_000_000_000))
       saved['TruckTuning'] = b'1'
