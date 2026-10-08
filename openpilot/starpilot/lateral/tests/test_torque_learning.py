@@ -66,7 +66,7 @@ class TestTorqueLearning(unittest.TestCase):
       params.put_bool(LEARNING_OFF_KEY, True, block=True)
       for vehicle in (HYUNDAI.KIA_EV6, HYUNDAI.HYUNDAI_SONATA):
         self.assertFalse(learning_allowed(params, cp_for(vehicle)))
-      self.assertTrue(learning_allowed(params, cp_for(TOYOTA.TOYOTA_RAV4_TSS2)))
+      self.assertFalse(learning_allowed(params, cp_for(TOYOTA.TOYOTA_RAV4_TSS2)))
 
   def test_learner_does_not_restore_collect_estimate_or_overwrite_disabled_cache(self):
     for vehicle in VEHICLES:

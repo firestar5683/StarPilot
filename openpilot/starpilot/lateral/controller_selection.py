@@ -16,7 +16,7 @@ DOCUMENT_VERSION = 1
 LEARNING_OFF_KEY = 'ForceAutoTuneOff'
 MAX_DOCUMENT_BYTES = 4096
 KNOWN_POLICIES = {'HYUNDAI_IONIQ_6': 'hyundai', 'GENESIS_G70_2020': 'hyundai', 'GENESIS_GV70_ELECTRIFIED_1ST_GEN': 'hyundai', 'TOYOTA_COROLLA_TSS2': 'toyota'}
-KNOWN_POLICIES.update({'HYUNDAI_SONATA_HYBRID': 'hyundai'})
+KNOWN_POLICIES.update({'HYUNDAI_SONATA_HYBRID': 'hyundai', 'TOYOTA_RAV4_TSS2': 'toyota'})
 KNOWN_POLICIES.update(dict.fromkeys(('HYUNDAI_PALISADE', 'HYUNDAI_PALISADE_2023'), 'hyundai'))
 KNOWN_POLICIES.update(dict.fromkeys((
   'CHEVROLET_BOLT_CC_2017', 'CHEVROLET_BOLT_CC_2018_2021', 'CHEVROLET_BOLT_CC_2022_2023',
@@ -116,6 +116,9 @@ def policy_for(CP) -> str | None:
     return 'bolt'
   if corolla_supported(CP):
     return 'corolla_tss2'
+  from openpilot.starpilot.lateral.rav4_tss2_policy import supported_cp as rav4_supported
+  if rav4_supported(CP):
+    return 'rav4_tss2'
   from openpilot.starpilot.lateral.palisade_policy import supported_cp as palisade_supported
   from openpilot.starpilot.lateral.sonata_hybrid_policy import supported_cp as sonata_hybrid_supported
   if sonata_hybrid_supported(CP):
@@ -223,6 +226,11 @@ def read_selection(params, CP) -> ControllerSelection:
     return ControllerSelection(default.mode, default.policy, 'invalid')
 
 
+def controller_uses_native_learning(selection: ControllerSelection) -> bool:
+  # RAV4 adds only two shaping stages to the modern native controller.
+  return selection.mode == ControllerMode.STANDARD or selection.policy == "rav4_tss2"
+
+
 def learning_allowed(params, CP, *, selection: ControllerSelection | None = None) -> bool:
   """Latch the exact controller's learning policy at each process startup.
 
@@ -241,4 +249,4 @@ def learning_allowed(params, CP, *, selection: ControllerSelection | None = None
     return False
   if geometry.force_auto:
     return selected.source != 'invalid'
-  return selected.mode != ControllerMode.STARPILOT
+  return controller_uses_native_learning(selected) and (selected.policy != "rav4_tss2" or selected.source != "invalid")

@@ -74,6 +74,11 @@ class LatControlTorque(LatControl):
     if self.starpilot_extension is not None:
       return self.starpilot_extension.update(active, CS, VM, params, steer_limited_by_safety,
                                                         desired_curvature, curvature_limited, lat_delay)
+    return self.update_standard(active, CS, VM, params, steer_limited_by_safety,
+                                desired_curvature, curvature_limited, lat_delay)
+
+  def update_standard(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay,
+                      *, friction_policy=None):
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
     measured_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
@@ -99,6 +104,8 @@ class LatControlTorque(LatControl):
     ff -= self.torque_params.latAccelOffset
     threshold = flm.base_threshold(self.flm_surface, CS.vEgo, FRICTION_THRESHOLD)
     ff, threshold = flm.stages(self.flm_surface, CS, setpoint, desired_lateral_jerk, ff, threshold)
+    if friction_policy is not None:
+      threshold = friction_policy.friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
     ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, threshold, self.torque_params)
 
     if not active:
@@ -114,6 +121,9 @@ class LatControlTorque(LatControl):
 
       output_torque = apply_turn_assist(self, CS, VM, params, desired_curvature, output_torque)
       output_torque = flm.angle_assist(self.flm_surface, CS, VM, params, desired_curvature, setpoint, desired_lateral_jerk, output_torque)
+
+      if friction_policy is not None:
+        output_torque *= friction_policy.output_scale(setpoint, CS.vEgo)
 
       pid_log.active = True
       pid_log.p = float(self.pid.p)

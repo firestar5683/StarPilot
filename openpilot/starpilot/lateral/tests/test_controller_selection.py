@@ -55,7 +55,7 @@ class TestControllerSelection(unittest.TestCase):
                 (TOYOTA.TOYOTA_COROLLA_TSS2, 'corolla_tss2'),
                 (HYUNDAI.KIA_EV6, 'kia_ev6'),
                 (HYUNDAI.HYUNDAI_SONATA, 'sonata'),
-                (TOYOTA.TOYOTA_RAV4_TSS2, None))
+                (TOYOTA.TOYOTA_RAV4_TSS2, 'rav4_tss2'))
     for vehicle, policy in expected:
       with self.subTest(vehicle=vehicle):
         cp = cp_for(vehicle)
@@ -96,8 +96,8 @@ class TestControllerSelection(unittest.TestCase):
     wrong.notCar = True
     self.assertIsNone(policy_for(wrong))
     with self.assertRaises(ValueError):
-      unsupported = cp_for(TOYOTA.TOYOTA_RAV4_TSS2)
-      LatControlTorque(unsupported.as_reader(), interfaces[TOYOTA.TOYOTA_RAV4_TSS2](unsupported), DT_CTRL,
+      unsupported = cp_for(TOYOTA.TOYOTA_RAV4_TSS2_2022)
+      LatControlTorque(unsupported.as_reader(), interfaces[TOYOTA.TOYOTA_RAV4_TSS2_2022](unsupported), DT_CTRL,
                        controller_mode=ControllerMode.STARPILOT)
 
   def test_standard_skips_policy_constructor_and_ioniq_factor_multiplier(self):

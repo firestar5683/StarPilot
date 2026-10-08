@@ -7,6 +7,7 @@ import json
 
 from openpilot.starpilot.lateral.controller_selection import (
   DOCUMENT_KEY, LEARNING_OFF_KEY, MAX_DOCUMENT_BYTES, ControllerMode, policy_for, replace_mode, selection_from_bytes,
+  controller_uses_native_learning,
 )
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.saved_source import read_saved
@@ -149,12 +150,12 @@ class ControllerFeature:
     selection = selection_from_bytes(CP, controller)
     raw, readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
     valid = readable and raw in (None, b'0', b'1') and controller_readable and selection.source != 'invalid'
-    starpilot = selection.mode == ControllerMode.STARPILOT
-    value = ('Off' if starpilot or raw == b'1' else 'On') if valid else 'Invalid saved preference'
+    fixed_vehicle_tune = not controller_uses_native_learning(selection)
+    value = ('Off' if fixed_vehicle_tune or raw == b'1' else 'On') if valid else 'Invalid saved preference'
     reason = ('StarPilot uses the vehicle tune. ' + TUNING_GUIDANCE
-              if starpilot else 'Saved for the next drive. Turn on only if you want Stock Controller to learn torque values.')
+              if fixed_vehicle_tune else 'Saved for the next drive. Turn on if you want this controller to learn torque values.')
     return FeatureRow(LEARNING_OFF_KEY, 'Automatic Steering Learning', value, raw, ('Off', 'On') if valid else (),
-                      available=valid and not starpilot and self.authority('preferences'),
+                      available=valid and not fixed_vehicle_tune and self.authority('preferences'),
                       reason=reason if valid else 'Saved controller or learning preference is unreadable or invalid.',
                       capability=capability, dependencies=((DOCUMENT_KEY, controller),), default_value="On")
 
@@ -202,7 +203,8 @@ class ControllerFeature:
       return (self.authority('preferences') and self.vehicle_fingerprint() == request.vehicle_fingerprint and
               self.capability() == request.capability and readable and current == learning)
 
-    if learning != b'1' and (MODES[request.value] == ControllerMode.STARPILOT or selected.mode == ControllerMode.STARPILOT):
+    if learning != b'1' and (not controller_uses_native_learning(replace(selected, mode=MODES[request.value])) or
+                             not controller_uses_native_learning(selected)):
       def authorize_learning_off() -> bool:
         current, readable = read_saved(self.params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES)
         return authorized() and readable and current == request.expected

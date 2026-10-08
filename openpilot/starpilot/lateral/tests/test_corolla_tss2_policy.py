@@ -57,7 +57,7 @@ def test_exact_vehicle_admission_and_upstream_gains():
     assert native.pid._k_i[1] == [0.15]
   other_cp, other, _ = controller_for(CAR.TOYOTA_RAV4_TSS2)
   assert not supported_cp(other_cp)
-  assert selected_policy(other) is None
+  assert type(selected_policy(other)).__name__ == "Rav4TSS2TorquePolicy"
   assert other.pid._k_i[1] == [0.15]
 
 

@@ -43,6 +43,10 @@ def create_extension(parent, cp, mode, selected, *, turn_assist=False):
     from openpilot.starpilot.lateral.genesis_g70_policy import GenesisG70TorquePolicy, supported_cp
     if supported_cp(cp):
       return TorqueExtension(GenesisG70TorquePolicy(parent, cp))
+  if selected == 'rav4_tss2':
+    from openpilot.starpilot.lateral.rav4_tss2_policy import Rav4TSS2TorquePolicy, supported_cp
+    if supported_cp(cp):
+      return TorqueExtension(Rav4TSS2TorquePolicy(parent, cp))
   if selected == 'corolla_tss2':
     from openpilot.starpilot.lateral.corolla_tss2_policy import CorollaTSS2TorquePolicy, supported_cp
     if supported_cp(cp):
