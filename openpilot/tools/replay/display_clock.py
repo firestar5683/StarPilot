@@ -73,6 +73,7 @@ class DisplayClockReader:
       self._mapping = None
 
   def sample(self, host_ns: int | None = None) -> ClockSample:
+    implicit_host = host_ns is None
     host_ns = time.monotonic_ns() if host_ns is None else host_ns
     missing = ClockSample(None, None, host_ns)
     if self._mapping is None or type(host_ns) is not int or host_ns <= 0:
@@ -87,6 +88,10 @@ class DisplayClockReader:
         break
     else:
       return missing
+    # A heartbeat may advance while the record is copied; date the coherent snapshot after the read.
+    if implicit_host:
+      host_ns = time.monotonic_ns()
+      missing = ClockSample(None, None, host_ns)
     _, magic, version, flags, epoch, route_anchor, host_anchor, speed, boot_offset, heartbeat, reserved = values
     if (magic != MAGIC or version != 1 or flags & ~15 or reserved or not epoch or
         not 0 < host_anchor <= heartbeat <= host_ns or host_ns - heartbeat > HEARTBEAT_MAX_AGE_NS or

@@ -523,6 +523,28 @@ int main() {
     self.write(route_ns=30_200_000_000, host_ns=10_500_000_000, heartbeat=10_500_000_000, speed=.5)
     self.assertEqual(self.reader.sample(10_600_000_000).now_ns, 30_250_000_000)
 
+  def test_implicit_host_clock_follows_heartbeat_published_during_snapshot(self):
+    from openpilot.tools.replay import display_clock
+    self.write()
+    original_unpack = display_clock.struct.unpack_from
+    reads = 0
+
+    def heartbeat_then_read(*args, **kwargs):
+      nonlocal reads
+      if reads == 0:
+        self.write(heartbeat=10_000_000_001)
+      reads += 1
+      return original_unpack(*args, **kwargs)
+
+    with patch.object(display_clock.time, 'monotonic_ns', side_effect=[10_000_000_000, 10_000_000_001]), \
+         patch.object(display_clock.struct, 'unpack_from', side_effect=heartbeat_then_read):
+      sample = self.reader.sample()
+    self.assertTrue(sample.valid)
+    self.assertEqual(sample.host_ns, 10_000_000_001)
+    self.assertEqual(sample.now_ns, 30_000_000_001)
+    # Explicit historical observations still reject genuinely future writer timestamps.
+    self.assertFalse(self.reader.sample(10_000_000_000).valid)
+
   def test_unknown_boot_offset_differs_from_valid_zero_and_recorded_suspend_offset(self):
     from openpilot.tools.replay.display_clock import BOOT_KNOWN, VALID
     self.write()
