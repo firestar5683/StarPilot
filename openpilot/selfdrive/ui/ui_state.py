@@ -275,6 +275,12 @@ class UIState:
 
       self._started_prev = self.started
 
+    if (self.started and self.sm.updated["selfdriveState"] and self.sm.valid["selfdriveState"] and
+        self.sm.alive["selfdriveState"] and self.sm.recv_frame["selfdriveState"] > self.started_frame):
+      stamp = self.sm.logMonoTime["selfdriveState"]
+      if 0 < stamp <= time.monotonic_ns() <= stamp + 250_000_000:
+        self.personality = log.LongitudinalPersonality.schema.enumerants[self.sm["selfdriveState"].personality]
+
   def _update_chestnut_state(self) -> None:
     detected = self.sm["deviceState"].chestnutPresent
     if not self.started:

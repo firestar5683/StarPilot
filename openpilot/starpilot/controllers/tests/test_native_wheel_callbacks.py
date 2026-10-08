@@ -1,9 +1,10 @@
 from collections import deque
+import time
 from types import SimpleNamespace as NS
 
 import pytest
 
-from openpilot.cereal import messaging
+from openpilot.cereal import log, messaging
 from openpilot.common.params import Params
 from openpilot.starpilot.controllers.cruise_action import CruiseActionPublisher
 from openpilot.starpilot.controllers.mode_actions import ModeActionPublisher, ModeIntent, publish_switchback
@@ -159,3 +160,108 @@ def test_toyota_default_gap_callback_saves_personality_once(native_session, monk
   assert ui.params.get('LongitudinalPersonality') == 0
   session._poll_wheel(NOW)
   assert ui.params.get('LongitudinalPersonality') == 0
+
+
+@pytest.fixture
+def personality_session(native_session, monkeypatch):
+  from openpilot.selfdrive.ui import ui_state as module
+  runtime, session, ui, _, _ = native_session
+  ui.started = ui.engaged = ui._started_prev = ui._engaged_prev = True
+  ui._engaged_transition_callbacks = []
+  ui._offroad_transition_callbacks = []
+  ui.add_engaged_transition_callback = ui._engaged_transition_callbacks.append
+  ui.update_params = lambda: None
+  ui.sm.frame = 100
+  ui.sm.seen = dict(ui.sm.seen)
+  ui.sm.alive = dict(ui.sm.alive)
+  ui.sm.valid = dict(ui.sm.valid)
+  ui.sm.updated = dict.fromkeys(ui.sm, True)
+  ui.sm.recv_frame = dict.fromkeys(ui.sm, ui.sm.frame)
+  ui.sm['selfdriveState'] = log.SelfdriveState.new_message(enabled=True, state='enabled', personality='standard')
+  ui.params.put('LongitudinalPersonality', 1, block=True)
+  ui.personality = 1
+  clock = [NOW]
+  monkeypatch.setattr(runtime.time, 'monotonic_ns', lambda: clock[0])
+  return runtime, session, ui, module, clock
+
+
+@pytest.mark.parametrize('profile', ['c4', 'c3'])
+def test_hidden_native_personality_owner_completes_three_distance_cycles(personality_session, monkeypatch, profile):
+  import pyray as rl
+
+  from openpilot.selfdrive.ui.layouts.settings import common
+  from openpilot.selfdrive.ui.layouts.settings import toggles as large
+  from openpilot.selfdrive.ui.mici.layouts.settings import toggles as compact
+  from openpilot.selfdrive.ui.mici.widgets import button
+  from openpilot.starpilot.controllers.tests.test_wheel_actions import state
+  from openpilot.system.ui.lib.application import gui_app
+
+  runtime, session, ui, module, clock = personality_session
+  monkeypatch.setattr(common, 'ui_state', ui)
+  monkeypatch.setattr(large, 'ui_state', ui)
+  monkeypatch.setattr(compact, 'ui_state', ui)
+  monkeypatch.setattr(large, 'Params', lambda: ui.params)
+  monkeypatch.setattr(button, 'Params', lambda: ui.params)
+  monkeypatch.setattr(gui_app, 'font', lambda *_: rl.Font())
+  monkeypatch.setattr(gui_app, 'texture', lambda *_: NS(width=64, height=64))
+  panel = compact.TogglesLayoutMici() if profile == 'c4' else large.TogglesLayout()
+  panel.set_visible(False)
+  session._native_favorite_actions = lambda: session.native_favorite_actions(
+    lambda: True, panel.request_personality, lambda: True)
+  queue = []
+  monkeypatch.setattr(runtime.messaging, 'recv_one_or_none', lambda _: queue.pop(0) if queue else None)
+  source, publisher = WheelPublisher(ui.params), Publisher()
+  source.observe(ui.params, ui.CP, state(), now_ns=NOW - 20_000_000, drive_id=DRIVE)
+
+  for sequence, expected in enumerate((0, 2, 1), start=1):
+    clock[0] = NOW + (sequence - 1) * 200_000_000
+    ui.sm.frame += 1
+    for name in ui.sm:
+      ui.sm.logMonoTime[name] = clock[0]
+      ui.sm.recv_time[name] = clock[0] / 1e9
+      ui.sm.recv_frame[name] = ui.sm.frame
+    source.observe(ui.params, ui.CP, state(True), now_ns=clock[0] - 10_000_000, drive_id=DRIVE)
+    commands = source.observe(ui.params, ui.CP, state(False), now_ns=clock[0], drive_id=DRIVE)
+    assert commands == (('DistanceButtonControl', 1),)
+    assert source.suppress_distance_release
+    source.publish(commands, ui.CP, publisher, now_ns=clock[0], drive_id=DRIVE,
+                   source_car_ns=clock[0], source_control_ns=clock[0])
+    wire = messaging.log_from_bytes(publisher.events[-1][1])
+    assert wire.slcCruiseEvent.wheelAction.sequence == sequence
+    queue.append(wire)
+    session._poll_wheel(clock[0])
+    deadline = time.monotonic() + 2
+    while ui.params.get('LongitudinalPersonality', return_default=True) != expected and time.monotonic() < deadline:
+      time.sleep(0.005)
+    saved = ui.params.get('LongitudinalPersonality', return_default=True)
+    assert saved == expected
+    # Mirror Selfdrived.params_thread -> publish_selfdriveState, then run the
+    # production UI update. The hidden settings panel never renders or updates.
+    ui.sm['selfdriveState'].personality = saved
+    module.UIState._update_status(ui)
+    assert int(ui.personality) == expected
+    assert not panel.is_visible
+    session._poll_wheel(clock[0])
+    assert ui.params.get('LongitudinalPersonality', return_default=True) == expected
+
+
+@pytest.mark.parametrize('case', ['fresh', 'stale', 'future', 'invalid', 'dead', 'before_drive', 'offroad', 'not_updated'])
+def test_personality_cache_rejects_unusable_selfdrive_state(personality_session, case):
+  _, _, ui, module, _ = personality_session
+  ui.sm['selfdriveState'].personality = 'aggressive'
+  if case == 'stale':
+    ui.sm.logMonoTime['selfdriveState'] = NOW - 250_000_001
+  elif case == 'future':
+    ui.sm.logMonoTime['selfdriveState'] = NOW + 1
+  elif case == 'invalid':
+    ui.sm.valid['selfdriveState'] = False
+  elif case == 'dead':
+    ui.sm.alive['selfdriveState'] = False
+  elif case == 'before_drive':
+    ui.sm.recv_frame['selfdriveState'] = ui.started_frame
+  elif case == 'offroad':
+    ui.started = ui.engaged = False
+  elif case == 'not_updated':
+    ui.sm.updated['selfdriveState'] = False
+  module.UIState._update_status(ui)
+  assert int(ui.personality) == (0 if case == 'fresh' else 1)
