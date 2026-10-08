@@ -92,6 +92,8 @@ def axis_status_color(state: OnroadState) -> rl.Color:
 
 
 class OnroadView:
+  preview_pip_layer: PipLayer | None
+
   def __init__(self, fonts: BitmapFonts, asset_directory: Path, *, camera_layer: CameraLayer | None = None,
                extra_overlays: OverlayLayer | None = None, pip_layer: PipLayer | None = None,
                background_layer: OverlayLayer | None = None, projection_viewport: tuple[float, float] | None = None):

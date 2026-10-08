@@ -1,6 +1,7 @@
 """Layer documents must survive persistence and remain independent per output."""
 import copy
 import json
+from typing import Any
 
 import pytest
 
@@ -79,7 +80,8 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   source = Path(__file__).parents[1] / 'onroad.py'
   tree = ast.parse(source.read_text())
   method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_ordered_widgets')
-  namespace = {'CLOCK_WIDGET': CLOCK_WIDGET, 'MODE_WIDGET': MODE_WIDGET, 'placement': placement, 'widget_order': widget_order, 'RAIL_WIDGETS': RAIL_WIDGETS,
+  namespace: dict[str, Any] = {'CLOCK_WIDGET': CLOCK_WIDGET, 'MODE_WIDGET': MODE_WIDGET, 'placement': placement, 'widget_order': widget_order,
+                             'RAIL_WIDGETS': RAIL_WIDGETS,
                'AlertSize': NS(NONE='none', FULL='full'), 'CameraViewChoice': NS(NONE='none'),
                'rl': NS(Rectangle=lambda x, y, width, height: NS(x=x, y=y, width=width, height=height))}
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)

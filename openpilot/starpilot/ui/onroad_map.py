@@ -220,7 +220,7 @@ def route_guidance(route, request: CanvasRequest, latitude: float):
   return layers
 
 
-def split_route(route: np.ndarray, position: tuple[float, float]) -> tuple[np.ndarray | None, np.ndarray | None]:
+def split_route(route: np.ndarray | None, position: tuple[float, float]) -> tuple[np.ndarray | None, np.ndarray | None]:
   """(driven, ahead) world polylines, split at the point on the route nearest the car."""
   if route is None or len(route) < 2:
     return None, None
@@ -372,7 +372,7 @@ void main() {
 class MapOverlay:
   """Owns two canvases (front/back), a widget texture and the mask shader."""
 
-  def __init__(self, root: Path | None = None, *, reader: TileReader | None = None, fonts=None,
+  def __init__(self, root: Path | None = None, *, reader: TileReader | SampleTileReader | None = None, fonts=None,
                clock: Callable[[], float] = time.monotonic):
     self.reader = reader or TileReader(root, clock)
     self.fonts = fonts
@@ -453,6 +453,8 @@ class MapOverlay:
     request = self._canvas_request
     if request is None or request.side != side:
       return True
+    assert self._world is not None
+    assert self._widget_size is not None
     px_per_unit = meters_per_tile(self._latitude) * SUPERSAMPLE / request.m_per_px
     drift = math.hypot(self._world[0] - request.center[0], self._world[1] - request.center[1]) * px_per_unit
     reach = self._reach(*self._widget_size) * SUPERSAMPLE * self._m_per_px / request.m_per_px
@@ -460,6 +462,7 @@ class MapOverlay:
     return drift > (side / 2 - reach) * 0.5 or not 0.82 < ratio < 1.22 or self.reader.generation != self._generation_built
 
   def _request(self, side: int) -> CanvasRequest:
+    assert self._world is not None
     reach_m = side / SUPERSAMPLE * self._m_per_px * 0.75
     reach = reach_m / meters_per_tile(self._latitude)
     x, y = self._world
@@ -631,6 +634,7 @@ class MapOverlay:
     """Inside the frame: the composed widget, rounded, feathered and faded."""
     if self._widget is None or self._shader is None:
       return
+    assert self._widget_size is not None
     width, height = self._widget_size
     size, radius, feather, alpha = self._uniform_values
     size.x, size.y = width, height

@@ -9,7 +9,7 @@ from openpilot.starpilot.ui.presentation import FontRole
 class NavigationFavorites:
   def __init__(self, fonts):
     self.fonts = fonts
-    self.document = None
+    self.document: dict | None = None
     self.error = ''
 
   def render(self, key, state):
@@ -19,8 +19,8 @@ class NavigationFavorites:
     label = key.removeprefix('nav_').title()
     doc = self.document
     place = next((row for row in doc['favorites'] if row.get('label') == label.lower()), None) if doc else None
-    active = bool(place and doc['destination'] and doc['destination']['id'] == place['id'])
-    available = bool(active or place and doc['enabled'] and doc['token'])
+    active = bool(place and doc and doc['destination'] and doc['destination']['id'] == place['id'])
+    available = bool(active or place and doc and doc['enabled'] and doc['token'])
     title = 'End navigation' if active else label
     detail = self.error or (label if active else 'Navigate' if available else 'Set in Galaxy' if place is None else 'Enable navigation')
     icons = placed.get('display') == 'icons'

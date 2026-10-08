@@ -56,6 +56,7 @@ class LayoutProfile(TypedDict):
   protectedWidget: NotRequired[str]
   inputZones: NotRequired[list[dict[str, Any]]]
   inputZonePriority: NotRequired[str]
+  widgetOrder: NotRequired[list[str]]
 
 
 def _widget(label: str, kind: str, width: float, height: float, x: float, y: float) -> Widget:

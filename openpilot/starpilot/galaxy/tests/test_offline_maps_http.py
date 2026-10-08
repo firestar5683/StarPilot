@@ -97,8 +97,7 @@ class OfflineMapsHttpTest(unittest.TestCase):
 class OfflineOwnerTest(unittest.TestCase):
   def test_bad_position_source_is_ignored(self):
     with tempfile.TemporaryDirectory() as root:
-      owner = OfflineMapsOwner(root, position=lambda: {"latitude": "x"})
+      owner = OfflineMapsOwner(Path(root), position=lambda: {"latitude": "x"})
       self.assertIsNone(owner.snapshot()["position"])
-      owner = OfflineMapsOwner(root, position=None)
+      owner = OfflineMapsOwner(Path(root), position=None)
       self.assertEqual(json.loads(json.dumps(owner.snapshot()))["areas"], [])
-

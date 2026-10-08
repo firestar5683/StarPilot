@@ -420,7 +420,7 @@ class WirelessBootstrap:
   def _join_network(self, credentials: WifiCredentials, join_wifi: Callable[[WifiCredentials], None]) -> None:
     """Stage 3: join Wi-Fi while servicing RFCOMM. A failed handshake never leaves the join running.
 
-    join_wifi must honour join_is_cancelled with bounded I/O (NetworkLease does); otherwise a join that
+    join_wifi must honor join_is_cancelled with bounded I/O (NetworkLease does); otherwise a join that
     finishes after the handshake failed could take Wi-Fi from the next attempt or from the user.
     """
     self.stage = "joining_wifi"

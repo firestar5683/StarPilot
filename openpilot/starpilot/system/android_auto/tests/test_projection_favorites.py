@@ -23,9 +23,9 @@ VIEWPORT = (2880, 1080)
 
 
 @pytest.fixture
-def favorites(tmp_path):
+def favorites(tmp_path, monkeypatch):
   owner = NavigationOwner(tmp_path, runtime_source=dict, transient_root=tmp_path / 'transient')
-  owner._is_metric = lambda: True
+  monkeypatch.setattr(owner, '_is_metric', lambda: True)
   home = dict(destination({'name': 'My home', 'latitude': 36.1, 'longitude': -115.1}), label='home')
   work = dict(destination({'name': 'My work', 'latitude': 36.2, 'longitude': -115.2}), label='work')
   owner.path.write_text(json.dumps({'version': 1, 'revision': 'initial', 'enabled': True, 'token': 'test-token',
@@ -122,7 +122,7 @@ def test_unconfigured_and_disabled_navigation_do_not_write(favorites):
     tap(favorites, view, 'nav_home')
     assert favorites.owner.read()['destination'] is None
   # Ending a selected route still works after navigation has been disabled.
-  doc = dict(favorites.document, favorites=[dict(destination({'name': 'Home', 'latitude': 1, 'longitude': 2}), label='home')])
+  doc: dict = dict(favorites.document, favorites=[dict(destination({'name': 'Home', 'latitude': 1, 'longitude': 2}), label='home')])
   doc['destination'] = doc['favorites'][0]
   favorites.owner.path.write_text(json.dumps(doc))
   tap(favorites, view, 'nav_home')

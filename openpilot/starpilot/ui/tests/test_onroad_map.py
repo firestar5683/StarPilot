@@ -69,8 +69,10 @@ def test_reroute_with_same_endpoints_updates_geometry(tmp_path):
   try:
     route = ((36., -115.), (36.1, -115.1), (36.2, -115.2))
     overlay._route(route)
+    assert overlay._route_world is not None
     previous = overlay._route_world.copy()
     overlay._route((route[0], (36.15, -115.1), route[2]))
+    assert overlay._route_world is not None
     assert not np.array_equal(previous, overlay._route_world)
   finally:
     overlay.close()

@@ -2,6 +2,7 @@
 
 import threading
 import time
+from unittest.mock import Mock
 
 import pytest
 
@@ -17,7 +18,7 @@ def scripted(frames, *, ping_interval=bs.JOIN_PING_INTERVAL):
   """A bootstrap whose car sends `frames` in order, then stays silent; records what the comma sent."""
   boot = bs.WirelessBootstrap(None, lambda *a, **k: None, stage_timeout=2, join_ping_interval=ping_interval)
   sent = []
-  boot.send = lambda message, payload=b"": sent.append(message)
+  boot.send = Mock(side_effect=lambda message_id, payload=b"": sent.append(message_id))
   queue = list(frames)
 
   def receive(timeout):
@@ -29,7 +30,7 @@ def scripted(frames, *, ping_interval=bs.JOIN_PING_INTERVAL):
     time.sleep(min(timeout, 0.02))
     raise bs.BootstrapTimeout(boot.stage, "head unit did not answer in time")
 
-  boot.next_frame = receive
+  boot.next_frame = Mock(side_effect=receive)
   return boot, sent
 
 

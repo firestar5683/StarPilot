@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 import struct
 import zlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -268,7 +268,7 @@ def decode_mvt_roads(data: bytes) -> dict[int, list[np.ndarray]]:
 
 # ---------------------------------------------------------------- compact storage
 
-def encode_road_tile(roads: dict[int, Iterable[np.ndarray]]) -> bytes:
+def encode_road_tile(roads: Mapping[int, Iterable[np.ndarray]]) -> bytes:
   """Delta-coded int16 polylines per class, zlib-compressed."""
   body = bytearray()
   classes = 0

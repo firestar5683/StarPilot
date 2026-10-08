@@ -177,7 +177,7 @@ def saved_origin_runtime(tmp_path, monkeypatch):
   def record_submit(*args):
     executor.calls.append(args)
     return submit(*args)
-  executor.submit = record_submit
+  monkeypatch.setattr(executor, 'submit', record_submit)
   return owner, executor, RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
 
 

@@ -121,13 +121,16 @@ def test_offline_area_downloads_only_on_wifi_then_completes(tmp_path):
   run(d, Environment(token="pk.test", network="cellular"))
   assert d.fetcher.session.urls == []
   d.status(Environment(token="pk.test", network="cellular"), force=True)
-  assert OfflineState(tmp_path).status()["areas"][area["id"]]["state"] == "waiting_wifi"
+  status = OfflineState(tmp_path).status()
+  assert status is not None
+  assert status["areas"][area["id"]]["state"] == "waiting_wifi"
   wifi = Environment(token="pk.test", network="wifi")
   run(d, wifi)
   tiles = area_tiles(area)
   assert all(d.store.has("saved", key) for key in tiles)
   d.status(wifi, force=True)
   status = OfflineState(tmp_path).status()
+  assert status is not None
   assert status["areas"][area["id"]] == {"state": "complete", "total": len(tiles), "done": len(tiles), "failed": 0}
   assert OfflineState(tmp_path).areas()[0]["refreshed"] == 1_790_000_000.0
   fetched = len(d.fetcher.session.urls)
@@ -315,6 +318,7 @@ def test_status_reports_sizes_and_failure(tmp_path):
   run(d, env)
   d.status(env, force=True)
   status = OfflineState(tmp_path).status()
+  assert status is not None
   assert status["failure"] == "key" and status["hasKey"] and status["network"] == "wifi"
   assert set(status["bytes"]) == {"saved", "driven", "cache"}
   assert navtilesd.FAILURE_KEY == "key"

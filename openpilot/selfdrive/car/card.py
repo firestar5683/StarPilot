@@ -683,8 +683,9 @@ class Car:
     # CP is fixed once the drive starts; these checks ran five times per 100 Hz frame.
     cached = getattr(self, '_aol_owner_cache', None)
     if cached is None or cached[0] is not self.CP:
-      owners = tuple(bool(check(self.CP, marked_only=True)) for check in (
-        qualified_angle_aol, qualified_ford_aol, qualified_honda_stock_aol, qualified_mazda_aol, qualified_tesla_preap))
+      owners = (bool(qualified_angle_aol(self.CP, marked_only=True)), bool(qualified_ford_aol(self.CP, marked_only=True)),
+                bool(qualified_honda_stock_aol(self.CP, marked_only=True)), bool(qualified_mazda_aol(self.CP, marked_only=True)),
+                bool(qualified_tesla_preap(self.CP, marked_only=True)))
       cached = self._aol_owner_cache = (self.CP, owners)
     return cached[1]
 

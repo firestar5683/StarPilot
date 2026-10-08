@@ -27,7 +27,8 @@ class OfflineMapsOwner:
   def snapshot(self) -> dict:
     status = self.state.status() or {}
     heartbeat = status.get("heartbeat")
-    running = type(heartbeat) in (int, float) and math.isfinite(heartbeat) and 0 <= self.wall() - heartbeat < STATUS_STALE_SECONDS
+    running = (isinstance(heartbeat, (int, float)) and type(heartbeat) in (int, float) and math.isfinite(heartbeat)
+               and 0 <= self.wall() - heartbeat < STATUS_STALE_SECONDS)
     progress = status.get("areas") if isinstance(status.get("areas"), dict) else {}
     areas = []
     for area in self.state.areas():
