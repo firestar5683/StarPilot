@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { createHash, webcrypto } from "node:crypto"
 import { decodeLayoutBackup, encodeLayoutBackup, sha256 } from "../web/js/layout-backup.js"
-import { SoftwarePage } from "../web/js/software-status.js"
+import { ToggleBackup } from "../web/js/toggle-backup.js"
 
 const layout = { version: 4, palette: { text: "#FFFFFFFF" }, layouts: { large: {}, compact: {} } }
 const encoded = await encodeLayoutBackup(layout, webcrypto)
@@ -29,21 +29,16 @@ for (const invalid of [
 
 // The page obtains a fresh revision immediately before the existing owner performs the restore.
 const calls = []
-const context = { layoutDraft: layout, layoutBusy: false, layoutNotice: "", layoutError: "",
-  layoutRequest: async (...args) => {
-    calls.push(args)
-    return args.length ? { valid: true } : { editable: true, revision: "current-revision" }
-  } }
-await SoftwarePage.methods.restoreLayout.call(context)
-assert.deepEqual(calls, [[], [layout, "current-revision"]])
-assert.equal(context.layoutNotice, "Visual layout restored.")
-assert.equal(context.layoutDraft, null)
-
+const context = { draft: layout, legacy: true, busy: false, notice: "", error: "",
+  request: async (...args) => { calls.push(args); return args.length === 2 ? {valid:true} : {editable:true,revision:"current-revision"} } }
+await ToggleBackup.methods.restoreBackup.call(context)
+assert.deepEqual(calls, [["./api/ui/layout"], ["./api/ui/layout", {document:layout, revision:"current-revision"}]])
+assert.equal(context.notice,"Layout and colors restored.")
+assert.equal(context.draft,null)
 let writes = 0
-const moving = { layoutDraft: layout, layoutBusy: false, layoutNotice: "", layoutError: "",
-  layoutRequest: async () => { writes++; return { editable: false, revision: "old" } } }
-await SoftwarePage.methods.restoreLayout.call(moving)
-assert.equal(writes, 1)
-assert.match(moving.layoutError, /Park/)
-
-console.log("visual layout backup checks passed")
+const moving = { draft:layout,legacy:true,busy:false,notice:"",error:"",
+  request:async () => {writes++;return {editable:false,revision:"old"}} }
+await ToggleBackup.methods.restoreBackup.call(moving)
+assert.equal(writes,1)
+assert.match(moving.error,/Park/)
+console.log("Portable layout files and legacy restore through Toggle backup passed")

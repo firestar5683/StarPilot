@@ -136,7 +136,7 @@ export const GalaxySelect = {
           <template v-for="(item, index) in items" :key="item.index">
             <div v-if="item.group && item.group !== items[index - 1]?.group" class="gx-select-menu__group">{{ item.group }}</div>
             <button type="button" role="option" :data-value="item.value" :aria-selected="item.value === selected" :disabled="item.disabled" @click="select(item)">
-              <span style="min-width:0; overflow-wrap:anywhere;"><span>{{ item.label }}</span><small v-if="item.description" class="gx-note" style="display:block; margin-top:4px; white-space:normal; line-height:1.4;">{{ item.description }}</small></span><i v-if="item.value === selected" class="bi bi-check-lg" aria-hidden="true"></i>
+              <span class="gx-grow gx-wrap"><span>{{ item.label }}</span><small v-if="item.description" class="gx-note gx-select__description">{{ item.description }}</small></span><i v-if="item.value === selected" class="bi bi-check-lg" aria-hidden="true"></i>
             </button>
           </template>
         </div>

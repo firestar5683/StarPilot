@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { MenuTile } from "./menu-tile.js"
 export const DRIVING_PAGES = Object.freeze({
   aol: "aol",
@@ -33,14 +34,14 @@ export function drivingPage(path) {
 }
 
 export const DrivingPage = {
-  components: { MenuTile },
+  components: { GxState, MenuTile },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true } },
   data: () => ({ groups: DRIVING_GROUPS }),
   template: `
     <section class="gx-driving" aria-label="Driving features">
-      <div class="gx-card gx-driving__intro"><h2>Driving Settings</h2>
+      <div class="gx-card gx-driving__intro gx-page-header"><h2>Driving Settings</h2>
         <p>Choose how StarPilot steers and controls speed.</p></div>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local driving settings are unavailable in preview.</div>
+      <GxState v-if="mode !== 'local'">Local driving settings are unavailable in preview.</GxState>
       <template v-else>
         <section v-for="group in groups" :key="group.title" class="gx-driving__group">
           <h3>{{ group.title }}</h3>
@@ -48,7 +49,7 @@ export const DrivingPage = {
             <MenuTile v-for="item in group.items" :key="item.page" icon="bi-sliders" :title="item.title" :description="item.detail" @select="go('/driving/' + item.page)" />
           </div>
         </section>
-        <div class="gx-driving__extras"><button type="button" class="gx-btn gx-btn--tonal" @click="go('/driving/longitudinal-curves')">Edit longitudinal curves</button>
+        <div class="gx-driving__extras gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="go('/driving/longitudinal-curves')">Edit longitudinal curves</button>
           <button type="button" class="gx-btn gx-btn--tonal" @click="go('/tuning/plots')">Live plots</button>
           <button type="button" class="gx-btn gx-btn--tonal" @click="go('/tuning/flm')">Offline FLM diagnostics</button></div>
       </template>

@@ -195,7 +195,7 @@ export const GalaxySettingRow = {
         <option v-for="choice in row.choices" :key="choice" :value="choice">{{ choice }}</option>
       </GalaxySelect>
       <button v-else-if="control === 'group'" type="button" class="gx-btn gx-btn--tonal" :disabled="locked" @click="$emit('open', row.page)">Manage</button>
-      <button v-else-if="control === 'action' && row.action" type="button" class="gx-btn gx-btn--tonal" :disabled="locked" @click="$emit('review', index, row.confirm ? 0 : 1)">{{ row.repairValue === 'Reset' || /reset|default/i.test(row.label) ? 'Reset to Default' : row.repairValue ? 'Set ' + row.repairValue : row.label }}</button>
+      <button v-else-if="control === 'action' && row.action" type="button" class="gx-btn gx-btn--tonal" :disabled="locked" @click="$emit('review', index, row.confirm ? 0 : 1)">{{ row.repairValue === 'Reset' || /reset|default/i.test(row.label) ? 'Reset' : row.repairValue ? 'Set ' + row.repairValue : row.label }}</button>
       <span v-else class="gx-row__value gx-row__readout">{{ displayValue }}</span>
     </div>`,
 }

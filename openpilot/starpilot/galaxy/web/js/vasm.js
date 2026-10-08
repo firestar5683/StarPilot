@@ -1,3 +1,5 @@
+import { GxDialog } from "./dialog.js"
+import { GxState } from "./state.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsFeed } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
@@ -7,7 +9,7 @@ import { FORMATS, annotationDraft, displaySide, sourcePoint } from "./vasm-geome
 
 export const VasmPage = {
   name: "VasmPage",
-  components: { GalaxySettingRow, GxNotice },
+  components: { GxDialog, GxState, GalaxySettingRow, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   setup(props) {
@@ -159,12 +161,12 @@ export const VasmPage = {
   },
   template: `
     <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings">
-      <header class="gx-settings__header"><div><h2>V-ASM Spot Monitoring</h2></div>
+      <header class="gx-settings__header gx-page-header"><div><h2>V-ASM Spot Monitoring</h2></div>
         <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
+      <GxState v-if="mode !== 'local'">Local saved settings are unavailable in preview.</GxState>
       <template v-else>
-        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Reading camera regions and spot-monitoring preferences…</div>
+        <GxState v-if="state.status === 'loading'" loading>Reading camera regions and spot-monitoring preferences…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read camera regions or spot-monitoring preferences. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
@@ -193,10 +195,9 @@ export const VasmPage = {
               @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           </section>
         </div>
-        <Teleport to="body"><div v-if="state.pending" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Confirm V-ASM preference">
-          <div class="gx-card gx-settings__dialog"><h3>Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
-            <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
-              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></div></div></Teleport>
+        <GxDialog v-if="state.pending" labelledby="gx-vasm-confirm-title" @close="feed.cancel()"><h3 id="gx-vasm-confirm-title">Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
+            <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
+              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></GxDialog>
       </template>
     </section>`,
 }

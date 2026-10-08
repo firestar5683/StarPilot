@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { requestJson } from "./startup.js"
 import { GalaxySelect } from "./galaxy-select.js"
@@ -13,7 +14,7 @@ export const validProviderStatus = value => value && ["comma", "konik"].includes
 
 export const CloudProviderPage = {
   name: "CloudProviderPage",
-  components: { GalaxySelect, GxNotice },
+  components: { GxState, GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: null, busy: false, error: "", request: null }),
   mounted() { this.activePage = true; this.poller = new PollTimer({ read: () => this.load() }); this.poller.start(); this.load() },
@@ -54,7 +55,7 @@ export const CloudProviderPage = {
     },
   },
   template: `<div class="gx-settings__developer-body">
-    <section v-if="mode !== 'local'" class="gx-card gx-message">Open this Developer page on your device to choose a cloud provider.</section>
+    <GxState v-if="mode !== 'local'">Open this Developer page on your device to choose a cloud provider.</GxState>
     <template v-else>
       <section class="gx-card gx-settings__section"><div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div><div class="gx-row"><div class="gx-row__info">
       <label class="gx-settings__developer-provider">Cloud provider
@@ -63,11 +64,8 @@ export const CloudProviderPage = {
           <option v-for="provider in status?.providers || []" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
         </GalaxySelect>
       </label></div></div></section>
-      <GxNotice v-if="selected" :tone="active && selected.id === active.id ? 'info' : 'warn'">
-        {{ selected.label }}{{ active && selected.id === active.id ? ' is currently active.' : ' applies after the next reboot.' }}
-      </GxNotice>
-      <p v-if="status?.restartRequired">Restart required. No automatic reboot will occur.</p>
-      <p v-if="status && !status.canSelect">Turn off the vehicle to change this Developer setting.</p>
+      <GxNotice v-if="status?.restartRequired" tone="warn">{{ selected?.label }} applies after the next reboot. No automatic reboot will occur.</GxNotice>
+      <GxNotice v-else-if="status && !status.canSelect" tone="warn">Turn off the vehicle to change this Developer setting.</GxNotice>
 
       <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
     </template></div>`,

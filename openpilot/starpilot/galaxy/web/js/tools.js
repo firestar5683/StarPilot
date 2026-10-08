@@ -13,8 +13,8 @@ export const Tools = {
     },
   },
   template: `
-    <div>
-      <h2 style="margin-top:0">Tools</h2>
+    <div class="gx-view">
+      <h2>Tools</h2>
       <div class="gx-grid">
         <MenuTile v-for="tool in tools" :key="tool.path" :icon="tool.icon" :title="tool.name"
           :description="tool.description" :availability="availability(tool)" @select="open(tool)" />

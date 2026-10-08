@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { SettingsPage } from "./settings.js"
 import { GxNotice } from "./notice.js"
 import { SentryNotifications } from "./sentry-notifications.js"
@@ -35,7 +36,7 @@ export class SentryEventsFeed extends SnapshotFeed {
 
 export const SentryEventsPage = {
   name: "SentryEventsPage",
-  components: { GxNotice, SentryNotifications, SettingsPage },
+  components: { GxState, GxNotice, SentryNotifications, SettingsPage },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, error: "" }),
@@ -55,19 +56,19 @@ export const SentryEventsPage = {
 
       <SettingsPage :mode="mode" :unauthorized="unauthorized" initial-page="sentry" title="Motion monitoring settings" />
       <SentryNotifications :mode="mode" :unauthorized="unauthorized" />
-      <p v-if="mode !== 'local'" class="gx-card gx-message">Local motion records are unavailable in preview.</p>
+      <GxState v-if="mode !== 'local'">Local motion records are unavailable in preview.</GxState>
       <template v-else>
 
-        <p v-if="status === 'loading'" role="status" class="gx-card gx-message">Reading local motion events…</p>
+        <GxState v-if="status === 'loading'" loading>Reading local motion events…</GxState>
         <GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
-          <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local motion events may exist.</p>
-          <p v-if="!data.events.length" role="status">No local motion events found in this scan.</p>
+          <GxNotice v-if="data.scanIncomplete" tone="warn">This scan was incomplete. More local motion events may exist.</GxNotice>
+          <GxState v-if="!data.events.length">No local motion events found in this scan.</GxState>
           <section v-for="event in data.events" :key="event.eventId" class="gx-card gx-home__card">
             <h2>{{ event.kind === 'selfie' ? 'Selfie' : event.kind === 'alarm' ? 'Alarm' : 'Warning' }}</h2>
             <p>System time: {{ systemTime(event.systemTimeMs) }}</p>
             <small>Event ID: {{ event.eventId }}</small>
-            <img v-for="camera in (event.images || [])" :key="camera" :src="'./api/sentry/image/' + event.eventId + '/' + camera" :alt="camera + ' camera at motion event'" style="max-width:100%;height:auto" />
+            <img v-for="camera in (event.images || [])" :key="camera" :src="'./api/sentry/image/' + event.eventId + '/' + camera" :alt="camera + ' camera at motion event'" class="gx-media" />
           </section>
         </template>
       </template>

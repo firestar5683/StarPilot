@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { guardUnload } from "./unload-guard.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
@@ -345,7 +346,7 @@ export const LayoutWidgetPreview = {
 }
 
 export const OnroadLayoutPage = {
-  components: { LayoutWidgetPreview, GalaxySelect, GxNotice },
+  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice },
   props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close", "target"],
   setup(props) {
@@ -721,17 +722,17 @@ export const OnroadLayoutPage = {
   },
   template: `
     <section class="gx-settings gx-layout" aria-label="Colors and layout">
-      <div class="gx-settings__header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
+      <div class="gx-settings__header gx-page-header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
         <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
 
       </div>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.editable && !(projection && state.data.reason)" tone="warn">Park the vehicle and reload to edit. If it stays unavailable, reload saved settings.</GxNotice>
-      <nav  class="gx-layout__tabs" aria-label="Layout target">
+      <nav class="gx-layout__tabs gx-tabs" aria-label="Layout target">
         <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="busy || !!state.drag" @click="$emit('target', 'device')">Comma</button>
         <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="busy || !!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
       </nav>
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Connect to local Galaxy to edit this device’s colors and layouts.</div>
+      <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
         <div class="gx-layout__savebar">
           <span role="status">{{ state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
@@ -744,12 +745,12 @@ export const OnroadLayoutPage = {
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <div v-if="state.discard" class="gx-card gx-layout__discard" role="alert">
           <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
-          <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" type="button" @click="state.discard = null">Keep editing</button>
+          <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="state.discard = null">Keep editing</button>
             <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
         </div>
         <template v-if="state.data && state.draft">
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
-          <div class="gx-layout__tabs" aria-label="Layout size">
+          <div class="gx-layout__tabs gx-tabs" aria-label="Layout size">
             <button v-if="!projection" v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
               :aria-pressed="state.profile === tab.id" :disabled="!!state.drag" @click="selectProfile(tab.id)">{{ tab.label }}<span v-if="state.data.activeProfile === tab.id"> · Active UI</span></button>
           </div>
@@ -805,7 +806,7 @@ export const OnroadLayoutPage = {
                   <rect class="gx-layout__selection" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="none" stroke="#b799ff" :stroke-width="state.profile === 'large' ? 5 : 1.5" stroke-dasharray="6 4" />
                 </g>
               </svg>
-              <button class="gx-btn gx-btn--tonal" type="button" :disabled="!!state.drag" @click="state.devicePreviewOpen ? hideDevicePreview() : showDevicePreview()">{{ state.devicePreviewOpen ? 'Hide Device preview' : 'Show Device preview' }}</button>
+              <button class="gx-btn gx-btn--tonal" type="button" :disabled="!!state.drag" @click="state.devicePreviewOpen ? hideDevicePreview() : showDevicePreview()">{{ state.devicePreviewOpen ? 'Hide preview' : 'Device preview' }}</button>
               <section v-if="state.devicePreviewOpen" class="gx-layout__device" aria-label="Device preview">
                 <div class="gx-layout__subhead"><strong>{{ projection ? 'Android Auto renderer preview' : 'Device preview' }}</strong><span>Preview scene</span></div>
                 <div class="gx-layout__scenes" aria-label="Device preview scene">

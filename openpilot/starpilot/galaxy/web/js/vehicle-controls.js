@@ -1,3 +1,5 @@
+import { GxDialog } from "./dialog.js"
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
@@ -160,7 +162,7 @@ export class VehicleSelectionFeed {
 }
 
 export const VehicleControlsPage = {
-  components: { GxNotice, SettingsPage, GalaxySelect },
+  components: { GxDialog, GxState, GxNotice, SettingsPage, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, busy: false, error: "", query: "", make: "" })
@@ -180,24 +182,24 @@ export const VehicleControlsPage = {
   methods: { choose(platform) { this.feed.preview(platform) } },
   template: `
     <section class="gx-vehicle" aria-label="Vehicle Controls">
-      <div class="gx-card gx-vehicle__header"><h2>Vehicle Selection</h2>
+      <div class="gx-card gx-vehicle__header gx-page-header"><h2>Vehicle Selection</h2>
         <p>Auto detects your car. A manual choice is saved for the next start; it does not change the car reported now.</p></div>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local vehicle selection is unavailable in preview.</div>
+      <GxState v-if="mode !== 'local'">Local vehicle selection is unavailable in preview.</GxState>
       <template v-else>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
-        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading vehicle selection…</div>
+        <GxState v-if="state.status === 'loading'" loading>Loading vehicle selection…</GxState>
         <article v-if="state.data" class="gx-card gx-vehicle__body">
           <div class="gx-vehicle__summary"><div><small>Saved for next start</small><strong>{{ state.data.selectedLabel }}</strong>
               <p v-if="!state.data.valid">Saved choice needs review. Only Auto can repair it.</p></div>
             <div><small>Last identified vehicle</small><strong>{{ state.data.reported?.label || 'Not available' }}</strong>
               <p>This is a cached report, not current vehicle confirmation.</p></div></div>
           <p v-if="!state.data.parked" class="gx-note">Changes require fresh parked vehicle evidence.</p>
-          <div class="gx-vehicle__actions">
+          <div class="gx-vehicle__actions gx-actions">
             <button type="button" class="gx-btn" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(null)">Choose Auto detection</button></div>
           <template v-if="state.data.valid">
             <h3>Choose a Vehicle</h3>
-            <div class="gx-vehicle__filters"><GalaxySelect v-model="state.make" class="gx-field gx-field--full" aria-label="Vehicle make">
+            <div class="gx-vehicle__filters gx-actions"><GalaxySelect v-model="state.make" class="gx-field gx-field--full" aria-label="Vehicle make">
                 <option value="">All makes</option><option v-for="make in makes" :key="make" :value="make">{{ make }}</option></GalaxySelect>
               <input v-model="state.query" class="gx-field" type="search" aria-label="Search vehicle models" placeholder="Search models"></div>
             <div class="gx-vehicle__models"><button v-for="item in models" :key="item.platform" type="button" class="gx-btn gx-btn--tonal"
@@ -206,11 +208,10 @@ export const VehicleControlsPage = {
           </template>
         </article>
         <SettingsPage :mode="mode" :unauthorized="unauthorized" initial-page="vehicle" title="Vehicle settings" />
-        <Teleport to="body"><div v-if="state.pending" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Confirm vehicle selection">
-          <div class="gx-card gx-settings__dialog"><h3>Confirm Vehicle Selection</h3><p>{{ state.pending.question }}</p>
+        <GxDialog v-if="state.pending" labelledby="gx-vehicle-controls-confirm-title" @close="feed.cancel()"><h3 id="gx-vehicle-controls-confirm-title">Confirm Vehicle Selection</h3><p>{{ state.pending.question }}</p>
             <p>The choice takes effect after the next start.</p>
-            <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
-              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></div></div></Teleport>
+            <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
+              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></GxDialog>
       </template>
     </section>`,
 }

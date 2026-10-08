@@ -1,3 +1,5 @@
+import { GxDialog } from "./dialog.js"
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { LiveCameraPreview } from "./cameras.js"
@@ -12,7 +14,7 @@ const SIDES = [
 
 export const PipPage = {
   name: "PipPage",
-  components: { GxNotice, GalaxySettingRow },
+  components: { GxDialog, GxState, GxNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   setup(props) {
@@ -172,13 +174,13 @@ export const PipPage = {
   },
   template: `
     <section class="gx-settings gx-pip" aria-label="Blind Spot Camera and Preview saved settings">
-      <header class="gx-settings__header"><div><h2>Blind Spot Camera and Preview</h2>
+      <header class="gx-settings__header gx-page-header"><div><h2>Blind Spot Camera and Preview</h2>
         <p>Adjust the native Blind Spot Camera crop on a cabin snapshot.</p></div>
         <button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button></header>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
+      <GxState v-if="mode !== 'local'">Local saved settings are unavailable in preview.</GxState>
       <template v-else>
         <GxNotice v-if="state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
-        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Reading blind-spot camera preferences and crop positions…</div>
+        <GxState v-if="state.status === 'loading'" loading>Reading blind-spot camera preferences and crop positions…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read blind-spot camera preferences or crop positions. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
@@ -205,10 +207,9 @@ export const PipPage = {
               @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           </section>
         </div>
-        <Teleport to="body"><div v-if="state.pending" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Confirm Blind Spot Camera preference">
-          <div class="gx-card gx-settings__dialog"><h3>Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
-            <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
-              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></div></div></Teleport>
+        <GxDialog v-if="state.pending" labelledby="gx-pip-confirm-title" @close="feed.cancel()"><h3 id="gx-pip-confirm-title">Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
+            <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
+              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></GxDialog>
       </template>
     </section>`,
 }

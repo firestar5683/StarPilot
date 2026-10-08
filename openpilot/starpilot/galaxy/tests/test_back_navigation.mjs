@@ -51,3 +51,30 @@ editor.state.discard = null // Cancel discard keeps the editor.
 assert.equal(closed, 0)
 editor.leave("back"); assert.equal(closed, 1)
 console.log("Galaxy Back history and editor guard passed")
+
+// Parent is the page actually visited, not a guessed personality parent.
+const nested = { initialPage: 'hub', state: { section: 'longitudinal', query: '', parents: [], data: {page: 'hub'} },
+  activeSection: {id: 'longitudinal'}, feed: {load(page) { nested.state.data = {page} }} }
+SettingsPage.methods.open.call(nested, 'profiles')
+SettingsPage.methods.back.call(nested)
+assert.equal(nested.state.data.page, 'hub')
+SettingsPage.methods.open.call(nested, 'standard')
+SettingsPage.methods.open.call(nested, 'standard/following')
+SettingsPage.methods.back.call(nested)
+assert.equal(nested.state.data.page, 'standard')
+SettingsPage.methods.back.call(nested)
+assert.equal(nested.state.data.page, 'hub', 'direct personality returns to Longitudinal hub')
+SettingsPage.methods.open.call(nested, 'profiles')
+SettingsPage.methods.open.call(nested, 'standard')
+SettingsPage.methods.back.call(nested)
+assert.equal(nested.state.data.page, 'profiles', 'personality opened through planner returns there')
+SettingsPage.methods.selectSection.call({...nested,busy:false,feed:{active:true,load(){}}}, {id:'wheel',pages:['wheel']})
+assert.deepEqual(nested.state.parents, [], 'changing sections retires nested history')
+
+nested.initialPage = 'profiles'; nested.state.data = {page:'profiles'}
+SettingsPage.methods.open.call(nested,'standard')
+SettingsPage.methods.open.call(nested,'standard/following')
+SettingsPage.methods.back.call(nested)
+assert.equal(nested.state.data.page,'standard','dedicated tools also retain each nested parent')
+SettingsPage.methods.back.call(nested)
+assert.equal(nested.state.data.page,'profiles')

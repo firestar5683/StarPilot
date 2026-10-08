@@ -78,14 +78,14 @@ export const CamerasPage = {
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.snapshots.stop() },
   watch: { mode() { this.snapshots.stop() } },
   template: `
-    <div class="gx-view" aria-label="Cameras and Monitoring">
+    <div class="gx-view gx-settings" aria-label="Cameras and Monitoring">
       <h2>Cameras &amp; Monitoring</h2>
       <div class="gx-grid">
         <MenuTile icon="bi-camera-video" title="Blind Spot Camera and Preview" description="Adjust the camera crop with a live cabin preview." :disabled="mode !== 'local'" @select="go('/cameras/pip')" />
         <MenuTile icon="bi-shield" title="Sentry" description="View motion events, configure saved motion settings, and manage notifications." :disabled="mode !== 'local'" @select="go('/cameras/events')" />
         <MenuTile icon="bi-eye" title="V-ASM" description="Preview the cabin camera, draw window regions, and adjust visual spot-monitoring choices." :disabled="mode !== 'local'" @select="go('/cameras/vasm')" />
       </div>
-      <section class="gx-card gx-home__card"><h2>Camera Snapshot</h2>
+      <section class="gx-card gx-panel gx-stack"><h2>Camera Snapshot</h2>
         <p>Turn off the vehicle, choose a camera, then take a snapshot.</p>
         <template v-if="mode === 'local'">
           <label>Camera
@@ -93,9 +93,9 @@ export const CamerasPage = {
               <option value="cabin">Cabin</option><option value="wide">Wide road</option><option value="narrow">Road</option>
             </GalaxySelect></label>
           <button class="gx-btn" type="button" :disabled="capturing" @click="snapshots.capture(camera)">{{ capturing ? 'Capturing…' : 'Take snapshot' }}</button>
-          <button v-if="image || capturing" class="gx-btn gx-btn--tonal" type="button" @click="snapshots.stop()">{{ capturing ? 'Cancel' : 'Clear snapshot' }}</button>
+          <button v-if="image || capturing" class="gx-btn gx-btn--tonal" type="button" @click="snapshots.stop()">{{ capturing ? 'Cancel' : 'Clear' }}</button>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-          <img v-if="image" :src="image" :alt="camera + ' camera snapshot'" style="display:block;max-width:100%;height:auto;margin-top:1rem;" />
+          <img v-if="image" :src="image" :alt="camera + ' camera snapshot'" class="gx-media gx-media--spaced" />
         </template>
         <p v-else>Camera snapshots are available on the connected device.</p>
         <small>Snapshots are not saved.</small></section>

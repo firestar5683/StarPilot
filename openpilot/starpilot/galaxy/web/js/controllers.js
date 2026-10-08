@@ -69,7 +69,7 @@ export class ControllersFeed {
     this.poll = null
     const generation = this.generation, request = new AbortController()
     this.request = request
-    this.busy = payload !== null
+    this.busy = true
     this.emit()
     this.timeout = this.later(() => request.abort(), 6000)
     let failure = "Controller Buttons are unavailable. Reload before trying again."
@@ -162,19 +162,20 @@ export const ControllersPage = {
     },
   },
   template: `
-    <section class="gx-card gx-driving__intro gx-controllers" aria-label="Controller Buttons">
+    <section class="gx-card gx-panel gx-stack gx-controllers" aria-label="Controller Buttons">
       <h3>Controller Buttons</h3>
       <p>Assign physical USB or Bluetooth buttons to Quick Select and available driving screen actions. Turn off the vehicle to edit.</p>
       <p v-if="mode !== 'local'" class="gx-note">Connect to local Galaxy to manage controller buttons.</p>
       <template v-else>
-        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <p v-if="!state.status" class="gx-note">Checking attached controllers…</p>
-        <template v-else>
-          <p v-if="!state.status.available" class="gx-note">Controller Buttons are unavailable. Reload to try again.</p>
-          <p v-else-if="!state.status.editable" class="gx-note">Turn off the vehicle to change controller buttons.</p>
-          <p v-if="changed" class="gx-note" role="status">Controller settings changed. Reload before saving.</p>
+        <GxNotice :tone="state.error ? 'danger' : 'info'" v-if="state.error || !state.status || !state.status.available" :busy="state.busy && !state.error">
+          {{ state.error || (!state.status ? 'Checking attached controllers…' : 'Controller Buttons are unavailable.') }}
+          <button type="button" class="gx-btn gx-btn--tonal" :disabled="state.busy" @click="reload">Refresh</button>
+        </GxNotice>
+        <template v-if="state.status?.available">
+          <GxNotice v-if="!state.status.editable" tone="warn">Turn off the vehicle to change controller buttons.</GxNotice>
+          <GxNotice v-if="changed" tone="warn">Controller settings changed. Reload before saving.</GxNotice>
           <p v-else-if="dirty" class="gx-note">Save these changes before learning or removing buttons.</p>
-          <div class="gx-driving__actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="state.busy" @click="reload">Reload</button>
+          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="state.busy" @click="reload">Reload</button>
             <button class="gx-btn" type="button" :disabled="!canEdit || !dirty" @click="save">Save Controller Settings</button></div>
           <div class="gx-controllers__switch-row"><span class="gx-row__label">Enable controller buttons</span>
             <label class="gx-switch"><input type="checkbox" aria-label="Enable controller buttons" v-model="state.draft.enabled" :disabled="!canEdit"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
@@ -193,9 +194,9 @@ export const ControllersPage = {
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>
           <p v-if="state.status.learning" role="status">Press a button for {{ state.status.slots[state.status.learning.slot].label }} within {{ Math.ceil(state.status.learning.expiresIn) }} seconds.
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="state.busy" @click="cancel">Cancel Learning</button></p>
-          <div class="gx-driving__actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit" @click="test">{{ state.status.testing ? 'Stop Button Test' : 'Test Buttons for 20 Seconds' }}</button></div>
+          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit" @click="test">{{ state.status.testing ? 'Stop test' : 'Test buttons (20s)' }}</button></div>
           <p v-if="state.status.testing" class="gx-note">Button test shows input without running its action.</p>
-          <p v-if="state.status.lastPress" class="gx-note" role="status">{{ state.status.lastPress.message }}</p>
+          <GxNotice v-if="state.status.lastPress" tone="info">{{ state.status.lastPress.message }}</GxNotice>
           <h4>Learned Buttons</h4><p v-if="!state.status.bindings.length" class="gx-note">No buttons learned yet.</p>
           <div v-for="binding in state.status.bindings" :key="binding.deviceId + ':' + binding.code" class="gx-row gx-controllers__row">
             <div class="gx-row__info"><span class="gx-row__label">{{ binding.name }}</span><span class="gx-row__desc">Button {{ binding.code }} · {{ state.status.slots[binding.slot].label }}</span></div>

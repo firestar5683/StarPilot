@@ -74,17 +74,17 @@ export const DevicePicker = {
   template: `
     <div v-if="visible" class="gx-nav-section">
       <div class="gx-nav-section__title">Commas</div>
-      <div v-for="(device, index) in devices" :key="device.slug" style="display:flex;align-items:center;gap:4px">
-        <button type="button" class="gx-nav-item" :class="{active:device.slug === activeSlug}" style="flex:1;min-width:0" @click="select(device)">
-          <i class="bi bi-cpu"></i><span style="overflow:hidden;text-overflow:ellipsis">{{ device.name || 'Comma ' + (index + 1) }}</span>
+      <div v-for="(device, index) in devices" :key="device.slug" class="gx-device-picker__row">
+        <button type="button" class="gx-nav-item gx-grow" :class="{active:device.slug === activeSlug}" @click="select(device)">
+          <i class="bi bi-cpu"></i><span class="gx-truncate">{{ device.name || 'Comma ' + (index + 1) }}</span>
           <small v-if="device.slug === activeSlug">Current</small>
         </button>
         <button type="button" class="gx-icon-btn" :aria-label="'Rename ' + (device.name || 'comma')" @click="edit(device)"><i class="bi bi-pencil"></i></button>
       </div>
-      <form v-if="editing" @submit.prevent="save" style="padding:var(--sp-2)">
+      <form v-if="editing" @submit.prevent="save" class="gx-device-picker__form">
         <label for="gx-device-name">Rename comma</label>
         <input id="gx-device-name" class="gx-field" v-model="draft" maxlength="40" autocomplete="off" />
-        <div style="display:flex;gap:6px;margin-top:8px"><button type="submit" class="gx-btn" :disabled="saving">Save</button><button type="button" class="gx-btn gx-btn--tonal" @click="editing=''">Cancel</button></div>
+        <div class="gx-actions gx-tags"><button type="submit" class="gx-btn" :disabled="saving">Save</button><button type="button" class="gx-btn gx-btn--tonal" @click="editing=''">Cancel</button></div>
         <p v-if="error" class="gx-note gx-note--danger">{{ error }}</p>
       </form>
     </div>

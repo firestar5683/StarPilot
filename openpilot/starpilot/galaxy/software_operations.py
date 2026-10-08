@@ -286,7 +286,7 @@ class SoftwareOperations:
     except (OSError, subprocess.SubprocessError):
       return False
 
-  def snapshot(self) -> dict:
+  def snapshot(self, *, include_history: bool = True) -> dict:
     with self.lock:
       try:
         status = self.status.snapshot()
@@ -323,6 +323,7 @@ class SoftwareOperations:
       elif self.request is not None and self.request.get("error") == "Updater did not report completion":
         stage, detail = "timed_out", "Request timed out; the updater may still be running"
       return {
+        "repository": self._repository(),
         "updaterAvailable": process, "progress": {"stage": stage, "detail": detail, "percent": None},
         "parked": parked, "availableBranches": branches, "selectedTarget": target,
         "canCheck": usable, "canFastUpdate": usable and self._valid_branch(status["installed"]["branch"]), "canSelect": usable and bool(branches),
@@ -330,8 +331,13 @@ class SoftwareOperations:
         "canDownload": usable and selected, "canInstall": usable and selected and self._ready(status, target),
         "reason": reason, "request": dict(self.request) if self.request is not None else None,
         "automaticDownloads": automatic_downloads(self.params), "canConfigure": parked and not reboot,
-        "history": self._history_snapshot(status),
+        **({"history": self._history_snapshot(status)} if include_history else {}),
       }
+
+  def _repository(self) -> str | None:
+    remote = self._param('GitRemote') or ''
+    match = re.fullmatch(r'(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?', remote)
+    return match[1] if match else None
 
   def _history_snapshot(self, status: dict) -> dict:
     branch = self.selected_target or status['updater']['targetBranch'] or status['installed']['branch']

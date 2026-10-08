@@ -1,3 +1,5 @@
+import { GxDialog } from "./dialog.js"
+import { GxState } from "./state.js"
 import { GxSummary } from "./summary.js"
 import { GxIconButton } from "./icon-button.js"
 import { GxNotice } from "./notice.js"
@@ -316,7 +318,7 @@ export class ModelManagerFeed {
 
 export const ModelsPage = {
   name: "ModelsPage",
-  components: { GxSummary, GxIconButton, GalaxySelect, GxNotice },
+  components: { GxDialog, GxState, GxSummary, GxIconButton, GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data() {
     return { loading: true, error: "", message: "", trackingProgress: false, busy: "", selectionUncertain: true, disposed: false,
@@ -434,8 +436,8 @@ export const ModelsPage = {
 
   template: `
     <div class="gx-view gx-model-manager">
-      <div v-if="mode !== 'local'" class="gx-card gx-message">Model Manager is unavailable in the offline preview.</div>
-      <div v-else-if="loading" class="gx-card gx-message" role="status">Reading installed models and available downloads…</div>
+      <GxState v-if="mode !== 'local'">Model Manager is unavailable in the offline preview.</GxState>
+      <GxState v-else-if="loading" loading>Reading installed models and available downloads…</GxState>
 
       <template v-else>
         <section class="gx-card">
@@ -445,8 +447,8 @@ export const ModelsPage = {
           </div>
           <GxSummary :items="[{label: 'Installed', value: summary.installed}, {label: 'Missing', value: summary.missing}, {label: 'Total', value: summary.total}]" />
           <p class="gx-model-selection">Selected: <strong>{{ currentLabel }}</strong></p>
-          <div style="padding: 0 var(--sp-3) var(--sp-3);">
-            <p v-if="message" role="status">{{ message }}</p>
+          <div class="gx-panel-footer">
+            <GxNotice v-if="message" tone="info">{{ message }}</GxNotice>
             <GxNotice v-if="error" tone="danger" title="Model Manager">{{ error }}</GxNotice>
             <GxNotice v-if="status.isOnroad" tone="warn">Park the vehicle before changing or downloading models.</GxNotice>
             <GxNotice v-if="status.downloading" :title="'Downloading ' + downloadTargetLabel">{{ status.progress || 'Keep the device connected until the download finishes.' }}</GxNotice>
@@ -483,29 +485,29 @@ export const ModelsPage = {
             <i aria-hidden="true" class="bi bi-sliders"></i>
             <span class="gx-section__title">Controls</span>
           </div>
-          <p class="gx-model-reason">Selections take effect the next time the driving model starts.</p>
-          <div style="padding: var(--sp-3); display:grid; grid-template-columns:minmax(0, 1fr); gap:12px;">
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div class="gx-panel gx-stack">
+            <p class="gx-note">Selections take effect the next time the driving model starts.</p>
+            <div class="gx-actions">
               <button v-if="status.downloading" type="button" class="gx-btn gx-btn--danger" :disabled="!canAction('cancel')" @click="runAction('cancel')"><i aria-hidden="true" class="bi bi-stop-circle"></i> Cancel Download</button>
               <button v-else type="button" class="gx-btn" :disabled="!canAction('downloadAll')" @click="runAction('downloadAll')"><i aria-hidden="true" class="bi bi-download"></i> Download Missing Models</button>
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="!canAction('refresh')" @click="runAction('refresh')"><i aria-hidden="true" v-if="busy === 'refresh:'" class="bi bi-arrow-repeat gx-spin"></i><i aria-hidden="true" v-else class="bi bi-arrow-clockwise"></i> Check model catalog</button>
             </div>
 
-            <div class="gx-row" style="border-top:none;">
+            <div class="gx-row gx-row--borderless">
               <span class="gx-row__label">Model Randomizer</span>
               <button type="button" class="gx-btn gx-btn--tonal" :aria-pressed="status.randomizer === true" :disabled="!canAction(status.randomizer ? 'disable-randomizer' : 'enable-randomizer')" @click="runAction(status.randomizer ? 'disable-randomizer' : 'enable-randomizer')">{{ status.randomizer ? 'On' : 'Off' }}</button>
             </div>
             <p v-if="status.randomizer" class="gx-model-reason">A different verified model is chosen each start. {{ status.gpuAvailable && activeBigModel ? 'Chestnut Big' : 'Small on-device' }} models are used. {{ (status.blacklistedModels || []).length }} excluded. Favorites only mark your preferred models.</p>
             <p v-if="!status.gpuAvailable" class="gx-model-reason">Chestnut is not detected. Active Small is used; your Big selection is saved for later.</p>
 
-            <div class="gx-row gx-model-control" style="border-top:none;">
+            <div class="gx-row gx-model-control gx-row--borderless">
               <span class="gx-row__label">Active Small · On-device</span>
               <GalaxySelect aria-label="Active Small" class="gx-field" :value="activeSmallModel" :disabled="!!busy || selectionUncertain || capabilities.select !== true || status.isOnroad || status.randomizer" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
                 <option v-for="m in installedSmallModels" :key="m.value" :value="m.value" :disabled="!m.installed || !m.selectable">{{ m.label || m.value }}</option>
               </GalaxySelect>
             </div>
 
-            <div class="gx-row gx-model-control" style="border-top:none;">
+            <div class="gx-row gx-model-control gx-row--borderless">
               <span class="gx-row__label">Active Big · Chestnut</span>
               <GalaxySelect aria-label="Active Big" class="gx-field" :value="activeBigModel" :disabled="!!busy || selectionUncertain || capabilities.select !== true || status.isOnroad || status.randomizer" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
                 <option value="">None — always use Active Small</option>
@@ -513,7 +515,7 @@ export const ModelsPage = {
               </GalaxySelect>
             </div>
 
-            <div class="gx-row gx-model-control" style="border-top:none;">
+            <div class="gx-row gx-model-control gx-row--borderless">
               <span class="gx-row__label">Sort</span>
               <GalaxySelect aria-label="Sort models" class="gx-field" :value="sortMode" @change="sortMode = $event.target.value">
                 <option value="release_date">Release Date</option>
@@ -521,7 +523,7 @@ export const ModelsPage = {
               </GalaxySelect>
             </div>
 
-            <div class="gx-row gx-model-control" style="border-top:none;">
+            <div class="gx-row gx-model-control gx-row--borderless">
               <label class="gx-row__label" for="gx-model-hardware">Model hardware</label>
               <GalaxySelect id="gx-model-hardware" class="gx-field" :value="hardwareFilter" @change="setHardwareFilter($event.target.value)">
                 <option value="both">Both</option>
@@ -530,13 +532,13 @@ export const ModelsPage = {
               </GalaxySelect>
             </div>
 
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <GalaxySelect aria-label="Your Favorite filter" class="gx-field" style="flex:1; min-width:140px;" :value="userFilter" @change="userFilter = $event.target.value">
+            <div class="gx-actions">
+              <GalaxySelect aria-label="Your Favorite filter" class="gx-field gx-filter-field" :value="userFilter" @change="userFilter = $event.target.value">
                 <option value="all">Your Favorite: All</option>
                 <option value="yes">Your Favorite: Yes</option>
                 <option value="no">Your Favorite: No</option>
               </GalaxySelect>
-              <GalaxySelect aria-label="Community Favorite filter" class="gx-field" style="flex:1; min-width:140px;" :value="communityFilter" @change="communityFilter = $event.target.value">
+              <GalaxySelect aria-label="Community Favorite filter" class="gx-field gx-filter-field" :value="communityFilter" @change="communityFilter = $event.target.value">
                 <option value="all">Community: All</option>
                 <option value="yes">Community: Yes</option>
                 <option value="no">Community: No</option>
@@ -552,15 +554,15 @@ export const ModelsPage = {
         <template v-else>
           <div class="gx-card-grid">
             <section class="gx-card" v-for="m in sorted" :key="m.value">
-            <div style="display:flex; align-items:flex-start; gap:8px; padding: var(--sp-3);">
-              <div style="flex:1; min-width:0;">
-                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div class="gx-panel gx-cluster">
+              <div class="gx-grow">
+                <div class="gx-actions">
                   <strong>{{ m.label || m.value }}</strong>
                   <span v-if="m.userFavorite" class="gx-chip">Your Favorite</span>
                   <span v-if="m.communityFavorite" class="gx-chip">Community Favorite</span>
                   <span v-if="m.blacklisted" class="gx-chip">Excluded from randomizer</span>
                 </div>
-                <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
+                <div class="gx-actions gx-tags">
                   <span class="gx-chip">{{ m.value }}</span>
                   <span v-if="m.builtin" class="gx-chip">Built-in</span>
                   <span class="gx-chip">{{ hardwareLabel(m) }}</span>
@@ -575,10 +577,10 @@ export const ModelsPage = {
               </button>
             </div>
             <p v-if="m.unavailableReason" class="gx-model-reason">{{ m.unavailableReason }}</p>
-            <div style="padding: 0 var(--sp-3) var(--sp-3); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <div class="gx-panel-footer gx-actions">
               <button v-if="status.randomizer || m.blacklisted" type="button" class="gx-btn gx-btn--tonal" :disabled="!canAction(m.blacklisted ? 'include' : 'exclude', m)" @click="runAction(m.blacklisted ? 'include' : 'exclude', m)">{{ m.blacklisted ? 'Include in Randomizer' : 'Exclude from Randomizer' }}</button>
               <template v-if="rowState(m) === 'active'">
-                <span class="gx-chip" style="background:var(--primary);color:var(--on-primary);">Selected model</span>
+                <span class="gx-chip gx-chip--selected">Selected model</span>
               </template>
               <template v-else-if="rowState(m) === 'busy'">
                 <span class="gx-chip"><i aria-hidden="true" class="bi bi-hourglass-split"></i> Busy</span>
@@ -588,7 +590,7 @@ export const ModelsPage = {
               </template>
               <template v-else-if="rowState(m) === 'installed'">
                 <button type="button" class="gx-btn" :disabled="!canAction(m.requiresGpu ? 'select-big' : 'select-small', m)" @click="runAction(m.requiresGpu ? 'select-big' : 'select-small', m)"><i aria-hidden="true" class="bi bi-play-fill"></i> Set Active {{ m.requiresGpu ? 'Big' : 'Small' }}</button>
-                <button v-if="!m.builtin" type="button" class="gx-btn gx-btn--tonal" style="color:var(--error);" :disabled="!canAction('delete', m)" @click="runAction('delete', m)"><i aria-hidden="true" class="bi bi-trash"></i> Delete</button>
+                <button v-if="!m.builtin" type="button" class="gx-btn gx-btn--tonal gx-text-danger" :disabled="!canAction('delete', m)" @click="runAction('delete', m)"><i aria-hidden="true" class="bi bi-trash"></i> Delete</button>
               </template>
               <template v-else>
                 <GxIconButton :label="'Download ' + m.label" icon="bi-download" :disabled="!canAction('download', m)" @click="runAction('download', m)" />
@@ -610,15 +612,13 @@ export const ModelsPage = {
             <p v-if="runtime.data.pendingNextStart">A saved selection is waiting for the next start.</p>
             <p v-if="runtime.data.fallbackReason">Fallback: {{ runtime.data.fallbackReason.replaceAll('-', ' ') }}</p>
           </div>
-          <p v-else class="gx-model-reason">{{ runtime.error || 'Checking the running model…' }}</p>
+          <p v-else class="gx-panel gx-note">{{ runtime.error || 'Checking the running model…' }}</p>
         </section>
       </template>
-      <div v-if="dialog" class="gx-settings__modal" @click.self="finishDialog(false)" @keydown.esc="finishDialog(false)">
-        <section class="gx-card gx-settings__dialog" role="dialog" aria-modal="true" aria-labelledby="gx-model-dialog-title">
+      <GxDialog v-if="dialog" labelledby="gx-model-dialog-title" @close="finishDialog(false)">
           <h3 id="gx-model-dialog-title">{{ dialog.title }}</h3><p>{{ dialog.message }}</p>
-          <div class="gx-settings__controls"><button class="gx-btn gx-btn--tonal" type="button" @click="finishDialog(false)">Cancel</button><button ref="confirmButton" class="gx-btn" :class="{'gx-btn--danger': dialog.danger}" type="button" @click="finishDialog(true)">{{ dialog.confirmLabel }}</button></div>
-        </section>
-      </div>
+          <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="finishDialog(false)">Cancel</button><button ref="confirmButton" class="gx-btn" :class="{'gx-btn--danger': dialog.danger}" type="button" @click="finishDialog(true)">{{ dialog.confirmLabel }}</button></div>
+      </GxDialog>
     </div>
   `,
 }

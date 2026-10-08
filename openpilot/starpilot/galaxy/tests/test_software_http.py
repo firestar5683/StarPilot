@@ -85,7 +85,11 @@ class SoftwareHttpTest(unittest.TestCase):
     for remote in (False, True):
       with self.subTest(remote=remote):
         cookie = self.remote_cookie if remote else self.local_cookie
+        status, light, _ = self.request('/api/software/status?history=0', remote=remote, cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertNotIn('history', light['operations'])
         status, value, _ = self.request('/api/software/status', remote=remote, cookie=cookie)
+        self.assertEqual(light['operations'], {key: entry for key, entry in value['operations'].items() if key != 'history'})
         self.assertEqual(status, 200)
         view = value['operations']
         self.assertEqual(view['history']['installed'][0]['subject'], 'Software history test')

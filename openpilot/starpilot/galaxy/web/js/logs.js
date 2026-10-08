@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { TroubleshootPage, TmuxPage } from "./diagnostic-tools.js"
 import { navigate } from "./router.js"
@@ -8,7 +9,7 @@ import { MenuTile } from "./menu-tile.js"
 
 export const Logs = {
   name: "Logs",
-  components: { GxNotice, SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
+  components: { GxState, GxNotice, SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
   props: { path: { type: String, required: true }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle" }, search: "",
     aaLogs: { sessions: [], others: [], status: "idle", error: "" } }),
@@ -72,25 +73,25 @@ export const Logs = {
         <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"></div>
         <p v-if="crashes.scanIncomplete" class="gx-note">Directory scan is incomplete; newer reports may be omitted.</p>
         <p v-else-if="crashes.listLimited" class="gx-note">Showing the 200 newest reports; older reports are omitted.</p>
-        <p v-if="crashes.status === 'loading'" class="gx-card gx-message" role="status">Loading crash reports…</p>
+        <GxState v-if="crashes.status === 'loading'" loading>Loading crash reports…</GxState>
         <GxNotice tone="danger" v-else-if="crashes.status === 'unavailable' && !crashes.error">Crash reports are unavailable.</GxNotice>
-        <p v-else-if="crashes.status === 'ready' && !visibleReports.length">{{ search ? 'No matching reports.' : 'No crash reports.' }}</p>
+        <GxState v-else-if="crashes.status === 'ready' && !visibleReports.length">{{ search ? 'No matching reports.' : 'No crash reports.' }}</GxState>
         <div v-if="crashes.status === 'ready'" class="gx-crash-list">
-          <button v-for="report in visibleReports" :key="report.id" type="button" class="gx-card gx-crash-row" @click="crashFeed.open(report)"><strong>{{ report.name }}</strong><span>{{ reportDate(report.modifiedAt) }} · {{ reportSize(report.size) }}</span></button>
+          <button v-for="report in visibleReports" :key="report.id" type="button" class="gx-card gx-crash-row gx-panel" @click="crashFeed.open(report)"><strong>{{ report.name }}</strong><span>{{ reportDate(report.modifiedAt) }} · {{ reportSize(report.size) }}</span></button>
         </div>
-        <section v-if="crashes.previewStatus === 'loading'" class="gx-card">Loading report…</section>
-        <section v-else-if="crashes.preview" class="gx-card gx-crash-preview"><div class="gx-crash-preview__head"><strong>{{ crashes.preview.name }}</strong><button type="button" class="gx-btn gx-btn--tonal" @click="copyPreview">Copy visible text</button></div><p v-if="crashes.preview.truncated" class="gx-note">Preview truncated to the first 256 KiB.</p><pre>{{ crashes.preview.text }}</pre></section>
+        <GxState v-if="crashes.previewStatus === 'loading'" loading>Loading report…</GxState>
+        <section v-else-if="crashes.preview" class="gx-card gx-crash-preview gx-panel"><div class="gx-crash-preview__head"><strong>{{ crashes.preview.name }}</strong><button type="button" class="gx-btn gx-btn--tonal" @click="copyPreview">Copy visible text</button></div><p v-if="crashes.preview.truncated" class="gx-note">Preview truncated to the first 256 KiB.</p><pre>{{ crashes.preview.text }}</pre></section>
         <GxNotice tone="danger" v-if="crashes.error">{{ crashes.error }}</GxNotice>
       </template>
       <template v-else-if="path === '/logs/android-auto' && mode === 'local'">
         <h2>Android Auto Logs</h2>
         <p class="gx-note">The last 20 connection sessions, newest first. The download is one zip with every session, a readable report for each, the Android Auto settings without Bluetooth addresses, and the car view's renderer logs.</p>
         <div class="gx-crash-controls"><a class="gx-btn" :href="bundleUrl()" download><i class="bi bi-download"></i> Download all (zip)</a><button type="button" class="gx-btn gx-btn--tonal" @click="aaFeed.load()">Refresh</button></div>
-        <p v-if="aaLogs.status === 'loading'">Loading Android Auto logs…</p>
-        <p v-else-if="aaLogs.status === 'unavailable'" role="alert">{{ aaLogs.error || 'Android Auto logs are unavailable.' }}</p>
-        <p v-else-if="aaLogs.status === 'ready' && !aaLogs.sessions.length">No Android Auto sessions have been logged yet.</p>
+        <GxState v-if="aaLogs.status === 'loading'" loading>Loading Android Auto logs…</GxState>
+        <GxNotice v-else-if="aaLogs.status === 'unavailable'" tone="danger">{{ aaLogs.error || 'Android Auto logs are unavailable.' }}</GxNotice>
+        <GxState v-else-if="aaLogs.status === 'ready' && !aaLogs.sessions.length">No Android Auto sessions have been logged yet.</GxState>
         <div v-if="aaLogs.status === 'ready'" class="gx-crash-list">
-          <div v-for="log in aaLogs.sessions" :key="log.name" class="gx-card gx-crash-row gx-aa-log">
+          <div v-for="log in aaLogs.sessions" :key="log.name" class="gx-card gx-crash-row gx-aa-log gx-panel">
             <div><strong>{{ outcomeLabel(log.outcome) }}</strong><span>{{ log.car || 'Car not identified' }}{{ log.transport ? ' · ' + log.transport : '' }}{{ log.trigger ? ' · ' + log.trigger : '' }}</span><span>{{ reportDate(log.modifiedAt) }} · {{ reportSize(log.size) }}</span></div>
             <a class="gx-btn gx-btn--tonal" :href="fileUrl(log.name)" download :aria-label="'Download ' + log.name"><i class="bi bi-download"></i></a>
           </div>
@@ -98,13 +99,13 @@ export const Logs = {
         <template v-if="aaLogs.status === 'ready' && aaLogs.others.length">
           <h3>Renderer logs</h3>
           <div class="gx-crash-list">
-            <div v-for="log in aaLogs.others" :key="log.name" class="gx-card gx-crash-row gx-aa-log">
+            <div v-for="log in aaLogs.others" :key="log.name" class="gx-card gx-crash-row gx-aa-log gx-panel">
               <div><strong>{{ log.name }}</strong><span>{{ reportDate(log.modifiedAt) }} · {{ reportSize(log.size) }}</span></div>
               <a class="gx-btn gx-btn--tonal" :href="fileUrl(log.name)" download :aria-label="'Download ' + log.name"><i class="bi bi-download"></i></a>
             </div>
           </div>
         </template>
       </template>
-      <div v-else class="gx-card gx-message" role="status">This Logs & Diagnostics page is unavailable in the offline preview.</div>
+      <GxState v-else>This Logs & Diagnostics page is unavailable in the offline preview.</GxState>
     </div>`,
 }

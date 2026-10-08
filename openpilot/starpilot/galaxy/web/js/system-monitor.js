@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { displayNumber, processFeature, processRows, processState, vital } from "./system-monitor-data.js"
 import { MonitorFeed } from "./monitor-feed.js"
@@ -5,7 +6,7 @@ import { GalaxySelect } from "./galaxy-select.js"
 
 export const SystemMonitor = {
   name: "SystemMonitor",
-  components: { GxNotice, GalaxySelect },
+  components: { GxState, GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ snapshot: null, status: "loading", error: "", query: "", scope: "comma", sort: "cpu", descending: true }),
   mounted() {
@@ -34,11 +35,11 @@ export const SystemMonitor = {
   },
   template: `
     <div class="gx-monitor">
-      <div class="gx-monitor__toolbar"><div><h2>System Monitor</h2><div class="gx-note">{{ mode === 'sample' ? 'Synthetic sample' : 'Local system' }} · Captured {{ captured }}</div></div><span class="gx-chip">{{ mode === 'sample' ? 'Offline preview' : status === 'current' ? 'Live' : 'Unavailable' }}</span></div>
+      <div class="gx-monitor__toolbar gx-page-header"><div><h2>System Monitor</h2><div class="gx-note">{{ mode === 'sample' ? 'Synthetic sample' : 'Local system' }} · Captured {{ captured }}</div></div><span class="gx-chip">{{ mode === 'sample' ? 'Offline preview' : status === 'current' ? 'Live' : 'Unavailable' }}</span></div>
       <p v-if="mode === 'sample'" class="gx-note">Illustrative values only. No device was read.</p>
       <p v-else class="gx-note">Read-only system activity. Updates every few seconds.</p>
       <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-      <div v-else-if="!snapshot" class="gx-card gx-message" role="status">Loading system activity…</div>
+      <GxState v-else-if="!snapshot" loading>Loading system activity…</GxState>
       <template v-else>
         <div class="gx-monitor__summary">
           <section class="gx-card gx-monitor__metric"><span>CPU</span><strong>{{ number(snapshot.cpuPercent, '%') }}</strong><small>{{ snapshot.cores.length }} cores · overall usage</small></section>
@@ -49,7 +50,7 @@ export const SystemMonitor = {
           <section class="gx-card gx-monitor__metric"><span>Onboard GPU temperature</span><strong>{{ number(sensor('gpuTempC', 'onboardMaxAgeMs'), ' °C') }}</strong></section>
           <section class="gx-card gx-monitor__metric"><span>eGPU hotspot temperature</span><strong>{{ number(sensor('hotspotTempC', 'maxAgeMs'), ' °C') }}</strong></section>
           <section class="gx-card gx-monitor__metric"><span>eGPU temperature</span><strong>{{ number(sensor('gpuEdgeTempC', 'maxAgeMs'), ' °C') }}</strong></section>
-          <section class="gx-card gx-monitor__metric"><span>eGPU VRAM</span><strong>{{ vramUsed == null ? '—' : number(vramUsed / 1073741824) + ' GiB' }}</strong><small v-if="vramTotal != null">{{ number(vramTotal / 1073741824) }} GiB total</small><progress v-if="vramTotal > 0 && vramUsed != null" :value="vramUsed" :max="vramTotal" aria-label="eGPU VRAM usage"></progress></section>
+          <section class="gx-card gx-monitor__metric"><span>eGPU VRAM</span><strong>{{ vramUsed == null ? '—' : number(vramUsed / 1073741824) + ' GiB' }}</strong><small v-if="vramTotal != null">{{ number(vramTotal / 1073741824) }} GiB total</small><progress v-if="vramTotal> 0 && vramUsed != null" :value="vramUsed" :max="vramTotal" aria-label="eGPU VRAM usage"></progress></section>
         </div>
         <details class="gx-card gx-monitor__cores"><summary>CPU cores</summary><div><span v-for="core in snapshot.cores" :key="core.name">{{ core.name.toUpperCase() }} <b>{{ number(core.percent, '%') }}</b><progress v-if="core.percent != null" :value="core.percent" max="100" :aria-label="core.name + ' usage'"></progress></span></div></details>
         <div class="gx-monitor__filters"><input class="gx-field" type="search" v-model="query" aria-label="Search processes" placeholder="Search feature, process, PID or user…"><GalaxySelect class="gx-field gx-field--full" v-model="scope" aria-label="Process group"><option value="comma">Comma processes</option><option value="users">Apps and services</option><option value="all">All processes</option></GalaxySelect></div>

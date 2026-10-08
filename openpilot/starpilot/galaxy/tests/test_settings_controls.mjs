@@ -148,3 +148,8 @@ assert.equal(SettingsPage.computed.atSectionRoot.call({ activeSection: deviceDat
 const dataLinks = SettingsPage.computed.visibleRows.call({ initialPage: "hub", activeSection: deviceData,
   state: { query: "", data: { page: "hub", rows: [] } } })
 assert.deepEqual(dataLinks.map(({ row }) => row.page), ["display", "data"])
+
+assert.equal(SettingsPage.computed.atSectionRoot.call({initialPage:'hub',state:{data:null,parents:[]}}),true,
+  'section tabs stay mounted while loading a new section')
+assert.equal(SettingsPage.computed.atSectionRoot.call({initialPage:'hub',activeSection:lateral,state:{data:null,parents:['hub']}}),false,
+  'nested page loading does not become a section root')

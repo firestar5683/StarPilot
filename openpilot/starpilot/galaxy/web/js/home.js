@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { LocalAccess } from "./local-access.js"
 import { MonitorFeed } from "./monitor-feed.js"
@@ -117,7 +118,7 @@ export function homeSummary(monitor, model, software) {
 
 export const Home = {
   name: "Home",
-  components: { GxNotice, LocalAccess },
+  components: { GxState, GxNotice, LocalAccess },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   data: () => ({
@@ -134,7 +135,7 @@ export const Home = {
     const revoked = () => { this.stopFeeds(); this.unauthorized() }
     this.monitorFeed = new MonitorFeed({ mode: this.mode, publish: (update) => Object.assign(this.monitor, update), unauthorized: revoked })
     this.modelFeed = new ModelStatusFeed({ publish: (update) => Object.assign(this.model, update), unauthorized: revoked })
-    this.softwareFeed = new SoftwareStatusFeed({ publish: (update) => Object.assign(this.software, update), unauthorized: revoked })
+    this.softwareFeed = new SoftwareStatusFeed({ includeHistory: false, publish: (update) => Object.assign(this.software, update), unauthorized: revoked })
     this.driveFeed = new DriveStatsFeed({ publish: (update) => Object.assign(this.drives, update), unauthorized: revoked })
   },
   mounted() {
@@ -172,7 +173,7 @@ export const Home = {
         <div><h1>Dashboard</h1><p class="gx-note">Your saved drives and current device</p></div>
 
       </div>
-      <p v-if="mode !== 'local'" class="gx-card gx-message">Dashboard information is available on your device.</p>
+      <GxState v-if="mode !== 'local'">Dashboard information is available on your device.</GxState>
       <template v-else>
         <section class="gx-card gx-home__last">
           <div class="gx-home__kicker"><span></span> Last drive</div>

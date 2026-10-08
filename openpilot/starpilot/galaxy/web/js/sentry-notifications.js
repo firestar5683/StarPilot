@@ -125,7 +125,7 @@ export const SentryNotifications = {
               <label>HTTPS URL <input v-model="drafts[name].url" class="gx-field" type="password" autocomplete="off" placeholder="Leave blank to keep saved URL"></label>
               <label>Bearer token (optional) <input v-model="drafts[name].token" class="gx-field" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>
             </div>
-            <div class="gx-sentry-channel__actions">
+            <div class="gx-sentry-channel__actions gx-actions">
             <button v-if="name !== 'webPush'" class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy" @click="save(name, true)">Save and enable</button>
             <button v-else class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy" @click="subscribe">Subscribe this browser</button>
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy || !notifications.channels[name].configured" @click="save(name, !notifications.channels[name].enabled)">{{ notifications.channels[name].enabled ? 'Disable' : 'Enable' }}</button>

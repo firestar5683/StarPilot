@@ -95,7 +95,7 @@ assert.equal(requested.length, 0, "hidden mount must not fetch")
 document.hidden = false
 listeners.get("visibilitychange")()
 for (let i = 0; i < 12; i++) await Promise.resolve()
-assert.deepEqual(new Set(requested), new Set(["./api/system/monitor", "./api/models/status", "./api/software/status", "./api/drives/stats?timezone=" + encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")]))
+assert.deepEqual(new Set(requested), new Set(["./api/system/monitor", "./api/models/status", "./api/software/status?history=0", "./api/drives/stats?timezone=" + encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")]))
 assert.equal(homeSummary(page.monitor, page.model, page.software).model.variant, "Small")
 assert.equal(homeSummary(page.monitor, page.model, page.software).software.update, "None reported")
 assert.equal(driveSummary(page.drives).totals.distance, "12.0 km")

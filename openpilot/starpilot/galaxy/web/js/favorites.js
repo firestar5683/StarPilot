@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
@@ -83,7 +84,7 @@ export class FavoritesFeed {
 }
 
 export const FavoritesPage = {
-  components: { GxNotice, GalaxySelect },
+  components: { GxState, GxNotice, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close"],
   setup(props) {
@@ -119,18 +120,18 @@ export const FavoritesPage = {
   },
   template: `
     <section class="gx-settings gx-favorites" aria-label="Quick Select">
-      <div class="gx-settings__header"><div><h2>Quick Select</h2><p>Choose your three driving-screen shortcuts.</p></div>
+      <div class="gx-settings__header gx-page-header"><div><h2>Quick Select</h2><p>Choose your three driving-screen shortcuts.</p></div>
         </div>
       <div class="gx-favorites__intro">
         <p class="gx-note">Small UI: tap the invisible left, middle or right third. Big UI: tap or swipe the lower-left corner to open Quick Select.</p>
         <p class="gx-note">Assigning a shortcut does not activate it. Each control keeps its usual availability; some settings can only change while parked.</p>
       </div>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Connect to local Galaxy to configure Quick Select.</div>
+      <GxState v-if="mode !== 'local'">Connect to local Galaxy to configure Quick Select.</GxState>
       <template v-else>
         <div class="gx-favorites__status"><span role="status">{{ state.status === 'saving' ? 'Saving Quick Select…' : state.status === 'loading' ? 'Loading Quick Select…' : state.notice }}</span>
           </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <p v-if="state.data && !state.data.valid" class="gx-note" role="status">Saved Quick Select could not be read. Empty slots are shown. Choosing a control will replace the invalid saved configuration.</p>
+        <GxNotice v-if="state.data && !state.data.valid" tone="warn">Saved Quick Select could not be read. Empty slots are shown. Choosing a control will replace the invalid saved configuration.</GxNotice>
         <div v-if="state.data" class="gx-favorites__slots">
           <section v-for="(slot, index) in state.data.slots" :key="index" class="gx-card gx-favorites__slot">
             <div class="gx-favorites__slot-header"><h3>Favorite {{ index + 1 }} <small>{{ ['Left', 'Middle', 'Right'][index] }}</small></h3>

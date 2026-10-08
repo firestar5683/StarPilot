@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { GxIconButton } from "./icon-button.js"
 // Bounded, read-only local control history. No layout or telemetry is persisted.
 export const MAX_POINTS = 240
@@ -189,7 +190,7 @@ export const PlotGraph = {
 
 export const PlotsPage = {
   name: 'PlotsPage',
-  components: { PlotGraph, GxIconButton },
+  components: { GxState, PlotGraph, GxIconButton },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: 'idle', data: null, history: [], error: '', paused: false, advanced: false }),
   created() { this.feed = new PlotsFeed({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
@@ -222,14 +223,14 @@ export const PlotsPage = {
   },
   template: `
     <div class="gx-view gx-plots">
-      <div class="gx-settings__header"><div><h2>Plots</h2><p>Live local control observations. Graphs and match scores are diagnostic, not driving-control checks.</p></div></div>
+      <div class="gx-settings__header gx-page-header"><div><h2>Plots</h2><p>Live local control observations. Graphs and match scores are diagnostic, not driving-control checks.</p></div></div>
       <a class="gx-btn gx-btn--tonal" href="#/tuning/flm">Offline tracking analysis</a>
-      <div v-if="mode !== 'local'" class="gx-card gx-message">Live plots require the authenticated local Galaxy service.</div>
+      <GxState v-if="mode !== 'local'">Live plots require the authenticated local Galaxy service.</GxState>
       <template v-else>
         <div class="gx-plots__toolbar"><GxIconButton :label="paused ? 'Resume live plots' : 'Pause live plots'" :icon="paused ? 'bi-play-fill' : 'bi-pause-fill'" @click="togglePause" />
           <button type="button" class="gx-btn gx-btn--tonal" :aria-pressed="advanced" @click="advanced=!advanced">{{ advanced ? 'Hide' : 'Show' }} controller terms</button>
           <span role="status">{{ paused ? 'Paused' : data?.bootStabilizing ? 'Starting vehicle systems' : status === 'current' ? 'Live' : status === 'stale' ? 'Reconnecting · last received values' : status === 'unavailable' ? 'Unavailable' : 'Connecting' }}</span></div>
-        <p class="gx-note" role="status" style="min-height:2.8em">{{ !paused && error ? error : 'Missing samples leave a gap in the graph.' }}</p>
+        <p class="gx-note gx-plots__hint" role="status">{{ !paused && error ? error : 'Missing samples leave a gap in the graph.' }}</p>
         <div class="gx-plots__grid">
           <section class="gx-card gx-plots__panel"><h3>Lateral Acceleration</h3><p class="gx-note">Desired / actual · m/s² · {{ source(data?.values?.lateralSource) }}</p>
             <plot-graph :chart="lateralChart" title="Lateral acceleration history" />

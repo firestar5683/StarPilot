@@ -58,12 +58,12 @@ export const LocalAccess = {
   mounted() { this.feed.start(this.mode) },
   watch: { mode(value) { this.feed.start(value) } },
   beforeUnmount() { this.feed.stop() },
-  template: `<section class="gx-card gx-local-access" style="padding:var(--sp-4)" aria-label="Local comma access">
+  template: `<section class="gx-card gx-local-access gx-panel" aria-label="Local comma access">
     <div class="gx-settings__subhead"><h3>Local Comma Access</h3></div>
     <p v-if="state.error" class="gx-note" role="status">{{ state.error }}</p>
     <template v-else-if="state.data?.available">
       <p>On the same network, open one of these comma addresses:</p>
-      <ul><li v-for="address in state.data.addresses" :key="address.interface + address.url"><a :href="address.url" target="_blank" rel="noopener" style="overflow-wrap:anywhere">{{ address.label }} · {{ address.url }}</a></li></ul>
+      <ul><li v-for="address in state.data.addresses" :key="address.interface + address.url"><a :href="address.url" target="_blank" rel="noopener" class="gx-wrap">{{ address.label }} · {{ address.url }}</a></li></ul>
       <p class="gx-note">These addresses come from the comma; your browser must be able to reach its network.</p>
     </template>
     <p v-else-if="state.data" class="gx-note" role="status">{{ state.data.reason || 'The comma has no local network address available.' }}</p>

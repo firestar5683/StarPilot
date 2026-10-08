@@ -67,7 +67,7 @@ assert.deepEqual(feed.receivers, [{ address: "AA:BB:CC:DD:EE:FF", name: "Saved c
 assert.equal(await feed.control("select_receiver", { address: "AA:BB:CC:DD:EE:FF" }), true)
 assert.deepEqual(JSON.parse(calls.find(([path]) => path.endsWith("/control"))[1].body),
   { action: "select_receiver", address: "AA:BB:CC:DD:EE:FF" })
-assert.match(AndroidAutoPage.template, /Connect to Your Car/)
+assert.match(AndroidAutoPage.template, /Connect to car/)
 assert.match(AndroidAutoPage.template, />Disconnect</)
 assert.match(AndroidAutoPage.template, /Automatic Connection/)
 assert.equal(await feed.setEnabled(false), true)

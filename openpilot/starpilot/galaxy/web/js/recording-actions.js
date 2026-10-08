@@ -1,8 +1,9 @@
+import { GxDialog } from "./dialog.js"
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
 
 export const RecordingActions = {
-  components: { GxNotice },
+  components: { GxDialog, GxNotice },
   props: { recording: { type: Object, required: true }, all: Boolean,
     unauthorized: { type: Function, required: true } },
   emits: ["changed"],
@@ -33,7 +34,7 @@ export const RecordingActions = {
     },
   },
   template: `
-    <div class="gx-recordings__actions">
+    <div class="gx-recordings__actions gx-actions">
       <template v-if="!all">
         <button class="gx-icon-btn" :aria-label="recording.preserved ? 'Unpreserve drive' : 'Preserve drive'" :title="recording.preserved ? 'Unpreserve' : 'Preserve'" :disabled="busy" @click="save('preserve')"><i class="bi" :class="recording.preserved ? 'bi-heart-fill' : 'bi-heart'"></i></button>
         <slot></slot>
@@ -45,16 +46,16 @@ export const RecordingActions = {
         <button class="gx-btn gx-btn--tonal gx-recordings__danger" :disabled="busy" @click="includePreserved=true; edit('delete')">Delete all including preserved</button>
       </template>
       <GxNotice tone="danger" v-if="error && !action">{{ error }}</GxNotice>
-      <Teleport to="body"><div v-if="action" class="gx-settings__modal" role="dialog" aria-modal="true" :aria-label="action === 'rename' ? 'Rename recording' : 'Delete recording'">
-        <form class="gx-card gx-settings__dialog" @submit.prevent="save()">
-          <h3>{{ action === 'rename' ? 'Rename recording' : 'Delete recording?' }}</h3>
+      <GxDialog v-if="action" labelledby="gx-recording-action-title" :alert="action === 'delete'" @close="!busy && (action='')">
+        <form class="gx-stack" @submit.prevent="save()">
+          <h3 id="gx-recording-action-title">{{ action === 'rename' ? 'Rename recording' : 'Delete recording?' }}</h3>
           <label v-if="action === 'rename'">Name<input class="gx-field" v-model="name" maxlength="128" required :disabled="busy" /></label>
           <p v-else>Delete {{ recording.displayName || recording.routeId }}? This cannot be undone.</p>
           <p v-if="all">{{ includePreserved ? "Preserved drives will also be deleted." : "Preserved drives will be kept." }}</p>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-          <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="action=''">Cancel</button>
+          <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="action=''">Cancel</button>
             <button class="gx-btn" :disabled="busy">{{ action === 'rename' ? 'Save name' : 'Delete recording' }}</button></div>
         </form>
-      </div></Teleport>
+      </GxDialog>
     </div>`,
 }

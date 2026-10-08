@@ -350,6 +350,22 @@ class SoftwareOperationsTest(unittest.TestCase):
     with self.assertRaises(SoftwareOperationError):
       self.save_downloads(1, False)
 
+  def test_repository_link_uses_only_normalized_github_origins(self):
+    for remote in ('https://github.com/owner/repo.git', 'git@github.com:owner/repo.git', 'ssh://git@github.com/owner/repo'):
+      self.params.put('GitRemote', remote, block=True)
+      self.assertEqual(self.owner.snapshot(include_history=False)['repository'], 'owner/repo')
+    self.params.put('GitRemote', 'https://foreign.test/owner/repo', block=True)
+    self.assertIsNone(self.owner.snapshot(include_history=False)['repository'])
+
+  def test_lightweight_status_preserves_controls_without_reading_history(self):
+    with mock.patch.object(self.owner, '_history_snapshot') as history:
+      light = self.owner.snapshot(include_history=False)
+      self.assertNotIn('history', light)
+      history.assert_not_called()
+      full = self.owner.snapshot()
+      history.assert_called_once()
+      self.assertEqual(light, {key: value for key, value in full.items() if key != 'history'})
+
   def test_history_caches_local_reads_and_refreshes_when_download_identity_changes(self):
     reader = mock.Mock(side_effect=lambda path, sha: [{'hash': sha, 'date': '2026-09-29T12:00:00+00:00', 'subject': path.name}])
     self.owner.history_reader = reader

@@ -1,3 +1,5 @@
+import { GxDialog } from "./dialog.js"
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsFeed } from "./settings.js"
@@ -36,7 +38,7 @@ export function curveGeometry(points) {
 }
 
 export const LongitudinalCurvesPage = {
-  components: { GxNotice, GalaxySettingRow },
+  components: { GxDialog, GxState, GxNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, go: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, error: "", profile: "standard", category: "acceleration" })
@@ -57,18 +59,18 @@ export const LongitudinalCurvesPage = {
   },
   template: `
     <section class="gx-long-curves" aria-label="Longitudinal curves">
-      <div class="gx-card gx-long-curves__header"><div><h2>Longitudinal Curves</h2>
+      <div class="gx-card gx-long-curves__header gx-page-header"><div><h2>Longitudinal Curves</h2>
         <p>Review acceleration, braking, and following curves for the next drive.</p></div>
         </div>
-      <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved curves are unavailable in preview.</div>
+      <GxState v-if="mode !== 'local'">Local saved curves are unavailable in preview.</GxState>
       <template v-else>
-        <div class="gx-long-curves__tabs" role="group" aria-label="Personality profile">
+        <div class="gx-long-curves__tabs gx-tabs" role="group" aria-label="Personality profile">
           <button v-for="profile in profiles" :key="profile" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.profile === profile"
             :disabled="state.status === 'saving'" @click="selectProfile(profile)">{{ profile }}</button></div>
-        <div class="gx-long-curves__tabs" role="group" aria-label="Curve category">
+        <div class="gx-long-curves__tabs gx-tabs" role="group" aria-label="Curve category">
           <button v-for="category in categories" :key="category" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.category === category"
             :disabled="state.status === 'saving'" @click="selectCategory(category)">{{ category }}</button></div>
-        <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved curve…</div>
+        <GxState v-if="state.status === 'loading'" loading>Loading saved curve…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved curve is unavailable.</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
@@ -97,10 +99,9 @@ export const LongitudinalCurvesPage = {
           <p v-else class="gx-note">{{ preset?.value === 'custom' ? 'Saved custom points are unavailable; review the saved profile.' : 'Choose the Custom preset to edit saved points. Preset curves remain managed by the vehicle profile.' }}</p>
           <button type="button" class="gx-btn gx-btn--tonal" @click="go('/driving/profiles')">All profile settings</button>
         </article>
-        <Teleport to="body"><div v-if="state.pending" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Confirm saved curve">
-          <div class="gx-card gx-settings__dialog"><h3>Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
-            <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
-              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></div></div></Teleport>
+        <GxDialog v-if="state.pending" labelledby="gx-longitudinal-curves-confirm-title" @close="feed.cancel()"><h3 id="gx-longitudinal-curves-confirm-title">Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
+            <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>
+              <button type="button" class="gx-btn" @click="feed.confirm()">Save</button></div></GxDialog>
       </template>
     </section>`,
 }

@@ -1,3 +1,4 @@
+import { GxDialog } from "./dialog.js"
 import { GxNotice } from "./notice.js"
 import { connectionError } from "./polling.js"
 import { requestJson } from "./startup.js"
@@ -261,7 +262,7 @@ export class MapOperationsClient {
 }
 
 export const MapOperationsPanel = {
-  components: { GxNotice },
+  components: { GxDialog, GxNotice },
   name: "MapOperationsPanel",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ setup: null, catalog: null, operation: null, busy: false, error: "", search: "", review: null }),
@@ -309,9 +310,9 @@ export const MapOperationsPanel = {
             <p class="gx-note">{{ formatBytes(setup.freeDiskBytes) }} available storage. {{ setup.parked ? 'Parked downloads available.' : 'Park to download maps.' }}</p></template>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
 
-          <p v-if="!operation" role="status">{{ error ? 'Map operation status unavailable.' : 'Loading map operation…' }}</p>
-          <template v-else>
-            <dl class="gx-map-manager__status"><dt>Operation</dt><dd>{{ operation.state }}</dd>
+          <p v-if="!operation && !error" role="status">Loading map operation…</p>
+          <template v-if="operation">
+            <dl class="gx-details"><dt>Operation</dt><dd>{{ operation.state }}</dd>
               <dt>Selected map</dt><dd>{{ operation.selectedGeneration ? 'Saved selection' : 'None' }}</dd>
               <dt v-if="operation.regionToken">Region</dt><dd v-if="operation.regionToken">{{ operation.regionToken }}</dd>
               <dt v-if="running">Progress</dt><dd v-if="running">{{ operation.completedGroups }} of {{ operation.totalGroups }} areas prepared</dd>
@@ -323,7 +324,7 @@ export const MapOperationsPanel = {
           </template>
           <div class="gx-map-manager__picker"><label for="map-region-search">Search regions</label>
             <input id="map-region-search" class="gx-field" type="search" v-model="search" placeholder="Country or US state"></div>
-          <p v-if="!catalog && setup?.packageReady" role="status">{{ error ? 'Map catalog unavailable.' : 'Loading map catalog…' }}</p>
+          <p v-if="!catalog && setup?.packageReady && !error" role="status">Loading map catalog…</p>
           <template v-if="catalog"><p class="gx-note">{{ regions.length }} regions shown · Up to {{ formatBytes(catalog.maxTransferBytes) }} transfer · {{ formatBytes(catalog.maxNewDiskBytes) }} new storage.</p>
             <div class="gx-map-manager__regions">
               <div v-for="region in regions" :key="region.token" class="gx-map-manager__region">
@@ -334,12 +335,10 @@ export const MapOperationsPanel = {
             </div></template>
         </template>
       </div>
-      <Teleport to="body"><div v-if="review" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Review map region">
-        <div class="gx-card gx-settings__dialog gx-map-manager__dialog"><h3>Replace Selected Map?</h3>
+      <GxDialog v-if="review" labelledby="gx-map-operations-confirm-title" @close="review=null"><h3 id="gx-map-operations-confirm-title">Replace Selected Map?</h3>
           <p><strong>{{ review.region.name }}</strong> covers an approximate rectangle ({{ formatBounds(review.region.bounds) }}), {{ review.region.groups }} groups. This can transfer up to {{ formatBytes(catalog.maxTransferBytes) }} and use up to {{ formatBytes(catalog.maxNewDiskBytes) }} of new disk space. The result is selected for the next map service start.</p>
-          <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="review=null">Cancel</button>
+          <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="review=null">Cancel</button>
             <button type="button" class="gx-btn" :disabled="busy || running || !operation" @click="confirm">Start download</button></div>
-        </div>
-      </div></Teleport>
+        </GxDialog>
     </section>`,
 }

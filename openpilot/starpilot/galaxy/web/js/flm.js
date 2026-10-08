@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { LocalHistoryFeed, validLocalHistory } from './record-history.js'
 
@@ -275,6 +276,7 @@ export function validLiveFlm(value) {
 
 export const FlmLiveEditor = {
   name: 'FlmLiveEditor',
+  components: { GxNotice },
   emits: ['source'],
   props: { unauthorized: { type: Function, required: true } },
   data: () => ({ live: null, error: '', busy: false, id: 'profile1', label: 'My surface', draft: null, useCurve: false, curve: [] }),
@@ -366,7 +368,7 @@ export function gmEventSeries(plot) {
 
 export const FlmPage = {
   name: 'FlmPage',
-  components: { GxNotice, FlmChart, FlmLiveEditor },
+  components: { GxState, GxNotice, FlmChart, FlmLiveEditor },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, go: { type: Function, required: true } },
   data: () => ({ inventoryStatus: 'idle', inventory: null, inventoryError: '', operation: null, report: null,
     operationError: '', busy: false, requesting: false, selected: [], gmSource: null, accepted: [], ignored: [] }),
@@ -413,20 +415,20 @@ export const FlmPage = {
     exclusions(items) { return items.map(([reason, count]) => `${reason.replaceAll('_', ' ')}: ${count}`).join(' · ') || 'None recorded' },
   },
   template: `<div class="gx-view gx-flm">
-    <div class="gx-settings__header"><div><h2>FLM</h2><p>Review recorded torque tracking or generate GM trial choices from observed symptoms. A trial is a user-selected tune, not a fitted learner or vehicle qualification.</p></div></div>
-    <p v-if="mode !== 'local'" class="gx-card gx-message">Offline analysis requires authenticated local Galaxy access.</p>
+    <div class="gx-settings__header gx-page-header"><div><h2>FLM</h2><p>Review recorded torque tracking or generate GM trial choices from observed symptoms. A trial is a user-selected tune, not a fitted learner or vehicle qualification.</p></div></div>
+    <GxState v-if="mode !== 'local'">Offline analysis requires authenticated local Galaxy access.</GxState>
     <template v-else>
       <FlmLiveEditor ref="liveEditor" :unauthorized="unauthorized" @source="gmSource = $event"/>
 
-      <p v-if="inventoryStatus === 'loading'" role="status" class="gx-card gx-message">Reading local recordings…</p><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
-      <p v-if="inventory?.scanIncomplete" role="status">This recording scan was incomplete. More local segments may exist.</p>
+      <GxState v-if="inventoryStatus === 'loading'" loading>Reading local recordings…</GxState><GxNotice tone="danger" v-if="inventoryStatus === 'unavailable'">{{ inventoryError }}</GxNotice>
+      <GxNotice v-if="inventory?.scanIncomplete" tone="warn">This recording scan was incomplete. More local segments may exist.</GxNotice>
       <section class="gx-card gx-flm__panel"><h3>Choose Full Logs</h3><p class="gx-note">Select 1–5 closed local segments. Quick logs alone cannot provide this report.</p>
-<div class="gx-flm__actions" style="position:sticky;top:0;z-index:1;background:var(--gx-surface, #181526);padding:0.75rem 0;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+<div class="gx-flm__actions gx-actions gx-flm__sticky">
           <button type="button" class="gx-btn" :disabled="!canAnalyze" @click="analyze">Analyze selected</button><button type="button" class="gx-btn" :disabled="!canAnalyze || !gmSource?.editable" @click="train">Generate GM trials</button><span>{{ selected.length }} of 5 selected</span>
         </div>
         <p v-if="inventoryStatus === 'ready' && !available.length">No closed full logs found in this scan.</p>
         <div v-for="segment in available" :key="segment.name" class="gx-flm__choice"><label><input type="checkbox" :checked="selected.includes(segment.name)"
-          :disabled="!selected.includes(segment.name) && selected.length >= 5 || operation?.state === 'running'" @change="toggle(segment.name)">
+ :disabled="!selected.includes(segment.name) && selected.length>= 5 || operation?.state === 'running'" @change="toggle(segment.name)">
           <span>Route {{ segment.routeId }} · Segment {{ segment.number }}</span></label></div>
       </section>
       <section class="gx-card gx-flm__panel"><h3>Analysis</h3>

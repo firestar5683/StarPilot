@@ -7,7 +7,7 @@ assert.equal(validSetup(setup), true)
 assert.equal(validSetup({ ...setup, packageReady: true }), false)
 assert.equal(validSetup({ ...setup, snapshotReady: false }), false)
 assert.equal(validSetup({ ...setup, freeDiskBytes: -1 }), false)
-assert.match(MapOperationsPanel.template, /Saved map selection is retained/)
+assert.match(MapOperationsPanel.template, /saved map selection is retained/i)
 assert.match(MapOperationsPanel.template, /available storage/)
 let calls = [], updates = [], resolveSetup
 const client = new MapOperationsClient({ publish: state => updates.push(state),

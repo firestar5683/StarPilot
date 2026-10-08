@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { installHelp, InstallApp } from '../web/js/install-app.js'
+import { installHelp, InstallApp, rememberInstallPrompt } from '../web/js/install-app.js'
 assert.match(installHelp({ secure: true, agent: 'iPhone' }), /Share.*Add to Home Screen/)
 assert.match(installHelp({ secure: false, agent: 'Android' }), /https:\/\/galaxy.firestar.link/)
 assert.match(installHelp({ secure: true, agent: 'Chrome' }), /Install app/)
@@ -28,3 +28,13 @@ assert.equal(state.installed, true)
 InstallApp.beforeUnmount.call(state)
 assert.equal(events.size, 0)
 console.log('install app prompt and platform guidance passed')
+
+// Browser can offer installation before the tool is mounted.
+const early = {preventDefault(){}, prompt: async () => prompted++, userChoice: Promise.resolve({outcome:'dismissed'})}
+rememberInstallPrompt(early)
+const late = {...InstallApp.data()}
+InstallApp.mounted.call(late)
+assert.equal(late.prompt, early)
+await InstallApp.methods.install.call(late)
+assert.equal(prompted, 2)
+InstallApp.beforeUnmount.call(late)

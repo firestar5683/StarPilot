@@ -11,10 +11,10 @@ const snapshot = (changes = {}) => ({ schemaVersion: 1, installed, updater, oper
 const request = (action, state = "pending", target = null, error = null) => ({ id: "one", action, target, state, error })
 const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body })
 
-function fixture() {
+function fixture(includeHistory = true) {
   const requests = [], states = [], timers = new Map()
   let nextTimer = 0, unauthorized = 0
-  const feed = new SoftwareStatusFeed({ publish: (state) => states.push(state), unauthorized: () => { unauthorized++ },
+  const feed = new SoftwareStatusFeed({ includeHistory, publish: (state) => states.push(state), unauthorized: () => { unauthorized++ },
     later: (fn, ms) => { const id = ++nextTimer; timers.set(id, { fn, ms }); return id },
     cancelTimer: (id) => timers.delete(id),
     fetcher: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })) })
@@ -239,62 +239,44 @@ assert.equal(revoked.states.at(-1).status, "idle")
 const page = (selectedTarget = "Dom", availableBranches = ["StarPilot", "Dom", "beta"], installedBranch = "Dom") => {
   const state = { operations: { ...operations, selectedTarget, availableBranches }, data: {
     installed: { ...installed, branch: installedBranch } }, actionDisabled: false,
-    primaryChoice: "", draftBranch: "", draftTouched: false, dialog: null }
-  Object.defineProperty(state, "otherBranches", { get: () => SoftwarePage.computed.otherBranches.call(state) })
-  Object.defineProperty(state, "canStageBranch", { get: () => SoftwarePage.computed.canStageBranch.call(state) })
+    draftBranch: "", draftTouched: false, dialog: null }
+  Object.defineProperty(state,"branchOptions",{get:()=>SoftwarePage.computed.branchOptions.call(state)})
+  Object.defineProperty(state,"canStageBranch",{get:()=>SoftwarePage.computed.canStageBranch.call(state)})
   return state
 }
 const staged = page()
-SoftwarePage.methods.syncDraftBranch.call(staged, "Dom")
-assert.equal(staged.primaryChoice, "Dom")
-assert.equal(SoftwarePage.computed.primaryBranchHelp.call(staged), "Latest features and fixes under development. Updates regularly and may introduce bugs.")
-staged.primaryChoice = "other:"
-SoftwarePage.methods.onPrimaryBranchChange.call(staged)
-assert.equal(staged.draftBranch, "") // Other is navigation, never a draft target.
-assert.equal(staged.canStageBranch, false)
-staged.draftBranch = "beta"
-SoftwarePage.methods.onOtherBranchChange.call(staged)
-assert.equal(staged.primaryChoice, "other:")
-assert.equal(staged.canStageBranch, true)
+SoftwarePage.methods.syncDraftBranch.call(staged,"Dom")
+assert.equal(staged.draftBranch,"Dom")
+staged.draftBranch="beta"
+SoftwarePage.methods.changeBranch.call(staged)
+assert.equal(staged.draftTouched,true)
+assert.equal(staged.canStageBranch,true)
 SoftwarePage.methods.chooseBranch.call(staged)
-assert.equal(staged.dialog.action, "select")
-assert.equal(staged.dialog.branch, "beta")
-assert.match(staged.dialog.message, /only stages the choice/i)
-staged.dialog = null
-staged.draftBranch = "other:"
-assert.equal(staged.canStageBranch, false)
-SoftwarePage.methods.chooseBranch.call(staged)
-assert.equal(staged.dialog, null)
-
-const alternateTarget = page("legacy", ["StarPilot", "Dom", "beta"], "installed-only")
-SoftwarePage.methods.syncDraftBranch.call(alternateTarget, alternateTarget.operations.selectedTarget)
-assert.equal(alternateTarget.primaryChoice, "other:")
-assert.equal(alternateTarget.draftBranch, "legacy")
-assert.deepEqual(alternateTarget.otherBranches.map(({ name, listed, current }) => ({ name, listed, current })), [
-  { name: "legacy", listed: false, current: false },
-  { name: "installed-only", listed: false, current: true },
-  { name: "beta", listed: true, current: false },
-])
-assert.equal(alternateTarget.canStageBranch, false) // A missing target remains visible but cannot be staged.
-alternateTarget.draftBranch = "beta"
-assert.equal(alternateTarget.canStageBranch, true)
-const unavailablePrimary = page("Dom", ["Dom"])
-unavailablePrimary.primaryChoice = "StarPilot"
-SoftwarePage.methods.onPrimaryBranchChange.call(unavailablePrimary)
-assert.equal(unavailablePrimary.canStageBranch, false)
-
+assert.equal(staged.dialog.action,"select") // Normal updates can still stage a target without restarting.
+assert.equal(staged.dialog.branch,"beta")
+SoftwarePage.methods.askFastUpdate.call({...staged, operations:{...staged.operations,canFastUpdate:true}})
+const switchPage={...staged,operations:{...staged.operations,canFastUpdate:true}}
+SoftwarePage.methods.askFastUpdate.call(switchPage)
+assert.equal(switchPage.dialog.action,"fast")
+assert.equal(switchPage.dialog.branch,"beta")
+assert.equal(switchPage.dialog.label,"Switch & update")
+const alternateTarget=page("legacy",["StarPilot","Dom","beta"],"installed-only")
+SoftwarePage.methods.syncDraftBranch.call(alternateTarget,"legacy")
+assert.equal(alternateTarget.canStageBranch,false)
+assert.equal(alternateTarget.draftBranch,"installed-only")
+assert.deepEqual(alternateTarget.branchOptions.map(branch=>branch.name),["legacy","installed-only","StarPilot","Dom","beta"])
+assert.equal(alternateTarget.branchOptions[0].available,false)
+assert.equal(alternateTarget.branchOptions[1].available,true)
 const sentinel = fixture()
 sentinel.feed.start()
 await sentinel.reply(0, snapshot({ operations: { ...operations, availableBranches: ["Dom", "other:"] } }))
 sentinel.feed.action("select", "other:")
 assert.equal(sentinel.requests.length, 1)
-assert.deepEqual(page("Dom", ["Dom", "other:"]).otherBranches, [])
+assert.deepEqual(page("Dom", ["Dom", "other:"]).branchOptions.map(branch=>branch.name), ["Dom"])
 sentinel.feed.stop()
 
-assert.match(SoftwarePage.template, /StarPilot — Release/)
-assert.match(SoftwarePage.template, /Dom — Development/)
-assert.match(SoftwarePage.template, /Other branches…/)
-assert.match(SoftwarePage.template, /Additional branches from this installation's repository/)
+assert.equal(SoftwarePage.methods.branchLabel("StarPilot"), "StarPilot — Release")
+assert.equal(SoftwarePage.methods.branchLabel("Dom"), "Dom — Development")
 assert.match(SoftwarePage.template, /Check for updates/)
 assert.match(SoftwarePage.template, /Normal Update/)
 assert.match(SoftwarePage.template, /Restart &amp; install/)
@@ -360,7 +342,7 @@ fastLost.feed.stop()
 
 const fastPage = { actionDisabled: false, operations: { canFastUpdate: true, selectedTarget: "beta" }, data: { installed }, dialog: null }
 SoftwarePage.methods.askFastUpdate.call(fastPage)
-assert.deepEqual(fastPage.dialog, { action: "fast", branch: "beta", title: "Fast Update", message: "Download latest version of beta and restart?", label: "Fast Update" })
+assert.deepEqual(fastPage.dialog, { action: "fast", branch: "beta", title: "Switch branch", message: "Download latest version of beta and restart?", label: "Switch & update" })
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canFastUpdate: "yes" } })), false)
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, request: { ...request("fast"), outcome: "invented" } } })), false)
 
@@ -418,9 +400,9 @@ for (const percent of [NaN, Infinity, -1, 101]) {
 assert.equal(softwareProgress({...updater, state: "finalizing update..."}, {progress: {stage: "unavailable", detail: "Updater status unavailable", percent: null}}).active, false)
 assert.ok(validSoftwareSnapshot(snapshot({updater: {...updater, lastCheckedAt: null}})))
 assert.equal(validSoftwareSnapshot(snapshot({updater: {...updater, lastCheckedAt: 12}})), false)
-assert.match(SoftwarePage.template, /1\. Check for updates/)
-assert.match(SoftwarePage.template, /2\. Choose your update/)
-assert.match(SoftwarePage.template, /lastCheckedAt !== undefined \? 'Last checked' : 'Last successful activity'/)
+assert.match(SoftwarePage.template, /<summary>Advanced options<\/summary>/)
+assert.match(SoftwarePage.template, /<summary>Versions &amp; release notes<\/summary>/)
+assert.match(SoftwarePage.template, /data\.updater\.lastCheckedAt/)
 
 for (const progress of [{stage: "idle", detail: "", percent: null}, {stage: null, detail: null, percent: null}, {stage: "unknown", detail: "", percent: null}]) {
   assert.ok(validSoftwareSnapshot(snapshot({operations: {...operations, progress}})))
@@ -433,3 +415,28 @@ for (const stage of ["complete", "error"]) {
   assert.equal(softwareProgress(state, {progress}).percent, null)
 }
 assert.equal(softwareProgress({...updater, state: "finalizing update..."}, {progress: {stage: "finalizing", detail: null, percent: null}}).label, "Finalizing update")
+
+const lightweight = fixture(false)
+lightweight.feed.start()
+assert.equal(lightweight.requests[0].url, './api/software/status?history=0')
+await lightweight.reply(0, snapshot())
+assert.equal(lightweight.states.at(-1).busy, false)
+assert.equal(lightweight.states.at(-1).data.operations.canCheck, true)
+SoftwarePage.methods.loadHistory.call({ operations, busy: false, feed: lightweight.feed }, { target: { open: true } })
+assert.equal(lightweight.requests[1].url, './api/software/status')
+await lightweight.reply(1, snapshot({ operations: { ...operations, history } }))
+assert.deepEqual(lightweight.states.at(-1).data.operations.history, history)
+lightweight.feed.stop()
+
+const directBranch = fixture()
+directBranch.feed.start()
+await directBranch.reply(0,snapshot({operations:{...operations,availableBranches:['Dom','beta'],canFastUpdate:true}}))
+const branchVm={actionDisabled:false,draftBranch:'beta',operations:directBranch.states.at(-1).data.operations,data:{installed},dialog:null,feed:directBranch.feed}
+SoftwarePage.methods.askFastUpdate.call(branchVm)
+assert.equal(branchVm.dialog.label,'Switch & update')
+const acceptedSwitch=SoftwarePage.methods.confirmDialog.call(branchVm)
+assert.deepEqual(JSON.parse(directBranch.requests[1].options.body),{action:'fast',branch:'beta'})
+assert.equal(directBranch.requests.length,2,'switching uses one request and one confirmation')
+await directBranch.reply(1,snapshot())
+await acceptedSwitch
+directBranch.feed.stop()

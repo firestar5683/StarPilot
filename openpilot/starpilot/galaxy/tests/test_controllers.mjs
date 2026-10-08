@@ -15,7 +15,7 @@ assert.equal(validControllersStatus({ ...status(), options: [{ key: "x\n", label
 assert.equal(validControllersStatus({ ...status(), lastPress: { deviceId: "hardware-1", code: 65551,
   slot: null, executed: false, message: "Test press detected" } }), true)
 assert.match(BluetoothPage.template, /<ControllersPage :mode="mode" :unauthorized="unauthorized"/)
-assert.match(ControllersPage.template, /Test Buttons for 20 Seconds/)
+assert.match(ControllersPage.template, /Test buttons \(20s\)/)
 assert.match(ControllersPage.template, /Press a button for/)
 assert.match(ControllersPage.template, /class="gx-switch"/)
 assert.match(ControllersPage.template, /class="gx-switch__track"/)

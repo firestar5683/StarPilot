@@ -1,3 +1,4 @@
+import { GxState } from "./state.js"
 import { GxDialog } from "./dialog.js"
 import { requestJson } from "./startup.js"
 import { GxIconButton } from "./icon-button.js"
@@ -108,7 +109,7 @@ export class LocalHistoryFeed extends SnapshotFeed {
 
 export const LocalRecordingsPage = {
   name: "LocalRecordingsPage",
-  components: { GxIconButton, GxNotice, RecordingActions, GalaxySelect, GxDialog },
+  components: { GxState, GxIconButton, GxNotice, RecordingActions, GalaxySelect, GxDialog },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ sortOrder: "newest", logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
     details: null, detailsName: null, detailsStatus: "idle", detailsError: "", detailsGeneration: 0,
@@ -142,7 +143,7 @@ export const LocalRecordingsPage = {
     recordingUrl,
     driveVideoUrl: (routeId, camera) => LOCAL.test(routeId) && ["qcamera", "fcamera", "dcamera", "ecamera"].includes(camera) ?
       `./api/recordings/route/${encodeURIComponent(routeId)}/${camera}` : null,
-    cameraLabel: camera => LABELS[camera],
+    cameraLabel: camera => LABELS[camera]?.replace(" video", ""),
     logUrl: (segmentName, filename) => SEGMENT.test(segmentName) && /^(rlog|qlog)\.(zst|bz2)$/.test(filename) ?
       `./api/recordings/files/${encodeURIComponent(segmentName)}/${filename}` : null,
     detailMetric,
@@ -309,7 +310,7 @@ export const LocalRecordingsPage = {
   template: `
     <div class="gx-view gx-recordings">
       <h2>Recordings</h2>
-      <p v-if="mode !== 'local'" class="gx-card gx-message">Local recordings are unavailable in the offline preview.</p>
+      <GxState v-if="mode !== 'local'">Local recordings are unavailable in the offline preview.</GxState>
       <template v-else>
         <section class="gx-card gx-recordings__library">
           <header class="gx-section__header"><i class="bi bi-camera-reels" aria-hidden="true"></i><span class="gx-section__title">Dashcam drives</span>
@@ -320,12 +321,12 @@ export const LocalRecordingsPage = {
             <GalaxySelect class="gx-field" aria-label="Sort recordings" :value="sortOrder" @change="sortOrder=$event.target.value">
               <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="longest">Longest duration</option><option value="shortest">Shortest duration</option>
             </GalaxySelect>
-            <div class="gx-recordings__tabs" aria-label="Filter recordings"><button class="gx-btn gx-btn--tonal" :aria-pressed="!preservedOnly" @click="preservedOnly=false">All</button><button class="gx-btn gx-btn--tonal" :aria-pressed="preservedOnly" @click="preservedOnly=true">Preserved · {{ stats.preserved }}</button></div>
+            <div class="gx-recordings__tabs gx-tabs" aria-label="Filter recordings"><button class="gx-btn gx-btn--tonal" :aria-pressed="!preservedOnly" @click="preservedOnly=false">All</button><button class="gx-btn gx-btn--tonal" :aria-pressed="preservedOnly" @click="preservedOnly=true">Preserved · {{ stats.preserved }}</button></div>
           </div>
         </section>
-        <p v-if="status === 'loading'" role="status" class="gx-card gx-message">Finding local drives…</p><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
+        <GxState v-if="status === 'loading'" loading>Finding local drives…</GxState><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
-          <p v-if="data.scanIncomplete" role="status">This scan was incomplete. More local segments may exist.</p>
+          <GxNotice v-if="data.scanIncomplete" tone="warn">This scan was incomplete. More local segments may exist.</GxNotice>
           <section class="gx-card gx-recordings__list">
             <p v-if="!routeCards.length" class="gx-recordings__empty">{{ data.routes.length ? 'No drives match your filters.' : 'No saved drives found on this device.' }}</p>
             <article v-for="route in routeCards" :key="route.routeId" class="gx-recordings__row" :class="{'gx-recordings__row--preserved': route.preserved}">
@@ -339,10 +340,10 @@ export const LocalRecordingsPage = {
           </section>
           <section v-if="logsRoute" ref="logsPanel" class="gx-card gx-recordings__logs">
             <header class="gx-section__header"><i class="bi bi-file-earmark-arrow-down"></i><span class="gx-section__title">{{ logsRoute.displayName !== logsRoute.routeId ? logsRoute.displayName : logsRoute.date.label }} · Logs and files</span><button class="gx-icon-btn" aria-label="Close logs" @click="logsRoute=null"><i class="bi bi-x-lg"></i></button></header>
-            <div class="gx-recordings__actions gx-recordings__log-toolbar"><a v-if="logsRoute.segments.some(segment => segment.logFiles?.length)" class="gx-btn gx-btn--tonal" :href="logArchiveUrl(logsRoute.routeId)" :download="logsRoute.routeId + '-logs.tar'"><i class="bi bi-download"></i>Download all logs (.tar)</a><a class="gx-btn gx-btn--tonal" href="#/tuning/flm">Analyze driving logs</a><a v-if="logsRoute.connect" class="gx-btn gx-btn--tonal" :href="logsRoute.connect" target="_blank" rel="noopener noreferrer">Open in comma connect</a></div>
+            <div class="gx-recordings__actions gx-recordings__log-toolbar gx-actions"><a v-if="logsRoute.segments.some(segment => segment.logFiles?.length)" class="gx-btn gx-btn--tonal" :href="logArchiveUrl(logsRoute.routeId)" :download="logsRoute.routeId + '-logs.tar'"><i class="bi bi-download"></i>Download all logs (.tar)</a><a class="gx-btn gx-btn--tonal" href="#/tuning/flm">Analyze driving logs</a><a v-if="logsRoute.connect" class="gx-btn gx-btn--tonal" :href="logsRoute.connect" target="_blank" rel="noopener noreferrer">Open in comma connect</a></div>
             <ul class="gx-recordings__segments"><li v-for="segment in logsRoute.segments" :key="segment.number">
               <div class="gx-recordings__segment-info"><strong>Segment {{ segment.number }}</strong><ul class="gx-recordings__files"><li v-for="file in availableFiles(segment.files)" :key="file">{{ file }}</li></ul></div>
-              <div class="gx-recordings__actions"><a v-for="filename in segment.logFiles || []" :key="filename" class="gx-btn gx-btn--tonal" :href="logUrl(segment.segmentName, filename)" :download="segment.segmentName + '-' + filename">{{ filename }}<span v-if="segment.logBytes?.[filename]"> · {{ formatBytes(segment.logBytes[filename]) }}</span><i class="bi bi-download"></i></a>
+              <div class="gx-recordings__actions gx-actions"><a v-for="filename in segment.logFiles || []" :key="filename" class="gx-btn gx-btn--tonal" :href="logUrl(segment.segmentName, filename)" :download="segment.segmentName + '-' + filename">{{ filename }}<span v-if="segment.logBytes?.[filename]"> · {{ formatBytes(segment.logBytes[filename]) }}</span><i class="bi bi-download"></i></a>
                 <button v-if="segment.files.rlog" class="gx-btn gx-btn--tonal" @click="openDetails(segment)">Details</button>
                 <button v-for="camera in ['fcamera', 'ecamera', 'dcamera', 'qcamera'].filter(camera => segment.files[camera])" :key="camera" class="gx-btn gx-btn--tonal" @click="openPlayer(logsRoute, segment, camera)">Play {{ cameraLabel(camera) }}</button>
                 <button v-if="hasVideo(segment.files)" type="button" class="gx-btn gx-btn--tonal gx-recordings__danger" :disabled="deleting !== null" @click="confirmDeleteVideos(segment)"><i aria-hidden="true" class="bi bi-trash"></i> {{ deleting === segment.segmentName ? 'Deleting…' : 'Delete videos' }}</button>
@@ -352,7 +353,7 @@ export const LocalRecordingsPage = {
           <section v-if="detailsName" ref="detailsPanel" class="gx-card gx-recordings__details" aria-label="Recorded segment details">
             <div class="gx-recordings__player-head"><h3>Recorded Segment Details</h3><GxIconButton label="Close segment details" icon="bi-x-lg" @click="closeDetails" /></div>
             <p class="gx-note">{{ detailsName }} · For this saved segment only. Distance is estimated from recorded speed.</p>
-            <p v-if="detailsStatus === 'loading'" role="status" class="gx-card gx-message">Reading closed full log…</p>
+            <GxState v-if="detailsStatus === 'loading'" loading>Reading closed full log…</GxState>
             <GxNotice tone="danger" v-if="detailsStatus === 'unavailable'">{{ detailsError }}</GxNotice>
             <div v-if="detailsStatus === 'ready' && details" class="gx-recordings__metrics">
               <div><strong>{{ detailMetric(details.observedCarSpanSeconds) }}</strong><span>Recorded time span</span></div>
@@ -371,11 +372,11 @@ export const LocalRecordingsPage = {
           <Teleport to="body"><dialog v-if="playing" ref="playerPanel" class="gx-card gx-recordings__player" aria-label="Camera recording player" @cancel.prevent="closePlayer">
             <div class="gx-recordings__player-head"><div><h3>{{ cameraLabel(playing.camera) }}</h3><p class="gx-note">{{ playing.camera === "qcamera" ? "Quick preview" : "Full-resolution recording" }} · {{ playing.routeId }} · segment {{ playing.segments[playing.index].number }}</p></div>
               <GxIconButton label="Close recording player" icon="bi-x-lg" @click="closePlayer" /></div>
-            <div class="gx-recordings__actions"><button v-for="camera in playerCameras" :key="camera" class="gx-btn gx-btn--tonal"
+            <div class="gx-recordings__actions gx-actions"><button v-for="camera in playerCameras" :key="camera" class="gx-btn gx-btn--tonal"
               :aria-pressed="playing.camera === camera" @click="selectCamera(camera)">{{ cameraLabel(camera) }}</button></div>
             <video :key="playerGeneration" ref="quickVideo" :data-player-generation="playerGeneration" controls playsinline autoplay preload="metadata" :src="playing.url" @error="videoError($event)" @ended="chooseSegment(1)"></video>
             <GxNotice tone="danger" v-if="playerError">{{ playerError }}</GxNotice>
-            <div class="gx-recordings__actions"><a class="gx-btn gx-btn--tonal" :href="playing.url" :download="playing.routeId + '-' + playing.camera + '-' + playing.segments[playing.index].number + '.mp4'">Download segment</a>
+            <div class="gx-recordings__actions gx-actions"><a class="gx-btn gx-btn--tonal" :href="playing.url" :download="playing.routeId + '-' + playing.camera + '-' + playing.segments[playing.index].number + '.mp4'">Download segment</a>
             <a class="gx-btn gx-btn--tonal" :href="driveVideoUrl(playing.routeId, playing.camera)" :download="playing.routeId + '-' + playing.camera + '.mp4'">Download drive</a></div>
             <div class="gx-recordings__player-controls"><GxIconButton label="Previous segment" icon="bi-skip-backward-fill" :disabled="playing.index === 0" @click="chooseSegment(-1)" />
               <GalaxySelect class="gx-field" aria-label="Video segment" :value="String(playing.index)" @change="chooseSegment(Number($event.target.value) - playing.index)"><option v-for="(segment, index) in playing.segments" :key="segment.number" :value="String(index)" :data-collapsed-label="'Segment ' + segment.number">Segment {{ segment.number }} · {{ index + 1 }} of {{ playing.segments.length }}</option></GalaxySelect>
@@ -389,7 +390,7 @@ export const LocalRecordingsPage = {
         <h3 id="gx-delete-videos-title">Delete segment videos?</h3>
         <p id="gx-delete-videos-body">Delete the videos for segment {{ deleteSelection.number }}? Its logs stay on the device. This cannot be undone.</p>
         <GxNotice v-if="deleteError" tone="danger">{{ deleteError }}</GxNotice>
-        <div class="gx-settings__controls">
+        <div class="gx-settings__controls gx-actions">
           <button class="gx-btn gx-btn--tonal" :disabled="deleting !== null" @click="deleteSelection = null">Cancel</button>
           <button class="gx-btn gx-btn--danger" :disabled="deleting !== null" @click="deleteVideos">{{ deleting ? 'Deleting…' : 'Delete videos' }}</button>
         </div>

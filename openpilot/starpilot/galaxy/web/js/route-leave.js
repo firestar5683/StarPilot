@@ -5,14 +5,22 @@ export function createRouteLeave(port) {
   let approved = null
   let generation = 0
   const commit = () => { current = port.read(); port.show() }
-  const ask = (proceed) => {
+  const ask = (proceed, back = false) => {
     const request = ++generation
     const once = () => { if (request === generation) { generation++; proceed() } }
-    if (guard) guard(once)
+    if (guard) guard(once, { back })
     else once()
   }
   return {
     setGuard(value) { guard = value },
+    ensureBackEntry() {
+      if (current.index === 0 && current.path !== "/") {
+        const path = current.path
+        port.replace("/", 0)
+        port.push(path, 1)
+        commit()
+      }
+    },
     navigate(path, before = null) {
       if (path === current.path && !before) return
       ask(() => {
@@ -24,7 +32,7 @@ export function createRouteLeave(port) {
       ask(() => {
         if (current.index > 0) { approved = { index: current.index - 1 }; port.go(-1) }
         else if (current.path !== "/") { port.replace("/", 0); commit() }
-      })
+      }, true)
     },
     changed() {
       let target = port.read()
@@ -32,7 +40,7 @@ export function createRouteLeave(port) {
         if (target.path === current.path && target.index === current.index) {
           const move = restoring
           restoring = null
-          ask(() => { approved = move.target; port.go(move.delta) })
+          ask(() => { approved = move.target; port.go(move.delta) }, move.delta < 0)
         }
         return
       }

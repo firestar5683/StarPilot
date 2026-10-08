@@ -335,10 +335,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       server.software_operations_source = software_operations_source
       return software_operations_source
 
-  def software_snapshot():
+  def software_snapshot(*, include_history=True):
     result = (software_source if software_source is not None else SoftwareStatus()).snapshot()
     if software_source is None or software_operations_source is not None:
-      result = {**result, 'operations': software_owner().snapshot()}
+      operations = software_owner().snapshot() if include_history else software_owner().snapshot(include_history=False)
+      result = {**result, 'operations': operations}
     return result
 
   def sound_owner():
@@ -948,7 +949,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if not self.require_session():
           return
         try:
-          result = software_snapshot()
+          result = software_snapshot(include_history=parse_qs(urlsplit(self.path).query).get('history') != ['0'])
         except (SoftwareUnavailable, SoftwareOperationError, OSError):
           self.json(503, {'error': 'Software status is unavailable'})
         else:
@@ -1363,6 +1364,23 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, result)
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path == '/api/settings/backup':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          from openpilot.starpilot.galaxy.toggle_backup import ToggleBackup
+          result = ToggleBackup(feature_settings(), layout_owner()).export()
+        except (SettingsUnavailable, SettingsChanged, OSError, RuntimeError, ValueError):
+          self.json(503, {'error': 'Toggle backup is unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
       elif path.startswith('/api/settings/pages/'):
         if not self.require_session():
           return
@@ -1457,7 +1475,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.connection.settimeout(old_timeout)
         return
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
-                      '/api/settings/reset-default', '/api/recordings/action',
+                      '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
@@ -1488,7 +1506,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         size = int(self.headers.get('Content-Length', ''))
       except ValueError:
         size = -1
-      max_size = 17408 if path in ('/api/ui/layout', '/api/ui/layout/preview') else 4096
+      max_size = 256 * 1024 if path == '/api/settings/restore' else 17408 if path in ('/api/ui/layout', '/api/ui/layout/preview') else 4096
       if not 0 < size <= max_size:
         self.json(413, {'error': 'Invalid request size'})
         return
@@ -2427,7 +2445,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(401, {'error': 'Sign in to Galaxy'})
           return
         try:
-          if path == '/api/settings/reset-default':
+          if path == '/api/settings/restore':
+            from openpilot.starpilot.galaxy.toggle_backup import ToggleBackup
+            with effect_lock:
+              result = ToggleBackup(feature_settings(), layout_owner()).restore(
+                payload, identity, authorized=lambda: self.settings_session() == identity)
+          elif path == '/api/settings/reset-default':
             if not isinstance(payload, dict) or set(payload) != {'view', 'row'} or \
                not isinstance(payload['view'], str) or len(payload['view']) > 64 or type(payload['row']) is not int:
               raise ValueError('Invalid default reset request')

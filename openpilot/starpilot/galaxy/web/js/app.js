@@ -1,10 +1,13 @@
+import { rememberInstallPrompt } from "./install-app.js"
+import { GxState } from "./state.js"
 import { BottomNav, NAV, primaryTab } from "./bottom-nav.js"
 import { GalaxyLoading } from "./loading-screen.js"
 import { GxNotice } from "./notice.js"
 import { createApp, reactive, defineAsyncComponent } from "../vendor/vue/vue.esm-browser.js"
-import { route, navigate, navigateBack, setRouteLeaveGuard, startRouter } from "./router.js"
+import { route, navigate, navigateBack, ensureBackEntry, setRouteLeaveGuard, startRouter } from "./router.js"
 import { loadCatalog } from "./startup.js"
 import { Tools } from "./tools.js"
+window.addEventListener("beforeinstallprompt", rememberInstallPrompt)
 const Logs = page(() => import("./logs.js").then((module) => module.Logs))
 const SoftwarePage = page(() => import("./software-status.js").then((module) => module.SoftwarePage))
 const NavigationPage = page(() => import("./navigation.js").then((module) => module.NavigationPage))
@@ -37,8 +40,8 @@ import { spawnAmbientStars } from "./ambient-stars.js"
 function page(loader) {
   return defineAsyncComponent({
     loader, delay: 150, timeout: 10000,
-    loadingComponent: { template: '<div class="gx-card gx-message" role="status">Opening page…</div>' },
-    errorComponent: { template: '<div class="gx-card gx-message" role="alert">This page could not open. <button class="gx-btn" @click="reload">Reload page</button></div>',
+    loadingComponent: { components: { GxState }, template: '<GxState loading>Opening page…</GxState>' },
+    errorComponent: { components: { GxState }, template: '<GxState tone="danger">This page could not open.<template #actions><button class="gx-btn" @click="reload">Reload page</button></template></GxState>',
       methods: { reload() { location.reload() } } },
     onError(_error, retry, fail, attempts) { if (attempts < 2) setTimeout(retry, 500); else fail() },
   })
@@ -94,7 +97,7 @@ createApp({
   errorCaptured() { state.pageError = "This page could not finish loading."; return false },
   watch: { 'route.path'(path, previous) {
     state.pageError = ""
-    this.routeDirection = primaryTab(path) < primaryTab(previous) ? -1 : 1
+    this.routeDirection = route.direction < 0 || primaryTab(path) < primaryTab(previous) ? -1 : 1
   } },
   methods: {
     setPageActive(element, active) { element.inert = !active; element.setAttribute("aria-hidden", String(!active)) },
@@ -104,12 +107,8 @@ createApp({
     returnFromSearch() { state.searchPage = "" },
     returnToDriving() { this.go("/driving") },
     returnToDevice() { this.go("/device-preferences") },
+    ensureBackEntry,
     routeBack() { state.drawerOpen = false; navigateBack() },
-    back() {
-      if (this.$refs.activeSettings?.navigateBack()) return
-      if (state.searchPage) { this.returnFromSearch(); return }
-      this.routeBack()
-    },
     toggleTheme() {
       state.theme = this.isLight ? "dark" : "light"
       document.documentElement.dataset.theme = state.theme
@@ -137,7 +136,9 @@ createApp({
       if (!document.hidden && (state.error || authState.status === "unavailable") && !initializing) initialize()
     }
     document.addEventListener("visibilitychange", this.visibility)
-    setRouteLeaveGuard((proceed) => {
+    setRouteLeaveGuard((proceed, { back } = {}) => {
+      if (back && this.$refs.activeSettings?.navigateBack()) return
+      if (back && state.searchPage) { this.returnFromSearch(); return }
       if (this.$refs.activeLayout) this.$refs.activeLayout.requestLeave(proceed)
       else if (this.$refs.activeSettings) this.$refs.activeSettings.requestRouteLeave(proceed)
       else proceed()
@@ -152,7 +153,7 @@ createApp({
   template: `
     <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned, 'gx-nav-hidden': route.path === '/navigation'}">
       <header v-if="route.path !== '/navigation'" class="gx-appbar">
-        <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" aria-label="Back" @click="back"><i class="bi bi-arrow-left"></i></button>
+        <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" aria-label="Back" @click="routeBack"><i class="bi bi-arrow-left"></i></button>
         <div class="gx-appbar__pill">
           <button type="button" class="gx-appbar__home" aria-label="Galaxy Home" @click="go('/')"><span class="gx-brand" aria-hidden="true"></span><span class="gx-appbar__title">Galaxy</span></button>
           <ToggleSearch :enabled="state.monitorMode === 'local' && authState.status === 'authenticated'" :unauthorized="sessionExpired" :open-page="openSearchHit" />
@@ -200,7 +201,7 @@ createApp({
         <PipPage v-else-if="route.path === '/cameras/pip'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <VasmPage v-else-if="route.path === '/cameras/vasm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <Tools v-else-if="route.path === '/tools'" :tools="visibleTools" :mode="state.monitorMode" />
-        <SettingsPage ref="activeSettings" v-else-if="route.path === '/developer/connect'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-section="developer" />
+        <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="route.path === '/developer/connect'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-section="developer" />
         <GalaxyPage v-else-if="route.path === '/galaxy'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <OnroadLayoutPage ref="activeLayout" v-else-if="['/theme_maker', '/theme_maker/android_auto'].includes(route.path)" :key="route.path" :projection="route.path === '/theme_maker/android_auto'" :mode="state.monitorMode" :unauthorized="sessionExpired" @target="go($event === 'projection' ? '/theme_maker/android_auto' : '/theme_maker')" @close="routeBack" />
         <Logs v-else-if="route.path === '/logs' || route.path.startsWith('/logs/') || ['/troubleshoot', '/manage_tmux'].includes(route.path)" :path="route.path === '/troubleshoot' ? '/logs/troubleshoot' : route.path === '/manage_tmux' ? '/logs/tmux' : route.path" :mode="state.monitorMode" :unauthorized="sessionExpired" />
@@ -212,13 +213,13 @@ createApp({
         <AndroidAutoPage v-else-if="route.path === '/android-auto'" :mode="state.monitorMode" :local-access="authState.localAccess" :unauthorized="sessionExpired" />
         <VehicleControlsPage v-else-if="route.path === '/vehicle'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <DevicePreferencesPage v-else-if="route.path === '/device-preferences'" :mode="state.monitorMode" :go="go" />
-        <SettingsPage ref="activeSettings" v-else-if="deviceSettingsPage" :key="deviceSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="deviceSettingsPage" :title="deviceSettingsPage === 'sounds' ? 'Sounds & Alerts' : 'Display'" :return-to="returnToDevice" />
+        <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="deviceSettingsPage" :key="deviceSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="deviceSettingsPage" :title="deviceSettingsPage === 'sounds' ? 'Sounds & Alerts' : 'Display'" :return-to="returnToDevice" />
         <DrivingPage v-else-if="route.path === '/driving'" :mode="state.monitorMode" :go="go" />
         <LongitudinalCurvesPage v-else-if="route.path === '/driving/longitudinal-curves'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <SettingsPage ref="activeSettings" v-else-if="drivingSettingsPage" :key="drivingSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="drivingSettingsPage" :title="'Driving settings · ' + drivingSettingsPage.replaceAll('_', ' ')" :return-to="returnToDriving" />
-        <SettingsPage ref="activeSettings" v-else-if="route.path === '/settings'" :key="state.searchPage || 'hub'" :mode="state.monitorMode" :unauthorized="sessionExpired"
+        <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="drivingSettingsPage" :key="drivingSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="drivingSettingsPage" :title="'Driving settings · ' + drivingSettingsPage.replaceAll('_', ' ')" :return-to="returnToDriving" />
+        <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="route.path === '/settings'" :key="state.searchPage || 'hub'" :mode="state.monitorMode" :unauthorized="sessionExpired"
           :initial-page="state.searchPage || 'hub'" :return-to="state.searchPage ? returnFromSearch : null" />
-        <SettingsPage ref="activeSettings" v-else-if="route.path === '/appearance'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="appearance" title="Driving Screen Widgets" />
+        <SettingsPage @nested="ensureBackEntry" ref="activeSettings" v-else-if="route.path === '/appearance'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="appearance" title="Driving Screen Widgets" />
         <div v-else-if="route.path === '/tuning'" class="gx-view">
           <h2>Plots &amp; Analysis</h2>
           <p class="gx-note">Live control observations and recorded-drive analysis.</p>
@@ -229,12 +230,12 @@ createApp({
         </div>
         <PlotsPage v-else-if="route.path === '/tuning/plots'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
-        <div v-else class="gx-card gx-message" role="status"><h2>{{ pageName }}</h2><p>This capability is unavailable in this build. No operation was attempted.</p></div>
+        <GxState v-else :title="pageName">This capability is unavailable in this build. No operation was attempted.</GxState>
       </div></Transition></div></main>
       <BottomNav v-if="route.path !== '/navigation'" :path="route.path" @navigate="go" />
     </div>
   `,
-}).component("GxNotice", GxNotice).mount("#galaxy-app")
+}).component("GxState", GxState).component("GxNotice", GxNotice).mount("#galaxy-app")
 
 spawnAmbientStars(document.getElementById("galaxy-bg"))
 
