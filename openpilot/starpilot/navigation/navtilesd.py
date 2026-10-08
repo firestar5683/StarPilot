@@ -106,6 +106,8 @@ class Fetcher:
       if self.usage.snapshot()["tiles"] >= int(FREE["vectorTiles"] * STOP_FRACTION):
         self._block(FAILURE_BUDGET, BUDGET_RECHECK_S)  # free tiles for the month are used up; resumes on the 1st
         return None
+    if self.usage is not None:
+      self.usage.add()
     try:
       response = self.session.get(MVT_URL.format(z=key.z, x=key.x, y=key.y), params={"access_token": token},
                                   timeout=REQUEST_TIMEOUT, stream=True)
@@ -128,8 +130,6 @@ class Fetcher:
       return None
     except TileFormatError:
       return None
-    if self.usage is not None:
-      self.usage.add()
     if status in (401, 403):
       self._block(FAILURE_KEY, KEY_BACKOFF_S)
       return None
@@ -161,6 +161,8 @@ class AreaProgress:
     self.refresh = refresh
     self.store = store
     self.recorded = False
+    self.completed_at = area.get("refreshed", 0)
+    self.retry_after = 0.0
 
   @property
   def finished(self) -> bool:
@@ -172,10 +174,6 @@ class AreaProgress:
       key = self.tiles[self.index]
       age = self.store.age("saved", key)
       if age is not None and (not self.refresh or age < AREA_REFRESH_SECONDS):
-        self.index += 1
-        self.done += 1
-        continue
-      if age is None and not self.refresh and self.store.promote("saved", key):
         self.index += 1
         self.done += 1
         continue
@@ -192,7 +190,8 @@ def covered(key: TileKey, areas: list[dict]) -> bool:
   for area in areas:
     cx, cy = world_xy(area["latitude"], area["longitude"], key.z)
     reach = area["radiusKm"] * 1000.0 / max(1.0, meters_per_tile(area["latitude"], key.z))
-    nx, ny = min(max(cx, key.x), key.x + 1), min(max(cy, key.y), key.y + 1)
+    tx = key.x + round((cx - key.x) / (1 << key.z)) * (1 << key.z)
+    nx, ny = min(max(cx, tx), tx + 1), min(max(cy, key.y), key.y + 1)
     if (nx - cx) ** 2 + (ny - cy) ** 2 <= reach * reach:
       return True
   return False
@@ -219,6 +218,8 @@ class TileDaemon:
     self.last_status = -math.inf
     self.last_trim = -math.inf
     self.no_space = False
+    self.storage_retry_after = 0.0
+    self.saved_full_at: int | None = None
     self.sizes = dict.fromkeys(("saved", "driven", "cache"), 0)
 
   # ---- planning
@@ -236,7 +237,7 @@ class TileDaemon:
       self.urgent.clear()
     self.urgent_kind = "driven" if settings["saveDriven"] else "cache"
 
-    route_key = (len(env.route), env.route[0] if env.route else None, env.route[-1] if env.route else None)
+    route_key = tuple(env.route)
     if route_key != self.route_key:
       self.route_key = route_key
       self.route_plan = corridor_tiles(env.route) if len(env.route) >= 2 else []
@@ -251,7 +252,10 @@ class TileDaemon:
     for area_id, area in areas.items():
       progress = self.progress.get(area_id)
       stale = bool(area.get("refreshed")) and self.wall() - area["refreshed"] > AREA_REFRESH_SECONDS
-      if progress is None or _shape(progress.area) != _shape(area) or (progress.finished and stale and not progress.refresh):
+      retry = progress is not None and progress.finished and (
+        progress.failed and self.clock() >= progress.retry_after or
+        progress.recorded and stale and self.wall() - progress.completed_at > AREA_REFRESH_SECONDS)
+      if progress is None or _shape(progress.area) != _shape(area) or retry:
         self.progress[area_id] = AreaProgress(area, self.store, refresh=stale)
     self.known_areas = areas
 
@@ -260,6 +264,8 @@ class TileDaemon:
   def _store(self, kind: str, key: TileKey, data: bytes) -> bool:
     ok = self.store.write(kind, key, data)
     self.no_space = not ok
+    if not ok:
+      self.storage_retry_after = self.clock() + TRIM_INTERVAL_S
     return ok
 
   def _urgent_job(self) -> TileKey | None:
@@ -284,11 +290,18 @@ class TileDaemon:
     """Do at most one download. Returns seconds to wait before the next step, or None when idle."""
     if env.network == "offline" or not env.token or self.fetcher.blocked:
       return None
+    if self.clock() < self.storage_retry_after:
+      return None
+    if not self.store.has_space():
+      self.no_space = True
+      return None
+    self.no_space = False
     key = self._urgent_job()
     if key is not None:
       data = self.fetcher.fetch(key, env.token)
       if data is not None:
-        self._store(self.urgent_kind, key, data)
+        if not self._store(self.urgent_kind, key, data):
+          self.urgent.appendleft(key)
       elif self.fetcher.blocked:
         self.urgent.appendleft(key)
       return 0.0
@@ -296,20 +309,37 @@ class TileDaemon:
     if key is not None:
       data = self.fetcher.fetch(key, env.token)
       if data is not None:
-        self._store("cache", key, data)
+        if not self._store("cache", key, data):
+          self.route_index -= 1
       elif self.fetcher.blocked:
         self.route_index -= 1
       return 0.0
     if env.network != "wifi":
+      return None
+    if self.saved_full_at == self.sizes["saved"]:
+      self.no_space = True
       return None
     for progress in self.progress.values():
       key = None if progress.finished else next(progress.pending(), None)
       if key is None:
         if progress.finished and not progress.recorded and progress.failed == 0:
           progress.recorded = True
-          self.state.mark_refreshed(progress.area, self.wall())
+          progress.completed_at = self.wall()
+          self.state.mark_refreshed(progress.area, progress.completed_at)
         continue
-      if self.sizes["saved"] >= SAVED_MAX_BYTES:
+      cached = self.store.find(key) if not progress.refresh else None
+      if cached is not None:
+        size = cached.stat().st_size
+        if self.sizes["saved"] + size > SAVED_MAX_BYTES:
+          self.no_space = True
+          self.saved_full_at = self.sizes["saved"]
+          return None
+        if self.store.promote("saved", key):
+          self.sizes["saved"] += size
+          progress.done += 1
+          progress.index += 1
+          return 0.0
+      if self.sizes["saved"] >= SAVED_MAX_BYTES and not self.store.has("saved", key):
         self.no_space = True
         return None
       wait = AREA_INTERVAL_S - (self.clock() - self.last_area_fetch)
@@ -317,13 +347,20 @@ class TileDaemon:
         return wait
       self.last_area_fetch = self.clock()
       data = self.fetcher.fetch(key, env.token)
+      saved = self.store.path("saved", key)
+      old_size = saved.stat().st_size if saved.is_file() else 0
+      if data is not None and self.sizes["saved"] + len(data) - old_size > SAVED_MAX_BYTES:
+        self.no_space = True
+        self.saved_full_at = self.sizes["saved"]
+        return None
       if data is not None and self._store("saved", key, data):
-        self.sizes["saved"] += len(data)
+        self.sizes["saved"] += len(data) - old_size
         progress.done += 1
         progress.index += 1
       elif not self.fetcher.blocked and not self.no_space:
         progress.failed += 1
         progress.index += 1
+        progress.retry_after = self.clock() + SERVER_BACKOFF_S
       return 0.0
     return None
 
@@ -416,7 +453,8 @@ def _environment(sm, owner, map_enabled: bool, now_ns: int) -> Environment:
   try:
     from openpilot.starpilot.navigation.wire import navigation_state
     nav = navigation_state(sm["starpilotNavigation"]) if sm.valid["starpilotNavigation"] else None
-    if nav is not None and nav.status == "guiding":
+    if (nav is not None and nav.enabled and nav.status == "guiding" and
+        0 < nav.frameMonoTime <= now_ns <= nav.frameMonoTime + 3_000_000_000):
       env.route = [(point.latitude, point.longitude) for point in nav.route]
   except Exception:
     env.route = []
@@ -435,19 +473,14 @@ def main() -> None:
   from openpilot.starpilot.gps.source import GPS_SOURCES
   sm = messaging.SubMaster(["deviceState", *GPS_SOURCES, "starpilotNavigation"])
   map_enabled, layout_checked = False, -math.inf
-  route: list[tuple[float, float]] = []
   while True:
     sm.update(0)
     now = time.monotonic()
     if now - layout_checked > LAYOUT_CHECK_S:
       layout_checked, map_enabled = now, _map_enabled()
     env = _environment(sm, owner, map_enabled, time.monotonic_ns())
-    if env.route:
-      route = env.route
-    elif not env.onroad:
-      route = []
-    env.route = route
     daemon.plan(env)
+    daemon.maintain()
     idle = False
     deadline = time.monotonic() + 0.9
     while time.monotonic() < deadline:
@@ -457,7 +490,6 @@ def main() -> None:
         break
       if wait > 0:
         time.sleep(min(wait, max(0.0, deadline - time.monotonic())))
-    daemon.maintain()
     daemon.status(env)
     if idle:
       time.sleep(1.0)

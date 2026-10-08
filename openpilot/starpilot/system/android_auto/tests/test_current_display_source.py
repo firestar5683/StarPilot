@@ -63,6 +63,14 @@ class TestCurrentDisplaySource(unittest.TestCase):
     rl.begin_scissor_mode(30, 30, 1800, 1020)
     self.assertEqual(calls, [(30, 30, 1800, 1020), (12, 12, 775, 439)])
 
+  def test_scissors_include_letterbox_offset(self):
+    calls = []
+    rl = type("Rl", (), {})()
+    rl.begin_scissor_mode = lambda *args: calls.append(args)
+    scale_scissors(rl, .5, 20, 40)
+    rl.begin_scissor_mode(10, 30, 100, 50)
+    self.assertEqual(calls, [(25, 55, 50, 25)])
+
   def test_view_uses_current_renderer(self):
     source = (SOURCE / "view.py").read_text()
     self.assertIn('"openpilot.starpilot.system.android_auto.current_car_ui"', source)

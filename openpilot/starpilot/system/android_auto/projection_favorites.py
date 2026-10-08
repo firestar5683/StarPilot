@@ -12,6 +12,7 @@ class ProjectionFavorites:
     self.owner = owner if owner is not None else NavigationOwner()
     self.document = None
     self.error = ''
+    self.card_bounds = None
     self._read_at = float('-inf')
     self._press = None
 
@@ -51,6 +52,17 @@ class ProjectionFavorites:
     if order is None:
       order = [*widget_order(state.customization, 'large'), *FAVORITE_WIDGETS]
     for key in reversed(order):
+      placed = state.customization['layouts']['large'].get(key)
+      if placed is not None and placed['enabled']:
+        px, py = placed['x'], placed['y']
+        if key == 'nav_map':
+          width, height = placed['width'], placed['height']
+        elif key == 'nav_card' and self.card_bounds is not None and (rect := self.card_bounds(state)) is not None:
+          px, py, width, height = rect.x, rect.y, rect.width, rect.height
+        else:
+          width = height = 0
+        if px <= x < px + width and py <= y < py + height:
+          return None
       if key in FAVORITE_WIDGETS and (placed := self.bounds(key, state)) is not None:
         width, height = (FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE) if placed.get('display') == 'icons' else FAVORITE_SIZE
         if placed['x'] <= x < placed['x'] + width and placed['y'] <= y < placed['y'] + height:

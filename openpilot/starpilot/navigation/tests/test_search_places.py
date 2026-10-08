@@ -34,17 +34,17 @@ def choose(owner, result, caller='caller', authorized=True):
   return value, provider
 
 
-def test_selected_place_is_kept_with_its_address_and_becomes_recent(owner):
+def test_selected_place_routes_without_persisting_temporary_coordinates(owner):
   result, session, _ = suggest(owner)
-  assert 'latitude' not in result and 'temporary' not in result
-  assert result['description'] == '123 Main St, Springfield'
+  assert 'latitude' not in result and result['temporary'] is True
   status, provider = choose(owner, result)
   assert provider.call_args.args[2]['session_token'] == session
   assert status['destination']['name'] == 'Coffee Shop'
   assert status['destination']['address'] == '123 Main St, Springfield'
-  assert owner.read()['destination'] == status['destination']
-  assert [row['name'] for row in status['recents']] == ['Coffee Shop', 'Old address']
-  assert not list(owner.transient_root.glob('*.json'))
+  assert status['destination']['temporary'] is True
+  assert owner.read()['destination'] is None
+  assert [row['name'] for row in status['recents']] == ['Old address']
+  assert 'Coffee Shop' not in owner.path.read_text()
   second = NavigationOwner(owner.root, runtime_source=lambda:None, transient_root=owner.transient_root)
   executor = Executor()
   runtime = RouteRuntime(second, engine=type('Engine',(),{'fetch':None})(), executor=executor)
@@ -52,13 +52,18 @@ def test_selected_place_is_kept_with_its_address_and_becomes_recent(owner):
   assert len(executor.jobs) == 1
   with pytest.raises(ValidationError):
     choose(owner, result)
-  saved = owner.favorite(status['destination'], status['revision'], True)
-  assert saved['favorites'] == [status['destination']]
+  with pytest.raises(ValidationError, match='cannot be saved'):
+    owner.favorite(status['destination'], status['revision'], True)
+  unmarked = {key:value for key,value in status['destination'].items() if key != 'temporary'}
+  with pytest.raises(ValidationError, match='cannot be saved'):
+    owner.select(unmarked, status['revision'], True)
+  with patch('openpilot.starpilot.navigation.owner.time.monotonic', return_value=time.monotonic() + 50000):
+    assert owner.read_routing()['destination'] is None
+  assert not list(owner.transient_root.glob('*.json'))
 
 
 def test_recents_move_to_top_dedupe_and_are_editable(owner):
-  result, _, _ = suggest(owner)
-  choose(owner, result)
+  owner.select({'name': 'Coffee Shop', 'latitude': 40., 'longitude': -90.}, owner.read()['revision'], True)
   cleared = owner.clear(owner.read()['revision'], True)
   assert cleared['destination'] is None and len(cleared['recents']) == 2
   again = owner.select(ADDRESS, cleared['revision'], True)
@@ -74,8 +79,7 @@ def test_recents_move_to_top_dedupe_and_are_editable(owner):
 
 
 def test_favorite_edits_keep_route_and_labels_are_unique(owner):
-  result, _, _ = suggest(owner)
-  status, _ = choose(owner,result)
+  status = owner.select({'name': 'Coffee Shop', 'latitude': 40., 'longitude': -90.}, owner.read()['revision'], True)
   saved = owner.favorite(ADDRESS,status['revision'],True)
   saved = owner.favorite(status['destination'],saved['revision'],True)
   assert saved['destination']['name'] == 'Coffee Shop'
@@ -97,29 +101,40 @@ def test_favorite_edits_keep_route_and_labels_are_unique(owner):
   assert removed['destination']['name'] == 'Coffee Shop' and [row['name'] for row in removed['favorites']] == ['Coffee Shop']
 
 
-def test_saving_a_suggestion_keeps_the_other_results_choosable(owner):
-  result, session, _ = suggest(owner)
-  revision = owner.read()['revision']
-  with patch('openpilot.starpilot.navigation.owner.response_json', return_value=FEATURE) as provider:
-    saved = owner.favorite_place(result['id'], result['searchId'], 'caller', revision, True)
-  assert provider.call_args.args[2]['session_token'] == session
-  assert saved['favorites'][0]['name'] == 'Coffee Shop' and saved['destination']['name'] == 'Old address'
-  used = owner.search_budget.used
-  status, provider = choose(owner, result)
-  assert provider.call_args.args[2]['session_token'] != session, "a retrieve ends a Mapbox session"
-  assert owner.search_budget.used == used + 1, "so choosing afterwards counts as its own session"
-  assert status['destination']['name'] == 'Coffee Shop'
+def test_suggestions_cannot_be_saved_but_remain_choosable(owner):
+  result, _, _ = suggest(owner)
+  before = owner.read()
+  with patch('openpilot.starpilot.navigation.owner.response_json') as provider:
+    with pytest.raises(ValidationError, match='cannot be saved'):
+      owner.favorite_place(result['id'], result['searchId'], 'caller', before['revision'], True)
+    provider.assert_not_called()
+  assert owner.read() == before
+  assert choose(owner, result)[0]['destination']['temporary'] is True
+
+
+def test_address_search_requests_permanent_results(owner):
+  with patch('openpilot.starpilot.navigation.owner.response_json', return_value={'features': []}) as provider:
+    assert owner.search('100 Main Street') == []
+  assert provider.call_args.args[2]['permanent'] == 'true'
+
+
+def test_temporary_destination_supports_full_unicode_address(owner):
+  result, _, _ = suggest(owner)
+  feature = {'features': [{'properties': {**POI, 'name': '🏠' * 256, 'full_address': '🏠' * 512},
+                           'geometry': {'coordinates': [-90., 40.]}}]}
+  with patch('openpilot.starpilot.navigation.owner.response_json', return_value=feature):
+    status = owner.select_place(result['id'], result['searchId'], 'caller', owner.read()['revision'], True)
+  assert status['destination']['address'] == '🏠' * 512
+  assert owner.read()['destination'] is None
 
 
 def test_save_home_and_work_in_one_change_without_changing_destination(owner):
   saved = owner.favorite(ADDRESS, owner.read()['revision'], True, label='home')
-  old_revision = saved['revision']
-  result, _, _ = suggest(owner)
-  with patch('openpilot.starpilot.navigation.owner.response_json', return_value=FEATURE):
-    saved = owner.favorite_place(result['id'], result['searchId'], 'caller', old_revision, True, label='home')
+  before = owner.read()
+  coffee = {'name': 'Coffee Shop', 'latitude': 40., 'longitude': -90.}
+  saved = owner.favorite(coffee, before['revision'], True, label='home')
   assert [(row['name'], row.get('label')) for row in saved['favorites']] == [('Coffee Shop', 'home'), ('Old address', None)]
   assert saved['destination']['name'] == 'Old address'
-  assert owner._searches[('caller', result['searchId'])]['revision'] == saved['revision']
   before = owner.read()
   with pytest.raises(ValidationError):
     owner.favorite(ADDRESS, before['revision'], True, label='invalid')
@@ -193,6 +208,7 @@ def test_address_fallback_and_symlink_safe_ephemeral_state(owner,tmp_path):
        patch.object(owner,'search',return_value=[ADDRESS]) as fallback:
     assert owner.search_places('100 Main','caller',str(uuid.uuid4()),str(uuid.uuid4())) == [ADDRESS]
   fallback.assert_called_once_with('100 Main')
+  owner.transient_root.rmdir()
   owner.transient_root.symlink_to(tmp_path)
   with pytest.raises(OSError):
     owner.record_routes(owner.read()['revision'], [])

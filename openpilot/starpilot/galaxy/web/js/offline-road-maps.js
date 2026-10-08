@@ -56,28 +56,40 @@ export function areaLabel(area) {
 export class OfflineRoadsClient {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancel = (id) => clearTimeout(id) }) {
-    Object.assign(this, { publish, unauthorized, fetcher })
+    Object.assign(this, { publish, unauthorized, fetcher, later, cancel })
     this.data = null
     this.busy = false
     this.error = ""
     this.active = false
+    this.generation = 0
     this.poller = new PollTimer({ read: () => this.load(), interval: 3000, later, cancel })
   }
 
   emit() { this.publish({ data: this.data, busy: this.busy, error: this.error }) }
-  start() { this.active = true; this.poller.start(); return this.load() }
-  stop() { this.active = false; this.poller.stop() }
+  start() { this.stop(); this.active = true; this.poller.start(); return this.load() }
+  stop() { this.active = false; this.generation++; this.controller?.abort(); this.busy = false; this.poller.stop() }
 
   async request(body = null) {
-    const response = await this.fetcher("./api/navigation/offline", { credentials: "same-origin", cache: "no-store",
-      ...(body === null ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) })
-    const payload = await response.json().catch(() => null)
-    if (response.status === 401 || ["access_unavailable", "setup_required"].includes(payload?.code)) {
-      this.stop(); this.unauthorized(); return null
-    }
-    if (!response.ok) throw new Error(payload?.error || "Offline maps are unavailable. Try again shortly.")
-    if (!validOffline(payload)) throw new Error("Offline maps returned an unexpected answer. Reload to try again.")
-    return payload
+    this.controller?.abort()
+    const generation = ++this.generation, controller = this.controller = new AbortController()
+    const deadline = this.later(() => controller.abort(), 10000)
+    try {
+      const response = await this.fetcher("./api/navigation/offline", { credentials: "same-origin", cache: "no-store",
+        signal: controller.signal,
+        ...(body === null ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) })
+      const payload = await response.json().catch(() => null)
+      if (!this.active || generation !== this.generation) return null
+      if (controller.signal.aborted) throw new Error("Offline maps did not respond. Try again shortly.")
+      if (response.status === 401 || ["access_unavailable", "setup_required"].includes(payload?.code)) {
+        this.stop(); this.unauthorized(); return null
+      }
+      if (!response.ok) throw new Error(payload?.error || "Offline maps are unavailable. Try again shortly.")
+      if (!validOffline(payload)) throw new Error("Offline maps returned an unexpected answer. Reload to try again.")
+      return payload
+    } catch (error) {
+      if (this.active && generation === this.generation) throw error
+      return null
+    } finally { this.cancel(deadline) }
   }
 
   async load() {
@@ -93,12 +105,13 @@ export class OfflineRoadsClient {
     this.busy = true
     this.error = ""
     this.emit()
+    const generation = this.generation + 1
     try {
       const data = await this.request(body)
       if (data) this.data = data
       return data
     } catch (error) { this.error = connectionError(error); return null }
-    finally { this.busy = false; this.emit() }
+    finally { if (generation === this.generation) { this.busy = false; if (this.active) this.emit() } }
   }
 }
 
@@ -155,7 +168,7 @@ export const OfflineRoadMapsPanel = {
       return { used, cap, parts: [["Areas", bytes.saved || 0, "#9d72ff"], ["Driven", bytes.driven || 0, "#34c778"], ["Recent", bytes.cache || 0, "#4096ff"]] }
     },
     usage() { const usage = this.data?.usage || {}; return { tiles: usage.tiles || 0, free: usage.freeTiles || 200000 } },
-    // The downloader stops at 99% of the free tiles, so nothing is billed.
+    // This counter covers this comma, not other uses of the same key.
     freeTilesLeft() { return Math.max(0, Math.floor(this.usage.free * 0.99) - this.usage.tiles) },
     canSave() { return this.mode === "local" && !this.busy && !!this.point && !!this.data && this.data.areas.length < this.constants.maxAreas },
   },
@@ -217,7 +230,7 @@ export const OfflineRoadMapsPanel = {
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
         <GxNotice tone="warn" v-if="!hasKey">Add your Mapbox key in Setup. Road maps download with the same key.</GxNotice>
         <GxNotice tone="warn" v-else-if="service.failure === 'key'">Mapbox rejected the saved key for map tiles. Check that it is a public (pk.) key without URL restrictions.</GxNotice>
-        <GxNotice tone="warn" v-if="service.failure === 'budget'">This month's free Mapbox road tiles are used up, so downloads pause until the 1st. Nothing is billed.</GxNotice>
+        <GxNotice tone="warn" v-if="service.failure === 'budget'">This comma's Mapbox road tile allowance is used up, so downloads pause until the 1st.</GxNotice>
         <GxNotice tone="warn" v-if="service.noSpace">The comma's storage is nearly full, so new map areas are paused. Delete an area or free space.</GxNotice>
         <div class="gx-offline-roads__stats">
           <div class="gx-offline-roads__stat"><span>Downloader</span><strong>{{ serviceLabel }}</strong></div>
@@ -227,10 +240,10 @@ export const OfflineRoadMapsPanel = {
               <i v-for="[label, value, color] in storage.parts" :key="label" :style="{ width: (storage.cap ? Math.max(value ? 1.5 : 0, value / storage.cap * 100) : 0) + '%', background: color }"></i></div>
             <small><span v-for="[label, value, color] in storage.parts" :key="label" class="gx-offline-roads__legend"><b :style="{ background: color }"></b>{{ label }} {{ formatBytes(value) }}</span></small></div>
         </div>
-        <label class="gx-toggle-row"><input type="checkbox" :checked="data?.settings.saveDriven" :disabled="!data || busy" @change="setSaveDriven($event.target.checked)">
-          <span>Save roads as you drive<small class="gx-note">Keeps the roads around everywhere you drive, so familiar places work offline without planning ahead.</small></span></label>
+        <div class="gx-row"><span>Save roads as you drive<small class="gx-note">Keeps the roads around everywhere you drive, so familiar places work offline without planning ahead.</small></span>
+          <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Save roads as you drive" :checked="data?.settings.saveDriven" :disabled="!data || busy" @change="setSaveDriven($event.target.checked)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
         <div class="gx-offline-roads__picker">
-          <div v-if="hasKey" class="gx-offline-roads__map"><canvas ref="canvas" tabindex="0" aria-label="Map. Tap to center a new offline area; drag to pan."></canvas>
+          <div v-if="hasKey" class="gx-offline-roads__map"><canvas ref="canvas" tabindex="0" aria-label="Map. Tap or press Enter to center a new offline area; drag or use arrow keys to pan."></canvas>
             <div class="gx-navigation-map__controls"><button class="gx-btn" type="button" @click="zoom(1)" aria-label="Zoom in">+</button>
               <button class="gx-btn" type="button" @click="zoom(-1)" aria-label="Zoom out">−</button></div>
             <span class="gx-offline-roads__hint">{{ point ? 'Adjust the radius, name it, then save.' : 'Tap the map to center a new area.' }}</span></div>
@@ -242,7 +255,7 @@ export const OfflineRoadMapsPanel = {
               <label for="offline-area-radius">Radius · {{ radiusLabel(radiusKm, metric) }}</label>
               <input id="offline-area-radius" class="gx-slider" type="range" :min="range.min" :max="range.max" step="1" v-model.number="radius" @change="focus(point, radiusKm)">
               <p class="gx-note" role="status">≈ {{ estimate.tiles.toLocaleString() }} tiles · {{ formatBytes(estimate.downloadBytes) }} to download · {{ formatBytes(estimate.storedBytes) }} on the comma</p>
-              <p v-if="estimate.tiles > freeTilesLeft" class="gx-note">Only {{ freeTilesLeft.toLocaleString() }} free tiles are left this month. The area downloads that many now and finishes after the 1st, without being billed.</p>
+              <p v-if="estimate.tiles > freeTilesLeft" class="gx-note">Only {{ freeTilesLeft.toLocaleString() }} tiles are left in this comma's allowance this month. The area resumes after the 1st.</p>
               <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="point = null">Cancel</button>
                 <button type="button" class="gx-btn" :disabled="!canSave" @click="save">Save area</button></div>
             </template>

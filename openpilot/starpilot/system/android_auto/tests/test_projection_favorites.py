@@ -56,6 +56,21 @@ def tap(control, state, key):
   control.touch('up', x, y, state, 1)
 
 
+def test_map_above_home_blocks_touch(favorites):
+  view = state(ordered=True)
+  placed = view.customization['layouts']['large']['nav_home']
+  view.customization['layouts']['large']['nav_map'].update(enabled=True, x=placed['x'], y=placed['y'])
+  order = view.customization['widgetOrder']['large']
+  order.remove('nav_map')
+  order.append('nav_map')
+  assert favorites.hit(*point(view, 'nav_home'), view) is None
+  tap(favorites, view, 'nav_home')
+  assert favorites.owner.read()['destination'] is None
+  order.remove('nav_home')
+  order.append('nav_home')
+  assert favorites.hit(*point(view, 'nav_home'), view) == 'nav_home'
+
+
 @pytest.mark.parametrize('ordered', [True, False])
 @pytest.mark.parametrize('display', ['words', 'icons'])
 def test_home_work_start_replace_and_end_navigation(favorites, ordered, display):

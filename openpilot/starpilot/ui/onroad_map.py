@@ -310,7 +310,7 @@ class TileReader:
             self._missing.pop(key, None)
             self._tiles[key] = tile
             self._tiles.move_to_end(key)
-            while len(self._tiles) > TILE_CACHE:
+            while len(self._tiles) > max(TILE_CACHE, len(self._wanted)):
               self._tiles.popitem(last=False)
             self.generation += 1
       elif job is not None:
@@ -411,7 +411,7 @@ class MapOverlay:
     dt = 0.0 if self._last_prepare is None else min(0.2, max(0.0, now - self._last_prepare))
     self._last_prepare = now
     if fix is None:
-      self.status = "waiting" if self._world is None else self.status
+      self.status = "waiting"
       return
     target_world = world_xy(fix.latitude, fix.longitude)
     age = min(DEAD_RECKON_S, max(0.0, now - fix.monotonic))
@@ -591,7 +591,8 @@ class MapOverlay:
               rl.draw_triangle_strip(rl.ffi.from_buffer("Vector2 *", strip), len(strip), color)
           finally:
             rl.rl_pop_matrix()
-          self._puck(anchor.x, anchor.y)
+          if self.status == "live":
+            self._puck(anchor.x, anchor.y)
           self._compass(width, height)
         else:
           rl.draw_texture_pro(self._canvas.texture, rl.Rectangle(0, 0, side, -side),
@@ -685,7 +686,8 @@ class MapFeed:
     from openpilot.starpilot.gps.source import bearing, select_location
     self.sm.update(0)
     now = time.monotonic()
-    selected = select_location(self.sm, time.monotonic_ns())
+    now_ns = time.monotonic_ns()
+    selected = select_location(self.sm, now_ns)
     if selected is not None:
       stamp, gps = selected
       speed = float(getattr(gps, "speed", float("nan")))
@@ -699,7 +701,8 @@ class MapFeed:
       try:
         from openpilot.starpilot.navigation.wire import navigation_state
         nav = navigation_state(navigation_sm["starpilotNavigation"]) if navigation_sm.valid["starpilotNavigation"] else None
-        if nav is not None and nav.status in ("guiding", "arrived"):
+        if (nav is not None and nav.enabled and nav.status in ("guiding", "arrived") and
+            0 < nav.frameMonoTime <= now_ns <= nav.frameMonoTime + 3_000_000_000):
           route = tuple((point.latitude, point.longitude) for point in nav.route)
       except Exception:
         route = ()

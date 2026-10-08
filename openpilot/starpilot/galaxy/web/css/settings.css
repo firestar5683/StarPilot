@@ -402,7 +402,7 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__scenes { flex-wrap: nowrap; overflow-x: auto; padding: 2px; }
 .gx-layout__scenes > button { flex-shrink: 0; }
 .gx-layout__inspector .gx-layout__palette { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
-@media (max-width: 900px) {
+@container (max-width: 1040px) {
   .gx-layout { max-width: 760px; }
   .gx-layout__workspace { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .gx-layout__preview-card { position: static; }

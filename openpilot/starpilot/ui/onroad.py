@@ -287,6 +287,7 @@ class OnroadView:
       if not driver_camera:
         if stock_layer is not None:
           submit("model_confidence", lambda: stock_layer(rl.Rectangle(0, 0, 536, 240), state))
+          submit("following_distance", lambda: self.compact_sidebar.render_personality(rl.Rectangle(0, 0, 536, 240), state))
         else:
           for key in RAIL_WIDGETS:
             submit(key, lambda key=key: self.compact_sidebar.render(rl.Rectangle(0, 0, 536, 240), state, widget=key))

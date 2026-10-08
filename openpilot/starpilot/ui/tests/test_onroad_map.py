@@ -3,6 +3,7 @@
 import math
 import os
 import time
+import threading
 
 import numpy as np
 
@@ -136,6 +137,34 @@ def test_tile_reader_loads_from_disk_and_retries_missing(tmp_path):
     reader.close()
 
 
+def test_tile_reader_finishes_canvas_larger_than_cache(tmp_path):
+  from openpilot.starpilot.ui.onroad_map import TILE_CACHE
+  store = TileStore(tmp_path, min_free_bytes=0)
+  keys = [TileKey(DATA_ZOOM, x, 10) for x in range(TILE_CACHE + 1)]
+  for key in keys:
+    store.write("saved", key, encode_road_tile({}))
+  reader = TileReader(tmp_path)
+  finished = threading.Event()
+  try:
+    reader.want(keys)
+    reader.submit(finished.set)
+    assert finished.wait(2), "requested tiles must not evict each other and starve the canvas"
+    assert len(reader.snapshot(keys)) == len(keys)
+  finally:
+    reader.close()
+
+
+def test_lost_gps_marks_previous_position_stale(tmp_path):
+  overlay = MapOverlay(tmp_path)
+  try:
+    overlay._advance(MapInput(MapFix(*CENTER, 0., 10., 100.)), 100.)
+    assert overlay.status == "live"
+    overlay._advance(MapInput(None), 106.)
+    assert overlay.status == "waiting"
+  finally:
+    overlay.close()
+
+
 # ---------------------------------------------------------------- GL
 
 def render_overlay(rl, tmp_path, bearing, width=560, height=420, opacity=1.0, route=True, steps=40):
@@ -266,6 +295,15 @@ def test_map_feed_uses_navigation_gps_choice_with_car_fallback(monkeypatch):
   sm.put("gpsLocationExternal", now - 100_000_000, latitude=36.3, bearingAccuracyDeg=200.0)
   fix = feed.read().fix
   assert fix.latitude == 36.3 and fix.bearing is None, "a receiver wins; an unusable heading is dropped"
+  nav = sm.ns(version=2, enabled=True, status="guiding", frameMonoTime=now,
+              route=[sm.ns(latitude=36.1, longitude=-115.1)])
+  published = {"starpilotNavigation": sm.ns(navigation=nav)}
+  class NavigationMaster(dict):
+    valid = {"starpilotNavigation": True}
+  navigation = NavigationMaster(published)
+  assert feed.read(navigation).route == ((36.1, -115.1),)
+  nav.frameMonoTime = now - 3_000_000_001
+  assert feed.read(navigation).route == (), "a stopped route publisher must not leave stale guidance"
 
 
 def test_route_stays_bright_at_minimum_map_opacity(gl, tmp_path):

@@ -5,14 +5,15 @@ Three tile directories, read in this order:
   driven/   tiles near the car while "save as you drive" is on; trimmed at their own cap
   cache/    everything else the map has needed; trimmed least recently used first
 
-State files beside them, each with one writer:
-  areas/<id>.json   offline areas (Galaxy writes; navtilesd only reads)
+State files beside them:
+  areas/<id>.json   Galaxy writes definitions; navtilesd updates refresh times under the shared lock
   settings.json     save-as-you-drive (Galaxy writes)
   status.json       download progress, sizes, network and usage (navtilesd writes)
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
 import os
@@ -21,6 +22,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,7 @@ MAX_AREAS = 24
 AREA_REFRESH_SECONDS = 120 * 24 * 3600
 STATUS_STALE_SECONDS = 20.0
 FREE_TILES_PER_MONTH = 200_000             # Mapbox Vector Tiles API free tier
+MAX_AREA_TILES = int(FREE_TILES_PER_MONTH * 0.99)  # bound planning memory as well as a month's downloads
 _ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
@@ -119,7 +122,7 @@ class TileStore:
   def write(self, kind: str, key: TileKey, data: bytes) -> bool:
     path = self.path(kind, key)
     try:
-      if shutil.disk_usage(_existing_ancestor(path)).free < self.min_free_bytes + len(data):
+      if not self.has_space(len(data)):
         return False
       path.parent.mkdir(parents=True, exist_ok=True)
       fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tile-")
@@ -131,6 +134,9 @@ class TileStore:
     if kind != "cache":
       self.path("cache", key).unlink(missing_ok=True)
     return True
+
+  def has_space(self, size: int = 0) -> bool:
+    return shutil.disk_usage(_existing_ancestor(self.root)).free >= self.min_free_bytes + size
 
   def promote(self, kind: str, key: TileKey) -> bool:
     """Move a tile already on disk into a longer-lived directory without downloading it."""
@@ -221,6 +227,8 @@ def validate_area(value: Any) -> dict:
       not -180 <= longitude <= 180 or not math.isfinite(radius) or
       not AREA_MIN_RADIUS_KM <= radius <= AREA_MAX_RADIUS_KM or not isinstance(name, str) or len(name) > 80):
     raise ValueError("Choose a place and a radius between 2 and 200 km")
+  if estimate(latitude, longitude, radius)["tiles"] > MAX_AREA_TILES:
+    raise ValueError("Choose a smaller offline area")
   area = {"latitude": round(latitude, 6), "longitude": round(longitude, 6), "radiusKm": round(radius, 1),
           "name": " ".join(name.split()) or f"{latitude:.3f}, {longitude:.3f}"}
   for key in ("id", "created", "refreshed"):
@@ -243,6 +251,13 @@ def estimate(latitude: float, longitude: float, radius_km: float) -> dict:
 class OfflineState:
   def __init__(self, root: Path | None = None):
     self.root = Path(root) if root is not None else roads_root()
+
+  @contextmanager
+  def _exclusive(self):
+    self.root.mkdir(parents=True, exist_ok=True)
+    with (self.root / ".areas.lock").open("a") as lock:
+      fcntl.flock(lock, fcntl.LOCK_EX)
+      yield
 
   @property
   def areas_dir(self) -> Path:
@@ -267,21 +282,27 @@ class OfflineState:
 
   def add_area(self, value: Any) -> dict:
     area = validate_area(value)
-    if len(self.areas()) >= MAX_AREAS:
-      raise ValueError(f"Up to {MAX_AREAS} offline areas can be saved")
-    area.update(id=uuid.uuid4().hex, created=_wall(), refreshed=0)
-    write_json(self.areas_dir / f"{area['id']}.json", area)
+    with self._exclusive():
+      areas = self.areas()
+      if len(areas) >= MAX_AREAS:
+        raise ValueError(f"Up to {MAX_AREAS} offline areas can be saved")
+      if sum(estimate(row["latitude"], row["longitude"], row["radiusKm"])["tiles"] for row in [*areas, area]) > MAX_AREA_TILES:
+        raise ValueError("Choose a smaller area or delete an existing area")
+      area.update(id=uuid.uuid4().hex, created=_wall(), refreshed=0)
+      write_json(self.areas_dir / f"{area['id']}.json", area)
     return area
 
   def delete_area(self, area_id: str) -> None:
     if not isinstance(area_id, str) or not _ID.fullmatch(area_id):
       raise ValueError("Unknown offline area")
-    (self.areas_dir / f"{area_id}.json").unlink(missing_ok=True)
+    with self._exclusive():
+      (self.areas_dir / f"{area_id}.json").unlink(missing_ok=True)
 
   def mark_refreshed(self, area: dict, when: float | None = None) -> None:
     path = self.areas_dir / f"{area['id']}.json"
-    if path.is_file():
-      write_json(path, {**{k: v for k, v in area.items() if k != "id"}, "refreshed": _wall() if when is None else when})
+    with self._exclusive():
+      if path.is_file():
+        write_json(path, {**{k: v for k, v in area.items() if k != "id"}, "refreshed": _wall() if when is None else when})
 
   def settings(self) -> dict:
     value = read_json(self.root / "settings.json", 4096)

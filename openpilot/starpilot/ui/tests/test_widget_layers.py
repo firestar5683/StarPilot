@@ -5,7 +5,7 @@ import json
 import pytest
 
 from openpilot.starpilot.ui.onroad_customization import (
-  DEFAULT_WIDGET_ORDER, MODE_WIDGET, PROFILES, customization_metadata, decode_document, default_document, validate_document,
+  CLOCK_WIDGET, DEFAULT_WIDGET_ORDER, MODE_WIDGET, PROFILES, customization_metadata, decode_document, default_document, validate_document,
 )
 from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout_for_viewport, decode_layout_for_viewport, layout_metadata_for_viewport, projection_customization, validate_layout_for_viewport,
@@ -79,7 +79,7 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   source = Path(__file__).parents[1] / 'onroad.py'
   tree = ast.parse(source.read_text())
   method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_ordered_widgets')
-  namespace = {'MODE_WIDGET': MODE_WIDGET, 'placement': placement, 'widget_order': widget_order, 'RAIL_WIDGETS': RAIL_WIDGETS,
+  namespace = {'CLOCK_WIDGET': CLOCK_WIDGET, 'MODE_WIDGET': MODE_WIDGET, 'placement': placement, 'widget_order': widget_order, 'RAIL_WIDGETS': RAIL_WIDGETS,
                'AlertSize': NS(NONE='none', FULL='full'), 'CameraViewChoice': NS(NONE='none'),
                'rl': NS(Rectangle=lambda x, y, width, height: NS(x=x, y=y, width=width, height=height))}
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
@@ -89,6 +89,7 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
                                                                for key in ('pip_left', 'pip_right')])
   view.driver_monitor_layer = lambda *args: seen.append('driver_monitor')
   view._driving_mode = lambda *args: seen.append(MODE_WIDGET)
+  view._clock = lambda *args: seen.append(CLOCK_WIDGET)
   view._slc_actions = lambda *args: seen.append('speed_limit_actions')
   for attr, key in [('unified_speed', 'cruise_limits'), ('current_speed', 'current_speed'),
                     ('steering_wheel', 'steering_wheel'), ('torque_bar', 'torque_bar')]:
@@ -119,3 +120,11 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   assert 'steering_wheel' not in seen
   assert 'speed_limit_actions' not in seen
   assert 'torque_bar' not in seen
+  if profile == 'compact':
+    seen.clear()
+    state.alert.size = 'none'
+    view.compact_sidebar.render_personality = lambda *args: seen.append('following_distance')
+    stock = Mock()
+    namespace['_ordered_widgets'](view, NS(x=0, y=0, width=476, height=240), state, stock_layer=stock)
+    stock.assert_called_once()
+    assert seen.count('following_distance') == 1

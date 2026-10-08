@@ -109,20 +109,20 @@ def projected_touches(events, geometry):
   return mapped
 
 
-def scale_scissors(rl, scale: float) -> None:
+def scale_scissors(rl, scale: float, left: float = 0, top: float = 0) -> None:
   """Scale scissor rectangles like the matrix that draws the UI into the visible-size target.
 
   The UI clips in logical coordinates, but raylib applies scissors in target pixels, unaffected by
   rl_scalef. This is gui_app._patch_scissor_mode for a renderer that never opens a window; it runs
   in its own process, so it touches only the car view.
   """
-  if scale == 1.0:
+  if scale == 1.0 and left == top == 0:
     return
   if not hasattr(rl, "_orig_begin_scissor_mode"):
     rl._orig_begin_scissor_mode = rl.begin_scissor_mode
 
   def begin_scissor_mode_scaled(x, y, width, height):
-    return rl._orig_begin_scissor_mode(int(x * scale), int(y * scale),
+    return rl._orig_begin_scissor_mode(int(left + x * scale), int(top + y * scale),
                                        int(math.ceil(width * scale)), int(math.ceil(height * scale)))
 
   rl.begin_scissor_mode = begin_scissor_mode_scaled
@@ -200,7 +200,9 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
     if not content.id:
       raise RuntimeError('Projection content target unavailable')
     resources.callback(rl.unload_render_texture, content)
-    scale_scissors(rl, geometry.scale)
+    left = (geometry.width - geometry.logical_width * geometry.scale) / 2
+    top = (geometry.height - geometry.logical_height * geometry.scale) / 2
+    scale_scissors(rl, geometry.scale, left, top)
     converter = None
     if request.flags & FLAG_NV12:
       try:
@@ -326,6 +328,7 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
         rl.clear_background(rl.BLACK)
         rl.rl_push_matrix()
         try:
+          rl.rl_translatef(left, top, 0)
           rl.rl_scalef(geometry.scale, geometry.scale, 1.0)
           layout.render()
         finally:

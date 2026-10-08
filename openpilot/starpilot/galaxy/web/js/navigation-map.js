@@ -101,6 +101,11 @@ export class RasterMap {
       if (this.onTap) this.onTap(this.pointAt(...this.local(event)))
     }
     this.key = (event) => {
+      if (this.onTap && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault()
+        this.onTap({ ...this.center })
+        return
+      }
       const delta = {
         ArrowLeft: [-80, 0], ArrowRight: [80, 0], ArrowUp: [0, -80], ArrowDown: [0, 80]
       }

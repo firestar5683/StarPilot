@@ -877,7 +877,7 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
   .gx-searchbox.open .gx-search-toggle { flex: none; order: 2; }
 }
 
-@container galaxy-header (max-width: 350px) { .gx-appbar__title { display: none; } }
+@container galaxy-header (max-width: 380px) { .gx-appbar__title { display: none; } }
 
 @media (max-width: 767px) {
   .blur-nav { display: grid; }
@@ -1488,28 +1488,3 @@ progress { max-width: 100%; accent-color: var(--primary); }
 
 /* Descriptions are ordinary page content; notices communicate changing state. */
 .gx-settings-tabs > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
-
-/* Offline road maps for the Android Auto overlay (#/navigation, Offline Maps tab). */
-.gx-navigation__offline { display: grid; gap: 16px; padding: 0 0 96px; }
-.gx-offline-roads { padding: 24px; display: grid; gap: 14px; }
-.gx-offline-roads__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-.gx-offline-roads__stat { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, currentColor 6%, transparent); }
-.gx-offline-roads__stat span { font-size: .78rem; opacity: .7; }
-.gx-offline-roads__stat strong { font-size: 1.05rem; }
-.gx-offline-roads__stat small { opacity: .7; font-size: .76rem; display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.gx-offline-roads__stat--wide { grid-column: 1 / -1; }
-.gx-offline-roads__bar { display: flex; height: 8px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, currentColor 12%, transparent); margin: 6px 0 2px; }
-.gx-offline-roads__bar i { display: block; height: 100%; transition: width .4s ease; }
-.gx-offline-roads__legend { display: inline-flex; align-items: center; gap: 6px; }
-.gx-offline-roads__legend b { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.gx-offline-roads__picker { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 14px; align-items: start; }
-@media (max-width: 760px) { .gx-offline-roads__picker { grid-template-columns: 1fr; } }
-.gx-offline-roads__map { position: relative; border-radius: 16px; overflow: hidden; background: #0e0e1a; height: 340px; }
-.gx-offline-roads__map canvas { width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
-.gx-offline-roads__map .gx-navigation-map__controls { position: absolute; right: 10px; top: 10px; display: grid; gap: 6px; }
-.gx-offline-roads__hint { position: absolute; left: 12px; bottom: 10px; padding: 6px 10px; border-radius: 10px; background: #0e0e1acc; color: #e8e6f5; font-size: .8rem; pointer-events: none; }
-.gx-offline-roads__form { display: grid; gap: 8px; }
-.gx-offline-roads__areas { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.gx-offline-roads__areas li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, currentColor 5%, transparent); }
-.gx-offline-roads__area { display: grid; gap: 2px; min-width: 0; flex: 1; }
-.gx-offline-roads__area small { opacity: .72; }

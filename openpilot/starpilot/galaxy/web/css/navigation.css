@@ -1,3 +1,5 @@
+@import "./offline-road-maps.css";
+
 /* A shared page shell keeps destination, maps, and setup in the same layout. */
 .gx-navigation {--navigation-land:#191a1a;width:100%;max-width:1440px;margin:0 auto;min-width:0;padding-bottom:24px}
 [data-theme="light"] .gx-navigation {--navigation-land:#f5f5f3}
@@ -41,7 +43,7 @@
 .gx-navigation .gx-navigation__field input:focus-visible {outline:none;box-shadow:none}
 .gx-navigation__field:focus-within {border-color:var(--glass-text);box-shadow:0 0 0 1px var(--glass-border)}
 .gx-navigation__icon {display:inline-grid;place-items:center;flex:0 0 auto;width:44px;height:44px;border:0;border-radius:50%;background:none;color:inherit;font-size:1.05rem;cursor:pointer}
-.gx-navigation__icon:hover:not(:disabled),.gx-navigation__icon:focus-visible {background:var(--glass-active-bg);outline:none}
+.gx-navigation__icon:hover:not(:disabled),.gx-navigation__icon:focus-visible {background:var(--glass-active-bg)}
 .gx-navigation__icon:disabled {opacity:.45;cursor:default}
 .gx-navigation__icon[aria-pressed="true"] .bi-star-fill,.gx-navigation__save--on {color:#f5b400}
 .gx-navigation__suggestions {display:grid;gap:2px;padding:6px;border-radius:16px;max-height:55vh;overflow:auto}
@@ -49,7 +51,7 @@
 .gx-navigation__favorite-choices {display:flex;gap:6px;flex:1 1 100%;margin:4px 0}
 .gx-navigation__favorite-choices .gx-btn {flex:1;min-width:0;padding:6px 10px;display:flex;align-items:center;justify-content:center;gap:6px}
 .gx-navigation__suggestion {flex:1;display:flex;align-items:center;gap:12px;min-width:0;padding:10px 12px;border:0;border-radius:12px;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit}
-.gx-navigation__suggestion:hover:not(:disabled),.gx-navigation__suggestion:focus-visible {background:var(--glass-active-bg);outline:none}
+.gx-navigation__suggestion:hover:not(:disabled),.gx-navigation__suggestion:focus-visible {background:var(--glass-active-bg)}
 .gx-navigation__suggestion i {color:var(--primary);font-size:1.05rem;flex:0 0 auto;width:20px;text-align:center}
 .gx-navigation__suggestion .bi-star-fill {color:#f5b400}
 .gx-navigation__suggestion span {display:grid;min-width:0}

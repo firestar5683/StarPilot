@@ -23,7 +23,7 @@ const coordinate = (value) => !!value && Number.isFinite(value.latitude) && Math
 const text = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit
 export const validDestination = (value) => coordinate(value) && text(value.id, 256) && text(value.name, 256) &&
   (value.address === undefined || text(value.address, 512)) && (value.label === undefined || ["home", "work"].includes(value.label))
-// Suggestions carry the search they came from; the comma looks up their coordinates when one is chosen or saved.
+// Suggestions carry the search they came from; their temporary coordinates are retrieved only for routing.
 export const validSuggestion = (value) => !!value && text(value.id, 256) && text(value.name, 256) &&
   (value.description === undefined || typeof value.description === "string" && value.description.length <= 512) &&
   typeof value.searchId === "string" && /^[0-9a-f-]{36}$/.test(value.searchId)
@@ -111,7 +111,7 @@ export class NavigationClient {
     const text = query.trim()
     if (this.pendingSuggestion && this.suggestionQuery === text) await this.pendingSuggestion
     if (!this.active || this.busy) return null
-    if (this.suggestionResultsQuery === text && this.suggestions?.length && this.autocompleteId) {
+    if (this.suggestionResultsQuery === text && this.suggestions?.length && this.autocompleteId && !this.suggestions.some(place => place.temporary)) {
       this.searchId = this.autocompleteId
       this.results = this.suggestions.slice()
       this.searched = true
@@ -131,6 +131,7 @@ export class NavigationClient {
     return pending
   }
   save(place, label) {
+    if (place.temporary) return Promise.resolve(null)
     const category = label === undefined ? {} : { label }
     return place.searchId ? this.action("favoritePlace", { id: place.id, searchId: place.searchId, ...category }) :
       this.action("favorite", { destination: placeOf(place), ...category })
@@ -431,10 +432,10 @@ export const NavigationPage = {
         <section class="gx-card gx-navigation__section">
           <h3>Mapbox</h3>
           <p>One public Mapbox access token (starting with pk.) handles the map, place and address search, and routes. A separate secret token is not needed.</p>
-          <p>Save your token while parked. Galaxy keeps it on your comma and never displays it after saving. Favorites and recent destinations are also kept on your comma; going to one skips search, so it uses none of your search allowance. URL-restricted keys may reject map requests.</p>
-          <p class="gx-note">Typing suggestions and offline road maps stop just short of Mapbox's free monthly allowance and resume on the 1st. Searches, address lookups, routes and map views are counted here but not limited.</p>
-          <dl v-if="usageRows.length" class="gx-navigation__usage" aria-label="Free Mapbox use this month">
-            <template v-for="row in usageRows" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.used.toLocaleString() }} of {{ row.limit.toLocaleString() }} free this month</dd></template>
+          <p>Save your token while parked. Galaxy keeps it on your comma and never displays it after saving. Permanent address results can be saved. Search suggestions are temporary and used only for the current route. Favorites and recent destinations are also kept on your comma; going to one skips search, so it uses none of your search allowance. URL-restricted keys may reject map requests.</p>
+          <p class="gx-note">Typing suggestions and offline road maps stop just short of Mapbox's free monthly allowance and resume on the 1st. Permanent address lookups are billed by Mapbox. Searches, address lookups, routes and map views are counted here but not limited.</p>
+          <dl v-if="usageRows.length" class="gx-navigation__usage" aria-label="Mapbox use this month">
+            <template v-for="row in usageRows" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.used.toLocaleString() }}<template v-if="row.key !== 'geocoding'"> of {{ row.limit.toLocaleString() }} free</template> this month</dd></template>
           </dl>
           <a class="gx-navigation__token-link" href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer">Get a Mapbox access token</a>
           <p v-if="data?.hasKey" class="gx-note">A Mapbox key is saved.</p>
@@ -458,7 +459,7 @@ export const NavigationPage = {
               <i class="bi bi-search" aria-hidden="true"></i>
               <label for="navigation-search" class="gx-sr-only">Search destinations</label>
               <input id="navigation-search" ref="search" v-model="query" placeholder="Address or place name" minlength="2" maxlength="200" required
-                autocomplete="off" enterkeyhint="search" :disabled="!available" role="combobox" :aria-expanded="showQuick || showSuggestions" aria-controls="navigation-suggestions"
+                autocomplete="off" enterkeyhint="search" :disabled="!available" role="searchbox"
                 @input="typed" @focus="suggestOpen = true" @keydown.escape="closeSuggestions">
               <button v-if="query || results.length" type="button" class="gx-navigation__icon" aria-label="Clear search" @mousedown.prevent @click="clearQuery"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
             </div>
@@ -470,7 +471,7 @@ export const NavigationPage = {
                 <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
                   <i class="bi" :class="placeIcon(place)" aria-hidden="true"></i><span><strong>{{ placeName(place) }}</strong><small v-if="placeDetail(place)">{{ placeDetail(place) }}</small></span></button>
                 <button type="button" class="gx-navigation__icon" :aria-label="'Remove ' + place.name + ' from saved places'" :disabled="!available" @click="client.action('removeFavorite',{id:place.id})"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
-                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name + ' as Home, Work, or Other'" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi bi-star-fill" aria-hidden="true"></i></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name + ' as Home, Work, or Other'" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available || place.temporary" :title="place.temporary ? 'Search for an address to save this place' : undefined" @click="openFavorite(place)"><i class="bi bi-star-fill" aria-hidden="true"></i></button>
                 <FavoriteChoices v-if="favoritePicker === favoriteKey(place)" :available="available" @choose="saveAs(place, $event)" />
               </div>
               <div v-if="recents.length" class="gx-navigation__group"><span>Recent</span>
@@ -478,7 +479,7 @@ export const NavigationPage = {
               <div v-for="place in recents" :key="'recent-' + place.id" class="gx-navigation__row">
                 <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
                   <i class="bi bi-clock-history" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.address">{{ place.address }}</small></span></button>
-                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi bi-star" aria-hidden="true"></i></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available || place.temporary" :title="place.temporary ? 'Search for an address to save this place' : undefined" @click="openFavorite(place)"><i class="bi bi-star" aria-hidden="true"></i></button>
                 <button type="button" class="gx-navigation__icon" :aria-label="'Remove ' + place.name + ' from recent places'" :disabled="!available" @click="client.action('removeRecent',{id:place.id})"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
                 <FavoriteChoices v-if="favoritePicker === favoriteKey(place)" :available="available" @choose="saveAs(place, $event)" />
               </div>
@@ -487,13 +488,13 @@ export const NavigationPage = {
               <div v-for="place in localMatches" :key="'local-' + place.id" class="gx-navigation__row">
                 <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
                   <i class="bi" :class="placeIcon(place)" aria-hidden="true"></i><span><strong>{{ placeName(place) }}</strong><small>{{ placeDetail(place) || (isFavorite(place) ? 'Saved place' : 'Recent') }}</small></span></button>
-                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available || place.temporary" :title="place.temporary ? 'Search for an address to save this place' : undefined" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
                 <FavoriteChoices v-if="favoritePicker === favoriteKey(place)" :available="available" @choose="saveAs(place, $event)" />
               </div>
               <div v-for="place in suggestions" :key="place.id" class="gx-navigation__row">
                 <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)">
                   <i class="bi bi-geo-alt-fill" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.description">{{ place.description }}</small></span></button>
-                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-pressed="isFavorite(place)" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="'Save ' + place.name" :aria-pressed="isFavorite(place)" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available || place.temporary" :title="place.temporary ? 'Search for an address to save this place' : undefined" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
                 <FavoriteChoices v-if="favoritePicker === favoriteKey(place)" :available="available" @choose="saveAs(place, $event)" />
               </div>
             </template>
@@ -506,7 +507,7 @@ export const NavigationPage = {
             <div class="gx-navigation__heading">
               <div><h3 class="gx-navigation__summary-title">{{ data.destination.name }}</h3><p v-if="data.destination.address" class="gx-note">{{ data.destination.address }}</p></div>
               <button type="button" class="gx-navigation__icon gx-navigation__save" :class="{'gx-navigation__save--on':destinationSaved}" :aria-pressed="!!destinationSaved"
-                :aria-label="destinationSaved ? 'Change saved place category' : 'Save this place'" :aria-expanded="favoritePicker === favoriteKey(data.destination)" :disabled="!available" @click="openFavorite(data.destination)">
+                :aria-label="destinationSaved ? 'Change saved place category' : 'Save this place'" :aria-expanded="favoritePicker === favoriteKey(data.destination)" :disabled="!available || data.destination.temporary" :title="data.destination.temporary ? 'Search for an address to save this place' : undefined" @click="openFavorite(data.destination)">
                 <i class="bi" :class="destinationSaved ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
             </div>
             <FavoriteChoices v-if="favoritePicker === favoriteKey(data.destination)" :available="available" @choose="saveAs(data.destination, $event)" />
@@ -538,7 +539,7 @@ export const NavigationPage = {
                 <button type="button" class="gx-navigation__suggestion" :disabled="!available" @click="pick(place)" :aria-label="'Start navigation to ' + place.name">
                   <i class="bi bi-arrow-up-right" aria-hidden="true"></i><span><strong>{{ place.name }}</strong><small v-if="place.address || place.description">{{ place.address || place.description }}</small><small class="gx-navigation__start">Start navigation</small></span>
                 </button>
-                <button type="button" class="gx-navigation__icon" :aria-label="(isFavorite(place) ? 'Saved: ' : 'Save ') + place.name" :aria-pressed="isFavorite(place)" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
+                <button type="button" class="gx-navigation__icon" :aria-label="(isFavorite(place) ? 'Saved: ' : 'Save ') + place.name" :aria-pressed="isFavorite(place)" :aria-expanded="favoritePicker === favoriteKey(place)" :disabled="!available || place.temporary" :title="place.temporary ? 'Search for an address to save this place' : undefined" @click="openFavorite(place)"><i class="bi" :class="isFavorite(place) ? 'bi-star-fill' : 'bi-star'" aria-hidden="true"></i></button>
                 <FavoriteChoices v-if="favoritePicker === favoriteKey(place)" :available="available" @choose="saveAs(place, $event)" />
               </li>
             </ul>

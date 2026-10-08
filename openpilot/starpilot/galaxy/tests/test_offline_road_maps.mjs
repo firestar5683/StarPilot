@@ -73,6 +73,10 @@ globalThis.performance = realPerformance
 frames.length = 0
 map.requestDraw(); map.requestDraw(); map.requestDraw()
 assert.equal(frames.length, 1, "pointer moves within a frame draw once")
+let picked = null
+map.onTap = point => { picked = point }
+listeners.keydown({ key: "Enter", preventDefault() {} })
+assert.deepEqual(picked, map.center, "keyboard users can select the map center")
 map.close()
 
 // Client: load, act, and hand 401s to the sign-in flow.
@@ -103,6 +107,35 @@ await guarded.start()
 assert.equal(signedOut, true)
 assert.equal(guarded.active, false)
 client.stop()
+
+// An older poll cannot undo a completed setting change, even if fetch ignores abort.
+const pending = []
+const racing = new OfflineRoadsClient({ publish() {}, later: () => 1, cancel() {},
+  fetcher: () => new Promise(resolve => pending.push(resolve)) })
+const oldPoll = racing.start()
+const changed = racing.action({ action: "settings", patch: { saveDriven: false } })
+const response = body => ({ ok: true, status: 200, json: async () => body })
+pending[1](response(snapshot({ settings: { saveDriven: false } })))
+await changed
+pending[0](response(snapshot()))
+await oldPoll
+assert.equal(racing.data.settings.saveDriven, false)
+const stoppedPoll = racing.load()
+racing.stop()
+pending[2](response(snapshot()))
+await stoppedPoll
+assert.equal(racing.data.settings.saveDriven, false, "stopped requests cannot publish")
+
+let timeout
+const stalled = new OfflineRoadsClient({ publish() {}, cancel() {}, later: (fn, ms) => { if (ms === 10000) timeout = fn; return 1 },
+  fetcher: (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")))) })
+stalled.active = true
+const timedOut = stalled.action({ action: "settings", patch: { saveDriven: true } })
+timeout()
+await timedOut
+assert.equal(stalled.busy, false, "an unresponsive action releases the controls")
+assert.ok(stalled.error)
+stalled.stop()
 
 // Templates compile with the real Vue compiler, and the Offline Maps tab shows both panels.
 const decodeEntities = (value) => value.replaceAll("&amp;", "&")

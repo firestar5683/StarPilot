@@ -21,12 +21,12 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
       if (pathname === '/api/navigation/search') {
         const body = request.postDataJSON()
         searches.push(body)
-        return route.fulfill({ json: { results: [{ id: 'poi/coffee', name: place.name, description: place.address, searchId: body.searchId }] } })
+        return route.fulfill({ json: { results: [{ ...place }] } })
       }
       if (pathname === '/api/navigation/action') {
         const body = request.postDataJSON()
         actions.push(body)
-        if (body.action === 'favoritePlace') status.favorites = [{ ...place, ...(body.label ? { label: body.label } : {}) }]
+        if (body.action === 'favorite') status.favorites = [{ ...place, ...(body.label ? { label: body.label } : {}) }]
         if (body.action === 'labelFavorite') status.favorites = [{ ...place, ...(body.label ? { label: body.label } : {}) }]
         status.revision = String(Number(status.revision) + 1)
         return route.fulfill({ json: status })
@@ -44,7 +44,7 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
         contentType: pathname.endsWith('.js') ? 'text/javascript' : pathname.endsWith('.css') ? 'text/css' : pathname.endsWith('.json') ? 'application/json' : pathname.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream' })
     })
     await page.goto('http://navigation.test/')
-    const search = page.getByRole('combobox', { name: 'Search destinations' })
+    const search = page.getByRole('searchbox', { name: 'Search destinations' })
     await search.waitFor()
     assert.equal(await page.getByText('Back to tools', { exact: true }).count(), 0)
     await search.fill('coffee')
@@ -72,7 +72,7 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
     assert.equal(actions.at(-1).action, 'labelFavorite')
     assert.equal(actions.at(-1).label, null)
     await page.goto('http://navigation.test/?shell=1#/navigation')
-    await page.getByRole('combobox', { name: 'Search destinations' }).waitFor()
+    await page.getByRole('searchbox', { name: 'Search destinations' }).waitFor()
     for (const theme of ['dark', 'light']) {
       await page.locator('html').evaluate((el, theme) => el.dataset.theme = theme, theme)
       for (const width of [360, 390, 768, 1280]) {

@@ -60,7 +60,7 @@ def run(d, env, limit=10_000):
     wait = d.step(env)
     if wait is None:
       return
-    d.clock.now += max(wait, 0.0) if hasattr(d.clock, "now") else 0
+    d.clock.now += max(wait, 1e-6) if hasattr(d.clock, "now") else 0
   raise AssertionError("daemon never went idle")
 
 
@@ -158,6 +158,124 @@ def test_route_corridor_is_prefetched_after_near_tiles(tmp_path):
   run(d, Environment(token="pk.test", network="cellular", onroad=True, route=route))
   from openpilot.starpilot.navigation.road_tiles import corridor_tiles
   assert all(d.store.find(key) is not None for key in corridor_tiles(route))
+
+
+def test_reroute_and_clear_replace_download_plan(tmp_path):
+  d = daemon(tmp_path)
+  route = [(36.1, -115.1), (36.15, -115.1), (36.2, -115.2)]
+  d.plan(Environment(route=route))
+  old = list(d.route_plan)
+  route[1] = (36.15, -115.3)
+  d.plan(Environment(route=route))
+  assert d.route_plan != old
+  d.plan(Environment())
+  assert d.route_plan == []
+
+
+def test_storage_failure_pauses_until_retry(tmp_path, monkeypatch):
+  d = daemon(tmp_path)
+  d.state.add_area({"latitude": 36.1, "longitude": -115.1, "radiusKm": 2})
+  env = Environment(token="pk.test", network="wifi")
+  d.plan(env)
+  with monkeypatch.context() as patch:
+    patch.setattr(d.store, "write", lambda *args: False)
+    d.step(env)
+    for _ in range(3):
+      d.clock.now += 1
+      assert d.step(env) is None
+    assert len(d.fetcher.session.urls) == 1
+  d.clock.now += navtilesd.TRIM_INTERVAL_S
+  assert d.step(env) == 0
+  assert len(d.fetcher.session.urls) == 2
+
+
+def test_incomplete_area_retries_missing_tiles(tmp_path):
+  d = daemon(tmp_path, Session(body=b"invalid tile"))
+  d.state.add_area({"latitude": 36.1, "longitude": -115.1, "radiusKm": 2})
+  env = Environment(token="pk.test", network="wifi")
+  run(d, env)
+  progress = next(iter(d.progress.values()))
+  assert progress.finished and progress.failed
+  d.fetcher.session.body = TILE
+  d.clock.now += navtilesd.SERVER_BACKOFF_S + 1
+  run(d, env)
+  progress = next(iter(d.progress.values()))
+  assert progress.finished and progress.done == progress.total and not progress.failed
+
+
+def test_repeated_refresh_does_not_double_count_saved_bytes(tmp_path, monkeypatch):
+  d = daemon(tmp_path)
+  area = d.state.add_area({"latitude": 36.1, "longitude": -115.1, "radiusKm": 2})
+  d.state.mark_refreshed(area, d.wall() - navtilesd.AREA_REFRESH_SECONDS - 1)
+  env = Environment(token="pk.test", network="wifi")
+  run(d, env)
+  saved = d.sizes["saved"]
+  fetched = len(d.fetcher.session.urls)
+  now = d.wall() + navtilesd.AREA_REFRESH_SECONDS + 1
+  monkeypatch.setattr(d, "wall", lambda: now)
+  monkeypatch.setattr(d.store, "age", lambda *args: navtilesd.AREA_REFRESH_SECONDS + 1)
+  run(d, env)
+  assert len(d.fetcher.session.urls) == fetched * 2
+  assert d.sizes["saved"] == saved == d.store.size("saved")
+
+
+def test_saved_cap_includes_promoted_tiles(tmp_path, monkeypatch):
+  d = daemon(tmp_path)
+  area = d.state.add_area({"latitude": 36.1, "longitude": -115.1, "radiusKm": 2})
+  key = area_tiles(area)[0]
+  d.store.write("cache", key, b"cached")
+  monkeypatch.setattr(navtilesd, "SAVED_MAX_BYTES", 5)
+  env = Environment(token="pk.test", network="wifi")
+  d.plan(env)
+  for _ in range(3):
+    assert d.step(env) is None
+  assert d.no_space and not d.store.has("saved", key)
+  assert not d.fetcher.session.urls
+
+
+def test_saved_coverage_wraps_at_date_line():
+  area = {"latitude": 0., "longitude": 179.99, "radiusKm": 25}
+  assert all(navtilesd.covered(key, [area]) for key in area_tiles(area))
+
+
+def test_area_planning_is_bounded(tmp_path):
+  with pytest.raises(ValueError, match="smaller"):
+    validate_area({"latitude": 84, "longitude": 0, "radiusKm": 200})
+  state = OfflineState(tmp_path)
+  for _ in range(2):
+    state.add_area({"latitude": 60, "longitude": 0, "radiusKm": 200})
+  with pytest.raises(ValueError, match="smaller"):
+    state.add_area({"latitude": 60, "longitude": 0, "radiusKm": 200})
+
+
+def test_refresh_cannot_resurrect_concurrently_deleted_area(tmp_path, monkeypatch):
+  import threading
+  from openpilot.starpilot.navigation import offline_roads
+  state = OfflineState(tmp_path)
+  area = state.add_area({"latitude": 36.1, "longitude": -115.1, "radiusKm": 2})
+  entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
+  write = offline_roads.write_json
+  def blocked_write(*args):
+    entered.set()
+    assert release.wait(2)
+    write(*args)
+  monkeypatch.setattr(offline_roads, "write_json", blocked_write)
+  refresh = threading.Thread(target=state.mark_refreshed, args=(area, 1))
+  def remove():
+    state.delete_area(area["id"])
+    deleted.set()
+  deletion = threading.Thread(target=remove)
+  refresh.start()
+  try:
+    assert entered.wait(1)
+    deletion.start()
+    assert not deleted.wait(.05), "delete must serialize with the refresh write"
+  finally:
+    release.set()
+    refresh.join(2)
+    if deletion.ident is not None:
+      deletion.join(2)
+  assert deleted.is_set() and state.areas() == []
 
 
 def test_area_validation_and_estimate(tmp_path):

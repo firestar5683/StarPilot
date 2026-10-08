@@ -1,6 +1,6 @@
-"""Keep every Mapbox service inside its free monthly allowance.
+"""Track Mapbox usage and cap services with a free monthly allowance.
 
-Each service is counted on the comma and refused once it reaches 99% of the
+Requests are counted on the comma; capped flows stop at 99% of the
 free tier for the calendar month (UTC, as Mapbox bills). The last 1% absorbs
 small differences between this count and Mapbox's (sessions Mapbox splits on its
 own, counts not yet written when a process restarts). Requests made with the
@@ -20,7 +20,7 @@ from pathlib import Path
 # Free monthly allowances (mapbox.com/pricing, 2026-10).
 FREE = {
   "searchSessions": 500,       # Search Box API sessions (typing and searching)
-  "geocoding": 100_000,        # Temporary Geocoding API (address search)
+  "geocoding": 0,              # Permanent address results have no free tier; counted, not capped
   "staticTiles": 200_000,      # Static Tiles API (Galaxy's map pictures)
   "directions": 100_000,       # Directions API (routes)
   "vectorTiles": 200_000,      # Vector Tiles API (offline road maps)
