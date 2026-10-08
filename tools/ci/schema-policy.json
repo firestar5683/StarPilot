@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "upstream_commit": "ab8c84c3989bab34969d83e78c5fad3ee5b95112",
+  "upstream_commit": "3f06ed3bc7a4cc9c320be1f7d03dcd8a885a8e6f",
   "opendbc_commit": "35f7e0813462607ef1d703e52313e7571e31405d",
   "unchanged_schemas": {
     "openpilot/cereal/deprecated.capnp": "b3aa5c13de40001ed7376cef858500fb003f7698f96131cd0db18d878fa1af0d",
