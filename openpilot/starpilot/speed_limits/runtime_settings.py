@@ -65,7 +65,7 @@ def parse(values: Mapping[str, object]) -> Settings:
       raise ValueError('saved SLC offsets need review')
     metric = _bool(values, "IsMetric") if document is None else False  # presentation units do not own adopted control
     first = values.get("SLCPriority1", "Vision")
-    second = values.get("SLCPriority2", "Map Data")
+    second = values.get("SLCPriority2", "Dashboard")
     if type(first) is not str or type(second) is not str:
       raise ValueError("invalid saved SLC source priority")
     mode = {"Highest": sel.SelectionMode.HIGHEST, "Lowest": sel.SelectionMode.LOWEST}.get(first, sel.SelectionMode.ORDERED)

@@ -302,7 +302,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"VASMPreferences", {PERSISTENT | DONT_LOG, JSON}},
     {"LaneChangePreferences", {PERSISTENT | DONT_LOG, JSON}},
     {"SLCPriority1", {PERSISTENT, STRING, "Vision"}},
-    {"SLCPriority2", {PERSISTENT, STRING, "Map Data"}},
+    {"SLCPriority2", {PERSISTENT, STRING, "Dashboard"}},
     {"SpeedLimitController", {PERSISTENT, BOOL, "0"}},
     {"RouteCount", {PERSISTENT, INT, "0"}},
     {"SnoozeUpdate", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},

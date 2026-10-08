@@ -16,15 +16,18 @@ class RuntimeSettingsTests(unittest.TestCase):
       settings = read_params(params)
       self.assertTrue(settings.display)
       self.assertFalse(settings.enabled)
-      self.assertEqual(settings.selection.slots[0], Source.VISION)
+      self.assertEqual(settings.selection.slots, (Source.VISION, Source.DASHBOARD))
+      self.assertTrue(settings.acceptance.display_only)
       params.put_bool('ShowSpeedLimits', False, block=True)
       params.put('SLCPriority1', 'Dashboard', block=True)
+      params.put('SLCPriority2', 'Map Data', block=True)
       saved = read_params(params)
       self.assertFalse(saved.display)
       self.assertFalse(saved.enabled)
-      self.assertEqual(saved.selection.slots[0], Source.DASHBOARD)
+      self.assertEqual(saved.selection.slots, (Source.DASHBOARD, Source.MAP))
       self.assertEqual(Path(params.get_param_path('ShowSpeedLimits')).read_bytes(), b'0')
       self.assertEqual(Path(params.get_param_path('SLCPriority1')).read_bytes(), b'Dashboard')
+      self.assertEqual(Path(params.get_param_path('SLCPriority2')).read_bytes(), b'Map Data')
 
   def test_corrupt_saved_values_disable_control_without_rewriting(self):
     cases = {'SLCConfirmation': b'invalid', 'SLCFallback': b'broken',
