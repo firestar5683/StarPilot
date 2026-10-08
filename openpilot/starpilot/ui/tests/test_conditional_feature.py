@@ -110,22 +110,24 @@ class ConditionalFeatureTests(unittest.TestCase):
       self.cp.to_bytes()
 
   def test_mode_request_rejects_changed_baseline_safe_mode_and_final_cp(self):
+    cp = self.cp
+    assert cp is not None and not isinstance(cp, SimpleNamespace)
     for change in ("baseline", "safe", "cp"):
       self.params.put_bool("ExperimentalMode", False, block=True)
       self.params.put_bool("SafeMode", False, block=True)
-      self.cp.carVin = "VIN1"
+      cp.carVin = "VIN1"
       request = replace(required_change(self.row("conditional:mode")), value="Experimental")
       if change == "baseline":
         self.params.put_bool("ExperimentalMode", True, block=True)
       elif change == "safe":
         self.params.put_bool("SafeMode", True, block=True)
       else:
-        self.cp.carVin = "VIN2"
+        cp.carVin = "VIN2"
       before = self.params.get("ConditionalModeConfig")
       self.assertFalse(self.owner.apply(request), change)
       self.assertEqual(self.params.get("ConditionalModeConfig"), before)
     self.params.put_bool("SafeMode", False, block=True)
-    self.cp.openpilotLongitudinalControl = False
+    cp.openpilotLongitudinalControl = False
     row = self.row("conditional:mode")
     self.assertNotIn("Experimental", row.choices)
     self.assertFalse(self.owner.apply(replace(required_change(row), value="Experimental")))
