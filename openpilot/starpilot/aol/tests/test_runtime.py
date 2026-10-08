@@ -24,6 +24,101 @@ def car_state(*, brake=False):
 
 
 class CardIntentTests(unittest.TestCase):
+  def test_volt_ascm_low_speed_continuation_and_engagement_gates(self):
+    # Route 14 crosses 5 kph while enabled; the stock no-entry event must
+    # still block a new longitudinal engagement, without dropping active axes.
+    from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
+    from opendbc.car.gm.values import CAR
+
+    import os
+    import struct
+
+    from openpilot.starpilot.aol.tests.test_gm import TestGmAol
+
+    with OpenpilotPrefix(), mock.patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      for key in ('AlwaysOnLateral', 'AlphaLongitudinalEnabled', 'VoltOnePedalMode', 'VoltSNG', 'GMAutoHold'):
+        settings.put_bool(key, True, block=True)
+      selected = TestGmAol.card(ordinary_params(CAR.CHEVROLET_VOLT_ASCM, alpha=True,
+                                              sascm=True, radar=True), settings)
+      try:
+        cp = selected.CP.as_reader()
+        self.assertEqual((cp.safetyConfigs[0].safetyParam, cp.alternativeExperience), (0xD114, 32))
+      finally:
+        selected.vehicle_startup.close()
+    self.assertEqual(cp.minEnableSpeed, struct.unpack('f', struct.pack('f', 5. / 3.6))[0])
+    from openpilot.starpilot.nostalgia import aol_no_entry
+    low_speed = [log.OnroadEvent.EventName.belowEngageSpeed]
+    self.assertTrue(aol_no_entry(low_speed, car_state(), paddle_only_cancel=False))
+    self.assertFalse(aol_no_entry(low_speed, car_state(), paddle_only_cancel=False, allow_below_engage_speed=True))
+    now = 4_000_000_000
+    state = car_state()
+    state.cruiseState.available = True
+
+    class SM(dict):
+      def all_checks(self, _services=None):
+        return True
+
+    sm = SM(driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
+            extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
+    services = ('aolSafetyWire', 'aolIntentWire')
+    sm.valid = sm.alive = sm.seen = dict.fromkeys(services, True)
+    sm.logMonoTime = dict.fromkeys(services, now)
+    sd = SelfdriveD.__new__(SelfdriveD)
+    sd.CP = cp
+    sd.initialized, sd.enabled, sd.active = True, False, False
+    sd.aol_replay, sd.axis_transport_required = True, True
+    sd.aol_car_state_log_ns, sd.aol_session_id = now, 'volt-session'
+    sd.aol_axis_decision = AxisDecision()
+    sd.aol_dm_lateral_inhibit, sd.nostalgia_paddle_cancel = False, False
+    sd.aol_settings = None
+    sd.events, sd.state_machine = Events(), StateMachine()
+
+    def step(speed, *, armed, long_requested, event=None):
+      state.vEgo = speed
+      sd.events.clear()
+      if speed < cp.minEnableSpeed:
+        sd.events.add(log.OnroadEvent.EventName.belowEngageSpeed)
+      if event is not None:
+        sd.events.add(event)
+      sm['aolIntentWire'] = encode_intent(IntentState('card', 1, now, now, now + 200_000_000,
+                                                     armed, False, False, True, armed))
+      sm['aolSafetyWire'] = encode_safety(SafetyState(1, True, now, now + 200_000_000,
+        int(cp.safetyConfigs[0].safetyModel.raw), 0xD114, True, long_requested,
+        True, long_requested, 'panda', 'volt-session'))
+      sd.step()
+      return sd.aol_axis_decision
+
+    with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now), \
+         mock.patch.object(sd, 'sm', sm, create=True), \
+         mock.patch.object(sd, 'data_sample', return_value=state), \
+         mock.patch.object(sd, 'update_events'), mock.patch.object(sd, 'update_alerts'), \
+         mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'):
+      combined = step(1.40, armed=False, long_requested=True,
+                      event=log.OnroadEvent.EventName.buttonEnable)
+      self.assertEqual(combined.mode, 'combined')
+      for speed in (1.385523796, 0., 1.395637870):
+        self.assertEqual(step(speed, armed=False, long_requested=True).mode, 'combined')
+        self.assertTrue(sd.enabled)
+      step(1.40, armed=True, long_requested=False, event=log.OnroadEvent.EventName.buttonCancel)
+      blocked = step(1.385523796, armed=True, long_requested=False,
+                     event=log.OnroadEvent.EventName.buttonEnable)
+      self.assertTrue(sd.events.contains(ET.NO_ENTRY))
+      self.assertFalse(sd.enabled or blocked.desired_longitudinal)
+      self.assertEqual(blocked.mode, 'lateralOnly')
+      self.assertEqual(step(1.395637870, armed=True, long_requested=False).mode, 'lateralOnly')
+      self.assertFalse(sd.enabled)  # Crossing the threshold is not an enable gesture.
+      for event in (log.OnroadEvent.EventName.canError, log.OnroadEvent.EventName.accFaulted,
+                    log.OnroadEvent.EventName.calibrationInvalid):
+        with self.subTest(event=event):
+          blocked = step(1.385523796, armed=True, long_requested=False, event=event)
+          self.assertFalse(blocked.desired_lateral or blocked.desired_longitudinal)
+      state.steerFaultTemporary = True
+      self.assertFalse(step(1.385523796, armed=True, long_requested=False).lateral_active)
+      state.steerFaultTemporary = False
+      sm.seen['aolSafetyWire'] = False
+      self.assertEqual(step(1.385523796, armed=True, long_requested=False).mode, 'off')
+
   def test_seatbelt_blocks_standard_longitudinal_without_disarming_aol(self):
     from openpilot.starpilot.nostalgia import aol_no_entry
 

@@ -28,6 +28,7 @@ from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from opendbc.car.gm.aol import native_bootstrap_supported
+from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
@@ -867,7 +868,9 @@ class SelfdriveD:
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
         no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
-                             cruise_main_required=getattr(self, 'aol_cruise_main_required', True)),
+                             cruise_main_required=getattr(self, 'aol_cruise_main_required', True),
+                             allow_below_engage_speed=bool(is_volt_ascm_longitudinal(self.CP) and
+                                                         not self.CP.flags & GMFlags.PEDAL_LONG)),
         immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
         dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
                         self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
