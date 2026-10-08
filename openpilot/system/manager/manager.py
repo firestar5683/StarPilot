@@ -73,6 +73,8 @@ def manager_init() -> None:
   # Initialize absent settings only. Typed reads can return None for malformed
   # saved data; replacing it here would bypass feature validation and recovery.
   for k in params.all_keys():
+    if k == b"LKASButtonControl":
+      continue  # Card enrolls the vehicle-specific default after identification.
     default_value = params.get_default_value(k)
     if default_value is not None and not os.path.lexists(params.get_param_path(k)):
       params.put(k, default_value, block=True)

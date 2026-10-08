@@ -126,6 +126,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ScreenTimeout", {PERSISTENT, INT}},
     {"ScreenTimeoutOnroad", {PERSISTENT, INT}},
     {"LKASButtonControl", {PERSISTENT, INT, "0"}},
+    {"SonataHybridLKASButtonControlMigrated", {PERSISTENT, BOOL, "0"}},
     {"MainCruiseButtonControl", {PERSISTENT, INT, "0"}},
     {"PulseGlideSpeedDelta", {PERSISTENT, FLOAT, "5.0"}},
     {"DistanceButtonControl", {PERSISTENT, INT, "1"}},
