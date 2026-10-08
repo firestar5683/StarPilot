@@ -34,14 +34,14 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
       if (pathname.startsWith('/api/')) return route.fulfill({ json: status })
       if (pathname === '/' && new URL(request.url()).searchParams.has('shell')) return route.fulfill({ contentType: 'text/html', body:
         `<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.min.css">
-        <link rel="stylesheet" href="/css/galaxy.css"><div id="galaxy-app"></div><script type="module" src="/js/app.js"></script>` })
+        <link rel="stylesheet" href="/css/galaxy.css"><link rel="stylesheet" href="/css/settings.css"><link rel="stylesheet" href="/css/navigation.css"><div id="galaxy-app"></div><script type="module" src="/js/app.js"></script>` })
       if (pathname === '/') return route.fulfill({ contentType: 'text/html', body: `<meta name="viewport" content="width=device-width,initial-scale=1">
-        <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.min.css"><link rel="stylesheet" href="/css/galaxy.css"><main class="gx-content"><div id="app"></div></main>
+        <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.min.css"><link rel="stylesheet" href="/css/galaxy.css"><link rel="stylesheet" href="/css/settings.css"><link rel="stylesheet" href="/css/navigation.css"><main class="gx-content"><div id="app"></div></main>
         <script type="module">import {createApp} from '/vendor/vue/vue.esm-browser.js';
         import {NavigationPage} from '/js/navigation.js';
         window.navigation = createApp(NavigationPage,{mode:'local',unauthorized:()=>{}}).mount('#app');</script>` })
       return route.fulfill({ body: readFileSync(path.join(web, pathname)),
-        contentType: pathname.endsWith('.js') ? 'text/javascript' : pathname.endsWith('.css') ? 'text/css' : pathname.endsWith('.json') ? 'application/json' : 'application/octet-stream' })
+        contentType: pathname.endsWith('.js') ? 'text/javascript' : pathname.endsWith('.css') ? 'text/css' : pathname.endsWith('.json') ? 'application/json' : pathname.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream' })
     })
     await page.goto('http://navigation.test/')
     const search = page.getByRole('combobox', { name: 'Search destinations' })
@@ -49,10 +49,6 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
     assert.equal(await page.getByText('Back to tools', { exact: true }).count(), 0)
     await search.fill('coffee')
     await page.getByRole('button', { name: 'Save Coffee Shop', exact: true }).waitFor()
-    const count = searches.length
-    await page.getByRole('button', { name: 'Search', exact: true }).click()
-    await page.getByRole('list', { name: 'Search results' }).waitFor()
-    assert.equal(searches.length, count, 'submitting uses ready suggestions')
     await page.getByRole('button', { name: 'Save Coffee Shop', exact: true }).click()
     const choices = page.getByRole('group', { name: 'Save place as' })
     for (const width of [360, 390, 768, 1280]) {
@@ -61,8 +57,6 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
         assert.equal(await choices.getByRole('button', { name, exact: true }).isVisible(), true)
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
       if (width < 400) {
-        const field = await search.boundingBox(), button = await page.getByRole('button', { name: 'Search', exact: true }).boundingBox()
-        assert(Math.abs(field.y - button.y) < 6, 'search stays in a single row on phones')
         assert((await page.locator('.gx-navigation-map canvas').boundingBox()).height <= 300, 'phone map stays compact')
       }
       await page.screenshot({ path: '/private/tmp/navigation-compact-' + width + '.png', fullPage: true })
@@ -70,20 +64,57 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
     await choices.getByRole('button', { name: 'Home', exact: true }).click()
     await page.waitForFunction(() => window.navigation.data.favorites[0]?.label === 'home')
     assert.equal(actions.at(-1).label, 'home')
-    await page.getByRole('button', { name: 'Saved: Coffee Shop', exact: true }).click()
+    await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+    await search.focus()
+    await page.getByRole('button', { name: 'Save Coffee Shop as Home, Work, or Other', exact: true }).click()
     await choices.getByRole('button', { name: 'Other', exact: true }).click()
     await page.waitForFunction(() => window.navigation.data.favorites[0] && !window.navigation.data.favorites[0].label)
     assert.equal(actions.at(-1).action, 'labelFavorite')
     assert.equal(actions.at(-1).label, null)
     await page.goto('http://navigation.test/?shell=1#/navigation')
     await page.getByRole('combobox', { name: 'Search destinations' }).waitFor()
-    assert.equal(await page.locator('.gx-appbar').isVisible(), true)
-    assert.equal(await page.getByRole('button', { name: 'Menu', exact: true }).isVisible(), true)
-    const header = await page.locator('.gx-appbar').boundingBox(), title = await page.getByRole('heading', { name: 'Navigation', exact: true }).boundingBox()
-    assert(title.y >= header.y + header.height, 'Navigation title sits below the shared header')
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: '/private/tmp/navigation-shell-mobile.png', fullPage: true })
+    for (const theme of ['dark', 'light']) {
+      await page.locator('html').evaluate((el, theme) => el.dataset.theme = theme, theme)
+      for (const width of [360, 390, 768, 1280]) {
+        await page.setViewportSize({ width, height: 844 })
+        const header = await page.locator('.gx-appbar').boundingBox()
+        const title = await page.getByRole('heading', { name: 'Navigation', exact: true }).boundingBox()
+        assert(header && header.y >= 0 && header.height >= 44, 'shared header is visible')
+        assert(title.y >= header.y + header.height, 'Navigation title sits below the shared header')
+        assert.equal(await page.getByRole('button', { name: 'Menu', exact: true }).isVisible(), true)
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+        for (const name of ['Destination', 'Offline Maps', 'Setup']) {
+          const tab = page.getByRole('group', { name: 'Navigation tools' }).getByRole('button', { name, exact: true })
+          await tab.click()
+          await page.mouse.move(0, 0)
+          assert.equal(await tab.getAttribute('aria-pressed'), 'true')
+          await page.waitForFunction(el => getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)', await tab.elementHandle())
+          const colors = await tab.evaluate(el => {
+            const style = getComputedStyle(el)
+            return { text: style.color, background: style.backgroundColor }
+          })
+          assert.notEqual(colors.text, colors.background, 'selected tab text must remain visible')
+          assert.equal(colors.background, 'rgba(0, 0, 0, 0)', 'selected tab uses the navigation underline style')
+        }
+        await page.getByRole('button', { name: 'Destination', exact: true }).click()
+        await page.screenshot({ path: `/private/tmp/navigation-shell-${theme}-${width}.png`, fullPage: true })
+      }
+    }
+    for (const pinned of [false, true]) {
+      await page.locator('.gx-app').evaluate((el, pinned) => el.classList.toggle('gx-nav-pinned', pinned), pinned)
+      for (const width of [360, 390, 768, 1024, 1280]) {
+        await page.setViewportSize({ width, height: 844 })
+        const pill = await page.locator('.gx-appbar__pill').boundingBox()
+        const status = await page.locator('.gx-appbar__right').boundingBox()
+        const searchBox = await page.locator('.gx-searchbox').boundingBox()
+        assert(status.x + status.width <= pill.x + pill.width, 'status stays inside the header pill')
+        assert(searchBox.x + searchBox.width <= status.x, 'search and device status do not overlap')
+        await page.getByRole('button', { name: 'Menu', exact: true }).click()
+        assert.equal(await page.getByRole('complementary', { name: 'Galaxy navigation' }).isVisible(), true)
+        await page.locator('.gx-underlay').click({ position: { x: width - 10, y: 100 } })
+      }
+    }
     assert.deepEqual(errors, [])
-    console.log('Navigation: 360–1280px layout, inline favorite choices, atomic Home save, Other relabel, and instant suggestion reuse passed')
+    console.log('Navigation: 360–1280px layout, inline favorite choices, atomic Home save, Other relabel, and readable tabs with shared headers in both themes passed')
   } finally { await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })

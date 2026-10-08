@@ -31,7 +31,8 @@
 .gx-navigation__panel .gx-navigation__section {padding:12px 14px}
 .gx-navigation__panel .gx-btn,.gx-navigation__tabs .gx-btn {border-radius:14px;font-size:.85rem;min-height:44px;padding:8px 16px}
 .gx-navigation__tabs .gx-btn {background:none;color:var(--text-muted);border:0;border-bottom:2px solid transparent;border-radius:0;box-shadow:none}
-.gx-navigation__tabs .gx-btn[aria-pressed="true"] {color:var(--primary);border-bottom-color:var(--primary)}
+.gx-navigation__tabs .gx-btn[aria-pressed="true"] {background:none;color:var(--primary);border-bottom-color:var(--primary)}
+.gx-navigation__tabs .gx-btn:hover:not(:disabled) {background:var(--glass-active-bg)}
 .gx-navigation__search {display:flex;flex-wrap:nowrap;gap:8px}
 .gx-navigation__panel .gx-navigation__search {margin:0}
 .gx-navigation__field {flex:1;display:flex;align-items:center;gap:8px;min-width:0;height:50px;padding:0 6px 0 16px;border-radius:25px}

@@ -309,6 +309,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 
 .gx-appbar {
+  container: galaxy-header / inline-size;
   align-items: center;
   display: flex;
   gap: var(--sp-2);
@@ -851,7 +852,7 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
 
 .gx-nav-item i { font-size: 1.3rem; width: 24px; }
 
-@media (max-width: 767px) {
+@container galaxy-header (max-width: 743px) {
   .gx-appbar__pill { padding-inline: 10px; gap: var(--sp-1); }
   .gx-searchbox { flex: 0 0 var(--touch-target); justify-content: center; min-width: 0; }
   .gx-searchbox.open { flex: 1; justify-content: stretch; }
@@ -862,24 +863,27 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
   .gx-appbar:has(.gx-searchbox.open) .gx-back-btn,
   .gx-appbar:has(.gx-searchbox.open) .gx-theme-toggle,
   .gx-appbar:has(.gx-searchbox.open) .gx-appbar__menu { display: none; }
-  .blur-nav { display: grid; }
-  .gx-drawer { padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); }
   .gx-back-btn { display: inline-flex; }
   .gx-appbar__search { flex: 1; min-width: 0; }
   .gx-status-pill { display: none; }
   .gx-status-pill.gx-device-state { display: inline-flex; flex: none; width: 24px; height: 32px; padding: 0; justify-content: center; border: 0; background: none; }
   .gx-device-state__label { display: none; }
-  .gx-content { padding-left: var(--sp-3); padding-right: var(--sp-3); }
 }
 
-@media (max-width: 767px) {
+@container galaxy-header (max-width: 743px) {
   .gx-search-toggle { display: inline-flex; }
   .gx-searchwrap { display: none; }
   .gx-searchbox.open .gx-searchwrap { display: flex; }
   .gx-searchbox.open .gx-search-toggle { flex: none; order: 2; }
 }
 
-@media (max-width: 359px) { .gx-appbar__title { display: none; } }
+@container galaxy-header (max-width: 350px) { .gx-appbar__title { display: none; } }
+
+@media (max-width: 767px) {
+  .blur-nav { display: grid; }
+  .gx-drawer { padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); }
+  .gx-content { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+}
 
 @media (min-width: 768px) {
   .blur-nav { display: none; }
