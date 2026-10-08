@@ -687,10 +687,9 @@ class FeatureSettingsOwner:
       title = "Vehicle Settings"
       capability = self._auto_hold_capability()
       allowed = configurable and capability is not None and self.authority("vehicle")
-      from opendbc.car.toyota.values import uses_toyota_auto_hold_aeb
-      stops = "manual stops" if capability is not None and uses_toyota_auto_hold_aeb(self.vehicle_params()) else "manual and cruise-controlled stops"
       row = self._bool_row("ToyotaAutoHold", "Automatic Brake Hold", allowed,
-                           f"Holds {stops} with cruise main on until you press the gas. Applies after the next startup.")
+                           "Hold the brake for over one second at a complete stop with cruise main on and cruise disengaged. " +
+                           "Holds until you press the gas; normal cruise stop-and-go is unchanged. Applies after the next startup.")
       rows = [replace(row, available=row.available and self._readable("ToyotaAutoHold"), capability=capability)] if capability is not None else []
       rows.extend(self.tesla_screen.rows(parked))
       rows.extend(self.gm_tune.rows(parked))

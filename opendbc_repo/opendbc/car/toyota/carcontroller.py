@@ -100,13 +100,11 @@ class CarController(CarControllerBase):
     self.secoc_prev_reset_counter = 0
     self.brake_hold_active = False
     self._brake_hold_counter = 0
-    self._auto_hold_rearm_blocked = False
 
-  def update_auto_hold_state(self, CS, cancel_requested=False, activation_frames=TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES, *,
-                             long_active=False, stopping=False):
+  def update_auto_hold_state(self, CS, cancel_requested=False, activation_frames=TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES):
     aeb_hold = uses_toyota_auto_hold_aeb(self.CP)
     allowed = (not cancel_requested and CS.out.standstill and CS.out.cruiseState.available and
-               not CS.out.gasPressed and (not CS.out.cruiseState.enabled or (long_active and not aeb_hold)) and
+               not CS.out.gasPressed and not CS.out.cruiseState.enabled and
                CS.out.gearShifter not in (structs.CarState.GearShifter.park, structs.CarState.GearShifter.reverse))
     if aeb_hold:
       # Manual AEB hold requires a driver brake stop.
@@ -116,18 +114,9 @@ class CarController(CarControllerBase):
       elif not allowed:
         self.reset_auto_hold_state()
     elif not allowed:
-      # A gas tap releases this stop, even if lifted before the wheels move.
-      # Re-arm once moving or after another brake press.
-      rearm_blocked = CS.out.standstill and (self._auto_hold_rearm_blocked or CS.out.gasPressed)
       self.reset_auto_hold_state()
-      self._auto_hold_rearm_blocked = rearm_blocked
     elif not self.brake_hold_active:
       if CS.out.brakePressed:
-        self._auto_hold_rearm_blocked = False
-      if long_active and stopping and CS.out.cruiseState.enabled and not self._auto_hold_rearm_blocked:
-        # Planner resume requests cannot release a cruise stop without driver gas.
-        self.brake_hold_active = True
-      elif CS.out.brakePressed and not CS.out.cruiseState.enabled:
         self._brake_hold_counter += 1
         self.brake_hold_active = self._brake_hold_counter > activation_frames
       else:
@@ -139,7 +128,6 @@ class CarController(CarControllerBase):
       self.standstill_req = False
     self._brake_hold_counter = 0
     self.brake_hold_active = False
-    self._auto_hold_rearm_blocked = False
 
   def update(self, CC, CS, now_nanos):
     filter_allowed = (not self.prius_longitudinal or self.prius_filter_input is not None and
@@ -242,8 +230,7 @@ class CarController(CarControllerBase):
 
     # *** gas and brake ***
     if supports_toyota_auto_hold(self.CP) and CS.out.canValid and not CS.out.canTimeout:
-      self.update_auto_hold_state(CS, pcm_cancel_cmd if not uses_toyota_auto_hold_aeb(self.CP) else False,
-                                  long_active=long_active, stopping=stopping)
+      self.update_auto_hold_state(CS, pcm_cancel_cmd if not uses_toyota_auto_hold_aeb(self.CP) else False)
       if (uses_toyota_auto_hold_aeb(self.CP) and self.frame % 2 == 0 and
           CS.out.standstill and CS.out.cruiseState.available and not CS.out.gasPressed):
         can_sends.append(toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active))
@@ -267,9 +254,6 @@ class CarController(CarControllerBase):
 
         if not should_resume and CS.out.cruiseState.standstill:
           self.standstill_req = True
-
-      if self._auto_hold_rearm_blocked:
-        self.standstill_req = False
 
       if self.frame % 3 == 0:
         # Press distance button until we are at the correct bar length. Only change while enabled to avoid skipping startup popup

@@ -235,81 +235,52 @@ class TestToyotaAutoHold(unittest.TestCase):
     self.assertTrue(controller.brake_hold_active)
     self.assert_acc_hold(tick_acc(cp, controller, command, state))
 
-  def test_cruise_stop_blocks_planner_resume_until_gas(self):
-    for car, hybrid in ((CAR.TOYOTA_COROLLA_TSS2, False), (CAR.TOYOTA_RAV4_TSS2, False)):
-      with self.subTest(car=car):
-        car_fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
-        cp, controller, command, state = setup_cruise_hold(car, car_fw=car_fw)
+  def test_auto_hold_preserves_normal_cruise_stop_and_go(self):
+    for car, hybrid in ((CAR.TOYOTA_COROLLA_TSS2, False), (CAR.TOYOTA_RAV4_TSS2, False),
+                        (CAR.TOYOTA_RAV4_TSS2, True), (CAR.TOYOTA_CAMRY_TSS2, False)):
+      with self.subTest(car=car, hybrid=hybrid):
+        fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+        cp, controller, command, state = setup_cruise_hold(car, car_fw=fw)
+        base_cp, baseline, base_command, base_state = setup_cruise_hold(car, enabled=False, car_fw=fw)
+        self.assertTrue(cp.openpilotLongitudinalControl)
+        self.assertTrue(cp.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
         self.assertEqual(bool(cp.flags & ToyotaFlags.HYBRID), hybrid)
-        self.assert_acc_hold(tick_acc(cp, controller, command, state))
-        self.assertTrue(controller.brake_hold_active)
-        command.actuators.accel = 1.5
-        command.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
-        command.cruiseControl.resume = True
-        for _ in range(10):
-          self.assert_acc_hold(tick_acc(cp, controller, command, state))
-        state.out.gasPressed = True
-        command.longActive = False
-        command.actuators.accel = 0
-        values = tick_acc(cp, controller, command, state)
-        self.assertFalse(controller.brake_hold_active)
-        self.assertEqual(values['ACCEL_CMD'], 0)
-        self.assertEqual(values['RELEASE_STANDSTILL'], 1)
-
-  def test_gas_tap_rearms_only_after_movement_or_brake(self):
-    for rearm in ('moving', 'brake'):
-      with self.subTest(rearm=rearm):
-        cp, controller, command, state = setup_cruise_hold()
-        self.assert_acc_hold(tick_acc(cp, controller, command, state))
-        state.out.gasPressed = True
-        command.longActive = False
-        command.actuators.accel = 0
-        self.assertEqual(tick_acc(cp, controller, command, state)['RELEASE_STANDSTILL'], 1)
-        state.out.gasPressed = False
-        command.longActive = True
-        command.actuators.accel = -0.7
-        for _ in range(10):
-          values = tick_acc(cp, controller, command, state)
+        for _ in range(50):
+          actual = tick_acc(cp, controller, command, state)
+          expected = tick_acc(base_cp, baseline, base_command, base_state)
           self.assertFalse(controller.brake_hold_active)
-          self.assertEqual(values['RELEASE_STANDSTILL'], 1)
-        if rearm == 'moving':
-          state.out.standstill = state.out.cruiseState.standstill = False
-          state.out.vEgo = state.out.vEgoRaw = 1
-          tick_acc(cp, controller, command, state)
-          state.out.standstill = state.out.cruiseState.standstill = True
-          state.out.vEgo = state.out.vEgoRaw = 0
-        else:
-          state.out.brakePressed = True
-        self.assert_acc_hold(tick_acc(cp, controller, command, state))
-        self.assertFalse(controller._auto_hold_rearm_blocked)
-
-  def test_cruise_hold_requires_stopping_and_acc_capability(self):
-    for long_state in ('off', 'pid', 'starting'):
-      with self.subTest(long_state=long_state):
-        cp, controller, command, state = setup_cruise_hold()
-        command.actuators.longControlState = getattr(structs.CarControl.Actuators.LongControlState, long_state)
-        command.actuators.accel = 1.5
-        tick_acc(cp, controller, command, state)
-        self.assertFalse(controller.brake_hold_active)
-    for car, enabled in ((CAR.TOYOTA_COROLLA_TSS2, False), (CAR.TOYOTA_CAMRY_TSS2, True)):
-      with self.subTest(car=car, enabled=enabled):
-        cp, controller, command, state = setup_cruise_hold(car, enabled)
-        tick_acc(cp, controller, command, state)
-        self.assertFalse(controller.brake_hold_active)
-        command.actuators.accel = 1.5
-        command.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
-        command.cruiseControl.resume = True
-        for _ in range(20):
-          values = tick_acc(cp, controller, command, state)
+          self.assertEqual(dict(actual), dict(expected))
+        for owner_command in (command, base_command):
+          owner_command.actuators.accel = 1.5
+          owner_command.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+          owner_command.cruiseControl.resume = True
+        for _ in range(30):
+          actual = tick_acc(cp, controller, command, state)
+          expected = tick_acc(base_cp, baseline, base_command, base_state)
           self.assertFalse(controller.brake_hold_active)
-        self.assertGreater(values['ACCEL_CMD'], 0)
-        self.assertEqual(values['RELEASE_STANDSTILL'], 1)
+          self.assertFalse(state.out.gasPressed)
+          self.assertEqual(dict(actual), dict(expected))
+        self.assertGreater(actual['ACCEL_CMD'], 0)
+        self.assertEqual(actual['RELEASE_STANDSTILL'], 1)
 
-  def test_cruise_hold_releases_when_conditions_change(self):
-    for cause in ('capability', 'cancel', 'main', 'park', 'reverse', 'moving', 'long_inactive'):
+  def test_engaged_cruise_never_acquires_manual_hold(self):
+    for long_state in ('off', 'pid', 'starting', 'stopping'):
+      for brake_pressed in (False, True):
+        with self.subTest(long_state=long_state, brake_pressed=brake_pressed):
+          cp, controller, command, state = setup_cruise_hold()
+          command.actuators.longControlState = getattr(structs.CarControl.Actuators.LongControlState, long_state)
+          state.out.brakePressed = brake_pressed
+          for _ in range(105):
+            step_hold(controller, command, state)
+            self.assertFalse(controller.brake_hold_active)
+
+  def test_manual_hold_releases_when_conditions_change(self):
+    for cause in ('capability', 'cancel', 'main', 'park', 'reverse', 'moving', 'cruise'):
       with self.subTest(cause=cause):
-        cp, controller, command, state = setup_cruise_hold()
-        self.assert_acc_hold(tick_acc(cp, controller, command, state))
+        cp, controller, command, state = setup_hold()
+        for _ in range(35):
+          values = tick_acc(cp, controller, command, state)
+        self.assert_acc_hold(values)
         if cause == 'capability':
           apply_toyota_auto_hold(cp, False)
         elif cause == 'cancel':
@@ -321,14 +292,22 @@ class TestToyotaAutoHold(unittest.TestCase):
         elif cause == 'moving':
           state.out.standstill = state.out.cruiseState.standstill = False
         else:
-          command.longActive = False
-        command.actuators.accel = 0
-        state.out.cruiseState.standstill = False
+          state.out.cruiseState.enabled = command.longActive = True
+        state.out.brakePressed = False
         values = tick_acc(cp, controller, command, state)
         self.assertFalse(controller.brake_hold_active)
         self.assertEqual(controller._brake_hold_counter, 0)
         self.assertEqual(values['RELEASE_STANDSTILL'], 1)
         self.assertEqual(values['CANCEL_REQ'], cause == 'cancel')
+        if cause == 'cruise':
+          command.actuators.accel = 1.5
+          command.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+          command.cruiseControl.resume = True
+          for _ in range(20):
+            values = tick_acc(cp, controller, command, state)
+            self.assertFalse(controller.brake_hold_active)
+          self.assertGreater(values['ACCEL_CMD'], 0)
+          self.assertEqual(values['RELEASE_STANDSTILL'], 1)
 
   def test_manual_hold_with_lateral_only_and_gas_release(self):
     cp, controller, command, state = setup_hold()
@@ -343,6 +322,16 @@ class TestToyotaAutoHold(unittest.TestCase):
     self.assertFalse(controller.brake_hold_active)
     self.assertEqual(values['ACCEL_CMD'], 0)
     self.assertEqual(values['RELEASE_STANDSTILL'], 1)
+
+    state.out.gasPressed = False
+    for _ in range(50):
+      tick_acc(cp, controller, command, state)
+      self.assertFalse(controller.brake_hold_active)
+    state.out.brakePressed = True
+    for _ in range(35):
+      values = tick_acc(cp, controller, command, state)
+    self.assertTrue(controller.brake_hold_active)
+    self.assert_acc_hold(values)
 
   def test_camry_interrupted_dwell_retains_manual_aeb_behavior(self):
     cp, controller, command, state = setup_hold(CAR.TOYOTA_CAMRY_TSS2)

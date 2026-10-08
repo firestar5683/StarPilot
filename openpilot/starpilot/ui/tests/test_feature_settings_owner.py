@@ -112,7 +112,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     from opendbc.car import structs
     from opendbc.car.toyota.interface import CarInterface
     from opendbc.car.toyota.values import CAR
-    for hybrid, description in ((True, "manual stops"), (False, "manual and cruise-controlled stops")):
+    for hybrid in (True, False):
       fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
       cp = CarInterface.get_params(CAR.TOYOTA_RAV4_TSS2, {0: {0x3F6: 8}, 1: {}, 2: {}}, fw, False, False, False)
       self.fingerprint = cp.carFingerprint
@@ -121,7 +121,9 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
       self.assertTrue(any(row.label == "Vehicle Settings" and row.available for row in hub.rows))
       row = self._row("vehicle", "ToyotaAutoHold")
       self.assertTrue(row.available)
-      self.assertIn(description, row.reason)
+      self.assertIn("cruise disengaged", row.reason)
+      self.assertIn("over one second", row.reason)
+      self.assertIn("normal cruise stop-and-go is unchanged", row.reason)
       request = replace(required_change(row), confirmation=True)
       self.assertTrue(self.owner.apply(request))
       self.params.put_bool("ToyotaAutoHold", False, block=True)
