@@ -572,7 +572,7 @@ class CarState(CarStateBase):
 
     if (self.CP.carFingerprint in (ORDINARY_ASCM_CAR | ORDINARY_SDGM_CAR) or
         is_ordinary_camera_profile(self.CP) or is_ordinary_camera_profile(self.CP, longitudinal=True) or
-        self.CP.carFingerprint in (CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)) and not is_volt_camera_removed(self.CP) and \
+        self.CP.carFingerprint in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019)) and not is_volt_camera_removed(self.CP) and \
         not is_ordinary_camera_removed(self.CP):
       self.stock_fcw_alert = int(cam_cp.vl["ASCMActiveCruiseControlStatus"]["FCWAlert"]) & 0x3
       ret.stockFcw = self.stock_fcw_alert != 0

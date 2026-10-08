@@ -46,7 +46,7 @@ def command(cp, *, accel, speed, orientation, active=True, frame=4):
   state = structs.CarState()
   state.vEgo = speed
   state.cruiseState.available = True
-  cs = SimpleNamespace(out=state.as_reader(), cam_lka_steering_cmd_counter=0,
+  cs = SimpleNamespace(out=state.as_reader(), stock_fcw_alert=0, cam_lka_steering_cmd_counter=0,
                        loopback_lka_steering_cmd_updated=False,
                        loopback_lka_steering_cmd_ts_nanos=1_000_000_000,
                        pt_lka_steering_cmd_counter=0,

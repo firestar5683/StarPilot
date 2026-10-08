@@ -53,6 +53,84 @@ WIRE = {'disabled': (-650, 0, 0, '0042abe001bd5420', '1000f00000'),
 
 
 class TestVoltAscmControl(unittest.TestCase):
+  def test_actual_ascm_camera_dashboard_source_and_sender(self):
+    from opendbc.can import CANPacker
+    from opendbc.can.parser import CANParser
+    from opendbc.car import Bus
+    from opendbc.car.gm.carstate import CarState
+    from opendbc.car.gm.values import gm_control_word
+
+    cp = params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, accelerator=True, radar=True)
+    cp.safetyConfigs[0].safetyParam = 0xD114
+    cp.alternativeExperience = 32
+    self.assertTrue(is_volt_ascm_longitudinal(cp))
+    self.assertEqual(gm_control_word(cp), 0x4A87)
+    for enabled in (False, True):
+      for stock_level, aeb, local_fcw in ((0, False, False), (1, False, False), (2, False, False),
+                                         (3, False, False), (0, True, False), (2, True, False),
+                                         (0, False, True), (1, False, True)):
+        with self.subTest(enabled=enabled, stock_level=stock_level, aeb=aeb, local_fcw=local_fcw):
+          state = CarState(cp)
+          parsers = state.get_can_parsers(cp)
+          packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+          camera = [packer.make_can_msg('ASCMLKASteeringCmd', 2, {}),
+                    packer.make_can_msg('ASCMActiveCruiseControlStatus', 2,
+                                       {'ACCCruiseState': 2, 'FCWAlert': stock_level}),
+                    packer.make_can_msg('AEBCmd', 2, {'AEBCmdActive': int(aeb)})]
+          parsers[Bus.cam].update([(1_000_000_000, camera)])
+          out = state.update(parsers)
+          self.assertEqual(state.stock_fcw_alert, stock_level)
+          self.assertEqual(out.stockFcw, stock_level != 0)
+          self.assertEqual(out.stockAeb, aeb)
+          state.out = out.as_reader()
+          control = structs.CarControl(enabled=enabled, longActive=enabled)
+          control.hudControl.setSpeed = 20.
+          control.hudControl.leadDistanceBars = 3
+          control.hudControl.leadVisible = True
+          control.hudControl.visualAlert = (structs.CarControl.HUDControl.VisualAlert.fcw if local_fcw else
+                                           structs.CarControl.HUDControl.VisualAlert.none)
+          controller = CarController(DBC[cp.carFingerprint], cp)
+          decoder = CANParser(DBC[cp.carFingerprint][Bus.pt], [('ASCMActiveCruiseControlStatus', 25)], 0)
+          sent = []
+          for index in range(8):
+            now = 1_000_000_000 + index * 10_000_000
+            _, frames = controller.update(control.as_reader(), state, now)
+            status = [msg for msg in frames if msg[0] == 0x370]
+            self.assertEqual(len(status), int(index % 4 == 0), index)
+            for message in status:
+              self.assertEqual(message[2], 0)
+              sent.append(bytes(message[1]))
+              decoder.update([(now, [message])])
+              decoded = decoder.vl['ASCMActiveCruiseControlStatus']
+              self.assertEqual(decoded['ACCCruiseState'], 2)
+              self.assertEqual(decoded['ACCCmdActive'], enabled)
+              self.assertEqual(decoded['ACCAlwaysOne'], 1)
+              self.assertEqual(decoded['ACCAlwaysOne2'], 1)
+              self.assertEqual(decoded['ACCGapLevel'], 3 * enabled)
+              self.assertEqual(decoded['FCWAlert'], 3 if local_fcw else stock_level or (3 if aeb else 0))
+          self.assertEqual(len(sent), 2)
+
+  def test_dashboard_stock_ascm_and_generic_sender_isolation(self):
+    from opendbc.car.gm.carstate import CarState
+
+    for candidate, alpha, expected in ((CAR.CHEVROLET_VOLT_ASCM, False, None),
+                                      (CAR.GMC_ACADIA, True, bytes.fromhex('010000000110'))):
+      cp = params(candidate, sascm=True, alpha=alpha, accelerator=True, radar=True)
+      state = CarState(cp)
+      state.out = state.update(state.get_can_parsers(cp)).as_reader()
+      controller = CarController(DBC[cp.carFingerprint], cp)
+      control = structs.CarControl(enabled=False, longActive=False)
+      control.hudControl.leadVisible = True
+      status = []
+      for index in range(8):
+        _, frames = controller.update(control.as_reader(), state, 1_000_000_000 + index * 10_000_000)
+        status.extend(msg for msg in frames if msg[0] == 0x370)
+      if expected is None:
+        self.assertFalse(status)
+      else:
+        self.assertEqual(len(status), 2)
+        self.assertTrue(all(msg[2] == 0 and bytes(msg[1]) == expected for msg in status))
+
   def test_exact_observed_admission_and_legacy_isolation(self):
     for alpha in (False, True):
       for brake_c9 in (False, True):
@@ -111,7 +189,7 @@ class TestVoltAscmControl(unittest.TestCase):
                 car.cruiseState.available = True
                 car.cruiseState.enabled = enabled and not alpha
                 car.gearShifter = structs.CarState.GearShifter.drive
-                cs = SimpleNamespace(out=car.as_reader(), cam_lka_steering_cmd_counter=0,
+                cs = SimpleNamespace(out=car.as_reader(), stock_fcw_alert=0, cam_lka_steering_cmd_counter=0,
                                      loopback_lka_steering_cmd_updated=False, loopback_lka_steering_cmd_ts_nanos=now,
                                      pt_lka_steering_cmd_counter=0, buttons_counter=0,
                                      pscm_status=dict.fromkeys(('HandsOffSWDetectionMode', 'HandsOffSWlDetectionStatus', 'LKATorqueDeliveredStatus',

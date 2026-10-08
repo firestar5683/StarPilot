@@ -1007,12 +1007,13 @@ class CarController(CarControllerBase):
         # Send dashboard UI commands (ACC status)
         send_fcw = hud_alert == VisualAlert.fcw
         camera_fcw = None
-        if self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_camera_long or self.volt_sdgm_long or self.ordinary_camera_long:
+        if (self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_ascm_long or self.volt_camera_long or
+            self.volt_sdgm_long or self.ordinary_camera_long):
           camera_fcw = 3 if send_fcw else CS.stock_fcw_alert
           if camera_fcw == 0 and (CS.out.stockAeb or CS.out.stockFcw):
             camera_fcw = 3
-        dashboard_state = 2 if (self.ordinary_camera_long or self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_camera_long or
-                                self.volt_sdgm_long or self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN) else None
+        dashboard_state = 2 if (self.ordinary_camera_long or self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_ascm_long or
+                                self.volt_camera_long or self.volt_sdgm_long or self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN) else None
         if self.camera_pedal_profile is None or runtime_allowed:
           dashboard_enabled = CC.enabled and not (self.camera_pedal_profile is not None and
                                                   self.camera_pedal_profile.topology in ("ascm", "sdgm") and not ready)
