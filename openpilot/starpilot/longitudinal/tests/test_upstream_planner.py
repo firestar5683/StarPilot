@@ -28,6 +28,7 @@ class TestUpstreamPlanner(unittest.TestCase):
       np.testing.assert_equal(np.diag(stock.solver.costs[0, 'W']), [3., 0., 0., 0., 200., 5.])
       stock.set_weights(personality=log.LongitudinalPersonality.aggressive)
       np.testing.assert_equal(np.diag(stock.solver.costs[0, 'W']), [3., 0., 0., 0., 100., 2.5])
+      np.testing.assert_equal(stock.solver.costs[mpc.N, 'Zl'], stock.solver.costs[0, 'Zl'])
       stock.set_weights(prev_accel_constraint=False)
       self.assertEqual(stock.solver.costs[0, 'W'][4, 4], 0)
       self.assertEqual(mpc.get_T_FOLLOW(log.LongitudinalPersonality.relaxed), 1.75)

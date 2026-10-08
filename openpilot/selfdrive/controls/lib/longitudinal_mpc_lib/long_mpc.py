@@ -172,6 +172,7 @@ def gen_long_ocp():
                         (a_max - a_ego),
                         ((x_obstacle - x_ego) - lead_danger_factor * (desired_dist_comfort)) / (v_ego + 10.))
   ocp.model.con_h_expr = constraints
+  ocp.model.con_h_expr_e = constraints
 
   x0 = np.zeros(X_DIM)
   ocp.constraints.x0 = x0
@@ -184,10 +185,17 @@ def gen_long_ocp():
   ocp.cost.Zl = cost_weights
   ocp.cost.Zu = cost_weights
   ocp.cost.zu = cost_weights
+  ocp.cost.zl_e = cost_weights
+  ocp.cost.Zl_e = cost_weights
+  ocp.cost.Zu_e = cost_weights
+  ocp.cost.zu_e = cost_weights
 
   ocp.constraints.lh = np.zeros(CONSTR_DIM)
   ocp.constraints.uh = 1e4*np.ones(CONSTR_DIM)
   ocp.constraints.idxsh = np.arange(CONSTR_DIM)
+  ocp.constraints.lh_e = np.zeros(CONSTR_DIM)
+  ocp.constraints.uh_e = 1e4*np.ones(CONSTR_DIM)
+  ocp.constraints.idxsh_e = np.arange(CONSTR_DIM)
 
   # The HPIPM solver can give decent solutions even when it is stopped early
   # Which is critical for our purpose where compute time is strictly bounded
@@ -264,7 +272,7 @@ class LongitudinalMpc:
 
     # Set L2 slack cost on lower bound constraints
     Zl = np.array(constraint_cost_weights)
-    for i in range(N):
+    for i in range(N+1):
       self.solver.cost_set(i, 'Zl', Zl)
     self._cached_cost_weights = key
 

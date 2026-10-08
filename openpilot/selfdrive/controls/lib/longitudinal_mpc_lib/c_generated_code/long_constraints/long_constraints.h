@@ -58,6 +58,22 @@ int long_constr_h_fun_n_out(void);
 
 
 
+int long_constr_h_e_fun_jac_uxt_zt(const real_t** arg, real_t** res, int* iw, real_t* w, void *mem);
+int long_constr_h_e_fun_jac_uxt_zt_work(int *, int *, int *, int *);
+const int *long_constr_h_e_fun_jac_uxt_zt_sparsity_in(int);
+const int *long_constr_h_e_fun_jac_uxt_zt_sparsity_out(int);
+int long_constr_h_e_fun_jac_uxt_zt_n_in(void);
+int long_constr_h_e_fun_jac_uxt_zt_n_out(void);
+
+int long_constr_h_e_fun(const real_t** arg, real_t** res, int* iw, real_t* w, void *mem);
+int long_constr_h_e_fun_work(int *, int *, int *, int *);
+const int *long_constr_h_e_fun_sparsity_in(int);
+const int *long_constr_h_e_fun_sparsity_out(int);
+int long_constr_h_e_fun_n_in(void);
+int long_constr_h_e_fun_n_out(void);
+
+
+
 
 #ifdef __cplusplus
 } /* extern "C" */

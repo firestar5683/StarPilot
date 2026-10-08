@@ -48,12 +48,12 @@
 #define LONG_NSH    4
 #define LONG_NSG    0
 #define LONG_NSPHI  0
-#define LONG_NSHN   0
+#define LONG_NSHN   4
 #define LONG_NSGN   0
 #define LONG_NSPHIN 0
 #define LONG_NSBXN  0
 #define LONG_NS     4
-#define LONG_NSN    0
+#define LONG_NSN    4
 #define LONG_NG     0
 #define LONG_NBXN   0
 #define LONG_NGN    0
@@ -63,7 +63,7 @@
 #define LONG_N      12
 #define LONG_NH     4
 #define LONG_NPHI   0
-#define LONG_NHN    0
+#define LONG_NHN    4
 #define LONG_NPHIN  0
 #define LONG_NR     0
 
@@ -122,6 +122,8 @@ typedef struct long_solver_capsule
 
 
 
+    external_function_param_casadi nl_constr_h_e_fun_jac;
+    external_function_param_casadi nl_constr_h_e_fun;
 
 } long_solver_capsule;
 

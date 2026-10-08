@@ -258,7 +258,7 @@ class LongitudinalMpc:
 
     # Set L2 slack cost on lower bound constraints
     Zl = np.array(constraint_cost_weights)
-    for i in range(N):
+    for i in range(N+1):
       self.solver.cost_set(i, 'Zl', Zl)
 
   def set_weights(self, prev_accel_constraint=True, personality=log.LongitudinalPersonality.standard):

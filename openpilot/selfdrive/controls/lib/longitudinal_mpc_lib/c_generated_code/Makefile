@@ -45,6 +45,8 @@ MODEL_OBJ := $(MODEL_SRC:.c=.o)
 OCP_SRC=
 OCP_SRC+= long_constraints/long_constr_h_fun_jac_uxt_zt.c
 OCP_SRC+= long_constraints/long_constr_h_fun.c
+OCP_SRC+= long_constraints/long_constr_h_e_fun_jac_uxt_zt.c
+OCP_SRC+= long_constraints/long_constr_h_e_fun.c
 OCP_SRC+= long_cost/long_cost_y_0_fun.c
 OCP_SRC+= long_cost/long_cost_y_0_fun_jac_ut_xt.c
 OCP_SRC+= long_cost/long_cost_y_0_hess.c

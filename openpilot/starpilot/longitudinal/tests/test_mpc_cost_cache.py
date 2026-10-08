@@ -15,7 +15,7 @@ from openpilot.starpilot.longitudinal.profile_runtime import ProfileTuning
 from openpilot.starpilot.longitudinal.tests.test_cruise_ceiling import messages
 
 
-WRITES_PER_UPDATE = 2 * long_mpc.N + 1
+WRITES_PER_UPDATE = 2 * (long_mpc.N + 1)
 
 
 class SolverRecorder:

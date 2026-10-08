@@ -32,7 +32,12 @@
             2,
             3
         ],
-        "idxsh_e": [],
+        "idxsh_e": [
+            0,
+            1,
+            2,
+            3
+        ],
         "idxsphi": [],
         "idxsphi_e": [],
         "lbu": [],
@@ -51,7 +56,12 @@
             0.0,
             0.0
         ],
-        "lh_e": [],
+        "lh_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
         "lphi": [],
         "lphi_e": [],
         "lsbu": [],
@@ -65,7 +75,12 @@
             0.0,
             0.0
         ],
-        "lsh_e": [],
+        "lsh_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
         "lsphi": [],
         "lsphi_e": [],
         "ubu": [],
@@ -84,7 +99,12 @@
             10000.0,
             10000.0
         ],
-        "uh_e": [],
+        "uh_e": [
+            10000.0,
+            10000.0,
+            10000.0,
+            10000.0
+        ],
         "uphi": [],
         "uphi_e": [],
         "usbu": [],
@@ -98,7 +118,12 @@
             0.0,
             0.0
         ],
-        "ush_e": [],
+        "ush_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
         "usphi": [],
         "usphi_e": []
     },
@@ -253,14 +278,24 @@
             0.0,
             0.0
         ],
-        "Zl_e": [],
+        "Zl_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
         "Zu": [
             0.0,
             0.0,
             0.0,
             0.0
         ],
-        "Zu_e": [],
+        "Zu_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
         "cost_ext_fun_type": "casadi",
         "cost_ext_fun_type_0": "casadi",
         "cost_ext_fun_type_e": "casadi",
@@ -296,14 +331,24 @@
             0.0,
             0.0
         ],
-        "zl_e": [],
+        "zl_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
         "zu": [
             0.0,
             0.0,
             0.0,
             0.0
         ],
-        "zu_e": []
+        "zu_e": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ]
     },
     "cython_include_dirs": [
         "/work/.venv-linux-arm64/lib/python3.12/site-packages/numpy/_core/include",
@@ -319,21 +364,21 @@
         "ng": 0,
         "ng_e": 0,
         "nh": 4,
-        "nh_e": 0,
+        "nh_e": 4,
         "np": 6,
         "nphi": 0,
         "nphi_e": 0,
         "nr": 0,
         "nr_e": 0,
         "ns": 4,
-        "ns_e": 0,
+        "ns_e": 4,
         "nsbu": 0,
         "nsbx": 0,
         "nsbx_e": 0,
         "nsg": 0,
         "nsg_e": 0,
         "nsh": 4,
-        "nsh_e": 0,
+        "nsh_e": 4,
         "nsphi": 0,
         "nsphi_e": 0,
         "nu": 1,
@@ -346,7 +391,7 @@
     "json_file": "/work/openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/acados_ocp_long.json",
     "model": {
         "con_h_expr": "jhpnnagiieahaaaadaaaaaaaaaaaaaaaaaegiaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaaaaaaaaaaaaaacaaaaaaaaaaaaaaadaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaaghpffghgpgegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaabgpffghgpgegpcaaaaaaaaaaaaaafaaaaaaabgpfngjgogegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaabgpfngbgihchcaaaaaaaaaaaaaaaegeaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaakaaaaaaaihpfpgcgdhehbgdgmgfgegpcaaaaaaaaaaaaaafaaaaaaaihpffghgpgegdaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaacbaaaaaamgfgbgegpfegbgoghgfgchpfggbgdgehpgchegbaaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegeaaaaaaaaaaaaaaaeglaaaaaaaaaaaaaaachbaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaajgfaaaaaaaegdaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaanaaaaaaamgfgbgegpfehpfggpgmgmgpghhchbaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaajggaaaaaaaegbaaaaaaaaaaaaaaachbaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaajgkaaaaaaa",
-        "con_h_expr_e": null,
+        "con_h_expr_e": "jhpnnagiieahaaaadaaaaaaaaaaaaaaaaaegiaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabaaaaaaaaaaaaaaacaaaaaaaaaaaaaaadaaaaaaaaaaaaaaaeaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaaghpffghgpgegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaabgpffghgpgegpcaaaaaaaaaaaaaafaaaaaaabgpfngjgogegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaafaaaaaaabgpfngbgihchcaaaaaaaaaaaaaaaegeaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegcaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaakaaaaaaaihpfpgcgdhehbgdgmgfgegpcaaaaaaaaaaaaaafaaaaaaaihpffghgpgegdaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaacbaaaaaamgfgbgegpfegbgoghgfgchpfggbgdgehpgchegbaaaaaaaaaaaaaaaegbaaaaaaaaaaaaaaaegeaaaaaaaaaaaaaaaeglaaaaaaaaaaaaaaachbaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaajgfaaaaaaaegdaaaaaaaaaaaaaaaegpcaaaaaaaaaaaaaanaaaaaaamgfgbgegpfehpfggpgmgmgpghhchbaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaajggaaaaaaaegbaaaaaaaaaaaaaaachbaaaaaaaaaaaaaaaegmcaaaaaaaaaaaaaajgkaaaaaaa",
         "con_phi_expr": null,
         "con_phi_expr_e": null,
         "con_r_expr": null,
