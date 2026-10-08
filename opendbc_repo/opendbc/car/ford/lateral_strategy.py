@@ -32,6 +32,9 @@ MAX_LATERAL_ACCEL = ISO_LATERAL_ACCEL - ACCELERATION_DUE_TO_GRAVITY * 0.06
 STEER_DT = CarControllerParams.STEER_STEP * DT_CTRL
 CURVATURE_LOOKAHEAD_MIN = 0.20
 CURVATURE_LOOKAHEAD_MAX = 0.40
+MACH_E_HIGH_SPEED_LOOKAHEAD_EXTRA = 0.40
+MACH_E_HIGH_SPEED_LOOKAHEAD_START_SPEED = 16.0
+MACH_E_HIGH_SPEED_LOOKAHEAD_FULL_SPEED = 23.0
 MACH_E_TURN_IN_LOOKAHEAD_EXTRA = 0.80
 MACH_E_LOW_SPEED_TURN_IN_LOOKAHEAD_EXTRA = 1.60
 MACH_E_LOW_SPEED_TURN_IN_START_SPEED = 2.0
@@ -214,6 +217,13 @@ class FordLateralController:
     state = int(getattr(self.model.meta.laneChangeState, "raw", self.model.meta.laneChangeState))
     direction = int(getattr(self.model.meta.laneChangeDirection, "raw", self.model.meta.laneChangeDirection))
     return state in (1, 2, 3), direction
+
+  def _high_speed_lookahead_extra(self, v_ego: float, steering_pressed: bool, lane_change: bool) -> float:
+    if (self.CP.carFingerprint != CAR.FORD_MUSTANG_MACH_E_MK1 or not self.CP.flags & FordFlags.CANFD or
+        steering_pressed or lane_change):
+      return 0.0
+    return MACH_E_HIGH_SPEED_LOOKAHEAD_EXTRA * float(np.interp(
+      v_ego, [MACH_E_HIGH_SPEED_LOOKAHEAD_START_SPEED, MACH_E_HIGH_SPEED_LOOKAHEAD_FULL_SPEED], [0.0, 1.0]))
 
   @staticmethod
   def _current_curvature(CS) -> float:
@@ -567,6 +577,7 @@ class FordLateralController:
 
     v_ego = float(CS.out.vEgoRaw)
     lookahead = self._curvature_lookahead()
+    lookahead += self._high_speed_lookahead_extra(v_ego, bool(CS.out.steeringPressed), self._lane_change()[0])
     predicted = self._predicted_curvature(v_ego, lookahead)
     allow_opposite_preview = False
     if self.CP.carFingerprint in FORD_CONSERVATIVE_PREVIEW_CARS:
@@ -648,6 +659,10 @@ class FordLateralController:
       curvature_rate *= float(np.interp(v_ego, [0.0, 14.5, 15.5], [1.0, 1.0, 0.0]))
       if self._lane_change()[0]:
         curvature_rate = 0.0
+
+    if (self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and self.CP.flags & FordFlags.CANFD and
+        command_predicted != predicted and command_predicted * curvature_rate > 0.0):
+      curvature_rate = 0.0
 
     self.curvature_last = float(np.clip(applied, -0.02, 0.02))
     min_curvature_rate = -0.001024
