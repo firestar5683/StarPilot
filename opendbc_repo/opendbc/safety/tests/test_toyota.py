@@ -527,6 +527,15 @@ class TestToyotaHighlanderAol(unittest.TestCase):
       self.physical(cruise=True, **changes)
       self.assertEqual(self.safety.aol_get_permission_mask(), 1)
 
+  def test_missing_native_heartbeat_denies_even_with_stock_cruise(self):
+    self.init(word=73, ae=32)
+    self.physical(cruise=True)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+    self.safety.set_aol_test_heartbeat(False)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.safety.set_aol_test_heartbeat(True)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+
   def test_physical_withdrawal_and_freshness(self):
     for changes in ({'main': False}, {'gear': 32}, {'door': True}, {'eps': 17}, {'eps': 3}, {'eps': 9}):
       with self.subTest(changes=changes):
@@ -607,7 +616,6 @@ class TestToyotaHighlanderAol(unittest.TestCase):
     self.init()
     self.safety.aol_set_host_request(3)
     self.assertEqual(self.safety.aol_get_permission_mask(), 0)
-
 
   def test_prius_filter_axis_permissions_and_tx_laws(self):
     for word, stock in ((4169, False), (4681, True)):

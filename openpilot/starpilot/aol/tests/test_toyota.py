@@ -19,6 +19,50 @@ CAMERA_TORQUE_CASES = (
 
 
 class TestHighlanderAol(unittest.TestCase):
+  def test_corolla_controls_require_current_native_ack_even_with_stock_enable(self):
+    import os
+    from unittest.mock import patch
+    from openpilot.common.params import Params
+    from openpilot.common.prefix import OpenpilotPrefix
+    from openpilot.selfdrive.controls.controlsd import Controls
+    from openpilot.starpilot.lateral.tests.test_lane_runtime import feed, publish_corolla_params
+
+    with OpenpilotPrefix(), patch.dict(os.environ, {'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}), \
+         patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
+      params = Params()
+      cp = publish_corolla_params(params)
+      self.assertEqual(cp.carFingerprint, CAR.TOYOTA_COROLLA_TSS2)
+      self.assertEqual((cp.safetyConfigs[0].safetyParam, cp.alternativeExperience), (73, 32))
+      controls = Controls()
+      self.assertTrue(controls.aol_replay)
+      self.assertTrue(controls.CP.openpilotLongitudinalControl)
+      conditions = ('missing', 'fresh', 'stale', 'stale_native', 'invalid', 'invalid_axis',
+                    'missing_native', 'missing_axis', 'fresh')
+      for tick, condition in enumerate(conditions):
+        with self.subTest(condition=condition):
+          now = 1_000_000_000 + tick * 50_000_000
+          feed(controls, now, tick * 5, active=True, enabled=True)
+          if condition in ('missing', 'missing_native'):
+            controls.sm.seen['aolSafetyWire'] = False
+          if condition in ('missing', 'missing_axis'):
+            controls.sm.seen['aolAxisState'] = False
+          if condition == 'stale':
+            controls.sm.logMonoTime['aolAxisState'] = now - 30_000_001
+          if condition == 'stale_native':
+            controls.sm.logMonoTime['aolSafetyWire'] = now - 200_000_001
+          if condition == 'invalid':
+            controls.sm.valid['aolSafetyWire'] = False
+          if condition == 'invalid_axis':
+            controls.sm.valid['aolAxisState'] = False
+          command, _ = controls.state_control()
+          self.assertTrue(command.enabled)
+          expected = condition == 'fresh'
+          self.assertEqual((command.latActive, command.longActive), (expected, expected))
+          if expected:
+            self.assertNotEqual(command.actuators.torque, 0.)
+          else:
+            self.assertEqual((command.actuators.torque, command.actuators.accel), (0., 0.))
+
   def test_actual_factory_gas_hybrid_and_hold_composition(self):
     for hybrid in (False, True):
       for hold in (False, True):

@@ -111,12 +111,22 @@ schema changes require a new review; do not regenerate expected outputs to hide
 differences.
 
 Default `ref_commit` and unlisted expected logs use the immutable official artifact
-revision. Eleven exact segment/process pairs use reviewed StarPilot references in
+revision. Fourteen exact segment/process pairs use reviewed StarPilot references in
 `refs/starpilot`, preserving intentional controller and capability changes. Their
 manifest pins inputs, comparison configurations, producing source snapshots and
 both official and reviewed output hashes. Every original comparison remains active;
 an arbitrary local output cannot override a default expectation. Deliberate alternate
 `ref_commit` and `--update-refs` retain their local reference behavior.
+
+The EV6 and Bolt EUV control references include the default Turn Assist behavior;
+explicit `TurnAssist=False` independently restores every prior compared field.
+The legacy Corolla recording contains no native axis or safety acknowledgement,
+so its control reference requires both axes disabled and zero torque and acceleration
+even when stock enable is true. Actual Controls and native Toyota safety regressions
+verify fresh grants and missing acknowledgement denial. The four reference updates
+record the prior output hash, exact difference fields and counts, regression source
+hashes, and committed producing sources in the manifest. These records document the
+reviewed changes; they do not exclude any field from replay comparison.
 
 Use `--output DIRECTORY` to place coverage, new logs and both diff reports outside
 the source tree. The predeploy runner supplies its results directory automatically.
