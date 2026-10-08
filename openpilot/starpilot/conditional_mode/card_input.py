@@ -91,7 +91,7 @@ def conditional_traffic_candidate(CS: car.CarState, tracker: ButtonTracker, para
   A heartbeat is emitted only for a new physical packet. An empty cached
   observation cannot extend the planner's source lifetime.
   """
-  gm_distance = gm_profiles_supported(CP) and distance is not None
+  gm_distance = distance is not None and gm_profiles_supported(CP)
   if gm_distance:
     media = distance
   if not (ioniq6_media_eligible(CP) or gm_distance) or media is None or not media.valid:

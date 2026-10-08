@@ -316,9 +316,9 @@ class AolCardIntent:
       self._aux_cancel_tracker = ButtonTracker()
       self._aux_media_tracker = ButtonTracker()
       return
-    cancel = car.CarState(**CS.to_dict())
-    cancel.buttonEvents = [car.CarState.ButtonEvent(type=ButtonType.gapAdjustCruise, pressed=event.pressed)
-                          for event in CS.buttonEvents if event.type == ButtonType.cancel]
+    cancel = car.CarState(canValid=CS.canValid, canTimeout=CS.canTimeout, buttonEvents=[
+      car.CarState.ButtonEvent(type=ButtonType.gapAdjustCruise, pressed=event.pressed)
+      for event in CS.buttonEvents if event.type == ButtonType.cancel])
     for gesture in self._aux_cancel_tracker.observe(cancel.as_reader()):
       slot = (Press.SHORT, Press.LONG, Press.VERY_LONG).index(gesture.press)
       self._perform(self.settings.cancel_actions[slot])

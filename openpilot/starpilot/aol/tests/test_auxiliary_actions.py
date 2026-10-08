@@ -62,6 +62,40 @@ class TestAuxiliaryActions(unittest.TestCase):
       owner.update_auxiliary(state(), media=MediaObservation(samples, 200000001, int(custom), True), media_eligible=True)
       self.assertTrue(getattr(owner, field))
 
+  def test_cancel_hold_boundaries_and_unrelated_buttons(self):
+    button = car.CarState.ButtonEvent.Type
+    for frames, expected in ((1, (True, False, False)), (49, (True, False, False)),
+                             (50, (False, True, False)), (249, (False, True, False)),
+                             (250, (False, True, True)), (251, (False, True, True))):
+      owner = AolCardIntent(AolSettings(True, 0., 0, 0, (0, 0, 0), (9, 3, 4)))
+      owner.update_auxiliary(state())
+      for tick in range(frames):
+        events = ((button.cancel, True), (button.lkas, True), (button.gapAdjustCruise, True)) if tick == 0 else ()
+        source = state(events)
+        source.vEgo = 12.
+        before = source.to_dict()
+        owner.update_auxiliary(source)
+        self.assertEqual(source.to_dict(), before)
+      owner.update_auxiliary(state(((button.cancel, False), (button.lkas, False), (button.gapAdjustCruise, False))))
+      owner.update_auxiliary(state())
+      self.assertEqual((owner.allowed_latch, owner.pause_lateral, owner.pause_longitudinal), expected)
+
+  def test_timeout_interrupts_held_cancel(self):
+    button = car.CarState.ButtonEvent.Type.cancel
+    owner = AolCardIntent(AolSettings(True, 0., 0, 0, (0, 0, 0), (9, 3, 4)))
+    owner.update_auxiliary(state())
+    owner.update_auxiliary(state(((button, True),)))
+    for _ in range(48):
+      owner.update_auxiliary(state())
+    interrupted = state()
+    interrupted.canTimeout = True
+    owner.update_auxiliary(interrupted)
+    owner.update_auxiliary(state(((button, False),)))
+    self.assertEqual((owner.allowed_latch, owner.pause_lateral, owner.pause_longitudinal), (False, False, False))
+    owner.update_auxiliary(state(((button, True),)))
+    owner.update_auxiliary(state(((button, False),)))
+    self.assertTrue(owner.allowed_latch)
+
   def test_explicit_owner_auxiliary_actions_denied(self):
     for action in (3, 4, 9):
       owner = AolCardIntent(AolSettings(True, 0., 0, 0, (0, 0, 0), (action, 0, 0), (action, 0, 0)), explicit_latch=True)
