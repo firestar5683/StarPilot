@@ -16,7 +16,7 @@ from openpilot.system.ui.lib.shader_polygon import draw_polygon
 from openpilot.starpilot.ui.onroad_state import OnroadState
 from openpilot.starpilot.ui.onroad_customization import offset as widget_offset, placement
 from openpilot.starpilot.ui.onroad_torque_geometry import (
-  CAP_RADIUS, MAX_HEIGHT, MAX_OFFSET, MIN_HEIGHT, MIN_OFFSET, RADIUS, TORQUE_ANGLE_SPAN,
+  CAP_RADIUS, LARGE_CAP_RADIUS, MAX_HEIGHT, MAX_OFFSET, MIN_HEIGHT, MIN_OFFSET, RADIUS, TORQUE_ANGLE_SPAN,
 )
 
 DEBUG = False
@@ -184,13 +184,14 @@ class TorqueBarWidget:
     dx, dy = widget_offset(state.customization, profile, 'torque_bar')
     translation = np.array([dx, dy], dtype=np.float32)
     draw_rect = rl.Rectangle(rect.x + dx, rect.y + dy, rect.width, rect.height)
-    points = arc_bar_pts(middle_radius, torque_height, -90 - span / 2, -90 + span / 2) + offset
+    cap_radius = LARGE_CAP_RADIUS if profile == 'large' else CAP_RADIUS
+    points = arc_bar_pts(middle_radius, torque_height, -90 - span / 2, -90 + span / 2, cap_radius=cap_radius) + offset
     if not enabled:
       return
     bg_alpha = float(np.interp(abs(torque), [0.5, 1.0], [0.25, 0.5]))
     draw_polygon(draw_rect, points + translation, color=rl.Color(255, 255, 255, int(255 * bg_alpha * alpha)))
     indicator_end = -90 + span / 2 * torque
-    indicator = arc_bar_pts(middle_radius, torque_height, -90, indicator_end) + offset
+    indicator = arc_bar_pts(middle_radius, torque_height, -90, indicator_end, cap_radius=cap_radius) + offset
     indicator_color = rl.Color(255, 255, 255, int(255 * 0.9 * alpha))
     draw_polygon(draw_rect, indicator + translation, color=indicator_color)
     if abs(torque) < 0.5:
