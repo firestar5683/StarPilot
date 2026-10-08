@@ -235,7 +235,8 @@ class TestVoltTransitions(unittest.TestCase):
             producer.logMonoTime[name] = now - 1_000_000
             producer.recv_time[name] = (now - 500_000) / 1e9
           with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now)), \
-               patch('openpilot.starpilot.controller_extensions.time.monotonic_ns', return_value=now):
+               patch('openpilot.starpilot.controller_extensions.time', SimpleNamespace(
+                 CLOCK_BOOTTIME=7, clock_gettime_ns=lambda _, stamp=now: stamp, monotonic_ns=lambda stamp=now: stamp)):
             _, actual = ci.apply(cc.as_reader(), now)
           _, expected = baseline.apply(cc.as_reader(), now)
           self.assertEqual([(a,b,d) for a,b,d in actual if a != 0x2CB],
