@@ -39,11 +39,18 @@ SPEED_LIMIT_PROMPT_CENTER_OFFSET_X = -26
 VISION_SPEED_LIMIT_PULSE_SECONDS = 1.0
 VISION_SPEED_LIMIT_PULSE_COLOR = rl.Color(188, 132, 255, 255)
 
+# Speedometer source selector (param "SpeedometerSource")
+SPEEDOMETER_SOURCE_OFF = 0
+SPEEDOMETER_SOURCE_CAN = 1
+SPEEDOMETER_SOURCE_GPS = 2
+SPEEDOMETER_SOURCE_BOTH = 3
+# "Both" mode only shows the secondary-source badge once CAN and GPS disagree
+# by more than this many km/h (matches the ~2mph a car's speedo commonly over-reports by).
+SPEEDOMETER_DISAGREEMENT_THRESHOLD_KPH = 3.0
+
 
 @dataclass(frozen=True)
 class FontSizes:
-  current_speed: int = 176
-  speed_unit: int = 66
   max_speed: int = 36
   set_speed: int = 112
 
@@ -125,6 +132,10 @@ class HudRenderer(Widget):
     self._set_speed_changed_time: float = 0
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
+    self._speed_badge_text: str = ""
+    # Slot the speed-limit sign last drew into (or its default slot, if none was drawn),
+    # so _draw_current_speed can stack the speedometer directly underneath it.
+    self._speed_limit_sign_slot: rl.Rectangle = rl.Rectangle(0, 0, 0, 0)
     self._engaged: bool = False
     self._small_model_engaged: bool = False
     self._egpu_fade_time: float = 0.0
@@ -231,7 +242,23 @@ class HudRenderer(Widget):
     self.v_ego_cluster_seen = self.v_ego_cluster_seen or v_ego_cluster != 0.0
     v_ego = v_ego_cluster if self.v_ego_cluster_seen else car_state.vEgo
     speed_conversion = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
-    self.speed = max(0.0, v_ego * speed_conversion)
+    can_speed = max(0.0, v_ego * speed_conversion)
+
+    gps = sm["gpsLocationExternal"] if sm.valid.get("gpsLocationExternal", False) else None
+    gps_speed = max(0.0, gps.speed * speed_conversion) if gps is not None else None
+
+    source = ui_state.ui_params.get_int("SpeedometerSource", return_default=True, default=SPEEDOMETER_SOURCE_CAN)
+    self._speed_badge_text = ""
+    if source == SPEEDOMETER_SOURCE_GPS and gps_speed is not None:
+      self.speed = gps_speed
+    elif source == SPEEDOMETER_SOURCE_BOTH and gps_speed is not None:
+      self.speed = gps_speed
+      if abs(can_speed - gps_speed) >= SPEEDOMETER_DISAGREEMENT_THRESHOLD_KPH:
+        sign = "+" if can_speed > gps_speed else "-"
+        self._speed_badge_text = f"CAN {sign}{round(abs(can_speed - gps_speed))}"
+    else:
+      # SPEEDOMETER_SOURCE_CAN, SPEEDOMETER_SOURCE_OFF, or GPS requested but unavailable.
+      self.speed = can_speed
 
     if sm.recv_frame["starpilotPlan"] >= ui_state.started_frame:
       starpilot_plan = sm["starpilotPlan"]
@@ -293,6 +320,7 @@ class HudRenderer(Widget):
   def render_background(self) -> None:
     """Draw HUD elements that should sit behind alerts."""
     self._draw_speed_limit(self._rect)
+    self._draw_current_speed(self._rect)
     self._navigation_card.render(self._rect)
 
   def render_foreground(self) -> None:
@@ -521,7 +549,18 @@ class HudRenderer(Widget):
       alpha,
     )
 
+  def _speed_limit_slot(self, rect: rl.Rectangle, use_vienna_speed_limit: bool, offset_text: str = "") -> rl.Rectangle:
+    """The top-right slot a speed-limit sign occupies (or would occupy), for a given style."""
+    sign_width = 118 if use_vienna_speed_limit else 116
+    sign_height = 118 if use_vienna_speed_limit else (142 if offset_text else 132)
+    sign_x = rect.x + rect.width - sign_width - 28
+    sign_y = rect.y + (28 if use_vienna_speed_limit else 20)
+    return rl.Rectangle(sign_x, sign_y, sign_width, sign_height)
+
   def _draw_speed_limit(self, rect: rl.Rectangle) -> None:
+    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
+    self._speed_limit_sign_slot = self._speed_limit_slot(rect, use_vienna_speed_limit)
+
     if not self._show_speed_limit:
       return
 
@@ -530,18 +569,17 @@ class HudRenderer(Widget):
       return
 
     sign_alpha = 72 if self._speed_limit_overridden and self._pending_speed_limit <= 0 else 255
-    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
     speed_text = str(round(display_speed))
     offset_text = ""
     if self._show_speed_limit_offset and not self._speed_limit_overridden:
       rounded_offset = round(self._speed_limit_offset)
       offset_text = "–" if rounded_offset == 0 else f"{rounded_offset:+d}"
 
-    sign_width = 118 if use_vienna_speed_limit else 116
-    sign_height = 118 if use_vienna_speed_limit else (142 if offset_text else 132)
-    base_x = rect.x + rect.width - sign_width - 28
-    sign_x = base_x
-    sign_y = rect.y + (28 if use_vienna_speed_limit else 20)
+    self._speed_limit_sign_slot = self._speed_limit_slot(rect, use_vienna_speed_limit, offset_text)
+    sign_x = self._speed_limit_sign_slot.x
+    sign_y = self._speed_limit_sign_slot.y
+    sign_width = self._speed_limit_sign_slot.width
+    sign_height = self._speed_limit_sign_slot.height
     widget_color = self._speed_limit_pulse_color(rl.Color(255, 255, 255, 255), sign_alpha)
 
     if use_vienna_speed_limit:
@@ -720,13 +758,29 @@ class HudRenderer(Widget):
     rl.draw_text_ex(self._font_medium, hint_text, hint_pos, 24, 0, rl.Color(255, 255, 255, 180))
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
-    """Draw the current vehicle speed and unit."""
+    """Draw the current vehicle speed and unit, stacked under the speed-limit sign slot."""
+    source = ui_state.ui_params.get_int("SpeedometerSource", return_default=True, default=SPEEDOMETER_SOURCE_CAN)
+    if source == SPEEDOMETER_SOURCE_OFF:
+      return
+
+    slot = self._speed_limit_sign_slot
+    center_x = slot.x + slot.width / 2
+    top = slot.y + slot.height + 10 if self._show_speed_limit and self._speed_limit_sign_slot.width > 0 else slot.y
+
     speed_text = str(round(self.speed))
-    speed_text_size = measure_text_cached(self._font_bold, speed_text, FONT_SIZES.current_speed)
-    speed_pos = rl.Vector2(rect.x + rect.width / 2 - speed_text_size.x / 2, 180 - speed_text_size.y / 2)
-    rl.draw_text_ex(self._font_bold, speed_text, speed_pos, FONT_SIZES.current_speed, 0, COLORS.WHITE)
+    speed_font_size = 38
+    speed_text_size = measure_text_cached(self._font_bold, speed_text, speed_font_size)
+    speed_pos = rl.Vector2(center_x - speed_text_size.x / 2, top)
+    rl.draw_text_ex(self._font_bold, speed_text, speed_pos, speed_font_size, 0, COLORS.WHITE)
 
     unit_text = tr("km/h") if ui_state.is_metric else tr("mph")
-    unit_text_size = measure_text_cached(self._font_medium, unit_text, FONT_SIZES.speed_unit)
-    unit_pos = rl.Vector2(rect.x + rect.width / 2 - unit_text_size.x / 2, 290 - unit_text_size.y / 2)
-    rl.draw_text_ex(self._font_medium, unit_text, unit_pos, FONT_SIZES.speed_unit, 0, COLORS.WHITE_TRANSLUCENT)
+    unit_font_size = 14
+    unit_text_size = measure_text_cached(self._font_medium, unit_text, unit_font_size)
+    unit_pos = rl.Vector2(center_x - unit_text_size.x / 2, top + speed_text_size.y + 2)
+    rl.draw_text_ex(self._font_medium, unit_text, unit_pos, unit_font_size, 0, COLORS.WHITE_TRANSLUCENT)
+
+    if self._speed_badge_text:
+      badge_font_size = 13
+      badge_size = measure_text_cached(self._font_semi_bold, self._speed_badge_text, badge_font_size)
+      badge_pos = rl.Vector2(center_x - badge_size.x / 2, top + speed_text_size.y + unit_text_size.y + 6)
+      rl.draw_text_ex(self._font_semi_bold, self._speed_badge_text, badge_pos, badge_font_size, 0, rl.Color(255, 207, 77, 220))
