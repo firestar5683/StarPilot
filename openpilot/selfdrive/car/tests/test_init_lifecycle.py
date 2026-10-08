@@ -405,6 +405,15 @@ class CardInitLifecycleTest(unittest.TestCase):
     from opendbc.car.gm.tests.test_ascm_intercept import params as ascm_params
     from opendbc.car.gm.tests.test_volt_camera_control import camera_params
     card = Car.__new__(Car)
+    self.assertFalse(card.volt_startup_keepalive())
+    self.assertFalse(card.volt_sdgm_startup_keepalive())
+    for cp in (None, SimpleNamespace(safetyConfigs=[]), SimpleNamespace(brand='hyundai'),
+               SimpleNamespace(brand='toyota', alternativeExperience=32, flags=0,
+                               carFingerprint=GMCar.CHEVROLET_VOLT_ASCM)):
+      with self.subTest(cp=cp):
+        card.CP = cp
+        self.assertFalse(card.volt_startup_keepalive())
+        self.assertFalse(card.volt_sdgm_startup_keepalive())
     for radar in (False, True):
       for accelerator in (False, True):
         cp = ascm_params(GMCar.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True,

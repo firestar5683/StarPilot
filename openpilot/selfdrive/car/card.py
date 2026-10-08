@@ -1053,9 +1053,13 @@ class Car:
     return True
 
   def volt_sdgm_startup_keepalive(self):
+    if getattr(getattr(self, 'CP', None), 'brand', None) != 'gm':
+      return False
     return (is_volt_sdgm_profile(self.CP, longitudinal=True) and self.CP.safetyConfigs[0].safetyParam == 0x5007)
 
   def volt_startup_keepalive(self):
+    if getattr(getattr(self, 'CP', None), 'brand', None) != 'gm':
+      return False
     return (self.volt_sdgm_startup_keepalive() or
             self.CP.alternativeExperience == 32 and not self.CP.flags & GMFlags.PEDAL_LONG and
             (is_volt_ascm_longitudinal(self.CP) or
