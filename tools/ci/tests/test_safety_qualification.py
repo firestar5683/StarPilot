@@ -52,6 +52,105 @@ class TestSafetyQualificationRunner(TestCase):
                  "panda/tests/misra/coverage_table", "opendbc_repo/opendbc/safety/tests/misra/coverage_table"):
       self.assertEqual(identity[path], qualification.hashlib.sha256((qualification.ROOT / path).read_bytes()).hexdigest())
 
+  def test_prerequisite_transition_rejects_every_unexpected_bootstrap_change(self):
+    outputs = dict.fromkeys(qualification.MPC_PREREQUISITE_OUTPUTS, "old-output")
+    inputs = dict.fromkeys(("openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/long_mpc.py",
+                           "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/SConscript",
+                           "openpilot/cereal/car.capnp", "opendbc_repo/opendbc/safety/safety.h",
+                           "msgq_repo/msgq/ipc_pyx.pyx", "tools/ci/run_safety_qualification.py"), "input")
+    before = {**outputs, **inputs}
+    regenerated = {**dict.fromkeys(outputs, "new-output"), **inputs}
+    for name in ("coverage", "mutation-full"):
+      with self.subTest(gate=name):
+        self.assertTrue(qualification.prerequisite_transition(before, regenerated, name))
+        for path in inputs:
+          with self.subTest(changed_input=path):
+            self.assertFalse(qualification.prerequisite_transition(before, {**regenerated, path: "changed"}, name))
+        self.assertFalse(qualification.prerequisite_transition(before, {**regenerated, "openpilot/undeclared.c": "new"}, name))
+        removed = dict(regenerated)
+        removed.pop(next(iter(outputs)))
+        self.assertFalse(qualification.prerequisite_transition(before, removed, name))
+    for name in ("panda-host", "panda-misra", "opendbc-misra", "mutation-list"):
+      with self.subTest(gate=name):
+        self.assertFalse(qualification.prerequisite_transition(before, regenerated, name))
+        self.assertTrue(qualification.prerequisite_transition(before, before, name))
+
+  def test_clean_checkout_bootstrap_hashes_real_files_and_rejects_generator_change(self):
+    with tempfile.TemporaryDirectory() as td:
+      root = Path(td)
+      generator = "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/long_mpc.py"
+      for path in (*qualification.MPC_PREREQUISITE_OUTPUTS, generator):
+        file = root / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("checked-in source fixture\n")
+      subprocess.run(["git", "-c", "gc.auto=0", "init", "--quiet", str(root)], check=True)
+      subprocess.run(["git", "-c", "gc.auto=0", "add", "."], cwd=root, check=True)
+      with patch.object(qualification, "ROOT", root):
+        before = qualification.source_identity()
+        for path in qualification.MPC_PREREQUISITE_OUTPUTS:
+          (root / path).write_text("regenerated output fixture\n")
+        built = qualification.source_identity()
+        self.assertEqual(set(before), set(built))
+        self.assertEqual({path for path in before if before[path] != built[path]}, set(qualification.MPC_PREREQUISITE_OUTPUTS))
+        self.assertTrue(qualification.prerequisite_transition(before, built, "coverage"))
+        (root / generator).write_text("unexpected changed generator\n")
+        self.assertFalse(qualification.prerequisite_transition(before, qualification.source_identity(), "coverage"))
+
+  def test_main_pins_inputs_before_bootstrap_and_all_outputs_after_bootstrap(self):
+    before = {**dict.fromkeys(qualification.MPC_PREREQUISITE_OUTPUTS, "old-output"),
+              "opendbc_repo/opendbc/safety/safety.h": "input"}
+    regenerated = {**dict.fromkeys(qualification.MPC_PREREQUISITE_OUTPUTS, "new-output"),
+                   "opendbc_repo/opendbc/safety/safety.h": "input"}
+    cases = (("fresh bootstrap", regenerated, regenerated, "commit", True, True),
+             ("input mutation", {**regenerated, "opendbc_repo/opendbc/safety/safety.h": "bad"}, regenerated, "commit", False, False),
+             ("head mutation", regenerated, regenerated, "other-commit", False, False),
+             ("output changed after bootstrap", regenerated, before, "commit", True, False),
+             ("native prerequisite changed during gate", regenerated, regenerated, "commit", True, False),
+             ("solver companion changed during gate", regenerated, regenerated, "commit", True, False))
+    for name, built, final, built_head, executed, passed in cases:
+      with self.subTest(case=name), tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "checkout"
+        (root / ".venv/bin").mkdir(parents=True)
+        (root / ".venv/bin/python").symlink_to(sys.executable)
+        output = Path(td) / "evidence"
+        extension = ".dylib" if sys.platform == "darwin" else ".so"
+        artifacts = (f"openpilot/common/libparams_c{extension}", "msgq_repo/msgq/ipc_pyx.so",
+                     "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so")
+        artifacts = qualification.prerequisite_artifact_paths(artifacts, "coverage")
+        for path in artifacts:
+          artifact = root / path
+          artifact.parent.mkdir(parents=True, exist_ok=True)
+          artifact.write_bytes(b"built-native")
+
+        def execute_gate(case_name=name, case_root=root, case_artifacts=artifacts):
+          if case_name == "native prerequisite changed during gate":
+            (case_root / case_artifacts[2]).write_bytes(b"unexpected replacement")
+          if case_name == "solver companion changed during gate":
+            (case_root / case_artifacts[3]).write_bytes(b"unexpected solver replacement")
+          return True
+
+        with patch.object(sys, "argv", ["qualification", "--gate", "coverage", "--output", str(output)]), \
+             patch.object(qualification, "ROOT", root), \
+             patch.object(qualification, "source_identity", side_effect=(before, built, final)), \
+             patch.object(qualification, "source_head", side_effect=("commit", built_head, built_head)), \
+             patch.object(qualification, "generated_identity", return_value={}), \
+             patch.object(qualification.Gate, "run", return_value=(0, "")), \
+             patch.object(qualification.Gate, "hash_artifact"), \
+             patch.object(qualification, "check_import_origins", return_value=True), \
+             patch.object(qualification, "imported_module_hashes", return_value={}), \
+             patch.object(qualification.Gate, "execute", side_effect=execute_gate) as execute:
+          self.assertEqual(qualification.main(), 0 if passed else 1)
+          self.assertEqual(execute.called, executed)
+        report = json.loads((output / "results.json").read_text())
+        self.assertEqual(report["passed"], passed)
+        self.assertEqual(report["source_unchanged"], executed and built == final)
+        self.assertEqual(report["prerequisite_artifacts_unchanged"],
+                         executed and name not in ("native prerequisite changed during gate", "solver companion changed during gate"))
+        if name == "fresh bootstrap":
+          self.assertEqual(json.loads((output / "source-before.json").read_text()), before)
+          self.assertEqual(json.loads((output / "source-after-prerequisites.json").read_text()), built)
+          self.assertEqual(set(report["prerequisite_outputs"]), set(qualification.MPC_PREREQUISITE_OUTPUTS))
+
   def test_unittest_summary_preserves_skip_count_and_failed_state(self):
     log = "Safety qualification collected 3590 tests\nRan 3590 tests in 33.0s\n\nOK (skipped=425)\nSafety qualification suppressed 0 methods"
     self.assertEqual(qualification.parse_unittest_summary(log),
@@ -245,11 +344,13 @@ class TestSafetyQualificationRunner(TestCase):
       root = Path(td) / "checkout"
       (root / ".venv/bin").mkdir(parents=True)
       (root / ".venv/bin/python").symlink_to(sys.executable)
+      source = {"source.py": "hash", **dict.fromkeys(qualification.MPC_PREREQUISITE_OUTPUTS, "generated-hash")}
       with patch.object(sys, "argv", ["run_safety_qualification.py", "--gate", "coverage", "--output", str(output)]), \
            patch.object(qualification, "ROOT", root), \
-           patch.object(qualification, "source_identity", return_value={"source.py": "hash"}), \
+           patch.object(qualification, "source_identity", return_value=source), \
            patch.object(qualification, "source_head", return_value="commit"), \
            patch.object(qualification, "generated_identity", return_value={}), \
+           patch.object(qualification, "prerequisite_artifact_identity", return_value={"fixture.so": "hash"}), \
            patch.object(qualification.Gate, "run", return_value=(0, "")) as invoke, \
            patch.object(qualification, "check_import_origins", return_value=True), \
            patch.object(qualification, "imported_module_hashes", return_value={}), \

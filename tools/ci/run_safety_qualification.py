@@ -31,6 +31,25 @@ SOURCE_EXACT = {".github/workflows/safety.yaml", "pyproject.toml", "uv.lock", "S
 SOURCE_SUFFIXES = {".c", ".h", ".cc", ".cpp", ".py", ".sh", ".capnp", ".dbc", ".toml", ".yaml", ".txt", ".json",
                    ".s", ".S", ".ld", ".mk", ".pyx", ".pxd", ".hpp"}
 SOURCE_NAMES = {"SConscript", "SConstruct", "Makefile", "coverage_table"}
+# These four tracked outputs are declared by the longitudinal MPC SConscript.
+# They may regenerate only during the catalog import prerequisite build; their
+# generators, templates, schemas, build definitions, and all safety inputs stay pinned.
+MPC_PREREQUISITE_OUTPUTS = {
+  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/acados_ocp_long.json": "long_mpc.py (SConscript generated_long)",
+  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/Makefile": "long_mpc.py (SConscript generated_long)",
+  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_solver_long.c": "long_mpc.py (SConscript generated_long)",
+  "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.c": "Cython (SConscript libacados_ocp_solver_c)",
+}
+
+
+def prerequisite_transition(before, after, name):
+  """Pin real inputs before build and admit only the four declared output rewrites."""
+  allowed = MPC_PREREQUISITE_OUTPUTS if name in ("coverage", "mutation-full") else {}
+  if before.keys() != after.keys():
+    return False
+  return all(before[path] == after[path] or path in allowed for path in before)
+
+
 UNITTEST_ACCOUNTING = """
 def test_ids(group):
   for item in group:
@@ -64,6 +83,21 @@ def source_identity():
                  (name.as_posix().startswith(SOURCE_PREFIXES) and (name.suffix in SOURCE_SUFFIXES or name.name in SOURCE_NAMES))) and
                  "obj" not in name.parts and "gen" not in name.parts and (ROOT / name).is_file())
   return {path.as_posix(): hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in files}
+
+
+def prerequisite_artifact_paths(prerequisites, name):
+  paths = list(prerequisites)
+  if name in ("coverage", "mutation-full"):
+    generated = "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/"
+    extension = ".dylib" if sys.platform == "darwin" else ".so"
+    paths.append(generated + "libacados_ocp_solver_long" + extension)
+    if sys.platform != "darwin":
+      paths.extend(generated + lib for lib in ("libacados.so", "libblasfeo.so", "libhpipm.so", "libqpOASES_e.so.3.1"))
+  return paths
+
+
+def prerequisite_artifact_identity(paths):
+  return {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in paths}
 
 
 def generated_identity():
@@ -409,6 +443,11 @@ def main():
   gate = None
   before = None
   after = None
+  bootstrap = None
+  bootstrap_ok = False
+  prerequisite_outputs = {}
+  prerequisite_artifacts = {}
+  prerequisite_artifacts_after = {}
   head_before = None
   head_after = None
   origins_ok = False
@@ -435,8 +474,22 @@ def main():
     built, _ = gate.run("build-imports", ["scons", "--minimal", "-j4", *prerequisites], timeout=3600)
     if built:
       raise RuntimeError("native host import prerequisites failed")
-    for artifact in prerequisites:
+    bootstrap = source_identity()
+    (output / "source-after-prerequisites.json").write_text(json.dumps(bootstrap, indent=2) + "\n")
+    bootstrap_ok = head_before == source_head() and prerequisite_transition(before, bootstrap, args.gate)
+    if args.gate in ("coverage", "mutation-full"):
+      for path, producer in MPC_PREREQUISITE_OUTPUTS.items():
+        if path not in before or path not in bootstrap:
+          raise RuntimeError(f"declared MPC prerequisite output missing: {path}")
+        prerequisite_outputs[path] = {"producer": producer, "before_sha256": before[path], "built_sha256": bootstrap[path]}
+        gate.hash_artifact(ROOT / path)
+    (output / "prerequisite-outputs.json").write_text(json.dumps(prerequisite_outputs, indent=2) + "\n")
+    if not bootstrap_ok:
+      raise RuntimeError("source inputs or HEAD changed during native import prerequisite build")
+    bound_artifacts = prerequisite_artifact_paths(prerequisites, args.gate)
+    for artifact in bound_artifacts:
       gate.hash_artifact(ROOT / artifact)
+    prerequisite_artifacts = prerequisite_artifact_identity(bound_artifacts)
     origins_ok = check_import_origins(gate.python, gate.env, output / "imports.log")
     if origins_ok:
       imported_before = imported_module_hashes(output / "imports.log")
@@ -454,6 +507,11 @@ def main():
     (output / "source-after.json").write_text(json.dumps(after, indent=2) + "\n")
   except Exception as exc:
     error = f"source finalization failed: {type(exc).__name__}: {exc}"
+  try:
+    if prerequisite_artifacts:
+      prerequisite_artifacts_after = prerequisite_artifact_identity(prerequisite_artifacts)
+  except Exception as exc:
+    error = f"prerequisite artifact finalization failed: {type(exc).__name__}: {exc}"
   generated = {}
   try:
     generated = generated_identity()
@@ -466,13 +524,18 @@ def main():
   except Exception as exc:
     error = f"imported module finalization failed: {type(exc).__name__}: {exc}"
   report = {"gate": args.gate, "head_before": head_before, "head_after": head_after,
-            "source_unchanged": before is not None and before == after, "import_origins_ok": origins_ok,
+            "source_unchanged": bootstrap_ok and bootstrap is not None and bootstrap == after,
+            "prerequisite_inputs_unchanged": bootstrap_ok, "prerequisite_outputs": prerequisite_outputs,
+            "prerequisite_artifacts_before": prerequisite_artifacts, "prerequisite_artifacts_after": prerequisite_artifacts_after,
+            "prerequisite_artifacts_unchanged": bool(prerequisite_artifacts) and prerequisite_artifacts == prerequisite_artifacts_after,
+            "import_origins_ok": origins_ok,
             "commands": gate.commands if gate else [], "artifacts": gate.artifacts if gate else {},
             "generated_before": len(generated_before), "generated_after": len(generated),
             "imported_modules": imported_before,
             "imported_modules_unchanged": imported_before == imported_after,
             "summary": getattr(gate, "summary", {}), "error": error,
-            "passed": passed and error is None and before is not None and before == after and head_before == head_after and imported_before == imported_after}
+            "passed": (passed and error is None and bool(prerequisite_artifacts) and prerequisite_artifacts == prerequisite_artifacts_after and
+                       bootstrap_ok and bootstrap is not None and bootstrap == after and head_before == head_after and imported_before == imported_after)}
   (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
   print(json.dumps({key: report[key] for key in ("gate", "passed", "summary", "source_unchanged", "import_origins_ok")}))
   return int(not report["passed"])
