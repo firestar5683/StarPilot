@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntFlag
+from math import isfinite
 from types import MappingProxyType
 
 from opendbc.car import Bus, PlatformConfig, DbcDict, Platforms, CarSpecs
@@ -97,8 +98,11 @@ class CarControllerParams:
       # lower threshold removes some braking deadzone
       max_regen_acceleration = -1. if CP.carFingerprint in EV_CAR else -0.1
 
+    if is_volt_sdgm_accepted_envelope(CP):
+      self.MAX_GAS = 2041.0
+
     self.GAS_LOOKUP_BP = [max_regen_acceleration, 0., self.ACCEL_MAX]
-    self.GAS_LOOKUP_V = [self.MAX_ACC_REGEN, 0., self.MAX_GAS]
+    self.GAS_LOOKUP_V = [self.MAX_ACC_REGEN, 0., 2698.0 if is_volt_sdgm_accepted_envelope(CP) else self.MAX_GAS]
 
     self.BRAKE_LOOKUP_BP = [self.ACCEL_MIN, max_regen_acceleration]
     self.BRAKE_LOOKUP_V = [self.MAX_BRAKE, 0.]
@@ -404,6 +408,26 @@ def is_volt_sdgm_profile(cp: CarParams, *, longitudinal=False) -> bool:
             gm_control_word(cp) in words)
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
+
+
+def is_volt_sdgm_accepted_envelope(cp: CarParams) -> bool:
+  return (camera_acc_pedal_profile(cp) is None and is_volt_sdgm_profile(cp, longitudinal=True) and
+          gm_control_word(cp) in (0x5007, 0x5407))
+
+
+def volt_sdgm_accepted_accel_max(cp: CarParams, speed: float) -> float:
+  try:
+    mass, wheelbase = cp.mass, cp.wheelbase
+    if not (isfinite(mass) and mass > 0.0 and isfinite(wheelbase) and wheelbase > 0.0 and
+            isfinite(speed) and speed >= 0.0):
+      return 0.0
+    # Invert the unchanged positive demand map, including its aero term.
+    aero_accel = 0.5 * 0.30 * (1.05 * wheelbase + 0.0679) * 1.225 * speed ** 2 / mass
+    if not isfinite(aero_accel):
+      return 0.0
+    return max(0.0, CarControllerParams.ACCEL_MAX * 2041.0 / 2698.0 - aero_accel)
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return 0.0
 
 
 def is_volt_longitudinal(cp: CarParams) -> bool:

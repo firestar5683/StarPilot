@@ -34,7 +34,7 @@ from opendbc.car.interfaces import CarControllerBase
 
 from opendbc.car.gm.hybrid_cc import (HybridPedalCommand, rearm_ready as hybrid_rearm_ready,
                                      lateral_ready as hybrid_lateral_ready, status_ready as hybrid_status_ready)
-from opendbc.car.gm.values import malibu_hybrid_profile
+from opendbc.car.gm.values import malibu_hybrid_profile, is_volt_sdgm_accepted_envelope
 from opendbc.car.gm.bolt_cc import BoltCcOwner, BoltCcProfile, auxiliary_messages
 from opendbc.car.gm.volt_cc_pedal import VoltCcPedalCommand
 from opendbc.car.gm.long_tune import acc_tune_limits
@@ -988,6 +988,8 @@ class CarController(CarControllerBase):
           plan_current=self.volt_sng_plan_input.update(now_nanos) if self.volt_sng and self.volt_sng_plan_input is not None else False)
         if self.camera_pedal_profile is not None and not ready:
           acc_engaged = False
+        if is_volt_sdgm_accepted_envelope(self.CP):
+          self.apply_gas = min(self.apply_gas, self.params.MAX_GAS)
         if hold_brake is None:
           can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, acc_engaged, at_full_stop))
         else:

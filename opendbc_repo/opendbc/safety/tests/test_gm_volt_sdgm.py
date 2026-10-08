@@ -37,7 +37,7 @@ class TestGmVoltSdgm(unittest.TestCase):
   def test_exact_limits_and_unowned_transmit(self):
     self.mode()
     self.safety.set_controls_allowed(True)
-    for gas, allowed in ((-540.125, False), (-540., True), (2698., True), (2698.125, False)):
+    for gas, allowed in ((-540.125, False), (-540., True), (2041., True), (2041.125, False), (2698., False)):
       self.assertEqual(self.safety.safety_tx_hook(self.gas(gas)), allowed and not self.release)
     self.assertFalse(self.safety.safety_tx_hook(self.gas(0., bus=2)))
     for active in (False, True):
@@ -59,6 +59,17 @@ class TestGmVoltSdgm(unittest.TestCase):
     self.safety.set_controls_allowed(False)
     self.assertEqual(self.safety.safety_tx_hook(self.gas(-500., enabled=False)), not self.release)
     self.assertFalse(self.safety.safety_tx_hook(self.gas(0.)))
+
+  def test_accepted_envelope_is_exact_and_does_not_restrict_alias_or_pedal_owners(self):
+    for word in (0x5007, 0x5407):
+      self.mode(word)
+      self.safety.set_controls_allowed(True)
+      for gas, allowed in ((-540.125, False), (-540., True), (2041., True), (2041.125, False), (2350., False)):
+        self.assertEqual(self.safety.safety_tx_hook(self.gas(gas)), allowed and not self.release)
+    for word in (0x5087, 0x5487, 0xD107, 0xD108, 0xD117, 0xD118):
+      self.mode(word)
+      self.safety.set_controls_allowed(True)
+      self.assertEqual(self.safety.safety_tx_hook(self.gas(2698.)), not self.release)
 
   def test_driver_button_brake_gas_regen_and_timeout(self):
     self.mode()

@@ -18,7 +18,8 @@ from opendbc.car.gm.values import (volt_cc_pedal_profile, CAR, CarControllerPara
                                    CAMERA_STOCK_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CAMERA_ALPHA_CAR, camera_acc_pedal_profile,
                                        VOLT_BSM_CAR, BOLT_CC_WORDS, is_bolt_cc_profile, BOLT_PEDAL_REMOVED_WORDS,
                                    is_bolt_pedal_removed_profile, is_bolt_present_no_acc_pedal_profile)
-from opendbc.car.gm.values import malibu_hybrid_profile, MALIBU_HYBRID_SOURCES
+from opendbc.car.gm.values import (malibu_hybrid_profile, MALIBU_HYBRID_SOURCES,
+                                   is_volt_sdgm_accepted_envelope, volt_sdgm_accepted_accel_max)
 from opendbc.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, LateralAccelFromTorqueCallbackType
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -128,6 +129,8 @@ class CarInterface(CarInterfaceBase):
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
+    if is_volt_sdgm_accepted_envelope(CP):
+      return CarControllerParams.ACCEL_MIN, volt_sdgm_accepted_accel_max(CP, current_speed)
     profile = camera_acc_pedal_profile(CP)
     if profile is not None and profile.longitudinal and profile.topology in ("gateway", "ascm", "sdgm"):
       return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX

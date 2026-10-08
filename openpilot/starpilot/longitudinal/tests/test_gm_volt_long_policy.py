@@ -332,3 +332,29 @@ class GMVoltLongPolicyTests(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+class VoltSdgmAcceptedLongControlTests(unittest.TestCase):
+  def test_driver_override_release_saturation_and_unwind_use_factory_envelope(self):
+    from opendbc.car.gm.tests.test_volt_sdgm_control import sdgm_params
+    for c9 in (False, True):
+      cp = sdgm_params(brake_c9=c9)
+      owner = LongControl(cp)
+      limits = CarInterface.get_pid_accel_limits(cp, 10., 40. / 3.6)
+      aero = .5 * .30 * (1.05 * cp.wheelbase + .0679) * 1.225 * 10. ** 2 / cp.mass
+      self.assertAlmostEqual(limits[1], 2. * 2041 / 2698 - aero)
+      # Driver override withdraws actual LongControl and clears accumulated I.
+      owner.pid.i = .6
+      self.assertEqual(owner.update(False, state(10., 0.), 1.11575, False, limits), 0.)
+      self.assertEqual(owner.pid.i, 0.)
+      outputs = [owner.update(True, state(10., 0.), 1.11575, False, limits) for _ in range(400)]
+      self.assertLessEqual(max(outputs), limits[1])
+      saturated_i = owner.pid.i
+      for _ in range(100):
+        owner.update(True, state(10., 0.), 1.11575, False, limits)
+      self.assertAlmostEqual(owner.pid.i, saturated_i)
+      output = owner.update(True, state(10., 1.7), -.72, False, limits)
+      self.assertLess(output, 0.)
+      self.assertLessEqual(owner.pid.i, saturated_i)
+      owner.update(False, state(10., 0.), 0., False, limits)
+      self.assertEqual(owner.pid.i, 0.)

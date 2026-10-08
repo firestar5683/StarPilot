@@ -1294,6 +1294,15 @@ static safety_config gm_init(uint16_t safety_param) {
   if (gm_volt_camera_long || gm_volt_sdgm_long) {
     gm_long_limits = &GM_BOLT_EUV_LONG_LIMITS;
   }
+  if (!gm_camera_pedal && ((camera_param == 0x5007U) || (camera_param == 0x5407U))) {
+    static const LongitudinalLimits GM_VOLT_SDGM_ACCEPTED_LIMITS = {
+      .max_gas = 2041 * GM_GAS_TO_CAN,
+      .min_gas = -540 * GM_GAS_TO_CAN,
+      .inactive_gas = -500 * GM_GAS_TO_CAN,
+      .max_brake = 400,
+    };
+    gm_long_limits = &GM_VOLT_SDGM_ACCEPTED_LIMITS;
+  }
 #endif
 
   gm_pcm_cruise = (gm_hw == GM_CAM);
