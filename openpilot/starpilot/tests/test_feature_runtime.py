@@ -92,11 +92,15 @@ def test_vision_control_needs_saved_master_and_vision_source_on_exact_long_cp():
     (params.root / 'SLCPriority1').write_bytes(b'Dashboard')
     (params.root / 'SLCPriority2').write_bytes(b'Vision')
     with patch('openpilot.starpilot.feature_runtime.ioniq6_long_eligible', side_effect=lambda cp: cp == 'tagged'):
+      from openpilot.starpilot.feature_runtime import vision_control_enabled
       assert requested(params, 'vision')
       assert enabled(params, 'tagged', 'vision', {})
       assert not enabled(params, 'stock', 'vision', {})
+      assert vision_control_enabled(params, 'tagged')
+      assert not vision_control_enabled(params, 'stock')
       (params.root / 'SpeedLimitController').write_bytes(b'0')
-      assert not enabled(params, 'tagged', 'vision', {})
+      assert enabled(params, 'tagged', 'vision', {})  # Default-on display still needs its selected Vision producer.
+      assert not vision_control_enabled(params, 'tagged')
 
 
 def test_explicit_replay_flags_remain_available_for_existing_replay_fixtures():
