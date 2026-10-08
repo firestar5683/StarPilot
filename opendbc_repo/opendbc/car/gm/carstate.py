@@ -312,7 +312,8 @@ class CarState(CarStateBase):
       if requires_camera_state_sources(self.CP):
         cam_cp.vl["ASCMActiveCruiseControlStatus"]
         self.volt_sng_sources += ((cam_cp.ts_nanos["ASCMActiveCruiseControlStatus"]["ACCCruiseState"], 100_000_000),)
-    if is_gm_auto_hold(self.CP):
+    gm_auto_hold = is_gm_auto_hold(self.CP)
+    if gm_auto_hold:
       alternate = is_volt_gateway_alternate_brake(self.CP)
       alternate_force = alternate or (is_volt_camera_removed(self.CP) and bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG)) or (
         self.camera_pedal_profile is not None and self.camera_pedal_profile.volt and
@@ -348,7 +349,8 @@ class CarState(CarStateBase):
       self.gm_auto_hold_moving = wheels["RLWheelSpd"] >= 12 * .0311 and wheels["RRWheelSpd"] >= 12 * .0311
       self.gm_auto_hold_wheel_ns = pt_cp.ts_nanos["EBCMWheelSpdRear"]["RLWheelSpd"]
       self.gm_auto_hold_unavailable = bool(pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"])
-    if is_volt_one_pedal(self.CP):
+    volt_one_pedal = is_volt_one_pedal(self.CP)
+    if volt_one_pedal:
       gear = pt_cp.vl["ECMPRDNL2"]
       low = gear["PRNDL2"] == 6 and not gear["ManualMode"]
       mode_ns = pt_cp.ts_nanos["EVDriveMode"]["SinglePedalModeActive"]
@@ -660,12 +662,12 @@ class CarState(CarStateBase):
     hold_config = self.gm_auto_hold_config
     hold_stopped = ret.standstill or (hold_config.continued_stop_speed > .02 and
                                      stopped_for_hold(ret, hold_config, self.gm_auto_hold_engaged))
-    hold_current = (is_gm_auto_hold(self.CP) and pt_cp.can_valid and not pt_cp.bus_timeout and
+    hold_current = (gm_auto_hold and pt_cp.can_valid and not pt_cp.bus_timeout and
                     (not requires_camera_state_sources(self.CP) or cam_cp.can_valid and not cam_cp.bus_timeout) and
                     hold_sources_current and not self.gm_auto_hold_unavailable and self.gm_auto_hold_forward and
                     ret.cruiseState.available and hold_stopped and
                     not ret.gasPressed and not ret.regenBraking)
-    if is_volt_one_pedal(self.CP) and (
+    if volt_one_pedal and (
         self.camera_pedal_profile is not None and self.camera_pedal_profile.volt and not self.camera_pedal_profile.auto_hold or
         self.camera_pedal_profile is None and int(self.CP.safetyConfigs[0].safetyParam) < 0xD110):
       hold_current = hold_current and self.volt_one_pedal_mode and self.volt_one_pedal_stopped and not ret.brakePressed

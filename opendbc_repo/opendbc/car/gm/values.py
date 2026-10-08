@@ -143,6 +143,15 @@ VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
 
 def gm_control_word(cp: CarParams) -> int:
   word = int(cp.safetyConfigs[0].safetyParam)
+  if word in VOLT_ONE_PEDAL_WORDS:
+    index = word - (0xD110 if word >= 0xD110 else 0xD100)
+    identity = (CAR.CHEVROLET_VOLT if index < 2 else CAR.CHEVROLET_VOLT_ASCM if index < 6 else
+                CAR.CHEVROLET_VOLT_2019 if index in (7, 8) else CAR.CHEVROLET_VOLT_CAMERA)
+    network = CarParams.NetworkLocation.gateway if index < 2 else CarParams.NetworkLocation.fwdCamera
+    if (cp.brand == 'gm' and cp.transmissionType == CarParams.TransmissionType.direct and
+        cp.carFingerprint == identity and cp.networkLocation == network):
+      return VOLT_ONE_PEDAL_WORDS[word]
+    return word
   hybrid = malibu_hybrid_profile(cp)
   if hybrid is not None:
     return 5 | (8 if hybrid.pedal and hybrid.longitudinal else 0)
@@ -173,15 +182,6 @@ def gm_control_word(cp: CarParams) -> int:
       return ((0xC173 if profile.longitudinal else 0xC172) if profile.removed else
               (0xC170 if profile.longitudinal else 0xC171))
     return word
-  if word not in VOLT_ONE_PEDAL_WORDS:
-    return word
-  index = word - (0xD110 if word >= 0xD110 else 0xD100)
-  identity = (CAR.CHEVROLET_VOLT if index < 2 else CAR.CHEVROLET_VOLT_ASCM if index < 6 else
-              CAR.CHEVROLET_VOLT_2019 if index in (7, 8) else CAR.CHEVROLET_VOLT_CAMERA)
-  network = CarParams.NetworkLocation.gateway if index < 2 else CarParams.NetworkLocation.fwdCamera
-  if (cp.brand == 'gm' and cp.transmissionType == CarParams.TransmissionType.direct and
-      cp.carFingerprint == identity and cp.networkLocation == network):
-    return VOLT_ONE_PEDAL_WORDS[word]
   return word
 
 
