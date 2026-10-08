@@ -97,6 +97,23 @@ class TestOffroadConfigurationPages(unittest.TestCase):
             self.assertTrue(rows[label]['choices'] or rows[label]['step'], (name, label))
       self.assert_no_car_cache()
 
+  def test_fixed_ioniq6_cruise_buttons_remain_outside_remapping_catalog(self):
+    from openpilot.starpilot.car.hyundai.settings import configuration_wheel_policy
+    cp = self.context.sample().cp
+    policy = configuration_wheel_policy(cp)
+    assert policy is not None
+    self.assertTrue(policy.fixed_cruise_buttons)
+    self.assertFalse(policy.lkas_button_supported)
+    self.params.put('LKASButtonControl', 9, block=True)
+    self.params.put('MainCruiseButtonControl', 10, block=True)
+    labels = {row['label'] for row in self.page('wheel')['rows']}
+    self.assertNotIn('LKAS press', labels)
+    self.assertNotIn('Main cruise press', labels)
+    self.assertIn('Distance long press', labels)
+    self.assertEqual(self.params.get('LKASButtonControl'), 9)
+    self.assertEqual(self.params.get('MainCruiseButtonControl'), 10)
+    self.assert_no_car_cache()
+
   def test_every_advertised_default_is_accepted_by_its_owner(self):
     checked = 0
     for name in sorted(PAGES):

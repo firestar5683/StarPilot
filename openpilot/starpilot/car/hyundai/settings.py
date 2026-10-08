@@ -11,6 +11,7 @@ class WheelSettingsPolicy:
   distance_pause_only: bool = True
   paddle_pause: bool = True
   runtime_supported: bool = False
+  lkas_button_supported: bool = False
 
 
 def supports_ioniq6_configuration(cp) -> bool:
