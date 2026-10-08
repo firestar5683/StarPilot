@@ -35,6 +35,7 @@ def test_large_aol_light_uses_same_perception_without_control_authority():
   view = OnroadView.__new__(OnroadView)
   view.fonts = Mock(profile=Profile.LARGE)
   view.fonts.measure.return_value = NS(width=100, height=30)
+  view.navigation_favorites = onroad.NavigationFavorites(view.fonts)
   view.camera_layer = view.background_layer = view.extra_overlays = None
   view.projection_viewport = None
   view._corner_cache = onroad.CornerHintCache()

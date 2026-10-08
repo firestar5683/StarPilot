@@ -524,6 +524,7 @@ class AppearanceSettingsTests(unittest.TestCase):
       view.background_layer = None
       view.projection_viewport = None
       object.__setattr__(view, "fonts", type("Fonts", (), {"profile": profile})())
+      view.navigation_favorites = onroad.NavigationFavorites(view.fonts)
       view.camera_layer = None
       view.extra_overlays = None
       view.alert = Mock()

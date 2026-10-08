@@ -10,6 +10,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
 from openpilot.starpilot.ui.onroad import CornerHintCache, OnroadView
+from openpilot.starpilot.ui.onroad_navigation_favorites import NavigationFavorites
 from openpilot.starpilot.ui.onroad_compact_widgets import MiciSidebarWidgets
 from openpilot.starpilot.ui.onroad_conditional import status as conditional_status
 from openpilot.starpilot.ui.onroad_curve import controlling, glowing, render_glow, status_label
@@ -74,6 +75,7 @@ class DeveloperPreviewRenderTests(unittest.TestCase):
         fonts.profile = profile
         fonts.measure.return_value = NS(width=100, height=20)
         view.fonts = fonts
+        view.navigation_favorites = NavigationFavorites(fonts)
         view.camera_layer = None
         view.background_layer = None
         view.pip_layer = None
@@ -111,6 +113,7 @@ class DeveloperPreviewRenderTests(unittest.TestCase):
     fonts = Mock()
     fonts.profile = Profile.LARGE
     view.fonts = fonts
+    view.navigation_favorites = NavigationFavorites(fonts)
     view.camera_layer = None
     view.background_layer = None
     view.pip_layer = None

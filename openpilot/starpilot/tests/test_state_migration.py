@@ -98,17 +98,21 @@ class TestStateMigration(unittest.TestCase):
     marker_bytes = marker.read_bytes()
     before = dict(known, **retired)
     prepare_manager_start(self.params, self.storage, auto_migrate=True)
-    snapshot, = (self.storage / 'snapshots').iterdir()
-    self.assertEqual(load_snapshot(snapshot), before)
+    snapshots = tuple((self.storage / 'snapshots').iterdir())
+    self.assertEqual(len(snapshots), 2)
+    after_retired = {key: raw for key, raw in before.items() if key != 'ShareUsageStats'}
+    self.assertCountEqual([load_snapshot(snapshot) for snapshot in snapshots], [before, after_retired])
     self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, known)
     self.assertEqual({key: ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns) for key in known}, identities)
     self.assertEqual(marker.read_bytes(), marker_bytes)
-    receipt = json.loads((snapshot / 'migration.json').read_bytes())
-    self.assertEqual(set(receipt['actions']), set(retired))
-    self.assertEqual(receipt['status'], 'migrated')
+    for snapshot in snapshots:
+      receipt = json.loads((snapshot / 'migration.json').read_bytes())
+      expected_actions = {'ShareUsageStats'} if 'ShareUsageStats' in load_snapshot(snapshot) else {'RetiredUnknownSetting'}
+      self.assertEqual(set(receipt['actions']), expected_actions)
+      self.assertEqual(receipt['status'], 'migrated')
     prepare_manager_start(self.params, self.storage, dry_run=True)
     prepare_manager_start(self.params, self.storage, auto_migrate=True)
-    self.assertEqual(list((self.storage / 'snapshots').iterdir()), [snapshot])
+    self.assertEqual(set((self.storage / 'snapshots').iterdir()), set(snapshots))
 
   def test_initialized_unknown_retirement_fails_before_deletion(self):
     prepare_manager_start(self.params, self.storage)
@@ -126,7 +130,7 @@ class TestStateMigration(unittest.TestCase):
 
   def test_initialized_unknown_keys_do_not_admit_invalid_known_state(self):
     prepare_manager_start(self.params, self.storage)
-    self.raw('ShareUsageStats', b'1')
+    self.raw('UnportedFeature', b'1')
     for key, raw in (('AlwaysOnLateral', b'true'), ('CalibrationParams', b'invalid retained calibration')):
       with self.subTest(key=key):
         self.raw(key, raw)
@@ -134,6 +138,33 @@ class TestStateMigration(unittest.TestCase):
         with self.assertRaises(MigrationRequired):
           prepare_manager_start(self.params, self.storage, auto_migrate=True)
         self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, before)
+        (self.namespace / key).unlink()
+
+  def test_retired_key_archival_does_not_admit_invalid_known_state(self):
+    prepare_manager_start(self.params, self.storage)
+    for key, raw in (('AlwaysOnLateral', b'true'), ('CalibrationParams', b'invalid retained calibration')):
+      with self.subTest(key=key):
+        self.raw('ShareUsageStats', b'1')
+        self.raw(key, raw)
+        before = {entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}
+        before_tree = self.tree_bytes()
+        with self.assertRaises(MigrationRequired):
+          prepare_manager_start(self.params, self.storage, dry_run=True, auto_migrate=True)
+        self.assertEqual(self.tree_bytes(), before_tree)
+        snapshots_before = set((self.storage / 'snapshots').iterdir()) if (self.storage / 'snapshots').exists() else set()
+        identity = ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns)
+        with self.assertRaises(MigrationRequired):
+          prepare_manager_start(self.params, self.storage, auto_migrate=True)
+        retained = {name: value for name, value in before.items() if name != 'ShareUsageStats'}
+        self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, retained)
+        self.assertEqual(((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns), identity)
+        snapshots = set((self.storage / 'snapshots').iterdir()) - snapshots_before
+        self.assertEqual(len(snapshots), 2)
+        self.assertCountEqual([load_snapshot(snapshot) for snapshot in snapshots], [before, retained])
+        archived = next(snapshot for snapshot in snapshots if 'ShareUsageStats' in load_snapshot(snapshot))
+        receipt = json.loads((archived / 'migration.json').read_bytes())
+        self.assertEqual(set(receipt['actions']), {'ShareUsageStats'})
+        self.assertEqual(receipt['status'], 'migrated')
         (self.namespace / key).unlink()
 
   def raw(self, key, value):
