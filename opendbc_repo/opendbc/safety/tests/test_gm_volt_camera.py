@@ -94,9 +94,10 @@ class TestGmVoltCamera(unittest.TestCase):
   def test_exact_sdgm_neighbor_has_its_own_longitudinal_owner(self):
     self.mode(0x5007)
     self.safety.set_controls_allowed(True)
-    self.assertEqual(self.safety.safety_tx_hook(self.gas(2698.)), not self.release)
-    self.assertFalse(self.safety.safety_tx_hook(self.gas(2698.125)))
-    self.assertFalse(self.safety.safety_tx_hook(self.gas(2698., bus=2)))
+    self.assertEqual(self.safety.safety_tx_hook(self.gas(2041.)), not self.release)
+    self.assertFalse(self.safety.safety_tx_hook(self.gas(2041.125)))
+    self.assertFalse(self.safety.safety_tx_hook(self.gas(2698.)))
+    self.assertFalse(self.safety.safety_tx_hook(self.gas(2041., bus=2)))
 
   def test_extra_bits_do_not_inherit_camera_owner(self):
     for bit in (0x8, 0x10, 0x20, 0x200, 0x400, 0x800, 0x2000, 0x8000):
