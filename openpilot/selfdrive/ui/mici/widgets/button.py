@@ -410,11 +410,11 @@ class BigMultiParamToggle(BigMultiToggle):
     new_idx = self._options.index(self.value)
     self.request_index(new_idx)
 
-  def request_index(self, index: int) -> bool:
+  def request_index(self, index: int, *, block: bool = False) -> bool:
     if type(index) is not int or not 0 <= index < len(self._options) or not self.enabled:
       return False
     self.set_value(self._options[index])
-    self._params.put(self._param, index)
+    self._params.put(self._param, index, block=block)
     return True
 
 

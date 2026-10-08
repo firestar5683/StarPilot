@@ -308,7 +308,7 @@ class TestOnroadFavorites(unittest.TestCase):
     native = NS(CP=NS(carFingerprint='car', flags=0, pcmCruise=True), has_longitudinal_control=True, started_frame=42, personality=1,
                 sm={"deviceState": NS(startedMonoTime=42)},
                 params=NS(get_bool=lambda key: False))
-    with patch.object(runtime_app, 'ui_state', native):
+    with patch.object(runtime_app, 'ui_state', native), patch.object(runtime_app, 'read_saved', return_value=(b'1', True)):
       actions = session.native_favorite_actions(bookmark, personality, experimental)
       assert actions[BOOKMARK].invoke()
       assert actions[CYCLE_PERSONALITY].invoke()
@@ -409,7 +409,7 @@ class TestOnroadFavorites(unittest.TestCase):
       owner._personality_toggle.request_index.assert_not_called()
       native.has_longitudinal_control = True
       assert owner.request_personality(2)
-      owner._personality_toggle.request_index.assert_called_once_with(2)
+      owner._personality_toggle.request_index.assert_called_once_with(2, block=True)
     assert owner._update_toggles.call_count == 2
 
 

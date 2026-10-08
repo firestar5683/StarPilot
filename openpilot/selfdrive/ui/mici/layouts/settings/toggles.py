@@ -143,7 +143,7 @@ class TogglesLayoutMici(NavScroller):
     self._update_toggles()
     if ui_state.CP is None or not ui_state.has_longitudinal_control:
       return False
-    return self._personality_toggle.request_index(index)
+    return self._personality_toggle.request_index(index, block=True)
 
   def request_experimental(self) -> bool:
     self._update_toggles()

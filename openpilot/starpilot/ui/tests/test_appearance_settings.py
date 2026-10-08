@@ -41,10 +41,10 @@ class AppearanceSettingsTests(unittest.TestCase):
 
   def test_absent_defaults_are_read_only_and_match_both_views(self):
     self.assertEqual(onroad_appearance(self.params), OnroadAppearance())
-    self.assertEqual(len(self.owner.snapshot(Profile.LARGE).rows), 9)
+    self.assertEqual(len(self.owner.snapshot(Profile.LARGE).rows), 10)
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.COMPACT).rows),
                      ("CameraView", "DriverCamera", "StoppedTimer", "StockConfidenceBallWidget", "EnableTorqueBarWidget",
-                      "RainbowPath", "HideDMIcon", "ShowBrakeStatus", "HideLeadMarker", "LeadInfo",
+                      "RainbowPath", "HideDMIcon", "HidePersonalityAlerts", "ShowBrakeStatus", "HideLeadMarker", "LeadInfo",
                       "SignalMetrics", "BlindSpotMetrics"))
     for key in ("HideSpeed", "HideMaxSpeed", "HideSteeringWheel", "DriverCamera", "StoppedTimer",
                 "StockConfidenceBallWidget", "EnableTorqueBarWidget", "RainbowPath", "HideLeadMarker", "SignalMetrics", "BlindSpotMetrics"):
@@ -61,6 +61,32 @@ class AppearanceSettingsTests(unittest.TestCase):
     self.assertEqual(self.row("CameraView", Profile.COMPACT).value, "Standard")
     self.assertEqual(self.row("DriverCamera", Profile.COMPACT).value, "Off")
     self.assertIn("border highlights apply to C4 only", self.owner.snapshot(Profile.LARGE).subtitle)
+
+  def test_personality_alert_visibility_is_default_off_and_widget_independent(self):
+    from openpilot.starpilot.ui.onroad_customization import read_customization
+    before = read_customization(self.params)
+    self.assertFalse(onroad_appearance(self.params).hide_personality_alerts)
+    self.assertIsNone(self.params.get("HidePersonalityAlerts"))
+    self.assertEqual(self.params.get_type("HidePersonalityAlerts").name, "BOOL")
+    for profile in (Profile.LARGE, Profile.COMPACT):
+      row = self.row("HidePersonalityAlerts", profile)
+      self.assertEqual((row.label, row.value, row.default_value), ("Hide Personality Alerts", "Off", "Off"))
+      request = row_change(row)
+      assert request is not None
+      self.parked = False
+      self.assertFalse(self.owner.apply(request))
+      self.parked = True
+      self.assertTrue(self.owner.apply(request))
+      self.assertTrue(onroad_appearance(self.params).hide_personality_alerts)
+      request = row_change(self.row("HidePersonalityAlerts", profile))
+      assert request is not None
+      self.assertTrue(self.owner.apply(request))
+      self.assertFalse(onroad_appearance(self.params).hide_personality_alerts)
+    self.assertEqual(read_customization(self.params), before)
+    path = Path(self.params.get_param_path("HidePersonalityAlerts"))
+    path.write_bytes(b"bad")
+    self.assertFalse(onroad_appearance(self.params).hide_personality_alerts)
+    self.assertEqual(path.read_bytes(), b"bad")
 
   def test_compact_border_saved_controls_repair_and_parked_source_guard(self):
     amber = row_change(self.row("SignalMetrics", Profile.COMPACT))

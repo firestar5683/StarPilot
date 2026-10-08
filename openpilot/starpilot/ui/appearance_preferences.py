@@ -58,6 +58,7 @@ DEFAULTS = {
   "HideMaxSpeed": False,
   "HideSteeringWheel": False,
   "HideDMIcon": False,
+  "HidePersonalityAlerts": False,
   "ShowBrakeStatus": False,
   "PedalsOnUI": False,
   "DriverCamera": False,
@@ -150,6 +151,7 @@ class OnroadAppearance:
   camera_view: CameraViewChoice = CameraViewChoice.STANDARD
   driver_camera_on_reverse: bool = False
   hide_dm_icon: bool = False
+  hide_personality_alerts: bool = False
   wheel_pedal_feedback: bool = False
 
 
@@ -168,6 +170,7 @@ def onroad_appearance(params: Any) -> OnroadAppearance:
     hide_max_speed=values["HideMaxSpeed"] is True,
     hide_steering_wheel=values["HideSteeringWheel"] is True,
     hide_dm_icon=values["HideDMIcon"] is True,
+    hide_personality_alerts=values["HidePersonalityAlerts"] is True,
     wheel_pedal_feedback=values["ShowBrakeStatus"] is True or values["PedalsOnUI"] is True,
     show_torque_bar=values["EnableTorqueBarWidget"] is not False,
     show_blindspot_border=values["BlindSpotMetrics"] is True,

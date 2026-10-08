@@ -1,4 +1,5 @@
 from collections import deque
+from pathlib import Path
 import time
 from types import SimpleNamespace as NS
 
@@ -40,7 +41,7 @@ def native_session(tmp_path, monkeypatch):
   session._mode = ShellMode.ONROAD
   state = OnroadState(True, True, 15, 80, SpeedLimitObservation())
   vars(session)['snapshot'] = lambda *_: NS(onroad=state)
-  vars(session)['_favorite_authority'] = lambda: True
+  vars(session)['_favorite_authority'] = lambda **_: True
   vars(session)['_conditional_favorite_active'] = lambda: False
   session.mode_actions, session.cruise_actions = ModeActionPublisher(), CruiseActionPublisher()
   session._wheel_personality = None
@@ -66,7 +67,7 @@ def test_actual_favorite_value_callback_reads_units_and_publishes_absolute_recei
   event = messaging.log_from_bytes(sender.events[-1][1])
   assert str(event.slcAction.kind) == 'cruiseSet'
   assert event.slcAction.controllerCruise.targetSpeedMps == pytest.approx(55 / 3.6)
-  vars(session)['_favorite_authority'] = lambda: False
+  vars(session)['_favorite_authority'] = lambda **_: False
   assert not owner.invoke(owner.snapshot().slots[0].request).success
   assert len(sender.events) == 1
 
@@ -265,3 +266,76 @@ def test_personality_cache_rejects_unusable_selfdrive_state(personality_session,
     ui.sm.updated['selfdriveState'] = False
   module.UIState._update_status(ui)
   assert int(ui.personality) == (0 if case == 'fresh' else 1)
+
+
+@pytest.mark.parametrize('profile', ['c4', 'c3'])
+def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(personality_session, monkeypatch, profile):
+  import pyray as rl
+  from dataclasses import replace
+  from openpilot.selfdrive.ui.layouts.settings import common
+  from openpilot.selfdrive.ui.layouts.settings import toggles as large
+  from openpilot.selfdrive.ui.mici.layouts.settings import toggles as compact
+  from openpilot.selfdrive.ui.mici.widgets import button
+  from openpilot.starpilot.controllers.tests.test_wheel_actions import state
+  from openpilot.starpilot.favorites.actions import CYCLE_PERSONALITY, EXPERIMENTAL
+  from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
+  from openpilot.starpilot.ui.presentation import Profile
+  from openpilot.system.ui.lib.application import gui_app
+
+  runtime, session, ui, _, clock = personality_session
+  for module in (common, large, compact):
+    monkeypatch.setattr(module, 'ui_state', ui)
+  monkeypatch.setattr(large, 'Params', lambda: ui.params)
+  monkeypatch.setattr(button, 'Params', lambda: ui.params)
+  monkeypatch.setattr(gui_app, 'font', lambda *_: rl.Font())
+  monkeypatch.setattr(gui_app, 'texture', lambda *_: NS(width=64, height=64))
+  panel = compact.TogglesLayoutMici() if profile == 'c4' else large.TogglesLayout()
+  panel.set_visible(False)
+  session.profile = Profile.COMPACT if profile == 'c4' else Profile.LARGE
+  del vars(session)['_favorite_authority']  # Exercise the real runtime admission.
+  shown = [OnroadState(True, True, 15, 80, SpeedLimitObservation(),
+                      alert=OnroadAlert(AlertSize.MID, 'Standard', 'Driving Personality',
+                                        alert_type='personalityChanged/warning'))]
+  vars(session)['snapshot'] = lambda *_: NS(onroad=shown[0])
+  session._native_favorite_actions = lambda: session.native_favorite_actions(
+    lambda: True, panel.request_personality, lambda: True)
+  actions = session._native_favorite_actions()
+  assert actions[CYCLE_PERSONALITY].available and actions[CYCLE_PERSONALITY].invoke()
+  assert ui.params.get('LongitudinalPersonality') == 2
+  assert not actions[BOOKMARK].available and not actions[EXPERIMENTAL].available
+  assert not actions[BOOKMARK].invoke() and not actions[EXPERIMENTAL].invoke()
+
+  queue = []
+  monkeypatch.setattr(runtime.messaging, 'recv_one_or_none', lambda _: queue.pop(0) if queue else None)
+  source, publisher = WheelPublisher(ui.params), Publisher()
+  source.observe(ui.params, ui.CP, state(), now_ns=NOW - 20_000_000, drive_id=DRIVE)
+  for sequence, expected in enumerate((1, 0, 2), start=1):
+    clock[0] = NOW + sequence * 5_000_000
+    for name in ui.sm:
+      ui.sm.logMonoTime[name], ui.sm.recv_time[name] = clock[0], clock[0] / 1e9
+    source.observe(ui.params, ui.CP, state(True), now_ns=clock[0] - 1_000_000, drive_id=DRIVE)
+    commands = source.observe(ui.params, ui.CP, state(False), now_ns=clock[0], drive_id=DRIVE)
+    assert commands == (('DistanceButtonControl', 1),)
+    source.publish(commands, ui.CP, publisher, now_ns=clock[0], drive_id=DRIVE,
+                   source_car_ns=clock[0], source_control_ns=clock[0])
+    queue.append(messaging.log_from_bytes(publisher.events[-1][1]))
+    session._poll_wheel(clock[0])
+    assert ui.params.get('LongitudinalPersonality') == expected
+    assert ui.personality == 1  # No selfdriveState acknowledgement between presses.
+
+  shown[0] = replace(shown[0], alert=OnroadAlert(AlertSize.FULL, 'Take control', critical=True,
+                                               alert_type='controlsMismatch/immediateDisable'))
+  assert not actions[CYCLE_PERSONALITY].invoke()
+  source.publish((('DistanceButtonControl', 1),), ui.CP, publisher, now_ns=clock[0], drive_id=DRIVE,
+                 source_car_ns=clock[0], source_control_ns=clock[0])
+  queue.append(messaging.log_from_bytes(publisher.events[-1][1]))
+  session._poll_wheel(clock[0])
+  assert ui.params.get('LongitudinalPersonality') == 2
+  shown[0] = replace(shown[0], alert=OnroadAlert())
+  ui.params.put_bool('SafeMode', True, block=True)
+  assert not actions[CYCLE_PERSONALITY].invoke()
+  ui.params.put_bool('SafeMode', False, block=True)
+  path = Path(ui.params.get_param_path('LongitudinalPersonality'))
+  path.write_bytes(b'bad')
+  assert not actions[CYCLE_PERSONALITY].invoke()
+  assert path.read_bytes() == b'bad'

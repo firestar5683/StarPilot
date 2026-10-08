@@ -15,6 +15,7 @@ LABELS = {
   "HideMaxSpeed": "Hide MAX Speed",
   "HideSteeringWheel": "Hide Steering Wheel",
   "HideDMIcon": "Hide Driver Monitoring Icon",
+  "HidePersonalityAlerts": "Hide Personality Alerts",
   "ShowBrakeStatus": "Wheel brake and acceleration colors",
   "DriverCamera": "Driver Camera on Reverse",
   "StoppedTimer": "Stopped Timer",
@@ -37,7 +38,8 @@ class AppearanceOwner:
     parked = self.parked()
     compact_only = ("StoppedTimer", "StockConfidenceBallWidget", "DriverCamera", "HideLeadMarker", "LeadInfo")
     keys = tuple(key for key in DEFAULTS if key not in compact_only and key in LABELS) if profile == Profile.LARGE else \
-      ("DriverCamera", "StoppedTimer", "StockConfidenceBallWidget", "EnableTorqueBarWidget", "RainbowPath", "HideDMIcon", "ShowBrakeStatus",
+      ("DriverCamera", "StoppedTimer", "StockConfidenceBallWidget", "EnableTorqueBarWidget", "RainbowPath", "HideDMIcon", "HidePersonalityAlerts",
+       "ShowBrakeStatus",
        "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics")
     rows = []
     if profile == Profile.COMPACT:

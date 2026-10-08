@@ -114,6 +114,11 @@ class OnroadAlert:
   visual_alert: int = 0
 
 
+def is_personality_notice(alert: OnroadAlert) -> bool:
+  return (alert.alert_type == "personalityChanged/warning" and alert.size in (AlertSize.SMALL, AlertSize.MID) and
+          not alert.critical and not alert.user_prompt and alert.visual_alert == 0)
+
+
 @dataclass(frozen=True)
 class BorderSignals:
   left_blinker: bool

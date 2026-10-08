@@ -64,7 +64,7 @@ from openpilot.starpilot.ui.bluetooth_status import BluetoothStatusSource
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
 from openpilot.starpilot.ui.network_panel import NetworkPanelBridge
 from openpilot.starpilot.ui.slc_action_dispatch import SlcActionDispatcher
-from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, SlcUiRequest
+from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, SlcUiRequest, is_personality_notice
 from openpilot.starpilot.ui.onroad_favorites import OnroadFavorites
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
 from openpilot.starpilot.favorites.owner import FavoritesOwner
@@ -267,7 +267,7 @@ class StarShellSession:
     self._favorite_read_at = None
     self._favorite_claimed = False
 
-  def _favorite_authority(self) -> bool:
+  def _favorite_authority(self, *, allow_personality_notice: bool = False) -> bool:
     if getattr(ui_state, "replay_clock", None) is not None:
       return False
     if self._mode != ShellMode.ONROAD:
@@ -275,7 +275,8 @@ class StarShellSession:
     state = self.snapshot(ShellMode.ONROAD).onroad
     camera_allowed = (self.profile != Profile.COMPACT or not state.reversing or
                       state.appearance.camera_view in (CameraViewChoice.NONE, CameraViewChoice.DRIVER))
-    return bool(self._mode == ShellMode.ONROAD and state.camera_available and state.alert.size == AlertSize.NONE and camera_allowed)
+    alert_allowed = state.alert.size == AlertSize.NONE or allow_personality_notice and is_personality_notice(state.alert)
+    return bool(self._mode == ShellMode.ONROAD and state.camera_available and alert_allowed and camera_allowed)
 
   def _render_driver_monitor(self, rect, state):
     from openpilot.starpilot.ui.runtime_snapshot import display_message
@@ -332,15 +333,30 @@ class StarShellSession:
           context, ui_state.sm, ui_state.CP, _slc_action_publisher(), now_ns=time.monotonic_ns())))
       return guarded_long(experimental)
 
-    self._wheel_personality = lambda: guarded_long(lambda: personality((int(ui_state.personality) - 1) % 3))
+    def cycle_personality(direction):
+      if not (self._favorite_authority(allow_personality_notice=True) and ui_state.CP is not None and
+              ui_state.has_longitudinal_control and not ui_state.params.get_bool("SafeMode")):
+        return False
+      try:
+        raw, readable = read_saved(ui_state.params, "LongitudinalPersonality", 8)
+      except (AttributeError, OSError, TypeError, ValueError):
+        return False
+      if not readable or raw not in (None, b"0", b"1", b"2"):
+        return False
+      current = int(raw) if raw is not None else 1  # Factory Standard when the setting is absent.
+      return personality((current + direction) % 3)
+
+    personality_available = bool(self._favorite_authority(allow_personality_notice=True) and ui_state.CP is not None and
+                                 ui_state.has_longitudinal_control and not ui_state.params.get_bool("SafeMode"))
+    self._wheel_personality = lambda: cycle_personality(-1)
     actions = {
       BOOKMARK: FavoriteAction(BOOKMARK, "Bookmark", available=available, reason="" if available else "Onroad only",
                                token=repr((drive, available)), invoke=lambda: guarded(bookmark)),
       CYCLE_PERSONALITY: FavoriteAction(CYCLE_PERSONALITY, "Cycle Driving Personality", kind="enum",
                                       state_label=("Aggressive", "Standard", "Relaxed")[current_personality],
-                                      available=long_available, reason="" if long_available else "Longitudinal control required",
-                                      token=repr((drive, current_personality, long_available)),
-                                      invoke=lambda: guarded_long(lambda: personality((int(ui_state.personality) + 1) % 3))),
+                                      available=personality_available, reason="" if personality_available else "Longitudinal control required",
+                                      token=repr((drive, current_personality, personality_available)),
+                                      invoke=lambda: cycle_personality(1)),
       EXPERIMENTAL: FavoriteAction(EXPERIMENTAL, "Experimental Mode", kind="toggle",
                                   state_label=("Overridden Chill" if (state.conditional_effective is not None and
                                                                    state.conditional_effective.reason == 'manual_chill') else
@@ -443,7 +459,7 @@ class StarShellSession:
         self._wheel_pending.append(event)
         continue
       command = self._wheel_consumer.accept(event, ui_state.params, ui_state.CP, ui_state.sm, now_ns=now_ns)
-      if command is None or command.action == 0 or not self._favorite_authority():
+      if command is None or command.action == 0 or not self._favorite_authority(allow_personality_notice=command.action == 1):
         continue
       actions = self._native_favorite_actions()
       try:

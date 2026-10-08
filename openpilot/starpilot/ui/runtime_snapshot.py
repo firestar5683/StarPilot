@@ -36,7 +36,7 @@ from opendbc.car.structs import car as car_schema
 from openpilot.starpilot.ui.device_state import DeviceRequest, DeviceState
 from openpilot.starpilot.ui.home_state import HomeMode, HomeState
 from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, ObservationKind, OnroadAlert,
-                                                OnroadState, SpeedLimitObservation, speed_limit_from_message)
+                                                OnroadState, SpeedLimitObservation, is_personality_notice, speed_limit_from_message)
 from openpilot.starpilot.ui.onroad_stopped_timer import StoppedTimer
 from openpilot.starpilot.ui.onroad_lane_alerts import lateral_lane_alert
 from openpilot.starpilot.ui.onroad_camera import ReverseDriverCamera
@@ -236,7 +236,9 @@ class PersonalityNotice:
     self._label = ""
 
   def update(self, source: Any | None, *, drive_frame: int, event_ns: int, now_ns: int,
-             native_alert: OnroadAlert) -> OnroadAlert:
+             native_alert: OnroadAlert, hide: bool = False) -> OnroadAlert:
+    if hide and is_personality_notice(native_alert):
+      native_alert = OnroadAlert()
     try:
       personality = int(getattr(source.personality, "raw", source.personality))
       if personality not in (0, 1, 2) or event_ns <= 0 or event_ns > now_ns:
@@ -254,10 +256,13 @@ class PersonalityNotice:
       self._last = personality
       self._label = ("Aggressive", "Standard", "Relaxed")[personality]
       self._until_ns = event_ns + 1_500_000_000
+    if hide:
+      self._until_ns = 0
+      return native_alert
     if native_alert.size != AlertSize.NONE:
       return native_alert
     if now_ns < self._until_ns:
-      return OnroadAlert(AlertSize.MID, self._label, "Driving Personality")
+      return OnroadAlert(AlertSize.MID, self._label, "Driving Personality", alert_type="personalityChanged/warning")
     return native_alert
 
 
@@ -401,7 +406,7 @@ class RuntimeSnapshotAdapter:
                                       model=display_model, selfdrive=display_selfdrive)
     alert = self._personality_notice.update(
       display_selfdrive, drive_frame=after, event_ns=int(sm.logMonoTime['selfdriveState']) if display_selfdrive is not None else 0,
-      now_ns=now_ns, native_alert=native_alert)
+      now_ns=now_ns, native_alert=native_alert, hide=self._appearance_value.hide_personality_alerts)
     slc = display_message(sm, "slcState", now_ns, after_frame=after) if started else None
     curve_envelope = current_curve_message(sm, now_ns, after_frame=after) if started else None
     curve = curve_observation(curve_envelope, now_ns) if curve_envelope is not None else None

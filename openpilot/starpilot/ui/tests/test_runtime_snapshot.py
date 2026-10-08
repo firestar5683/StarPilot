@@ -400,6 +400,36 @@ class TestRuntimeSnapshot(unittest.TestCase):
     native = adapter.build(ShellMode.ONROAD, now_ns=NOW + 1_800_000_000).onroad.alert
     self.assertEqual((native.size, native.text1), (AlertSize.FULL, 'Take control'))
 
+  def test_hiding_personality_notices_keeps_native_safety_alerts_and_clears_pending_notice(self):
+    from dataclasses import replace
+    from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance
+    from openpilot.starpilot.ui.runtime_snapshot import PersonalityNotice
+    from openpilot.starpilot.ui.onroad_state import OnroadAlert
+    ui = ui_fake()
+    ui.sm.messages['selfdriveState'].personality = NS(raw=1)
+    adapter = RuntimeSnapshotAdapter(ui)
+    adapter.build(ShellMode.ONROAD, now_ns=NOW)
+    adapter._appearance_value = OnroadAppearance(hide_personality_alerts=True)
+    ui.sm.messages['selfdriveState'].personality = NS(raw=0)
+    self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.alert.size, AlertSize.NONE)
+    source = ui.sm.messages['selfdriveState']
+    source.alertSize, source.alertType = NS(raw=1), 'personalityChanged/warning'
+    source.alertText1 = 'Driving Personality: Aggressive'
+    self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.alert.size, AlertSize.NONE)
+    source.alertType, source.alertText1, source.alertSize = 'controlsMismatch/immediateDisable', 'Take control', NS(raw=3)
+    self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.alert.text1, 'Take control')
+    source.alertSize = NS(raw=0)
+    adapter._appearance_value = replace(adapter._appearance_value, hide_personality_alerts=False)
+    self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.alert.size, AlertSize.NONE)
+    source.personality = NS(raw=2)
+    self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.alert.text1, 'Relaxed')
+    notice = PersonalityNotice()
+    notice.update(NS(personality=1), drive_frame=1, event_ns=NOW, now_ns=NOW, native_alert=OnroadAlert())
+    for safety in (OnroadAlert(AlertSize.FULL, 'Take control', critical=True, alert_type='personalityChanged/warning'),
+                   OnroadAlert(AlertSize.SMALL, 'Warning', user_prompt=True, alert_type='personalityChanged/warning')):
+      self.assertEqual(notice.update(NS(personality=2), drive_frame=1, event_ns=NOW, now_ns=NOW,
+                                     native_alert=safety, hide=True), safety)
+
   def test_personality_notice_clears_on_invalid_source_and_new_drive(self):
     ui = ui_fake()
     ui.sm.messages['selfdriveState'].personality = NS(raw=1)
