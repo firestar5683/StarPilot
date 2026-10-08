@@ -165,7 +165,7 @@ def test_pairing_source_is_minted_only_for_authenticated_parked_session_and_revo
   assert request('POST', '/api/android-auto/pairing', '{}', cookie=cookie, content_type='application/json')[0] == 403
   state['parked'] = True
   state['identity_installed'] = False
-  assert request('POST', '/api/android-auto/pairing', '{}', cookie=cookie, content_type='application/json')[0] == 409
+  assert request('POST', '/api/android-auto/pairing', '{}', cookie=cookie, content_type='application/json')[0] == 200
   state['identity_installed'] = True
   state['bluetooth_enabled'] = False
   assert request('POST', '/api/android-auto/pairing', '{}', cookie=cookie, content_type='application/json')[0] == 409
@@ -235,6 +235,11 @@ def test_existing_paired_car_controls_are_local_authenticated_and_source_bound(a
                             json.dumps({'action': 'select_receiver', 'address': 'AA:BB:CC:DD:EE:FF'}),
                             cookie=cookie, content_type='application/json')
   assert code == 200 and result['status']['receiver_address'] == 'AA:BB:CC:DD:EE:FF'
+  state['identity_installed'] = False
+  assert request('POST', '/api/android-auto/control', json.dumps({'action': 'start'}),
+                 cookie=cookie, content_type='application/json')[0] == 409
+  assert not client.running
+  state['identity_installed'] = True
   state['parked'] = False
   assert request('POST', '/api/android-auto/control', json.dumps({'action': 'auto_connect', 'enabled': True}),
                  cookie=cookie, content_type='application/json')[0] == 403

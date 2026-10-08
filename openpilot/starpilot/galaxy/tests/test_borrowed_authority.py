@@ -126,6 +126,7 @@ def test_actual_ui_constructor_borrows_one_collector_for_both_runtimes():
     'openpilot.starpilot.ui.layout_preview_runtime': SimpleNamespace(LayoutPreviewRuntime=runtime),
   }
   scope: dict = {
+    'COMMA_HARDWARE': False,
     'config_realtime_process': Mock(),
     'Priority': SimpleNamespace(UI=0),
     'select_ui': lambda *args: SimpleNamespace(custom=True, reason='test'),
@@ -133,7 +134,7 @@ def test_actual_ui_constructor_borrows_one_collector_for_both_runtimes():
     'sys': sys,
     'Profile': SimpleNamespace(LARGE=SimpleNamespace(value='large'), COMPACT=SimpleNamespace(value='compact')),
     'gui_app': SimpleNamespace(init_window=Mock(), render=lambda **kwargs: iter(())),
-    'ui_state': SimpleNamespace(params=Params(), sm=messages, is_offroad=lambda: True),
+    'ui_state': SimpleNamespace(params=Params(), sm=messages, is_offroad=lambda: True, replay_clock=None),
     'messaging': SimpleNamespace(PubMaster=Mock()),
     'update_frame': Mock(),
   }

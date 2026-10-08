@@ -50,7 +50,9 @@ def test_default_off_saved_switch_applies_after_startup_without_native_menu_link
   assert owner.apply(replace(required_change(row(owner)), confirmation=True))
   assert Path(params.get_param_path("ToyotaAutoHold")).read_bytes() == b"0"
   hub = owner.snapshot(FeaturePage.HUB, parked=True, system_long=True, lateral_context=True, metric=False)
-  assert all(item.page != FeaturePage.VEHICLE for item in hub.rows)
+  vehicle_links = [item for item in hub.rows if item.page == FeaturePage.VEHICLE]
+  assert len(vehicle_links) == 1 and vehicle_links[0].available
+  assert vehicle_links[0].label == 'Vehicle Settings'
 
 
 @pytest.mark.parametrize("change", [
@@ -74,6 +76,8 @@ def test_unsupported_or_changed_cp_cannot_edit_saved_switch(setup, change):
   request = replace(required_change(row(owner)), confirmation=True)
   change(current.cp)
   assert owner.snapshot(FeaturePage.VEHICLE, parked=True, system_long=True, lateral_context=True, metric=False).rows == ()
+  hub = owner.snapshot(FeaturePage.HUB, parked=True, system_long=True, lateral_context=True, metric=False)
+  assert all(item.page != FeaturePage.VEHICLE for item in hub.rows)
   assert not owner.apply(request)
   assert params.get("ToyotaAutoHold") is None
 
