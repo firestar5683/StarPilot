@@ -21,7 +21,7 @@ installed_dependencies_within_limits = CHECKER.installed_dependencies_within_lim
 class DirectDependencyBudgetTest(unittest.TestCase):
   def setUp(self):
     self.project = {
-      'dependencies': ['core'] * 22,
+      'dependencies': ['core'] * 23,
       'optional-dependencies': {
         'testing': ['test'] * 4,
         'tools': ['tool'] * 5,
@@ -32,7 +32,7 @@ class DirectDependencyBudgetTest(unittest.TestCase):
     }
 
   def test_existing_separate_budgets_are_admitted(self):
-    self.assertEqual(direct_dependency_counts(self.project), {'baseline': 38, 'dev': 3, 'safety': 5})
+    self.assertEqual(direct_dependency_counts(self.project), {'baseline': 39, 'dev': 3, 'safety': 5})
     self.assertTrue(direct_dependencies_within_limits(self.project))
 
   def test_new_extra_and_each_over_budget_category_fail(self):

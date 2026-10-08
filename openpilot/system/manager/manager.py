@@ -20,6 +20,7 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.system import sentry
 from openpilot.starpilot.state_migration import prepare_manager_start
 from openpilot.starpilot.storage import starpilot_storage_root
 
@@ -211,7 +212,15 @@ def manager_thread() -> None:
 
 
 def main() -> None:
-  manager_init()
+  sentry.init()
+  sentry.set_tag("daemon", "manager")
+  try:
+    manager_init()
+  except Exception:
+    sentry.capture_exception()
+    sentry.flush()
+    raise
+  sentry.init()
   if os.getenv("PREPAREONLY") is not None:
     return
 
@@ -230,6 +239,8 @@ def main() -> None:
   except Exception:
     traceback.print_exc()
     cloudlog.exception("crash")
+    sentry.capture_exception()
+    sentry.flush()
   finally:
     if analytics is not None:
       try:

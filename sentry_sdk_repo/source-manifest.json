@@ -1,0 +1,658 @@
+{
+  "name": "sentry-sdk",
+  "version": "2.38.0",
+  "license": "MIT",
+  "upstream": "https://github.com/getsentry/sentry-python",
+  "wheel_sha256": "2324aea8573a3fa1576df7fb4d65c4eb8d9929c8fa5939647397a07179eef8d0",
+  "source": "Unchanged complete installed wheel package; every file checked against distribution RECORD. No bytecode or installer metadata.",
+  "files": {
+    "sentry_sdk/__init__.py": {
+      "sha256": "fa34403be106e0b063e4bdb4b0ad357dd3256edbc67ff89dcb9e046f8e8488a4",
+      "bytes": 1364
+    },
+    "sentry_sdk/_compat.py": {
+      "sha256": "3f1720e9c5183e23a85c815f2c8fc7dc04dbed27eb71739e65dce9796bf7ba62",
+      "bytes": 3116
+    },
+    "sentry_sdk/_init_implementation.py": {
+      "sha256": "58be7877c9e082346e9c19b75e51beb164b1e324b996961882077b6015a9b959",
+      "bytes": 2559
+    },
+    "sentry_sdk/_log_batcher.py": {
+      "sha256": "6c1a6ca4895fd5e8f195bb9da35edb64e4a2af6dba2c601d8c37bfde41e43aba",
+      "bytes": 5085
+    },
+    "sentry_sdk/_lru_cache.py": {
+      "sha256": "a6164c066f44294d66ebb38e0299ca09f7e7956025573f5b6238a0ec282542e9",
+      "bytes": 1229
+    },
+    "sentry_sdk/_queue.py": {
+      "sha256": "514cdb9a58836267556220c0df634c6245f7ebd12558c14d4a3e64a1da954191",
+      "bytes": 11250
+    },
+    "sentry_sdk/_types.py": {
+      "sha256": "1b0f4f9f49881d93f6dc1f02da2335834ecdcf19c092981100647932b280d84b",
+      "bytes": 10487
+    },
+    "sentry_sdk/_werkzeug.py": {
+      "sha256": "9b718f7fe8c777cbf779539f04768ac397f4b87a0b917ad23b511c63ef048ac6",
+      "bytes": 3734
+    },
+    "sentry_sdk/ai/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sentry_sdk/ai/monitoring.py": {
+      "sha256": "6d2fca9de58200bf5e8669795e2c9f89ca0f571e035141ba69c6c7ddc8cfdc8f",
+      "bytes": 5057
+    },
+    "sentry_sdk/ai/utils.py": {
+      "sha256": "0ac3cdc3e376bad2e151f5db4fc70204f9432324c1373250e5a205d7c80f7619",
+      "bytes": 1705
+    },
+    "sentry_sdk/api.py": {
+      "sha256": "3a4c10dad039600489efbc0b3ad79476fff0a0f178c0bfc94ce00cc5ef73f24e",
+      "bytes": 15282
+    },
+    "sentry_sdk/attachments.py": {
+      "sha256": "d03ca5866d3ae4eea13458c1e347d609de47838a964979dd9a2d533d68256642",
+      "bytes": 3109
+    },
+    "sentry_sdk/client.py": {
+      "sha256": "a1072897015d2efb97e21b94682729800072dcce586f8221cf29a5cf2aea7e41",
+      "bytes": 38860
+    },
+    "sentry_sdk/consts.py": {
+      "sha256": "cfe419c8a3f378ce3e658078c0e98d67fdc29d2ed07138d7678f67b8c02bf47e",
+      "bytes": 49865
+    },
+    "sentry_sdk/crons/__init__.py": {
+      "sha256": "dd9b7a835fa9659d76b9128ab02f102e6dd7809e0ad55631815a4d354ca03996",
+      "bytes": 221
+    },
+    "sentry_sdk/crons/api.py": {
+      "sha256": "9a4f9407c226d8b536ac915d13e4d5df4d8468a9dff24023c042f46c85741f37",
+      "bytes": 1767
+    },
+    "sentry_sdk/crons/consts.py": {
+      "sha256": "757a8993999e052bb9ae3946a6a00e964a400a7b948bbb2f427005a32d593545",
+      "bytes": 87
+    },
+    "sentry_sdk/crons/decorator.py": {
+      "sha256": "52b8de22a0426efb2e2ab7e31a42896db2c1be3c364d0bc359c4ceed6c009ab2",
+      "bytes": 3913
+    },
+    "sentry_sdk/debug.py": {
+      "sha256": "75d05e850940b900b5b20d573be378377762674c74893e51589c0576bb5cb23c",
+      "bytes": 1019
+    },
+    "sentry_sdk/envelope.py": {
+      "sha256": "9c252fa9558855657e46856f320ad33540dfa3b87f6798d4f20f744f7d307571",
+      "bytes": 10360
+    },
+    "sentry_sdk/feature_flags.py": {
+      "sha256": "f7d2518a0e93064ae40735422aa61c995823b2e03f1e4fae97b8c51c6849a657",
+      "bytes": 2233
+    },
+    "sentry_sdk/hub.py": {
+      "sha256": "d902ef12d218498574e2bf21ed5066423a289082da881671641193b5028d0168",
+      "bytes": 25675
+    },
+    "sentry_sdk/integrations/__init__.py": {
+      "sha256": "b560bcba3360f2bf127386e4f0be4d31e0094206cf62dbd67676d6c0195555b4",
+      "bytes": 10342
+    },
+    "sentry_sdk/integrations/_asgi_common.py": {
+      "sha256": "62983b21cb41de23cf63ad1e6d59730a1ce04fc19e1a9674607f15bc93439446",
+      "bytes": 3187
+    },
+    "sentry_sdk/integrations/_wsgi_common.py": {
+      "sha256": "035f97ee5d6964272b6d48511e499d2a22bf11e9846639fbc53a0922f944b853",
+      "bytes": 7558
+    },
+    "sentry_sdk/integrations/aiohttp.py": {
+      "sha256": "feb7c32b1d5aaef550c1c0b6d2f87b1c6f34a7c5ed833a8a077881b8f619cbc0",
+      "bytes": 12895
+    },
+    "sentry_sdk/integrations/anthropic.py": {
+      "sha256": "ecca888192ce0f77cec35e05f41c4716bf55a4ba72e3842d66068fc9854a162e",
+      "bytes": 13169
+    },
+    "sentry_sdk/integrations/argv.py": {
+      "sha256": "18863b4c11444c5f19d1f0f3a935c426576de575c20dd14d671a46c4fec43da5",
+      "bytes": 911
+    },
+    "sentry_sdk/integrations/ariadne.py": {
+      "sha256": "0becca94ead4ee3bd35a6407671d0cd2d0193643cfa3b679fb98d70c3f762e25",
+      "bytes": 5834
+    },
+    "sentry_sdk/integrations/arq.py": {
+      "sha256": "c833dd5896b76609c62f01736af23294869f115374aaa49280be24507c5017bd",
+      "bytes": 7881
+    },
+    "sentry_sdk/integrations/asgi.py": {
+      "sha256": "ce3a0e380e5b1e54e9b51b0fdd95385f952c96ec8716a79bb14b779517e21ad1",
+      "bytes": 12738
+    },
+    "sentry_sdk/integrations/asyncio.py": {
+      "sha256": "0c4a1703093ca1597fd526e69b64ed869aee68b3bba7859905387d2be99c87f8",
+      "bytes": 4136
+    },
+    "sentry_sdk/integrations/asyncpg.py": {
+      "sha256": "7db0538b96c41112b773da38dcb04bb52e703da495abfa88977639d0d3e6af96",
+      "bytes": 6521
+    },
+    "sentry_sdk/integrations/atexit.py": {
+      "sha256": "b18e3a376844bed1ae4f50c14218ab5171db8e05e35c09bb47fb2089e72d54ac",
+      "bytes": 1652
+    },
+    "sentry_sdk/integrations/aws_lambda.py": {
+      "sha256": "5af7875a707f9c1b277cb4db694c6287bf516b7423bf826387eee6daffa0489b",
+      "bytes": 17954
+    },
+    "sentry_sdk/integrations/beam.py": {
+      "sha256": "aaddf9526900d2783854dce6c2a1fda33ed211253e8acf488c56d3276d5a7785",
+      "bytes": 5182
+    },
+    "sentry_sdk/integrations/boto3.py": {
+      "sha256": "d48b4a517ec42fd3075d2d47f154a7e887d94852dea9a52a79683e38a066fc89",
+      "bytes": 4411
+    },
+    "sentry_sdk/integrations/bottle.py": {
+      "sha256": "682e4eb22b65b1150458196990d8f1bc7d26e94106dce7c027d8c5c8f09bcea4",
+      "bytes": 6615
+    },
+    "sentry_sdk/integrations/celery/__init__.py": {
+      "sha256": "14d9ab2cbd02b3de64bfac940a9246bbd5fc0a9c36d263181a69e4042e082f86",
+      "bytes": 18699
+    },
+    "sentry_sdk/integrations/celery/beat.py": {
+      "sha256": "58711d29eb6b0c982d646369d5550c6ba046d6af8c86c2d931e7d4995acfbb7c",
+      "bytes": 8953
+    },
+    "sentry_sdk/integrations/celery/utils.py": {
+      "sha256": "08c5903a983dca7884926dd69577bb61a9097d59cbc1a634fa3c9ea36197f992",
+      "bytes": 1208
+    },
+    "sentry_sdk/integrations/chalice.py": {
+      "sha256": "0382bff4598d52ed77d4497472d9139a3b7261dd7ce08e214139627597040b9e",
+      "bytes": 4699
+    },
+    "sentry_sdk/integrations/clickhouse_driver.py": {
+      "sha256": "daaa51ce7c1236e452ceb080d51e5b9a98227a10e6cdb1bbc997ba84dfbad568",
+      "bytes": 6098
+    },
+    "sentry_sdk/integrations/cloud_resource_context.py": {
+      "sha256": "fe016574c7951ece69c4fe6c9bcb8fed92a69bab3fe61c3752c9d77a4f48c3c0",
+      "bytes": 7780
+    },
+    "sentry_sdk/integrations/cohere.py": {
+      "sha256": "8ae0c8d4854f137f6b6ec7377bdfea252d9b0a3360ec5e776a9b9e09d873afc4",
+      "bytes": 9322
+    },
+    "sentry_sdk/integrations/dedupe.py": {
+      "sha256": "9d917f325fb96b1abf361dc0653f346746cd3603dbc6f627efd7957812ab2060",
+      "bytes": 1515
+    },
+    "sentry_sdk/integrations/django/__init__.py": {
+      "sha256": "2aa02004a92ec891b0d25a8d6418f4a2da991b2fd81ea3ec8ac80f64b08df264",
+      "bytes": 25247
+    },
+    "sentry_sdk/integrations/django/asgi.py": {
+      "sha256": "479c10612e8701a48cf6b98ee5b9d31cdb7aa4296d84ce8bb2b8128a84d26523",
+      "bytes": 8349
+    },
+    "sentry_sdk/integrations/django/caching.py": {
+      "sha256": "52f61a888ef1acdd3c49ee7dbcc8095ab48ed81ba8c0ecb1de3997999a31409a",
+      "bytes": 6427
+    },
+    "sentry_sdk/integrations/django/middleware.py": {
+      "sha256": "5152aad77e30fd3c8e54f57b5b0056d108c763ece20e2a5c6412034268ea71e1",
+      "bytes": 6009
+    },
+    "sentry_sdk/integrations/django/signals_handlers.py": {
+      "sha256": "8ae7567ad4e5ccdaf9fa4c7f7b0d58c16fef674c830a1a289f03d907b01818fa",
+      "bytes": 3098
+    },
+    "sentry_sdk/integrations/django/templates.py": {
+      "sha256": "9373d0acd202192e30aa61712b7a3c2b03a5aa2a7bad222bcb2738a1ad567b17",
+      "bytes": 5725
+    },
+    "sentry_sdk/integrations/django/transactions.py": {
+      "sha256": "031ca1de5e14bccf7a477828d9a9d585ec3725bac467815261dd6bdd45c4730e",
+      "bytes": 4951
+    },
+    "sentry_sdk/integrations/django/views.py": {
+      "sha256": "6e31f0b7a4d57d863bc9f1946b645ab7dca8c2451b4366d809c25a5c9c4fd889",
+      "bytes": 3137
+    },
+    "sentry_sdk/integrations/dramatiq.py": {
+      "sha256": "234f6f2969df8ae85d4450a36188e613d2ce050bc34cf4be285a9fde21c54ac3",
+      "bytes": 5583
+    },
+    "sentry_sdk/integrations/excepthook.py": {
+      "sha256": "b5fc29490ba8d5bfce9896cd28f3d187dd045230ff3921380eaaa0618f4f5502",
+      "bytes": 2408
+    },
+    "sentry_sdk/integrations/executing.py": {
+      "sha256": "e65c410313b9172a58fb34d5d370079dc1a6a2599a1dddf6efedd5ae3cec91c7",
+      "bytes": 1994
+    },
+    "sentry_sdk/integrations/falcon.py": {
+      "sha256": "ba18ea14f29af1b59142bd336b8a555c661a3ebf8b45d202c36ad43be95a282a",
+      "bytes": 9501
+    },
+    "sentry_sdk/integrations/fastapi.py": {
+      "sha256": "92271d8a01ccdcc1be1a5a4b50deb0c07f23395bb8753ba8403e91045ae55e0a",
+      "bytes": 4589
+    },
+    "sentry_sdk/integrations/flask.py": {
+      "sha256": "b7babbdc9a094f8e91583b6b3489ad225a06c8383b0a7b0d14aa52e203ae048c",
+      "bytes": 8740
+    },
+    "sentry_sdk/integrations/gcp.py": {
+      "sha256": "bb5ad28b79cad8849442a9119e62851b6dcab3e49e7ec8537f93d5d03c29dffe",
+      "bytes": 8274
+    },
+    "sentry_sdk/integrations/gnu_backtrace.py": {
+      "sha256": "14bed69117c74fa89d60248b22bb454361b96531a862e7422af05c8d1e61aac2",
+      "bytes": 2812
+    },
+    "sentry_sdk/integrations/gql.py": {
+      "sha256": "94de4b24d670507b3fd4141c22b47469d22481bf5888e87a52da141bcbc23bf6",
+      "bytes": 4801
+    },
+    "sentry_sdk/integrations/graphene.py": {
+      "sha256": "23a649f00a5df5d3bd5cf56f658ec8e3afafd5e5ce5b50b5ac0916c1ab05de05",
+      "bytes": 5042
+    },
+    "sentry_sdk/integrations/grpc/__init__.py": {
+      "sha256": "cee932458b5ac5119c0ee4125c16d57296bb64c01874b43e95a450aaa1ec1e07",
+      "bytes": 5620
+    },
+    "sentry_sdk/integrations/grpc/aio/__init__.py": {
+      "sha256": "dab82b962a30a4f7cb2f0e34ff6614ea2c52cc8bbfddff0d3774d1a65cdcf12f",
+      "bytes": 141
+    },
+    "sentry_sdk/integrations/grpc/aio/client.py": {
+      "sha256": "72c3b09496fb7e0f5f067cde347c6bfaaa5912653dec8fe39ea902aba64b140b",
+      "bytes": 3322
+    },
+    "sentry_sdk/integrations/grpc/aio/server.py": {
+      "sha256": "48291d8a43d945d5b2ae59d97b0b121a93e4e2fe80b1d480a5501b3be95ffcb9",
+      "bytes": 4019
+    },
+    "sentry_sdk/integrations/grpc/client.py": {
+      "sha256": "ace3f06d4d083ba55ef7d6adbefc21755640f27a81cbbff06c7d9fadbd24209d",
+      "bytes": 3382
+    },
+    "sentry_sdk/integrations/grpc/consts.py": {
+      "sha256": "369b0de602960e6b46b552bf2f91ec720159047aa33a998b24b18aca1f066410",
+      "bytes": 31
+    },
+    "sentry_sdk/integrations/grpc/server.py": {
+      "sha256": "a28efdce37c6689b424b0b7168978215103a516a07d4f0f38d1e920ccb6ddfdf",
+      "bytes": 2474
+    },
+    "sentry_sdk/integrations/httpx.py": {
+      "sha256": "5b052e96acc12e8186a9651475083f3138704142b30579c0fa6de0ff518ea421",
+      "bytes": 5866
+    },
+    "sentry_sdk/integrations/huey.py": {
+      "sha256": "c25cb18de5aaa89a755f94b79de0f91626635dccb39e6d5d97cfeed70228efa5",
+      "bytes": 5443
+    },
+    "sentry_sdk/integrations/huggingface_hub.py": {
+      "sha256": "df767667448411031ca68018d32f0415f41d31a0750da712549db6bad7471ca5",
+      "bytes": 14940
+    },
+    "sentry_sdk/integrations/langchain.py": {
+      "sha256": "bceeda943fbfde02eea96dcb5b681051881ab6307d0abb08fbb2292663b2f137",
+      "bytes": 29393
+    },
+    "sentry_sdk/integrations/langgraph.py": {
+      "sha256": "6320c3735e20142355baa5662b05fc191435ed3d7b58ec764aaa83e081d138fb",
+      "bytes": 11015
+    },
+    "sentry_sdk/integrations/launchdarkly.py": {
+      "sha256": "6efb44c6e8faf313d7645b107964c347e641a8fd3ceed3ee5733f56cd00e6477",
+      "bytes": 1935
+    },
+    "sentry_sdk/integrations/litestar.py": {
+      "sha256": "8daa347fcbf92506a0901835e5d5094dd5863f1a52dcb98e577d35fa5c069067",
+      "bytes": 11815
+    },
+    "sentry_sdk/integrations/logging.py": {
+      "sha256": "e090b67a12ea7794f3feb69df1855bf4a8599cf703ccbc4b87e023a29c8d5447",
+      "bytes": 13905
+    },
+    "sentry_sdk/integrations/loguru.py": {
+      "sha256": "7e08af3dd427deb9ac31e22751ddb06cd95b5cf007f4c2a18daab2b5154a9ec2",
+      "bytes": 6215
+    },
+    "sentry_sdk/integrations/modules.py": {
+      "sha256": "bf32f1dc4ae0efb565e269d4bc081383fded780b96cbbcf2945a4089d048f48d",
+      "bytes": 820
+    },
+    "sentry_sdk/integrations/openai.py": {
+      "sha256": "32dbd2ec5338d5eb519f990fa9bdfba927e5a3cefa2fc99c576b24105c011652",
+      "bytes": 23890
+    },
+    "sentry_sdk/integrations/openai_agents/__init__.py": {
+      "sha256": "fb276a1b4b0522bbc9953f491cee7c119a42033cb2f49e7d02ff1dc67d1f1eec",
+      "bytes": 1424
+    },
+    "sentry_sdk/integrations/openai_agents/consts.py": {
+      "sha256": "3d36f7be5aa4b8c3e4b6edb500b2bbda8e563085f8f9c7b04c489345d1ca15d4",
+      "bytes": 38
+    },
+    "sentry_sdk/integrations/openai_agents/patches/__init__.py": {
+      "sha256": "23b0bd259ef431ff0f577c0f745b314eabdc625e136148126587cd5364a96fb6",
+      "bytes": 231
+    },
+    "sentry_sdk/integrations/openai_agents/patches/agent_run.py": {
+      "sha256": "18f055fa3f189c73ab24085d86efeda617b5e33ec6d3eae21559a314d0e0cb4b",
+      "bytes": 5773
+    },
+    "sentry_sdk/integrations/openai_agents/patches/models.py": {
+      "sha256": "0edc2a0a64ac605961459aae28cda38933a79c083dedec824ed2586645aa770c",
+      "bytes": 1405
+    },
+    "sentry_sdk/integrations/openai_agents/patches/runner.py": {
+      "sha256": "16be6d7e581a76eddf9c44e14996ae021ad3ec16ef7a6b997a50d51998e57aa0",
+      "bytes": 1483
+    },
+    "sentry_sdk/integrations/openai_agents/patches/tools.py": {
+      "sha256": "b80c751a0b220c904fee3a585bcaff90e226760cd797062a2beba19323f789c2",
+      "bytes": 3255
+    },
+    "sentry_sdk/integrations/openai_agents/spans/__init__.py": {
+      "sha256": "465562efcd731acbc22417220cefc46c16f091a9306cff43a054016e8e150041",
+      "bytes": 353
+    },
+    "sentry_sdk/integrations/openai_agents/spans/agent_workflow.py": {
+      "sha256": "7dd4524e10f7d53728317160fb6be6a8ad98712c2cf1885dd280ba7f13a7cac3",
+      "bytes": 469
+    },
+    "sentry_sdk/integrations/openai_agents/spans/ai_client.py": {
+      "sha256": "d071b9a53f1ad3a660739254991c7ca7fe9b3e840540b8c3acc63f41241dd3f1",
+      "bytes": 1206
+    },
+    "sentry_sdk/integrations/openai_agents/spans/execute_tool.py": {
+      "sha256": "c37416592e306e9b5e153cf82633025dd0e947a25529c51544443e96f24e4136",
+      "bytes": 1420
+    },
+    "sentry_sdk/integrations/openai_agents/spans/handoff.py": {
+      "sha256": "301873cbb329bcf1b04133d3e5315c3a79923e2487fee69d439c2f92cb9e2229",
+      "bytes": 525
+    },
+    "sentry_sdk/integrations/openai_agents/spans/invoke_agent.py": {
+      "sha256": "cb283ec325596983186da391bdafc1a2d37107da322b90ec9fc29f43763b3992",
+      "bytes": 2323
+    },
+    "sentry_sdk/integrations/openai_agents/utils.py": {
+      "sha256": "99bf29197674b7ffa681b209321e877d5a062a9ea41aa20c07b53951142d4900",
+      "bytes": 5208
+    },
+    "sentry_sdk/integrations/openfeature.py": {
+      "sha256": "fafbddacde1f2b45e1bb68a9e356e43c83c4a9dceff31ce62eef70465236c4f0",
+      "bytes": 1131
+    },
+    "sentry_sdk/integrations/opentelemetry/__init__.py": {
+      "sha256": "7a634be5a02afcd84ad0f6667d7fe0e0621dbc14ba9c7a86ae3ac882b742e66f",
+      "bytes": 229
+    },
+    "sentry_sdk/integrations/opentelemetry/consts.py": {
+      "sha256": "7d82fa1480047e71991818459f95fb691c87c628523ea00a2aa30b85fe469e2c",
+      "bytes": 143
+    },
+    "sentry_sdk/integrations/opentelemetry/integration.py": {
+      "sha256": "096a7a84514caa847bc1cbb04d16d13bed6255c87803aa0e07746e1d6797f464",
+      "bytes": 1791
+    },
+    "sentry_sdk/integrations/opentelemetry/propagator.py": {
+      "sha256": "3690a0bf621bab52d4aeff3e5116b265a3c64b3cf47f5b49b1feda6b1019e697",
+      "bytes": 3720
+    },
+    "sentry_sdk/integrations/opentelemetry/span_processor.py": {
+      "sha256": "20117be6577dcc92cd175fb81189cd068012d34fd74d78cf8a8f3accf5fd0cb4",
+      "bytes": 13276
+    },
+    "sentry_sdk/integrations/pure_eval.py": {
+      "sha256": "3af4fbe97be5950fc9e8006ede354d53a283d900319d732d4d9ee1aa15cd8696",
+      "bytes": 4581
+    },
+    "sentry_sdk/integrations/pymongo.py": {
+      "sha256": "70fa4c1846d71e557a1d31e09880cbd45fb1df0ed931139755be1e5212ecddbc",
+      "bytes": 6380
+    },
+    "sentry_sdk/integrations/pyramid.py": {
+      "sha256": "203a27ce866f2eb1f5f092fe8bf4296f3b5ce13de264d42158516fe9201769cf",
+      "bytes": 7364
+    },
+    "sentry_sdk/integrations/quart.py": {
+      "sha256": "ee1e01b86356cd969b54820e2a6d7de2030a0e522f4be7665855b88995ec985e",
+      "bytes": 7413
+    },
+    "sentry_sdk/integrations/ray.py": {
+      "sha256": "1df47101f4d87bd3258b773c86ff873c3f17499df7f65fbac8cfab2ab0a6d8eb",
+      "bytes": 4596
+    },
+    "sentry_sdk/integrations/redis/__init__.py": {
+      "sha256": "02ce5785b3ae7bef52cbd77c56bf1c65a81b3bf05cd2e1bc9f61b760d30fed35",
+      "bytes": 1332
+    },
+    "sentry_sdk/integrations/redis/_async_common.py": {
+      "sha256": "03edb7298ec992467c83a16e7e71a8e881caecb9fe8ed666a29547e5686a7641",
+      "bytes": 4056
+    },
+    "sentry_sdk/integrations/redis/_sync_common.py": {
+      "sha256": "312e4173de1caa2b299f864cf96487d361ab82707a721beb9dfd0905a6d334c5",
+      "bytes": 3796
+    },
+    "sentry_sdk/integrations/redis/consts.py": {
+      "sha256": "8d8865a17f77e58435011f5cf20882568d45a48b865e4191fd37e7e0b3ae94d5",
+      "bytes": 480
+    },
+    "sentry_sdk/integrations/redis/modules/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sentry_sdk/integrations/redis/modules/caches.py": {
+      "sha256": "798f17638364dd0b0c3344f6e8e39875c36be1b3744a9f77db91e41fe84ef1c8",
+      "bytes": 4063
+    },
+    "sentry_sdk/integrations/redis/modules/queries.py": {
+      "sha256": "d06c59f7cc328ea71ce02c0f1b7c49e1b4862065bcc0f5c28529391719ba9188",
+      "bytes": 2035
+    },
+    "sentry_sdk/integrations/redis/rb.py": {
+      "sha256": "a5aca43bb104fc301d899cc2a48a96d4caad044ee6139506d099dab857a3bb31",
+      "bytes": 806
+    },
+    "sentry_sdk/integrations/redis/redis.py": {
+      "sha256": "d4aeac7ae3fab6d11db1c28b16d11812ef6f90346e00d0acc5655e0c84ac1ac8",
+      "bytes": 1702
+    },
+    "sentry_sdk/integrations/redis/redis_cluster.py": {
+      "sha256": "6b91793e09409bcedbf9a5b4f1152fe35cd819896259981c337c2b181fe617eb",
+      "bytes": 3554
+    },
+    "sentry_sdk/integrations/redis/redis_py_cluster_legacy.py": {
+      "sha256": "a73e698340317473d95add233104433c7ffd8dd8748b72a80cf6cd5326af22ba",
+      "bytes": 1585
+    },
+    "sentry_sdk/integrations/redis/utils.py": {
+      "sha256": "8f5c81272a206b1a0bc41abc9cb91102acd2b7e11b76d1e83bef736535bf597c",
+      "bytes": 3970
+    },
+    "sentry_sdk/integrations/rq.py": {
+      "sha256": "d8289dbabd322ff26d7693ad06ea7a0fa698c8de13f6682c85e6c473e92fa7e1",
+      "bytes": 5307
+    },
+    "sentry_sdk/integrations/rust_tracing.py": {
+      "sha256": "7d0d1e1b4f70dc83d97bc79c81e5284133e81854e19246ab532182f0a263df9a",
+      "bytes": 9078
+    },
+    "sentry_sdk/integrations/sanic.py": {
+      "sha256": "67ba2bc645fd62153d6125f83a276c8b79f8e89d2a9551bb023a20f9f9d4adea",
+      "bytes": 12960
+    },
+    "sentry_sdk/integrations/serverless.py": {
+      "sha256": "9e988a26e232fec124593ff1d04bb6c5210c88c87f6b24aa198967bc844eb189",
+      "bytes": 1804
+    },
+    "sentry_sdk/integrations/socket.py": {
+      "sha256": "865243625b29ccecb750d8ec77ba973d4a2a265e6cd52845de28a34d15a955a5",
+      "bytes": 3169
+    },
+    "sentry_sdk/integrations/spark/__init__.py": {
+      "sha256": "a0e7b0304ae7664dabccdbc89593ba511c507b1bbd6d426e48b3369bfcc40b2f",
+      "bytes": 208
+    },
+    "sentry_sdk/integrations/spark/spark_driver.py": {
+      "sha256": "9aa19032780301958cefc9562b94b414fa668ddd50eb94dae53e1b387ea6357b",
+      "bytes": 9465
+    },
+    "sentry_sdk/integrations/spark/spark_worker.py": {
+      "sha256": "1464f8c915365ff890082e3a69ab0c9af25f60e2a6062a7c29b0c5ff09e1bc46",
+      "bytes": 3706
+    },
+    "sentry_sdk/integrations/sqlalchemy.py": {
+      "sha256": "41e99903a06699937903cbb1f3881875e949f46f46fba919401edae724490ad4",
+      "bytes": 4372
+    },
+    "sentry_sdk/integrations/starlette.py": {
+      "sha256": "511401d1d2438953f200acb2482d5175f477aa8f5653d18953f7ee769e93f30c",
+      "bytes": 26267
+    },
+    "sentry_sdk/integrations/starlite.py": {
+      "sha256": "9651ec4e64bffd658b792297d15c59fcb4c893fd9c35fdd40d0cea27cafc9e81",
+      "bytes": 10544
+    },
+    "sentry_sdk/integrations/statsig.py": {
+      "sha256": "f9ee7b8711df1e8d52d7761028e6d5eb9abf52f444cb16d1e7a7e77fb6e40bda",
+      "bytes": 1227
+    },
+    "sentry_sdk/integrations/stdlib.py": {
+      "sha256": "be007dc1e0c6878e79bc1c2651281c4118335622acb6edced2cc8eb610a7fc7d",
+      "bytes": 8831
+    },
+    "sentry_sdk/integrations/strawberry.py": {
+      "sha256": "bbb2e4e2edec344c9c752998d67401cd82a6a88fa63bc0562800099024ae4d10",
+      "bytes": 14126
+    },
+    "sentry_sdk/integrations/sys_exit.py": {
+      "sha256": "0304a18060563dd898db968e5832d102cd910542a6e53dc2acbf90fb3024d25e",
+      "bytes": 2493
+    },
+    "sentry_sdk/integrations/threading.py": {
+      "sha256": "cb327680af5c5a0ffe8197c089dce4b55a2418cf5fc408a34b89cc3bf12feebd",
+      "bytes": 5394
+    },
+    "sentry_sdk/integrations/tornado.py": {
+      "sha256": "41c7edf056717552029da6b5021b03076eb6b089c44193dffa9be023e0208e67",
+      "bytes": 7206
+    },
+    "sentry_sdk/integrations/trytond.py": {
+      "sha256": "05a2c236a41e4560db1c70c47a54b9b668fea7f0ab6e6b46107227e897f31051",
+      "bytes": 1651
+    },
+    "sentry_sdk/integrations/typer.py": {
+      "sha256": "150ac582947db7ac90585fa858223d2892c58a812703673fd4112d615fa63c0b",
+      "bytes": 1815
+    },
+    "sentry_sdk/integrations/unleash.py": {
+      "sha256": "e89b21ab2b8063f91bbbd36bdb4b4c3a1b60c7eaf2a8f1c2aeafc4408cdeaa6e",
+      "bytes": 1058
+    },
+    "sentry_sdk/integrations/unraisablehook.py": {
+      "sha256": "f085bc21af6dda12a03cb87c592f16926780b328c9e80978aa2f2c33abc6ae95",
+      "bytes": 1753
+    },
+    "sentry_sdk/integrations/wsgi.py": {
+      "sha256": "696fc49c309c7b1e3534676bc4a159b1f2712619ddb0c0afd1dd9ae4b05bef05",
+      "bytes": 10747
+    },
+    "sentry_sdk/logger.py": {
+      "sha256": "1e79a432639fd61c2fc4870f5b6a8ebc83929c567dc9134305a7bf7ab886b286",
+      "bytes": 2471
+    },
+    "sentry_sdk/metrics.py": {
+      "sha256": "dc8bc1c1b1e553e0be25dc03cac4de26a3a8572617b0767ba04924534a9365be",
+      "bytes": 29913
+    },
+    "sentry_sdk/monitor.py": {
+      "sha256": "e76086d66d9ef289050d5a13a5ba9f9bdcde79a2dad1c882febf71d91897b838",
+      "bytes": 3639
+    },
+    "sentry_sdk/profiler/__init__.py": {
+      "sha256": "dcf2376c793d45292439764a37ce030de764ffb33ae448aaa9a206a3e0d8b341",
+      "bytes": 1291
+    },
+    "sentry_sdk/profiler/continuous_profiler.py": {
+      "sha256": "ed06fbe5368a2cd631300f7bc0efaa1290d5ab13d058e2d48b6ae7526ebf0a2d",
+      "bytes": 23066
+    },
+    "sentry_sdk/profiler/transaction_profiler.py": {
+      "sha256": "7b732c52ab3e608a7afa79b3a660581a8596205ed1cae486bb6e038fef065c05",
+      "bytes": 27970
+    },
+    "sentry_sdk/profiler/utils.py": {
+      "sha256": "1b9b38b586a2f404c9a9c1eb4376ce23194aea321a1f310bac3b54e64dcde072",
+      "bytes": 6556
+    },
+    "sentry_sdk/py.typed": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sentry_sdk/scope.py": {
+      "sha256": "a296c46d1fea5b34a3e0e0a9f2fafd4a7fbb1f5d507bbcf8bca634a6322003cf",
+      "bytes": 63907
+    },
+    "sentry_sdk/scrubber.py": {
+      "sha256": "ac4366437e5bbae803976ebd6d166e200b60af6ec1f52ce2b0961417eebdd697",
+      "bytes": 6064
+    },
+    "sentry_sdk/serializer.py": {
+      "sha256": "c54c37c634ac185d1c5911cbf687ded2799612d66fccf387490e881efa3a5007",
+      "bytes": 13239
+    },
+    "sentry_sdk/session.py": {
+      "sha256": "4ea0d599128a1d40d29996f88d047eb3cc03b7b1706fa41a1b6d616b0506584b",
+      "bytes": 5571
+    },
+    "sentry_sdk/sessions.py": {
+      "sha256": "519da37ebaa162f6734f108319cd4c2c3e8ffda1cb2674c57ad49444e21a3da0",
+      "bytes": 9154
+    },
+    "sentry_sdk/spotlight.py": {
+      "sha256": "f7791d77c2b174b7dc3dac459c5baa1e060000be0509fa4ad618a23e80fb01ce",
+      "bytes": 8678
+    },
+    "sentry_sdk/tracing.py": {
+      "sha256": "79c9ee33463cb9e5f5d743388977ce57c6b2e275a21eebc288d40c3eb3736813",
+      "bytes": 51530
+    },
+    "sentry_sdk/tracing_utils.py": {
+      "sha256": "10cd9edd41e43943685a1b3481a1636896430321ca0b0d8a0747cec16959174c",
+      "bytes": 38862
+    },
+    "sentry_sdk/transport.py": {
+      "sha256": "034baec7b5e79e20c9b84c4bb9d2f2c850d89d2e42eabef3a3319b92f79433b1",
+      "bytes": 32469
+    },
+    "sentry_sdk/types.py": {
+      "sha256": "34b6e7473c30d8adffa06cf61b3702f13757e4bd835d8b28d7e1f5b82bf61f07",
+      "bytes": 1222
+    },
+    "sentry_sdk/utils.py": {
+      "sha256": "2ae6ec47e368f34613275158c0d4316af614e21390c818b17af9cfb17c4d0817",
+      "bytes": 61705
+    },
+    "sentry_sdk/worker.py": {
+      "sha256": "55231a8a044c6c89d5caea52169042e366dfb76a0856279afb40bf77d4e19c8a",
+      "bytes": 4464
+    }
+  }
+}

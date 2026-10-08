@@ -15,9 +15,12 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
+from openpilot.system import sentry
 
 
 def launcher(proc: str, name: str) -> None:
+  sentry.init()
+  sentry.set_tag("daemon", name)
   try:
     # import the process
     mod = importlib.import_module(proc)
@@ -39,6 +42,8 @@ def launcher(proc: str, name: str) -> None:
     # can't install the crash handler because sys.excepthook doesn't play nice
     # with threads, so catch it here.
     cloudlog.exception("crash")
+    sentry.capture_exception()
+    sentry.flush()
     raise
 
 

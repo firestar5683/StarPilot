@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 # Jetlink is shipped as pinned source and uses the existing NumPy dependency.
-DIRECT_LIMITS = {"baseline": 38, "dev": 3, "safety": 5}
+
+# One supported SDK preserves structured Bugsink crashes; transitives exist already.
+DIRECT_LIMITS = {"baseline": 39, "dev": 3, "safety": 5}
 TOOLING_PACKAGES = frozenset({
   "colorlog", "cppcheck", "execnet", "gcovr", "iniconfig", "jinja2", "lxml", "markupsafe",
   "pluggy", "pygments", "pytest", "pytest-mock", "pytest-xdist", "tree-sitter", "tree-sitter-c",

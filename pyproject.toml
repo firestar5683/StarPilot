@@ -20,6 +20,9 @@ dependencies = [
   "requests",     # many one-off uses
   "tqdm",         # cars (fw_versions.py) on start + many one-off uses
 
+  # Bugsink error reporting (SDK is also packaged for prebuilt devices)
+  "sentry-sdk==2.38.0",
+
   # core
   "scons",
   "pycapnp==2.1.0",  # 2.2 introduces a memory leak due to cyclic references
