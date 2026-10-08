@@ -1205,6 +1205,32 @@
       "artifact_sha256": "261454e0d170f5282d989d67ea7db08c90d7297369260085fbdf44af4e327a08",
       "artifact_size": 779382267,
       "artifact_chunk_count": 17
+    },
+    {
+      "id": "resfit",
+      "name": "ResFit",
+      "version": "v16",
+      "series": "OP Series",
+      "released": "2026-10-06",
+      "community_favorite": false,
+      "uses_external_gpu": true,
+      "artifact_format": "tinygrad_single_v1_arena",
+      "artifact_sha256": "5dde72ce3f00bdb4db89fb147b3bef4f684a114a4acd01332b81cde5214baa62",
+      "artifact_size": 804588697,
+      "artifact_chunk_count": 18
+    },
+    {
+      "id": "mountaindewv1",
+      "name": "Mountain Dew v1 👀📡",
+      "version": "v16",
+      "series": "OP Series",
+      "released": "2026-10-08",
+      "community_favorite": false,
+      "uses_external_gpu": true,
+      "artifact_format": "tinygrad_single_v1_arena",
+      "artifact_sha256": "397e0a555c66143b2507b45a55e24a8d638634ad2f40abaa857a857226b20b0c",
+      "artifact_size": 804589195,
+      "artifact_chunk_count": 18
     }
   ]
 }

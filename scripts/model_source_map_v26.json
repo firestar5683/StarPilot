@@ -483,5 +483,13 @@
   "cinquev3": {
     "source_id": "cinquev3",
     "input_format": "supercombo"
+  },
+  "resfit": {
+    "source_id": "resfit",
+    "input_format": "supercombo"
+  },
+  "mountaindewv1": {
+    "source_id": "mountaindewv1",
+    "input_format": "supercombo"
   }
 }
