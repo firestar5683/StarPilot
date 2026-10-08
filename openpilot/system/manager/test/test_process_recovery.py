@@ -106,3 +106,35 @@ class TestProcessRecovery(unittest.TestCase):
     from openpilot.system.manager.process_config import procs
     restarting = {p.name for p in procs if getattr(p, "restart_on_exit", False)}
     self.assertLessEqual({"ui", "soundd", "android_autod"}, restarting)
+
+
+  def test_sensor_three_recovery_cycles_obey_backoff_and_stop_eligibility(self):
+    from openpilot.system.manager import process_config
+    configured = process_config.managed_processes['sensord']
+    p = process.PythonProcess('sensord', configured.module, configured.should_run,
+                             restart_on_exit=configured.restart_on_exit)
+    with patch.object(process_config, 'sentry_enabled', return_value=False):
+      self.step(p)
+      for delay in (1, 2, 4):
+        old = p.proc
+        assert isinstance(old, Child)
+        old.exitcode = 1
+        self.step(p)
+        self.assertEqual(p.restart_at - self.now, delay)
+        self.now += delay - .01
+        self.step(p)
+        self.assertIs(p.proc, old)
+        self.now += .02
+        self.step(p)
+        self.assertIsNot(p.proc, old)
+        self.assertTrue(old.joined)
+      self.step(p, started=False)
+      self.assertTrue(p.shutting_down)
+      self.step(p, started=False)
+      self.assertIsNone(p.proc)
+      self.now += 60
+      self.step(p, started=False)
+      self.assertIsNone(p.proc)
+      p.enabled = False
+      self.step(p, started=True)
+      self.assertIsNone(p.proc)

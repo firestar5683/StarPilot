@@ -126,7 +126,7 @@ procs = [
   PythonProcess("vision_slc", "openpilot.starpilot.speed_limits.vision.producer", vision_slc_development),
   PythonProcess("dmonitoringmodeld", "openpilot.selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC)),
 
-  PythonProcess("sensord", "openpilot.system.sensord.sensord", sensord_run, enabled=not PC),
+  PythonProcess("sensord", "openpilot.system.sensord.sensord", sensord_run, enabled=not PC, restart_on_exit=True),
   PythonProcess("sentry_motion", "openpilot.starpilot.sentry_mode.runtime", sentry_motion, enabled=not PC),
   PythonProcess("vasm_monitor", "openpilot.starpilot.spot_monitor.runtime", vasm_monitor, enabled=not PC),
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run, restart_on_exit=True),
