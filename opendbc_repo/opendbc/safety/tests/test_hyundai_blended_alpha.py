@@ -124,6 +124,17 @@ class TestHyundaiBlendedAlpha(unittest.TestCase):
               modified[0].data[index] ^= 1 << bit
               self.assertFalse(self.safety.safety_tx_hook(modified))
 
+  def test_auxiliary_low_nibble_and_alpha_button_are_denied(self):
+    for hda2 in (False, True):
+      self.select(hda2)
+      packet = self.packer.make_can_msg_safety('RADAR_0x363', self.bus, {'FCA_ESA': 1})
+      self.assertTrue(self.safety.safety_tx_hook(packet))
+      packet[0].data[1] ^= 1
+      self.assertFalse(self.safety.safety_tx_hook(packet))
+      button = self.button(0, 0)
+      self.assertFalse(self.safety.safety_tx_hook(button))
+      self.assertFalse(self.safety.safety_test_selected_tx(button))
+
   def tcs(self, active, counter=0):
     values = {'ACC_REQ': int(active), 'AliveCounterTCS': counter}
     return self.packer.make_can_msg_safety('TCS13', self.bus, values, fix_checksum=checksum)
@@ -226,6 +237,41 @@ class TestHyundaiBlendedAlphaAol(unittest.TestCase):
   def warm(self):
     for _ in range(8):
       self.feed()
+
+  def test_main_off_cancel_and_heartbeat_loss_revoke_physical_token(self):
+    for cause in ('main_off', 'cancel', 'heartbeat'):
+      self.now = 1_000_000
+      self.counter = 0
+      self.reset()
+      self.warm()
+      self.feed(lda=True)
+      self.assertEqual(self.request(1), 0 if self.release else 1)
+      if self.release:
+        continue
+      if cause == 'main_off':
+        self.feed(available=False)
+      elif cause == 'cancel':
+        self.feed(button=4)
+      else:
+        self.safety.set_aol_test_heartbeat(False)
+      self.assertEqual(self.request(1), 0)
+      self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_cluster_lda_source_needs_its_own_neutral_edge(self):
+    self.reset()
+    self.warm()
+    self.assertEqual(self.request(0), 0)
+    for pressed in (0, 1):
+      packet = self.packer.make_can_msg_safety('CLU13', 0, {'CF_Clu_LdwsLkasSW': pressed})
+      self.assertTrue(self.safety.safety_rx_hook(packet))
+    self.assertEqual(self.request(1), 0 if self.release else 1)
+    self.reset()
+    self.warm()
+    self.assertEqual(self.request(1), 0)
+    for pressed in (0, 1):
+      packet = self.packer.make_can_msg_safety('CLU13', 0, {'CF_Clu_LdwsLkasSW': pressed})
+      self.assertTrue(self.safety.safety_rx_hook(packet))
+    self.assertEqual(self.request(1), 0)
 
   def test_token_is_lateral_only_and_long_enable_remains_physical(self):
     self.reset()

@@ -649,3 +649,23 @@ class TestToyotaHighlanderAol(unittest.TestCase):
         self.init(word=word, ae=ae)
         self.physical(cruise=True)
         self.assertEqual(self.safety.aol_get_request_mask(), 0)
+
+  def test_defensive_observer_wrong_length_drops_only_selected_source(self):
+    self.init()
+    self.physical()
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    # Unknown ingress must not erase a qualified source.
+    self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x321, 0, bytes(7))))
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    for address in (0x1D3, 0x3BC, 0x620, 0x262):
+      with self.subTest(address=hex(address)):
+        malformed = libsafety_py.make_CANPacket(address, 0, bytes(7))
+        # Registered ingress rejects malformed required sources before the observer.
+        self.safety.safety_rx_hook(malformed)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.physical()
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+        self.safety.safety_test_toyota_aol_observe(malformed)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.physical()
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1)

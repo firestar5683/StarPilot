@@ -220,3 +220,15 @@ class TestVolvoC1Safety(unittest.TestCase):
         data = bytearray(message[1])
         data[index] = 1
         assert not lib.safety_tx_hook(packet((message[0], data, message[2])))
+
+  def test_negative_measured_error_requires_convergence_with_same_envelope(self):
+    reset()
+    lib.set_angle_meas(0, 0)
+    for _ in range(6):
+      rx('VehicleSpeed1', 0, {'VehicleSpeed': 72})
+    lib.set_controls_allowed(True)
+    lib.set_desired_angle_last(round(-30 * 22.753128))
+    self.assertFalse(lib.safety_tx_hook(packet(codec.create_c1_steering_control(packer, -30, True))))
+    lib.set_controls_allowed(True)
+    lib.set_desired_angle_last(round(-30 * 22.753128))
+    self.assertTrue(lib.safety_tx_hook(packet(codec.create_c1_steering_control(packer, -29.8, True))))

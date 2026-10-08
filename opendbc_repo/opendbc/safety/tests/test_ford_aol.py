@@ -1,3 +1,7 @@
+import os
+import resource
+import signal
+import time
 import unittest
 
 from opendbc.car import structs
@@ -159,3 +163,100 @@ class TestFordAolDriverIntent(unittest.TestCase):
             self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(frame[0], frame[2], frame[1])), name)
         self.assertTrue(self.safety.safety_config_valid())
         self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_permanent_eps_is_denied_before_any_clean_replacement(self):
+    for word in self.PROFILES:
+      with self.subTest(word=word):
+        self.reset(word)
+        self.arm()
+        self.rx('EPAS_INFO', {'SteeringColumnTorque': 0, 'EPAS_Failure': 2})
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.pump(30, mask=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.rearm()
+
+  def test_main_cancel_states_and_physical_cancel_buttons_withdraw(self):
+    for state in (1, 2):
+      self.reset(32)
+      self.arm()
+      self.pump(10, main=state, mask=1)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    for bit in (8, 24):
+      self.reset(32)
+      self.arm()
+      data = (1 << bit).to_bytes(8, 'little')
+      self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x83, 0, data)))
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+      self.pump(20, mask=1)
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+      self.rearm()
+
+  def test_accepted_lateral_owns_only_replacement_until_lease_or_rejection(self):
+    from opendbc.car.ford.fordcan import CanBus, create_lat_ctl_msg
+    from opendbc.car.ford.mache_can import create_lka_msg
+    from opendbc.car import gen_empty_fingerprint
+    self.reset(32)
+    self.arm()
+    bus = CanBus(fingerprint=gen_empty_fingerprint())
+    frame = create_lat_ctl_msg(self.packer, bus, True, 0., 0., 0., 0.)
+    command = libsafety_py.make_CANPacket(frame[0], frame[2], frame[1])
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x3D3), 0)
+    self.assertFalse(self.safety.safety_tx_hook(command))
+    announcement = create_lka_msg(self.packer, bus)
+    self.assertTrue(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(announcement[0], announcement[2], announcement[1])))
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x3D3), 0)
+    self.assertTrue(self.safety.safety_tx_hook(command))
+    for address in (0x3D3, 0x3D8, 0x18A):
+      self.assertEqual(self.safety.safety_fwd_hook(2, address), -1)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x321), 0)
+    self.pump(31, mask=1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    for address in (0x3D3, 0x3D8, 0x18A):
+      self.assertEqual(self.safety.safety_fwd_hook(2, address), 0)
+
+  def test_native_bounded_catalog_copy_denies_invalid_and_restores_registered_table(self):
+    for length, null_catalog in ((0, False), (1, False), (7, False), (8, False), (1, True)):
+      with self.subTest(length=length, null_catalog=null_catalog):
+        self.reset(32)
+        self.assertTrue(self.bounded_catalog_contract(length, null_catalog))
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.arm()
+
+  def bounded_catalog_contract(self, length, null_catalog):
+    # Coverage uses the direct callback. Mutants use the identical native inputs
+    # in a child so a broken pointer/bounds guard becomes a unittest assertion.
+    if not hasattr(self.safety, 'mutation_set_active_mutant'):
+      return self.safety.safety_test_ford_aol_tx_bounds(length, null_catalog)
+    reader, writer = os.pipe()
+    child = os.fork()
+    if child == 0:
+      os.close(reader)
+      resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+      try:
+        result = self.safety.safety_test_ford_aol_tx_bounds(length, null_catalog)
+        os.write(writer, bytes([int(bool(result))]))
+        os._exit(0)
+      except BaseException:
+        os._exit(2)
+    os.close(writer)
+    reaped = False
+    try:
+      deadline = time.monotonic() + 5.
+      while time.monotonic() < deadline:
+        finished, status = os.waitpid(child, os.WNOHANG)
+        if finished:
+          reaped = True
+          break
+        time.sleep(.001)
+      if not reaped:
+        self.fail('native catalog contract exceeded its five-second deadline')
+      self.assertTrue(os.WIFEXITED(status), f'native catalog contract failed with wait status {status}')
+      self.assertEqual(os.WEXITSTATUS(status), 0)
+      self.assertEqual(os.read(reader, 1), bytes([1]))
+      return True
+    finally:
+      if not reaped:
+        os.kill(child, signal.SIGKILL)
+        os.waitpid(child, 0)
+      os.close(reader)

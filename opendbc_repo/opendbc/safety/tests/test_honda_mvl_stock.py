@@ -1,12 +1,11 @@
-import pytest
+import unittest
 
 from opendbc.car import structs
 from opendbc.safety.tests.common import CANPackerSafety
 from opendbc.safety.tests.libsafety import libsafety_py
 
 
-@pytest.mark.parametrize("word", (80, 81))
-def test_physical_pcm_camera_override_cancel_and_validated_arrival_expiry(word):
+def check_physical_pcm_camera_override_cancel_and_validated_arrival_expiry(word):
   safety = libsafety_py.libsafety
   safety.init_tests()
   safety.set_alternative_experience(0)
@@ -52,8 +51,7 @@ def test_physical_pcm_camera_override_cancel_and_validated_arrival_expiry(word):
   assert not safety.safety_tx_hook(packet("SCM_BUTTONS", {"CRUISE_BUTTONS": 4}, 2))
 
 
-@pytest.mark.parametrize("word,experience", ((64, 0), (82, 0), (83, 0), (80, 32), (81, 32)))
-def test_unqualified_mvl_words_and_independent_axis_have_no_transmit_table(word, experience):
+def check_unqualified_mvl_words_and_independent_axis_have_no_transmit_table(word, experience):
   safety = libsafety_py.libsafety
   safety.init_tests()
   safety.set_alternative_experience(experience)
@@ -61,3 +59,21 @@ def test_unqualified_mvl_words_and_independent_axis_have_no_transmit_table(word,
   packer = CANPackerSafety("honda_common_canfd_generated")
   for bus in (0, 2):
     assert not safety.safety_tx_hook(packer.make_can_msg_safety("SCM_BUTTONS", bus, {"CRUISE_BUTTONS": 2}))
+
+
+class TestHondaMvlStock(unittest.TestCase):
+  def tearDown(self):
+    safety = libsafety_py.libsafety
+    safety.init_tests()
+    safety.set_alternative_experience(0)
+    safety.set_safety_hooks(structs.CarParams.SafetyModel.noOutput, 0)
+
+  def test_physical_pcm_camera_override_cancel_and_validated_arrival_expiry(self):
+    for word in (80, 81):
+      with self.subTest(word=word):
+        check_physical_pcm_camera_override_cancel_and_validated_arrival_expiry(word)
+
+  def test_unqualified_mvl_words_and_independent_axis_have_no_transmit_table(self):
+    for word, experience in ((64, 0), (82, 0), (83, 0), (80, 32), (81, 32)):
+      with self.subTest(word=word, experience=experience):
+        check_unqualified_mvl_words_and_independent_axis_have_no_transmit_table(word, experience)

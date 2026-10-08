@@ -158,6 +158,93 @@ class TestGmBoltCcSafety(unittest.TestCase):
     self.assertTrue(packet(0x180, bytes(4), 1_001_000, transmit=True))
     self.assertFalse(packet(0x200, bytes(6), 1_001_000, transmit=True))
 
+  def test_timer_rollover_preserves_fresh_physical_sources(self):
+    safety = libsafety_py.libsafety
+    safety.set_alternative_experience(0)
+    for word in WORDS:
+      frames = ready(word)
+      setup(word)
+      for address, data in frames:
+        packet(address, data, 0xFFFFF000)
+      self.assertTrue(safety.get_controls_allowed())
+      self.assertTrue(packet(0x180, bytes((8, 1, 0, 0)), 1000, transmit=True))
+      packet(0xC9, bytes((0, 0, 0, 0, 0, 1, 0, 0)), 2000)
+      self.assertFalse(safety.get_controls_allowed())
+      self.assertFalse(packet(0x180, bytes((8, 1, 0, 0)), 3000, transmit=True))
+
+  def test_pscm_copy_requires_exact_payload_fresh_source_and_cadence(self):
+    libsafety_py.libsafety.set_alternative_experience(0)
+    for word in WORDS:
+      for source, expected in ((bytes(8), bytes((0, 0, 32, 0, 0, 32, 0, 0))),
+                               (bytes((0, 0, 32, 0, 0, 32, 0, 0)), bytes((0, 0, 32, 0, 0, 32, 0, 0)))):
+        with self.subTest(word=word, source=source):
+          ready(word)
+          packet(0x184, source, 1_000_001)
+          for index in range(8):
+            bad = bytearray(expected)
+            bad[index] ^= 1
+            self.assertFalse(packet(0x184, bad, 1_001_000, transmit=True, bus=2))
+          self.assertTrue(packet(0x184, expected, 1_001_000, transmit=True, bus=2))
+          self.assertFalse(packet(0x184, expected, 1_002_000, transmit=True, bus=2))
+          self.assertFalse(packet(0x184, expected, 1_101_001, transmit=True, bus=2))
+          packet(0x184, source, 1_101_002)
+          self.assertTrue(packet(0x184, expected, 1_101_003, transmit=True, bus=2))
+      for address in (0x409, 0x40A):
+        ready(word)
+        self.assertEqual(packet(address, bytes(7), 1_001_000, transmit=True), word in (0xC111, 0xC121, 0xC131))
+        for index in range(7):
+          bad = bytearray(7)
+          bad[index] = 1
+          self.assertFalse(packet(address, bad, 1_002_000, transmit=True))
+
+  def test_camera_cancel_requires_fresh_active_camera_and_consumes_credit(self):
+    libsafety_py.libsafety.set_alternative_experience(0)
+    for camera in (bytes(6), bytes((0, 0, 128, 0, 0, 0))):
+      ready(0xC140)
+      packet(0x370, camera, 1_000_001, bus=2)
+      expected = bool(camera[2] & 128)
+      self.assertEqual(packet(0x1E1, button_bytes(6, 1), 1_001_000, transmit=True, bus=2), expected)
+      self.assertFalse(packet(0x1E1, button_bytes(6, 1), 1_002_000, transmit=True, bus=2))
+    frames = ready(0xC140)
+    packet(0x370, bytes((0, 0, 128, 0, 0, 0)), 1_000_001, bus=2)
+    for address, data in frames:
+      packet(address, button_bytes(1, 1) if address == 0x1E1 else data, 1_301_000)
+    self.assertFalse(packet(0x1E1, button_bytes(6, 2), 1_302_000, transmit=True, bus=2))
+    packet(0x370, bytes((0, 0, 128, 0, 0, 0)), 1_303_000, bus=2)
+    packet(0x1E1, button_bytes(1, 2), 1_304_000)
+    self.assertTrue(packet(0x1E1, button_bytes(6, 3), 1_305_000, transmit=True, bus=2))
+
+  def test_physical_cancel_withdraws_and_set_release_rearms(self):
+    libsafety_py.libsafety.set_alternative_experience(0)
+    for word in WORDS:
+      ready(word)
+      packet(0x1E1, button_bytes(6, 1), 1_001_000)
+      self.assertFalse(libsafety_py.libsafety.get_controls_allowed())
+      packet(0x1E1, button_bytes(1, 2), 1_002_000)
+      self.assertFalse(libsafety_py.libsafety.get_controls_allowed())
+      packet(0x1E1, button_bytes(3, 3), 1_003_000)
+      packet(0x1E1, button_bytes(1, 0), 1_004_000)
+      self.assertTrue(libsafety_py.libsafety.get_controls_allowed())
+
+  def test_invalid_profile_initializer_rejects_transmit_admission(self):
+    setup(0xC110)
+    self.assertFalse(libsafety_py.libsafety.safety_test_gm_bolt_unowned_tx())
+    self.assertTrue(libsafety_py.libsafety.safety_test_gm_bolt_invalid_profile())
+    setup(0xC110)
+    self.assertFalse(packet(0x200, bytes(6), transmit=True))
+
+  def test_selected_forwarding_policy_preserves_owned_blocks_and_unowned_routing(self):
+    for word in WORDS:
+      libsafety_py.libsafety.set_alternative_experience(0)
+      setup(word)
+      for bus in (0, 1, 2):
+        for address in (0x180, 0x184, 0x3D1, 0x321):
+          with self.subTest(word=word, bus=bus, address=hex(address)):
+            blocked = (bus == 2 and address == 0x180) or (bus == 0 and address in (0x184, 0x3D1))
+            self.assertEqual(libsafety_py.libsafety.safety_test_selected_fwd(bus, address), blocked)
+            destination = -1 if blocked or bus == 1 else 2 if bus == 0 else 0
+            self.assertEqual(libsafety_py.libsafety.safety_fwd_hook(bus, address), destination)
+
 
 class TestGmRemovedBoltStockSafety(unittest.TestCase):
   def test_reduced_stock_has_cancel_only_physical_button_authority(self):

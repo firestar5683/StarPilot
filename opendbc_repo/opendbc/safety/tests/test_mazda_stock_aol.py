@@ -159,3 +159,16 @@ class TestMazdaStockAol(unittest.TestCase):
           self.assertEqual(self.safety.aol_get_permission_mask(), 1)
           for address in (0x243, 0x440):
             self.assertEqual(self.safety.safety_fwd_hook(2, address), -1 if elapsed <= 300_000 else 0)
+
+  def test_longitudinal_request_requires_actual_stock_cruise(self):
+    self.configure()
+    self.arm()
+    self.safety.aol_set_host_request(3)
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.assertTrue(self.safety.safety_rx_hook(self.packet('CRZ_CTRL', {'CRZ_AVAILABLE': 1, 'CRZ_ACTIVE': 1})))
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+    self.assertTrue(self.safety.safety_rx_hook(self.packet('CRZ_CTRL', {'CRZ_AVAILABLE': 1, 'CRZ_ACTIVE': 0})))
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)

@@ -49,6 +49,15 @@ class Ev9LongFixture:
 
 
 class TestEv9LongDebugContract(Ev9LongFixture, unittest.TestCase):
+  def test_active_camera_forwarding_requires_current_physical_readiness(self):
+    self.ready()
+    for address in (0x110, 0x362):
+      self.assertEqual(self.safety.safety_test_selected_fwd(2, address), True)
+    self.assertTrue(self.safety.safety_rx_hook(self.packet('TCS', 1, {'DriverBraking': 1})))
+    for address in (0x110, 0x362):
+      self.assertEqual(self.safety.safety_test_selected_fwd(2, address), False)
+    self.assertFalse(self.safety.safety_tx_hook(self.angle()))
+
   def test_direct_cb_is_bus_bound_crc_checked_and_no_110_owner(self):
     self.ready()
     self.assertTrue(self.safety.safety_tx_hook(self.angle(value=1.1)))

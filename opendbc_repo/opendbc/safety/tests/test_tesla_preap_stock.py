@@ -216,3 +216,38 @@ class TestTeslaPreapStock(unittest.TestCase):
           self.feed(lever=2)
           self.safety.aol_set_host_request(1)
           self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+
+  def test_physical_stalk_integrity_faults_revoke_until_new_intent(self):
+    for fault in ('crc', 'reserved'):
+      with self.subTest(fault=fault):
+        self.setUp()
+        self.arm()
+        data = bytearray(self.stalk(0, (self.counter + 1) % 16).data[0:8])
+        if fault == 'crc':
+          data[7] ^= 1
+        else:
+          data[0] |= 128
+          data[7] = self.crc(data[:7])
+        self.safety.safety_rx_hook(make_msg(0, 0x45, dat=bytes(data)))
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.feed()
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.arm()
+
+  def test_resume_requires_physical_engage_and_brake_release(self):
+    for _ in range(10):
+      self.feed()
+    self.assertFalse(self.safety.safety_tx_hook(self.stalk(16, (self.counter + 1) % 16)))
+    self.arm()
+    self.assertTrue(self.safety.safety_tx_hook(self.stalk(16, (self.counter + 1) % 16)))
+    self.feed(brake=2)
+    self.assertFalse(self.safety.safety_tx_hook(self.stalk(16, (self.counter + 1) % 16)))
+    self.assertTrue(self.safety.safety_tx_hook(self.stalk(1, (self.counter + 1) % 16)))
+
+  def test_native_forwarding_defense_blocks_with_public_gate_unchanged(self):
+    for bus in (0, 2):
+      for address in (0x45, 0x155, 0x488):
+        with self.subTest(bus=bus, address=address):
+          self.assertEqual(self.safety.safety_fwd_hook(bus, address), -1)
+          self.assertTrue(self.safety.safety_test_selected_fwd(bus, address))

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 // TODO: time should just be passed into the hooks we expose
 uint32_t timer_cnt = 0;
@@ -273,4 +274,86 @@ void init_tests(void){
 
   ignition_can = false;
   ignition_can_cnt = 0U;
+}
+
+// Direct native callback contracts do not change registered public admission.
+bool safety_test_selected_tx(const CANPacket_t *msg) {
+  return (current_hooks != NULL) && (current_hooks->tx != NULL) && current_hooks->tx(msg);
+}
+
+bool safety_test_selected_fwd(int bus, int addr) {
+  return (current_hooks != NULL) && (current_hooks->fwd != NULL) && current_hooks->fwd(bus, addr);
+}
+
+void safety_test_toyota_aol_observe(const CANPacket_t *msg) {
+  toyota_aol_observe(msg);
+}
+
+bool safety_test_ford_aol_tx_bounds(int length, bool null_catalog) {
+  if ((current_safety_mode != SAFETY_FORD) || (current_safety_config.tx_msgs_len < 1) ||
+      (current_safety_config.tx_msgs_len > 7)) {
+    return false;
+  }
+  const uint16_t mode = current_safety_mode;
+  const uint16_t param = current_safety_param;
+  const int original_len = current_safety_config.tx_msgs_len;
+  CanMsg original_tx[7];
+  memcpy(original_tx, current_safety_config.tx_msgs, (size_t)original_len * sizeof(CanMsg));
+  CanMsg source[8] = {
+    {.addr = 0x3D3, .bus = 0U, .len = 8}, {.addr = 0x3D8, .bus = 0U, .len = 8}, {.addr = 0x18A, .bus = 0U, .len = 8}, {.addr = 0x83, .bus = 0U, .len = 8},
+    {.addr = 0x3D3, .bus = 0U, .len = 8}, {.addr = 0x3D8, .bus = 0U, .len = 8}, {.addr = 0x18A, .bus = 0U, .len = 8}, {.addr = 0x83, .bus = 0U, .len = 8},
+  };
+  CanMsg workspace[7];
+  safety_config fixture = {.tx_msgs = null_catalog ? NULL : source, .tx_msgs_len = length};
+  ford_aol_bind_tx(&fixture, workspace);
+  const bool valid_length = !null_catalog && (length > 0) && (length <= 7);
+  bool contract = false;
+  if (valid_length) {
+    contract = (fixture.tx_msgs == workspace) && (fixture.tx_msgs_len == length) && ford_aol_enabled;
+    for (int i = 0; i < length; i++) {
+      contract &= (workspace[i].addr == source[i].addr) && (workspace[i].bus == source[i].bus) &&
+                  (workspace[i].len == source[i].len) &&
+                  (workspace[i].disable_static_blocking == (source[i].addr != 0x83));
+    }
+  } else {
+    contract = (fixture.tx_msgs == NULL) && (fixture.tx_msgs_len == 0) && !ford_aol_enabled;
+  }
+  // The fixture starts from a fresh registered configuration and restores it.
+  const int restored = set_safety_hooks(mode, param);
+  contract &= (restored == 0) && (current_safety_mode == mode) && (current_safety_param == param) &&
+              (current_safety_config.tx_msgs_len == original_len) &&
+              (memcmp(original_tx, current_safety_config.tx_msgs, (size_t)original_len * sizeof(CanMsg)) == 0);
+  return contract;
+}
+
+bool safety_test_gm_ascm_adas(const CANPacket_t *msg) {
+  const unsigned int length = GET_LEN(msg);
+  const bool fixed_shape = (msg->bus == 1U) &&
+    (((msg->addr == 0xA1U) && (length == 7U)) || ((msg->addr == 0x306U) && (length == 8U)) ||
+     ((msg->addr == 0x308U) && (length == 7U)) || ((msg->addr == 0x310U) && (length == 2U)));
+  return fixed_shape && gm_ascm_adas_valid(msg);
+}
+
+bool safety_test_gm_bolt_invalid_profile(void) {
+  const uint16_t mode = current_safety_mode;
+  const uint16_t param = current_safety_param;
+  const safety_config fixture = gm_bolt_cc_profile_init(0U);
+  const bool denied = (fixture.tx_msgs_len == 1) && (fixture.tx_msgs[0].addr == 0) &&
+                      (fixture.tx_msgs[0].bus == 0U) && (fixture.tx_msgs[0].len == 0);
+  return (set_safety_hooks(mode, param) == 0) && denied;
+}
+
+bool safety_test_gm_bolt_unowned_tx(void) {
+  const CANPacket_t msg = {.addr = 0x200U, .bus = 0U, .data_len_code = 6U};
+  return gm_bolt_cc_profile_tx(&msg);
+}
+
+
+bool safety_test_hyundai_angle_invalid_capacity(unsigned int count) {
+  if ((count != 0U) && (count != 65U)) {
+    return false;
+  }
+  safety_config fixture = {.rx_checks_len = 1, .tx_msgs_len = (int)count};
+  const bool bounded = hyundai_canfd_angle_aol_capacity(&fixture);
+  return !bounded && (fixture.rx_checks_len == 0) && (fixture.tx_msgs_len == 0);
 }

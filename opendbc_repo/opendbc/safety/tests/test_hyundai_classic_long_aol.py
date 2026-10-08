@@ -29,6 +29,15 @@ class TestHyundaiClassicLongAol(unittest.TestCase):
       self.rx('CLU11', {'CF_Clu_AliveCnt1': c % 16, 'CF_Clu_CruiseSwState': button, 'CF_Clu_CruiseSwMain': int(main)})
     self.now += 10000
 
+  def test_marked_long_with_foreign_experience_has_no_rx_or_tx_admission(self):
+    for experience in (0, 1, 33):
+      self.safety.set_alternative_experience(experience)
+      self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x404), 0)
+      self.safety.init_tests()
+      self.assertFalse(self.safety.safety_config_valid())
+      self.assertFalse(self.safety.safety_tx_hook(self.packer.make_can_msg_safety('LKAS11', 0, {})))
+      self.assertEqual(self.request(3), 0)
+
   def test_availability_and_held_main_cannot_authorize(self):
     self.reset(0x404)
     for _ in range(6):

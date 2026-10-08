@@ -92,6 +92,33 @@ class TestGmHybridCc(unittest.TestCase):
   def pedal(self, fraction=.2, counter=0):
     return self.safety.safety_tx_hook(self.packet(gmcan.create_pedal_command(self.packer, fraction, counter)))
 
+  def test_physical_cancel_main_and_standard_set_have_distinct_rearm_effects(self):
+    for physical_word in (0x2ACD, 0x20EF, 0x60AF, 0x6A8D):
+      with self.subTest(physical_word=hex(physical_word)):
+        self.reset(0xE801)
+        self.warm()
+        self.arm()
+        self.slot(physical_word)
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.slot(0x15EE)
+        self.assertFalse(self.safety.get_controls_allowed())
+        for counter in range(4):
+          set_word = 0x3000 | (0xDF + counter * 0x4EF)
+          self.slot(set_word, counter=counter)
+          self.assertFalse(self.safety.get_controls_allowed())
+          self.slot(0x15EE, counter=counter)
+          self.assertTrue(self.safety.get_controls_allowed())
+          self.slot(0x60AF)
+          self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_either_rear_wheel_independently_reports_motion(self):
+    for left, right, moving in ((0, 0, False), (0, 1, True), (1, 0, True)):
+      self.reset(0xE801)
+      frame = self.packer.make_can_msg('EBCMWheelSpdRear', 0,
+                                      {'RLWheelSpd': left, 'RRWheelSpd': right, 'RLWheelDir': 1, 'RRWheelDir': 1})
+      self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
+      self.assertEqual(self.safety.get_vehicle_moving(), moving)
+
   def test_phase_qualified_collision_and_one_shot_credit(self):
     for word in (0xE800, 0xE801):
       self.reset(word)

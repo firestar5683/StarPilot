@@ -499,6 +499,40 @@ static void gm_rx_hook(const CANPacket_t *msg) {
   if (gm_acc_pedal_forward_owner) { (void)gm_acc_pedal_dashboard_current(); }
 }
 
+static bool gm_ascm_adas_valid(const CANPacket_t *msg) {
+  bool valid = true;
+  if (msg->addr == 0xA1U) {
+    const uint16_t checksum = (0x1000U - msg->data[0] - msg->data[1] - msg->data[2] - msg->data[3]) & 0xFFFU;
+    valid &= ((msg->data[3] & 0x3U) == 0U) && (msg->data[4] == (0x40U + (checksum >> 8))) &&
+          (msg->data[5] == (checksum & 0xFFU)) && (msg->data[6] == 0x12U);
+  } else if (msg->addr == 0x306U) {
+    const uint16_t checksum = 0x60U + msg->data[0] + msg->data[1] + msg->data[2] + msg->data[3] + msg->data[4] + msg->data[5];
+    valid &= ((msg->data[0] & 0x3FU) == 0U) && (msg->data[1] == 0xF0U) && (msg->data[2] == 0x20U) &&
+          (msg->data[3] == 0U) && (msg->data[4] == 0U) && (msg->data[5] == 0U) &&
+          (msg->data[6] == (checksum >> 8)) && (msg->data[7] == (checksum & 0xFFU));
+  } else if (msg->addr == 0x308U) {
+    const uint16_t speed = (msg->data[1] << 4) | (msg->data[2] >> 4);
+    const uint8_t near = (speed <= 0x27U) ? 1U : 0U;
+    const uint8_t far = 1U - near;
+    const uint8_t counter = msg->data[5] >> 5;
+    const uint16_t checksum = 0x62U + far + (counter << 2) + msg->data[0] + msg->data[1] + msg->data[2];
+    const uint8_t counter_bits = (uint8_t)(counter << 5);
+    const uint8_t far_bit = (uint8_t)(far << 4);
+    const uint8_t near_bit = (uint8_t)(near << 3);
+    const uint8_t checksum_high = (uint8_t)(checksum >> 8);
+    const uint8_t expected_byte_5 = (uint8_t)(counter_bits + far_bit + near_bit + checksum_high);
+    valid &= (counter <= 3U) && (msg->data[0] == 0x08U) && ((msg->data[2] & 0xFU) == 0U) &&
+          (msg->data[3] == 0U) && (msg->data[4] == 0U) &&
+          (msg->data[5] == expected_byte_5) &&
+          (msg->data[6] == (checksum & 0xFFU));
+  } else if (msg->addr == 0x310U) {
+    valid &= (msg->data[0] == 0x42U) && (msg->data[1] == 0x04U);
+  } else {
+    // No additional message shape applies in this range.
+  }
+  return valid;
+}
+
 static bool gm_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits GM_STEERING_LIMITS = {
     .max_torque = 300,
@@ -676,38 +710,9 @@ static bool gm_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // The intercepted ASCM radar path uses four fixed host-generated ADAS frames.
-  // Only admit their exact static shape and arithmetic; other GM modes retain their existing rules.
+  // Preserve the registered admission and intercept/bus boundary.
   if (gm_ascm_intercept && (msg->bus == 1U)) {
-    if (msg->addr == 0xA1U) {
-      const uint16_t checksum = (0x1000U - msg->data[0] - msg->data[1] - msg->data[2] - msg->data[3]) & 0xFFFU;
-      tx &= ((msg->data[3] & 0x3U) == 0U) && (msg->data[4] == (0x40U + (checksum >> 8))) &&
-            (msg->data[5] == (checksum & 0xFFU)) && (msg->data[6] == 0x12U);
-    } else if (msg->addr == 0x306U) {
-      const uint16_t checksum = 0x60U + msg->data[0] + msg->data[1] + msg->data[2] + msg->data[3] + msg->data[4] + msg->data[5];
-      tx &= ((msg->data[0] & 0x3FU) == 0U) && (msg->data[1] == 0xF0U) && (msg->data[2] == 0x20U) &&
-            (msg->data[3] == 0U) && (msg->data[4] == 0U) && (msg->data[5] == 0U) &&
-            (msg->data[6] == (checksum >> 8)) && (msg->data[7] == (checksum & 0xFFU));
-    } else if (msg->addr == 0x308U) {
-      const uint16_t speed = (msg->data[1] << 4) | (msg->data[2] >> 4);
-      const uint8_t near = (speed <= 0x27U) ? 1U : 0U;
-      const uint8_t far = 1U - near;
-      const uint8_t counter = msg->data[5] >> 5;
-      const uint16_t checksum = 0x62U + far + (counter << 2) + msg->data[0] + msg->data[1] + msg->data[2];
-      const uint8_t counter_bits = (uint8_t)(counter << 5);
-      const uint8_t far_bit = (uint8_t)(far << 4);
-      const uint8_t near_bit = (uint8_t)(near << 3);
-      const uint8_t checksum_high = (uint8_t)(checksum >> 8);
-      const uint8_t expected_byte_5 = (uint8_t)(counter_bits + far_bit + near_bit + checksum_high);
-      tx &= (counter <= 3U) && (msg->data[0] == 0x08U) && ((msg->data[2] & 0xFU) == 0U) &&
-            (msg->data[3] == 0U) && (msg->data[4] == 0U) &&
-            (msg->data[5] == expected_byte_5) &&
-            (msg->data[6] == (checksum & 0xFFU));
-    } else if (msg->addr == 0x310U) {
-      tx &= (msg->data[0] == 0x42U) && (msg->data[1] == 0x04U);
-    } else {
-      // No additional message shape applies in this range.
-    }
+    tx &= gm_ascm_adas_valid(msg);
   }
 
   if (gm_cc_pedal) { tx &= gm_cc_pedal_tx(msg); }

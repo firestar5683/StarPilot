@@ -2,6 +2,7 @@ import unittest
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
+from opendbc.car.gm import gmcan
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.tests.test_ascm_intercept import params
@@ -66,6 +67,36 @@ class TestGmAscmIntercept(unittest.TestCase):
       controller.cancel_counter = 11
     _, commands = controller.update(control.as_reader(), car_state, 1_100_000_000)
     return packer, sources, out, commands
+
+  def test_adas_validator_exact_shapes_and_registered_intercept_denials(self):
+    packer = CANPacker('gm_global_a_object')
+    frames = []
+    for counter in range(4):
+      frames += [gmcan.create_adas_time_status(1, 0x1234567, counter),
+                 gmcan.create_adas_steering_status(1, counter)]
+      frames += [gmcan.create_adas_accelerometer_speed_status(1, speed, counter) for speed in (0, 39 / 16, 40 / 16, 30)]
+    frames.append(gmcan.create_adas_headlights_status(packer, 1))
+    # Current production ASCM profiles do not admit these radar frames.
+    for car in ASCM_INTERCEPT_CAR:
+      cp = params(car, sascm=True, radar=True, alpha=True)
+      self.mode(cp)
+      for frame in frames:
+        self.assertFalse(self.safety.safety_tx_hook(self.packet(frame)))
+        corrupt = bytearray(frame[1])
+        corrupt[0] ^= 1
+        self.assertFalse(self.safety.safety_test_selected_tx(self.packet((frame[0], bytes(corrupt), 1))))
+    # Exercise the retained defensive validator without changing TX admission.
+    self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, 0), 0)
+    for frame in frames:
+      with self.subTest(address=hex(frame[0]), data=frame[1]):
+        self.assertTrue(self.safety.safety_test_gm_ascm_adas(self.packet(frame)))
+        for index in range(len(frame[1])):
+          bad = bytearray(frame[1])
+          bad[index] ^= 1
+          self.assertFalse(self.safety.safety_test_gm_ascm_adas(self.packet((frame[0], bytes(bad), 1))))
+        self.assertFalse(self.safety.safety_test_gm_ascm_adas(self.packet((frame[0], frame[1], 0))))
+    invalid_counter = gmcan.create_adas_accelerometer_speed_status(1, 0, 4)
+    self.assertFalse(self.safety.safety_test_gm_ascm_adas(self.packet(invalid_counter)))
 
   def test_stock_controller_and_native_all_eight_both_brake_sources(self):
     for car in ASCM_INTERCEPT_CAR:

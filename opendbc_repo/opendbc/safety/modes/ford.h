@@ -476,6 +476,24 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
   return tx;
 }
 
+static void ford_aol_bind_tx(safety_config *ret, CanMsg workspace[7]) {
+  const bool bounded = (ret->tx_msgs != NULL) && (ret->tx_msgs_len > 0) && (ret->tx_msgs_len <= 7);
+  if (bounded) {
+    for (int i = 0; i < ret->tx_msgs_len; i++) {
+      workspace[i] = ret->tx_msgs[i];
+      const unsigned int addr = workspace[i].addr;
+      if ((addr == ford_aol_replacement()) || (addr == 0x3D8U) || (addr == 0x18AU)) {
+        workspace[i].disable_static_blocking = true;
+      }
+    }
+    ret->tx_msgs = workspace;
+  } else {
+    ret->tx_msgs = NULL;
+    ret->tx_msgs_len = 0;
+    ford_aol_reset();
+  }
+}
+
 static safety_config ford_init(uint16_t param) {
   // warning: quality flags are not yet checked in openpilot's CAN parser,
   // this may be the cause of blocked messages
@@ -673,21 +691,7 @@ static safety_config ford_init(uint16_t param) {
 #ifdef ALLOW_DEBUG
     _Static_assert(sizeof(FORD_CANFD_LONG_TX_MSGS) <= sizeof(ford_aol_tx_msgs), "Ford CAN FD long TX capacity");
 #endif
-    const bool bounded = (ret.tx_msgs_len > 0) && (ret.tx_msgs_len <= 7);
-    if (bounded) {
-      for (int i = 0; i < ret.tx_msgs_len; i++) {
-        ford_aol_tx_msgs[i] = ret.tx_msgs[i];
-        const unsigned int addr = ford_aol_tx_msgs[i].addr;
-        if ((addr == ford_aol_replacement()) || (addr == 0x3D8U) || (addr == 0x18AU)) {
-          ford_aol_tx_msgs[i].disable_static_blocking = true;
-        }
-      }
-      ret.tx_msgs = ford_aol_tx_msgs;
-    } else {
-      ret.tx_msgs = NULL;
-      ret.tx_msgs_len = 0;
-      ford_aol_reset();
-    }
+    ford_aol_bind_tx(&ret, ford_aol_tx_msgs);
   }
   return ret;
 }
