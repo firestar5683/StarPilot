@@ -191,7 +191,7 @@ def is_volt_one_pedal(cp: CarParams) -> bool:
     if profile is not None and profile.volt:
       return profile.longitudinal and profile.one_pedal
     return (int(cp.safetyConfigs[0].safetyParam) in VOLT_ONE_PEDAL_WORDS and
-            cp.transmissionType == CarParams.TransmissionType.direct and is_volt_longitudinal(cp) and is_gm_auto_hold(cp))
+            cp.transmissionType == CarParams.TransmissionType.direct and is_gm_auto_hold(cp))
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
 
@@ -319,15 +319,18 @@ def apply_gm_auto_hold(cp: CarParams, enabled: bool) -> None:
       word & ~int(GMSafetyFlags.VOLT_AUTO_HOLD))
 
 
+VOLT_ASCM_REQUIRED_FLAGS = int(GMSafetyFlags.EV | GMSafetyFlags.HW_CAM | GMSafetyFlags.HW_CAM_LONG |
+                               GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.VOLT_LONG)
+VOLT_ASCM_OPTIONAL_FLAGS = int(GMSafetyFlags.ASCM_BRAKE_C9 | GMSafetyFlags.ASCM_RADAR)
+VOLT_ASCM_ALLOWED_FLAGS = VOLT_ASCM_REQUIRED_FLAGS | VOLT_ASCM_OPTIONAL_FLAGS
+
+
 def is_volt_ascm_longitudinal(cp: CarParams) -> bool:
   """Admit the exact ASCM Volt longitudinal and physical interceptor configurations."""
   try:
     profile = camera_acc_pedal_profile(cp)
     if profile is not None and profile.topology == "ascm":
       return profile.longitudinal
-    required = int(GMSafetyFlags.EV | GMSafetyFlags.HW_CAM | GMSafetyFlags.HW_CAM_LONG |
-                   GMSafetyFlags.ASCM_INTERCEPT | GMSafetyFlags.VOLT_LONG)
-    optional = int(GMSafetyFlags.ASCM_BRAKE_C9 | GMSafetyFlags.ASCM_RADAR)
     if len(cp.safetyConfigs) != 1:
       return False
     flags = gm_control_word(cp)
@@ -338,7 +341,7 @@ def is_volt_ascm_longitudinal(cp: CarParams) -> bool:
             cp.openpilotLongitudinalControl and not cp.pcmCruise and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and control_flags(cp) == 0 and
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
-            flags & required == required and not flags & ~(required | optional) and
+            flags & VOLT_ASCM_REQUIRED_FLAGS == VOLT_ASCM_REQUIRED_FLAGS and not flags & ~VOLT_ASCM_ALLOWED_FLAGS and
             bool(flags & int(GMSafetyFlags.ASCM_RADAR)) is not cp.radarUnavailable)
   except (AttributeError, IndexError, TypeError, ValueError):
     return False
