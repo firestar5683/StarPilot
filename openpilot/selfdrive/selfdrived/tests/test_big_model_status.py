@@ -1,5 +1,6 @@
 """Published large-model loss uses the same soft-disable event for either owner."""
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from openpilot.cereal import messaging
@@ -29,6 +30,28 @@ def fixture(chestnut=None):
 
 
 class TestBigModelStatus(unittest.TestCase):
+  def test_failure_edge_restarts_settling_once_until_recovery(self):
+    drive = fixture()
+    drive.big_model_ready_t = -1.0
+    drive.sm['modelV2'].big = True
+    with patch('openpilot.selfdrive.selfdrived.helpers.time.monotonic', side_effect=[50.0, 70.0]) as clock:
+      self.assertFalse(drive.update_big_model_status())
+      self.assertEqual(drive.big_model_ready_t, -1.0)
+      clock.assert_not_called()
+      drive.sm['modelV2'].big = False
+      self.assertTrue(drive.update_big_model_status())
+      self.assertEqual(drive.big_model_ready_t, 50.0)
+      self.assertIn(EventName.bigModelFailed, drive.events.names)
+      self.assertTrue(drive.update_big_model_status())
+      self.assertEqual(drive.big_model_ready_t, 50.0)
+      clock.assert_called_once_with()
+      drive.sm['modelV2'].big = True
+      self.assertFalse(drive.update_big_model_status())
+      drive.sm['modelV2'].big = False
+      self.assertTrue(drive.update_big_model_status())
+      self.assertEqual(drive.big_model_ready_t, 70.0)
+      self.assertEqual(clock.call_count, 2)
+
   def test_actual_remote_big_then_small_is_soft_disable_without_chestnut_claim(self):
     drive = fixture()
     drive.sm['modelV2'].big = True

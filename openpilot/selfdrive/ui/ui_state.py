@@ -16,6 +16,7 @@ from openpilot.starpilot.ui.display_preferences import AUTO, DisplayPreferences,
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
+from openpilot.selfdrive.selfdrived.alertmanager import OFFROAD_ALERTS
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.usb import cable_connected, get_usb_state, is_chestnut_usb_id
@@ -155,6 +156,7 @@ class UIState:
     self.chestnut_checking: bool = False
     self.chestnut_active: bool | None = None
     self.chestnut_output_seen: bool = False
+    self.chestnut_alert: bool = False
     self.chestnut_loading: bool = False
     self.usb_connected: bool = False
     self.usb_connected_ts: float | None = None
@@ -369,7 +371,8 @@ class UIState:
     detected = self.sm["deviceState"].chestnutPresent
     if not self.started:
       self.chestnut_present = detected
-      self.chestnut_state = (ChestnutState.DISCONNECTED if not detected else
+      self.chestnut_state = (ChestnutState.FAILED if self.chestnut_alert else
+                             ChestnutState.DISCONNECTED if not detected else
                              ChestnutState.LOADING if self.chestnut_checking else
                              ChestnutState.READY if self.chestnut_compiled else ChestnutState.UNCOMPILED)
       return
@@ -421,6 +424,8 @@ class UIState:
     self.chestnut_active = raw_chestnut if type(raw_chestnut) is bool else (
       True if raw_chestnut in (b"1", "1") else False if raw_chestnut in (b"0", "0") else None)
     self.chestnut_loading = self.params.get_bool("ChestnutLoading")
+    self.chestnut_alert = any(self.params.get(k) is not None for k, a in OFFROAD_ALERTS.items()
+                              if k.startswith("Offroad_Chestnut") and a["severity"] >= 0)
     if getattr(self, "replay_clock", None) is not None:
       self.chestnut_compiled = self.chestnut_active is True or self.chestnut_output_seen
       return

@@ -1,4 +1,5 @@
 import math
+import time
 from enum import StrEnum, auto
 
 from openpilot.cereal import log, messaging
@@ -69,6 +70,7 @@ def update_big_model_status(owner) -> bool:
   big_failed = (big_active is False and not published_big) or load_mismatch or model_unavailable or demoted or chestnut_lost
   if big_failed and not owner.big_model_failed:
     owner.events.add(log.OnroadEvent.EventName.bigModelFailed)
+    owner.big_model_ready_t = time.monotonic()
   owner.big_model_failed = big_failed
   # A successful load is not yet an executed frame; warmup output can be invalid.
   if published_big:
