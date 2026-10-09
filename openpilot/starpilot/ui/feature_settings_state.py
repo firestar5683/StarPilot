@@ -47,6 +47,7 @@ class FeaturePage(StrEnum):
   CURVE = "curve"
   TORQUE = "torque"
   AOL = "aol"
+  HIGHWAY_SMOOTHING = "highway_smoothing"
   WHEEL = "wheel"
   CONDITIONAL = "conditional"
   CONDITIONAL_CEM = "conditional/cem"
