@@ -203,7 +203,7 @@ static void gm_emit_paddle_after_stock(uint32_t now_us, uint32_t addr, uint8_t d
   // No output before a host feed or more than four 25 Hz frames after it.
   if (gm_paddle_sched && feed->valid) {
     const bool expired = safety_get_ts_elapsed(now_us, feed->last_feed_us) > 100000U;
-    feed->valid = false;  // A matching stock packet consumes the feed even if TX is denied.
+    if (expired) { feed->valid = false; }  // Retain the command through its bounded host-feed lifetime.
     if (!expired && gm_pedal_regen_gear_ready() && !regen_braking &&
         (!gm_pedal_acc || gm_pedal_main_ready())) {
       CANPacket_t packet = {0};

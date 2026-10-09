@@ -194,6 +194,46 @@ class TestGmBoltPedalSafety(unittest.TestCase):
     self.safety.safety_rx_hook(stock_gear)
     self.assertEqual([(addr, bus) for addr, bus, _ in self.recorded()], [(0xBD, 0), (0x1F5, 0)])
 
+  def test_host_25hz_feed_covers_each_stock_40hz_phase(self):
+    for gen2, applied in ((False, 7), (True, 5)):
+      for phase in (0, 5000, 10000, 15000, 20000):
+        with self.subTest(gen2=gen2, phase=phase):
+          self.init_mode(GMSafetyFlags.NO_ACC | (GMSafetyFlags.BOLT_GEN2 if gen2 else GMSafetyFlags.BOLT_2017))
+          self.safety.safety_rx_hook(self.low_gear())
+          self.assertTrue(self.safety.safety_rx_hook(self.sensor(0)))
+          self.safety.set_controls_allowed(True)
+          paddle = create_bolt_regen_paddle(self.packer, True)
+          gear = create_bolt_regen_gear(self.packer, True, gen2)
+          self.assertEqual(gear[1][3], applied)
+          feeds = 0
+          events = sorted([(t, 0) for t in range(0, 120001, 40000)] +
+                          [(t, 1) for t in range(phase, 120001, 25000)])
+          for timestamp, kind in events:
+            self.safety.set_timer(timestamp)
+            if kind == 0:
+              feeds += 1
+              self.assertTrue(self.safety.safety_rx_hook(self.sensor(feeds % 16)))
+              self.assertTrue(self.safety.get_controls_allowed())
+              self.safety.safety_rx_hook(self.low_gear())
+              self.safety.reset_recorded_can()
+              self.assertFalse(self.safety.safety_tx_hook(self.packet(paddle)))
+              self.assertFalse(self.safety.safety_tx_hook(self.packet(gear)))
+            else:
+              self.safety.reset_recorded_can()
+              self.safety.safety_rx_hook(self.stock("EBCMRegenPaddle", {"RegenPaddle": 0}))
+              self.safety.safety_rx_hook(self.low_gear())
+              self.assertEqual(self.recorded(), [(0xBD, 0, paddle[1]), (0x1F5, 0, gear[1])], timestamp)
+          # Refresh physical sources independently, without renewing either host feed.
+          for index, (age, allowed) in enumerate(((100000, True), (100001, False))):
+            self.safety.set_timer(120000 + age)
+            self.assertTrue(self.safety.safety_rx_hook(self.sensor((feeds + index + 1) % 16)))
+            self.assertTrue(self.safety.get_controls_allowed())
+            self.safety.safety_rx_hook(self.low_gear())
+            self.safety.reset_recorded_can()
+            self.safety.safety_rx_hook(self.stock("EBCMRegenPaddle", {"RegenPaddle": 0}))
+            self.safety.safety_rx_hook(self.low_gear())
+            self.assertEqual(self.recorded(), [(0xBD, 0, paddle[1]), (0x1F5, 0, gear[1])] if allowed else [])
+
   def test_fault_and_driver_source_changes_consume_pending_spoofs(self):
     self.safety.safety_rx_hook(self.sensor(1))
     self.safety.safety_rx_hook(self.low_gear())
@@ -216,12 +256,14 @@ class TestGmBoltPedalSafety(unittest.TestCase):
     self.safety.safety_rx_hook(stock_paddle)
     self.assertEqual([addr for addr, _, _ in self.recorded()], [0x1F5, 0xBD])
 
-    for prndl, manual in ((1, 0), (2, 0), (4, 0), (6, 1)):
+    for index, (prndl, manual) in enumerate(((1, 0), (2, 0), (4, 0), (6, 1))):
       with self.subTest(prndl=prndl, manual=manual):
         self.safety.reset_recorded_can()
         self.safety.safety_rx_hook(self.low_gear())
+        self.assertEqual(self.recorded(), [(0x1F5, 0, bytes(applied_gear.data[0:8]))] if index == 0 else [])
         self.safety.set_controls_allowed(True)
         self.assertFalse(self.safety.safety_tx_hook(applied_gear))
+        self.safety.reset_recorded_can()
         self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": prndl, "ManualMode": manual}))
         self.assertEqual(self.recorded(), [])
         self.assertFalse(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, prndl))))
