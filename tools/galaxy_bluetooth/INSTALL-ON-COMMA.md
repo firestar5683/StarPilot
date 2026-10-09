@@ -43,18 +43,42 @@ service now reads its source from the installed fork, not the earlier copied app
 
 ```sh
 sh /data/openpilot/tools/galaxy_bluetooth/bridge/install.sh
-sudo cp /data/openpilot/tools/galaxy_bluetooth/bridge/galaxy-ble-fork.service /etc/systemd/system/galaxy-ble.service
-sudo systemctl daemon-reload
-sudo systemctl enable galaxy-ble
-sudo systemctl restart galaxy-ble
-sudo journalctl -u galaxy-ble -n 20 --no-pager
+bash /data/openpilot/tools/galaxy_bluetooth/bridge/start-at-boot.sh
+sudo journalctl -u galaxy-ble-fork.service -n 20 --no-pager
 ```
+
+Comma's system partition is read-only. The helper links the unit into writable
+`/run/systemd/system`, then starts it. Runtime registration disappears on reboot,
+so call the helper on every boot from the writable `/data/continue.sh` launcher.
+The device's `/usr/comma/comma.sh` executes this launcher.
+
+First read `cat /data/continue.sh`. For a launcher containing only the shebang,
+`cd /data/openpilot` and `exec ./launch_openpilot.sh`, use:
+
+```sh
+cat > /data/continue.sh <<'EOF'
+#!/usr/bin/env bash
+bash /data/openpilot/tools/galaxy_bluetooth/bridge/start-at-boot.sh >> /data/galaxy-ble/boot.log 2>&1 &
+cd /data/openpilot
+exec ./launch_openpilot.sh
+EOF
+chmod +x /data/continue.sh
+bash -n /data/continue.sh
+```
+
+For a launcher with other custom commands, preserve them and insert only the
+background helper call before the existing exec. The helper's service commands
+have time limits and never prompt for sudo passwords. Its background invocation
+does not block StarPilot startup if Bluetooth fails. Inspect `/data/galaxy-ble/boot.log`
+if service registration fails after reboot. Recheck the hook if an installer
+replaces `/data/continue.sh`.
 
 An existing pairing key is preserved. If this is a fresh setup, the installer
 prints the new key for entry into the phone app; do not share that output.
 The unit intentionally skips startup if its source, environment or pairing file
 is missing. It runs as comma and restarts failures after 10 seconds. Keep
-StarPilot Bluetooth enabled. Hardware service startup still needs verification.
+StarPilot Bluetooth enabled. Runtime service startup was confirmed on the pilot
+comma; automatic startup after reboot still needs verification.
 
 Look for `Galaxy BLE bridge ready…`. Then restart comma using its normal Restart
 control. Confirm StarPilot opens and the phone reconnects without an SSH session.
