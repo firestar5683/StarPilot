@@ -5,7 +5,8 @@ iPhone app for StarPilot’s Galaxy interface. Uses local Wi-Fi first, with encr
 ## Setup
 
 - [Install on comma](INSTALL-ON-COMMA.md)
-- [iPhone setup and testing](ios/TESTER-GUIDE.md)
+- [iPhone tester quick start](ios/QUICK-START.md)
+- [Connection testing details](ios/TESTER-GUIDE.md)
 - [Live View and CarPlay pilot](ios/CARPLAY-PILOT.md)
 - [Android prototype](android/README.md)
 

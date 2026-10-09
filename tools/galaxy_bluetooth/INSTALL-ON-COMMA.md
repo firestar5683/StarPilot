@@ -2,8 +2,8 @@
 
 The pilot branch is based on the user's installed upstream Dom commit
 `15bbbf3cc4ad251c173abf01fff931951202331a`. Its tree differs from that version
-under `tools/galaxy_bluetooth` plus a two-line comma 4 settings hook that adds
-the Pair phone button. Driving code and prebuilt files are retained from Dom.
+under `tools/galaxy_bluetooth` plus phone-pairing, diagnostics and screen-capture
+hooks. Driving-control code and prebuilt files are retained from Dom.
 This establishes source equality for driving code, not new road testing.
 
 Run the following in the comma SSH terminal while parked. The existing theme
@@ -78,8 +78,8 @@ An existing pairing key is preserved. If this is a fresh setup, the installer
 prints the new key for entry into the phone app; do not share that output.
 The unit intentionally skips startup if its source, environment or pairing file
 is missing. It runs as comma and restarts failures after 10 seconds. Keep
-StarPilot Bluetooth enabled. Runtime service startup was confirmed on the pilot
-comma; automatic startup after reboot still needs verification.
+StarPilot Bluetooth enabled. Runtime service startup and startup after reboot were confirmed on the pilot
+comma.
 
 Look for `Galaxy BLE bridge ready…`. Then restart comma using its normal Restart
 control. Confirm StarPilot opens and the phone reconnects without an SSH session.
