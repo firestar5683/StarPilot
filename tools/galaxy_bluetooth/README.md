@@ -1,6 +1,6 @@
 # Galaxy Bluetooth for iPhone and Android
 
-Native iPhone and Android prototype apps that bundle StarPilot's existing Galaxy mobile interface and send local requests over encrypted Bluetooth to a separate comma-side bridge. The iPhone shell uses SwiftUI/WKWebView; Android uses a Java pairing screen, WebView and the platform BLE client.
+Native iPhone and Android prototype apps reuse StarPilot's Galaxy mobile interface. iPhone now prefers local Wi-Fi with encrypted Bluetooth fallback and saves verified Galaxy interface updates from the configured GitHub pilot branch. Android retains its Bluetooth-only pilot implementation. The iPhone shell uses SwiftUI/WKWebView; Android uses a Java pairing screen, WebView and the platform BLE client.
 
 **Hardware testing is in progress.** The iPhone app connected and loaded Galaxy with phone Wi-Fi/cellular off. Notification streaming reduced the earlier settings transfer from 61 seconds to 24.75 seconds. A subsequent smaller Toggles snapshot is modeled as 17 response packets rather than 102; its hardware timing and a real setting write still need verification. The Android debug APK compiles, its signature and bundled assets verify, and its automated tests pass, but no Android phone was available for installation, rendering or Bluetooth tests. Start with the [Android tester guide](android/TESTER-GUIDE.md) before expanding the pilot.
 
@@ -26,7 +26,7 @@ Galaxy interface bundled on phone
   → Galaxy at 127.0.0.1:8082 on the comma
 ```
 
-Both apps use Bluetooth between phone and comma; the bridge forwards HTTP only inside the comma. iPhone uses a private loopback server with an app header and origin checks. Android uses bundled HTTPS content and native web messages restricted to its local top-level origin. Galaxy's existing screens and server-side settings behavior are retained. See the Android README for its current feature limits.
+iPhone chooses local HTTP to comma on port 8082 first, or encrypted Bluetooth to the bridge when LAN is unavailable. Android currently uses Bluetooth only. The bridge forwards HTTP only inside the comma. iPhone uses a private loopback server with an app header and origin checks. Android uses bundled HTTPS content and native web messages restricted to its local top-level origin. Galaxy's existing screens and server-side settings behavior are retained. See the Android README for its current feature limits.
 
 For faster loading, the authenticated health response advertises `notificationStream`. After verifying it, the phone subscribes to a separate notification characteristic (`bd490005-6dc1-4de7-a7d0-6cdb441f7650`) before opening Galaxy. The bridge compresses raw HTTP bytes before base64 encoding and pushes up to eight MTU-bounded fragments without requiring reads. Each window has a tagged ACK that releases the next batch. The final ACK follows successful decryption and verification of the entire response. Shared notifications carry a session/request tag; publishers are serialized, and the phone ignores frames for other clients or requests. Subscriptions alone cannot execute an API request: the request still must pass authentication, session and replay checks.
 
@@ -51,7 +51,7 @@ Its settings-only request excludes five unused dashboard/history fields only for
 1. Open `ios/GalaxyBluetooth.xcodeproj` in Xcode 16 or later.
 2. Select the **GalaxyBluetooth** target, then **Signing & Capabilities**. Choose your personal development team and change the bundle identifier if necessary.
 3. Connect your iPhone to your Mac, enable Developer Mode if iOS requests it, select the iPhone as the run destination and click Run.
-4. Allow Bluetooth access when prompted.
+4. Allow Local Network and Bluetooth access when prompted. Use Automatic for LAN first, or choose Wi-Fi only / Bluetooth only. See [the iPhone tester guide](ios/TESTER-GUIDE.md) for pairing, route-switch and GitHub/offline tests.
 5. Start the bridge on your comma using the steps below, paste its 64-character pairing key into the app and select **Scan for comma**.
 6. Select **Galaxy** in the scan results. The app verifies the key before opening Galaxy and saves the key in the iPhone Keychain.
 
@@ -164,3 +164,7 @@ To check installer recovery from a missing `ensurepip`, download the wheels in `
 ## Attribution
 
 This project is an independent prototype and is not an official comma.ai or StarPilot app. Bundled Galaxy assets come from [StarPilot](https://github.com/firestar5683/StarPilot) under its upstream licensing; retain `UPSTREAM-LICENSE` and `UPSTREAM-NOTICES.md` when redistributing. The upstream licenses and notices remain applicable to bundled vendor assets.
+
+## iPhone connection and GitHub update validation
+
+`python3 scripts/check_ios_connections.py` tests production routing and asset updates, including no automatic replay of writes, offline cache validation, incomplete update rollback, active-screen retention, bounded downloads and redirect/cancellation handling. An optional comma private IP argument performs read-only LAN checks. Run `python3 scripts/generate_galaxy_manifest.py --check` before publishing asset updates. See the iPhone tester guide for the endpoint-scoped HTTP exception and release limitations.

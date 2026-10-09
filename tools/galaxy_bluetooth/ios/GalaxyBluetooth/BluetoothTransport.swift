@@ -64,6 +64,20 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
+    func reconnectSaved(pairingKey: String) {
+        guard !connected, !connecting, central.state == .poweredOn,
+              let value = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device"),
+              let id = UUID(uuidString: value),
+              let found = central.retrievePeripherals(withIdentifiers: [id]).first else { return }
+        peripherals[id] = found
+        connect(NearbyDevice(id: id, name: found.name ?? "comma", signal: 0), pairingKey: pairingKey)
+    }
+
+    func forgetSavedDevice() {
+        disconnect()
+        UserDefaults.standard.removeObject(forKey: "galaxy.bluetooth.device")
+    }
+
     func scan() {
         guard central.state == .poweredOn else { status = "Bluetooth is unavailable or permission is required."; return }
         devices = []
@@ -384,6 +398,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private func completeConnection() throws {
         try PairingKeyStore.save(keyText)
         connectionTimeout?.cancel()
+        if let peripheral { UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "galaxy.bluetooth.device") }
         connected = true
         connecting = false
         status = supportsNotifications ? "Connected with fast Bluetooth transfers" : "Connected over Bluetooth"

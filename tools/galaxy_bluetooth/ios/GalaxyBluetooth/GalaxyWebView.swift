@@ -16,6 +16,7 @@ struct GalaxyWebView: UIViewRepresentable {
         // Only requests to this same local origin receive the private header.
         let script = """
         (() => {
+          if (location.origin !== '\(url.scheme!)://\(url.host!):\(url.port!)') return;
           window.__galaxyNative = true;
           const key = '\(requestKey)';
           const local = (u) => new URL(u, location.href).origin === location.origin;

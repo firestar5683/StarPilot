@@ -55,3 +55,14 @@ Android source adds a Java native pairing/scanning screen, Android BLE client, K
 - Android lint passed with no errors and four dependency-version availability warnings (Gradle, AndroidX WebKit/Activity and test-only JSON). The tested dependencies are explicitly pinned.
 
 No physical Android device was available, and this APK was not installed or launched in an emulator. Actual WebView rendering, runtime permission flows, scanning, MTU negotiation, notification timing, Keystore persistence on device, setting changes/read-back, reconnection, multiple phones and accessory coexistence remain pending. This is an installable debug test build for the first tester; a publisher-owned release signing key and physical results are needed before a wider continuing cohort. Android README and TESTER-GUIDE record those steps and current media/network/background limitations.
+
+## iPhone LAN-first/GitHub update iteration
+
+- Generic iOS Debug build succeeds with the current Xcode installation.
+- Production Swift LAN priority/read fallback, explicit mode selection, no mutation replay, normal HTTP error handling, and private-address validation pass.
+- Production GitHub asset tests cover full manifest/hash verification, offline restart, unchanged manifest fast checks, failed update rollback, keeping an active older interface through successive updates, traversal rejection and corrupt-cache rejection.
+- Real HTTP fixtures verify redirects are not followed, declared/streamed response bounds and cancellation. Production Swift also passed a read-only LAN health probe and status request against comma's existing Galaxy server.
+- Existing Swift/Python framing, loopback and metadata-cache checks pass.
+- Asset manifest covers 175 files / 5,070,834 bytes. GitHub downloads use immutable commit URLs, at most four concurrent file requests, 32 MiB bundle and 4 MiB file limits.
+- New iPhone UI, permissions and physical Wi-Fi-to-BLE switching are still unverified. No bridge/driving-code changes are required for this iteration. Android was not modified.
+- Pilot HTTP exception is scoped to the current comma IP. No automatic cloud transport, foreground-to-background service guarantee, media streaming, App Store approval or internet sharing is claimed.

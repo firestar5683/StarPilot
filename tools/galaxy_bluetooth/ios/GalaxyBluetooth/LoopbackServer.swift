@@ -11,10 +11,10 @@ final class LoopbackServer: ObservableObject {
     let localSecret = UUID().uuidString + UUID().uuidString
     private var listener: NWListener?
     private var connections: [UUID: LocalConnection] = [:]
-    private let webRoot: URL
+    private var webRoot: URL
     private let transport: any GalaxyRequestTransport
-    private let catalog: Data?
-    private let catalogSHA256: String?
+    private var catalog: Data?
+    private var catalogSHA256: String?
 
     init(transport: any GalaxyRequestTransport, webRoot: URL? = nil) {
         self.transport = transport
@@ -22,6 +22,12 @@ final class LoopbackServer: ObservableObject {
         self.webRoot = root
         self.catalog = try? Data(contentsOf: root.appendingPathComponent("assets/components/tools/device_settings_layout.json"))
         self.catalogSHA256 = catalog.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+    }
+
+    func useWebRoot(_ root: URL) {
+        webRoot = root
+        catalog = try? Data(contentsOf: root.appendingPathComponent("assets/components/tools/device_settings_layout.json"))
+        catalogSHA256 = catalog.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
     }
 
     func start() {
@@ -81,11 +87,11 @@ final class LoopbackServer: ObservableObject {
               !path.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }) else {
             return .error(400, "Invalid local path.")
         }
-        if path.hasPrefix("/_gateway/") { return .error(404, "This app connects directly over Bluetooth.") }
+        if path.hasPrefix("/_gateway/") { return .error(404, "Choose your connection in the native app.") }
         let dynamic = path.hasPrefix("/api/") || path == "/assets/components/tools/device_settings_layout.json"
         if dynamic {
             guard request.headers["x-galaxy-local"] == localSecret else { return .error(403, "Missing app request key.") }
-            guard transport.connected else { return .error(503, "Your comma is disconnected. Reconnect over Bluetooth.") }
+            guard transport.connected else { return .error(503, "Your comma is disconnected. Open Connections to reconnect.") }
             // Verify the device's catalog during the authenticated BLE handshake.
             // Unknown or different versions continue through the ordinary proxy.
             if request.method == "GET", request.body.isEmpty,
