@@ -185,8 +185,6 @@ static bool aol_optional_release_pending = false;
 static bool aol_optional_release_latch = false;
 static uint32_t aol_optional_release_ts = 0U;
 static bool aol_optional_release_counter_seen = false;
-static uint8_t aol_optional_release_counter = 0U;
-static uint32_t aol_optional_release_sample_ts = 0U;
 static bool hyundai_torque_long_aol_cancel_preserves_lateral = false;
 static bool hyundai_canfd_torque_ev_long = false;
 static bool aol_ioniq6_lateral_latch = false;
@@ -523,6 +521,8 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
     }
     if (aol_ioniq6_long && (msg_matches(msg, hyundai_canfd_alt_buttons ? 0x1aaU : 0x1cfU, pt_bus))) {
       if (aol_optional_release_capable && aol_optional_release_policy) {
+        static uint8_t aol_optional_release_counter = 0U;
+        static uint32_t aol_optional_release_sample_ts = 0U;
         const uint8_t counter = hyundai_canfd_get_counter(msg);
         const uint8_t maximum = hyundai_canfd_alt_buttons ? 0xffU : 0xfU;
         const uint32_t sample_ts = microsecond_timer_get();
@@ -547,6 +547,8 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
                     (aol_optional_release_previous == HYUNDAI_BTN_RESUME)) && (cruise_button == HYUNDAI_BTN_NONE)) {
           aol_optional_release_pending = true;
           aol_optional_release_ts = microsecond_timer_get();
+        } else {
+          // No release edge; retain the current neutral/release state.
         }
         aol_optional_release_previous = (uint8_t)cruise_button;
       }
