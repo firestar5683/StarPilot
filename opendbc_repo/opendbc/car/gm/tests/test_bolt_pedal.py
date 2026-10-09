@@ -27,6 +27,31 @@ def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=
 
 
 class TestBoltPedalIdentity(unittest.TestCase):
+  def test_no_acc_neutral_credit_exact_bytes_and_scope(self):
+    from opendbc.car.gm.conventional_pedal import CancelCredit
+    for counter in range(4):
+      checksum = 0xF0 + counter * 0x3F0
+      raw = bytes((0, 0, 0, 0, counter, 0x10 | (checksum >> 8), checksum & 0xFF))
+      for scoped in (False, True):
+        credit = CancelCredit(neutral_interval_ns=100_000_000, allow_non_acc_neutral=scoped)
+        credit.observe([(1_000_000_000, [(0x1E1, raw, 0)])])
+        self.assertEqual(credit.credit_ns > 0, scoped)
+      for index in range(7):
+        damaged = bytearray(raw)
+        damaged[index] ^= 0x80
+        credit = CancelCredit(neutral_interval_ns=100_000_000, allow_non_acc_neutral=True)
+        credit.observe([(1_000_000_000, [(0x1E1, damaged, 0)])])
+        self.assertEqual(credit.credit_ns, 0, (counter, index))
+      for mode in (2, 3):
+        damaged = bytearray(raw)
+        damaged[3] = mode
+        credit = CancelCredit(allow_non_acc_neutral=True)
+        credit.observe([(1_000_000_000, [(0x1E1, damaged, 0)])])
+        self.assertEqual(credit.credit_ns, 0)
+      credit = CancelCredit(neutral_interval_ns=100_000_000, allow_non_acc_neutral=True)
+      credit.observe([(1_000_000_000, [(0x1E1, raw, 2)])])
+      self.assertEqual(credit.credit_ns, 0)
+
   def test_removed_pedal_factory_has_one_physical_parser_owner(self):
     from opendbc.car.gm.values import (BOLT_PEDAL_REMOVED_CARS, BOLT_PEDAL_REMOVED_STOCK_WORDS,
                                       is_bolt_pedal_profile, is_bolt_pedal_removed_profile)
@@ -502,6 +527,51 @@ class TestBoltPedalStartupParser(unittest.TestCase):
             expected = tick in (0, 21 if duplicate else 18)
             self.assertEqual(bool(cancel), expected, (identity, tick, interrupted.hex()))
             for address, raw, bus in cancel:
+              self.assertTrue(native.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, raw)))
+              self.assertFalse(native.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, raw)))
+            if tick in (15, 19) or tick == 21 and not duplicate:
+              counter = ci.CS.conventional_cancel_credit.counter
+              self.assertFalse(native.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, (counter + 1) % 4))))
+            self.assertFalse(any(message[0] in (0x315, 0x370) for message in messages))
+
+  def test_present_no_acc_mode_zero_actual_parser_cancel_and_gap_recovery(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    from opendbc.safety.tests.libsafety import libsafety_py
+
+    def physical_buttons(button, counter):
+      checksum = 0xF0 + counter * 0x3F0 - ((button - 1) << 4)
+      return bytes((0, 0, 0, 0, counter, (button << 4) | (checksum >> 8), checksum & 0xFF))
+
+    self.assertEqual(physical_buttons(1, 3), bytes.fromhex('00000000031cc0'))
+    for identity, removed in ((identity, removed) for identity in NO_ACC_BOLT_CAR for removed in (False, True)):
+      for kind in ('neutral', 'nonneutral', 'skipped', 'duplicate'):
+        with self.subTest(identity=identity, interrupted=kind):
+          cp = params(identity, pedal=True, camera=not removed, removed=removed)
+          native = libsafety_py.libsafety
+          self.assertEqual(native.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
+          native.init_tests()
+          ci, _ = self.stream(cp, native=native, camera_present=not removed)
+          ci.CC.frame = 100
+          first_counter = (ci.CS.conventional_cancel_credit.counter + 1) % 4
+          interrupted_counter = (first_counter + {'neutral': 1, 'nonneutral': 1, 'skipped': 3, 'duplicate': 0}[kind]) % 4
+          interrupted = physical_buttons(2 if kind == 'nonneutral' else 1, interrupted_counter)
+          self.assertEqual(ci.CS.conventional_cancel_credit.neutral_interval_ns, 100_000_000)
+          command = structs.CarControl()  # Withdrawing stock cruise still works with both axes disabled.
+          for tick in range(22):
+            now = 3_500_000_000 + tick * 10_000_000
+            duplicate = kind == 'duplicate'
+            button = {0: physical_buttons(1, first_counter), 15: interrupted,
+                      18: physical_buttons(1, (interrupted[4] + 1) % 4),
+                      19: physical_buttons(1, (interrupted[4] + 1) % 4)}.get(tick)
+            if duplicate and tick == 21:
+              button = physical_buttons(1, (interrupted[4] + 2) % 4)
+            self.present_tick(ci, native, now, 13 + tick, button=button)
+            _, messages = ci.apply(command.as_reader(), now)
+            cancel = [message for message in messages if message[0] == 0x1E1]
+            expected = tick in (0, 21 if duplicate else 18)
+            self.assertEqual(bool(cancel), expected, (identity, tick, interrupted.hex()))
+            for address, raw, bus in cancel:
+              self.assertEqual(raw[3], 1)  # Preserve original emitted ACC-form CANCEL.
               self.assertTrue(native.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, raw)))
               self.assertFalse(native.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, raw)))
             if tick in (15, 19) or tick == 21 and not duplicate:
@@ -1027,9 +1097,22 @@ class TestBoltPaddleModes(unittest.TestCase):
                         ('ASCMLKASteeringCmd', 'AEBCmd', 'ASCMActiveCruiseControlStatus'))
           frames.append(packer.make_can_msg('ASCMLKASteeringCmd', 128, {}))
           safety.reset_recorded_can()
+          regen_observation_index = None
           for frame in sorted(frames, key=lambda frame: frame[0] in (0x1F5, 0xBD)):
             if frame[2] != 128:
+              if override == 'regen' and frame[0] == 0xBD:
+                # The preceding stock gear RX still observes the prior physical regen state.
+                regen_observation_index = safety.get_recorded_can_count()
               safety.safety_rx_hook(recorder.packet(frame))
+          if override == 'regen':
+            self.assertIsNotNone(regen_observation_index, (candidate, tick, override))
+            # Explicit stock Low RX after observed driver regen must not replay an applied feed.
+            probe = next(frame for frame in frames if frame[0] == 0x1F5 and frame[2] == 0)
+            self.assertTrue(safety.safety_rx_hook(recorder.packet(probe)), (candidate, tick, probe))
+            post_observation = recorder.recorded()[regen_observation_index:]
+            self.assertFalse(any(payload[0] == 0x20 if address == 0xBD else payload[5] == 2
+                                 for address, _, payload in post_observation if address in (0xBD, 0x1F5)),
+                             (candidate, tick, override, post_observation))
           all_recorded = recorder.recorded()
           statuses = [packet for packet in all_recorded if packet[0] == 0x3D1]
           recorded = [packet for packet in all_recorded if packet[0] != 0x3D1]
@@ -1051,8 +1134,11 @@ class TestBoltPaddleModes(unittest.TestCase):
                                                       CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL) else 7), 2)
                                  if expected_pressed else (6, 0))
           if override is not None and (override not in ('main', 'stock') or candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+            # Regen is checked from its physical RX boundary above; every other override remains whole-tick.
+            checked = recorded if override != 'regen' else [packet for packet in all_recorded[regen_observation_index:]
+                                                            if packet[0] in (0xBD, 0x1F5)]
             self.assertFalse(any(payload[0] == 0x20 if address == 0xBD else payload[5] == 2
-                                 for address, _, payload in recorded))
+                                 for address, _, payload in checked), (candidate, tick, override, checked))
           for address, bus, payload in recorded:
             self.assertEqual(bus, 0)
             self.assertEqual(payload, last_feeds[address])

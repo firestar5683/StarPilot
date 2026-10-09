@@ -312,11 +312,18 @@ static void gm_rx_hook(const CANPacket_t *msg) {
       if ((msg->addr == 0x1E1U) && (GET_LEN(msg) == 7U)) {
         const uint8_t counter = msg->data[4] & 0x3U;
         const uint16_t neutral_checksum = 0xFFU + (counter * 0x4EFU);
-        const bool neutral = (((msg->data[5] >> 4) & 0x7U) == 1U) &&
+        const bool neutral_acc = (((msg->data[5] >> 4) & 0x7U) == 1U) &&
                              (msg->data[0] == 0U) && (msg->data[1] == 0U) && (msg->data[2] == 0U) &&
                              (msg->data[3] == 1U) && (msg->data[4] == counter) &&
                              (msg->data[5] == (uint8_t)(0x10U | (neutral_checksum >> 8))) &&
                              (msg->data[6] == (uint8_t)neutral_checksum);
+        const uint16_t non_acc_checksum = 0xF0U + (counter * 0x3F0U);
+        const bool neutral_non_acc = (gm_bolt_pedal_removed || gm_bolt_present_cc_cancel) && !gm_pedal_acc &&
+          (msg->data[0] == 0U) && (msg->data[1] == 0U) && (msg->data[2] == 0U) &&
+          (msg->data[3] == 0U) && (msg->data[4] == counter) &&
+          (msg->data[5] == (uint8_t)(0x10U | (non_acc_checksum >> 8))) &&
+          (msg->data[6] == (uint8_t)non_acc_checksum);
+        const bool neutral = neutral_acc || neutral_non_acc;
         const bool forward = counter == ((gm_volt_removed_counter + 1U) % 4U);
         const bool timely = safety_get_ts_elapsed(now, gm_volt_removed_button_observed_us) <= 100000U;
         if (neutral && (!gm_volt_removed_button_seen || (forward && timely))) {

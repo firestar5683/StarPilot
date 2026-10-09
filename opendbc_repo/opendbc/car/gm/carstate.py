@@ -104,7 +104,7 @@ class CarState(CarStateBase):
     self.conventional_pedal_sources = ()
     no_acc_pedal_cancel = (is_bolt_present_no_acc_pedal_profile(CP) or is_bolt_present_no_acc_pedal_profile(CP, stock_only=True) or
                           CP.carFingerprint in NO_ACC_BOLT_CAR and is_bolt_pedal_removed_profile(CP))
-    self.conventional_cancel_credit = CancelCredit(neutral_interval_ns=100_000_000) if no_acc_pedal_cancel else CancelCredit()
+    self.conventional_cancel_credit = CancelCredit(neutral_interval_ns=100_000_000, allow_non_acc_neutral=True) if no_acc_pedal_cancel else CancelCredit()
     self.silverado_pedal_sources = ()
     self.bolt_cc_profile = is_bolt_cc_profile(CP)
     self.bolt_cc_removed = self.bolt_cc_profile and CP.safetyConfigs[0].safetyParam == BOLT_CC_WORDS[CP.carFingerprint][1]

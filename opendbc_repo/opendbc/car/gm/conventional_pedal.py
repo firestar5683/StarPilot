@@ -44,8 +44,9 @@ class CancelCredit:
 
   """One cancellation per sequential, byte-valid neutral wheel-button packet."""
 
-  def __init__(self, *, neutral_interval_ns=300_000_000):
+  def __init__(self, *, neutral_interval_ns=300_000_000, allow_non_acc_neutral=False):
     self.neutral_interval_ns = neutral_interval_ns
+    self.allow_non_acc_neutral = allow_non_acc_neutral
     self.counter = None
     self.packet_ns = self.source_ns = self.credit_ns = 0
     self.main_ns = self.stock_ns = 0
@@ -103,6 +104,9 @@ class CancelCredit:
       return
     checksum = 0xFF + counter * 0x4EF
     neutral = raw == bytes((0, 0, 0, 1, counter, 0x10 | (checksum >> 8), checksum & 0xFF))
+    if self.allow_non_acc_neutral:
+      non_acc_checksum = 0xF0 + counter * 0x3F0
+      neutral |= raw == bytes((0, 0, 0, 0, counter, 0x10 | (non_acc_checksum >> 8), non_acc_checksum & 0xFF))
     first = self.counter is None
     timely = self.source_ns > 0 and 0 <= stamp - self.source_ns <= self.neutral_interval_ns
     if neutral and (first or timely and counter == (self.counter + 1) % 4):

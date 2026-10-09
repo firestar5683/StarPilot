@@ -770,6 +770,51 @@ class TestGmBoltPedalSafety(unittest.TestCase):
         self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))), word != 0x1CD)
         self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, 1))))
 
+  def test_no_acc_mode_zero_credit_all_counters_preserves_cancel_signature(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for word, counter in ((word, counter) for word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702, 0x1CD) for counter in range(4)):
+      with self.subTest(word=word, counter=counter):
+        self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+        self.safety.init_tests()
+        self.safety.set_timer(1000)
+        for frame in (self.low_gear(), self.sensor(1),
+                      self.stock("ECMEngineStatus", {"CruiseMainOn": 1}),
+                      libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
+                      libsafety_py.make_CANPacket(0x1E1, 0, bytes((0, 0, 0, 0, counter,
+                                                                 0x10 | ((0xF0 + counter * 0x3F0) >> 8), (0xF0 + counter * 0x3F0) & 0xFF)))):
+          self.safety.safety_rx_hook(frame)
+        self.assertEqual(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, (counter + 1) % 4))), word != 0x1CD)
+        self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(0x1E1, 0, button_bytes(6, (counter + 1) % 4))))
+
+  def test_no_acc_mode_zero_corruption_cannot_grant_cancel_credit(self):
+    from opendbc.car.gm.bolt_cc import button_bytes
+    for word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702):
+      for counter in range(4):
+        checksum = 0xF0 + counter * 0x3F0
+        neutral = bytes((0, 0, 0, 0, counter, 0x10 | (checksum >> 8), checksum & 0xFF))
+        corruptions = []
+        for index in range(7):
+          damaged = bytearray(neutral)
+          damaged[index] ^= 0x80
+          corruptions.append(bytes(damaged))
+        for mode in (2, 3):
+          damaged = bytearray(neutral)
+          damaged[3] = mode
+          corruptions.append(bytes(damaged))
+        corruptions.extend((neutral[:-1], neutral + b'\x00'))
+        for raw in corruptions:
+          with self.subTest(word=word, counter=counter, raw=raw.hex()):
+            self.assertEqual(self.safety.set_safety_hooks(CarParams.SafetyModel.gm, word), 0)
+            self.safety.init_tests()
+            self.safety.set_timer(1000)
+            for frame in (self.low_gear(), self.sensor(1),
+                          self.stock('ECMEngineStatus', {'CruiseMainOn': 1}),
+                          libsafety_py.make_CANPacket(0x3D1, 0, bytes((0, 0, 0, 0, 128, 0, 0, 0))),
+                          libsafety_py.make_CANPacket(0x1E1, 0, raw)):
+              self.safety.safety_rx_hook(frame)
+            self.assertFalse(self.safety.safety_tx_hook(libsafety_py.make_CANPacket(
+              0x1E1, 0, button_bytes(6, (counter + 1) % 4))))
+
   def test_removed_no_acc_gap_recovers_without_reusing_cancel_slot(self):
     from opendbc.car.gm.bolt_cc import button_bytes
     for word in (0x9D, 0xE700, 0xE701, 0xE702):
