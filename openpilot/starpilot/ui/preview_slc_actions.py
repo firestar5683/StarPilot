@@ -42,6 +42,9 @@ def main() -> None:
         for name, pending in (("pending", True), ("adoptable", False)):
           observation = SpeedLimitObservation(kind=ObservationKind.VALID, source="dashboard", speed_limit_mps=22.0,
                                               accepted_speed_limit_mps=18.0, accepted_source="dashboard",
+                                              accepted_adjusted_limit_mps=20.0, effective_cluster_target_mps=20.0,
+                                              pending_adjusted_limit_mps=24.0 if pending else None,
+                                              presentation_adjusted_limit_mps=24.0, limiting_max_set=True,
                                               pending_source="dashboard" if pending else "none",
                                               pending_speed_limit_mps=22.0 if pending else None,
                                               session_id="preview-drive", decision_id=7 if pending else 0,

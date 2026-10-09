@@ -4,7 +4,6 @@ Geometry and drawing order follow the frozen SetSpeedWidget, SpeedLimitWidget,
 HudRenderer and ExpButton. See the adjacent UI LICENSE for retained source.
 """
 
-from dataclasses import replace
 from pathlib import Path
 import hashlib
 import json
@@ -17,11 +16,8 @@ from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState
 from openpilot.starpilot.ui.onroad_widget_style import draw_control_card
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole
 from openpilot.starpilot.ui.wheel_feedback import wheel_feedback_rgb
-from openpilot.starpilot.ui.speed_limit_pulse import SpeedLimitPulse
-from openpilot.starpilot.ui import clip
 from openpilot.starpilot.ui.speed_source_drawer import SpeedSourceDrawer
-from openpilot.starpilot.ui.speed_card_typography import value_layout, source_header_layout
-from openpilot.starpilot.ui.unified_speed_presentation import displayed_limit_mps, resolve_unified_speed
+from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
 
 
 ENGAGED = rl.Color(128, 216, 166, 255)
@@ -39,119 +35,119 @@ class UnifiedSpeedWidget:
 
   def __init__(self, fonts: BitmapFonts):
     self.fonts = fonts
-    self._pulse = SpeedLimitPulse()
     self._source_drawer = SpeedSourceDrawer()
-    self._source_bounds = None
     self._source_session = None
 
   def collapse_sources(self):
     self._source_drawer.reset()
-    self._source_bounds = None
-
-  def source_bounds(self):
-    return self._source_bounds
 
   def _draw_source_contents(self, panel, state):
     rows = [row for row in state.speed_limit.source_readings if row.enabled]
     if not rows:
-      _center(self.fonts, 'No sources enabled', FontRole.SEMI_BOLD, 18, panel, panel.y + 30)
+      _center(self.fonts, 'No sources enabled', FontRole.NORMAL, 28, panel, panel.y + 30)
       return
-    row_height = (panel.height - 24) / len(rows)
+    row_height = (panel.height - 32) / len(rows)
     active = state.speed_limit.accepted_source
     labels = {'dashboard': 'Dashboard', 'map': 'Map', 'vision': 'Vision', 'online': 'Online'}
     for index, row in enumerate(rows):
-      role = FontRole.BOLD if row.source == active else FontRole.SEMI_BOLD
+      role = FontRole.MEDIUM if row.source == active else FontRole.NORMAL
       color = rl.WHITE if row.source == active else rl.Color(170, 179, 174, 255)
-      value = str(round(row.speed_mps * (3.6 if state.metric else 2.2369362921))) if row.kind == 'valid' and row.speed_mps is not None else '--'
+      value = str(round(row.speed_mps * (3.6 if state.metric else 2.2369362921))) if row.kind == 'valid' and row.speed_mps is not None else '–'
       label = labels[row.source]
-      size = 22
-      value_width = self.fonts.measure(value, role, 24).width
-      while size > 12 and self.fonts.measure(label, role, size).width > panel.width - 44 - value_width:
+      size = 28
+      value_width = self.fonts.measure(value, role, 30).width
+      while size > 12 and self.fonts.measure(label, role, size).width > panel.width - 64 - value_width:
         size -= 1
-      y = panel.y + 12 + index * row_height
+      y = panel.y + 16 + index * row_height
       label_height = self.fonts.measure(label, role, size).height
-      value_height = self.fonts.measure(value, role, 24).height
-      self.fonts.draw(label, role, size, panel.x + 16, y + (row_height - label_height) / 2, color)
-      self.fonts.draw(value, role, 24, panel.x + panel.width - 16 - value_width, y + (row_height - value_height) / 2, color)
+      value_height = self.fonts.measure(value, role, 30).height
+      self.fonts.draw(label, role, size, panel.x + 32, y + (row_height - label_height) / 2, color)
+      self.fonts.draw(value, role, 30, panel.x + panel.width - 32 - value_width, y + (row_height - value_height) / 2, color)
 
   def render(self, content: rl.Rectangle, state: OnroadState) -> None:
+    from openpilot.starpilot.ui.large_speed_geometry import (WIDTH, MAX_ROW_HEIGHT, PADDING, SOURCE_ROW_HEIGHT,
+                                                           card_height, source_toggle_bounds, source_panel_bounds)
+    from openpilot.starpilot.ui.onroad_customization import placement
     shown = resolve_unified_speed(state)
-    if shown.mode == "hidden":
+    if shown.mode == 'hidden':
       self.collapse_sources()
       return
-    dx, dy = offset(state.customization, "large", "cruise_limits")
-    rect = rl.Rectangle(content.x + 58 + dx, content.y + 45 + dy, 176,
-                        411 if shown.mode in ("split", "merged") else 215 if shown.mode == "limit_only" else 196)
-    now = time.monotonic()
-    observation = state.speed_limit
-    posted = displayed_limit_mps(observation)
-    pulse_state = (replace(state, speed_limit=replace(observation, speed_limit_mps=posted))
-                   if posted is not None else state)
-    self._pulse.update(pulse_state, now, visible=shown.mode != "max_only")
-    fill = rl.Color(*rgba(state.customization, "cardFill", "large", "cruise_limits"))
-    border = self._pulse.color(rl.Color(*rgba(state.customization, "cardBorder", "large", "cruise_limits")), now)
-    text = rl.Color(*rgba(state.customization, "text", "large", "cruise_limits"))
-    drawer = self._source_drawer
+    saved = placement(state.customization, 'large', 'cruise_limits')
+    rect = rl.Rectangle(saved['x'], saved['y'], WIDTH, card_height(shown.mode))
+    fill = rl.Color(*rgba(state.customization, 'cardFill', 'large', 'cruise_limits'))
+    border = rl.Color(*rgba(state.customization, 'cardBorder', 'large', 'cruise_limits'))
+    text = rl.Color(*rgba(state.customization, 'text', 'large', 'cruise_limits'))
+    muted, accent = rl.Color(172, 190, 203, 255), rl.Color(197, 163, 255, 255)
+    draw_control_card(rect, fill=fill, border=border, border_width=1, roundness=.09)
+
+    def label(value, x, y, size=32, color=muted, role=FontRole.MEDIUM):
+      while size > 20 and self.fonts.measure(value, role, size).width > WIDTH - 2 * PADDING:
+        size -= 1
+      ink_top, _ = self.fonts.vertical_ink(value, role, size)
+      self.fonts.draw(value, role, size, x, y - ink_top, color)
+
+    def row(title, value, top, footer, status='', active=False, footer_color=muted, footer_y=174):
+      left = rect.x + PADDING
+      label(title, left, top + 24, color=accent if active else muted)
+      size, unit_size = 112, 28
+      has_value = value != '–'
+      unit_width = self.fonts.measure(shown.unit, FontRole.NORMAL, unit_size).width if has_value else 0
+      while size > 72 and self.fonts.measure(value, FontRole.SPEED, size).width + unit_width + 14 > WIDTH - PADDING * 2:
+        size -= 1
+      number_width = self.fonts.measure(value, FontRole.SPEED, size).width
+      number_top, number_bottom = self.fonts.vertical_ink(value, FontRole.SPEED, size)
+      number_y = top + 72 - number_top
+      if not has_value:
+        digit_top, digit_bottom = self.fonts.vertical_ink('0', FontRole.SPEED, size)
+        number_y += ((digit_bottom - digit_top) - (number_bottom - number_top)) / 2
+      self.fonts.draw(value, FontRole.SPEED, size, left, number_y, text)
+      if has_value:
+        _, unit_bottom = self.fonts.vertical_ink(shown.unit, FontRole.NORMAL, unit_size)
+        self.fonts.draw(shown.unit, FontRole.NORMAL, unit_size, left + number_width + 14,
+                        top + 72 + number_bottom - number_top - unit_bottom, muted)
+      if status:
+        label(status, left, top + 174, size=30, role=FontRole.NORMAL, color=accent if active else muted)
+      label(footer, left, top + footer_y, size=30, role=FontRole.NORMAL, color=footer_color)
+
+    if shown.mode != 'limit_only':
+      max_active = shown.active_side in ('max', 'shared') and shown.max_text != '–'
+      row('MAX SET', shown.max_text, rect.y, shown.max_status,
+          active=max_active, footer_color=accent if max_active else muted)
+    if shown.mode != 'max_only':
+      top = rect.y + (MAX_ROW_HEIGHT if shown.mode == 'split' else 0)
+      if shown.mode == 'split':
+        rl.draw_line_ex(rl.Vector2(rect.x + 1, top), rl.Vector2(rect.x + WIDTH - 1, top), 1, border)
+      road_limit = f'Road limit {shown.posted_text}'
+      if shown.offset_text:
+        road_limit += f' {shown.offset_text}'
+      row('SLC LIMIT', shown.limit_text, top, road_limit, shown.limit_status,
+          active=shown.active_side in ('slc', 'shared'), footer_y=224)
     session = state.speed_limit.session_id
     if session != self._source_session:
       self.collapse_sources()
       self._source_session = session
-    drawer_top = rect.y + (196 if shown.mode in ('split', 'merged') else 0)
-    if (state.speed_limit.kind != ObservationKind.VALID or not session or shown.pending or shown.mode == 'max_only'):
+    available = state.speed_limit.kind == ObservationKind.VALID and bool(session) and shown.mode != 'max_only'
+    if not available:
       self.collapse_sources()
-    else:
-      drawer.update(state.customization.get('speedSources', False), now)
-    self._source_bounds = clip._intersection(drawer.bounds(rect, drawer_top), content) if drawer.width > 0 else None
-    if drawer.width > 0:
-      drawer.draw_frame(rect, drawer_top, fill, border)
-    else:
-      draw_control_card(rect, fill=fill, border=border)
-    accent = rl.Color(188, 132, 255, 255)
-    def fitted(text_value, role, size, y, color):
-      width = self.fonts.measure(text_value, role, size).width
-      if width > rect.width - 24:
-        size = max(12, int(size * (rect.width - 24) / width))
-      _center(self.fonts, text_value, role, size, rect, y, color)
-      return size
-    def value(value, adjustment, top, height, *, size=86, unit=True, unit_color=DISENGAGED, visible_top=None):
-      layout = value_layout(value, adjustment, rect.width, height,
-                            lambda text_value, font_size: self.fonts.measure(text_value, FontRole.BOLD, font_size).width,
-                            lambda text_value, font_size: self.fonts.vertical_ink(text_value, FontRole.BOLD, font_size),
-                            lambda text_value: self.fonts.measure(text_value, FontRole.SEMI_BOLD, 28).width,
-                            lambda text_value: self.fonts.vertical_ink(text_value, FontRole.SEMI_BOLD, 28),
-                            self.fonts.vertical_ink(shown.unit, FontRole.MEDIUM, 24), size=size, visible_top=visible_top)
-      self.fonts.draw(value, FontRole.BOLD, layout.size, rect.x + layout.x, top + layout.y, text)
-      if adjustment:
-        self.fonts.draw(adjustment, FontRole.SEMI_BOLD, 28, rect.x + layout.offset_x, top + layout.offset_y, text)
-      if unit:
-        _center(self.fonts, shown.unit, FontRole.MEDIUM, 24, rect, top + layout.unit_y, unit_color)
-    def row(label, number, top, height, active=False, source="", adjustment=None):
-      color = accent if active else DISENGAGED
-      label_size = fitted(label, FontRole.SEMI_BOLD, 17 if label == "MAX SET / LIMIT" else 29, top + 18, color)
-      visible_top = None
-      if source:
-        source_size = 14
-        source_width = self.fonts.measure(source.upper(), FontRole.SEMI_BOLD, source_size).width
-        if source_width > rect.width - 24:
-          source_size = max(12, int(source_size * (rect.width - 24) / source_width))
-        source_y, visible_top = source_header_layout(
-          self.fonts.vertical_ink(label, FontRole.SEMI_BOLD, label_size),
-          self.fonts.vertical_ink(source.upper(), FontRole.SEMI_BOLD, source_size))
-        _center(self.fonts, source.upper(), FontRole.SEMI_BOLD, source_size, rect, top + source_y, text)
-      value(number, adjustment, top, height, unit_color=color, visible_top=visible_top)
-    if shown.mode == "merged":
-      row("MAX SET / LIMIT", shown.max_text, rect.y, 196, shown.active_side == "shared")
-      fitted(shown.source.upper(), FontRole.SEMI_BOLD, 25, rect.y + 238, text)
-      value(shown.posted_text, shown.offset_text, rect.y + 236, 175, size=48, unit=False)
-    else:
-      if shown.mode != "limit_only":
-        row("MAX SET", shown.max_text, rect.y, 196, shown.active_side == "max")
-      if shown.mode != "max_only":
-        top = rect.y + (196 if shown.mode == "split" else 0)
-        row("NEW LIMIT" if shown.pending else "LIMIT", shown.posted_text, top, 215,
-            shown.active_side == "slc" or shown.pending, shown.source, shown.offset_text)
-    if drawer.width > 0:
-      drawer.draw_contents(lambda panel: self._draw_source_contents(panel, state), rect, drawer_top, content)
+      return
+    now = time.monotonic()
+    self._source_drawer.update(state.customization.get('speedSources', False), now)
+    left, top, right, bottom = source_toggle_bounds(state)
+    if getattr(self, 'source_pressed', lambda: False)():
+      rl.draw_rectangle_rounded(rl.Rectangle(left, top, right - left, bottom - top), .15, 8, rl.Color(197, 163, 255, 35))
+    label('Hide sources' if state.customization.get('speedSources', False) else 'View sources', left + PADDING, top + 11,
+          size=30, role=FontRole.NORMAL)
+    if self._source_drawer.progress <= 0:
+      return
+    rows = sum(row.enabled for row in state.speed_limit.source_readings)
+    height = max(1, rows) * SOURCE_ROW_HEIGHT + PADDING
+    panel_bounds = source_panel_bounds(state, height, content)
+    if panel_bounds is None:
+      self.collapse_sources()
+      return
+    panel = rl.Rectangle(*panel_bounds)
+    self._source_drawer.draw_panel(panel, content, fill, border,
+                                                       lambda panel: self._draw_source_contents(panel, state))
 
 
 class CurrentSpeedHud:
@@ -164,12 +160,16 @@ class CurrentSpeedHud:
     speed = str(round(state.speed_mps * (3.6 if state.metric else 2.2369362921)))
     dx, dy = offset(state.customization, "large", "current_speed")
     rect = rl.Rectangle(content.x + 610 + dx, content.y + dy, 580, 300)
-    _center(self.fonts, speed, FontRole.BOLD, 176, rect, content.y + 42 + dy, rl.Color(*rgba(state.customization, "text", "large", "current_speed")))
-    unit = "km/h" if state.metric else "mph"
-    unit_height = self.fonts.measure(unit, FontRole.MEDIUM, 66).height
-    red, green, blue, alpha = rgba(state.customization, "text", "large", "current_speed")
-    _center(self.fonts, unit, FontRole.MEDIUM, 66, rect, 290 - unit_height / 2 + dy,
+    number_top, _ = self.fonts.vertical_ink(speed, FontRole.SPEED, 176)
+    old_top, old_bottom = self.fonts.vertical_ink(speed, FontRole.BOLD, 176)
+    _center(self.fonts, speed, FontRole.SPEED, 176, rect, content.y + 42 + dy + old_top - number_top,
+            rl.Color(*rgba(state.customization, 'text', 'large', 'current_speed')))
+    unit = 'km/h' if state.metric else 'mph'
+    unit_top, _ = self.fonts.vertical_ink(unit, FontRole.NORMAL, 44)
+    red, green, blue, alpha = rgba(state.customization, 'text', 'large', 'current_speed')
+    _center(self.fonts, unit, FontRole.NORMAL, 44, rect, content.y + 42 + dy + old_bottom + 20 - unit_top,
             rl.Color(red, green, blue, int(alpha * 200 / 255)))
+
 
 
 class SteeringWheelWidget:

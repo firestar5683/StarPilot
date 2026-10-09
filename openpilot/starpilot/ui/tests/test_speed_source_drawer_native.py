@@ -51,19 +51,20 @@ class DrawerNativeTest(unittest.TestCase):
     state = replace(state, customization=doc)
     emitted = []
     touch = OnroadInput(emitted.append, Profile.LARGE)
-    touch.drawer_bounds = lambda: rl.Rectangle(264, 271, 248, 215)
-    touch.press(400, 320, state)
-    touch.release(400, 320, state)
+    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
+    left, top, _, _ = source_toggle_bounds(state)
+    touch.press(left + 12, top + 12, state)
+    touch.release(left + 12, top + 12, state)
     self.assertEqual([(r.kind, r.value) for r in emitted], [('set_speed_sources', False)])
-    touch.press(400, 150, state)
+    touch.press(120, 320, state)
     self.assertFalse(touch.claimed)
     pending = replace(state, speed_limit=replace(obs, pending_speed_limit_mps=30, decision_id=2))
-    touch.press(400, 320, pending)
-    touch.release(400, 320, pending)
-    self.assertEqual(len(emitted), 1)
-    touch.press(400, 320, state)
-    touch.release(400, 320, replace(state, speed_limit=SpeedLimitObservation()))
-    self.assertEqual(len(emitted), 1)
+    touch.press(left + 12, top + 12, pending)
+    touch.release(left + 12, top + 12, pending)
+    self.assertEqual(len(emitted), 2)
+    touch.press(left + 12, top + 12, state)
+    touch.release(left + 12, top + 12, replace(state, speed_limit=SpeedLimitObservation()))
+    self.assertEqual(len(emitted), 2)
 
   def test_nested_drawer_clip_restores_parent_after_exception(self):
     calls = []
@@ -145,30 +146,24 @@ class DrawerNativeTest(unittest.TestCase):
     fonts = SimpleNamespace(measure=lambda *args: SimpleNamespace(width=20, height=20), draw=lambda text, role, *args: drawn.append((text, role)))
     widget = UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts)))
     widget._draw_source_contents(rl.Rectangle(264, 271, 248, 215), state)
-    self.assertIn(('Dashboard', FontRole.BOLD), drawn)
-    self.assertIn(('Vision', FontRole.SEMI_BOLD), drawn)
+    self.assertIn(('Dashboard', FontRole.MEDIUM), drawn)
+    self.assertIn(('Vision', FontRole.NORMAL), drawn)
 
-  def test_actual_custom_right_edge_exposes_no_outside_drawer_touch(self):
+  def test_custom_right_edge_keeps_panel_and_toggle_inside_viewport(self):
+    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
     obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 25, session_id='edge')
     doc = default_document()
     doc['speedSources'] = True
-    doc['layouts']['large']['cruise_limits']['x'] = 1654
+    doc['layouts']['large']['cruise_limits']['x'] = 1350
     state = OnroadState(False, False, 20, 100, obs, customization=validate_document(doc))
-    fonts = SimpleNamespace(
-      measure=lambda *args: SimpleNamespace(width=20, height=20), draw=Mock(), vertical_ink=lambda text, role, size: (size * 0.2, size * 0.8)
-    )
-    widget = UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts)))
-    widget._source_session = 'edge'
-    widget._source_drawer.update(True, 0)
-    widget._source_drawer.update(True, 1)
-    with patch.object(widget._source_drawer, 'draw_frame'), patch.object(widget._source_drawer, 'draw_contents'):
-      widget.render(rl.Rectangle(30, 30, 1800, 1020), state)
-    bounds = widget.source_bounds()
-    self.assertEqual(bounds.width, 0)
-    self.assertEqual(bounds.x, 1830)
+    left, top, right, bottom = source_toggle_bounds(state)
+    self.assertLessEqual(right, 1830)
+    self.assertLessEqual(bottom, 1050)
     emitted = []
     touch = OnroadInput(emitted.append, Profile.LARGE)
-    touch.drawer_bounds = widget.source_bounds
-    touch.press(1850, 320, state)
-    touch.release(1850, 320, state)
+    touch.press(1850, top + 12, state)
+    touch.release(1850, top + 12, state)
     self.assertEqual(emitted, [])
+    touch.press(left + 12, top + 12, state)
+    touch.release(left + 12, top + 12, state)
+    self.assertEqual(len(emitted), 1)

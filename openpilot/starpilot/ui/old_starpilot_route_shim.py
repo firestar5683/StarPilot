@@ -43,10 +43,12 @@ def speed_limit_fallback(ui, observation, now_ns, *, cruise_kph, car, read_messa
   source = str(legacy.slcSpeedLimitSource).lower()
   return SpeedLimitObservation(
     kind=ObservationKind.VALID, speed_limit_mps=limit, offset_mps=offset,
-    effective_cap_mps=target,
+    # Old-route replay: effective_cap_mps preserves legacy state and can be dropped; the new UI needs presentation_adjusted_limit_mps.
+    effective_cap_mps=target, presentation_adjusted_limit_mps=target,
     effective_cluster_target_mps=target if enabled else None,
     action_enabled=enabled,
     limiting_max_set=bool(target is not None and cruise_kph is not None and target < cruise_kph / 3.6),
     driver_override_active=overridden,
+    override_basis=('pedal' if car is not None and getattr(car, 'gasPressed', False) else 'persistent') if overridden else 'none',
     source='unknown' if source in ('', 'none') else source, status='legacy_replay',
   )

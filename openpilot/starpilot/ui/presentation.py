@@ -30,6 +30,7 @@ class FontRole(StrEnum):
   BRAND = "brand"
   ROMAN = "roman"
   DISPLAY = "display"
+  SPEED = "speed"
   FALLBACK = "fallback"
 
 
@@ -49,6 +50,7 @@ def font_filename(profile: Profile, role: FontRole) -> str:
     FontRole.BRAND: "Sora-800.fnt",
     FontRole.ROMAN: "Inter-Regular.fnt",
     FontRole.DISPLAY: "Inter-Bold.fnt",
+    FontRole.SPEED: "DINish-Speed.fnt" if profile == Profile.LARGE else "Inter-Bold.fnt",
     FontRole.FALLBACK: "unifont.fnt",
   }[role]
 
@@ -60,7 +62,7 @@ def default_font_directory() -> Path:
 def font_path(directory: Path, filename: str) -> Path:
   # Keep the supplied Sora wordmark pinned to its bundled asset. The other
   # fonts use the bundled directory by default or a validated caller override.
-  return default_font_directory() / filename if filename == "Sora-800.fnt" else directory / filename
+  return default_font_directory() / filename if filename in ("Sora-800.fnt", "DINish-Speed.fnt") else directory / filename
 
 
 def validate_bitmap_font(path: Path) -> None:
@@ -70,7 +72,7 @@ def validate_bitmap_font(path: Path) -> None:
   requires an explicit asset review; accepting a partial descriptor grammar is
   insufficient to protect the native parser from malformed input.
   """
-  manifest_name = "sora-brand-font.json" if path.name == "Sora-800.fnt" else "bitmap-fonts.json"
+  manifest_name = {"Sora-800.fnt": "sora-brand-font.json", "DINish-Speed.fnt": "dinish-speed-font.json"}.get(path.name, "bitmap-fonts.json")
   manifest = json.loads(Path(__file__).with_name(manifest_name).read_text())
   expected = {entry["file"]: entry for entry in manifest["files"]}
   try:

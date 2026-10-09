@@ -82,7 +82,7 @@ class TestSlcUiRuntime(unittest.TestCase):
                              "SLCConfirmationHigher": True, "SLCPriority1": "Dashboard"}), session_id="ui-accept")
     pending = runtime.step(sm, cp, now_ns=START).message
     self.assertTrue(pending.slcState.hasPending)
-    request = ui_request(pending, profile=Profile.LARGE, x=120, y=360)
+    request = ui_request(pending, profile=Profile.LARGE, x=120, y=630)
     self.assertEqual(request.kind, SlcActionKind.ACCEPT)
     action = publish_request(pending.slcState, request, START)
     sm.advance(START + 50_000_000)
@@ -109,7 +109,7 @@ class TestSlcUiRuntime(unittest.TestCase):
     view_state = OnroadState(True, False, 20.0, 60.0, observation,
                              longitudinal_active=True, slc_system_long_available=True)
     self.assertEqual(slc_controls(Profile.COMPACT, view_state), ())
-    adopt = ui_request(rejected.message, profile=Profile.LARGE, x=150, y=530)
+    adopt = ui_request(rejected.message, profile=Profile.LARGE, x=150, y=590)
     self.assertEqual(adopt.kind, SlcActionKind.ADOPT)
     restore = publish_request(rejected.message.slcState, adopt, START + 50_000_000)
     sm.advance(START + 100_000_000)
@@ -123,7 +123,7 @@ class TestSlcUiRuntime(unittest.TestCase):
     shown = runtime.step(sm, cp, now_ns=START).message
     self.assertTrue(shown.slcState.hasAccepted)
     self.assertAlmostEqual(shown.slcState.acceptedSpeedLimit, shown.slcState.speedLimit)
-    request = ui_request(shown, profile=Profile.LARGE, x=150, y=530)
+    request = ui_request(shown, profile=Profile.LARGE, x=150, y=590)
     self.assertEqual(request.kind, SlcActionKind.ADOPT)
     action = publish_request(shown.slcState, request, START)
     sm.advance(START + 50_000_000)
@@ -136,7 +136,7 @@ class TestSlcUiRuntime(unittest.TestCase):
     runtime = Runtime(parse({"SpeedLimitController": True, "SLCConfirmation": True,
                              "SLCConfirmationHigher": True, "SLCPriority1": "Dashboard"}), session_id="ui-stale")
     pending = runtime.step(sm, cp, now_ns=START).message
-    old_touch = ui_request(pending, profile=Profile.LARGE, x=120, y=360)
+    old_touch = ui_request(pending, profile=Profile.LARGE, x=120, y=630)
     publisher = Mock()
     stale = SlcActionDispatcher(publisher, lambda _: pending.slcState, lambda: START + 200_000_000)
     self.assertFalse(stale.dispatch(old_touch))

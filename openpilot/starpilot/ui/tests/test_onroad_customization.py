@@ -145,7 +145,7 @@ def test_v3_layout_migrates_wheel_size_without_changing_saved_placement_or_color
   for profile in ("large", "compact"):
     del document["layouts"][profile]["steering_wheel"]["size"]
   migrated = validate_document(document)
-  assert migrated["version"] == 4
+  assert migrated["version"] == 6
   assert migrated["palette"] == document["palette"]
   assert migrated["layouts"]["large"]["steering_wheel"] == {"x": 1300, "y": 100, "enabled": False, "size": 192}
   assert migrated["layouts"]["compact"]["steering_wheel"] == {"x": 90, "y": 150, "enabled": True, "size": 50}
@@ -175,7 +175,7 @@ def test_pre_action_saved_layout_migrates_without_losing_positions_or_palette(re
       assert migrated["layouts"][profile][key] == {
         **position, **({"size": customization_metadata()["profiles"][profile]["widgets"][key]["width"]}
                      if key == "steering_wheel" else {})}
-  assert migrated["layouts"]["large"]["speed_limit_actions"] == {"x": 288, "y": 600, "enabled": False}
+  assert migrated["layouts"]["large"]["speed_limit_actions"] == {"x": 288, "y": 667, "enabled": False}
   assert migrated["layouts"]["compact"]["speed_limit_actions"] == default_document()["layouts"]["compact"]["speed_limit_actions"]
 
 
@@ -193,7 +193,7 @@ def test_malformed_pre_action_cruise_placement_is_rejected():
 def test_duplicate_key_cannot_apply_otherwise_valid_placement():
   document = default_document()
   document["layouts"]["large"]["current_speed"]["x"] = 100
-  raw = json.dumps(document).replace('"version": 4', '"version": 4, "version": 4').encode()
+  raw = json.dumps(document).replace('"version": 6', '"version": 6, "version": 6').encode()
   with patch("openpilot.starpilot.ui.onroad_customization.read_saved", return_value=(raw, True)):
     assert read_customization(Mock()) == default_document()
 
@@ -290,7 +290,7 @@ def test_large_draw_origins_and_wheel_input_move_together():
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card:
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     rect = card.call_args.args[0]
-    assert (rect.x, rect.y, rect.width, rect.height) == (188, 95, 176, 196)
+    assert (rect.x, rect.y, rect.width, rect.height) == (188, 95, 344, 210)
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
   assert fonts.draw.call_args_list[-2].args[3:5] == (965, 112)
   wheel = SteeringWheelWidget.__new__(SteeringWheelWidget)
@@ -323,14 +323,14 @@ def test_speed_limit_actions_move_independently_of_cruise_card_and_keep_touch_pr
                                      presentation_id=2, action_enabled=True)
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
   controls = slc_controls(Profile.LARGE, state)
-  assert controls[0].bounds == (388, 600, 472, 658)
+  assert controls[0].bounds == (388, 644, 554, 708)
   assert slc_controls(Profile.COMPACT, state)[0].bounds == (174, 180, 310, 234)
   emit = Mock()
   inputs = OnroadInput(emit)
-  for x, y in ((400, 610), (300, 400)):
+  for x, y in ((400, 650), (300, 400)):
     inputs.press(x, y, state)
     inputs.release(x, y, state)
-  assert emit.call_count == 2
+  assert emit.call_count == 1
   assert not slc_controls(Profile.LARGE, replace(state, alert=OnroadAlert(size=AlertSize.FULL)))
   document["layouts"]["large"]["cruise_limits"]["enabled"] = False
   assert slc_controls(Profile.LARGE, state) == controls
@@ -372,13 +372,13 @@ def test_frozen_default_draw_geometry_and_neutral_colors():
   with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card:
     UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
     rect = card.call_args.args[0]
-    assert (rect.x, rect.y, rect.width, rect.height) == (88, 75, 176, 196)
+    assert (rect.x, rect.y, rect.width, rect.height) == (88, 75, 344, 210)
     fill, border = card.call_args.kwargs["fill"], card.call_args.kwargs["border"]
-    assert (fill.r, fill.g, fill.b, fill.a) == (0, 0, 0, 166)
-    assert (border.r, border.g, border.b, border.a) == (196, 205, 208, 180)
+    assert (fill.r, fill.g, fill.b, fill.a) == (16, 25, 31, 255)
+    assert (border.r, border.g, border.b, border.a) == (53, 67, 77, 255)
   CurrentSpeedHud(Mock(spec=BitmapFonts, **vars(fonts))).render(content, state)
   assert fonts.draw.call_args_list[-2].args[3:5] == (925, 72)
-  assert fonts.draw.call_args_list[-1].args[3:5] == (925, 280)
+  assert fonts.draw.call_args_list[-1].args[3:5] == pytest.approx((925, 215.2))
   wheel = SteeringWheelWidget.__new__(SteeringWheelWidget)
   wheel._texture = Mock()
   with patch.object(rl, "draw_circle") as circle, patch.object(rl, "draw_texture_pro"):
@@ -487,14 +487,14 @@ def test_v1_palette_positions_and_visibility_migrate_without_mutating_source():
   original = copy.deepcopy(old)
   result = decode_document(json.dumps(old).encode())
   assert old == original
-  assert result['version'] == 4
+  assert result['version'] == 6
   assert result['palette'] == old['palette']
   for profile, layout in old['layouts'].items():
     for key, position in layout.items():
       assert result['layouts'][profile][key] == {
         **position, **({'size': customization_metadata()['profiles'][profile]['widgets'][key]['width']}
                      if key == 'steering_wheel' else {})}
-  assert result['widgetColors'] == {'large': {}, 'compact': {}}
+  assert result['widgetColors'] == {'large': {'cruise_limits': {'cardFill': '#12345678', 'cardBorder': '#C4CDD0B4'}}, 'compact': {}}
   assert rgba(result, 'text', 'large', 'current_speed') == (170, 187, 204, 221)
   assert rgba(result, 'cardFill', 'compact', 'following_distance') == (0, 0, 0, 0)
 

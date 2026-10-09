@@ -1,4 +1,3 @@
-const SCENES = ["engaged", "aol", "long_only", "experimental", "braking", "cem_stop_light", "cem_lead", "cem_curve", "slc_pending"]
 export const PREVIEW_SCENES = [
   { id: "engaged", label: "Engaged" },
   { id: "aol", label: "Lateral only" },
@@ -9,7 +8,15 @@ export const PREVIEW_SCENES = [
   { id: "cem_lead", label: "CEM · Stopped lead" },
   { id: "cem_curve", label: "CEM · Curve" },
   { id: "slc_pending", label: "Pending speed limit" },
+  { id: "slc_max", label: "Using set speed" },
+  { id: "slc_equal", label: "Equal speed limits" },
+  { id: "slc_pedal", label: "Using accelerator" },
+  { id: "slc_retained", label: "Set-speed override" },
+  { id: "slc_disengaged", label: "Cruise off" },
+  { id: "slc_unavailable", label: "Unavailable speed limit" },
+  { id: "slc_display", label: "Display-only speed limit" },
 ]
+const SCENES = PREVIEW_SCENES.map(({ id }) => id)
 
 export class LayoutPreviewFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),

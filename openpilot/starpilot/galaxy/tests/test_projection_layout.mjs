@@ -13,7 +13,7 @@ metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 1, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 2, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-screen-and-layout", editable: true, valid: true,
@@ -83,7 +83,7 @@ const draft = copy(feed.data.document)
 draft.layouts.large.current_speed.x += 20
 assert.equal(await feed.save(draft), true)
 assert.equal(requests[0].url, "./api/android-auto/layout")
-assert.equal(requests[1].body.document.version, 1)
+assert.equal(requests[1].body.document.version, 2)
 assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["canvas", "clock24Hour", "version", "widgets"])
 assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
