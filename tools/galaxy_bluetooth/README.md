@@ -10,7 +10,7 @@ iPhone app for StarPilot’s Galaxy interface. Uses local Wi-Fi first, with encr
 - [Live View and CarPlay pilot](ios/CARPLAY-PILOT.md)
 - [Android prototype](android/README.md)
 
-Open `ios/GalaxyBluetooth.xcodeproj`, select your signing team and iPhone, then Run. On comma 4, open **Settings → Pair phone**. Scan its code in the app and select the comma. The bridge needs a one-time installation.
+Open `ios/GalaxyBluetooth.xcodeproj`, select your signing team and iPhone, then Run. On comma 4, open **Settings → Bluetooth → Pair phone**. Scan its code in the app and select the comma. The bridge needs a one-time installation.
 
 ## Connection
 
@@ -26,4 +26,4 @@ iOS build, bridge tests and routing/update checks pass. Bluetooth startup after 
 
 See [validation](VALIDATION.md) and [upstream notices](UPSTREAM-NOTICES.md).
 
-Comma 3X: phone pairing is available in Device settings. The bridge and capture hooks are shared; physical 3X testing is pending. `bridge/probe.py` reports Bluetooth and encoder compatibility without credentials. See `ios/QUICK-START.md`.
+Comma 3X: phone pairing is available in Bluetooth settings. The bridge and capture hooks are shared; physical 3X testing is pending. `bridge/probe.py` reports Bluetooth and encoder compatibility without credentials. See `ios/QUICK-START.md`.

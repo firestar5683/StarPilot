@@ -1,19 +1,47 @@
-diff --git a/selfdrive/ui/layouts/settings/device.py b/selfdrive/ui/layouts/settings/device.py
---- a/selfdrive/ui/layouts/settings/device.py
-+++ b/selfdrive/ui/layouts/settings/device.py
-@@ -28,6 +28,7 @@
- from openpilot.system.ui.widgets.list_view import text_item, button_item, dual_button_item
- from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
- from openpilot.system.ui.widgets.scroller_tici import Scroller
+diff --git a/selfdrive/ui/layouts/settings/settings.py b/selfdrive/ui/layouts/settings/settings.py
+--- a/selfdrive/ui/layouts/settings/settings.py
++++ b/selfdrive/ui/layouts/settings/settings.py
+@@ -16,6 +16,7 @@
+ from openpilot.system.ui.widgets import Widget
+ from openpilot.system.ui.widgets.bluetooth import BluetoothManagerUI
+ from openpilot.system.ui.widgets.network import NetworkUI
 +from openpilot.tools.galaxy_bluetooth.comma_pairing_tici import pair_phone_item
  
- # Description constants
- DESCRIPTIONS = {
-@@ -149,6 +150,7 @@
-       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
-       self._pair_device_btn,
-       self._pair_galaxy_btn,
-+      pair_phone_item(),
-       button_item(lambda: tr("Driver Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['driver_camera']),
-                   callback=self._show_driver_camera, enabled=ui_state.is_offroad),
-       button_item(lambda: tr("Reset Driver Monitoring"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_driver_monitoring']),
+ # Constants
+ COLLAPSED_WIDTH = 0
+@@ -80,7 +81,7 @@
+       PanelType.STARPILOT: PanelInfo(tr_noop("StarPilot"), StarPilotLayout()),
+       PanelType.DEVICE: PanelInfo(tr_noop("Device"), DeviceLayout()),
+       PanelType.NETWORK: PanelInfo(tr_noop("Network"), NetworkUI(wifi_manager)),
+-      PanelType.BLUETOOTH: PanelInfo(tr_noop("Bluetooth"), BluetoothManagerUI(bluetooth_manager)),
++      PanelType.BLUETOOTH: PanelInfo(tr_noop("Bluetooth"), BluetoothManagerUI(bluetooth_manager, phone_pairing=pair_phone_item())),
+       PanelType.TOGGLES: PanelInfo(tr_noop("Toggles"), TogglesLayout()),
+       PanelType.SOFTWARE: PanelInfo(tr_noop("Software"), SoftwareLayout()),
+       PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout()),
+diff --git a/system/ui/widgets/bluetooth.py b/system/ui/widgets/bluetooth.py
+--- a/system/ui/widgets/bluetooth.py
++++ b/system/ui/widgets/bluetooth.py
+@@ -177,8 +177,9 @@
+ 
+ class BluetoothManagerUI(Widget):
+   """Big UI Bluetooth settings panel backed by the existing Bluetooth manager daemon."""
+-  def __init__(self, manager: BluetoothManager):
++  def __init__(self, manager: BluetoothManager, phone_pairing: Widget | None = None):
+     super().__init__()
++    self._phone_pairing = phone_pairing
+     self._manager = manager
+     self._scroll_panel = GuiScrollPanel()
+     self._power_toggle = Toggle(initial_state=False, callback=self._toggle_power)
+@@ -378,7 +379,11 @@
+     header_rect = rl.Rectangle(rect.x, rect.y, rect.width, HEADER_HEIGHT)
+     self._render_header(header_rect, status)
+ 
+-    content_rect = rl.Rectangle(rect.x, rect.y + HEADER_HEIGHT, rect.width, rect.height - HEADER_HEIGHT)
++    content_y = rect.y + HEADER_HEIGHT
++    if self._phone_pairing is not None:
++      self._phone_pairing.render(rl.Rectangle(rect.x + HEADER_PADDING, content_y, rect.width - 2 * HEADER_PADDING, ITEM_HEIGHT))
++      content_y += ITEM_HEIGHT
++    content_rect = rl.Rectangle(rect.x, content_y, rect.width, rect.y + rect.height - content_y)
+     if not status.available:
+       gui_label(content_rect, tr("Bluetooth is not available on this device."), font_size=62,
+                 color=TEXT_SECONDARY, alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)

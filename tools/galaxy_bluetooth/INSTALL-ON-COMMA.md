@@ -91,7 +91,7 @@ including SSH, bridge dependencies and pairing.
 
 ## Pair a phone without copying a key
 
-On comma 4 while offroad, open Settings → Pair phone → pair phone. In the updated
+On comma 4 while offroad, open Settings → Bluetooth → Pair phone → pair phone. In the updated
 iPhone app, choose Scan pairing code, allow camera access and scan the displayed
 code. Select the comma found by Bluetooth. The app saves the key in Keychain only
 after its encrypted bridge handshake succeeds. No internet is needed to scan.
@@ -102,7 +102,7 @@ enable the bridge by itself. A native iPhone app rebuild is required for scannin
 The QR contains a private shared Bluetooth key, not a Galaxy web link. Keep it
 private. The display closes after two minutes or when going onroad; this hides
 the code but does not expire the shared credential. Multiple phones may share
-it. Settings → Pair phone → forget paired phones requires a confirmation slide
+it. Settings → Bluetooth → Pair phone → forget paired phones requires a confirmation slide
 and replaces the key atomically. The bridge closes old sessions and rejects old
 keys without restarting its Bluetooth advertisement. Previously accepted setting
 requests cannot be undone by revocation. Revocation affects this BLE bridge, not
@@ -114,4 +114,4 @@ scanning and revoke/re-pair hardware checks remain required.
 
 ## Comma 3X pilot
 
-The same branch and bridge installer apply. Enable Bluetooth in Settings, then pair from **Settings → Device → Pair phone**. Run `tools/galaxy_bluetooth/bridge/probe.py` with `/data/galaxy-ble/venv/bin/python` and send the report before testing. Physical 3X validation is still pending. See `ios/QUICK-START.md` for the reboot, revocation and Live View checks.
+The same branch and bridge installer apply. Enable Bluetooth in Settings, then pair from **Settings → Bluetooth → Pair phone**. Run `tools/galaxy_bluetooth/bridge/probe.py` with `/data/galaxy-ble/venv/bin/python` and send the report before testing. Physical 3X validation is still pending. See `ios/QUICK-START.md` for the reboot, revocation and Live View checks.

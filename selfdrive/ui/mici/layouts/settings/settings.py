@@ -9,7 +9,6 @@ from openpilot.selfdrive.ui.mici.layouts.settings.device import DeviceLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.developer import DeveloperLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.driving_model import DrivingModelBigButton
 from openpilot.selfdrive.ui.mici.layouts.settings.galaxy import GalaxyBigButton
-from openpilot.tools.galaxy_bluetooth.comma_pairing import PairPhoneButton
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.wifi_manager import WifiManager
 
@@ -102,7 +101,6 @@ class SettingsLayout(NavScroller):
       self._driving_model_btn,
       visuals_btn,
       galaxy_btn,
-      PairPhoneButton(),
       PairBigButton(),
       #BigDialogButton("manual", "", "icons_mici/settings/manual_icon.png", "Check out the mici user\nmanual at comma.ai/setup"),
       developer_btn,

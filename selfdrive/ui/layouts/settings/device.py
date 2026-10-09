@@ -28,7 +28,6 @@ from openpilot.system.ui.widgets.keyboard import Keyboard
 from openpilot.system.ui.widgets.list_view import text_item, button_item, dual_button_item
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.widgets.scroller_tici import Scroller
-from openpilot.tools.galaxy_bluetooth.comma_pairing_tici import pair_phone_item
 
 # Description constants
 DESCRIPTIONS = {
@@ -150,7 +149,6 @@ class DeviceLayout(Widget):
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       self._pair_device_btn,
       self._pair_galaxy_btn,
-      pair_phone_item(),
       button_item(lambda: tr("Driver Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['driver_camera']),
                   callback=self._show_driver_camera, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Reset Driver Monitoring"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_driver_monitoring']),

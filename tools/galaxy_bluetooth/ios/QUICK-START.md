@@ -50,7 +50,7 @@ If SSH is not set up yet, set it up on your own comma first. Your SSH public key
 
 ## 4. Pair and connect
 
-1. Enable Bluetooth on comma, then display its QR code: **Settings → Pair phone** on comma 4, or **Settings → Device → Pair phone → MANAGE → Pair phone** on comma 3X.
+1. Enable Bluetooth on comma, then display its QR code: **Settings → Bluetooth → Pair phone** on comma 4, or **Settings → Bluetooth → Pair phone → MANAGE → Pair phone** on comma 3X.
 2. Open the iPhone app and tap the circular **Settings** gear.
 3. Tap **Scan pairing code**, scan your comma’s code, then select your comma from the Bluetooth device list to finish pairing.
 4. Leave the connection mode on **Automatic**. Connect both devices to the same reachable Wi-Fi network for LAN access; Bluetooth provides nearby fallback.
@@ -90,7 +90,7 @@ Run this in the comma SSH terminal after installing the bridge:
 
 Send Nate the output. It contains the hardware model, Python version, Bluetooth capabilities, Galaxy status and a Live View encoder check; it does not include the pairing key. Look for a powered adapter with `gattServer: true`, `advertising: true`, `galaxyHTTPStatus: 200`, and `liveEncoder.available: true`. An encoder failure affects video; test Galaxy settings separately. If Bluetooth is missing, enable it in comma Settings and rerun the check.
 
-After reboot, confirm the phone can reconnect without starting anything manually. Test forgetting phones from comma Device settings: the old code should stop working, and scanning the new code should restore access. QR codes close after two minutes or when comma enters driving mode.
+After reboot, confirm the phone can reconnect without starting anything manually. Test forgetting phones from comma Bluetooth settings: the old code should stop working, and scanning the new code should restore access. QR codes close after two minutes or when comma enters driving mode.
 
 For the first Live View test, keep the comma awake and parked. Report video FPS, dropped frames, temperatures and any UI lag with Live View on versus off. Unavailable sensors should remain blank; do not treat them as zero readings.
 
