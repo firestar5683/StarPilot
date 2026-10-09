@@ -133,6 +133,10 @@ function launch {
   # start manager
   cd system/manager
 
+  if [ -f /AGNOS ]; then
+    timeout 15s python3 "$DIR/tools/galaxy_bluetooth/settings_backup.py" || echo "Galaxy settings backup unavailable"
+  fi
+
   sp_launch_timing "launch_param_migrations_start"
   if ! python3 ./launch_param_migrations.py; then
     echo "Launch param migrations failed; continuing boot."

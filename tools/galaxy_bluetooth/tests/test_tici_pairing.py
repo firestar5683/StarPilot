@@ -18,6 +18,7 @@ class TiciPairingTests(unittest.TestCase):
     def dialog(*args, **kwargs):
       return SimpleNamespace(args=args, **kwargs)
     attrs = {
+      'openpilot.tools.galaxy_bluetooth.bootstrap': {'setup_status': lambda: 'Ready to pair', 'retry_setup': Mock()},
       'numpy': {}, 'pyray': {'unload_texture': Mock()}, 'qrcode': {},
       'openpilot.selfdrive.ui.ui_state': {'ui_state': self.ui},
       'openpilot.system.ui.lib.application': {'gui_app': self.gui, 'FontWeight': SimpleNamespace(MEDIUM=1)},

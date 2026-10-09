@@ -12,6 +12,7 @@ from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
 from openpilot.system.ui.widgets.list_view import button_item
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
+from openpilot.tools.galaxy_bluetooth.bootstrap import setup_status, retry_setup
 from openpilot.tools.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
 
@@ -97,11 +98,17 @@ def pair_phone_item():
         return
       if dialog.selection == "Pair phone":
         show_qr()
-      else:
+      elif dialog.selection == "Retry setup":
+        try:
+          retry_setup()
+          gui_app.push_widget(alert_dialog("Setup queued. Connect comma to internet for first setup."))
+        except OSError:
+          gui_app.push_widget(alert_dialog("Could not queue setup. Restart comma and try again."))
+      elif dialog.selection == "Forget paired phones":
         gui_app.push_widget(ConfirmDialog("Forget all phones? Scan again to reconnect.", "Forget", callback=forget))
 
-    dialog = MultiOptionDialog("Galaxy app", ["Pair phone", "Forget paired phones"], "Pair phone", callback=apply)
+    dialog = MultiOptionDialog(setup_status(), ["Pair phone", "Forget paired phones", "Retry setup"], "Pair phone", callback=apply)
     gui_app.push_widget(dialog)
 
-  return button_item("Pair phone", "MANAGE", "Pair the Galaxy iPhone app with this comma.",
+  return button_item("Pair phone", "MANAGE", lambda: setup_status(),
                      callback=show_options, enabled=ui_state.is_offroad)

@@ -11,6 +11,7 @@ from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigConfirmatio
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.widgets.label import UnifiedLabel
+from openpilot.tools.galaxy_bluetooth.bootstrap import setup_status, retry_setup
 from openpilot.tools.galaxy_bluetooth.bridge.pairing import ensure_key, load_key, rotate_key, qr_payload
 
 
@@ -67,6 +68,7 @@ class PairPhoneButton(BigButton):
   def _update_state(self):
     super()._update_state()
     self.set_enabled(not ui_state.started)
+    self.set_value(setup_status())
 
   def _show_qr(self):
     if ui_state.started:
@@ -96,12 +98,18 @@ class PairPhoneButton(BigButton):
         return
       if holder["dialog"].get_selected_option() == "pair phone":
         self._show_qr()
-      else:
+      elif holder["dialog"].get_selected_option() == "retry setup":
+        try:
+          retry_setup()
+          gui_app.push_widget(BigDialog("Bluetooth setup", "Setup queued. Connect comma to internet for first setup."))
+        except OSError:
+          gui_app.push_widget(BigDialog("Bluetooth setup", "Could not queue setup. Restart comma and try again."))
+      elif holder["dialog"].get_selected_option() == "forget paired phones":
         gui_app.push_widget(BigConfirmationDialog(
           "forget all phones?\nscan again to reconnect",
           gui_app.texture("icons_mici/settings/bluetooth.png", 64, 64), self._forget, red=True))
 
-    dialog = BigMultiOptionDialog(options=["pair phone", "forget paired phones"],
+    dialog = BigMultiOptionDialog(options=["pair phone", "forget paired phones", "retry setup"],
                                  default="pair phone", right_btn_callback=apply)
     holder["dialog"] = dialog
     gui_app.push_widget(dialog)

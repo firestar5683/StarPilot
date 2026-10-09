@@ -32,7 +32,7 @@ The complete experiment needs the **Nate/galaxy-bluetooth** branch of [Nate’s 
 
 The pilot is based on a specific StarPilot Dom version. Check compatibility before replacing another branch or fork.
 
-Follow **INSTALL-ON-COMMA.md** in the extracted folder. It covers switching to the pilot branch, installing the bridge and starting it at boot. Run its commands in the comma SSH terminal, one at a time. Stop if a command reports an error; send Nate the error instead of forcing the change.
+Follow **INSTALL-ON-COMMA.md** in the extracted folder. It covers switching to the pilot branch. Restart comma while parked with internet access; Bluetooth setup then runs automatically. Run its commands in the comma SSH terminal, one at a time. Stop if a command reports an error; send Nate the error instead of forcing the change.
 
 To connect from your Mac Terminal, replace `YOUR_COMMA_IP` with the address shown by your comma:
 
@@ -108,3 +108,19 @@ Send your iPhone model/iOS version, comma model and branch/version, network type
 
 - [Free-account testing and seven-day limits](https://developer.apple.com/support/compare-memberships/)
 - [Distribution options, including TestFlight](https://help.apple.com/xcode/mac/current/en.lproj/dev31de635e5.html)
+
+## Keeping the pilot updated
+
+After the one-time comma setup, Galaxy's Update Manager can update the installed branch. In Advanced Updates it is labeled **Nate's BT Build**; the Git branch remains `Nate/galaxy-bluetooth`. This appears only when comma's origin is Nate's fork. Comma needs internet for downloading updates, even if the app connects over Bluetooth. Follow update/reboot prompts while parked. Get native iPhone updates from TestFlight. Dependency changes automatically trigger setup while parked with comma internet access.
+
+## Automatic setup and existing settings
+
+First setup needs internet on comma. Restart while parked, enable Bluetooth and
+open Settings → Bluetooth → Pair phone. Wait for Ready to pair, then scan its QR
+code. If setup fails, reconnect comma to internet and choose Retry setup. Once
+installed, Bluetooth works without internet. No SSH bridge setup is required.
+
+The Bluetooth installer preserves existing settings and pairing keys. The first
+boot privately backs up persistent parameters and caches on comma. StarPilot's
+existing migrations still apply when changing versions, so check your driving
+settings afterwards. Do not share the settings backup: it contains credentials.

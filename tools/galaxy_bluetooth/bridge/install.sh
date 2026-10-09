@@ -18,8 +18,6 @@ if [ -z "$python_bin" ]; then
   fi
 fi
 
-# AGNOS may omit ensurepip. Create the bridge environment without it, then
-# install into that explicit environment using an existing package installer.
 "$python_bin" -m venv --without-pip "$data_dir/venv"
 uv_bin=$(command -v uv || true)
 if [ -z "$uv_bin" ] && [ -x /usr/local/venv/bin/uv ]; then
@@ -37,11 +35,13 @@ else
   exit 1
 fi
 "$data_dir/venv/bin/python" -c 'import dbus_next; from Crypto.Cipher import AES'
-if [ ! -f "$data_dir/pairing.json" ]; then
-  printf '\nPairing key: paste this into the iPhone app and keep it private.\n'
-  "$data_dir/venv/bin/python" "$bridge_dir/server.py" --key-file "$data_dir/pairing.json" --init-key
-else
-  printf '\nExisting pairing key preserved.\n'
+"$data_dir/venv/bin/python" - "$bridge_dir" "$data_dir/pairing.json" <<'KEY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from pairing import ensure_key
+ensure_key(Path(sys.argv[2]))
+KEY
+if [ "${GALAXY_BLE_QUIET:-0}" != "1" ]; then
+  printf '\nBridge installed. Pair this phone from Settings → Bluetooth → Pair phone.\n'
 fi
-printf '\nStart the bridge with:\n'
-printf '"%s" "%s" --key-file "%s"\n' "$data_dir/venv/bin/python" "$bridge_dir/server.py" "$data_dir/pairing.json"

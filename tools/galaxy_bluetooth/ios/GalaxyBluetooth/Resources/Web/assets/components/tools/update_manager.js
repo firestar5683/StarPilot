@@ -134,6 +134,13 @@ function normalizeGithubRemote(remoteValue, commitsUrlValue = "") {
   return remote
 }
 
+function branchLabel(branch) {
+  const remote = normalizeGithubRemote(state.status?.originRemote, state.status?.commitsUrl)
+  return remote.toLowerCase() === "https://github.com/natehuby76/starpilotbt" && branch === "Nate/galaxy-bluetooth"
+    ? "Nate's BT Build"
+    : branch
+}
+
 function currentOrSelectedBranchForCommits() {
   const selected = String(state.selectedBranch || "").trim()
   if (selected) return selected
@@ -152,7 +159,7 @@ function activeCommitsUrl() {
 function activeCommitsLabel() {
   const branch = currentOrSelectedBranchForCommits()
   return branch
-    ? `View latest commit for the "${branch}" branch`
+    ? `View latest commit for "${branchLabel(branch)}"`
     : "View latest commit for this branch"
 }
 
@@ -785,7 +792,7 @@ export function UpdateManager() {
       ${() => !state.loading ? html`
         <div class="updateCard">
           <div class="updateGrid">
-            <p><strong>Current Branch:</strong> ${state.status?.branch || "Unknown"}</p>
+            <p><strong>Current Branch:</strong> ${branchLabel(state.status?.branch) || "Unknown"}</p>
             <p><strong>Installed Commit:</strong> ${shortHash(state.status?.localCommit)}</p>
             <p><strong>Latest Commit:</strong> ${shortHash(state.status?.remoteCommit)}</p>
             <p><strong>Update Available:</strong> ${state.status?.updateAvailable ? "Yes" : "No"}</p>
@@ -872,7 +879,7 @@ export function UpdateManager() {
                     }
                   }}">
                   ${() => state.branches.length
-                    ? state.branches.map((branch) => html`<option value="${branch}" selected="${() => branch === state.selectedBranch || false}">${branch}${branch === state.status?.branch ? " (current)" : ""}</option>`)
+                    ? state.branches.map((branch) => html`<option value="${branch}" selected="${() => branch === state.selectedBranch || false}">${branchLabel(branch)}${branch === state.status?.branch ? " (current)" : ""}</option>`)
                     : html`<option value="">No branches found</option>`
                   }
                 </select>

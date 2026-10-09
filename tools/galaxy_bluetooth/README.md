@@ -27,3 +27,12 @@ iOS build, bridge tests and routing/update checks pass. Bluetooth startup after 
 See [validation](VALIDATION.md) and [upstream notices](UPSTREAM-NOTICES.md).
 
 Comma 3X: phone pairing is available in Bluetooth settings. The bridge and capture hooks are shared; physical 3X testing is pending. `bridge/probe.py` reports Bluetooth and encoder compatibility without credentials. See `ios/QUICK-START.md`.
+
+## Automatic bridge setup
+
+The pilot's manager runs `bootstrap.py` on comma. First parked boot installs the
+bridge in its own environment; later boots reuse it. Dependency changes are
+installed while parked. Bluetooth settings show setup status and Retry setup.
+`settings_backup.py` saves one private parameter/cache snapshot before existing
+launch migrations. Setup never resets StarPilot parameters or pairing keys.
+Do not share the backup; it contains credentials. See INSTALL-ON-COMMA.md.

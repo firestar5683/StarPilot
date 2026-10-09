@@ -45,7 +45,12 @@ def check(wheelhouse, uv_bin=None):
         if second.returncode:
             raise RuntimeError(second.stderr)
         assert key_file.read_bytes() == first_key
-        assert "Existing pairing key preserved" in second.stdout
+        assert json.loads(first_key)["key"] not in first.stdout + first.stderr + second.stdout + second.stderr
+        env["GALAXY_BLE_QUIET"] = "1"
+        quiet = subprocess.run(command, env=env, capture_output=True, text=True)
+        assert quiet.returncode == 0
+        assert key_file.read_bytes() == first_key
+        assert json.loads(first_key)["key"] not in quiet.stdout + quiet.stderr
         print(f"{'uv' if uv_bin else 'pip'} installer: passed with ensurepip unavailable; dependencies isolated; key preserved")
 
 

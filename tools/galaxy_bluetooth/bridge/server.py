@@ -21,6 +21,7 @@ from protocol import (Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, NOTI
                       NOTIFICATION_WINDOW, open_message, packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy, error_response
 from pairing import load_key
+from setup_health import write_ready, clear_ready
 
 ROOT = "/link/galaxy/ble"
 SERVICE_PATH = ROOT + "/service0"
@@ -392,6 +393,7 @@ def create_key(path):
 
 async def serve(args):
     key_path = Path(args.key_file)
+    clear_ready(key_path.parent)
     key = load_key(key_path)
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
     gateway = Gateway(key, GalaxyProxy(args.galaxy_port), key_path)
@@ -427,6 +429,7 @@ async def serve(args):
     watcher = asyncio.create_task(gateway.watch_key())
     try:
         await advertising.call_register_advertisement(ad_path, {})
+        write_ready(key_path.parent)
         LOG.info("Galaxy BLE bridge ready on %s; forwarding to localhost:%s", adapter_path, args.galaxy_port)
         stopped = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -434,6 +437,7 @@ async def serve(args):
             loop.add_signal_handler(sig, stopped.set)
         await stopped.wait()
     finally:
+        clear_ready(key_path.parent)
         watcher.cancel()
         try:
             await watcher

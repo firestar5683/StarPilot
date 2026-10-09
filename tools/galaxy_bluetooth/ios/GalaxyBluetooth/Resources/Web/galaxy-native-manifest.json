@@ -359,8 +359,8 @@
     },
     {
       "path": "assets/components/tools/update_manager.js",
-      "sha256": "7087babf90ea6cc2cb9eec76bcae68dcb4dec92e0b5612bd67309df62d13cf03",
-      "size": 35365
+      "sha256": "fe8fa936b3ffb0ec457135965aaa018691ab9b51e489d73ce847bc2efeb35975",
+      "size": 35673
     },
     {
       "path": "assets/components/tools/v_asm.css",
