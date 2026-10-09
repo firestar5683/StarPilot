@@ -22,9 +22,9 @@ for (const [index, label] of ["Home", "Work"].entries()) {
   metadata.widgets[key] = { label, kind: key, width: 320, height: 110, iconSize: 110, colors: {},
     default: { x: 2195 + index * 335, y: 280, enabled: false, display: 'words' } }
 }
-metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 110, height: 110, colors: {}, required: true, frontmost: true,
+metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
-  default: { x: 30, y: 940, enabled: true } }
+  default: { x: 30, y: 954, enabled: true } }
 metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work", "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
@@ -159,8 +159,8 @@ for (const display of ['emoji', null, true, 1]) {
 // The escape control moves normally but cannot be disabled, removed, or placed below another widget.
 vm.state.selected = 'car_exit'
 assert.equal(profile.widgets.car_exit.label, 'Exit to car')
-assert.deepEqual(widgetSize(profile.widgets.car_exit, vm.layout.car_exit), [110, 110])
-assert.deepEqual([vm.layout.car_exit.x, vm.layout.car_exit.y], [30, 940])
+assert.deepEqual(widgetSize(profile.widgets.car_exit, vm.layout.car_exit), [96, 96])
+assert.deepEqual([vm.layout.car_exit.x, vm.layout.car_exit.y], [30, 954])
 assert.equal(vm.layout.car_exit.enabled, true)
 vm.changePosition('car_exit', 200, 800)
 assert.deepEqual([vm.layout.car_exit.x, vm.layout.car_exit.y], [200, 800])

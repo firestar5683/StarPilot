@@ -30,13 +30,14 @@ class ProjectionExit:
     x, y = placed['x'], placed['y']
     width, height = CAR_EXIT_SIZE
     rect = rl.Rectangle(x, y, width, height)
-    border = rl.Color(199, 174, 247, 255)
-    rl.draw_rectangle_rounded(rect, .3, 8, rl.Color(15, 13, 23, 245))
+    border = rl.Color(199, 174, 247, 200)
+    icon = rl.Color(199, 174, 247, 230)
+    rl.draw_rectangle_rounded(rect, .3, 8, rl.Color(15, 13, 23, 166))
     rl.draw_rectangle_rounded_lines_ex(rect, .3, 8, 3, border)
     # Door frame and outward arrow: the familiar exit-to-app symbol without text.
-    for x1, y1, x2, y2 in ((63, 24, 29, 24), (29, 24, 29, 86), (29, 86, 63, 86),
-                           (44, 55, 88, 55), (75, 42, 88, 55), (88, 55, 75, 68)):
-      rl.draw_line_ex(rl.Vector2(x + x1, y + y1), rl.Vector2(x + x2, y + y2), 6, border)
+    for x1, y1, x2, y2 in ((54, 20, 24, 20), (24, 20, 24, 76), (24, 76, 54, 76),
+                           (38, 48, 78, 48), (67, 37, 78, 48), (78, 48, 67, 59)):
+      rl.draw_line_ex(rl.Vector2(x + x1, y + y1), rl.Vector2(x + x2, y + y2), 5, icon)
 
   def render(self, state) -> None:
     self.draw(self.placement(state.customization))

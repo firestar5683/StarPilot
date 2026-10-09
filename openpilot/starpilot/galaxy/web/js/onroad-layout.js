@@ -409,10 +409,10 @@ export const LayoutWidgetPreview = {
         </template>
       </g>
       <g v-else-if="widget.kind === 'car_exit'">
-        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
-        <g data-preview-icon="door-exit" fill="none" stroke="#c7aef7" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M63 24 H29 V86 H63" />
-          <path d="M44 55 H88 M75 42 L88 55 L75 68" />
+        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="15" fill="#0f0d17a6" stroke="#c7aef7c8" stroke-width="3" />
+        <g data-preview-icon="door-exit" fill="none" stroke="#c7aef7e6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M54 20 H24 V76 H54" />
+          <path d="M38 48 H78 M67 37 L78 48 L67 59" />
         </g>
       </g>
       <g v-else-if="widget.kind === 'nav_card'">

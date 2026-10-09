@@ -69,6 +69,32 @@ def test_old_documents_keep_their_original_shape():
   assert validate_layout_for_viewport(default_layout_for_viewport((1860, 1080)), (1860, 1080)) == default_layout_for_viewport((1860, 1080))
 
 
+def test_projection_escape_replaces_native_corner_hint():
+  # Inspect the real render guard without importing native UI/IPC libraries on CPU-only hosts.
+  import ast
+  from pathlib import Path
+  from types import SimpleNamespace as NS
+
+  source = Path(__file__).parents[1] / 'onroad.py'
+  tree = ast.parse(source.read_text())
+  method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_large')
+  parents = {child: parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)}
+  call = next(node for node in ast.walk(method) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id == 'render_corner_hint')
+  guard = parents[call]
+  while not isinstance(guard, ast.If):
+    guard = parents[guard]
+  condition = compile(ast.Expression(guard.test), str(source), 'eval')
+
+  def visible(viewport, alert_size):
+    return eval(condition, {'AlertSize': NS(FULL='full')},
+                {'self': NS(projection_viewport=viewport), 'state': NS(alert=NS(size=alert_size))})
+
+  assert visible(None, 'none')
+  assert not visible((2880, 1080), 'none')
+  assert not visible(None, 'full')
+
+
 @pytest.mark.parametrize('profile,viewport', [('large', None), ('compact', None), ('large', (2880, 1080))])
 def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   # Load the real composition method without native IPC/Params imports, which

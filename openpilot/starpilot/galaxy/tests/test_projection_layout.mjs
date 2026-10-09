@@ -11,9 +11,9 @@ metadata.width = 2880
 metadata.bounds.width = 2820
 metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
-metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 110, height: 110, colors: {}, required: true, frontmost: true,
+metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
-  default: { x: 30, y: 940, enabled: true } }
+  default: { x: 30, y: 954, enabled: true } }
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))

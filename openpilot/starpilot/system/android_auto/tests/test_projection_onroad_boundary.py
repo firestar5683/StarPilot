@@ -79,7 +79,7 @@ class TestProjectionOnroad(unittest.TestCase):
                                        native_focus=requested)
     self.addCleanup(view.close)
     placed = layout['widgets'][CAR_EXIT]
-    x, y = placed['x'] + 55, placed['y'] + 55
+    x, y = placed['x'] + 48, placed['y'] + 48
     events = [SimpleNamespace(kind='down', x=x / 2880, y=y / 1080),
               SimpleNamespace(kind='up', x=x / 2880, y=y / 1080)]
     view.handle_touches(events)

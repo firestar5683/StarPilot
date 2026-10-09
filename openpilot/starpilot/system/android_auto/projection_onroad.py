@@ -118,11 +118,6 @@ class ProjectionOnroad:
       self._resources.callback(self._close_onroad)
       self.exit = ProjectionExit(native.rl, self.fonts, native.font_role, lambda: self.native_focus())
       self.onroad.projection_exit_layer = self.exit.render
-      # The view's render-prepare hooks belong to gui_app's window loop, which this renderer never runs.
-      # Without its texture, the corner hint redraws ~100 primitives every frame.
-      self._corner_cache = getattr(self.onroad, '_corner_cache', None)
-      if self._corner_cache is not None:
-        self._corner_cache.headless = True
       self.monitor = native.monitor(native.profile.LARGE)
       self._monitor_pair = None
       self._monitor_pair_ns = None
@@ -218,8 +213,6 @@ class ProjectionOnroad:
 
   def prepare(self):
     """Before the frame's render target is bound: offscreen map work happens here."""
-    if self._corner_cache is not None:
-      self._corner_cache.prepare()
     if self.favorites is not None:
       self.favorites.refresh()
       self.onroad.navigation_favorites.document = self.favorites.document

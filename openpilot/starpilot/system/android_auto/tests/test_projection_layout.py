@@ -164,9 +164,9 @@ class TestProjectionLayout(unittest.TestCase):
     self.assertEqual(metadata['widgets'][CAR_EXIT]['label'], 'Exit to car')
     self.assertTrue(metadata['widgets'][CAR_EXIT]['required'])
     self.assertTrue(metadata['widgets'][CAR_EXIT]['frontmost'])
-    self.assertEqual((metadata['widgets'][CAR_EXIT]['width'], metadata['widgets'][CAR_EXIT]['height']), (110, 110))
+    self.assertEqual((metadata['widgets'][CAR_EXIT]['width'], metadata['widgets'][CAR_EXIT]['height']), (96, 96))
     self.assertTrue(document['widgets'][CAR_EXIT]['enabled'])
-    self.assertEqual((document['widgets'][CAR_EXIT]['x'], document['widgets'][CAR_EXIT]['y']), (30, 940))
+    self.assertEqual((document['widgets'][CAR_EXIT]['x'], document['widgets'][CAR_EXIT]['y']), (30, 954))
     document['widgets'][CAR_EXIT].update(x=30, y=30)
     self.assertEqual(validate_layout(document, SCREEN)['widgets'][CAR_EXIT]['x'], 30)
     order = metadata['widgetOrder']

@@ -372,7 +372,9 @@ class OnroadView:
       clip.end_scissor_mode()
     if not self.projection_viewport:
       render_live_sidebar(self.fonts, rl.Rectangle(width, 0, 300, height), state.developer_metrics)
-    if state.alert.size != AlertSize.FULL:
+    # Projection has its own permanent escape control in this corner; the native
+    # favorite-menu hint would overlap it and does not control projected input.
+    if not self.projection_viewport and state.alert.size != AlertSize.FULL:
       render_corner_hint(content, cache=self._corner_cache)
     label = status_label(state)
     if label is not None:

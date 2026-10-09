@@ -39,7 +39,7 @@ def test_car_widget_tap_requests_native_focus_and_drag_does_not():
   Graphics.lines = []
   control = ProjectionExit(Graphics, Fonts(), NS(SEMI_BOLD='bold', NORMAL='normal'), lambda: calls.append(NATIVE_FOCUS))
   placed = default_layout_for_viewport((2880, 1080))['widgets'][CAR_EXIT]
-  x, y = placed['x'] + 55, placed['y'] + 55
+  x, y = placed['x'] + 48, placed['y'] + 48
   control.draw(placed)
   assert control.fonts.drawn == []
   assert len(Graphics.lines) == 6
