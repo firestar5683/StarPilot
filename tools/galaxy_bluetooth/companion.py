@@ -11,6 +11,7 @@ import struct
 import subprocess
 from pathlib import Path
 import threading
+import tempfile
 import time
 
 DATA = Path('/dev/shm/galaxy-companion')
@@ -21,9 +22,14 @@ _nonces = {}
 
 def atomic_write(name, content):
   DATA.mkdir(mode=0o700, exist_ok=True)
-  temporary = DATA / (name + '.tmp')
-  temporary.write_bytes(content)
-  os.replace(temporary, DATA / name)
+  with tempfile.NamedTemporaryFile(dir=DATA, prefix=name + '.', suffix='.tmp', delete=False) as output:
+    temporary = Path(output.name)
+    try:
+      output.write(content)
+      output.flush()
+      os.replace(temporary, DATA / name)
+    finally:
+      temporary.unlink(missing_ok=True)
 
 
 def register_routes(app):

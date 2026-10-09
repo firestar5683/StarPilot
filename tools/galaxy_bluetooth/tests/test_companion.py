@@ -1,4 +1,5 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import hmac
 import importlib.util
@@ -7,6 +8,7 @@ from pathlib import Path
 import sys
 import struct
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -45,6 +47,21 @@ class CompanionTests(unittest.TestCase):
   def headers(self, path, nonce='a' * 32):
     mac = hmac.new(KEY, f'{nonce}\nGET\n{path}'.encode(), hashlib.sha256).hexdigest()
     return {'X-Companion-Nonce': nonce, 'X-Companion-MAC': mac}
+
+  def test_overlapping_capture_requests_write_complete_files(self):
+    barrier = threading.Barrier(4)
+    replace = companion.os.replace
+    payloads = [str(i).encode() * 4096 for i in range(4)]
+
+    def overlapping_replace(source, destination):
+      barrier.wait(timeout=5)
+      replace(source, destination)
+
+    with patch.object(companion.os, 'replace', side_effect=overlapping_replace):
+      with ThreadPoolExecutor(max_workers=4) as workers:
+        list(workers.map(lambda data: companion.atomic_write('capture-request', data), payloads))
+    self.assertIn((companion.DATA / 'capture-request').read_bytes(), payloads)
+    self.assertEqual(list(companion.DATA.glob('*.tmp')), [])
 
   def test_opt_in_authentication_and_replay(self):
     path = '/api/companion/diagnostics'
