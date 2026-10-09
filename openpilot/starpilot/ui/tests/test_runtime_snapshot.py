@@ -119,7 +119,8 @@ class TestRuntimeSnapshot(unittest.TestCase):
     self.assertIsNone(observation.decision_id)
     presentation = resolve_unified_speed(state)
     self.assertEqual(presentation.posted_text, '30')
-    self.assertEqual(presentation.limit_text, '35')
+    assert observation.effective_cap_mps is not None
+    self.assertAlmostEqual(observation.effective_cap_mps * 2.2369362921, 35.0, places=4)
     self.assertEqual(presentation.offset_text, '+5')
     self.assertEqual(presentation.active_side, 'none')
     ui.params.values['SpeedLimitController'] = '1'
@@ -127,20 +128,28 @@ class TestRuntimeSnapshot(unittest.TestCase):
     ui.sm['carControl'].longActive = True
     state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
     presentation = resolve_unified_speed(state)
-    self.assertEqual((presentation.active_side, presentation.status), ('slc', 'Active'))
+    self.assertEqual(presentation.active_side, 'slc')
+    self.assertTrue(state.speed_limit.action_enabled)
+    self.assertTrue(state.speed_limit.limiting_max_set)
     from openpilot.starpilot.ui.onroad_state import slc_controls
     from openpilot.starpilot.ui.presentation import Profile
     self.assertEqual(slc_controls(Profile.LARGE, state), ())
     ui.sm['carState'].vCruiseCluster = 40.0
-    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
-    self.assertEqual((presentation.active_side, presentation.status), ('max', 'MAX limiting'))
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
+    presentation = resolve_unified_speed(state)
+    self.assertEqual(presentation.active_side, 'max')
+    self.assertFalse(state.speed_limit.limiting_max_set)
     legacy.slcOverriddenSpeed = 20.0
-    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
-    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Set-speed override'))
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
+    presentation = resolve_unified_speed(state)
+    self.assertEqual(presentation.active_side, 'none')
+    self.assertTrue(state.speed_limit.driver_override_active)
     legacy.slcOverriddenSpeed = 0.0
     ui.sm['carControl'].longActive = False
-    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
-    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Disengaged'))
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
+    presentation = resolve_unified_speed(state)
+    self.assertEqual(presentation.active_side, 'none')
+    self.assertFalse(state.cruise_active)
     ui.sm.valid['slcState'] = True
     self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.speed_limit.source, 'dashboard')
     ui.sm.valid['slcState'] = False
