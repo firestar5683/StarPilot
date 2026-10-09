@@ -71,7 +71,8 @@ def _message_at_age(sm: Any, service: str, now_ns: int, after_frame: int, max_ag
     if replay is not None and not replay.valid:
       return None
     stamp = int(sm.logMonoTime[service])
-    if (not sm.valid[service] or not sm.alive[service] or stamp <= 0 or stamp > now_ns or
+    max_future_ns = max_age_ns if replay is not None else 0
+    if (not sm.valid[service] or not sm.alive[service] or stamp <= 0 or stamp > now_ns + max_future_ns or
         now_ns - stamp > max_age_ns or int(sm.recv_frame[service]) <= after_frame):
       return None
     if recv_now_ns is not None and not (replay is not None and replay.paused):
@@ -117,7 +118,8 @@ def current_curve_message(sm: Any, now_ns: int, *, after_frame: int = 0) -> Any 
     stamp = int(sm.logMonoTime["slcState"])
     frequency = SERVICE_LIST["slcState"].frequency
     max_age_ns = int(2e9 / frequency) if frequency else 1_000_000_000
-    if (not sm.alive["slcState"] or stamp <= 0 or stamp > now_ns or now_ns - stamp > max_age_ns or
+    max_future_ns = max_age_ns if replay is not None else 0
+    if (not sm.alive["slcState"] or stamp <= 0 or stamp > now_ns + max_future_ns or now_ns - stamp > max_age_ns or
         int(sm.recv_frame["slcState"]) <= after_frame):
       return None
     return sm["slcState"]
@@ -205,8 +207,9 @@ def current_alert(sm: Any, now_ns: int, *, after_frame: int) -> OnroadAlert:
     if replay is not None and not replay.valid:
       return OnroadAlert()
     receipt_now = replay.host_ns if replay is not None else now_ns
+    max_future_ns = _ALERT_TRANSPORT_TIMEOUT_NS if replay is not None else 0
     if (not sm.valid[service] or int(sm.recv_frame[service]) <= after_frame or
-        stamp <= 0 or stamp > now_ns or receipt <= 0 or receipt > receipt_now):
+        stamp <= 0 or stamp > now_ns + max_future_ns or receipt <= 0 or receipt > receipt_now):
       return OnroadAlert()
     missing_ns = 0 if replay is not None and replay.paused else receipt_now - receipt
     if missing_ns > _ALERT_TRANSPORT_TIMEOUT_NS:
