@@ -74,13 +74,13 @@ def main() -> None:
           "native_raylib_sha256": digest(Path(raylib._cffi.__file__)),
           "source_sha256": {name: digest(module / name) for name in (
             "device.py", "device_state.py", "preview_device.py", "settings.py", "settings_assets.py", "presentation.py",
-            "settings-assets.json", "bitmap-fonts.json", "sora-brand-font.json")},
+            "settings-assets.json", "bitmap-fonts.json", "sora-brand-font.json", "dinish-speed-font.json")},
           "asset_sha256": {"icons/backspace.png": digest(args.asset_directory / "icons/backspace.png")},
           "font_sha256": {path.name: digest(path) for path in sorted(args.font_directory.glob("*"))
                           if path.name in {"Inter-Regular.fnt", "Inter-Regular.png", "Inter-Medium.fnt", "Inter-Medium.png",
                                            "Inter-Bold.fnt", "Inter-Bold.png", "Inter-SemiBold.fnt", "Inter-SemiBold.png",
                                            "unifont.fnt", "unifont.png"}} |
-                         {name: digest(module / "assets/fonts" / name) for name in ("Sora-800.fnt", "Sora-800.png")},
+                         {name: digest(module / "assets/fonts" / name) for name in ("Sora-800.fnt", "Sora-800.png", "DINish-Speed.fnt", "DINish-Speed.png")},
           "scope": "large captured viewport only; no compact Device scene, scrolling, services, or action execution",
         }
         (args.output / "large.json").write_text(json.dumps(report, indent=2) + "\n")

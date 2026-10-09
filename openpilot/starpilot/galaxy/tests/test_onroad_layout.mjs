@@ -10,8 +10,8 @@ export function snapshot() {
   const metadata = { profiles: {
     large: { label: "Large UI", width: 2160, height: 1080, bounds: { x: 30, y: 30, width: 1800, height: 1020 }, reservedZones: [], widgets: {
       current_speed: widget("Current speed", "current_speed", 580, 300, 640, 30),
-      cruise_limits: widget("Cruise and speed limit", "cruise_limits", 176, 483, 88, 75),
-      speed_limit_actions: widget("Speed limit actions", "speed_limit_actions", 176, 58, 88, 500),
+      cruise_limits: widget("Cruise and speed limit", "cruise_limits", 480, 522, 88, 75),
+      speed_limit_actions: widget("Speed limit actions", "speed_limit_actions", 480, 108, 88, 567),
       steering_wheel: widget("Steering wheel", "steering_wheel", 192, 192, 1588, 75),
       driver_monitor: widget("Driver monitoring", "driver_monitor", 192, 192, 88, 808),
       torque_bar: { ...widget("Torque bar", "torque_bar", 998, 240, 439, 759), layer: "underlay" },
@@ -48,7 +48,7 @@ export function snapshot() {
   metadata.roadColorFields = [{ id: 'path', label: 'Path', default: '#30FF9CFF' },
     { id: 'pathEdge', label: 'Path edges', default: '#00FF40FF' }, { id: 'laneLines', label: 'Lane lines', default: '#FFFFFFFF' }]
   metadata.profiles.compact.widgets.speed_limit_actions.visualInsetTop = 32
-  const document = { version: 4, roadColors: { large: {}, compact: {} }, widgetColors: { large: {}, compact: {} }, palette: Object.fromEntries(metadata.paletteFields.map((field) => [field.id, field.default])),
+  const document = { version: 6, roadColors: { large: {}, compact: {} }, widgetColors: { large: {}, compact: {} }, palette: Object.fromEntries(metadata.paletteFields.map((field) => [field.id, field.default])),
     layouts: Object.fromEntries(Object.entries(metadata.profiles).map(([id, profile]) => [id,
       Object.fromEntries(Object.entries(profile.widgets).map(([key, definition]) => [key,
         { ...definition.default, ...(definition.resizable ? { size: definition.resizable.default } : {}) }]))])) }

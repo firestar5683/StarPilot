@@ -28,9 +28,9 @@ def roundness_for(rect: rl.Rectangle, radius: float = CONTROL_RADIUS) -> float:
 
 def draw_control_card(rect: rl.Rectangle, *, fill: rl.Color = CONTROL_BG,
                       border: rl.Color = CONTROL_BORDER,
-                      border_width: float = CONTROL_BORDER_WIDTH) -> None:
+                      border_width: float = CONTROL_BORDER_WIDTH,
+                      roundness: float = CONTROL_ROUNDNESS) -> None:
   """Draw the common translucent rounded card used by left-hand controls."""
-  roundness = CONTROL_ROUNDNESS
   rl.draw_rectangle_rounded(rect, roundness, CONTROL_SEGMENTS, fill)
   rl.draw_rectangle_rounded_lines_ex(rect, roundness, CONTROL_SEGMENTS, border_width, border)
 

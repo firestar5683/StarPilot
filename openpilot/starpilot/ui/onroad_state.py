@@ -4,7 +4,6 @@ The producer owns freshness and units. A missing observation is never inferred
 from a zero-valued speed or a default-initialized message.
 """
 
-from openpilot.starpilot.ui.unified_speed_presentation import large_limit_bounds
 from openpilot.starpilot.ui.onroad_customization import PROFILES, default_document, offset, placement, widget_size
 
 from collections.abc import Callable
@@ -91,12 +90,24 @@ class SpeedLimitObservation:
   action_sequence_id: int = 0
   action_status: str = ""
   source_readings: tuple[SourceReading, ...] = ()
+  accepted_adjusted_limit_mps: float | None = None
+  pending_adjusted_limit_mps: float | None = None
+  presentation_adjusted_limit_mps: float | None = None
+  override_basis: str = 'none'
+  retained_override: bool = False
+  command_action_sequence_id: int = 0
+  command_status: str = ''
+  action_feedback: str = ''
 
   def __post_init__(self) -> None:
     for value in (self.speed_limit_mps, self.offset_mps, self.pending_speed_limit_mps,
-                  self.effective_cap_mps, self.accepted_speed_limit_mps, self.effective_cluster_target_mps):
+                  self.effective_cap_mps, self.accepted_speed_limit_mps, self.effective_cluster_target_mps,
+                  self.accepted_adjusted_limit_mps, self.pending_adjusted_limit_mps, self.presentation_adjusted_limit_mps):
       if value is not None and not math.isfinite(value):
         raise ValueError("Speed-limit values must be finite")
+    for value in (self.accepted_adjusted_limit_mps, self.pending_adjusted_limit_mps, self.presentation_adjusted_limit_mps):
+      if value is not None and value <= 0:
+        raise ValueError('Adjusted limits must be positive')
     if self.kind != ObservationKind.VALID and self.speed_limit_mps is not None:
       raise ValueError("Only a valid observation can carry a speed limit")
     if self.kind == ObservationKind.VALID and (self.speed_limit_mps is None or self.speed_limit_mps <= 0):
@@ -221,8 +232,13 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
       return SlcUiRequest(kind, observation.session_id or "", observation.decision_id or 0,
                           observation.presentation_id or 0, pending)
     if profile == Profile.LARGE:
-      return (SlcControl(request(SlcActionKind.ACCEPT), "ACCEPT", (88, 500, 172, 558)),
-              SlcControl(request(SlcActionKind.REJECT), "REJECT", (180, 500, 264, 558)))
+      from openpilot.starpilot.ui.large_speed_geometry import WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y, ACTION_HEADER_HEIGHT
+      target = observation.pending_adjusted_limit_mps
+      label = f'Apply {round(target * (3.6 if state.metric else 2.2369362921))}' if target is not None and target > 0 else 'Apply'
+      return (SlcControl(request(SlcActionKind.ACCEPT), label,
+                         (ACTION_X, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH // 2 - 6, ACTION_Y + ACTION_HEIGHT)),
+              SlcControl(request(SlcActionKind.REJECT), 'Keep',
+                         (ACTION_X + WIDTH // 2 + 6, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH, ACTION_Y + ACTION_HEIGHT)))
     return (SlcControl(request(SlcActionKind.ACCEPT), "ACCEPT", (174, 180, 310, 234)),
             SlcControl(request(SlcActionKind.REJECT), "REJECT", (320, 180, 456, 234)))
   if (pending is None and observation.speed_limit_mps is not None and
@@ -231,8 +247,12 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
       return ()
     request = SlcUiRequest(SlcActionKind.ADOPT, observation.session_id, observation.decision_id or 0,
                            observation.presentation_id, observation.speed_limit_mps)
-    bounds = (88, 500, 264, 558) if profile == Profile.LARGE else (174, 180, 456, 234)
-    return (SlcControl(request, "USE LIMIT", bounds),)
+    from openpilot.starpilot.ui.large_speed_geometry import WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y, ACTION_HEADER_HEIGHT
+    header = ACTION_HEADER_HEIGHT if observation.action_feedback else 0
+    bounds = (ACTION_X, ACTION_Y + header, ACTION_X + WIDTH, ACTION_Y + header + ACTION_HEIGHT - ACTION_HEADER_HEIGHT)
+    target = observation.presentation_adjusted_limit_mps
+    label = f'Use limit {round(target * (3.6 if state.metric else 2.2369362921))}' if target is not None else 'USE LIMIT'
+    return (SlcControl(request, label, bounds),)
   return ()
 
 
@@ -280,19 +300,24 @@ class OnroadInput:
     self.profile = profile
     self._press: tuple[float, float, bool, str] | None = None
     self._slc_press: tuple[float, float, SlcUiRequest] | None = None
-    self.drawer_bounds = lambda: None
     self._source_press = None
 
   def _source_target(self, x, y, state):
     if (self.profile != Profile.LARGE or state.alert.size != AlertSize.NONE or
         state.speed_limit.kind != ObservationKind.VALID or not state.speed_limit.session_id or
-        state.speed_limit.pending_speed_limit_mps is not None or
         not placement(state.customization, 'large', 'cruise_limits')['enabled']):
       return False
-    if _inside_widget(x, y, state, 'cruise_limits', large_limit_bounds(state)):
-      return True
-    bounds = self.drawer_bounds()
-    return bounds is not None and bounds.x <= x <= bounds.x + bounds.width and bounds.y <= y <= bounds.y + bounds.height
+    from openpilot.starpilot.ui.large_speed_geometry import source_toggle_bounds
+    left, top, right, bottom = source_toggle_bounds(state)
+    return left <= x <= right and top <= y <= bottom
+
+  @property
+  def source_pressed(self):
+    return self._source_press is not None
+
+  @property
+  def pressed_action(self):
+    return self._slc_press[2] if self._slc_press else None
 
   @property
   def claimed(self) -> bool:
@@ -306,10 +331,6 @@ class OnroadInput:
       if left <= x <= right and top <= y <= bottom:
         self._slc_press = (x, y, control.request)
         return
-    if (self.profile == Profile.LARGE and controls and controls[0].request.kind == SlcActionKind.ACCEPT and
-        _inside_widget(x, y, state, "cruise_limits", large_limit_bounds(state))):
-      self._slc_press = (x, y, controls[0].request)
-      return
     if self._source_target(x, y, state):
       self._source_press = (x, y, state.speed_limit.session_id, state.customization.get('speedSources', False))
       return
@@ -330,11 +351,8 @@ class OnroadInput:
     if self._slc_press:
       px, py, request = self._slc_press
       current = next((item for item in slc_controls(self.profile, state) if item.request == request), None)
-      card_accept = (self.profile == Profile.LARGE and request.kind == SlcActionKind.ACCEPT and
-                     _inside_widget(x, y, state, "cruise_limits", large_limit_bounds(state)) and
-                     _inside_widget(px, py, state, "cruise_limits", large_limit_bounds(state)))
       in_control = current is not None and current.bounds[0] <= x <= current.bounds[2] and current.bounds[1] <= y <= current.bounds[3]
-      if current is None or abs(x - px) > 5 or abs(y - py) > 5 or not (card_accept or in_control):
+      if current is None or abs(x - px) > 5 or abs(y - py) > 5 or not in_control:
         self.cancel()
       return
     if self._press:
@@ -426,7 +444,17 @@ def speed_limit_from_message(message: SlcStateMessage | None) -> SpeedLimitObser
                                  presentation_id=message.presentationId, status=message.status,
                                  action_enabled=bool(getattr(message, "enabled", False)),
                                  action_sequence_id=int(getattr(message, "actionSequenceId", 0)),
-                                 action_status=str(getattr(message, "actionStatus", "")))
+                                 action_status=str(getattr(message, "actionStatus", "")),
+                                 accepted_adjusted_limit_mps=(getattr(message, 'acceptedAdjustedLimit', None)
+                                   if getattr(message, 'hasAcceptedAdjustedLimit', False) else None),
+                                 pending_adjusted_limit_mps=(getattr(message, 'pendingAdjustedLimit', None)
+                                   if getattr(message, 'hasPendingAdjustedLimit', False) else None),
+                                 presentation_adjusted_limit_mps=(getattr(message, 'presentationAdjustedLimit', None)
+                                   if getattr(message, 'hasPresentationAdjustedLimit', False) else None),
+                                 override_basis=str(getattr(message, 'overrideBasis', 'none')),
+                                 retained_override=bool(getattr(message, 'retainedOverride', False)),
+                                 command_action_sequence_id=int(getattr(message, 'commandActionSequenceId', 0)),
+                                 command_status=str(getattr(message, 'commandStatus', '')))
   except (ValueError, TypeError, AttributeError, OverflowError):
     return SpeedLimitObservation(kind=ObservationKind.UNKNOWN, source=message.source,
                                  status="Invalid SLC numeric observation")

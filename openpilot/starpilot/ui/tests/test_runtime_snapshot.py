@@ -127,20 +127,24 @@ class TestRuntimeSnapshot(unittest.TestCase):
     ui.sm['carControl'].longActive = True
     state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
     presentation = resolve_unified_speed(state)
-    self.assertEqual((presentation.active_side, presentation.status), ('slc', 'Active'))
+    self.assertEqual((presentation.active_side, presentation.status), ('slc', 'Using speed limit'))
     from openpilot.starpilot.ui.onroad_state import slc_controls
     from openpilot.starpilot.ui.presentation import Profile
     self.assertEqual(slc_controls(Profile.LARGE, state), ())
     ui.sm['carState'].vCruiseCluster = 40.0
     presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
-    self.assertEqual((presentation.active_side, presentation.status), ('max', 'MAX limiting'))
+    self.assertEqual((presentation.active_side, presentation.status), ('max', 'Using set speed'))
     legacy.slcOverriddenSpeed = 20.0
     presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
-    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Set-speed override'))
+    self.assertEqual((presentation.active_side, presentation.status), ('max', 'Set-speed override'))
+    ui.sm['carState'].gasPressed = True
+    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
+    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Using accelerator'))
+    ui.sm['carState'].gasPressed = False
     legacy.slcOverriddenSpeed = 0.0
     ui.sm['carControl'].longActive = False
     presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
-    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Disengaged'))
+    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Cruise off'))
     ui.sm.valid['slcState'] = True
     self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.speed_limit.source, 'dashboard')
     ui.sm.valid['slcState'] = False

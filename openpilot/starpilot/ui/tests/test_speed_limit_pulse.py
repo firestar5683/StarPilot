@@ -52,15 +52,16 @@ def test_source_reacquisition_missing_hidden_and_units_do_not_retrigger_same_num
 
 
 @pytest.mark.parametrize("compact", [False, True])
-def test_both_native_signs_render_original_purple_color(compact):
+def test_compact_sign_pulses_while_large_numbers_and_frame_stay_stable(compact):
   fonts = Mock()
   fonts.measure.return_value = Mock(width=20, height=20)
   fonts.vertical_ink.side_effect = lambda text, role, size: (0., size * .7)
   shown = state()
+  shown = replace(shown, speed_limit=replace(shown.speed_limit, accepted_adjusted_limit_mps=shown.speed_limit.speed_limit_mps))
   shown = replace(shown, appearance=replace(shown.appearance, show_speed_limit_sign=True))
   renderer = CompactHudRenderer(fonts, Mock()) if compact else UnifiedSpeedWidget(fonts)
   with patch("time.monotonic", return_value=10.) as clock, \
-       patch.object(rl, "draw_rectangle_rounded_lines_ex"), patch.object(rl, "draw_rectangle_rounded"), \
+       patch.object(rl, "draw_rectangle_rounded_lines_ex"), patch.object(rl, "draw_rectangle_rounded"), patch.object(rl, "draw_line_ex"), \
        patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card:
     def render():
       if isinstance(renderer, CompactHudRenderer):
@@ -75,7 +76,7 @@ def test_both_native_signs_render_original_purple_color(compact):
     if compact:
       assert rgba(numeric.args[-1]) == (188, 132, 255, 255)
     else:
-      assert rgba(card.call_args.kwargs["border"]) == (188, 132, 255, 180)
+      assert rgba(card.call_args.kwargs["border"]) == (53, 67, 77, 255)
       assert rgba(numeric.args[-1]) == rgba(rl.WHITE)
 
 

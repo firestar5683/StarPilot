@@ -13,7 +13,7 @@ from openpilot.starpilot.ui import onroad
 from openpilot.starpilot.ui.onroad import axis_status_color, clock_text, driving_mode_description
 from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
-from openpilot.starpilot.ui.onroad_large_widgets import DISENGAGED, UnifiedSpeedWidget
+from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.onroad_state import OnroadInput
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
 from openpilot.starpilot.ui.presentation import Profile
@@ -59,7 +59,7 @@ class TestOnroadAxes(unittest.TestCase):
         with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"):
           UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
         label_color = fonts.draw.call_args_list[0].args[-1]
-        self.assertEqual(rgba(label_color), rgba(rl.Color(188, 132, 255, 255) if longitudinal else DISENGAGED))
+        self.assertEqual(rgba(label_color), (172, 190, 203, 255))
         compact = CompactHudRenderer(fonts, Path("/unused"))
         with patch.object(compact, "prepare"), patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_texture_pro"), \
              patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
@@ -198,7 +198,7 @@ class TestOnroadAxes(unittest.TestCase):
     fonts.vertical_ink.return_value = (0, 10)
     with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"):
       UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
-    self.assertEqual(rgba(fonts.draw.call_args_list[0].args[-1]), rgba(rl.Color(188, 132, 255, 255)))
+    self.assertEqual(rgba(fonts.draw.call_args_list[0].args[-1]), (172, 190, 203, 255))
     compact = CompactHudRenderer(fonts, Path("/unused"))
     with patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
       compact.render(state)

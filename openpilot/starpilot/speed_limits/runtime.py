@@ -147,6 +147,8 @@ class Runtime:
     self.last_cruise_producer: str | None = None
     self.last_command_id = 0
     self.command_status = ''
+    self._command_ui_sequence = 0
+    self._ui_receipt = None
     self.command_issued_ns = 0
     self.command_expiry_ns = 0
     self.command_expected_mps = 0.0
@@ -168,6 +170,8 @@ class Runtime:
     self.last_cruise_producer = None
     self.last_command_id = 0
     self.command_status = ''
+    self._command_ui_sequence = 0
+    self._ui_receipt = None
     self.command_issued_ns = 0
     self.command_expiry_ns = 0
     self.command_expected_mps = 0.0
@@ -373,8 +377,14 @@ class Runtime:
       self.ledger = completed.state
     command = self._command(result, sm, CP, now_ns, old_accepted, old_pending, action, adopt)
     message = self._message(now_ns, result, sm, frame.observations)
+    if command is not None:
+      self._command_ui_sequence = request.sequence_id if request is not None else 0
+    message.slcState.commandActionSequenceId = getattr(self, '_command_ui_sequence', 0)
     if action_result is not None and action_result.status == 'resolved' and request is not None:
-      message.slcState.actionSequenceId = request.sequence_id
+      self._ui_receipt = (request.sequence_id, str(message.slcState.actionStatus))
+    receipt = getattr(self, '_ui_receipt', None)
+    if receipt is not None:
+      message.slcState.actionSequenceId, message.slcState.actionStatus = receipt
     return Output(result, message, action_result, command, self.settings)
 
   def _command(self, result: comp.Result, sm, CP, now_ns: int, old_accepted, old_pending,
@@ -478,7 +488,19 @@ class Runtime:
       state.pendingSpeedLimit = pending.candidate.speed_mps
       state.pendingSource = pending.candidate.source
       state.decisionId = pending.decision_id
+    state.overrideBasis = (result.override.basis if state.driverOverrideActive else 'none')
+    state.retainedOverride = bool(result.state.override.persistent_selected_mps is not None)
     shown = result.state.acceptance.presentation
+    if state.observationKind == 'valid':
+      for candidate, value_field, flag_field in (
+        (accepted.candidate if accepted is not None else None, 'acceptedAdjustedLimit', 'hasAcceptedAdjustedLimit'),
+        (pending.candidate if pending is not None else None, 'pendingAdjustedLimit', 'hasPendingAdjustedLimit'),
+        (shown.candidate if shown is not None else None, 'presentationAdjustedLimit', 'hasPresentationAdjustedLimit'),
+      ):
+        value = sd.adjusted_limit(candidate.speed_mps, self.settings.offsets) if candidate is not None else None
+        if value is not None:
+          setattr(state, value_field, value)
+          setattr(state, flag_field, True)
     if shown is not None:
       state.presentationId = shown.presentation_id
     state.status = result.status
