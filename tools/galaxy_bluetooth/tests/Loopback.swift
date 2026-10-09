@@ -1,8 +1,10 @@
 import Foundation
+import CryptoKit
 
 @MainActor
 final class FixtureTransport: GalaxyRequestTransport {
     var connected = true
+    var catalogSHA256: String?
     var received: [(String, String, Data)] = []
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         received.append((path, method, body))
@@ -29,6 +31,24 @@ struct LoopbackCheck {
         precondition(String(decoding: html, as: UTF8.self).contains("galaxy-app"))
         let (_, moduleResponse) = try await session.data(from: url.appendingPathComponent("assets/mobile/js/app.js"))
         precondition((moduleResponse as! HTTPURLResponse).mimeType == "text/javascript")
+
+        let catalogURL = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("assets/components/tools/device_settings_layout.json")
+        let catalog = try Data(contentsOf: catalogURL)
+        transport.catalogSHA256 = SHA256.hash(data: catalog).map { String(format: "%02x", $0) }.joined()
+        var layoutRequest = URLRequest(url: URL(string: "assets/components/tools/device_settings_layout.json?v=settings-tier-1", relativeTo: url)!)
+        let (_, protectedLayout) = try await session.data(for: layoutRequest)
+        precondition((protectedLayout as! HTTPURLResponse).statusCode == 403 && transport.received.isEmpty)
+        layoutRequest.setValue(server.localSecret, forHTTPHeaderField: "X-Galaxy-Local")
+        let (localLayout, layoutResponse) = try await session.data(for: layoutRequest)
+        precondition((layoutResponse as! HTTPURLResponse).statusCode == 200 && localLayout == catalog && transport.received.isEmpty)
+        transport.catalogSHA256 = "changed"
+        _ = try await session.data(for: layoutRequest)
+        precondition(transport.received.count == 1)
+        transport.received.removeAll()
+        transport.connected = false
+        let (_, offlineLayout) = try await session.data(for: layoutRequest)
+        precondition((offlineLayout as! HTTPURLResponse).statusCode == 503 && transport.received.isEmpty)
+        transport.connected = true
 
         var request = URLRequest(url: url.appendingPathComponent("api/params"))
         request.httpMethod = "PUT"

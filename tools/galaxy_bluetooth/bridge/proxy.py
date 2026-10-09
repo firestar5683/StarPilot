@@ -1,5 +1,6 @@
 """Only proxies relative Galaxy requests to the fixed comma loopback endpoint."""
 import base64
+import hashlib
 import json
 import time
 import urllib.error
@@ -18,6 +19,13 @@ MEDIA_PREFIXES = ("/video/", "/screen_recordings/", "/api/screen_recordings/down
 # the existing BLE body limit. No parameter on the comma is modified.
 PARAMS_SNAPSHOT_LIMIT = 8 * MAX_BODY
 INTERNAL_PARAMS = {"LiveTorqueParameters"}
+CATALOG_PATH = "/assets/components/tools/device_settings_layout.json"
+# Only omit these additional fields for the settings-only request, and only when
+# the device catalog exactly matches the audited bundled Dom catalog. Every
+# toggle value, dependency, lock and vehicle-state flag remains unchanged.
+FAST_SETTINGS_CATALOG_SHA256 = "ead70dc1cd550249ab5318160b88c246620de5f35e0a411a006b6ef7adff7517"
+SETTINGS_UNUSED_PARAMS = {"GalaxyDashboardStats", "CarParamsPrevRoute", "StarPilotStats",
+                          "GitDiff", "ApiCache_NavDestinations"}
 
 
 def validate_target(target):
@@ -53,12 +61,26 @@ class GalaxyProxy:
         self.base = f"http://127.0.0.1:{port}"
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
+    def catalog_digest(self):
+        try:
+            with self.opener.open(self.base + CATALOG_PATH, timeout=3) as response:
+                data = response.read(MAX_BODY + 1)
+                if response.status == 200 and len(data) <= MAX_BODY and isinstance(json.loads(data), list):
+                    return hashlib.sha256(data).hexdigest()
+        except Exception:
+            pass
+        return None
+
     def handle(self, request):
         request_id = str(request.get("id", ""))
         try:
             if request.get("path") == "/_bridge/health" and request.get("method") == "GET":
+                health = {"protocol": 1, "transport": "bluetooth", "readStream": True, "notificationStream": True}
+                digest = self.catalog_digest()
+                if digest:
+                    health["catalogSHA256"] = digest
                 return {"id": request_id, "status": 200, "headers": {"content-type": "application/json"},
-                        "body": base64.b64encode(b'{"protocol":1,"transport":"bluetooth","readStream":true,"notificationStream":true}').decode()}
+                        "body": base64.b64encode(json.dumps(health, separators=(",", ":")).encode()).decode()}
             target = validate_target(request.get("path"))
             method = request.get("method", "GET")
             if method not in METHODS:
@@ -107,7 +129,12 @@ class GalaxyProxy:
                         return error_response(request_id, 502, "Galaxy returned invalid settings JSON.")
                     if not isinstance(values, dict):
                         return error_response(request_id, 502, "Galaxy returned an invalid settings snapshot.")
-                    data = json.dumps({k: v for k, v in values.items() if k not in INTERNAL_PARAMS},
+                    excluded = INTERNAL_PARAMS
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(target).query)
+                    if (query.get("galaxy_ble_settings") == ["1"]
+                            and self.catalog_digest() == FAST_SETTINGS_CATALOG_SHA256):
+                        excluded = INTERNAL_PARAMS | SETTINGS_UNUSED_PARAMS
+                    data = json.dumps({k: v for k, v in values.items() if k not in excluded},
                                       separators=(",", ":"), ensure_ascii=False).encode()
                 if len(data) > MAX_BODY:
                     return error_response(request_id, 413, "Response exceeds the 1 MiB BLE limit.")

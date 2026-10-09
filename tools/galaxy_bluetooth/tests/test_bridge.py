@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -15,7 +16,8 @@ from dbus_next import Variant, DBusError
 from Crypto.Cipher import AES
 from protocol import (Assembler, MAX_BODY, MAX_FRAME, NOTIFICATION_WINDOW, open_message,
                       packets, seal, stream_tag, notification_packets)
-from proxy import GalaxyProxy, PARAMS_SNAPSHOT_LIMIT, validate_target
+from proxy import (GalaxyProxy, PARAMS_SNAPSHOT_LIMIT, validate_target,
+                   FAST_SETTINGS_CATALOG_SHA256, SETTINGS_UNUSED_PARAMS)
 from server import Application, Characteristic, NotificationCharacteristic, GattService, Gateway, SERVICE_PATH
 
 KEY = bytes(range(32))
@@ -119,6 +121,12 @@ class Fixture(BaseHTTPRequestHandler):
             self.respond(200, b'data: waiting\n\n', "text/event-stream")
         elif self.path == "/api/binary":
             self.respond(200, bytes(range(256)), "image/jpeg")
+        elif self.path == "/assets/components/tools/device_settings_layout.json":
+            self.respond(200, (Path(__file__).resolve().parents[1] / "ios/GalaxyBluetooth/Resources/Web/assets/components/tools/device_settings_layout.json").read_bytes())
+        elif self.path == "/api/params/all?galaxy_ble_settings=1":
+            self.respond(200, json.dumps({"Metric": True, "IsOnroad": True, "LanguageSetting": "en",
+                                         "LongitudinalPersonalityProfiles": {"custom": [1, 2, 3]},
+                                         **{key: "large history" * 100 for key in SETTINGS_UNUSED_PARAMS}}).encode())
         elif self.path == "/api/params/all":
             self.respond(200, json.dumps({"Metric": True, "LanguageSetting": "en",
                                          "LongitudinalPersonalityProfiles": {"custom": [1, 2, 3]},
@@ -174,6 +182,32 @@ class ProxyTests(unittest.TestCase):
         for packet in packets(seal(result, KEY, "response")):
             message = assembler.add(packet)
         self.assertEqual(open_message(message, KEY, "response"), result)
+
+    def test_health_reports_verified_catalog_without_requiring_it(self):
+        health = json.loads(base64.b64decode(self.request("/_bridge/health")["body"]))
+        self.assertEqual(health["catalogSHA256"], FAST_SETTINGS_CATALOG_SHA256)
+        with patch.object(self.proxy, "catalog_digest", return_value=None):
+            health = json.loads(base64.b64decode(self.request("/_bridge/health")["body"]))
+            self.assertNotIn("catalogSHA256", health)
+            self.assertTrue(health["notificationStream"])
+
+    def test_settings_view_preserves_flags_and_profiles_and_falls_back_on_catalog_change(self):
+        path = "/api/params/all?galaxy_ble_settings=1"
+        values = json.loads(base64.b64decode(self.request(path)["body"]))
+        self.assertEqual(values, {"Metric": True, "IsOnroad": True, "LanguageSetting": "en",
+                                  "LongitudinalPersonalityProfiles": {"custom": [1, 2, 3]}})
+        for digest in (None, "changed"):
+            with patch.object(self.proxy, "catalog_digest", return_value=digest):
+                fallback = json.loads(base64.b64decode(self.request(path)["body"]))
+                self.assertTrue(SETTINGS_UNUSED_PARAMS <= fallback.keys())
+                self.assertTrue(fallback["IsOnroad"])
+        catalog = (Path(__file__).resolve().parents[1] / "ios/GalaxyBluetooth/Resources/Web/assets/components/tools/device_settings_layout.json").read_bytes()
+        self.assertEqual(hashlib.sha256(catalog).hexdigest(), FAST_SETTINGS_CATALOG_SHA256)
+        web = Path(__file__).resolve().parents[1] / "ios/GalaxyBluetooth/Resources/Web/assets/mobile"
+        code = "\n".join(path.read_text() for path in web.rglob("*.js"))
+        for key in SETTINGS_UNUSED_PARAMS:
+            self.assertNotIn(key, catalog.decode())
+            self.assertNotIn(key, code)
 
     def test_parameter_snapshot_is_still_bounded_and_requires_an_object(self):
         self.assertEqual(self.request("/api/params/all?remaining-large")["status"], 413)

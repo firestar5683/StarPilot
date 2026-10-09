@@ -62,6 +62,7 @@ export const api = {
   savePersonalityProfile(data) { return request("/api/personality_profiles", { method: "PUT", data }) },
   migratePersonalityProfiles() { return request("/api/personality_profiles/migrate", { method: "POST" }) },
 
+  getSettingsParams() { return request("/api/params/all?galaxy_ble_settings=1", { cache: "no-store" }) },
   getParams() { return request("/api/params/all") },
   async getLanguage() {
     const res = await fetch("/api/params?key=LanguageSetting")

@@ -3,7 +3,12 @@ import Foundation
 @MainActor
 protocol GalaxyRequestTransport: AnyObject {
     var connected: Bool { get }
+    var catalogSHA256: String? { get }
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse
+}
+
+extension GalaxyRequestTransport {
+    var catalogSHA256: String? { nil }
 }
 
 /// Share concurrent settings reads and reuse only stable metadata. Current
@@ -18,6 +23,7 @@ final class GalaxyReadCache: GalaxyRequestTransport {
     private var entries: [String: (BridgeResponse, TimeInterval)] = [:]
     private var pending: [String: (UUID, Task<BridgeResponse, Error>)] = [:]
     var connected: Bool { transport.connected }
+    var catalogSHA256: String? { transport.catalogSHA256 }
 
     init(transport: any GalaxyRequestTransport, sessionID: @escaping () -> String,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
@@ -47,7 +53,7 @@ final class GalaxyReadCache: GalaxyRequestTransport {
         }
         let metadata = path == "/api/params/defaults"
             || path == "/assets/components/tools/device_settings_layout.json?v=settings-tier-1"
-        guard body.isEmpty, metadata || path == "/api/params/all" else {
+        guard body.isEmpty, metadata || path == "/api/params/all" || path == "/api/params/all?galaxy_ble_settings=1" else {
             return try await transport.request(path: path, method: method, headers: headers, body: body)
         }
         let relevantHeaders = headers.filter { ["accept", "cookie", "range"].contains($0.key.lowercased()) }

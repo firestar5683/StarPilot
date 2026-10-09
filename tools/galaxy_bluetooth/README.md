@@ -33,11 +33,17 @@ Bursts stop after eight packets without an ACK. Missing credit times out after 1
 
 When updating from the earlier read-only prototype, disconnect the app and forget the comma/Galaxy entry in iPhone **Settings > Bluetooth** once so iOS discovers the new characteristic. The native app handles service invalidation and reports a stale service cache explicitly rather than silently staying in the slow read mode. Keep the app's pairing key; forgetting the system Bluetooth entry does not replace it.
 
-Startup reads only `LanguageSetting`, rather than the entire parameter snapshot. Toggles reuses its catalog/defaults for up to five minutes; opening it again still fetches current values. Any non-GET request invalidates cached metadata and concurrent reads before and after forwarding the write. The cache does not persist across connections.
+Startup reads only `LanguageSetting`, rather than the entire parameter snapshot. Fallback catalog reads and defaults used by other screens can be reused for up to five minutes; opening it again still fetches current values. Any non-GET request invalidates cached metadata and concurrent reads before and after forwarding the write. The cache does not persist across connections.
 
 Map search, online map tiles, model downloads and software updates can still require internet access on the phone or comma, as they do in Galaxy today. Bluetooth replaces the connection between the phone and comma; it does not make those external services available offline.
 
 Local toggles and settings are intended to work with Wi-Fi and cellular disabled on either or both devices. Bluetooth must stay enabled, Galaxy must be running on the comma, and the bridge must remain running. The bridge omits `LiveTorqueParameters` from `/api/params/all`: it is internal learning history, is not in the Toggles catalog, and is unused by the bundled UI. Every other parameter is retained. This changes the transferred snapshot only; it does not delete or modify the parameter on the comma.
+
+## Fast local Toggles
+
+Toggles uses a catalog bundled from public Dom source only if the authenticated bridge health response reports the same SHA-256 as the device catalog. Otherwise it downloads the device layout normally. Current values are read fresh every time Toggles opens.
+
+Its settings-only request excludes five unused dashboard/history fields only for the audited catalog, while preserving every other value, dependency, lock and vehicle-state flag. Other pages keep the normal parameter endpoint. Toggles no longer requests defaults it never uses. Read-only device measurements modeled a reduction from 102 to 17 response packets at 512 bytes; hardware timing needs retesting. This update changes no Bluetooth services, so existing pairing can be retained.
 
 ## Run on iPhone
 

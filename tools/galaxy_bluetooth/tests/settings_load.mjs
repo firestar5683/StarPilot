@@ -14,8 +14,8 @@ const components = Object.fromEntries(["SettingTree", "PersonalityProfiles", "Ga
 const Settings = vm.runInNewContext(source, {
   ...components, GALAXY_DEVELOPER_MODE_KEY: "developerMode", longitudinalModeLayout: layout => layout,
   setLanguage() {}, showSnackbar(message) { throw new Error(message) },
-  api: { getLayout: async () => [], getDefaults: async () => ({}),
-    getParams: async () => { reads++; return { developerMode } } },
+  api: { getLayout: async () => [], getDefaults: async () => { throw new Error("Settings must not fetch unused defaults") },
+    getSettingsParams: async () => { reads++; return { developerMode } } },
 })
 const model = reactive({ ...Settings.data(), ...Settings.methods, sections: [], $nextTick: nextTick })
 const stop = watch(() => !!model.values.developerMode, () => Settings.watch.devModeOn.call(model))
@@ -33,9 +33,10 @@ stop()
 const api = (await import(new URL("assets/mobile/js/api.js", web))).api
 const originalFetch = globalThis.fetch
 const paths = []
-globalThis.fetch = async path => { paths.push(path); return { ok: true, text: async () => "English\n" } }
+globalThis.fetch = async path => { paths.push(path); return { ok: true, text: async () => "English\n", json: async () => ({ Metric: true }) } }
 try {
   assert.equal(await api.getLanguage(), "English")
-  assert.deepEqual(paths, ["/api/params?key=LanguageSetting"])
+  assert.deepEqual(await api.getSettingsParams(), { Metric: true })
+  assert.deepEqual(paths, ["/api/params?key=LanguageSetting", "/api/params/all?galaxy_ble_settings=1"])
 } finally { globalThis.fetch = originalFetch }
 console.log("Settings: one initial load, one developer-mode refresh, single-key language read passed")

@@ -30,6 +30,7 @@ struct BridgeHealth: Decodable {
     let transport: String
     let readStream: Bool?
     let notificationStream: Bool?
+    let catalogSHA256: String?
 }
 
 enum BridgeError: LocalizedError {

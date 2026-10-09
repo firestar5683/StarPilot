@@ -84,6 +84,7 @@ struct Interop {
             do { _ = try LocalRequest.parse(Data(invalid.utf8)); fatalError("Invalid HTTP request was accepted") }
             catch {}
         }
+        precondition(oldHealth.catalogSHA256 == nil && oldHealth.notificationStream == nil)
         print("Swift/Python encrypted framing and HTTP parser checks passed")
     }
 }

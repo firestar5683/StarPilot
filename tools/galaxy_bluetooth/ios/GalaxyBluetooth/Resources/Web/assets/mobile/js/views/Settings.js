@@ -85,8 +85,8 @@ export const Settings = {
       this.loading = true
       this.loadError = ""
       try {
-        const [layout, values, defaults] = await Promise.all([
-          api.getLayout(), api.getParams(), api.getDefaults(),
+        const [layout, values] = await Promise.all([
+          api.getLayout(), api.getSettingsParams(),
         ])
         this.layout = longitudinalModeLayout(layout)
         this.values = values || {}
@@ -94,7 +94,6 @@ export const Settings = {
         // The initial snapshot must not trigger another full download.
         await this.$nextTick()
         setLanguage(this.values.LanguageSetting || "en")
-        this.defaults = defaults || {}
         if (!this.activeSectionSlug && this.sections.length) {
           const preferred = this.sections.find((s) => s.slug === this.defaultSectionSlug)
           this.activeSectionSlug = (preferred || this.sections[0]).slug

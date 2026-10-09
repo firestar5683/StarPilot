@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 import Combine
 import UniformTypeIdentifiers
@@ -12,10 +13,15 @@ final class LoopbackServer: ObservableObject {
     private var connections: [UUID: LocalConnection] = [:]
     private let webRoot: URL
     private let transport: any GalaxyRequestTransport
+    private let catalog: Data?
+    private let catalogSHA256: String?
 
     init(transport: any GalaxyRequestTransport, webRoot: URL? = nil) {
         self.transport = transport
-        self.webRoot = webRoot ?? Bundle.main.resourceURL!.appendingPathComponent("Web", isDirectory: true)
+        let root = webRoot ?? Bundle.main.resourceURL!.appendingPathComponent("Web", isDirectory: true)
+        self.webRoot = root
+        self.catalog = try? Data(contentsOf: root.appendingPathComponent("assets/components/tools/device_settings_layout.json"))
+        self.catalogSHA256 = catalog.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
     }
 
     func start() {
@@ -80,6 +86,14 @@ final class LoopbackServer: ObservableObject {
         if dynamic {
             guard request.headers["x-galaxy-local"] == localSecret else { return .error(403, "Missing app request key.") }
             guard transport.connected else { return .error(503, "Your comma is disconnected. Reconnect over Bluetooth.") }
+            // Verify the device's catalog during the authenticated BLE handshake.
+            // Unknown or different versions continue through the ordinary proxy.
+            if request.method == "GET", request.body.isEmpty,
+               request.target == "/assets/components/tools/device_settings_layout.json?v=settings-tier-1",
+               request.headers["range"] == nil, let catalog, let catalogSHA256,
+               transport.catalogSHA256 == catalogSHA256 {
+                return LocalResponse(status: 200, headers: ["content-type": "application/json"], body: catalog)
+            }
             do {
                 let response = try await transport.request(path: request.target, method: request.method,
                                                           headers: request.headers, body: request.body)

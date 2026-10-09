@@ -27,6 +27,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private var keyText = ""
     private var session = ""
     var sessionIdentifier: String { session }
+    private(set) var catalogSHA256: String?
     private var supportsReadStream = false
     private var activeReadStream = false
     private var supportsNotifications = false
@@ -116,6 +117,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         notify = nil
         session = ""
         counter = 0
+        catalogSHA256 = nil
         supportsReadStream = false
         activeReadStream = false
         supportsNotifications = false
@@ -331,6 +333,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                     guard health.protocol == 1, health.transport == "bluetooth" else {
                         throw BridgeError.message("Unsupported bridge protocol.")
                     }
+                    self.catalogSHA256 = health.catalogSHA256
                     self.supportsReadStream = health.readStream == true
                     self.pairingVerified = true
                     if health.notificationStream == true {
