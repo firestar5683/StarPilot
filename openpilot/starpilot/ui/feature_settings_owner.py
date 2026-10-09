@@ -800,7 +800,6 @@ class FeatureSettingsOwner:
                              vehicle_fingerprint=self.vehicle_fingerprint(), dependencies=learning.sources))
     elif page == FeaturePage.TORQUE:
       title = "Steering and Torque"
-      rows.extend(self._lateral_pause_rows(configurable))
       controller_row = self.controller.row()
       if controller_row is not None:
         rows.append(controller_row)
@@ -824,6 +823,7 @@ class FeatureSettingsOwner:
       rows.extend(numeric_rows)
     elif page == FeaturePage.AOL:
       title = "Always On Lateral"
+      rows.extend(self._lateral_pause_rows(configurable))
       capability = self._capability("aol")
       vehicle_cp = self.vehicle_params()
       policy = self.aol_settings_policy(vehicle_cp)
