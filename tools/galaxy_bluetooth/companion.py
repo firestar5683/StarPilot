@@ -323,7 +323,7 @@ class CompanionPublisher:
           self.process = subprocess.Popen([
             'ffmpeg', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba',
             '-s:v', f'{image.width}x{image.height}', '-r', '20', '-i', 'pipe:0',
-            '-an', '-c:v', 'mjpeg', '-q:v', '5', '-threads', '1', '-f', 'image2pipe',
+            '-an', '-c:v', 'mjpeg', '-q:v', '5', '-threads', '1', '-f', 'rawvideo',
             '-flush_packets', '1', 'pipe:1'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
           self.video_size = dimensions
           self.encoder_error = None
