@@ -10,3 +10,7 @@
 - Earlier Android build, signature and automated checks passed.
 
 Pending: camera scan on iPhone, comma QR layout, revoke/re-pair, hotspot and LAN/BLE switching, setting write/read-back, Android hardware and release distribution.
+
+Live / CarPlay pilot: 36 bridge/companion tests pass; iOS builds pass. GPU capture, capture overhead and physical CarPlay remain untested. MJPEG fragmentation/chunking/size-bound tests pass. CarPlay requires the approved entitlement; regular phone signing is unchanged.
+
+Encoder integration with StarPilot’s pinned raylib 5.5.0.2: 40 distinct 960×480 JPEGs in 2.23 seconds on Mac, latest frame age 0.053 seconds. This does not measure comma GPU readback or end-to-end phone FPS.

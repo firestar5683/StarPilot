@@ -1,11 +1,13 @@
 // !$*UTF8*$!
 { archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
-9F0B8B04FE0E80BA046C0042 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Branding.xcassets; sourceTree = "<group>"; };
-606A672A792903E98EFFC2D9 = {isa = PBXBuildFile; fileRef = 9F0B8B04FE0E80BA046C0042; };
-FACE00000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
-FACE00000000000000000001 = {isa = PBXBuildFile; fileRef = FACE00000000000000000002; };
 		D47658A09FCC6A6C73D1A1A3 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BluetoothTransport.swift"; sourceTree = "<group>"; };
 		140107256F4F4DF2910BED61 = { isa = PBXBuildFile; fileRef = D47658A09FCC6A6C73D1A1A3; };
+		8F213860FC7A532DBD355109 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CarPlaySceneDelegate.swift"; sourceTree = "<group>"; };
+		A6D597850E6DD0CDFB754EF8 = { isa = PBXBuildFile; fileRef = 8F213860FC7A532DBD355109; };
+		8AD85D1A585138AF80FEADB9 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CompanionDiagnostics.swift"; sourceTree = "<group>"; };
+		28D504D2BD92FF8A8AEB68A7 = { isa = PBXBuildFile; fileRef = 8AD85D1A585138AF80FEADB9; };
+		4A6311E858CDB1BD4920077F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GalaxyAssetStore.swift"; sourceTree = "<group>"; };
+		2A682386E9EC74235CD11405 = { isa = PBXBuildFile; fileRef = 4A6311E858CDB1BD4920077F; };
 		3356A9DC86451A9D92F074F8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GalaxyBluetoothApp.swift"; sourceTree = "<group>"; };
 		36EBF9BB2BE027F139572ADA = { isa = PBXBuildFile; fileRef = 3356A9DC86451A9D92F074F8; };
 		80D0F5CDB02B33E408C75D8C = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GalaxyRequestTransport.swift"; sourceTree = "<group>"; };
@@ -14,20 +16,30 @@ FACE00000000000000000001 = {isa = PBXBuildFile; fileRef = FACE000000000000000000
 		DE64BADD40C934E610D4D505 = { isa = PBXBuildFile; fileRef = BF41C7E4AB86DEB71B85E4F6; };
 		34DE7063A67F0755E6E69BF7 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HTTP.swift"; sourceTree = "<group>"; };
 		1698566BBEF2185D9C80B6BB = { isa = PBXBuildFile; fileRef = 34DE7063A67F0755E6E69BF7; };
+		F3032D4A3D2E5EE30499DF81 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LiveStream.swift"; sourceTree = "<group>"; };
+		2B85690770820EED1B745258 = { isa = PBXBuildFile; fileRef = F3032D4A3D2E5EE30499DF81; };
 		B07071562661895558F74EE6 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LoopbackServer.swift"; sourceTree = "<group>"; };
 		5992DC6B04748581DE47AA02 = { isa = PBXBuildFile; fileRef = B07071562661895558F74EE6; };
+		1E4606411FF46FC358A57309 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NetworkTransport.swift"; sourceTree = "<group>"; };
+		B43A299D9DC20C1A52EF0FA8 = { isa = PBXBuildFile; fileRef = 1E4606411FF46FC358A57309; };
 		43A1199899003FF3F5F30831 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PairingKeyStore.swift"; sourceTree = "<group>"; };
 		BC3706D8A74BDB5B0AA8063E = { isa = PBXBuildFile; fileRef = 43A1199899003FF3F5F30831; };
+		0BD8AAC162EE2668A9FD16BA = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PairingScanner.swift"; sourceTree = "<group>"; };
+		2E4A82AC9BEEE068C5B22A47 = { isa = PBXBuildFile; fileRef = 0BD8AAC162EE2668A9FD16BA; };
+		6A4F45F0CE946309B0256EB0 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PrivateLANHTTP.swift"; sourceTree = "<group>"; };
+		F554251230F20602FFF9DDB5 = { isa = PBXBuildFile; fileRef = 6A4F45F0CE946309B0256EB0; };
 		F48B8D06AA8D8C4AC21E5982 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Wire.swift"; sourceTree = "<group>"; };
 		7F54642B30B38C648001D4ED = { isa = PBXBuildFile; fileRef = F48B8D06AA8D8C4AC21E5982; };
 		9CEEC13202AFBF12EE3ABB99 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		4B5E57F6EB2F42B9039B3D1E = { isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Web; sourceTree = "<group>"; };
 		4E7D2B65B79ACE4A91B667A2 = { isa = PBXBuildFile; fileRef = 4B5E57F6EB2F42B9039B3D1E; };
+		9F0B8B04FE0E80BA046C0042 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Branding.xcassets; sourceTree = "<group>"; };
+		606A672A792903E98EFFC2D9 = { isa = PBXBuildFile; fileRef = 9F0B8B04FE0E80BA046C0042; };
 		A172CEDCAE47474B615C54D5 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = GalaxyBluetooth.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		9E61AFF607A3704A97803240 = { isa = PBXGroup; children = (FACE00000000000000000002,D47658A09FCC6A6C73D1A1A3,3356A9DC86451A9D92F074F8,80D0F5CDB02B33E408C75D8C,BF41C7E4AB86DEB71B85E4F6,34DE7063A67F0755E6E69BF7,B07071562661895558F74EE6,43A1199899003FF3F5F30831,F48B8D06AA8D8C4AC21E5982,9CEEC13202AFBF12EE3ABB99,4B5E57F6EB2F42B9039B3D1E,9F0B8B04FE0E80BA046C0042); path = GalaxyBluetooth; sourceTree = "<group>"; };
+		9E61AFF607A3704A97803240 = { isa = PBXGroup; children = (D47658A09FCC6A6C73D1A1A3,8F213860FC7A532DBD355109,8AD85D1A585138AF80FEADB9,4A6311E858CDB1BD4920077F,3356A9DC86451A9D92F074F8,80D0F5CDB02B33E408C75D8C,BF41C7E4AB86DEB71B85E4F6,34DE7063A67F0755E6E69BF7,F3032D4A3D2E5EE30499DF81,B07071562661895558F74EE6,1E4606411FF46FC358A57309,43A1199899003FF3F5F30831,0BD8AAC162EE2668A9FD16BA,6A4F45F0CE946309B0256EB0,F48B8D06AA8D8C4AC21E5982,9CEEC13202AFBF12EE3ABB99,4B5E57F6EB2F42B9039B3D1E,9F0B8B04FE0E80BA046C0042); path = GalaxyBluetooth; sourceTree = "<group>"; };
 		0A3E27B8CA818264D75C8D81 = { isa = PBXGroup; children = (A172CEDCAE47474B615C54D5); name = Products; sourceTree = "<group>"; };
 		C69913C7EE4DFDD011BE172F = { isa = PBXGroup; children = (9E61AFF607A3704A97803240,0A3E27B8CA818264D75C8D81); sourceTree = "<group>"; };
-		878A52FC5FF6A57D50B7B870 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (FACE00000000000000000001,140107256F4F4DF2910BED61,36EBF9BB2BE027F139572ADA,8BA587954B4079F504AAD35E,DE64BADD40C934E610D4D505,1698566BBEF2185D9C80B6BB,5992DC6B04748581DE47AA02,BC3706D8A74BDB5B0AA8063E,7F54642B30B38C648001D4ED); runOnlyForDeploymentPostprocessing = 0; };
+		878A52FC5FF6A57D50B7B870 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (140107256F4F4DF2910BED61,A6D597850E6DD0CDFB754EF8,28D504D2BD92FF8A8AEB68A7,2A682386E9EC74235CD11405,36EBF9BB2BE027F139572ADA,8BA587954B4079F504AAD35E,DE64BADD40C934E610D4D505,1698566BBEF2185D9C80B6BB,2B85690770820EED1B745258,5992DC6B04748581DE47AA02,B43A299D9DC20C1A52EF0FA8,BC3706D8A74BDB5B0AA8063E,2E4A82AC9BEEE068C5B22A47,F554251230F20602FFF9DDB5,7F54642B30B38C648001D4ED); runOnlyForDeploymentPostprocessing = 0; };
 		41D311A605520FC7B8B9A980 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (4E7D2B65B79ACE4A91B667A2,606A672A792903E98EFFC2D9); runOnlyForDeploymentPostprocessing = 0; };
 		E2AA269EB967A8853A258BFA = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		488864B3D19480A82F7F1786 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; CLANG_ENABLE_MODULES = YES; }; };
@@ -71,4 +83,3 @@ FACE00000000000000000001 = {isa = PBXBuildFile; fileRef = FACE000000000000000000
   developmentRegion = en; knownRegions = (en, Base); mainGroup = C69913C7EE4DFDD011BE172F;
   productRefGroup = 0A3E27B8CA818264D75C8D81; projectDirPath = ""; projectRoot = ""; targets = (34A04005BCAF206EEC990BD9); };
 }; rootObject = 244210E48437B6556980A702; }
-

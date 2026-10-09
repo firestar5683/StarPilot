@@ -10734,6 +10734,8 @@ def main():
 
   app = Flask(__name__, static_folder="assets", static_url_path="/assets")
   setup(app)
+  from openpilot.tools.galaxy_bluetooth.companion import register_routes
+  register_routes(app)
   threading.Thread(target=_testing_ground_custom_reserved_worker, daemon=True).start()
 
   # Desktop-only debug mode. On-device must stay on 8082 to match Galaxy FRP routing.
@@ -10751,3 +10753,4 @@ def main():
 
 if __name__ == "__main__":
   main()
+

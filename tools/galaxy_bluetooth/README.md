@@ -6,6 +6,7 @@ iPhone app for StarPilot’s Galaxy interface. Uses local Wi-Fi first, with encr
 
 - [Install on comma](INSTALL-ON-COMMA.md)
 - [iPhone setup and testing](ios/TESTER-GUIDE.md)
+- [Live View and CarPlay pilot](ios/CARPLAY-PILOT.md)
 - [Android prototype](android/README.md)
 
 Open `ios/GalaxyBluetooth.xcodeproj`, select your signing team and iPhone, then Run. On comma 4, open **Settings → Pair phone**. Scan its code in the app and select the comma. The bridge needs a one-time installation.

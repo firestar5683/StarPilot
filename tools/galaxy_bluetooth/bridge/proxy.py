@@ -9,7 +9,7 @@ import urllib.request
 
 from protocol import MAX_BODY
 
-REQUEST_HEADERS = {"content-type", "accept", "cookie", "range"}
+REQUEST_HEADERS = {"content-type", "accept", "cookie", "range", "x-companion-nonce", "x-companion-mac"}
 RESPONSE_HEADERS = {"content-type", "content-range", "accept-ranges", "content-disposition"}
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
 MEDIA_PREFIXES = ("/video/", "/screen_recordings/", "/api/screen_recordings/download/", "/api/sentry/video/")
@@ -77,6 +77,8 @@ class GalaxyProxy:
                 return {"id": request_id, "status": 200, "headers": {"content-type": "application/json"},
                         "body": base64.b64encode(json.dumps(health, separators=(",", ":")).encode()).decode()}
             target = validate_target(request.get("path"))
+            if target.split("?")[0] in ("/api/companion/frame", "/api/companion/stream"):
+                return error_response(request_id, 501, "Live View requires local Wi-Fi; Bluetooth carries diagnostics only.")
             method = request.get("method", "GET")
             if method not in METHODS:
                 raise ValueError("Unsupported HTTP method")

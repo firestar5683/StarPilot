@@ -35,10 +35,26 @@
 	<string>Connect directly to your comma's Galaxy Bluetooth bridge.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing code displayed on your comma to connect the Galaxy app over Bluetooth.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to Galaxy on your comma over your local Wi-Fi network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>CPTemplateApplicationScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>StarPilot CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
@@ -48,7 +64,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to Galaxy on your comma over your local Wi-Fi network.</string>
 </dict>
 </plist>

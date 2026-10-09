@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Reproducibly generate the dependency-free Xcode project."""
 import hashlib
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "ios"
-PROJECT = ROOT / "GalaxyBluetooth.xcodeproj"
+PROJECT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "GalaxyBluetooth.xcodeproj"
 PROJECT.mkdir(exist_ok=True)
 
 

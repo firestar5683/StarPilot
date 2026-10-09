@@ -145,7 +145,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         request.httpBody = body.isEmpty ? nil : body
         // Bound stale-route delay; long downloads/streams need a separate route.
         request.timeoutInterval = 8
-        for (name, value) in headers where ["content-type", "accept", "cookie", "range"].contains(name.lowercased()) {
+        for (name, value) in headers where ["content-type", "accept", "cookie", "range", "x-companion-nonce", "x-companion-mac"].contains(name.lowercased()) {
             request.setValue(value, forHTTPHeaderField: name)
         }
         let (data, response) = try await PrivateLANHTTP.load(request, limit: 8 * Wire.maxBody)

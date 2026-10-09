@@ -3,12 +3,25 @@ import Network
 
 @main
 struct GalaxyBluetoothApp: App {
-    @StateObject private var model = AppModel()
+    @StateObject private var model = AppModel.shared
     var body: some Scene { WindowGroup { GalaxyRootView(model: model) } }
 }
 
 @MainActor
 final class AppModel: ObservableObject {
+    static let shared = AppModel()
+    let diagnostics = CompanionDiagnostics()
+    @Published var showDiagnostics = false
+    private var phoneActive = false
+    private var carPlayActive = false
+    private var monitorTask: Task<Void, Never>?
+    func setPhoneActive(_ active: Bool) { phoneActive = active; diagnostics.phoneActive = active; updateMonitoring() }
+    func setCarPlayActive(_ active: Bool) { carPlayActive = active; diagnostics.carPlayActive = active; updateMonitoring() }
+    private func updateMonitoring() {
+        if phoneActive || carPlayActive {
+            if monitorTask == nil { monitorTask = Task { await monitor() } }
+        } else { monitorTask?.cancel(); monitorTask = nil }
+    }
     @Published var pairingKey = PairingKeyStore.load()
     @Published var address = UserDefaults.standard.string(forKey: "galaxy.lan.address") ?? ""
     @Published var findAddressAutomatically = UserDefaults.standard.object(forKey: "galaxy.lan.auto") as? Bool ?? true {
@@ -70,6 +83,7 @@ final class AppModel: ObservableObject {
         if let saved = UserDefaults.standard.string(forKey: "galaxy.comma.identity"), LANTransport.deviceID(Data(saved.utf8)) != nil {
             lan.bind(to: saved)
         }
+        diagnostics.transport = transport; diagnostics.lan = lan
         server.start()
         pathMonitor.pathUpdateHandler = { [weak self] _ in
             Task { @MainActor in
@@ -182,6 +196,7 @@ struct GalaxyRootView: View {
                         .foregroundStyle(model.transport.connected ? .green : .orange)
                     Text("Galaxy · \(model.transport.label)").font(.subheadline.weight(.semibold))
                     Spacer()
+                    Button("Live") { model.showDiagnostics = true }.font(.subheadline)
                     Button("Connections") { model.showConnections = true }.font(.subheadline)
                 }.padding(.horizontal, 16).padding(.vertical, 10)
                 // Keep the screen mounted across connection switches.
@@ -191,14 +206,11 @@ struct GalaxyRootView: View {
         .background(Color.black)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $model.showConnections) { connectionView.preferredColorScheme(.dark) }
+        .fullScreenCover(isPresented: $model.showDiagnostics) { CompanionView(diagnostics: model.diagnostics) }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
         .task(id: scenePhase) {
-            guard scenePhase == .active else { return }
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await model.assets.check() }
-                group.addTask { await model.monitor() }
-                await group.waitForAll()
-            }
+            model.setPhoneActive(scenePhase == .active)
+            if scenePhase == .active { await model.assets.check() }
         }
     }
     private let brandPurple = Color(red: 0.55, green: 0.36, blue: 0.96)
@@ -214,6 +226,7 @@ struct GalaxyRootView: View {
                     Text("Galaxy companion")
                         .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity).padding(.top, 8)
+                Button("Live View & diagnostics") { model.showDiagnostics = true }.buttonStyle(.bordered)
                 Text("Connect your comma").font(.title2.bold())
                 Picker("Connection", selection: $model.mode) {
                     ForEach(ConnectionMode.allCases) { Text($0.title).tag($0) }

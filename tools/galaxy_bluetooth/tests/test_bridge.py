@@ -164,6 +164,15 @@ class ProxyTests(unittest.TestCase):
         return self.proxy.handle({"id": "request", "path": path, "method": method,
                                   "body": base64.b64encode(body).decode(), "headers": headers or {}})
 
+    def test_companion_reads_forward_signed_headers_but_not_screen_frames(self):
+        response = self.proxy.handle({'id': 'diagnostics', 'path': '/api/companion/diagnostics', 'method': 'GET',
+            'headers': {'X-Companion-Nonce': 'a' * 32, 'X-Companion-MAC': 'b' * 64}, 'body': ''})
+        self.assertEqual(response['status'], 200)
+        self.assertEqual(Fixture.seen[-1][2]['X-Companion-Nonce'], 'a' * 32)
+        self.assertEqual(Fixture.seen[-1][2]['X-Companion-Mac'], 'b' * 64)
+        frame = self.proxy.handle({'id': 'frame', 'path': '/api/companion/frame', 'method': 'GET', 'headers': {}, 'body': ''})
+        self.assertEqual(frame['status'], 501)
+
     def test_forwards_read_and_setting_change(self):
         self.assertEqual(self.request("/api/device/status")["status"], 200)
         body = b'{"key":"Metric","value":true}'
