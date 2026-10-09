@@ -38,7 +38,7 @@ from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
 J_CRUISE_VALS = [1.6, 1.2, 0.8, 0.6]
-A_CRUISE_MIN = -1.2
+A_CRUISE_MIN = -0.5
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 MIN_ALLOW_THROTTLE_SPEED = 2.5
 NATIVE_ALLOW_THROTTLE_PROBABILITY = 0.4
