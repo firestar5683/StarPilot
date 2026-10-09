@@ -1,8 +1,7 @@
 import Foundation
 import Combine
 
-/// Each request has an isolated, bounded buffer. Redirects cannot move local
-/// credentials or GitHub update requests onto a different server.
+/// Each request has an isolated, bounded buffer.
 final class BoundedHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
@@ -74,8 +73,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
     private(set) var generation = UUID().uuidString
     private(set) var expectedDeviceID: String?
 
-    // An explicit private IPv4 address prevents cloud/loopback endpoints from
-    // being treated as the local comma. No network-wide port scanning.
+    // An explicit private IPv4 address prevents cloud/loopback endpoints from being treated as the local comma.
     static func endpoint(_ address: String) throws -> URL {
         let parts = address.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 4, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
@@ -189,8 +187,7 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
                 try Task.checkCancellation()
                 guard error is URLError else { throw error }
                 invalidateLAN()
-                // Only reads can be repeated on another transport. Never replay
-                // a mutation whose response was lost after comma received it.
+                // Retry reads only; never replay a setting change.
                 if !["GET", "HEAD"].contains(method) {
                     throw BridgeError.message("Wi-Fi disconnected. This change may have saved; reload the setting to confirm before trying again.")
                 }

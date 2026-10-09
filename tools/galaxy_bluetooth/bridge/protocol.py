@@ -28,8 +28,7 @@ def seal(value, key, direction, nonce=None, compact_body=False):
     compressed = zlib.compress(plaintext, wbits=-15)
     encoded = (b"\x01" + struct.pack(">I", len(plaintext)) + compressed
                if len(compressed) < len(plaintext) else b"\x00" + struct.pack(">I", len(plaintext)) + plaintext)
-    # Compress the actual HTTP bytes, before base64 breaks repeated JSON keys
-    # into different byte sequences. Only clients advertising codec 2 get it.
+    # Compress HTTP bytes before base64 encoding.
     if compact_body and isinstance(value.get("body"), str):
         body = base64.b64decode(value["body"], validate=True)
         if len(body) > MAX_BODY:

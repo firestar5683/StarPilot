@@ -171,8 +171,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             queue.remove(at: index).completion.resume(throwing: CancellationError())
         } else if active?.id == id {
             if writeIndex >= outgoing.count {
-                // Drain an already-sent response so navigating away from a poll
-                // does not tear down a healthy Bluetooth session.
+                // Drain cancelled reads without disconnecting Bluetooth.
                 activeCancelled = true
             } else {
                 failConnection("Request cancelled. Reconnect before sending another request.")

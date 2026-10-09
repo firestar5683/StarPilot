@@ -60,7 +60,7 @@ implemented in this prototype.
 
 ## GitHub screens and offline startup
 
-The app checks `natehuby76/StarPilotBT`, branch `codex/galaxy-bluetooth`, when it
+The app checks `natehuby76/StarPilotBT`, branch `Nate/galaxy-bluetooth`, when it
 becomes active and when **Check Galaxy updates** is selected. It resolves one
 immutable commit, downloads a compatible manifest and verifies every file's hash
 and length. Unchanged files are copied from the saved/bundled version.

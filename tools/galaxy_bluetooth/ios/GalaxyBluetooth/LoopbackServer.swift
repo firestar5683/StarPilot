@@ -93,7 +93,6 @@ final class LoopbackServer: ObservableObject {
             guard request.headers["x-galaxy-local"] == localSecret else { return .error(403, "Missing app request key.") }
             guard transport.connected else { return .error(503, "Your comma is disconnected. Open Connections to reconnect.") }
             // Verify the device's catalog during the authenticated BLE handshake.
-            // Unknown or different versions continue through the ordinary proxy.
             if request.method == "GET", request.body.isEmpty,
                request.target == "/assets/components/tools/device_settings_layout.json?v=settings-tier-1",
                request.headers["range"] == nil, let catalog, let catalogSHA256,

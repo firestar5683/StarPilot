@@ -173,9 +173,7 @@ class Gateway:
             return b"\x00"
         packet = state.response[state.index]
         if state.read_stream:
-            # ATT reads already have a response. An authenticated opt-in client
-            # reads once per fragment and ACKs once after verifying the frame.
-            # Any read error closes that client session; fragments are not retried.
+            # ACK once after the read stream is verified.
             state.index += 1
         return packet
 
@@ -229,8 +227,7 @@ class Gateway:
     async def push_response(self, state):
         response = state.response
         try:
-            # BlueZ broadcasts Value notifications. Serialize publishers and
-            # tag frames so other subscribed clients ignore unrelated traffic.
+            # Serialize broadcasts and tag each client’s frames.
             async with self.notification_lock:
                 while state.response is response and response and not state.closed:
                     if self.notifier is None or not self.notifier.notifying:
@@ -243,8 +240,7 @@ class Gateway:
                             raise RuntimeError("Notification session ended")
                         state.index += 1
                         self.notifier.send(packet)
-                        # Bound the burst and yield to D-Bus/ATT. No fragment or
-                        # original HTTP request is retransmitted on a timeout.
+                        # Bound the burst and yield to D-Bus/ATT.
                         await asyncio.sleep(0.004)
                     await asyncio.wait_for(state.notification_ack.wait(), timeout=NOTIFICATION_ACK_TIMEOUT)
         except asyncio.CancelledError:

@@ -15,11 +15,11 @@ reports a conflict, stop and inspect it rather than forcing the switch.
 
 ```sh
 git -C /data/openpilot remote add galaxy-bt https://github.com/natehuby76/StarPilotBT.git
-git -C /data/openpilot fetch galaxy-bt refs/heads/codex/galaxy-bluetooth:refs/remotes/galaxy-bt/codex/galaxy-bluetooth
-git -C /data/openpilot switch --track galaxy-bt/codex/galaxy-bluetooth
+git -C /data/openpilot fetch galaxy-bt refs/heads/Nate/galaxy-bluetooth:refs/remotes/galaxy-bt/Nate/galaxy-bluetooth
+git -C /data/openpilot switch --track galaxy-bt/Nate/galaxy-bluetooth
 git -C /data/openpilot remote set-url origin https://github.com/natehuby76/StarPilotBT.git
-git -C /data/openpilot config branch.codex/galaxy-bluetooth.remote origin
-git -C /data/openpilot config branch.codex/galaxy-bluetooth.merge refs/heads/codex/galaxy-bluetooth
+git -C /data/openpilot config branch.Nate/galaxy-bluetooth.remote origin
+git -C /data/openpilot config branch.Nate/galaxy-bluetooth.merge refs/heads/Nate/galaxy-bluetooth
 ```
 
 Run one command at a time, stopping on an error. The remote-add step is needed
@@ -33,7 +33,7 @@ git -C /data/openpilot branch --show-current
 git -C /data/openpilot remote get-url origin
 ```
 
-Expected branch: `codex/galaxy-bluetooth`. Expected origin:
+Expected branch: `Nate/galaxy-bluetooth`. Expected origin:
 `https://github.com/natehuby76/StarPilotBT.git`.
 
 ## Use the fork's bridge at startup

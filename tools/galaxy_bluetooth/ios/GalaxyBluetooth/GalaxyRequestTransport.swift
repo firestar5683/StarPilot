@@ -11,8 +11,7 @@ extension GalaxyRequestTransport {
     var catalogSHA256: String? { nil }
 }
 
-/// Share concurrent settings reads and reuse only stable metadata. Current
-/// parameter values are always read again; writes are never cached or retried.
+/// Share concurrent settings reads and reuse only stable metadata.
 @MainActor
 final class GalaxyReadCache: GalaxyRequestTransport {
     private let transport: any GalaxyRequestTransport

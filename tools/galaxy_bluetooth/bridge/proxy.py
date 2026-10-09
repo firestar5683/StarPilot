@@ -14,15 +14,10 @@ RESPONSE_HEADERS = {"content-type", "content-range", "accept-ranges", "content-d
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
 MEDIA_PREFIXES = ("/video/", "/screen_recordings/", "/api/screen_recordings/download/", "/api/sentry/video/")
 # StarPilot includes this binary learning history in its all-parameters endpoint.
-# Galaxy's bundled UI never reads it and it is not a toggle in the settings catalog.
-# Bound the upstream snapshot separately, then retain every other parameter within
-# the existing BLE body limit. No parameter on the comma is modified.
 PARAMS_SNAPSHOT_LIMIT = 8 * MAX_BODY
 INTERNAL_PARAMS = {"LiveTorqueParameters"}
 CATALOG_PATH = "/assets/components/tools/device_settings_layout.json"
-# Only omit these additional fields for the settings-only request, and only when
-# the device catalog exactly matches the audited bundled Dom catalog. Every
-# toggle value, dependency, lock and vehicle-state flag remains unchanged.
+# Trim unused fields only when the settings catalog matches.
 FAST_SETTINGS_CATALOG_SHA256 = "ead70dc1cd550249ab5318160b88c246620de5f35e0a411a006b6ef7adff7517"
 SETTINGS_UNUSED_PARAMS = {"GalaxyDashboardStats", "CarParamsPrevRoute", "StarPilotStats",
                           "GitDiff", "ApiCache_NavDestinations"}

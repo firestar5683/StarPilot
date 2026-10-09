@@ -11,9 +11,7 @@ struct GalaxyWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // A normal on-phone HTTP origin preserves ES modules, fetch, XHR,
-        // iframes, multipart bodies and Response semantics without editing Galaxy.
-        // Only requests to this same local origin receive the private header.
+        // Keep Galaxy on one local origin.
         let script = """
         (() => {
           if (location.origin !== '\(url.scheme!)://\(url.host!):\(url.port!)') return;

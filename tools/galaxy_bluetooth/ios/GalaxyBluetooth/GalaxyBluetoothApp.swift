@@ -39,8 +39,7 @@ final class AppModel: ObservableObject {
     private var identitySession = ""
     private var addressCheckSession = ""
     func importPairingKey(_ key: String) {
-        // QR import replaces a selected device. Save to Keychain only after
-        // the existing encrypted Bluetooth handshake proves possession.
+        // Save imported keys only after the encrypted handshake.
         opened = false
         wantsConnection = false
         bluetooth.forgetSavedDevice()
@@ -117,8 +116,7 @@ final class AppModel: ObservableObject {
             if identitySession != session {
                 let identity = try await bluetooth.request(path: "/api/params?key=DongleId", method: "GET", headers: [:], body: Data())
                 guard wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session else { return }
-                // Only the authenticated BLE peer may establish the automatic
-                // LAN identity. An unregistered device requires manual address.
+                // Only the authenticated BLE peer may establish the automatic LAN identity.
                 guard identity.status == 200, let value = LANTransport.deviceID(identity.bodyData) else {
                     networkDetails = "Automatic local discovery needs a registered device identifier. Bluetooth still works; enter comma’s IP manually for Wi-Fi."
                     return
@@ -139,8 +137,7 @@ final class AppModel: ObservableObject {
             } else {
                 networkDetails = "Comma has no usable local Wi-Fi address. Bluetooth still controls local settings; comma can use its SIM for online downloads."
             }
-            // Galaxy's online:true means the server responds, not that comma
-            // can reach the internet. Never infer internet access from it.
+            // Galaxy's online:true means the server responds, not that comma can reach the internet.
         } catch { /* Discovery is optional; it must not disrupt working BLE. */ }
     }
     func monitor() async {

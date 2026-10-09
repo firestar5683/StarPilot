@@ -30,10 +30,9 @@ struct GalaxyAssetManifest: Codable {
 
 @MainActor
 final class GalaxyAssetStore: ObservableObject {
-    // Pilot updates come only from our authorized fork. Change this release
-    // channel deliberately when the maintainers adopt the project.
+    // Nate’s pilot update channel.
     static let repository = "natehuby76/StarPilotBT"
-    static let branch = "codex/galaxy-bluetooth"
+    static let branch = "Nate/galaxy-bluetooth"
     static let resourcePath = "tools/galaxy_bluetooth/ios/GalaxyBluetooth/Resources/Web"
     @Published private(set) var status = "Galaxy is available offline."
     @Published private(set) var checking = false
@@ -91,8 +90,7 @@ final class GalaxyAssetStore: ObservableObject {
             stage = staging
             try manager.createDirectory(at: staging, withIntermediateDirectories: true)
             var completed = 0
-            // Four concurrent downloads, immutable commit URLs, and all files
-            // verified before publication prevent mixed-version interfaces.
+            // Verify every file before publishing an update.
             for offset in stride(from: 0, to: manifest.files.count, by: 4) {
                 try Task.checkCancellation()
                 let batch = Array(manifest.files[offset..<min(offset + 4, manifest.files.count)])

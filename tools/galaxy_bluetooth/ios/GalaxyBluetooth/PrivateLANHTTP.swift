@@ -1,9 +1,7 @@
 import Foundation
 import Network
 
-/// A local-only HTTP client for the one configured comma endpoint. GitHub and
-/// every other internet request retain URLSession's normal HTTPS protections.
-/// No global/private-range ATS exceptions, redirects or DNS/network scanning.
+/// A local-only HTTP client for the one configured comma endpoint.
 @MainActor
 final class PrivateLANHTTP {
     private let connection: NWConnection
