@@ -12,14 +12,19 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.hyundai.values import CAR as HYUNDAI
 from opendbc.car.toyota.values import CAR as TOYOTA
 from opendbc.car.vehicle_model import VehicleModel
+from opendbc.car.lateral import get_friction
 from openpilot.common.realtime import DT_CTRL
-from openpilot.common.constants import CV
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.selfdrive.controls.lib import latcontrol_torque
 from openpilot.starpilot.lateral.torque_extension import selected_policy
 from openpilot.starpilot.lateral import ioniq6_policy as tune
 from openpilot.starpilot.lateral.torque_shaping import INTERP_SPEEDS
 
 TESTDATA = Path(__file__).parent / 'testdata'
+
+
+def _legacy_friction(controller, error, deadzone, threshold, _cs, _setpoint):
+  return latcontrol_torque.get_friction(error, deadzone, threshold, controller.torque_params)
 
 
 def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=False, direct_original_controller=False, turn_assist=True,
@@ -92,7 +97,6 @@ class Ioniq6PolicyTests(unittest.TestCase):
     controller.update_torque_parameters(3.2, 0.01, 0.10)
     self.assertEqual(controller.pid._k_p, [[0.0], [0.6]])
 
-  @mock.patch.object(tune, 'get_hkg_canfd_base_friction_threshold', lambda _speed, _accel=0.0: 0.39)
   def test_actual_frozen_controller_sequences_and_pure_calibration(self):
     sequence = ([(False, 0.3, 10.0, -0.001, False)] * 2 +
                 [(True, 0.3, 10.0, -0.001, False)] * 4 +
@@ -129,29 +133,20 @@ class Ioniq6PolicyTests(unittest.TestCase):
           for value, reference in zip(row, expected, strict=True):
             self.assertAlmostEqual(value, reference, places=6)
 
-  def test_highway_threshold_knots_and_curve_relief(self):
-    for mph, threshold in ((0, .39), (30, .39), (50, .39), (65, .55), (75, .65), (100, .65)):
-      with self.subTest(mph=mph):
-        speed = mph * CV.MPH_TO_MS
-        for accel in (-.25, 0., .25):
-          self.assertAlmostEqual(tune.get_hkg_canfd_base_friction_threshold(speed, accel), threshold)
-        for accel in (-1.5, -.65, .65, 1.5):
-          self.assertEqual(tune.get_hkg_canfd_base_friction_threshold(speed, accel), .39)
-        self.assertAlmostEqual(tune.get_hkg_canfd_base_friction_threshold(speed, .45), (.39 + threshold) / 2)
-    self.assertAlmostEqual(tune.get_hkg_canfd_base_friction_threshold(60 * CV.MPH_TO_MS), .39 + .16 * 2 / 3)
-
   def test_threshold_reaches_controller_without_changing_requests_or_pid(self):
     for speed, curvature, unchanged in ((20., .0002, True), (32., .001, True), (32., .0001, False)):
       with self.subTest(speed=speed, curvature=curvature):
         sequence = [(False, speed, 0., curvature, False)] * 100 + [(True, speed, 0., curvature, False)] * 100
-        with mock.patch.object(tune, 'get_friction', wraps=tune.get_friction) as friction:
+        with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as friction:
           controller, actual = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, roll=0.)
-        state = actual[-1]
-        expected_threshold = tune.get_ioniq_6_friction_threshold(speed, state[1], state[2])
-        expected_threshold /= tune.get_ioniq_6_center_taper_scale(state[1], speed)
-        self.assertAlmostEqual(friction.call_args.args[2], expected_threshold)
-        with mock.patch.object(tune, 'get_hkg_canfd_base_friction_threshold', lambda _speed, _accel=0.0: .39):
-          baseline, original = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, roll=0.)
+        with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as old_friction:
+          with mock.patch.object(LatControlTorque, 'friction', _legacy_friction):
+            baseline, original = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, roll=0.)
+        if unchanged:
+          self.assertEqual(friction.call_args.args[:3], old_friction.call_args.args[:3])
+        else:
+          self.assertGreater(friction.call_args.args[2], old_friction.call_args.args[2])
+          self.assertLess(abs(friction.call_args.args[0]), abs(old_friction.call_args.args[0]))
         self.assertEqual(controller.torque_params.to_dict(), baseline.torque_params.to_dict())
         self.assertEqual((controller.pid.pos_limit, controller.pid.neg_limit),
                          (baseline.pid.pos_limit, baseline.pid.neg_limit))
@@ -180,6 +175,7 @@ class Ioniq6PolicyTests(unittest.TestCase):
       self.assertAlmostEqual(controller.torque_params.latAccelOffset, 0.02, places=6)
       self.assertAlmostEqual(controller.torque_params.friction, 0.10, places=6)
 
+  @mock.patch.object(LatControlTorque, 'friction', _legacy_friction)
   def test_other_cars_without_assist_match_committed_parent_trace(self):
     sequence = ([(False, 2., 5., -.0005, False)] * 2 +
                 [(True, 2., 5., -.0005, False)] * 3 +

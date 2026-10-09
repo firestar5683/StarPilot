@@ -3,7 +3,6 @@ import math
 
 import numpy as np
 
-from opendbc.car.lateral import get_friction
 from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
@@ -108,7 +107,7 @@ class HKGShapedTorquePolicy:
     threshold, friction_scale = self.friction_context(setpoint, jerk, measurement, cs.vEgo)
     jerk_deadzone = center_chatter_friction_jerk_deadzone(cs.vEgo, setpoint, self.jerk_deadzone(setpoint, jerk, measurement, cs.vEgo))
     friction_jerk = math.copysign(max(abs(jerk) - jerk_deadzone, 0.0), jerk)
-    ff += friction_scale * get_friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, parent.torque_params)
+    ff += friction_scale * parent.friction(error + JERK_GAIN * friction_jerk, deadzone, threshold, cs, setpoint)
     if cs.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
     freeze = safety_limited or cs.steeringPressed or cs.vEgo < self.low_speed_reset_threshold or unwind

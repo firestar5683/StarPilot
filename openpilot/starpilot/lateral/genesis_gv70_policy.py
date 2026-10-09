@@ -8,7 +8,6 @@ import numpy as np
 from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from opendbc.car import structs
-from opendbc.car.lateral import get_friction
 from opendbc.car.hyundai.values import CAR
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -129,7 +128,7 @@ class GenesisGV70TorquePolicy:
     vehicle_deadzone = get_genesis_gv70_friction_jerk_deadzone(CS.vEgo, setpoint)
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, vehicle_deadzone)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
-    ff += get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, parent.torque_params)
+    ff += parent.friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, CS, setpoint)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
     # Filter feedforward before PID so feedback remains immediate.

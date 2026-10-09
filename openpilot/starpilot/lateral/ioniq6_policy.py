@@ -30,10 +30,9 @@ HKG_CANFD_BASE_FRICTION_THRESHOLD = 0.39
 IONIQ_6_CARS = (CAR.HYUNDAI_IONIQ_6,)
 
 
-def get_hkg_canfd_base_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0) -> float:
-  base = float(np.interp(v_ego, [50 * CV.MPH_TO_MS, 65 * CV.MPH_TO_MS, 75 * CV.MPH_TO_MS], [0.39, 0.55, 0.65]))
-  center_weight = float(np.interp(abs(desired_lateral_accel), [0.25, 0.65], [1.0, 0.0]))
-  return HKG_CANFD_BASE_FRICTION_THRESHOLD + (base - HKG_CANFD_BASE_FRICTION_THRESHOLD) * center_weight
+def get_hkg_canfd_base_friction_threshold(v_ego: float) -> float:
+  base = float(np.interp(v_ego, [1 * CV.MPH_TO_MS, 20 * CV.MPH_TO_MS, 75 * CV.MPH_TO_MS], [0.16, 0.19, 0.27]))
+  return max(base, HKG_CANFD_BASE_FRICTION_THRESHOLD)
 
 
 def is_ioniq_6_2025_model(CP) -> bool:
@@ -495,7 +494,7 @@ def get_ioniq_6_2023_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
   return 1.0 - reduction
 
 def get_ioniq_6_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0, desired_lateral_jerk: float = 0.0) -> float:
-  base_threshold = max(get_hkg_canfd_base_friction_threshold(v_ego, desired_lateral_accel), IONIQ_6_BASE_FRICTION_THRESHOLD)
+  base_threshold = max(get_hkg_canfd_base_friction_threshold(v_ego), IONIQ_6_BASE_FRICTION_THRESHOLD)
   transition_envelope = _ioniq_6_transition_envelope(v_ego, desired_lateral_accel, desired_lateral_jerk)
   phase = _ioniq_6_transition_phase(desired_lateral_accel, desired_lateral_jerk)
   turn_in_weight = max(phase, 0.0)
@@ -731,7 +730,6 @@ def get_ioniq_6_low_speed_angle_assist_torque(desired_angle_deg: float, actual_a
 from collections import deque
 
 from openpilot.cereal import log
-from opendbc.car.lateral import get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.pid import PIDController
@@ -854,8 +852,8 @@ class Ioniq6TorquePolicy:
     vehicle_jerk_deadzone = IONIQ_6_2025_FRICTION_JERK_DEADZONE if self.is_2025 else IONIQ_6_FRICTION_JERK_DEADZONE
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, vehicle_jerk_deadzone)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
-    ff += friction_scale * get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
-                                        friction_threshold, parent.torque_params)
+    ff += friction_scale * parent.friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
+                                          friction_threshold, CS, setpoint)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
     freeze_integrator = (steer_limited_by_safety or CS.steeringPressed or

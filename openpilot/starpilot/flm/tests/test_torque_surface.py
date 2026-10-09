@@ -93,7 +93,6 @@ class TestIoniq6Surface(unittest.TestCase):
     with self.assertRaises(ValueError):
       unchecked_input(i.speed, i.setpoint, i.jerk, i.desired_angle_deg, i.actual_angle_deg, i.output_torque, False, None)
 
-  @mock.patch.object(baseline, 'get_hkg_canfd_base_friction_threshold', lambda _speed, _accel=0.0: 0.39)
   def test_frozen_ioniq_stage_vectors(self):
     # Compact values from frozen 678af783 latcontrol_vehicle_tunes.py SHA256
     # 2a7793c6ee4b53b45070d3267a01e8c7105dfd8df9d38cdfc96cfe4b672a125b.

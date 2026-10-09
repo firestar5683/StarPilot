@@ -3,8 +3,10 @@ import numpy as np
 from collections import deque
 
 from openpilot.cereal import log
+from opendbc.car import structs
+from opendbc.car.hyundai.values import HyundaiFlags
 from opendbc.car.lateral import FRICTION_THRESHOLD, get_friction
-from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
+from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY, CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
@@ -38,6 +40,10 @@ VERSION = 1
 class LatControlTorque(LatControl):
   def __init__(self, CP, CI, dt, *, controller_mode: ControllerMode | None = None, turn_assist: bool = False):
     super().__init__(CP, CI, dt)
+    self.hkg_canfd_torque = bool(CP.brand == 'hyundai' and CP.flags & HyundaiFlags.CANFD and
+                                CP.steerControlType == structs.CarParams.SteerControlType.torque and
+                                not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and
+                                not (CP.notCar or CP.passive or CP.dashcamOnly))
     self.controller_mode = default_selection(CP).mode if controller_mode is None else ControllerMode(controller_mode)
     self.controller_policy = policy_for(CP)
     if self.controller_mode == ControllerMode.STARPILOT and self.controller_policy is None:
@@ -68,6 +74,14 @@ class LatControlTorque(LatControl):
   def update_limits(self):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
+
+  def friction(self, error, deadzone, threshold, CS, setpoint):
+    if self.hkg_canfd_torque and not CS.steeringPressed:
+      weight = np.interp(CS.vEgo, [50 * CV.MPH_TO_MS, 65 * CV.MPH_TO_MS], [0.0, 1.0])
+      weight *= np.interp(abs(setpoint), [0.25, 0.65], [1.0, 0.0])
+      threshold += max(np.interp(CS.vEgo, [65 * CV.MPH_TO_MS, 75 * CV.MPH_TO_MS], [0.65, 0.78]) - threshold, 0.0) * weight
+      error = math.copysign(max(abs(error) - 0.04 * weight, 0.0), error)
+    return get_friction(error, deadzone, threshold, self.torque_params)
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
     self.flm_surface = self.flm_source.sample(active=active, speed=CS.vEgo)
@@ -106,7 +120,7 @@ class LatControlTorque(LatControl):
     ff, threshold = flm.stages(self.flm_surface, CS, setpoint, desired_lateral_jerk, ff, threshold)
     if friction_policy is not None:
       threshold = friction_policy.friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
-    ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, threshold, self.torque_params)
+    ff += self.friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, threshold, CS, setpoint)
 
     if not active:
       output_torque = 0.0
