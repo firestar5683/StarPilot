@@ -6806,6 +6806,8 @@ public:
 
   inline bool getNativeAcknowledged() const;
 
+  inline bool getOptionalSetRelease() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -6873,6 +6875,9 @@ public:
 
   inline bool getNativeAcknowledged();
   inline void setNativeAcknowledged(bool value);
+
+  inline bool getOptionalSetRelease();
+  inline void setOptionalSetRelease(bool value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -7093,6 +7098,8 @@ public:
 
   inline bool getLateralArmed() const;
 
+  inline bool getOptionalSetRelease() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -7160,6 +7167,9 @@ public:
 
   inline bool getLateralArmed();
   inline void setLateralArmed(bool value);
+
+  inline bool getOptionalSetRelease();
+  inline void setOptionalSetRelease(bool value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -16345,6 +16355,20 @@ inline void AolAxisState::Builder::setNativeAcknowledged(bool value) {
       ::capnp::bounded<277>() * ::capnp::ELEMENTS, value);
 }
 
+inline bool AolAxisState::Reader::getOptionalSetRelease() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<278>() * ::capnp::ELEMENTS);
+}
+
+inline bool AolAxisState::Builder::getOptionalSetRelease() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<278>() * ::capnp::ELEMENTS);
+}
+inline void AolAxisState::Builder::setOptionalSetRelease(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<278>() * ::capnp::ELEMENTS, value);
+}
+
 inline  ::uint8_t AolAxisState::SafetyWire::Reader::getKind() const {
   return _reader.getDataField< ::uint8_t>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
@@ -16767,6 +16791,20 @@ inline bool AolAxisState::IntentWire::Builder::getLateralArmed() {
 inline void AolAxisState::IntentWire::Builder::setLateralArmed(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<12>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AolAxisState::IntentWire::Reader::getOptionalSetRelease() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS);
+}
+
+inline bool AolAxisState::IntentWire::Builder::getOptionalSetRelease() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS);
+}
+inline void AolAxisState::IntentWire::Builder::setOptionalSetRelease(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint8_t AolAxisState::LaneChangeStatusWire::Reader::getKind() const {
