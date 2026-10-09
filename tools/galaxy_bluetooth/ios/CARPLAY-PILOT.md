@@ -32,6 +32,8 @@ rm -f /data/galaxy-ble/diagnostics-enabled
 4. Compare UI FPS with Live View on and off. Stop if capture causes UI stalls. Errors stop capture temporarily; stale images are removed from the phone.
 5. Disconnect Wi-Fi: the image disappears, while diagnostics may continue through paired Bluetooth. Stop the comma UI or disconnect the phone and confirm stale values disappear.
 
+If no fresh frame arrives for ten seconds, tap **Copy diagnostics** and paste the report to the developer. It includes recent connection events and capture/encoder errors, without pairing keys or authentication headers. Update both the phone app and comma fork for capture details. On comma, the same capture report is available at `/dev/shm/galaxy-companion/capture-status.json`.
+
 Temperatures include reported CPU, onboard GPU, memory, DSP, modem, PMIC, intake, exhaust, GNSS and SoC values; available kernel thermal/hwmon sensors; and Chestnut GPU/memory when present. Sensor availability varies, and some kernel sensors duplicate existing readings. Missing/default zero values are not displayed as measured temperatures.
 
 FPS is derived from UI frames and camera/model frame counters. Other subscribed services show observed updates per second, not rendering FPS. It is not an FPS measurement of every Linux process. First samples need another update to establish rates.

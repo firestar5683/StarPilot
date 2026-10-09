@@ -152,6 +152,10 @@ class CompanionPublisher:
     self.process = None
     self.video_size = None
     self.sent_times = queue.Queue(maxsize=8)
+    self.capture_hook = 0.0
+    self.last_encoded = 0.0
+    self.capture_error = None
+    self.encoder_error = None
 
   def update(self, ui, gui):
     if not ENABLED.exists():
@@ -188,6 +192,14 @@ class CompanionPublisher:
       rates.append({'name': name, 'value': round(value, 1) if value is not None else None, 'unit': unit})
     self.previous = {name: count for name, count, _, _ in sources}
     self.last = now
+    capture_status = {
+      'hookAgeSeconds': round(now - self.capture_hook, 2) if self.capture_hook else None,
+      'frameAgeSeconds': round(now - self.last_encoded, 2) if self.last_encoded else None,
+      'queuedImages': self.images.qsize(), 'captureError': self.capture_error,
+      'encoderError': self.encoder_error,
+      'encoderRunning': self.process is not None and self.process.poll() is None,
+    }
+    atomic_write('capture-status.json', json.dumps(capture_status).encode())
     temperatures = []
     device = sm['deviceState']
     if sm.valid['deviceState'] and now - sm.recv_time['deviceState'] < 3:
@@ -224,12 +236,13 @@ class CompanionPublisher:
         except (OSError, ValueError):
           pass
     atomic_write('diagnostics.json', json.dumps({'monotonic': now, 'engaged': bool(ui.engaged) if sm.valid.get('selfdriveState', False) and now - sm.recv_time.get('selfdriveState', 0) < 3 else None, 'temperatures': temperatures,
-                 'rates': rates, 'captureLimitFPS': 20}, allow_nan=False, separators=(',', ':')).encode())
+                 'rates': rates, 'captureLimitFPS': 20, 'capture': capture_status}, allow_nan=False, separators=(',', ':')).encode())
 
   def capture(self):
     if not ENABLED.exists():
       return
     now = time.monotonic()
+    self.capture_hook = now
     if now < self.capture_failed_until or now - self.last_capture < 0.045 or self.images.full():
       return
     try:
@@ -252,9 +265,11 @@ class CompanionPublisher:
         self.encoder = threading.Thread(target=self.encode, daemon=True)
         self.encoder.start()
       self.images.put_nowait((image, now))
+      self.capture_error = None
       image = None
 
     except Exception as error:
+      self.capture_error = str(error)[:500]
       logging.getLogger("galaxy-companion").warning("Screen capture: %s", error)
       self.capture_failed_until = now + 10
     finally:
@@ -281,6 +296,7 @@ class CompanionPublisher:
           captured = times.get(timeout=2)
           if len(raw) <= 650000 and time.monotonic() - captured < 1 and ENABLED.exists():
             atomic_write('frame.bin', struct.pack('!d', captured) + raw)
+            self.last_encoded = captured
     except (OSError, ValueError, queue.Empty):
       pass
     finally:
@@ -304,8 +320,10 @@ class CompanionPublisher:
             'ffmpeg', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba',
             '-s:v', f'{image.width}x{image.height}', '-r', '20', '-i', 'pipe:0',
             '-an', '-c:v', 'mjpeg', '-q:v', '5', '-threads', '1', '-f', 'image2pipe',
-            '-flush_packets', '1', 'pipe:1'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            '-flush_packets', '1', 'pipe:1'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
           self.video_size = dimensions
+          self.encoder_error = None
+          threading.Thread(target=self.read_encoder_errors, args=(self.process,), daemon=True).start()
           threading.Thread(target=self.read_encoded, args=(self.process, self.sent_times), daemon=True).start()
         rl.image_format(image, rl.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
         raw = bytes(rl.ffi.buffer(image.data, image.width * image.height * 4))
@@ -313,6 +331,7 @@ class CompanionPublisher:
         self.process.stdin.write(raw)
         self.process.stdin.flush()
       except Exception as error:
+        self.encoder_error = str(error)[:500]
         logging.getLogger("galaxy-companion").warning("Screen encoder: %s", error)
         self.capture_failed_until = time.monotonic() + 10
         if self.process is not None and self.process.poll() is None:
@@ -320,6 +339,14 @@ class CompanionPublisher:
       finally:
         rl.unload_image(image)
         self.images.task_done()
+
+  def read_encoder_errors(self, process):
+    try:
+      for line in process.stderr:
+        if process is self.process:
+          self.encoder_error = line.decode(errors='replace').strip()[:500]
+    except (OSError, ValueError):
+      pass
 
 
 publisher = CompanionPublisher()
@@ -335,5 +362,5 @@ def publish_telemetry(ui, gui):
 def capture_frame():
   try:
     publisher.capture()
-  except Exception:
-    pass
+  except Exception as error:
+    publisher.capture_error = str(error)[:500]

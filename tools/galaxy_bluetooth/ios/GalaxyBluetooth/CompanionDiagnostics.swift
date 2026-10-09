@@ -15,19 +15,30 @@ struct DiagnosticSnapshot: Decodable {
     let engaged: Bool?
     let temperatures: [DiagnosticMetric]
     let rates: [DiagnosticMetric]
+    let capture: CaptureStatus?
+}
+
+struct CaptureStatus: Codable {
+    let hookAgeSeconds: Double?
+    let frameAgeSeconds: Double?
+    let queuedImages: Int?
+    let captureError: String?
+    let encoderError: String?
+    let encoderRunning: Bool?
 }
 
 @MainActor
 final class CompanionDiagnostics: ObservableObject {
     @Published var snapshot: DiagnosticSnapshot?
     @Published var screen: UIImage?
-    @Published var status = "Connect and pair with comma to read diagnostics."
-    @Published var screenStatus = "Live View uses local Wi-Fi."
-    @Published var live = true
-    @Published var phoneVisible = false { didSet { updateActivity() } }
+    @Published var status = "Connect and pair with comma to read diagnostics." { didSet { record(status) } }
+    @Published var screenStatus = "Live View uses local Wi-Fi." { didSet { record(screenStatus) } }
+    @Published var live = true { didSet { if live { waitingSince = Date() } } }
+    @Published var phoneVisible = false { didSet { if phoneVisible && !oldValue { waitingSince = Date() }; updateActivity() } }
     @Published var carPlayActive = false { didSet { updateActivity() } }
     @Published private(set) var receivedAt: Date?
     @Published private(set) var frameAt: Date?
+    @Published var copiedLog = false
     var transport: PreferredTransport?
     var lan: LANTransport?
     var phoneActive = true { didSet { updateActivity() } }
@@ -41,6 +52,39 @@ final class CompanionDiagnostics: ObservableObject {
     private var fpsStarted = Date()
     @Published private(set) var displayFPS = 0.0
     private var lastDiagnostics = Date.distantPast
+    private var waitingSince = Date()
+    private var events: [String] = []
+    private var lastEvent = ""
+    private var captureSample: CaptureStatus?
+    private var captureSampleAt: Date?
+
+    var canCopyLog: Bool {
+        live && phoneVisible && !frameFresh && Date().timeIntervalSince(waitingSince) >= 10
+    }
+    private func record(_ message: String) {
+        guard message != lastEvent else { return }
+        lastEvent = message
+        events.append("\(ISO8601DateFormatter().string(from: Date())) \(message.prefix(500))")
+        if events.count > 30 { events.removeFirst(events.count - 30) }
+    }
+    func diagnosticLog() -> String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        var lines = ["StarPilot Live diagnostics", ISO8601DateFormatter().string(from: Date()),
+                     "App: \(info["CFBundleShortVersionString"] ?? "unknown") (\(info["CFBundleVersion"] ?? "unknown"))",
+                     "iOS: \(UIDevice.current.systemVersion)",
+                     "Connection: \(transport?.label ?? "Disconnected")",
+                     "LAN connected: \(lan?.connected == true)",
+                     "Telemetry: \(status)", "Stream: \(screenStatus)",
+                     "No frame for: \(Int(Date().timeIntervalSince(waitingSince))) seconds"]
+        if let captureSample, let captureSampleAt,
+           let data = try? JSONEncoder().encode(captureSample), let text = String(data: data, encoding: .utf8) {
+            lines.append("Capture sample age: \(Int(Date().timeIntervalSince(captureSampleAt))) seconds")
+            lines.append("Comma capture: \(text)")
+        } else { lines.append("Comma capture details unavailable; update the comma fork if telemetry is connected.") }
+        lines.append("Recent events:")
+        lines.append(contentsOf: events)
+        return lines.joined(separator: "\n")
+    }
 
     var fresh: Bool {
         guard let snapshot, let receivedAt, transport?.connected == true else { return false }
@@ -88,6 +132,7 @@ final class CompanionDiagnostics: ObservableObject {
                 let sample = try JSONDecoder().decode(DiagnosticSnapshot.self, from: response.bodyData)
                 guard sample.ageSeconds.isFinite, sample.ageSeconds >= 0 else { throw BridgeError.message("Invalid telemetry age.") }
                 snapshot = sample; receivedAt = Date(); status = sample.ageSeconds < 5 ? "Connected · read only" : "Telemetry is outdated"
+                if let capture = sample.capture { captureSample = capture; captureSampleAt = Date() }
             } catch { if !Task.isCancelled { status = error.localizedDescription; snapshot = nil; receivedAt = nil } }
         }
         guard live, phoneVisible, phoneActive else { stopStream(); return }
@@ -110,6 +155,7 @@ final class CompanionDiagnostics: ObservableObject {
                 Task { @MainActor in
                     guard let self, self.streamGeneration == generation else { return }
                     self.screen = picture; self.frameAt = Date(); self.frameCount += 1
+                    self.waitingSince = Date()
                     let elapsed = Date().timeIntervalSince(self.fpsStarted)
                     if elapsed >= 1 {
                         self.displayFPS = Double(self.frameCount) / elapsed
@@ -155,6 +201,14 @@ struct CompanionView: View {
                                 }
                             }
                             Text(diagnostics.screenStatus).font(.caption).foregroundStyle(.secondary)
+                            if diagnostics.canCopyLog {
+                                Text("Still waiting for a frame. Copy diagnostics to share what happened.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Button(diagnostics.copiedLog ? "Copied diagnostics" : "Copy diagnostics", systemImage: diagnostics.copiedLog ? "checkmark" : "doc.on.doc") {
+                                    UIPasteboard.general.string = diagnostics.diagnosticLog()
+                                    diagnostics.copiedLog = true
+                                }.buttonStyle(.bordered).tint(.purple)
+                            }
                         }
                     } else {
                         ScrollView {

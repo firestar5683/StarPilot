@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import hmac
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
@@ -109,6 +110,19 @@ class CompanionTests(unittest.TestCase):
     self.assertEqual(publisher.last_capture, 0)
     with patch.object(companion.publisher, 'capture', side_effect=RuntimeError('GPU')):
       companion.capture_frame()
+    self.assertEqual(companion.publisher.capture_error, 'GPU')
+    companion.publisher.capture_error = None
+
+  def test_encoder_error_is_visible_and_bounded(self):
+    publisher = companion.CompanionPublisher()
+    process = types.SimpleNamespace(stderr=io.BytesIO(b'encoder unavailable\n' + b'x' * 1000 + b'\n'))
+    publisher.process = process
+    publisher.read_encoder_errors(process)
+    self.assertEqual(publisher.encoder_error, 'x' * 500)
+    publisher.process = None
+    process.stderr = io.BytesIO(b'old encoder error\n')
+    publisher.read_encoder_errors(process)
+    self.assertEqual(publisher.encoder_error, 'x' * 500)
 
   def test_capture_queue_is_bounded_and_preserves_aspect(self):
     companion.ENABLED.touch()
@@ -169,11 +183,15 @@ class CompanionTests(unittest.TestCase):
     with patch.object(companion.time, "monotonic", return_value=now):
       publisher.update(ui, gui)
     first = json.loads((companion.DATA / 'diagnostics.json').read_bytes())
+    self.assertIsNone(first['capture']['hookAgeSeconds'])
+    self.assertFalse(first['capture']['encoderRunning'])
     gpu = next(m for m in first['temperatures'] if m['name'] == 'GPU')
     self.assertIsNone(gpu['value'])
     self.assertIsNone(next(m for m in first['rates'] if m['name'] == 'modelV2')['value'])
     gui.frame = 30
     source.model.frameId = 120
+    publisher.capture_hook = now
+    publisher.capture_error = 'No screen pixels'
     with patch.object(companion.time, 'monotonic', return_value=now + 1):
       publisher.update(ui, gui)
     sample = json.loads((companion.DATA / 'diagnostics.json').read_bytes())
@@ -181,6 +199,9 @@ class CompanionTests(unittest.TestCase):
     self.assertEqual(rate['value'], 20)
     self.assertEqual(rate['unit'], 'FPS')
     self.assertTrue(sample['engaged'])
+    self.assertEqual(sample['capture']['hookAgeSeconds'], 1)
+    self.assertEqual(sample['capture']['captureError'], 'No screen pixels')
+    self.assertEqual(json.loads((companion.DATA / 'capture-status.json').read_bytes()), sample['capture'])
 
 
 if __name__ == '__main__':
