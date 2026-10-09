@@ -2,6 +2,7 @@
 #include "system/camerad/cameras/spectra.h"
 
 #include <poll.h>
+#include <sched.h>
 #include <sys/ioctl.h>
 
 #include <algorithm>
@@ -15,6 +16,23 @@
 #include "common/params.h"
 #include "common/swaglog.h"
 
+
+// CPU hotplug can move an offroad camera thread away from its intended core.
+// Recheck outside frame processing so a surviving parked camera recovers onroad.
+static void restore_camera_affinity() {
+  static uint64_t last_check = 0;
+  uint64_t now = nanos_since_boot();
+  if (last_check != 0 && now - last_check < 1000000000ULL) return;
+  last_check = now;
+
+  cpu_set_t current;
+  CPU_ZERO(&current);
+  if (sched_getaffinity(0, sizeof(current), &current) != 0) return;
+  if (CPU_COUNT(&current) == 1 && CPU_ISSET(6, &current)) return;
+  if (util::set_core_affinity({6}) == 0) {
+    LOGW("camerad: restored camera event loop affinity to core 6");
+  }
+}
 
 ExitHandler do_exit;
 
@@ -270,6 +288,7 @@ void camerad_thread() {
   // poll events
   LOG("-- Dequeueing Video events");
   while (!do_exit) {
+    restore_camera_affinity();
     struct pollfd fds[1] = {{.fd = m.video0_fd, .events = POLLPRI}};
     int ret = poll(fds, std::size(fds), 1000);
     if (ret < 0) {
