@@ -49,7 +49,7 @@ class CompanionTests(unittest.TestCase):
   def test_opt_in_authentication_and_replay(self):
     path = '/api/companion/diagnostics'
     headers = self.headers(path)
-    self.assertEqual(self.client.get(path, headers=headers).status_code, 403)
+    self.assertEqual(self.client.get(path, headers=headers).status_code, 503)
     companion.ENABLED.touch()
     self.assertEqual(self.client.get(path).status_code, 403)
     bad = dict(headers, **{'X-Companion-MAC': '0' * 64})

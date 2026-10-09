@@ -31,6 +31,15 @@ struct MJPEGTests {
             var parser = MJPEGParser()
             do { _ = try parser.append(Data(invalid.utf8)); fatalError("Invalid response accepted") } catch {}
         }
+        for (status, expected) in [(404, "missing"), (403, "pairing"), (503, "disabled"), (500, "HTTP 500")] {
+            var parser = MJPEGParser()
+            do {
+                _ = try parser.append(Data("HTTP/1.1 \(status) Error\r\n\r\n".utf8))
+                fatalError("HTTP error accepted")
+            } catch BridgeError.message(let message) {
+                precondition(message.contains(expected), "Misleading HTTP error")
+            }
+        }
         var parser = MJPEGParser()
         let oversized = Data("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=galaxy-frame\r\n\r\n--galaxy-frame\r\nContent-Type: image/jpeg\r\nContent-Length: 9999999\r\n\r\n".utf8)
         do { _ = try parser.append(oversized); fatalError("Oversized frame accepted") } catch {}

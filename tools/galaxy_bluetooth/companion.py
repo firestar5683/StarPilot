@@ -53,10 +53,18 @@ def register_routes(app):
       _nonces[nonce] = now + 120
     return True
 
+  def denial(path):
+    if not ENABLED.exists():
+      return jsonify(error='Diagnostics are disabled on comma.'), 503
+    if not allowed(path):
+      return jsonify(error='Phone pairing was rejected.'), 403
+    return None
+
   @app.get('/api/companion/diagnostics')
   def diagnostics():
-    if not allowed('/api/companion/diagnostics'):
-      return jsonify(error='Pair your phone and enable diagnostics on comma.'), 403
+    rejected = denial('/api/companion/diagnostics')
+    if rejected is not None:
+      return rejected
     try:
       sample = json.loads((DATA / 'diagnostics.json').read_bytes())
       sample['ageSeconds'] = max(0, time.monotonic() - sample.pop('monotonic'))
@@ -68,8 +76,9 @@ def register_routes(app):
 
   @app.get('/api/companion/frame')
   def frame():
-    if not allowed('/api/companion/frame'):
-      return jsonify(error='Pair your phone and enable diagnostics on comma.'), 403
+    rejected = denial('/api/companion/frame')
+    if rejected is not None:
+      return rejected
     atomic_write('capture-request', str(time.monotonic()).encode())
     try:
       raw = (DATA / 'frame.bin').read_bytes()
@@ -85,8 +94,9 @@ def register_routes(app):
 
   @app.get('/api/companion/stream')
   def stream():
-    if not allowed('/api/companion/stream'):
-      return jsonify(error='Pair your phone and enable diagnostics on comma.'), 403
+    rejected = denial('/api/companion/stream')
+    if rejected is not None:
+      return rejected
     session_key = load_key()
 
     @stream_with_context

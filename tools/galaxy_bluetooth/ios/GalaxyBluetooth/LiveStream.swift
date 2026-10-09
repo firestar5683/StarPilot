@@ -18,9 +18,20 @@ struct MJPEGParser {
                 guard wire.count <= 16_384 else { throw URLError(.cannotParseResponse) }; return []
             }
             let header = String(decoding: wire[..<end.lowerBound], as: UTF8.self).lowercased()
-            guard header.components(separatedBy: "\r\n").first?.split(separator: " ").dropFirst().first == "200",
-                  header.contains("content-type: multipart/x-mixed-replace"), header.contains("boundary=galaxy-frame") else {
-                throw BridgeError.message("Live stream unavailable. Enable diagnostics and pair this phone.")
+            guard let code = header.components(separatedBy: "\r\n").first?.split(separator: " ").dropFirst().first,
+                  let status = Int(code) else { throw URLError(.cannotParseResponse) }
+            if status != 200 {
+                let message: String
+                switch status {
+                case 404: message = "Comma is missing the Live View endpoint. Update your fork and reboot comma while parked."
+                case 403: message = "Comma rejected this phone’s pairing, or diagnostics are disabled in an older build. Check comma setup, then reconnect Bluetooth."
+                case 503: message = "Live View is disabled on comma. Enable diagnostics before connecting."
+                default: message = "Comma returned HTTP \(status) for Live View."
+                }
+                throw BridgeError.message(message)
+            }
+            guard header.contains("content-type: multipart/x-mixed-replace"), header.contains("boundary=galaxy-frame") else {
+                throw BridgeError.message("Comma returned an unexpected Live View format (HTTP 200). Check that Galaxy is running the updated fork.")
             }
             chunked = header.contains("transfer-encoding: chunked")
             wire.removeSubrange(..<end.upperBound); headersRead = true
