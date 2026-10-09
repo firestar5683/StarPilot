@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var showConnections = false
+    @Published var showPairingScanner = false
     @Published var opened = false
     @Published var connectionMessage = "Choose a connection, or use Automatic for Wi-Fi with Bluetooth fallback."
     @Published var wantsConnection = true
@@ -37,6 +38,25 @@ final class AppModel: ObservableObject {
     private var lastAddressCheck = Date.distantPast
     private var identitySession = ""
     private var addressCheckSession = ""
+    func importPairingKey(_ key: String) {
+        // QR import replaces a selected device. Save to Keychain only after
+        // the existing encrypted Bluetooth handshake proves possession.
+        opened = false
+        wantsConnection = false
+        bluetooth.forgetSavedDevice()
+        PairingKeyStore.remove()
+        lan.clearEndpoint()
+        lan.bind(to: nil)
+        address = ""
+        identitySession = ""
+        addressCheckSession = ""
+        UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
+        UserDefaults.standard.removeObject(forKey: "galaxy.lan.address")
+        pairingKey = key
+        if mode == .lan { mode = .automatic }
+        connectionMessage = "Code scanned. Select your comma below to finish pairing."
+        bluetooth.scan()
+    }
     init() {
         let bluetooth = BluetoothTransport()
         let lan = LANTransport()
@@ -210,8 +230,13 @@ struct GalaxyRootView: View {
                 if model.mode != .lan {
                     Divider()
                     Text("Bluetooth pairing").font(.headline)
-                    Text("Start the bridge on comma, then enter its pairing key. After pairing once, the app can reconnect automatically.")
+                    Text("On comma, open Settings → Pair phone. Scan its code here, then select your comma below. After pairing once, the app reconnects automatically.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    Button("Scan pairing code") { model.showPairingScanner = true }
+                        .buttonStyle(.borderedProminent).tint(.purple)
+                        .sheet(isPresented: $model.showPairingScanner) {
+                            PairingScannerSheet { model.importPairingKey($0) }
+                        }
                     SecureField("64-character pairing key", text: $model.pairingKey)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(.system(.body, design: .monospaced))

@@ -20,6 +20,7 @@ from dbus_next.service import ServiceInterface, dbus_property, method
 from protocol import (Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, NOTIFY_UUID,
                       NOTIFICATION_WINDOW, open_message, packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy, error_response
+from pairing import load_key
 
 ROOT = "/link/galaxy/ble"
 SERVICE_PATH = ROOT + "/service0"
@@ -58,14 +59,41 @@ class Session:
 
 
 class Gateway:
-    def __init__(self, key, proxy):
+    def __init__(self, key, proxy, key_path=None):
         self.key = key
+        self.key_path = key_path
         self.proxy = proxy
         self.sessions = {}
         self.notifier = None
         self.notification_lock = asyncio.Lock()
 
+    def refresh_key(self):
+        if self.key_path is None:
+            return
+        try:
+            key = load_key(self.key_path)
+        except Exception:
+            # Fail closed if the local credential is removed or invalid.
+            key = None
+        if key != self.key:
+            for state in self.sessions.values():
+                state.close()
+            self.sessions.clear()
+            self.key = key
+            LOG.info("Pairing credentials changed; Bluetooth sessions revoked")
+        if key is None:
+            raise DBusError("org.bluez.Error.NotAuthorized", "Pairing credentials unavailable")
+
+    async def watch_key(self):
+        while True:
+            await asyncio.sleep(0.5)
+            try:
+                self.refresh_key()
+            except DBusError:
+                pass
+
     def session(self, options, fresh=False):
+        self.refresh_key()
         device = options.get("device")
         if not device or not isinstance(device.value, str):
             raise DBusError("org.bluez.Error.NotAuthorized", "A device identity is required")
@@ -154,6 +182,9 @@ class Gateway:
     async def process(self, state, data):
         started = time.monotonic()
         try:
+            self.refresh_key()
+            if state.closed:
+                return
             request = open_message(data, self.key, "request")
             counter = request.get("counter")
             if request.get("session") != state.challenge.hex() or type(counter) is not int or counter <= state.counter:
@@ -168,6 +199,9 @@ class Gateway:
                 raise ValueError("Subscribe to notifications before requesting that response flow")
             state.counter = counter  # Consume before invoking any mutating endpoint.
             response = await asyncio.to_thread(self.proxy.handle, request)
+            self.refresh_key()
+            if state.closed:
+                return
             response["session"] = state.challenge.hex()
             response["counter"] = counter
             state.notification_stream = notify
@@ -362,13 +396,9 @@ def create_key(path):
 
 async def serve(args):
     key_path = Path(args.key_file)
-    key = bytes.fromhex(json.loads(key_path.read_text())["key"])
-    if len(key) != 32:
-        raise ValueError("Pairing key must be 32 bytes")
-    if key_path.stat().st_mode & 0o077:
-        raise ValueError("Pairing key file must have permissions 600")
+    key = load_key(key_path)
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
-    gateway = Gateway(key, GalaxyProxy(args.galaxy_port))
+    gateway = Gateway(key, GalaxyProxy(args.galaxy_port), key_path)
     objects = {
         SERVICE_PATH: GattService(),
         SERVICE_PATH + "/rx": Characteristic(RX_UUID, ["write"], gateway, "rx"),
@@ -398,6 +428,7 @@ async def serve(args):
     gatt = obj.get_interface("org.bluez.GattManager1")
     advertising = obj.get_interface("org.bluez.LEAdvertisingManager1")
     await gatt.call_register_application(ROOT, {})
+    watcher = asyncio.create_task(gateway.watch_key())
     try:
         await advertising.call_register_advertisement(ad_path, {})
         LOG.info("Galaxy BLE bridge ready on %s; forwarding to localhost:%s", adapter_path, args.galaxy_port)
@@ -407,6 +438,11 @@ async def serve(args):
             loop.add_signal_handler(sig, stopped.set)
         await stopped.wait()
     finally:
+        watcher.cancel()
+        try:
+            await watcher
+        except asyncio.CancelledError:
+            pass
         for state in gateway.sessions.values():
             state.close()
         try:

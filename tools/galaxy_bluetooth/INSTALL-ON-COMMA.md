@@ -2,8 +2,9 @@
 
 The pilot branch is based on the user's installed upstream Dom commit
 `15bbbf3cc4ad251c173abf01fff931951202331a`. Its tree differs from that version
-only under `tools/galaxy_bluetooth`; driving/runtime source and prebuilt files
-are retained from Dom. This establishes source equality, not new road testing.
+under `tools/galaxy_bluetooth` plus a two-line comma 4 settings hook that adds
+the Pair phone button. Driving code and prebuilt files are retained from Dom.
+This establishes source equality for driving code, not new road testing.
 
 Run the following in the comma SSH terminal while parked. The existing theme
 changes are outside the added folder and can remain in the checkout. Commands
@@ -87,3 +88,26 @@ The SSH connection will close during restart; reconnect with your normal key.
 No factory reinstall is required for the initial switch. Factory flashing is the
 user's chosen recovery route. A factory flash should be treated as a fresh setup,
 including SSH, bridge dependencies and pairing.
+
+## Pair a phone without copying a key
+
+On comma 4 while offroad, open Settings → Pair phone → pair phone. In the updated
+iPhone app, choose Scan pairing code, allow camera access and scan the displayed
+code. Select the comma found by Bluetooth. The app saves the key in Keychain only
+after its encrypted bridge handshake succeeds. No internet is needed to scan.
+Enable Bluetooth in StarPilot; install the bridge and boot hook once per device
+as above. QR pairing removes key-copying, but does not install dependencies or
+enable the bridge by itself. A native iPhone app rebuild is required for scanning.
+
+The QR contains a private shared Bluetooth key, not a Galaxy web link. Keep it
+private. The display closes after two minutes or when going onroad; this hides
+the code but does not expire the shared credential. Multiple phones may share
+it. Settings → Pair phone → forget paired phones requires a confirmation slide
+and replaces the key atomically. The bridge closes old sessions and rejects old
+keys without restarting its Bluetooth advertisement. Previously accepted setting
+requests cannot be undone by revocation. Revocation affects this BLE bridge, not
+Galaxy's existing web password, cloud sessions or iPhone Bluetooth bonds.
+
+Pilot validation: iOS generic build and automated QR parsing/key preservation,
+rotation, old-key rejection and permission checks. Actual comma screen, camera
+scanning and revoke/re-pair hardware checks remain required.
