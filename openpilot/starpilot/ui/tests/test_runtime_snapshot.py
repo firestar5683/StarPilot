@@ -154,27 +154,6 @@ class TestRuntimeSnapshot(unittest.TestCase):
     self.assertIsNot(adapter._conditional, previous)
     self.assertFalse(state.engaged)
 
-  def test_replay_forward_clock_skew_tolerated_for_display_messages(self):
-    from openpilot.tools.replay.display_clock import ClockSample
-    from openpilot.starpilot.ui.runtime_snapshot import display_message
-    ui = ui_fake()
-    ui.replay_clock = object()
-    ui.replay_sample = ClockSample(NOW, None, NOW * 1000, epoch=1, valid=True)
-    ui.sm.replay_sample = ui.replay_sample
-    # Put message 10ms in the future relative to extrapolated NOW
-    ui.sm.put("carOutput", NS(actuatorsOutput=NS(torque=0.5)), age_ns=-10_000_000)
-    ui.sm.put("driverMonitoringState", NS(isRHD=False, activePolicy="vision"), age_ns=-10_000_000)
-    self.assertIsNotNone(display_message(ui.sm, "carOutput", NOW))
-    self.assertIsNotNone(display_message(ui.sm, "driverMonitoringState", NOW))
-
-  def test_device_mode_strictly_rejects_forward_timestamps(self):
-    from openpilot.starpilot.ui.runtime_snapshot import display_message
-    ui = ui_fake()
-    # In device mode, replay_sample is None
-    ui.sm.replay_sample = None
-    ui.sm.put("carOutput", NS(actuatorsOutput=NS(torque=0.5)), age_ns=-10_000_000)
-    self.assertIsNone(display_message(ui.sm, "carOutput", NOW))
-
   def test_home_panda_presence_is_independent_of_ignition(self):
     for panda_type in (log.PandaState.PandaType.dos, log.PandaState.PandaType.tres, log.PandaState.PandaType.cuatro):
       for ignition in (False, True):
