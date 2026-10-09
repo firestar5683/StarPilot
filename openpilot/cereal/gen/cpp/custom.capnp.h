@@ -504,7 +504,7 @@ struct StarPilotCarState {
   struct Gps;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(f35cc4560bbf6ec2, 2, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(f35cc4560bbf6ec2, 3, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -2062,6 +2062,10 @@ public:
   inline bool hasGps() const;
   inline  ::cereal::StarPilotCarState::Gps::Reader getGps() const;
 
+  inline bool getLateralAuthorityUnavailable() const;
+
+  inline  ::uint64_t getSourceCarStateMonoTime() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2189,6 +2193,12 @@ public:
   inline  ::cereal::StarPilotCarState::Gps::Builder initGps();
   inline void adoptGps(::capnp::Orphan< ::cereal::StarPilotCarState::Gps>&& value);
   inline ::capnp::Orphan< ::cereal::StarPilotCarState::Gps> disownGps();
+
+  inline bool getLateralAuthorityUnavailable();
+  inline void setLateralAuthorityUnavailable(bool value);
+
+  inline  ::uint64_t getSourceCarStateMonoTime();
+  inline void setSourceCarStateMonoTime( ::uint64_t value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -9414,6 +9424,34 @@ inline void StarPilotCarState::Builder::adoptGps(
 inline ::capnp::Orphan< ::cereal::StarPilotCarState::Gps> StarPilotCarState::Builder::disownGps() {
   return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarState::Gps>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool StarPilotCarState::Reader::getLateralAuthorityUnavailable() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<69>() * ::capnp::ELEMENTS);
+}
+
+inline bool StarPilotCarState::Builder::getLateralAuthorityUnavailable() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<69>() * ::capnp::ELEMENTS);
+}
+inline void StarPilotCarState::Builder::setLateralAuthorityUnavailable(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<69>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t StarPilotCarState::Reader::getSourceCarStateMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t StarPilotCarState::Builder::getSourceCarStateMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void StarPilotCarState::Builder::setSourceCarStateMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint64_t StarPilotCarState::Gps::Reader::getSourceMonoTime() const {
