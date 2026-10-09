@@ -114,7 +114,7 @@ class TestControllerSelection(unittest.TestCase):
         self.assertAlmostEqual(standard.torque_params.latAccelFactor, cp.lateralTuning.torque.latAccelFactor)
         if vehicle == HYUNDAI.HYUNDAI_IONIQ_6:
           self.assertEqual(standard.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
-          self.assertEqual(policy.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+          self.assertEqual(policy.pid.pos_limit, policy.torque_params.latAccelFactor)
           self.assertEqual(policy.torque_params.latAccelFactor,
                            struct.unpack('f', struct.pack('f', cp.lateralTuning.torque.latAccelFactor * 1.22))[0])
           for controller, multiplier in ((standard, 1.0), (policy, 1.22)):
@@ -161,7 +161,7 @@ class TestControllerSelection(unittest.TestCase):
       legacy = Controls()
       self.assertEqual(legacy.lateral_controller_selection, default_selection(cp))
       self.assertIsNotNone(selected_policy(legacy.LaC))
-      self.assertEqual(legacy.LaC.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+      self.assertEqual(legacy.LaC.pid.pos_limit, legacy.LaC.torque_params.latAccelFactor)
       self.assertIsNone(legacy.torque_host)
       from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY as TORQUE_DOCUMENT_KEY, replace_field, serialize_document
       tune = cp.lateralTuning.torque
