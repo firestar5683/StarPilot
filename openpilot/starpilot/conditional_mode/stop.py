@@ -56,6 +56,7 @@ class StopFrame:
   pedal_override: bool | None = None
   model_tick_mono_s: float | None = None
   model_should_stop: bool | None = None
+  stationary_launch_clear: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,9 +134,12 @@ class StopLightDetector:
     if self.committed:
       assert frame.speed_mps is not None
       self.commit_distance_m = max(0.0, self.commit_distance_m - frame.speed_mps * dt)
+      launch_clear = (self.standstill_committed and frame.standstill is True and frame.speed_mps <= 0.01 and
+                      frame.forcing_stop is False and frame.stationary_launch_clear is True)
+      clear_distance = max(0.0 if launch_clear else FROZEN_RAW_STOP_DISTANCE_M,
+                           self.commit_distance_m) + STOP_MODEL_RELEASE_MARGIN_M
       clear = (horizon is not None and model_stopping is False and frame.model_should_stop is False and
-               horizon >= max(FROZEN_RAW_STOP_DISTANCE_M + STOP_MODEL_RELEASE_MARGIN_M,
-                              self.commit_distance_m + STOP_MODEL_RELEASE_MARGIN_M))
+               horizon >= clear_distance)
       if clear:
         if self.commit_clear_since_s is None:
           self.commit_clear_since_s = frame.now_mono_s
@@ -242,7 +246,11 @@ class StopLightDetector:
     # At standstill the speed-scaled detector has a zero threshold. Its raw
     # 50 m fallback therefore needs the same spatial release band as an approach;
     # otherwise a 49.9/50.1 m horizon alternates the actual CEM hold each tick.
-    if frame.standstill and frame.pedal_override is False:
+    if frame.stationary_launch_clear is True and frame.standstill and frame.pedal_override is False:
+      # The qualified launch proof clears the coarse stationary <50m fallback;
+      # the acquired stop still holds until _commit's continuous clear dwell.
+      self.standstill_model_stopped = False
+    elif frame.standstill and frame.pedal_override is False:
       release_distance = FROZEN_RAW_STOP_DISTANCE_M + (STOP_MODEL_RELEASE_MARGIN_M if self.standstill_model_stopped else 0.0)
       self.standstill_model_stopped = horizon < release_distance
     else:
