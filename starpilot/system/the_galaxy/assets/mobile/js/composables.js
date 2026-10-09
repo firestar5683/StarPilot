@@ -24,7 +24,7 @@ export function useTabRouting(basePath, tabs) {
   return { tab, selectTab }
 }
 
-export function usePolling(fn, { interval = 3000, enabled = () => true } = {}) {
+export function usePolling(fn, { interval = 3000, enabled = () => true, pauseOnScroll = true } = {}) {
   const state = reactive({ running: false, lastError: "", lastErrorAt: 0 })
   let timer = null
   let destroyed = false
@@ -32,7 +32,7 @@ export function usePolling(fn, { interval = 3000, enabled = () => true } = {}) {
   const stop = () => { if (timer) { clearTimeout(timer); timer = null } }
   const scrolling = () => typeof document !== "undefined" && !!document.body?.classList?.contains("is-scrolling")
   const tick = async () => {
-    if (destroyed || !enabled() || document.visibilityState !== "visible" || scrolling()) {
+    if (destroyed || !enabled() || document.visibilityState !== "visible" || (pauseOnScroll && scrolling())) {
       timer = setTimeout(tick, interval)
       return
     }

@@ -1,4 +1,4 @@
-import { api, showSnackbar } from "../api.js"
+import { api, downloadBlob, showSnackbar } from "../api.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { GalaxySection } from "../components/GalaxySection.js"
 import { GxNotice } from "../components/GxNotice.js"
@@ -274,12 +274,7 @@ export const ThemeMaker = {
       this.busy = true
       try {
         const blob = await api.downloadTheme(this.getFormData())
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = this.themeName.trim().replace(/\s+/g, "_") + ".zip"
-        a.click()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        downloadBlob(blob, this.themeName.trim().replace(/\s+/g, "_") + ".zip")
         showSnackbar("Theme exported as a zip.")
       } catch (e) {
         showSnackbar(e?.message || "Failed to export theme.", "error")
