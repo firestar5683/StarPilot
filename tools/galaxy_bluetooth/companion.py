@@ -156,6 +156,7 @@ class CompanionPublisher:
     self.last_encoded = 0.0
     self.capture_error = None
     self.encoder_error = None
+    self.encoder_stderr = None
 
   def update(self, ui, gui):
     if not ENABLED.exists():
@@ -197,6 +198,9 @@ class CompanionPublisher:
       'frameAgeSeconds': round(now - self.last_encoded, 2) if self.last_encoded else None,
       'queuedImages': self.images.qsize(), 'captureError': self.capture_error,
       'encoderError': self.encoder_error,
+      'encoderStderr': self.encoder_stderr,
+      'encoderExitCode': self.process.poll() if self.process is not None else None,
+      'videoSize': list(self.video_size) if self.video_size else None,
       'encoderRunning': self.process is not None and self.process.poll() is None,
     }
     atomic_write('capture-status.json', json.dumps(capture_status).encode())
@@ -323,6 +327,7 @@ class CompanionPublisher:
             '-flush_packets', '1', 'pipe:1'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
           self.video_size = dimensions
           self.encoder_error = None
+          self.encoder_stderr = None
           threading.Thread(target=self.read_encoder_errors, args=(self.process,), daemon=True).start()
           threading.Thread(target=self.read_encoded, args=(self.process, self.sent_times), daemon=True).start()
         rl.image_format(image, rl.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
@@ -344,7 +349,7 @@ class CompanionPublisher:
     try:
       for line in process.stderr:
         if process is self.process:
-          self.encoder_error = line.decode(errors='replace').strip()[:500]
+          self.encoder_stderr = line.decode(errors='replace').strip()[:500]
     except (OSError, ValueError):
       pass
 

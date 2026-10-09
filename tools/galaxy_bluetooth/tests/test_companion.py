@@ -118,11 +118,11 @@ class CompanionTests(unittest.TestCase):
     process = types.SimpleNamespace(stderr=io.BytesIO(b'encoder unavailable\n' + b'x' * 1000 + b'\n'))
     publisher.process = process
     publisher.read_encoder_errors(process)
-    self.assertEqual(publisher.encoder_error, 'x' * 500)
+    self.assertEqual(publisher.encoder_stderr, 'x' * 500)
     publisher.process = None
     process.stderr = io.BytesIO(b'old encoder error\n')
     publisher.read_encoder_errors(process)
-    self.assertEqual(publisher.encoder_error, 'x' * 500)
+    self.assertEqual(publisher.encoder_stderr, 'x' * 500)
 
   def test_capture_queue_is_bounded_and_preserves_aspect(self):
     companion.ENABLED.touch()

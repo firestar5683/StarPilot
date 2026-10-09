@@ -24,6 +24,9 @@ struct CaptureStatus: Codable {
     let queuedImages: Int?
     let captureError: String?
     let encoderError: String?
+    let encoderStderr: String?
+    let encoderExitCode: Int?
+    let videoSize: [Int]?
     let encoderRunning: Bool?
 }
 

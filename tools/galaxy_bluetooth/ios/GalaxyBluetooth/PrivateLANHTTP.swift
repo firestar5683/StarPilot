@@ -59,7 +59,7 @@ final class PrivateLANHTTP {
         let target = components.percentEncodedPath + (components.percentEncodedQuery.map { "?" + $0 } ?? "")
         let body = request.httpBody ?? Data()
         var text = "\(request.httpMethod ?? "GET") \(target) HTTP/1.1\r\nHost: \(url.host!):8082\r\nConnection: close\r\nAccept-Encoding: identity\r\nContent-Length: \(body.count)\r\n"
-        for (name, value) in request.allHTTPHeaderFields ?? [:] where ["content-type", "accept", "cookie", "range"].contains(name.lowercased()) {
+        for (name, value) in request.allHTTPHeaderFields ?? [:] where ["content-type", "accept", "cookie", "range", "x-companion-nonce", "x-companion-mac"].contains(name.lowercased()) {
             guard !value.contains("\r"), !value.contains("\n") else { finish(.failure(BridgeError.message("Invalid request header."))); return }
             text += "\(name): \(value)\r\n"
         }
