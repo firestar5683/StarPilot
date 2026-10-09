@@ -8,6 +8,7 @@ import os
 import stat
 
 from openpilot.common.constants import CV
+from openpilot.starpilot.lateral.auto_lane_change import steering_capable
 from openpilot.starpilot.lateral.lane_change_preferences import (
   KEY, MAX_BYTES, MAX_SPEED_MPS, MINIMUM_SPEED_MPS, effective, LaneChangePolicy, SavedLaneChange, read_saved, to_value,
 )
@@ -62,7 +63,7 @@ class LaneChangeFeature:
   def capability(self) -> tuple | None:
     cp = self.vehicle_params()
     try:
-      if cp is None or cp.notCar or cp.passive or cp.dashcamOnly or not cp.carFingerprint:
+      if not steering_capable(cp):
         return None
       return (str(cp.carFingerprint), str(cp.brand), str(cp.steerControlType),
               bool(cp.notCar), bool(cp.passive), bool(cp.dashcamOnly), self.longitudinal_available(),
@@ -102,7 +103,7 @@ class LaneChangeFeature:
                     choices=("Off", "On"), available=allowed, reason=inactive),
             replace(common, key=AUTO, label="Automatic Lane Changes", value="On" if policy.auto_lane_change else "Off",
                     choices=("Off", "On"), available=allowed,
-                    reason="Saved for the next drive; requires an enabled automatic-steering setup. Otherwise, a driver nudge is required."),
+                    reason="Saved for the next drive; runs while steering assistance is active. Lane and blindspot checks still apply."),
             replace(common, key=DELAY, label="Automatic lane-change delay", value=str(round(policy.auto_delay_s, 1)),
                     step=0.1, minimum=0.0, maximum=5.0, unit="s", available=allowed,
                     reason="Time to wait after signaling before an automatic lane change; lane and blindspot checks still apply"),

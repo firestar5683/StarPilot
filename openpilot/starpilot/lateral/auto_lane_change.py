@@ -1,9 +1,10 @@
-"""Development-only Auto Lane Change qualification from one model frame."""
+"""Auto Lane Change qualification from one model frame."""
 
 import math
 import time
 from dataclasses import replace
 
+from opendbc.car import structs
 from openpilot.cereal import log
 from openpilot.starpilot.lateral.adjacent_lane_evidence import adjacent_lane_available
 from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy
@@ -46,9 +47,22 @@ class ClockEpochGuard:
     return True
 
 
-def session_policy(saved: LaneChangePolicy, development_opt_in: bool) -> LaneChangePolicy:
-  """Modeld calls once at startup; saved On never implies running Auto."""
-  return saved if development_opt_in else replace(saved, auto_lane_change=False)
+def steering_capable(cp) -> bool:
+  try:
+    return bool(cp is not None and cp.carFingerprint and not (cp.notCar or cp.passive or cp.dashcamOnly) and
+                cp.steerControlType in (structs.CarParams.SteerControlType.torque, structs.CarParams.SteerControlType.angle,
+                                       structs.CarParams.SteerControlType.curvature) and
+                cp.safetyConfigs and not any(config.safetyModel == structs.CarParams.SafetyModel.allOutput for config in cp.safetyConfigs) and
+                any(config.safetyModel not in
+                  (structs.CarParams.SafetyModel.silent, structs.CarParams.SafetyModel.noOutput,
+                   structs.CarParams.SafetyModel.allOutput) for config in cp.safetyConfigs))
+  except (AttributeError, TypeError, ValueError):
+    return False
+
+
+def session_policy(saved: LaneChangePolicy, vehicle_capable: bool) -> LaneChangePolicy:
+  """Latch the saved request only for a configured steering owner."""
+  return saved if vehicle_capable else replace(saved, auto_lane_change=False)
 
 
 def boottime_ns() -> int:
@@ -97,7 +111,7 @@ def auto_evidence(sm, model, direction: int, minimum_width_m: float, *, now_mono
       return False
     control = sm["carControl"]
     car_state = sm["carState"]
-    return (bool(control.enabled and control.latActive and car_state.canValid and not car_state.canTimeout) and
+    return (bool(control.latActive and car_state.canValid and not car_state.canTimeout) and
             adjacent_lane_available(model, direction, minimum_width_m))
   except (AttributeError, TypeError, ValueError, OverflowError):
     return False

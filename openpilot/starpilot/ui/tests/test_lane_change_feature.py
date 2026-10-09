@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from opendbc.car.car_helpers import interfaces
+from opendbc.car.hyundai.values import CAR as HYUNDAI
 from openpilot.common.params import Params
 from openpilot.starpilot.lateral.lane_change_preferences import KEY, LaneChangePolicy, decode, effective, read_saved, to_value
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
@@ -23,10 +25,10 @@ class LaneChangeFeatureTests(unittest.TestCase):
     self.addCleanup(self.temp.cleanup)
     self.params = Params(self.temp.name)
     self.parked = True
-    self.fingerprint = "TEST CAR"
-    self.cp = SimpleNamespace(carFingerprint="TEST CAR", brand="test", steerControlType="torque",
-                              notCar=False, passive=False, dashcamOnly=False, carVin="VIN1",
-                              openpilotLongitudinalControl=True)
+    self.cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
+    self.cp.carVin = "VIN1"
+    self.cp.openpilotLongitudinalControl = True
+    self.fingerprint = str(self.cp.carFingerprint)
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.parked and group in ("lane_change", "parked_preferences"),
                                       vehicle_fingerprint=lambda: self.fingerprint, vehicle_params=lambda: self.cp)
 

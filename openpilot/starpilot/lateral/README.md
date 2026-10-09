@@ -46,9 +46,9 @@ is retained in the repository LICENSE.
 
 The ordinary lane-change path requires a driver nudge. The saved Auto option
 adds a delay of 0–5 s and minimum adjacent-lane width of 0–15 ft (stored in
-meters), defaulting to 1 s and 0 ft. Auto additionally requires
-`STARPILOT_AUTO_LANE_CHANGE_DEV` at modeld startup; saving the option alone does
-not enable it.
+meters), defaulting to 1 s and 0 ft. The saved option takes effect at modeld
+startup on vehicles with configured steering control. Active lateral authority
+is required; cruise control and Always On Lateral preferences do not enable it.
 
 DesireHelper owns the transition, blindspot check and signal latch. Auto uses
 same-frame model evidence, current calibration, fresh carState/carControl,

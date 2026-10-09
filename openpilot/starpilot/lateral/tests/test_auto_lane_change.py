@@ -6,7 +6,7 @@ import unittest
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
-from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, session_policy
+from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, session_policy, steering_capable
 from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy, decode as decode_policy
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.lateral.lane_change_status_wire import (
@@ -46,6 +46,42 @@ class TestAutoLaneChange(unittest.TestCase):
     self.assertIsNotNone(old)
     assert old is not None
     self.assertFalse(session_policy(old, True).auto_lane_change)
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.hyundai.values import CAR as HYUNDAI
+    from opendbc.car.toyota.values import CAR as TOYOTA
+    from opendbc.car import structs
+    for car in (HYUNDAI.HYUNDAI_IONIQ_6, TOYOTA.TOYOTA_RAV4_TSS2_2023):
+      cp = interfaces[car].get_non_essential_params(car)
+      self.assertTrue(steering_capable(cp))
+      for field in ('notCar', 'passive', 'dashcamOnly'):
+        bad = cp.as_reader().as_builder()
+        setattr(bad, field, True)
+        self.assertFalse(steering_capable(bad))
+      for config in cp.safetyConfigs:
+        config.safetyModel = structs.CarParams.SafetyModel.noOutput
+      self.assertFalse(steering_capable(cp))
+    from opendbc.car.ford.values import CAR as FORD
+    for car in (TOYOTA.TOYOTA_RAV4_TSS2_2023, FORD.FORD_ESCAPE_MK4):
+      self.assertTrue(steering_capable(interfaces[car].get_non_essential_params(car)))
+    cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
+    actual = cp.as_reader().as_builder().safetyConfigs[-1]
+    placeholder = structs.CarParams.SafetyConfig()
+    placeholder.safetyModel = structs.CarParams.SafetyModel.silent
+    cp.safetyConfigs = [placeholder, actual]
+    self.assertTrue(steering_capable(cp))
+    placeholder.safetyModel = structs.CarParams.SafetyModel.noOutput
+    cp.safetyConfigs = [placeholder, actual]
+    self.assertTrue(steering_capable(cp))
+    cp.safetyConfigs = [placeholder]
+    self.assertFalse(steering_capable(cp))
+    placeholder.safetyModel = structs.CarParams.SafetyModel.silent
+    cp.safetyConfigs = [placeholder]
+    self.assertFalse(steering_capable(cp))
+    placeholder.safetyModel = structs.CarParams.SafetyModel.allOutput
+    cp.safetyConfigs = [placeholder, actual]
+    self.assertFalse(steering_capable(cp))
+    self.assertFalse(steering_capable(None))
+    self.assertFalse(steering_capable(SimpleNamespace()))
     requested = LaneChangePolicy(auto_lane_change=True)
     self.assertFalse(session_policy(requested, False).auto_lane_change)
     self.assertTrue(session_policy(requested, True).auto_lane_change)
@@ -98,7 +134,22 @@ class TestAutoLaneChange(unittest.TestCase):
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
     frame.laneLineProbs[3] = 0.95
     sm.values["carControl"].enabled = False
+    self.assertTrue(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+    from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
+    car = sm.values["carState"]
+    car.vEgo, car.leftBlinker, car.rightBlinker = 15., False, False
+    car.steeringPressed, car.steeringTorque = False, 0.
+    car.leftBlindspot = car.rightBlindspot = False
+    helper = DesireHelper(LaneChangePolicy(auto_lane_change=True, auto_delay_s=0.))
+    evidence = auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True)
+    helper.update(car, True, 1., engaged=sm.values["carControl"].latActive, auto_evidence=evidence)
+    car.rightBlinker = True
+    helper.update(car, True, 1., engaged=sm.values["carControl"].latActive, auto_evidence=evidence)
+    helper.update(car, True, 1., engaged=sm.values["carControl"].latActive, auto_evidence=evidence)
+    self.assertEqual(helper.lane_change_state, log.LaneChangeState.laneChangeStarting)
+    sm.values["carControl"].latActive = False
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+    sm.values["carControl"].latActive = True
     sm.values["carControl"].enabled = True
     sm.values["carState"].canTimeout = True
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))

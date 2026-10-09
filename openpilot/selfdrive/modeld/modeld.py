@@ -36,7 +36,7 @@ from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.starpilot.lateral.lane_change_preferences import effective as effective_lane_change, read_saved as read_lane_change
-from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, paired_clocks_ns, session_policy
+from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, paired_clocks_ns, session_policy, steering_capable
 from openpilot.starpilot.lateral.lane_change_status_wire import (
   Direction as StatusDirection, LaneChangeStatus, Phase as StatusPhase, encode_optional as encode_lane_status,
 )
@@ -409,9 +409,8 @@ def main(demo=False):
   prev_action = log.ModelDataV2.Action()
 
   saved_lane_policy = effective_lane_change(read_lane_change(params))
-  auto_development_enabled = os.getenv("STARPILOT_AUTO_LANE_CHANGE_DEV") == "1"
-  runtime_lane_policy = session_policy(saved_lane_policy, auto_development_enabled)
-  auto_vehicle_capable = not (CP.notCar or CP.passive or CP.dashcamOnly)
+  auto_vehicle_capable = steering_capable(CP)
+  runtime_lane_policy = session_policy(saved_lane_policy, auto_vehicle_capable)
   initial_mono_ns, initial_boot_ns, initial_skew_ns = paired_clocks_ns()
   lane_clock_guard = ClockEpochGuard(initial_mono_ns, initial_boot_ns, initial_skew_ns)
   DH = DesireHelper(runtime_lane_policy)
@@ -571,7 +570,7 @@ def main(demo=False):
                     auto_evidence(sm, modelv2_send.modelV2, direction, runtime_lane_policy.minimum_lane_width_m,
                                   now_mono_ns=mono_now_ns, now_boot_ns=boot_now_ns,
                                   model_valid=bool(modelv2_send.valid), vehicle_capable=auto_vehicle_capable))
-      engaged = bool(sm['carControl'].enabled and sm['carControl'].latActive)
+      engaged = bool(sm['carControl'].latActive)
       DH.update(car_state, sm['carControl'].latActive, lane_change_prob,
                 auto_evidence=auto_ready, engaged=engaged,
                 navigation_turn=matching_turn_signal(sm, mono_now_ns, supported=turn_supported))
