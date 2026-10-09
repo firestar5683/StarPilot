@@ -33,6 +33,7 @@ from opendbc.car.gm.steering_authority import monitored_profile
 from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
+from openpilot.starpilot.aol.intent_companion import IntentCompanion
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -104,6 +105,8 @@ class SelfdriveD:
     self.force_stop_hold_alert = HoldAlertState()
     self.aol_car_state_log_ns = 0
     self.aol_last_intent = None
+    self.aol_intent_companion = (IntentCompanion(messaging.sub_sock('aolIntentWire', conflate=False))
+                                 if self.aol_replay else None)
     self.lane_status_session = ""
     self.lane_status_sequence = -1
     self.conditional_replay = feature_enabled(self.params, self.CP, 'conditional', os.environ)
@@ -392,7 +395,7 @@ class SelfdriveD:
       if self.tesla_stock_consumer.binding is not None:
         now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
         companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
-                                   previous=self.aol_last_intent)
+                                   previous=self.aol_last_intent, companion=getattr(self, 'aol_intent_companion', None))
         session = companion.producerSessionId if companion is not None else None
         self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
 
@@ -905,7 +908,8 @@ class SelfdriveD:
         self.events.add(EventName.controlsMismatch)
     if self.aol_replay:
       intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
-                              previous=getattr(self, 'aol_last_intent', None))
+                              previous=getattr(self, 'aol_last_intent', None),
+                              companion=getattr(self, 'aol_intent_companion', None))
       self.aol_last_intent = intent
       if self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or self.sm['driverMonitoringState'].lockout:
         self.aol_dm_lateral_inhibit = True

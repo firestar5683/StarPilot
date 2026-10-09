@@ -655,7 +655,7 @@ class CardIntentTests(unittest.TestCase):
 
 
 class IpcAxisContractTests(unittest.TestCase):
-  def _authority_callers(self, full_op):
+  def _authority_callers(self, full_op, *, cp=None, intent_companion=None):
     self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False))
     from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
     from opendbc.car.gm.values import CAR
@@ -668,13 +668,15 @@ class IpcAxisContractTests(unittest.TestCase):
     params.put_bool('OpenpilotEnabledToggle', True, block=True)
     params.put_bool('SafeMode', False, block=True)
     params.put_bool('AlwaysOnLateral', True, block=True)
-    cp = ordinary_params(CAR.CHEVROLET_VOLT_ASCM, alpha=True, sascm=True, radar=True)
+    supplied_cp = cp is not None
+    if cp is None:
+      cp = ordinary_params(CAR.CHEVROLET_VOLT_ASCM, alpha=True, sascm=True, radar=True)
     policy = policy_for(cp)
     cp.safetyConfigs[-1].safetyParam |= policy.safety_param_addition
     cp.alternativeExperience |= policy.alternative_experience_addition
     params.put('CarParams', cp.to_bytes(), block=True)
     controls = Controls()
-    sd = SelfdriveD.__new__(SelfdriveD)
+    sd = SelfdriveD(CP=cp.as_reader()) if supplied_cp else SelfdriveD.__new__(SelfdriveD)
     sd.params = params
     sd.CP = cp.as_reader()
     services = ['deviceState', 'pandaStates', 'driverMonitoringState', 'extrinsicsCalibration', 'modelV2',
@@ -694,6 +696,8 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.aol_car_state_log_ns = 0
     sd.conditional_car_state_valid = False
     sd.aol_last_intent = None
+    if intent_companion is not None or not supplied_cp:
+      sd.aol_intent_companion = intent_companion
     sd.aol_session_id, sd.aol_sequence = 'authority-session', 0
     sd.conditional_replay = False
     sd.nostalgia_paddle_cancel = False
@@ -726,13 +730,13 @@ class IpcAxisContractTests(unittest.TestCase):
 
     def step(tick, *, timeout=False, old_intent=False, allowed=True, pause=False, latched=True,
              brake=False, steering=False, gas=False, user_disable=False, observed_state=None, authority_unavailable=False, companion=True,
-             long_allowed=True, pause_long=False):
-      now = base + tick * 10_000_000
+             long_allowed=True, pause_long=False, state_stamp=None, intent_message=None, offset_ns=0):
+      now = base + tick * 10_000_000 + offset_ns
       clock.return_value = now
       state = car_state(brake=brake) if observed_state is None else observed_state
       state.cruiseState.available = True
       state.steeringPressed, state.gasPressed = steering, gas
-      state_event = messaging.new_message('carState', valid=True, logMonoTime=now)
+      state_event = messaging.new_message('carState', valid=True, logMonoTime=now if state_stamp is None else state_stamp)
       state_event.carState = state
       recv.return_value = None if timeout else state_event.as_reader()
       frames = []
@@ -747,9 +751,11 @@ class IpcAxisContractTests(unittest.TestCase):
       intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=intent_ns)
       intent.aolIntentWire = encode_intent(IntentState('authority-card', tick + 1, intent_ns, intent_ns,
                                                      intent_ns + 200_000_000, latched, pause, pause_long, True, latched))
+      if intent_message is not None:
+        intent = intent_message
       native = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
       native.aolSafetyWire = encode_safety(SafetyState(1, True, now, now + 200_000_000,
-        int(car.CarParams.SafetyModel.gm), cp.safetyConfigs[-1].safetyParam,
+        int(cp.safetyConfigs[-1].safetyModel.raw), cp.safetyConfigs[-1].safetyParam,
         allowed, full_op and long_allowed, True, full_op, 'authority-panda', sd.aol_session_id))
       if companion:
         authority = messaging.new_message('starpilotCarState', valid=companion != 'invalid',
@@ -779,6 +785,62 @@ class IpcAxisContractTests(unittest.TestCase):
       controls.publish(command, lac_log)
       return sd.pm.messages['aolAxisState'].aolAxisState, sd.pm.messages['selfdriveState'].selfdriveState, command
     return sd, controls, step
+
+  def test_ioniq6_fresh_backlog_companion_keeps_axes_and_stale_loss_warns(self):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.hyundai.interface import CarInterface
+    from opendbc.car.hyundai.ioniq6_handoff import build_ioniq6_hda2_long_candidate
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.starpilot.aol.intent_companion import IntentCompanion
+
+    for full_op in (False, True):
+      with self.subTest(full_op=full_op), OpenpilotPrefix():
+        fp = gen_empty_fingerprint()
+        fp[2].update({0x110: 32, 0x362: 32})
+        fp[0][0x3A5] = 24
+        fp[1].update({0x1CF: 8, 0x1AA: 16, 0x35: 32, 0x175: 24, 0xA0: 24, 0xEA: 24,
+                      0x1BA: 24, 0x1E5: 16, 0x36A: 16})
+        stock = CarInterface.get_params(CAR.HYUNDAI_IONIQ_6, fp, [], False, False, False)
+        cp = build_ioniq6_hda2_long_candidate(stock, fp)
+        self.assertIsNotNone(cp)
+        # Mirror Card's saved-AOL marker before publishing the LONG candidate.
+        cp.safetyConfigs[-1].safetyParam |= 0x0800
+        pm = messaging.PubMaster(['aolIntentWire'])
+        sd, controls, step = self._authority_callers(full_op, cp=cp)
+        self.assertIsInstance(sd.aol_intent_companion, IntentCompanion)
+        self.assertEqual(sd.CP.safetyConfigs[-1].safetyParam, 0x8895)
+        self.assertEqual(sd.CP.alternativeExperience, 0)
+        axis, _, command = step(0)
+        self.assertTrue(axis.lateralActive and command.latActive)
+        self.assertEqual(command.longActive, full_op)
+        base = 10_000_000_000
+
+        def intent(stamp, sequence):
+          message = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=stamp)
+          message.aolIntentWire = encode_intent(IntentState('authority-card', sequence, stamp, stamp,
+                                                           stamp + 200_000_000, True, False, False, True, True))
+          return message
+
+        source = base + 66_000_000
+        first = intent(source, 2)
+        newer = intent(base + 77_000_000, 3)
+        pm.send('aolIntentWire', first)
+        pm.send('aolIntentWire', newer)
+        axis, state, command = step(8, state_stamp=source, intent_message=newer)
+        self.assertEqual(axis.sourceCarStateMonoTime, source)
+        self.assertTrue(axis.nativeAcknowledged and axis.lateralActive and command.latActive)
+        self.assertEqual(axis.longitudinalActive, full_op)
+        self.assertEqual(command.longActive, full_op)
+        self.assertNotIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+        self.assertNotEqual(state.alertText1, 'TAKE CONTROL IMMEDIATELY')
+        self.assertTrue(step(9)[0].lateralActive)
+        axis, state, command = step(17, timeout=True, offset_ns=877_165)
+        self.assertEqual(axis.sourceCarStateMonoTime, 0)
+        self.assertFalse(sd.enabled or sd.active or axis.lateralActive or axis.longitudinalActive)
+        self.assertFalse(command.latActive or command.longActive)
+        self.assertIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+        self.assertEqual(state.alertText1, 'TAKE CONTROL IMMEDIATELY')
+        self._assert_withdrawal_alert(controls, sd.pm.messages['selfdriveState'])
 
   def _assert_withdrawal_alert(self, controls, message):
     from openpilot.starpilot.audio.axis_alerts import AxisAlerts
