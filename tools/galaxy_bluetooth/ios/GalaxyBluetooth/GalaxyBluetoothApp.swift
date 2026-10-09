@@ -1,4 +1,5 @@
 import SwiftUI
+import Network
 
 @main
 struct GalaxyBluetoothApp: App {
@@ -9,7 +10,11 @@ struct GalaxyBluetoothApp: App {
 @MainActor
 final class AppModel: ObservableObject {
     @Published var pairingKey = PairingKeyStore.load()
-    @Published var address = UserDefaults.standard.string(forKey: "galaxy.lan.address") ?? "192.168.10.85"
+    @Published var address = UserDefaults.standard.string(forKey: "galaxy.lan.address") ?? ""
+    @Published var findAddressAutomatically = UserDefaults.standard.object(forKey: "galaxy.lan.auto") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(findAddressAutomatically, forKey: "galaxy.lan.auto") }
+    }
+    @Published var networkDetails = "Comma can use a hotspot, Wi-Fi or its SIM for internet. Your connection here controls how this iPhone reaches comma."
     @Published var mode = ConnectionMode(rawValue: UserDefaults.standard.string(forKey: "galaxy.connection.mode") ?? "") ?? .automatic {
         didSet {
             transport.mode = mode
@@ -27,7 +32,11 @@ final class AppModel: ObservableObject {
     let transport: PreferredTransport
     let assets: GalaxyAssetStore
     let server: LoopbackServer
+    private let pathMonitor = NWPathMonitor()
     private var lastReconnect = Date.distantPast
+    private var lastAddressCheck = Date.distantPast
+    private var identitySession = ""
+    private var addressCheckSession = ""
     init() {
         let bluetooth = BluetoothTransport()
         let lan = LANTransport()
@@ -39,14 +48,31 @@ final class AppModel: ObservableObject {
         })
         server = LoopbackServer(transport: cache, webRoot: assets.readyRoot ?? assets.bundledRoot)
         transport.mode = mode
+        if let saved = UserDefaults.standard.string(forKey: "galaxy.comma.identity"), LANTransport.deviceID(Data(saved.utf8)) != nil {
+            lan.bind(to: saved)
+        }
         server.start()
+        pathMonitor.pathUpdateHandler = { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.lan.invalidate()
+                self.lastAddressCheck = .distantPast
+            }
+        }
+        pathMonitor.start(queue: .main)
     }
+    deinit { pathMonitor.cancel() }
     func connect() {
         do {
-            if mode != .bluetooth { try lan.configure(address: address) }
+            if mode != .bluetooth, !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try lan.configure(address: address)
+            } else if mode == .lan {
+                throw BridgeError.message("Enter comma’s current local IP address, or use Automatic and pair Bluetooth to find it.")
+            }
             UserDefaults.standard.set(address.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "galaxy.lan.address")
             wantsConnection = true
             lastReconnect = .distantPast
+            lastAddressCheck = .distantPast
             connectionMessage = "Checking your comma…"
         } catch { connectionMessage = error.localizedDescription }
     }
@@ -62,6 +88,41 @@ final class AppModel: ObservableObject {
         bluetooth.disconnect(); lan.invalidate()
         connectionMessage = "Disconnected."
     }
+    private func learnAddress() async {
+        guard bluetooth.connected, Date().timeIntervalSince(lastAddressCheck) >= 20 || addressCheckSession != bluetooth.sessionIdentifier else { return }
+        lastAddressCheck = Date()
+        let session = bluetooth.sessionIdentifier
+        addressCheckSession = session
+        do {
+            if identitySession != session {
+                let identity = try await bluetooth.request(path: "/api/params?key=DongleId", method: "GET", headers: [:], body: Data())
+                guard wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session else { return }
+                // Only the authenticated BLE peer may establish the automatic
+                // LAN identity. An unregistered device requires manual address.
+                guard identity.status == 200, let value = LANTransport.deviceID(identity.bodyData) else {
+                    networkDetails = "Automatic local discovery needs a registered device identifier. Bluetooth still works; enter comma’s IP manually for Wi-Fi."
+                    return
+                }
+                lan.bind(to: value)
+                UserDefaults.standard.set(value, forKey: "galaxy.comma.identity")
+                identitySession = session
+            }
+            guard findAddressAutomatically, !lan.connected else { return }
+            let response = try await bluetooth.request(path: "/api/device/status", method: "GET", headers: [:], body: Data())
+            guard wantsConnection, mode != .bluetooth, bluetooth.sessionIdentifier == session, response.status == 200,
+                  !response.bodyData.isEmpty else { return }
+            if let ip = LANTransport.reportedAddress(response.bodyData) {
+                try lan.configure(address: ip)
+                address = ip
+                UserDefaults.standard.set(ip, forKey: "galaxy.lan.address")
+                networkDetails = "Trying comma’s current local address. If this hotspot or Wi-Fi network blocks direct access, Bluetooth stays available."
+            } else {
+                networkDetails = "Comma has no usable local Wi-Fi address. Bluetooth still controls local settings; comma can use its SIM for online downloads."
+            }
+            // Galaxy's online:true means the server responds, not that comma
+            // can reach the internet. Never infer internet access from it.
+        } catch { /* Discovery is optional; it must not disrupt working BLE. */ }
+    }
     func monitor() async {
         while !Task.isCancelled {
             if wantsConnection {
@@ -71,7 +132,8 @@ final class AppModel: ObservableObject {
                     bluetooth.reconnectSaved(pairingKey: pairingKey)
                 }
                 if mode != .bluetooth {
-                    if lan.endpoint == nil {
+                    await learnAddress()
+                    if lan.endpoint == nil, !address.isEmpty {
                         do { try lan.configure(address: address) }
                         catch { connectionMessage = error.localizedDescription }
                     }
@@ -133,11 +195,14 @@ struct GalaxyRootView: View {
                 }.pickerStyle(.segmented)
                 Text("Automatic prefers local Wi-Fi and falls back to your paired comma over Bluetooth. Internet isn’t needed for local settings.")
                     .font(.subheadline).foregroundStyle(.secondary)
+                Text(model.networkDetails).font(.caption).foregroundStyle(.secondary)
                 if model.mode != .bluetooth {
+                    Toggle("Find comma’s address over Bluetooth", isOn: $model.findAddressAutomatically)
                     Text("Comma IP address").font(.headline)
                     TextField("192.168.10.85", text: $model.address)
                         .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(14).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                    Text(lan.status).font(.caption).foregroundStyle(.secondary)
                 }
                 Button("Connect") { model.connect(); if model.opened { model.showConnections = false } }
                     .buttonStyle(.borderedProminent).tint(.purple)
@@ -156,7 +221,13 @@ struct GalaxyRootView: View {
                     Text(bluetooth.status).font(.subheadline).foregroundStyle(.secondary)
                     ForEach(bluetooth.devices) { device in
                         Button {
+                            model.opened = false
                             model.wantsConnection = true
+                            model.lan.clearEndpoint()
+                            model.lan.bind(to: nil)
+                            model.address = ""
+                            UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
+                            UserDefaults.standard.removeObject(forKey: "galaxy.lan.address")
                             bluetooth.connect(device, pairingKey: model.pairingKey)
                         } label: {
                             HStack {
@@ -168,6 +239,7 @@ struct GalaxyRootView: View {
                     if bluetooth.connecting { Button("Cancel Bluetooth connection") { bluetooth.disconnect() } }
                     Button("Forget Bluetooth pairing") {
                         bluetooth.forgetSavedDevice(); PairingKeyStore.remove(); model.pairingKey = ""
+                        model.lan.bind(to: nil); UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
                     }.font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()

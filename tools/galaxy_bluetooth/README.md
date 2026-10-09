@@ -167,4 +167,11 @@ This project is an independent prototype and is not an official comma.ai or Star
 
 ## iPhone connection and GitHub update validation
 
-`python3 scripts/check_ios_connections.py` tests production routing and asset updates, including no automatic replay of writes, offline cache validation, incomplete update rollback, active-screen retention, bounded downloads and redirect/cancellation handling. An optional comma private IP argument performs read-only LAN checks. Run `python3 scripts/generate_galaxy_manifest.py --check` before publishing asset updates. See the iPhone tester guide for the endpoint-scoped HTTP exception and release limitations.
+`python3 scripts/check_ios_connections.py` tests production routing and asset updates, including no automatic replay of writes, offline cache validation, incomplete update rollback, active-screen retention, bounded downloads and redirect/cancellation handling. An optional comma private IP argument performs read-only LAN checks. Run `python3 scripts/generate_galaxy_manifest.py --check` before publishing asset updates. See the iPhone tester guide for hotspot/shared-Wi-Fi/SIM behavior, automatic BLE address discovery, local device-identifier checks and release limitations.
+
+The iPhone can learn comma's current private LAN IP over its authenticated BLE
+connection and uses a local-only native TCP client on port 8082, so changing from
+home Wi-Fi to a hotspot does not need an app rebuild. It verifies a paired
+registered device's identifier before accepting a LAN route. A SIM supplies
+comma internet; it does not create a local phone-to-comma route. Nearby SIM-only
+use stays on BLE, while remote/cloud access remains unimplemented.

@@ -69,8 +69,10 @@ final class BoundedHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendable {
 @MainActor
 final class LANTransport: ObservableObject, GalaxyRequestTransport {
     @Published private(set) var connected = false
+    @Published private(set) var status = "Local connection not checked yet."
     private(set) var endpoint: URL?
     private(set) var generation = UUID().uuidString
+    private(set) var expectedDeviceID: String?
 
     // An explicit private IPv4 address prevents cloud/loopback endpoints from
     // being treated as the local comma. No network-wide port scanning.
@@ -89,6 +91,20 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         let new = try Self.endpoint(address)
         if endpoint != new { endpoint = new; invalidate() }
     }
+    static func reportedAddress(_ data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ip = json["lanIp"] as? String, (try? endpoint(ip)) != nil else { return nil }
+        return ip
+    }
+    static func deviceID(_ data: Data) -> String? {
+        guard let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              value.count == 16, value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
+        return value
+    }
+    func bind(to identity: String?) {
+        if expectedDeviceID != identity { expectedDeviceID = identity; invalidate() }
+    }
+    func clearEndpoint() { endpoint = nil; invalidate() }
     func invalidate() { connected = false; generation = UUID().uuidString }
     func probe() async -> Bool {
         guard let endpoint else { return false }
@@ -96,12 +112,21 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         request.timeoutInterval = 2
         let expectedGeneration = generation
         do {
-            let (data, response) = try await BoundedHTTP.load(request, limit: 65_536)
+            let (data, response) = try await PrivateLANHTTP.load(request, limit: 65_536)
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             guard !Task.isCancelled, expectedGeneration == generation else { return false }
-            connected = response.statusCode == 200 && json?["online"] as? Bool == true
+            var available = response.statusCode == 200 && json?["online"] as? Bool == true
                 && ["Parked", "Driving"].contains(json?["status"] as? String ?? "")
-        } catch { if !Task.isCancelled, expectedGeneration == generation { invalidate() } }
+            if available, let expectedDeviceID {
+                var identityRequest = URLRequest(url: URL(string: endpoint.absoluteString + "/api/params?key=DongleId")!)
+                identityRequest.timeoutInterval = 2
+                let (identity, identityResponse) = try await PrivateLANHTTP.load(identityRequest, limit: 256)
+                available = identityResponse.statusCode == 200 && Self.deviceID(identity) == expectedDeviceID
+            }
+            guard !Task.isCancelled, expectedGeneration == generation else { return false }
+            connected = available
+            status = available ? "Local comma verified." : "Local endpoint unavailable or does not match the paired comma."
+        } catch { if !Task.isCancelled, expectedGeneration == generation { status = error.localizedDescription; invalidate() } }
         return connected
     }
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
@@ -125,7 +150,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         for (name, value) in headers where ["content-type", "accept", "cookie", "range"].contains(name.lowercased()) {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let (data, response) = try await BoundedHTTP.load(request, limit: 8 * Wire.maxBody)
+        let (data, response) = try await PrivateLANHTTP.load(request, limit: 8 * Wire.maxBody)
         var responseHeaders: [String: String] = [:]
         for (key, value) in response.allHeaderFields {
             if let name = key as? String, ["content-type", "content-range", "accept-ranges", "content-disposition"].contains(name.lowercased()) {

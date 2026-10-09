@@ -14,7 +14,7 @@ root = Path(__file__).resolve().parents[1]
 production = root / 'ios/GalaxyBluetooth'
 with tempfile.TemporaryDirectory(prefix='galaxy-connections-') as folder:
     target = Path(folder)
-    files = ['Wire.swift', 'GalaxyRequestTransport.swift', 'NetworkTransport.swift', 'GalaxyAssetStore.swift']
+    files = ['HTTP.swift', 'PrivateLANHTTP.swift', 'Wire.swift', 'GalaxyRequestTransport.swift', 'NetworkTransport.swift', 'GalaxyAssetStore.swift']
     subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(target / 'cache'),
                     *[str(production / file) for file in files], str(root / 'tests/Connections.swift'), '-o', str(target / 'test')], check=True)
     class Fixture(BaseHTTPRequestHandler):

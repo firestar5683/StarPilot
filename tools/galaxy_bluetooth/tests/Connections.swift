@@ -45,7 +45,36 @@ struct Connections {
         for address in ["127.0.0.1", "8.8.8.8", "192.168.10.85:8082", "https://example.com", "192.168.010.85", "192.168.1.256"] {
             do { _ = try LANTransport.endpoint(address); fatalError("Invalid LAN host accepted") } catch {}
         }
-        _ = try LANTransport.endpoint("192.168.10.85")
+        for address in ["192.168.10.85", "192.168.4.12", "172.20.10.3", "10.42.0.8"] { _ = try LANTransport.endpoint(address) }
+        for ip in ["192.168.4.12", "172.20.10.3", "10.42.0.8"] {
+            let status = try JSONSerialization.data(withJSONObject: ["lanIp": ip, "online": true])
+            precondition(LANTransport.reportedAddress(status) == ip)
+        }
+        for status in ["{\"lanIp\":null}", "{\"lanIp\":\"8.8.8.8\"}", "{\"lanIp\":\"https://evil.example\"}", "not json"] {
+            precondition(LANTransport.reportedAddress(Data(status.utf8)) == nil)
+        }
+        precondition(LANTransport.deviceID(Data("0123456789abcdef\n".utf8)) != nil)
+        precondition(LANTransport.deviceID(Data("Unregistered".utf8)) == nil)
+        precondition(LANTransport.deviceID(Data("other comma".utf8)) == nil)
+        var parser = LANHTTPParser(limit: 128, headOnly: false)
+        let packet = Data("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/plain\r\n\r\n2\r\nhe\r\n3;test=yes\r\nllo\r\n0\r\n\r\n".utf8)
+        var parsed: LocalResponse?
+        for byte in packet { parsed = try parser.consume(Data([byte]), ended: false) }
+        precondition(parsed?.body == Data("hello".utf8))
+        for invalid in [
+            "HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nx",
+            "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nx",
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nxZZ",
+            "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nxx"] {
+            var bad = LANHTTPParser(limit: 128, headOnly: false)
+            do { _ = try bad.consume(Data(invalid.utf8), ended: true); fatalError("Malformed local HTTP accepted") } catch {}
+        }
+        var closed = LANHTTPParser(limit: 128, headOnly: false)
+        let closeResult = try closed.consume(Data("HTTP/1.0 200 OK\r\n\r\nhello".utf8), ended: true)
+        precondition(closeResult?.body == Data("hello".utf8))
+        print("Local HTTP: incremental chunked/close framing, length bounds, ambiguous/truncated response rejection and hotspot/private IPs passed")
         print("Routing: LAN priority, read fallback, no mutation replay, explicit modes, HTTP errors and private-address validation passed")
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -106,10 +135,18 @@ struct Connections {
         }
         if CommandLine.arguments.count > 1 {
             let live = LANTransport(); try live.configure(address: CommandLine.arguments[1])
-            let found = await live.probe(); precondition(found)
+            let found = await live.probe(); guard found else { throw BridgeError.message("Live probe failed: " + live.status) }
             let status = try await live.request(path: "/api/device/status", method: "GET", headers: [:], body: Data())
             precondition(status.status == 200)
-            print("Actual comma: LAN health probe and read-only status request passed")
+            let identity = try await live.request(path: "/api/params?key=DongleId", method: "GET", headers: [:], body: Data())
+            if let value = LANTransport.deviceID(identity.bodyData) {
+                live.bind(to: value == "0000000000000000" ? "1111111111111111" : "0000000000000000")
+                let mismatch = await live.probe(); precondition(!mismatch)
+                live.bind(to: value)
+                let matched = await live.probe(); precondition(matched)
+                print("Actual comma: mismatched LAN identity rejected; matching device accepted")
+            }
+            print("Actual comma: endpoint-scoped LAN health probe and read-only status request passed")
         }
     }
 }

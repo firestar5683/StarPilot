@@ -65,4 +65,11 @@ No physical Android device was available, and this APK was not installed or laun
 - Existing Swift/Python framing, loopback and metadata-cache checks pass.
 - Asset manifest covers 175 files / 5,070,834 bytes. GitHub downloads use immutable commit URLs, at most four concurrent file requests, 32 MiB bundle and 4 MiB file limits.
 - New iPhone UI, permissions and physical Wi-Fi-to-BLE switching are still unverified. No bridge/driving-code changes are required for this iteration. Android was not modified.
-- Pilot HTTP exception is scoped to the current comma IP. No automatic cloud transport, foreground-to-background service guarantee, media streaming, App Store approval or internet sharing is claimed.
+- The later network iteration removes the comma-IP ATS exception and uses an endpoint-scoped native local TCP client; only app loopback retains an HTTP ATS exception. No automatic cloud transport, foreground-to-background service guarantee, media streaming, App Store approval or internet sharing is claimed.
+
+## Hotspot/shared-Wi-Fi/SIM network iteration
+
+- Private IPv4 endpoints include common iPhone/Android hotspot and home-network addresses, learned from authenticated BLE when a registered identifier is available; manual entry remains supported. No fixed comma IP or broad ATS exception remains.
+- Incremental native HTTP framing tests cover fragmented chunked and connection-close responses, upload/response bounds, duplicate/ambiguous lengths, truncation and malformed chunks. Existing routing/GitHub/HTTP client tests pass.
+- Production native local TCP health/status requests passed against comma. A mismatched identifier was rejected, then the correct paired-device identifier was accepted; no private identifier is printed or embedded.
+- Local-network path changes invalidate LAN and trigger address rediscovery. Automatic discovery itself and personal/other-phone hotspot switching still require physical iPhone testing. SIM-only nearby operation uses BLE; no remote cellular/cloud transport or hotspot-enabling API is claimed.
