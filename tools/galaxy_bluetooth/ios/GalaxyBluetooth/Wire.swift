@@ -10,6 +10,8 @@ struct BridgeRequest: Codable {
     let method: String
     let headers: [String: String]
     let body: String
+    var responseCodec: Int? = nil
+    var responseFlow: String? = nil
 }
 
 struct BridgeResponse: Codable {
@@ -21,6 +23,12 @@ struct BridgeResponse: Codable {
     let body: String
 
     var bodyData: Data { Data(base64Encoded: body) ?? Data() }
+}
+
+struct BridgeHealth: Decodable {
+    let `protocol`: Int
+    let transport: String
+    let readStream: Bool?
 }
 
 enum BridgeError: LocalizedError {
@@ -76,8 +84,9 @@ enum Wire {
         let plaintext: Data
         switch encoded.first {
         case 0: plaintext = Data(encoded.dropFirst(5))
-        case 1:
+        case 1, 2:
             let compressed = Data(encoded.dropFirst(5))
+            guard !compressed.isEmpty else { throw BridgeError.message("Empty compressed message.") }
             var decoded = [UInt8](repeating: 0, count: length + 1)
             let written = compressed.withUnsafeBytes { bytes in
                 compression_decode_buffer(&decoded, decoded.count, bytes.bindMemory(to: UInt8.self).baseAddress!, compressed.count, nil, COMPRESSION_ZLIB)
@@ -87,11 +96,21 @@ enum Wire {
         default: throw BridgeError.message("Unknown Bluetooth compression codec.")
         }
         guard plaintext.count == length else { throw BridgeError.message("Incorrect decoded message size.") }
+        if encoded.first == 2 {
+            guard plaintext.count >= 4 else { throw BridgeError.message("Invalid response envelope.") }
+            let metadataLength = Int(number(plaintext.prefix(4)))
+            guard metadataLength > 0, metadataLength <= plaintext.count - 4,
+                  plaintext.count - 4 - metadataLength <= maxBody,
+                  var metadata = try JSONSerialization.jsonObject(with: plaintext.subdata(in: 4..<(4 + metadataLength))) as? [String: Any],
+                  metadata["body"] == nil else { throw BridgeError.message("Invalid response metadata.") }
+            metadata["body"] = plaintext.dropFirst(4 + metadataLength).base64EncodedString()
+            return try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: metadata))
+        }
         return try JSONDecoder().decode(T.self, from: plaintext)
     }
 
     static func packets(_ frame: Data, size: Int) -> [Data] {
-        let payloadSize = max(15, min(180, size) - 5)
+        let payloadSize = max(15, min(512, size) - 5)
         return stride(from: 0, to: frame.count, by: payloadSize).enumerated().map { sequence, start in
             Data([1]) + uint32(UInt32(sequence)) + frame.subdata(in: start..<min(start + payloadSize, frame.count))
         }

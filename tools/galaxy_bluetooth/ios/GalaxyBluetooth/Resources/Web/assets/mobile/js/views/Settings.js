@@ -34,6 +34,7 @@ export const Settings = {
       expanded: {},
       loading: true,
       loadError: "",
+      loadPending: false,
       activeSectionSlug: "",
       defaultSectionSlug: "lateral-steering",
     }
@@ -79,6 +80,8 @@ export const Settings = {
     modeSection(s) { return this.layout.find(section => section.name === s.name && section.params.some(p => p.key === LONGITUDINAL_MODE_KEY)) },
     ordinaryParams(s) { return s.params.filter(p => !this.isModeParam(p)) },
     async load() {
+      if (this.loadPending) return
+      this.loadPending = true
       this.loading = true
       this.loadError = ""
       try {
@@ -87,6 +90,9 @@ export const Settings = {
         ])
         this.layout = longitudinalModeLayout(layout)
         this.values = values || {}
+        // Flush the developer-mode watcher while this load is still pending.
+        // The initial snapshot must not trigger another full download.
+        await this.$nextTick()
         setLanguage(this.values.LanguageSetting || "en")
         this.defaults = defaults || {}
         if (!this.activeSectionSlug && this.sections.length) {
@@ -98,6 +104,7 @@ export const Settings = {
         showSnackbar("Failed to load settings: " + (e?.message || e), "error")
       } finally {
         this.loading = false
+        this.loadPending = false
       }
     },
     onParamChange(patch) {

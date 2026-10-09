@@ -1,5 +1,6 @@
 """Galaxy BLE v1: bounded framing and authenticated, direction-bound messages."""
 import json
+import base64
 import os
 import struct
 import zlib
@@ -15,7 +16,7 @@ MAX_BODY = 1024 * 1024
 AAD_PREFIX = b"galaxy-ble-v1/"
 
 
-def seal(value, key, direction, nonce=None):
+def seal(value, key, direction, nonce=None, compact_body=False):
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce or os.urandom(12))
     cipher.update(AAD_PREFIX + direction.encode())
     plaintext = json.dumps(value, separators=(",", ":")).encode()
@@ -24,6 +25,19 @@ def seal(value, key, direction, nonce=None):
     compressed = zlib.compress(plaintext, wbits=-15)
     encoded = (b"\x01" + struct.pack(">I", len(plaintext)) + compressed
                if len(compressed) < len(plaintext) else b"\x00" + struct.pack(">I", len(plaintext)) + plaintext)
+    # Compress the actual HTTP bytes, before base64 breaks repeated JSON keys
+    # into different byte sequences. Only clients advertising codec 2 get it.
+    if compact_body and isinstance(value.get("body"), str):
+        body = base64.b64decode(value["body"], validate=True)
+        if len(body) > MAX_BODY:
+            raise ValueError("Body exceeds limit")
+        metadata = json.dumps({k: v for k, v in value.items() if k != "body"}, separators=(",", ":")).encode()
+        payload = struct.pack(">I", len(metadata)) + metadata + body
+        if len(payload) > MAX_FRAME:
+            raise ValueError("Decoded message exceeds limit")
+        compact = b"\x02" + struct.pack(">I", len(payload)) + zlib.compress(payload, wbits=-15)
+        if len(compact) < len(encoded):
+            encoded = compact
     ciphertext, tag = cipher.encrypt_and_digest(encoded)
     data = cipher.nonce + ciphertext + tag
     if len(data) > MAX_FRAME:
@@ -42,7 +56,7 @@ def open_message(data, key, direction):
     length = struct.unpack(">I", encoded[1:5])[0]
     if not 1 <= length <= MAX_FRAME:
         raise ValueError("Invalid decoded message length")
-    if encoded[0] == 1:
+    if encoded[0] in (1, 2):
         decoder = zlib.decompressobj(wbits=-15)
         plaintext = decoder.decompress(encoded[5:], length + 1)
         if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
@@ -53,6 +67,18 @@ def open_message(data, key, direction):
         raise ValueError("Unknown compression codec")
     if len(plaintext) != length:
         raise ValueError("Incorrect decoded message length")
+    if encoded[0] == 2:
+        if len(plaintext) < 4:
+            raise ValueError("Invalid body envelope")
+        metadata_length = struct.unpack(">I", plaintext[:4])[0]
+        if not 1 <= metadata_length <= len(plaintext) - 4:
+            raise ValueError("Invalid metadata length")
+        value = json.loads(plaintext[4:4 + metadata_length])
+        body = plaintext[4 + metadata_length:]
+        if not isinstance(value, dict) or "body" in value or len(body) > MAX_BODY:
+            raise ValueError("Invalid body envelope")
+        value["body"] = base64.b64encode(body).decode()
+        return value
     value = json.loads(plaintext)
     if not isinstance(value, dict):
         raise ValueError("Expected an object")
@@ -95,7 +121,7 @@ class Assembler:
 
 
 def packets(frame, size=180):
-    if not 20 <= size <= 180:
+    if not 20 <= size <= 512:
         raise ValueError("Invalid ATT payload size")
     for sequence, start in enumerate(range(0, len(frame), size - 5)):
         yield b"\x01" + struct.pack(">I", sequence) + frame[start:start + size - 5]

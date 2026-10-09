@@ -4,12 +4,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import struct
+import zlib
 import sys
 import threading
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-from dbus_next import Variant
+from dbus_next import Variant, DBusError
+from Crypto.Cipher import AES
 from protocol import Assembler, MAX_BODY, MAX_FRAME, open_message, packets, seal
 from proxy import GalaxyProxy, PARAMS_SNAPSHOT_LIMIT, validate_target
 from server import Application, Characteristic, GattService, Gateway, SERVICE_PATH
@@ -21,7 +23,7 @@ class ProtocolTests(unittest.TestCase):
     def test_roundtrip_all_att_sizes_and_binary_body(self):
         value = {"body": base64.b64encode(bytes(range(256)) * 32).decode(), "unicode": "Galaxy ✨", "status": 200}
         frame = seal(value, KEY, "response")
-        for size in (20, 64, 180):
+        for size in (20, 64, 180, 244, 512):
             assembler = Assembler()
             decoded = None
             for packet in packets(frame, size):
@@ -48,6 +50,29 @@ class ProtocolTests(unittest.TestCase):
         frame = seal({"id": "a"}, KEY, "request")
         with self.assertRaises(ValueError):
             Assembler().add(b"\x01" + bytes(4) + frame + b"extra")
+
+    def test_compact_response_preserves_json_and_binary(self):
+        for body in (json.dumps([{ "repeated_setting": n, "label": "Galaxy ✨" } for n in range(1000)]).encode(),
+                     bytes(range(256)) * 100, b""):
+            value = {"id": "compact", "status": 200, "headers": {"content-type": "application/json"},
+                     "body": base64.b64encode(body).decode()}
+            legacy = seal(value, KEY, "response")
+            compact = seal(value, KEY, "response", compact_body=True)
+            self.assertLessEqual(len(compact), len(legacy))
+            self.assertEqual(open_message(compact[4:], KEY, "response"), value)
+        with self.assertRaises(ValueError):
+            seal({"body": base64.b64encode(b"x" * (MAX_BODY + 1)).decode()}, KEY, "response", compact_body=True)
+
+    def test_compact_response_rejects_bad_metadata_and_expansion(self):
+        for payload in (b"bad", struct.pack(">I", 50) + b"{}", struct.pack(">I", 2) + b"[]",
+                        struct.pack(">I", 11) + b'{"body":""}',
+                        struct.pack(">I", 2) + b"{}" + b"x" * (MAX_BODY + 1)):
+            encoded = b"\x02" + struct.pack(">I", len(payload)) + zlib.compress(payload, wbits=-15)
+            cipher = AES.new(KEY, AES.MODE_GCM, nonce=bytes(12))
+            cipher.update(b"galaxy-ble-v1/response")
+            ciphertext, tag = cipher.encrypt_and_digest(encoded)
+            with self.assertRaises(ValueError):
+                open_message(cipher.nonce + ciphertext + tag, KEY, "response")
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -179,9 +204,13 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.options = {"device": Variant("o", "/org/bluez/hci0/dev_01_02_03_04_05_06"), "mtu": Variant("q", 185)}
         self.state = self.gateway.session(self.options, fresh=True)
 
-    async def submit(self, counter=1, session=None, key=KEY):
+    async def submit(self, counter=1, session=None, key=KEY, response_codec=None, response_flow=None):
         request = {"id": "unique", "session": session or self.state.challenge.hex(), "counter": counter,
                    "path": "/api/params", "method": "PUT", "body": ""}
+        if response_codec is not None:
+            request["responseCodec"] = response_codec
+        if response_flow is not None:
+            request["responseFlow"] = response_flow
         for packet in packets(seal(request, key, "request")):
             self.gateway.write(packet, self.options)
         task = self.state.task
@@ -225,6 +254,51 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.submit()
         self.assertTrue(all(len(p) <= 20 for p in self.state.response))
         self.drain()
+
+    async def test_fast_packets_require_capability_and_keep_negotiated_mtu(self):
+        self.options["mtu"] = Variant("q", 517)
+        self.gateway.session(self.options)
+        no_mtu = {"device": self.options["device"]}
+        self.assertEqual(self.gateway.session(no_mtu).packet_size, 512)
+        body = json.dumps([{ "repeated_setting": n, "label": "Galaxy ✨" } for n in range(1000)]).encode()
+        def response(request):
+            return {"id": request["id"], "status": 200, "headers": {}, "body": base64.b64encode(body).decode()}
+        self.proxy.handle = response
+        await self.submit()
+        self.assertTrue(all(len(p) <= 180 for p in self.state.response))
+        legacy_count = len(self.state.response)
+        self.drain()
+        await self.submit(counter=2, response_codec=2)
+        self.assertEqual(len(self.state.response[0]), 512)
+        self.assertLess(len(self.state.response), legacy_count)
+        self.assertEqual(base64.b64decode(self.drain()["body"]), body)
+        self.options["mtu"] = Variant("q", 23)
+        await self.submit(counter=3, response_codec=2)
+        self.assertTrue(all(len(p) <= 20 for p in self.state.response))
+        self.drain()
+
+    async def test_stream_reads_once_then_acknowledges_verified_frame(self):
+        body = json.dumps([{ "repeated_setting": n } for n in range(1000)]).encode()
+        def response(request):
+            return {"id": request["id"], "status": 200, "headers": {}, "body": base64.b64encode(body).decode()}
+        self.proxy.handle = response
+        await self.submit(response_codec=2, response_flow="read-stream")
+        count = len(self.state.response)
+        self.assertGreater(count, 1)
+        assembler = Assembler()
+        for sequence in range(count):
+            packet = self.gateway.read(self.options)
+            self.assertEqual(struct.unpack(">I", packet[1:5])[0], sequence)
+            data = assembler.add(packet)
+            if sequence == 0:
+                with self.assertRaises(DBusError):
+                    self.gateway.write(b"\x02" + packet[1:5], self.options)
+        self.assertEqual(self.gateway.read(self.options), b"\x00")
+        self.assertTrue(self.state.busy)
+        self.assertEqual(base64.b64decode(open_message(data, KEY, "response")["body"]), body)
+        self.gateway.write(b"\x02" + struct.pack(">I", count - 1), self.options)
+        self.assertFalse(self.state.response)
+        self.assertFalse(self.state.busy)
 
 
 if __name__ == "__main__":

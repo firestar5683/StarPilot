@@ -10,7 +10,8 @@ A working prototype source project that bundles StarPilot's existing Galaxy mobi
 - Galaxy mobile and classic assets, pinned to StarPilot commit `2a12dbd0ad94b46f8a7b6099d32d7216b7676f79`.
 - A separate Python service on the comma using its existing BlueZ daemon. It does not patch StarPilot, the driving code or the Bluetooth kernel.
 - AES-256-GCM encryption using a private pairing key, per-session challenges and monotonic request counters, direction-bound authentication, and compressed messages.
-- Request/response fragmentation with explicit acknowledgements. No automatic retry of a settings change.
+- MTU-aware fragmentation, compact HTTP response compression, and a negotiated read stream with one acknowledgement after the complete response. Older apps/bridges retain the original per-fragment acknowledgement mode. No automatic retry of a settings change.
+- Shared concurrent settings reads and a five-minute in-memory catalog/defaults cache, cleared after any write or new connection. Current toggle values are never cached.
 - Read-only hardware diagnostics, automated bridge tests and Swift/Python interoperability checks.
 
 ## How the connection works
@@ -25,6 +26,10 @@ Galaxy interface bundled on iPhone
 ```
 
 The two HTTP hops stay inside their respective devices. The iPhone-to-comma connection uses Bluetooth. Galaxy's screens and server-side settings behavior are retained. The phone's loopback server rejects external origins and requires a private app header for API requests.
+
+For faster loading, the authenticated health response advertises `readStream`. The phone opts in only after verifying it. The bridge compresses raw HTTP bytes before base64 encoding, permits response packets up to 512 bytes within the negotiated ATT MTU, and advances one fragment per successful read. The phone verifies the complete authenticated response before sending the final ACK. A read error closes the session; it never retries a fragment or a mutating request. Existing characteristic UUIDs and flags remain unchanged. The old per-fragment mode remains available for compatibility.
+
+Startup reads only `LanguageSetting`, rather than the entire parameter snapshot. Toggles reuses its catalog/defaults for up to five minutes; opening it again still fetches current values. Any non-GET request invalidates cached metadata and concurrent reads before and after forwarding the write. The cache does not persist across connections.
 
 Map search, online map tiles, model downloads and software updates can still require internet access on the phone or comma, as they do in Galaxy today. Bluetooth replaces the connection between the phone and comma; it does not make those external services available offline.
 
@@ -123,7 +128,7 @@ You can then remove `/data/galaxy-ble` and delete the iPhone app. Flashing back 
 - Finite event-stream responses, such as a route list, are buffered until complete. Continuous EventSource streams are not implemented; the mobile log view already uses snapshots.
 - Video downloads and video/multipart live streams are rejected explicitly. Direct media element loads, continuous camera viewing, direct downloads and browser push notifications are not supported in this prototype.
 - A few image elements request dynamic files without the app's API header. These may not render; JSON settings and normal `fetch` / XHR requests are the supported path.
-- Galaxy's UI bundle is pinned. A different StarPilot version may need a matching bundle; `UPSTREAM.json` records the revision and four small native-shell adaptations.
+- Galaxy's UI bundle is pinned. A different StarPilot version may need a matching bundle; `UPSTREAM.json` records the revision and the native-shell adaptations.
 - One saved pairing key is supported at a time. The bridge creates independent sessions for up to four clients. Encryption protects payloads; radio jamming or unauthenticated connection flooding can still disrupt availability.
 
 ## Development checks
@@ -134,9 +139,12 @@ Install `bridge/requirements.txt` in a development Python environment, then run:
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 python3 scripts/check_bundle.py
 python3 scripts/check_interop.py
+node tests/settings_load.mjs
 ```
 
 The tests check actual local HTTP forwarding, binary response preservation, finite SSE, body limits, redirect/path restrictions, encryption tamper rejection, GATT packet/ACK behavior, and replay/session rejection. The interoperability check compiles the production Swift wire/parser files on macOS and exchanges messages with Python in both directions. It requires Xcode's command line tools.
+
+To compare response sizes without modifying settings, run `python3 scripts/benchmark_settings.py --galaxy-url http://YOUR_COMMA:8082`. Add `--packet-size 512` only to model a connection whose negotiated MTU permits that payload. The default comparison uses 180-byte packets. This prints byte/operation counts, never parameter values or keys, and does not measure actual Bluetooth loading time. Both the bridge and iPhone app must be updated for the full optimization.
 
 To regenerate the included Xcode project after adding Swift files, run `python3 scripts/create_xcode_project.py`.
 

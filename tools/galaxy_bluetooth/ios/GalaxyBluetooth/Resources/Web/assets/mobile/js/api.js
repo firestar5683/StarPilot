@@ -63,6 +63,11 @@ export const api = {
   migratePersonalityProfiles() { return request("/api/personality_profiles/migrate", { method: "POST" }) },
 
   getParams() { return request("/api/params/all") },
+  async getLanguage() {
+    const res = await fetch("/api/params?key=LanguageSetting")
+    if (!res.ok) throw new Error("Failed to read language")
+    return (await res.text()).trim()
+  },
   async getDefaults() {
     const res = await fetch("/api/params/defaults")
     return res.ok ? parse(res) : {}

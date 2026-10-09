@@ -38,6 +38,8 @@ class Session:
         self.last_seen = time.monotonic()
         self.task = None
         self.packet_size = 20
+        self.read_stream = False
+        self.response_started = 0
 
     def close(self):
         if self.task:
@@ -67,8 +69,8 @@ class Gateway:
             self.sessions[path] = Session()
         state = self.sessions[path]
         state.last_seen = time.monotonic()
-        mtu = int(options.get("mtu", Variant("q", 23)).value)
-        state.packet_size = min(180, max(20, mtu - 3))
+        if "mtu" in options:
+            state.packet_size = min(512, max(20, int(options["mtu"].value) - 3))
         return state
 
     def write(self, value, options):
@@ -78,12 +80,14 @@ class Gateway:
         try:
             if len(value) == 5 and value[0] == 2:
                 sequence = struct.unpack(">I", value[1:])[0]
-                if state.response and sequence == state.index:
+                if state.read_stream and state.response:
+                    if state.index != len(state.response) or sequence != len(state.response) - 1:
+                        raise ValueError("Unexpected stream acknowledgement")
+                    self.acknowledged(state)
+                elif state.response and sequence == state.index:
                     state.index += 1
                     if state.index == len(state.response):
-                        state.response = []
-                        state.index = 0
-                        state.busy = False
+                        self.acknowledged(state)
                 else:
                     raise ValueError("Unexpected acknowledgement")
                 return
@@ -97,13 +101,29 @@ class Gateway:
             state.assembler.reset()
             raise DBusError("org.bluez.Error.InvalidValueLength", str(e))
 
+    def acknowledged(self, state):
+        LOG.info("Response delivered: %d packets in %.2fs (%s)", len(state.response),
+                 time.monotonic() - state.response_started, "read stream" if state.read_stream else "per-packet ACK")
+        state.response = []
+        state.index = 0
+        state.busy = False
+
     def read(self, options):
         state = self.session(options)
         if options.get("offset", Variant("q", 0)).value:
             raise DBusError("org.bluez.Error.InvalidOffset", "Packets fit inside the negotiated MTU")
-        return state.response[state.index] if state.response else b"\x00"
+        if not state.response or state.index >= len(state.response):
+            return b"\x00"
+        packet = state.response[state.index]
+        if state.read_stream:
+            # ATT reads already have a response. An authenticated opt-in client
+            # reads once per fragment and ACKs once after verifying the frame.
+            # Any read error closes that client session; fragments are not retried.
+            state.index += 1
+        return packet
 
     async def process(self, state, data):
+        started = time.monotonic()
         try:
             request = open_message(data, self.key, "request")
             counter = request.get("counter")
@@ -115,8 +135,15 @@ class Gateway:
             response = await asyncio.to_thread(self.proxy.handle, request)
             response["session"] = state.challenge.hex()
             response["counter"] = counter
-            state.response = list(packets(seal(response, self.key, "response"), state.packet_size))
+            fast = request.get("responseCodec") == 2
+            state.read_stream = fast and request.get("responseFlow") == "read-stream"
+            frame = seal(response, self.key, "response", compact_body=fast)
+            size = state.packet_size if fast else min(180, state.packet_size)
+            state.response = list(packets(frame, size))
             state.index = 0
+            state.response_started = time.monotonic()
+            LOG.info("Response prepared: %d bytes, %d packets, ATT payload %d, %.2fs",
+                     len(frame), len(state.response), size, time.monotonic() - started)
         except asyncio.CancelledError:
             raise
         except Exception:

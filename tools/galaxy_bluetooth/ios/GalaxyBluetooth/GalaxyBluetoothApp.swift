@@ -14,7 +14,8 @@ final class AppModel: ObservableObject {
     init() {
         let bluetooth = BluetoothTransport()
         self.bluetooth = bluetooth
-        server = LoopbackServer(transport: bluetooth)
+        let cache = GalaxyReadCache(transport: bluetooth, sessionID: { bluetooth.sessionIdentifier })
+        server = LoopbackServer(transport: cache)
         server.start()
     }
 }
@@ -25,7 +26,6 @@ struct GalaxyRootView: View {
     @ObservedObject var server: LoopbackServer
 
     init(model: AppModel) {
-        self.model = model
         self.model = model
         bluetooth = model.bluetooth
         server = model.server

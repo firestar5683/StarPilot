@@ -79,8 +79,8 @@ export const AppShell = {
     },
     async loadLanguage() {
       try {
-        const values = await api.getParams()
-        setLanguage(values?.LanguageSetting || languageState.code || "en")
+        const language = await api.getLanguage()
+        setLanguage(language || languageState.code || "en")
       } catch (e) {
         setLanguage(languageState.code || "en")
       }

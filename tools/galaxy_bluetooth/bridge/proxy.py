@@ -58,7 +58,7 @@ class GalaxyProxy:
         try:
             if request.get("path") == "/_bridge/health" and request.get("method") == "GET":
                 return {"id": request_id, "status": 200, "headers": {"content-type": "application/json"},
-                        "body": base64.b64encode(b'{"protocol":1,"transport":"bluetooth"}').decode()}
+                        "body": base64.b64encode(b'{"protocol":1,"transport":"bluetooth","readStream":true}').decode()}
             target = validate_target(request.get("path"))
             method = request.get("method", "GET")
             if method not in METHODS:

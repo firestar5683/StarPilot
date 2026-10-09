@@ -25,6 +25,9 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private var key: SymmetricKey?
     private var keyText = ""
     private var session = ""
+    var sessionIdentifier: String { session }
+    private var supportsReadStream = false
+    private var activeReadStream = false
     private var counter: UInt64 = 0
     private var queue: [Pending] = []
     private var active: Pending?
@@ -104,6 +107,8 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         tx = nil
         session = ""
         counter = 0
+        supportsReadStream = false
+        activeReadStream = false
     }
 
     private func failConnection(_ message: String) {
@@ -156,11 +161,13 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         activeCancelled = false
         awaitingAck = false
         writeIndex = 0
+        activeReadStream = supportsReadStream && active.path != "/_bridge/health"
         do {
             let request = BridgeRequest(id: active.id, session: session, counter: counter, path: active.path,
-                                        method: active.method, headers: active.headers, body: active.body.base64EncodedString())
+                                        method: active.method, headers: active.headers, body: active.body.base64EncodedString(),
+                                        responseCodec: 2, responseFlow: activeReadStream ? "read-stream" : nil)
             outgoing = Wire.packets(try Wire.seal(request, key: key, direction: "request"),
-                                    size: min(180, peripheral.maximumWriteValueLength(for: .withResponse)))
+                                    size: min(180, peripheral.maximumWriteValueLength(for: .withoutResponse)))
             timeoutTask = Task { @MainActor [weak self] in
                 let seconds: UInt64 = active.path == "/_bridge/health" ? 10 : 90
                 try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
@@ -288,6 +295,11 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                 do {
                     let response = try await self.request(path: "/_bridge/health", method: "GET", headers: [:], body: Data())
                     guard response.status == 200 else { throw BridgeError.message("Bridge verification failed.") }
+                    let health = try JSONDecoder().decode(BridgeHealth.self, from: response.bodyData)
+                    guard health.protocol == 1, health.transport == "bluetooth" else {
+                        throw BridgeError.message("Unsupported bridge protocol.")
+                    }
+                    self.supportsReadStream = health.readStream == true
                     try PairingKeyStore.save(self.keyText)
                     self.connectionTimeout?.cancel()
                     self.connected = true
@@ -316,6 +328,10 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                     throw BridgeError.message("Bluetooth response identity did not match the request.")
                 }
                 completedResponse = response
+            }
+            if activeReadStream, completedResponse == nil, let tx {
+                peripheral.readValue(for: tx)
+                return
             }
             awaitingAck = true
             peripheral.writeValue(Data([2]) + data.subdata(in: 1..<5), for: rx, type: .withResponse)

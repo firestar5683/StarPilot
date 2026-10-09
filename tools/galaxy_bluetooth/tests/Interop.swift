@@ -5,6 +5,9 @@ import CryptoKit
 struct Interop {
     static func main() throws {
         let key = SymmetricKey(data: Data((0..<32).map(UInt8.init)))
+        let oldHealth = try JSONDecoder().decode(BridgeHealth.self, from: Data("{\"protocol\":1,\"transport\":\"bluetooth\"}".utf8))
+        let newHealth = try JSONDecoder().decode(BridgeHealth.self, from: Data("{\"protocol\":1,\"transport\":\"bluetooth\",\"readStream\":true}".utf8))
+        precondition(oldHealth.readStream == nil && newHealth.readStream == true)
         let input = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         let request = try Wire.open(Data(input.dropFirst(4)), as: BridgeRequest.self, key: key, direction: "request")
         precondition(request.path == "/api/params")
@@ -24,6 +27,20 @@ struct Interop {
             fatalError("Tampered response was accepted")
         } catch {}
         try frame.write(to: URL(fileURLWithPath: CommandLine.arguments[2]))
+        let compact = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3]))
+        let rawBody = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4]))
+        let compactResponse = try Wire.open(Data(compact.dropFirst(4)), as: BridgeResponse.self, key: key, direction: "response")
+        precondition(compactResponse.bodyData == rawBody && compactResponse.status == 200)
+        for size in [20, 180, 244, 512] {
+            var compactAssembler = FrameAssembler()
+            var completeCompact: Data?
+            for fragment in Wire.packets(compact, size: size) {
+                precondition(fragment.count <= size)
+                completeCompact = try compactAssembler.append(fragment)
+            }
+            let decoded = try Wire.open(completeCompact!, as: BridgeResponse.self, key: key, direction: "response")
+            precondition(decoded.bodyData == rawBody)
+        }
 
         let valid = Data("PUT /api/params HTTP/1.1\r\nHost: 127.0.0.1:9000\r\nContent-Length: 2\r\n\r\n{}".utf8)
         let incomplete = try LocalRequest.parse(Data(valid.dropLast()))
