@@ -30,6 +30,7 @@ from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from opendbc.car.gm.aol import native_bootstrap_supported
 from opendbc.car.gm.steering_authority import monitored_profile
+from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
@@ -98,7 +99,8 @@ class SelfdriveD:
     self.aol_dm_lateral_inhibit = False
     self.aol_authority_lost = False
     self.steering_authority_unavailable = False
-    self.steering_authority_pair = None
+    self.steering_companion = (SteeringCompanion(messaging.sub_sock('starpilotCarState', conflate=False))
+                               if monitored_profile(self.CP) else None)
     self.force_stop_hold_alert = HoldAlertState()
     self.aol_car_state_log_ns = 0
     self.aol_last_intent = None
@@ -271,29 +273,19 @@ class SelfdriveD:
       self.steering_authority_unavailable = False
       return
     now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
-    service = 'starpilotCarState'
     source_ns = self.aol_car_state_log_ns
     source_current = bool(getattr(self, 'conditional_car_state_valid', False) and CS.canValid and not CS.canTimeout and
                           0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS)
-    envelope_current = bool(self.sm.seen.get(service, False) and self.sm.valid.get(service, False) and
-                            self.sm.alive.get(service, False))
-    pair = None
-    if source_current and envelope_current:
-      message_ns = int(self.sm.logMonoTime[service])
-      companion = self.sm[service]
-      if (int(companion.sourceCarStateMonoTime) == message_ns and 0 < message_ns <= now_ns and
-          now_ns - message_ns <= INTENT_MAX_AGE_NS):
-        if message_ns == source_ns:
-          pair = (source_ns, bool(companion.lateralAuthorityUnavailable))
-          self.steering_authority_pair = pair
-        elif message_ns > source_ns:
-          previous = getattr(self, 'steering_authority_pair', None)
-          if previous is not None and previous[0] == source_ns:
-            pair = previous
+    companion = getattr(self, 'steering_companion', None)
+    if companion is None:
+      companion = self.steering_companion = SteeringCompanion()
+    pair = companion.current(self.sm, source_ns=source_ns, now_ns=now_ns)
+    if not source_current:
+      pair = None
     previous_axes = self.aol_axis_decision
     expected_active = self.active or previous_axes.lateral_active or previous_axes.longitudinal_active
     if pair is not None:
-      self.steering_authority_unavailable = pair[1]
+      self.steering_authority_unavailable = pair
     elif expected_active:
       self.steering_authority_unavailable = True
     if getattr(self, 'steering_authority_unavailable', False):

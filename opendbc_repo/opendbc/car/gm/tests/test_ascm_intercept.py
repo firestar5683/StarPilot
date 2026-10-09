@@ -201,6 +201,37 @@ class TestAscmIntercept(unittest.TestCase):
                params(CAR.CHEVROLET_BOLT_EUV)):
       self.assertFalse(CarState(cp).steering_authority.enabled)
 
+  def test_volt_steering_neutral_reacquisition(self):
+    for recovered in (True, False):
+      with self.subTest(recovered=recovered):
+        cp = params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, radar=True)
+        ci, packer = CarInterface(cp), CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        for tick in range(30):
+          self.authority_frame(ci, packer, tick)
+        self.assertTrue(ci.CS.steering_authority.seen_active)
+        for tick in range(30, 90):
+          cs = self.authority_frame(ci, packer, tick, active=False, status=1 if tick < 50 else 0)
+          self.assertFalse(cs.steerFaultTemporary, tick)
+        self.assertTrue(ci.CS.steering_authority.seen_active)
+        for tick in range(90, 120):
+          cs = self.authority_frame(ci, packer, tick, status=1 if recovered and tick >= 105 else 0)
+          self.assertFalse(cs.steerFaultTemporary, (recovered, tick))
+        for tick in range(120, 131):
+          cs = self.authority_frame(ci, packer, tick, status=1 if recovered else 0)
+        self.assertEqual(cs.steerFaultTemporary, not recovered)
+        self.assertEqual(ci.CS.steering_authority.latched, not recovered)
+        if recovered:
+          self.assertTrue(ci.CS.steering_authority.seen_active)
+        else:
+          for tick in range(131, 180):
+            cs = self.authority_frame(ci, packer, tick, active=False)
+          self.assertTrue(cs.steerFaultTemporary)
+          self.assertTrue(ci.CS.steering_authority.latched)
+          for tick in range(180, 200):
+            cs = self.authority_frame(ci, packer, tick)
+            self.assertTrue(cs.steerFaultTemporary, tick)
+          self.assertTrue(ci.CS.steering_authority.latched)
+
   def test_eight_manual_ids_have_stock_acc_default(self):
     self.assertEqual(len(ASCM_INTERCEPT_CAR), 8)
     for car in ASCM_INTERCEPT_CAR:

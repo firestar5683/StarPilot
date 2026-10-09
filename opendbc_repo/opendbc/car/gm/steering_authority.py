@@ -18,6 +18,7 @@ class SteeringAuthority:
     self.min_speed = CP.minSteerSpeed
     self.latched = False
     self.command_active = False
+    self.neutral_since_ns = 0
     self.seen_active = False
     self.last_active_ns = 0
     self.active_since_ns = 0
@@ -57,6 +58,20 @@ class SteeringAuthority:
   def command(self, now_ns: int, active: bool):
     if not self.enabled:
       return
+    if not active and self.command_active:
+      self.neutral_since_ns = now_ns
+    if active:
+      # A sustained emitted neutral with healthy inactive feedback is a new acquisition.
+      # Brief withdrawals retain the confirmed episode; a fault latch never clears here.
+      if (not self.latched and self.neutral_since_ns and
+          now_ns - self.neutral_since_ns >= EPS_STATUS_TIMEOUT_NS and
+          0 < self.status_ns <= now_ns and now_ns - self.status_ns <= EPS_STATUS_TIMEOUT_NS and
+          self.status in (0, 1)):
+        self.seen_active = False
+        self.active_since_ns = 0
+        self.bad_since_ns = self.bad_samples = 0
+        self.last_sample_ns = self.status_ns
+      self.neutral_since_ns = 0
     self.command_active = active
     if active:
       self.last_active_ns = now_ns
