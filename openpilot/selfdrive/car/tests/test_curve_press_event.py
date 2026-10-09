@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from openpilot.cereal import messaging
 from openpilot.selfdrive.car.card import Car, curve_press_receipt
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.car.cruise import VCruiseHelper
 from opendbc.car.structs import car
 
@@ -84,6 +85,7 @@ class CurvePressEventTests(unittest.TestCase):
               'can_rcv_cum_timeout_counter': 0, 'rk': NS(remaining=0.0), 'v_cruise_helper': self.helper}
     for name, value in (values | overrides).items():
       self.enterContext(patch.object(card, name, value, create=True))
+    initialize_publication_sources(card)
     return card, publisher
 
   def test_curve_only_replay_preserves_recorded_car_and_event_time(self):

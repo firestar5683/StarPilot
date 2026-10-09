@@ -6,6 +6,7 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.card import Car
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS, VCruiseHelper
 from openpilot.selfdrive.car.tests.test_hyundai_aol import candidate
 from openpilot.starpilot.controllers.wheel_actions import ACTIONS, KEYS, WheelConsumer, WheelPublisher, capture
@@ -127,6 +128,7 @@ def test_actual_card_published_distance_off_cannot_trigger_unconditional_persona
   vars(instance)['rk'] = NS(remaining=0.0)
   instance.v_cruise_helper = VCruiseHelper(cp)
   instance.slc_receipts = []
+  initialize_publication_sources(instance)
   instance.state_publish(physical, None)
   serialized = next(messaging.log_from_bytes(raw).carState for name, raw in instance.pm.events if name == 'carState')
   assert len(serialized.buttonEvents) == 0

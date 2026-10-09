@@ -13,6 +13,7 @@ from opendbc.car.honda.values import CAR as HONDA
 from openpilot.cereal import messaging
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.car.card import Car
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.starpilot.aol.runtime import current_intent, current_native, decide_axes
 from openpilot.starpilot.aol.wire import IntentState, SafetyState, encode_intent, encode_safety
@@ -81,6 +82,7 @@ def test_card_companion_is_available_when_car_state_wakes_selfdrive(pause_latera
       rk=SimpleNamespace(remaining=0), aol_replay=True, aol_qualified=qualified, aol_sequence=1,
       slc_producer_session='card', aol_card_intent=SimpleNamespace(allowed_latch=True, output=lambda _: (True, pause_lateral, False)),
       v_cruise_helper=SimpleNamespace(slc_cruise_change=None))
+    initialize_publication_sources(card)
     create = messaging.new_message
 
     def stamped(service, *args, **kwargs):

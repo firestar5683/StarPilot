@@ -31,6 +31,7 @@ def test_replay_messages_use_clock_sample_after_receipt():
 
   ui.sm.update = receive
   UIState.update(ui)
+  assert ui.replay_sample.now_ns is not None
   assert display_message(ui.sm, 'carControl', ui.replay_sample.now_ns).latActive
   assert ui.sm.replay_sample is ui.replay_sample
   ui._reset_replay_state.assert_not_called()

@@ -48,6 +48,7 @@ class TestSuburbanGateway(unittest.TestCase):
     from opendbc.can import CANPacker
     from opendbc.car import Bus
     from opendbc.car.gm.carcontroller import CarController
+    from opendbc.car.gm.carstate import CarState
     fp = gen_empty_fingerprint()
     fp[1][0x460] = 8
     cp = CarInterface.get_params(CAR.CHEVROLET_SUBURBAN, fp, [], False, False, False)
@@ -72,7 +73,8 @@ class TestSuburbanGateway(unittest.TestCase):
     state = structs.CarState(vEgo=12)
     state.cruiseState.available = True
     cs = SimpleNamespace(out=state.as_reader(), cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
-                         loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0)
+                         loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
+                         steering_authority=CarState(cp).steering_authority)
     seen = 0
     for frame in range(100):
       control = structs.CarControl(enabled=True, latActive=True, longActive=True)

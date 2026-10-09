@@ -888,6 +888,7 @@ class TestGmAol(unittest.TestCase):
 
   def test_calibration_recovery_requires_new_main_edge_through_actual_callers(self):
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+    from openpilot.starpilot.aol.tests.test_runtime import sample_car_state
     from openpilot.selfdrive.selfdrived.state import StateMachine
     from openpilot.selfdrive.selfdrived.events import Events, EventName, ET
     from openpilot.starpilot.aol.runtime import AxisDecision
@@ -907,7 +908,7 @@ class TestGmAol(unittest.TestCase):
         sd.nostalgia_paddle_cancel = False
         sd.state_machine, sd.events = StateMachine(), Events()
         sd.sm = messaging.SubMaster(['aolIntentWire', 'aolSafetyWire', 'modelV2',
-                                     'extrinsicsCalibration', 'driverMonitoringState'])
+                                     'extrinsicsCalibration', 'driverMonitoringState', 'pandaStates'])
         cs = structs.CarState(canValid=True, vEgo=20., gearShifter='drive')
         for tick, (phase, expected) in enumerate((('unbuckled', True), ('unbuckled', True), ('healthy', True), ('invalid', False), ('recovered', False),
                                                   ('held', False), ('unmapped_lkas', False), ('unmapped_main', False),
@@ -961,7 +962,7 @@ class TestGmAol(unittest.TestCase):
             self.assertTrue(sd.events.contains(ET.NO_ENTRY))
             self.assertTrue(sd.events.contains(ET.SOFT_DISABLE))
           with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
-               patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
+               patch.object(sd, 'data_sample', side_effect=lambda sd=sd, cs=cs, now=now: sample_car_state(sd, cs, now)), patch.object(sd, 'update_events'), \
                patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
                patch.object(sd, 'publish_selfdriveState'):
             sd.step()
@@ -989,6 +990,7 @@ class TestGmAol(unittest.TestCase):
 
   def exercise_actual_selfdrived_override(self, *, unlatched=False):
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+    from openpilot.starpilot.aol.tests.test_runtime import sample_car_state
     from openpilot.selfdrive.selfdrived.state import StateMachine
     from openpilot.selfdrive.selfdrived.events import Events, EventName
     from openpilot.starpilot.aol.runtime import AxisDecision
@@ -1003,6 +1005,7 @@ class TestGmAol(unittest.TestCase):
       cs.cruiseState.available = cs.cruiseState.enabled = True
       sd = SelfdriveD.__new__(SelfdriveD)
       sd.CP, sd.initialized, sd.aol_replay = cp, True, True
+      sd.enabled = sd.active = True
       sd.aol_car_state_log_ns = now
       sd.aol_session_id = 'gm-test'
       sd.aol_axis_decision = AxisDecision()
@@ -1014,7 +1017,7 @@ class TestGmAol(unittest.TestCase):
       sd.events = Events()
       sd.events.add(EventName.gasPressedOverride)
       sd.sm = messaging.SubMaster(['aolIntentWire', 'aolSafetyWire', 'modelV2',
-                                   'extrinsicsCalibration', 'driverMonitoringState'])
+                                   'extrinsicsCalibration', 'driverMonitoringState', 'pandaStates'])
       intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=now)
       intent.aolIntentWire = encode_intent(IntentState('card', 1, now, now, now + 30_000_000,
                                                       True, False, False, True, True))
@@ -1053,7 +1056,7 @@ class TestGmAol(unittest.TestCase):
         sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
                                      calibration.as_reader(), monitoring.as_reader()])
         with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
-             patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
+             patch.object(sd, 'data_sample', side_effect=lambda sd=sd, cs=cs, now=now: sample_car_state(sd, cs, now)), patch.object(sd, 'update_events'), \
              patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
              patch.object(sd, 'publish_selfdriveState'):
           sd.step()

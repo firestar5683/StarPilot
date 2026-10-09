@@ -574,7 +574,7 @@ class TestGmBoltPedalSafety(unittest.TestCase):
                              bolt_pedal_main_ts_nanos=car_state.bolt_pedal_main_ts_nanos,
                              cam_lka_steering_cmd_counter=0, loopback_lka_steering_cmd_updated=False,
                              loopback_lka_steering_cmd_ts_nanos=1_000_000_000, pt_lka_steering_cmd_counter=0,
-                             buttons_counter=0)
+                             buttons_counter=0, steering_authority=car_state.steering_authority)
         _, commands = controller.update(control.as_reader(), cs, 1_000_000_000)
         acc_pedal = candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
         self.assertEqual([msg[0] for msg in commands], ([0x3D1] if not acc_pedal else []) +

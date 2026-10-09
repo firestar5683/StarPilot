@@ -579,8 +579,8 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card.ioniq6_handoff_result = None
     card.can_callbacks = (lambda wait_for_one=False: [], lambda messages: None)
     card.params = SimpleNamespace(put_bool=Mock())
-    card.CP = SimpleNamespace(safetyConfigs=[object()])
-    card.CI = SimpleNamespace(CC=SimpleNamespace(), init=Mock(), apply=Mock(return_value=(object(), [])))
+    card.CP = SimpleNamespace(brand='hyundai', safetyConfigs=[object()])
+    card.CI = SimpleNamespace(CC=SimpleNamespace(), CS=SimpleNamespace(), init=Mock(), apply=Mock(return_value=(object(), [])))
     card.vehicle_startup = VehicleStartupOwner()
     card.sm = FakeSM()
     card.publish_sendcan = Mock()

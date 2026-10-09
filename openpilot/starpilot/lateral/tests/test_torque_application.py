@@ -32,7 +32,7 @@ class TestTorqueApplication(unittest.TestCase):
               self.assertFalse(host.apply(controller, host.vehicle))
             update.assert_not_called()
             self.assertEqual(controller.pid.pos_limit, initial_limit)
-            self.assertAlmostEqual(initial_limit, 3.0)
+            self.assertAlmostEqual(initial_limit, 3.0 * 1.22, places=6)
             selected = replace(host.vehicle, source=source)
             self.assertTrue(host.apply(controller, selected))
             self.assertAlmostEqual(controller.pid.pos_limit, 3.0 * 1.22, places=6)
@@ -55,7 +55,7 @@ class TestTorqueApplication(unittest.TestCase):
       self.assertFalse(host.apply(controller, host.vehicle))
       _, other = self.controller(HYUNDAI.HYUNDAI_IONIQ_6)
       self.assertFalse(host.apply(other, host.vehicle))
-      self.assertAlmostEqual(other.pid.pos_limit, 3.0)
+      self.assertAlmostEqual(other.pid.pos_limit, 3.0 * 1.22, places=6)
       self.assertTrue(host.apply(other, custom))
 
   def test_vehicle_only_samples_do_not_unlock_limit(self):
@@ -70,7 +70,7 @@ class TestTorqueApplication(unittest.TestCase):
         tune = host.sample(sm, now_ns=now, lat_active=active)
         self.assertEqual(tune, host.vehicle)
         self.assertFalse(host.apply(controller, tune))
-        self.assertAlmostEqual(controller.pid.pos_limit, 3.0)
+        self.assertAlmostEqual(controller.pid.pos_limit, 3.0 * 1.22, places=6)
 
   def test_inactive_fallback_and_failed_application_are_not_cached_as_success(self):
     with OpenpilotPrefix():

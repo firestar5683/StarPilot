@@ -170,6 +170,10 @@ class TestTeslaScreenIntegration(unittest.TestCase):
               brake = 100 <= tick < 110
               unbuckled = 40 <= tick < 60 or 150 <= tick < 160
               counts = (3,) if tick < 35 or tick in (40, 60, 90) or tick == 120 and brake_option else (0,)
+              # Authority loss needs a published withdrawal, then a fresh
+              # physical rearm and one native request acknowledgement cycle.
+              if not master_off and tick in (53, 54):
+                counts = (3,) if tick == 53 else (0, 3, 0)
               if tick == 80:
                 counts = (3, 0, 3, 0)
               if 170 <= tick <= 200 or 205 <= tick < 220 or tick == 235:
@@ -261,7 +265,8 @@ class TestTeslaScreenIntegration(unittest.TestCase):
                                  'latch': selected.aol_card_intent.allowed_latch, 'axis_ack': wanted.native_acknowledged,
                                  'native_healthy': bool(safety.safety_config_valid()), 'long_active': command.longActive,
                                  'unbuckled': cs.seatbeltUnlatched, 'cancel': command.cruiseControl.cancel,
-                                 'ordinary_active': sd.active, 'ordinary_enabled': sd.enabled})
+                                 'ordinary_active': sd.active, 'ordinary_enabled': sd.enabled,
+                                 'authority_lost': sd.aol_authority_lost})
             self.assertTrue(all(row[2] for tick, row in observed.items() if tick >= 30))
             self.assertFalse(observed[34][0])
             self.assertEqual(observed[34][1], [])
@@ -275,6 +280,16 @@ class TestTeslaScreenIntegration(unittest.TestCase):
             self.assertFalse(observed[45][3]['long_active'])
             for tick in (48, 49, 50, 51, 52, 53):
               self.assertFalse(observed[tick][0], observed[tick])
+            if not master_off:
+              self.assertTrue(observed[52][3]['authority_lost'])
+              self.assertEqual(observed[53][1], [True])
+              self.assertFalse(observed[53][3]['latch'] or observed[53][3]['desired'])
+              self.assertFalse(observed[53][3]['authority_lost'])
+              self.assertEqual(observed[54][1], [False, True, False])
+              self.assertTrue(observed[54][3]['latch'] and observed[54][3]['desired'])
+              self.assertFalse(observed[54][0])  # Rearm has not yet been acknowledged.
+              self.assertFalse(observed[54][3]['authority_lost'])
+              self.assertFalse(observed[55][3]['authority_lost'])
             self.assertEqual(observed[55][0], not master_off)
             self.assertFalse(observed[65][0])
             self.assertEqual(observed[80][1], [True, False, True, False])

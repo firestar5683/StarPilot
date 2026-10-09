@@ -11,6 +11,7 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.card import Car
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.car.cruise import VCruiseHelper
 from openpilot.selfdrive.car.tests.test_hyundai_aol import candidate
 from openpilot.system.manager.process_config import vision_slc_development
@@ -42,6 +43,7 @@ def card_for(test: unittest.TestCase, cp, publisher, frame):
   test.enterContext(patch.object(card, 'rk', SimpleNamespace(remaining=0.0), create=True))
   card.v_cruise_helper = VCruiseHelper(cp)
   card.slc_receipts = []
+  initialize_publication_sources(card)
   return card
 
 

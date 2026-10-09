@@ -23,6 +23,15 @@ def car_state(*, brake=False):
                       vEgo=20.0, brakePressed=brake)
 
 
+def sample_car_state(sd, state, stamp):
+  event = messaging.new_message('carState', valid=bool(state.canValid), logMonoTime=stamp)
+  event.carState = state
+  with mock.patch.object(sd, 'car_state_sock', object(), create=True), \
+       mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=event.as_reader()), \
+       mock.patch.object(sd.sm, 'update', create=True):
+    return SelfdriveD.data_sample(sd)
+
+
 class CardIntentTests(unittest.TestCase):
   def test_optional_cancel_preserves_only_current_owned_lateral(self):
     from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
@@ -48,7 +57,7 @@ class CardIntentTests(unittest.TestCase):
       def all_checks(self, services=None):
         return self.model_ready or services is None or 'modelV2' not in services
 
-    sm = SM(driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
+    sm = SM(pandaStates=[], driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
             extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
     services = ('aolSafetyWire', 'aolIntentWire')
     sm.valid = dict.fromkeys(services, True)
@@ -91,7 +100,7 @@ class CardIntentTests(unittest.TestCase):
       return sd.aol_axis_decision
 
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now), \
-         mock.patch.object(sd, 'sm', sm, create=True), mock.patch.object(sd, 'data_sample', return_value=state), \
+         mock.patch.object(sd, 'sm', sm, create=True), mock.patch.object(sd, 'data_sample', side_effect=lambda: sample_car_state(sd, state, now)), \
          mock.patch.object(sd, 'update_events'), mock.patch.object(sd, 'update_alerts'), \
          mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'), \
          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.aol_no_entry', wraps=aol_no_entry) as veto:
@@ -157,7 +166,7 @@ class CardIntentTests(unittest.TestCase):
       def all_checks(self, _services=None):
         return True
 
-    sm = SM(driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
+    sm = SM(pandaStates=[], driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
             extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
     services = ('aolSafetyWire', 'aolIntentWire')
     sm.valid = sm.alive = sm.seen = dict.fromkeys(services, True)
@@ -189,7 +198,7 @@ class CardIntentTests(unittest.TestCase):
 
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now), \
          mock.patch.object(sd, 'sm', sm, create=True), \
-         mock.patch.object(sd, 'data_sample', return_value=state), \
+         mock.patch.object(sd, 'data_sample', side_effect=lambda: sample_car_state(sd, state, now)), \
          mock.patch.object(sd, 'update_events'), mock.patch.object(sd, 'update_alerts'), \
          mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'):
       combined = step(1.40, armed=False, long_requested=True,

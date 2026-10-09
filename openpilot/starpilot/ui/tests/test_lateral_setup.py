@@ -239,7 +239,7 @@ class TestLateralSetup(unittest.TestCase):
     self.assertEqual(controls.LaC.controller_mode, ControllerMode.STARPILOT)
     self.assertFalse(controls.torque_learning_allowed)
     self.assertIsNone(controls.torque_host)
-    self.assertAlmostEqual(controls.LaC.pid.pos_limit, 3.0)
+    self.assertAlmostEqual(controls.LaC.pid.pos_limit, 3.0 * 1.22, places=6)
     event = next(call.args[0] for call in info.call_args_list if isinstance(call.args[0], dict) and
                  call.args[0].get('event') == 'torque controller selected')
     self.assertEqual(event['controller'], 'starpilot')

@@ -36,6 +36,7 @@ class CardInitLifecycleTest(unittest.TestCase):
       return object(), [CanData(0x200, b'\x00' * 8, 0)]
 
     fake_ci = SimpleNamespace(
+      CS=GMInterface(cp).CS,
       CC=SimpleNamespace(),
       init=Mock(side_effect=lambda *_: order.append('init')),
       apply=Mock(side_effect=apply),

@@ -54,11 +54,14 @@ def _controller(cp, surface=None, *, original_constructor_context=False):
     # Replace before the first update. The production constructor always uses None.
     controller.starpilot_extension.policy = Ioniq6TorquePolicy(controller, cp.as_reader(), surface=surface, turn_assist=True)
   if original_constructor_context:
+    controller.hkg_canfd_torque = False
     # These frozen vectors invoke the original constructor directly. Dom
     # controlsd replaces this curve with the saved/default flat gain each tick;
-    # this is not a drive-loop replay. Keep the original literal context here.
+    # this is not a drive-loop replay. Preserve its gain curve and raw-CP startup limits.
     controller.pid._k_p = [[1, 1.5, 2., 3., 5, 7.5, 10, 15, 30],
                            [250, 120, 65, 30, 11.5, 5.5, 3.5, 2., .6]]
+    controller.pid.set_limits(controller.lateral_accel_from_torque(controller.steer_max, cp.lateralTuning.torque),
+                              controller.lateral_accel_from_torque(-controller.steer_max, cp.lateralTuning.torque))
   return controller
 
 
@@ -147,6 +150,23 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
           self.assertAlmostEqual(controller.pid.neg_limit, expected["after"]["negLimit"], places=8)
           actual = _trace(controller, cp, _EXTENDED["sequence"])
           _assert_rows(self, actual, expected["rows"])
+
+  def test_current_startup_and_equal_live_update_use_compensated_limits(self):
+    for firmware, fw in (("2023", False), ("2025", True)):
+      for mode in ("default", "tuned"):
+        with self.subTest(firmware=firmware, mode=mode):
+          cp = _params(firmware_2025=fw)
+          surface = Ioniq6Surface.validated("firmware_2025" if fw else "standard", _TUNED_KNOBS) if mode == "tuned" else None
+          controller = _controller(cp, surface)
+          self.assertAlmostEqual(controller.torque_params.latAccelFactor, 3.0 * 1.22, places=6)
+          limits = (controller.pid.pos_limit, controller.pid.neg_limit)
+          self.assertEqual(limits, (controller.torque_params.latAccelFactor, -controller.torque_params.latAccelFactor))
+          for sign in (-1, 1):
+            controller.pid.reset()
+            accel = controller.pid.update(0., feedforward=sign * 100., freeze_integrator=True)
+            self.assertEqual(accel, sign * controller.torque_params.latAccelFactor)
+          controller.update_torque_parameters(3.0, 0.0, 0.09)
+          self.assertEqual((controller.pid.pos_limit, controller.pid.neg_limit), limits)
 
   def test_curvature_delay_scales_at_current_speed_without_spurious_unwind(self):
     cp = _params()

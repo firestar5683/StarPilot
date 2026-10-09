@@ -9,6 +9,7 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.card import Car
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.car.cruise import VCruiseHelper, CRUISE_LONG_PRESS
 from openpilot.selfdrive.selfdrived.events import EventName, Events
 from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
@@ -49,6 +50,7 @@ class TestDistancePersonalityClaim(unittest.TestCase):
                                     slc_replay=False, curve_replay=False, conditional_replay=False, aol_replay=False,
                                     last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
                                     rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[]))
+    initialize_publication_sources(self.card)
     Car.observe_distance_personality(self.card, state(), 1)
 
   def observe(self, physical, tick):

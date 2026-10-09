@@ -98,6 +98,18 @@ class TestVoltAlternateBrake(unittest.TestCase):
                             brake=brake, gas=gas, camera=cp.networkLocation == structs.CarParams.NetworkLocation.fwdCamera and
                             not is_volt_camera_removed(cp))
           packets = [packet for packet in packets if packet[0] not in (0xBE, 0xF1, 0x1C4)]
+          if ci.CS.steering_authority.enabled:
+            packets = [packet for packet in packets if packet[0] != 0x184]
+            eps_status = 1 if active else 0
+            packets.append(packer.make_can_msg('PSCMStatus', 0, {'LKATorqueDeliveredStatus': eps_status}))
+            # The forwarded EPS status reflects the healthy input; all other frozen bytes stay exact.
+            expected = [message.copy() for message in expected]
+            for message in expected:
+              if message[0] == 0x184:
+                data = bytearray.fromhex(message[1])
+                self.assertEqual(data[0] & 0x38, 0)
+                data[0] |= eps_status << 3
+                message[1] = data.hex()
           packets.append(packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 2 if active else 0,
                                                                     'AcceleratorPedal2': 30 if gas else 0}))
           if be:
