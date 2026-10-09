@@ -241,6 +241,14 @@ enum class Kind_94d51b83b2a8ea50: uint16_t {
 };
 CAPNP_DECLARE_ENUM(Kind, 94d51b83b2a8ea50);
 CAPNP_DECLARE_SCHEMA(fc6241ed8877b611);
+CAPNP_DECLARE_SCHEMA(da4149b4426ee957);
+enum class FaultReason_da4149b4426ee957: uint16_t {
+  UNKNOWN,
+  NONE,
+  TRANSPORT_PAUSE,
+  CRITICAL,
+};
+CAPNP_DECLARE_ENUM(FaultReason, da4149b4426ee957);
 CAPNP_DECLARE_SCHEMA(b63a8514b8adccf9);
 enum class Mode_b63a8514b8adccf9: uint16_t {
   OFF,
@@ -1067,6 +1075,8 @@ struct AolAxisState {
   class Reader;
   class Builder;
   class Pipeline;
+  typedef ::capnp::schemas::FaultReason_da4149b4426ee957 FaultReason;
+
   typedef ::capnp::schemas::Mode_b63a8514b8adccf9 Mode;
 
   struct SafetyWire;
@@ -1074,7 +1084,7 @@ struct AolAxisState {
   struct LaneChangeStatusWire;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(fc6241ed8877b611, 5, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(fc6241ed8877b611, 6, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -6965,6 +6975,13 @@ public:
 
   inline bool getOptionalSetRelease() const;
 
+  inline  ::cereal::AolAxisState::FaultReason getFaultReason() const;
+
+  inline  ::uint64_t getFaultEventMonoTime() const;
+
+  inline bool hasFaultSessionId() const;
+  inline  ::capnp::Text::Reader getFaultSessionId() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -7035,6 +7052,19 @@ public:
 
   inline bool getOptionalSetRelease();
   inline void setOptionalSetRelease(bool value);
+
+  inline  ::cereal::AolAxisState::FaultReason getFaultReason();
+  inline void setFaultReason( ::cereal::AolAxisState::FaultReason value);
+
+  inline  ::uint64_t getFaultEventMonoTime();
+  inline void setFaultEventMonoTime( ::uint64_t value);
+
+  inline bool hasFaultSessionId();
+  inline  ::capnp::Text::Builder getFaultSessionId();
+  inline void setFaultSessionId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFaultSessionId(unsigned int size);
+  inline void adoptFaultSessionId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFaultSessionId();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -16979,6 +17009,68 @@ inline bool AolAxisState::Builder::getOptionalSetRelease() {
 inline void AolAxisState::Builder::setOptionalSetRelease(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<278>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::AolAxisState::FaultReason AolAxisState::Reader::getFaultReason() const {
+  return _reader.getDataField< ::cereal::AolAxisState::FaultReason>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::AolAxisState::FaultReason AolAxisState::Builder::getFaultReason() {
+  return _builder.getDataField< ::cereal::AolAxisState::FaultReason>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+inline void AolAxisState::Builder::setFaultReason( ::cereal::AolAxisState::FaultReason value) {
+  _builder.setDataField< ::cereal::AolAxisState::FaultReason>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AolAxisState::Reader::getFaultEventMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AolAxisState::Builder::getFaultEventMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void AolAxisState::Builder::setFaultEventMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AolAxisState::Reader::hasFaultSessionId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AolAxisState::Builder::hasFaultSessionId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AolAxisState::Reader::getFaultSessionId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AolAxisState::Builder::getFaultSessionId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AolAxisState::Builder::setFaultSessionId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AolAxisState::Builder::initFaultSessionId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void AolAxisState::Builder::adoptFaultSessionId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AolAxisState::Builder::disownFaultSessionId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
 inline  ::uint8_t AolAxisState::SafetyWire::Reader::getKind() const {
