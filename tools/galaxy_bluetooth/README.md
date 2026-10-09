@@ -54,6 +54,8 @@ sh /data/galaxy-ble/app/bridge/install.sh
 
 The installer creates a separate virtual environment in `/data/galaxy-ble/venv` and a private key file at `/data/galaxy-ble/pairing.json`. It preserves an existing key. It does not overwrite the openpilot environment or start a background service.
 
+On AGNOS, the installer also checks StarPilot's managed Python at `/usr/local/venv`. It creates the bridge environment without `ensurepip`, then uses an existing `uv` or pip 22.3+ to install only into that environment. This handles devices where the system's `python3-venv` package is absent. A normal Python installation with `ensurepip` is also supported. If none of those installers is available, it stops with a diagnostic instead of modifying system packages.
+
 Turn Bluetooth on in StarPilot, then check the prerequisites:
 
 ```sh
@@ -131,6 +133,8 @@ python3 scripts/check_interop.py
 The tests check actual local HTTP forwarding, binary response preservation, finite SSE, body limits, redirect/path restrictions, encryption tamper rejection, GATT packet/ACK behavior, and replay/session rejection. The interoperability check compiles the production Swift wire/parser files on macOS and exchanges messages with Python in both directions. It requires Xcode's command line tools.
 
 To regenerate the included Xcode project after adding Swift files, run `python3 scripts/create_xcode_project.py`.
+
+To check installer recovery from a missing `ensurepip`, download the wheels in `bridge/requirements.txt` to a local directory, then run `python3 scripts/check_installer.py --wheelhouse /path/to/wheels`. Add `--uv-bin /path/to/uv` to exercise the uv path too. These checks run the real installer in temporary directories and confirm dependency isolation and pairing-key preservation. The installer accepts `GALAXY_BLE_PYTHON` and `GALAXY_BLE_DATA_DIR` overrides for development checks.
 
 ## Attribution
 
