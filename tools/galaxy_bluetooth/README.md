@@ -25,3 +25,5 @@ The Bluetooth bridge uses a shared key, session challenges and request counters.
 iOS build, bridge tests and routing/update checks pass. Bluetooth startup after reboot was verified on the pilot comma. Camera scanning, revoke/re-pair and network switching still need hardware checks. Android has no physical-device test yet.
 
 See [validation](VALIDATION.md) and [upstream notices](UPSTREAM-NOTICES.md).
+
+Comma 3X: phone pairing is available in Device settings. The bridge and capture hooks are shared; physical 3X testing is pending. `bridge/probe.py` reports Bluetooth and encoder compatibility without credentials. See `ios/QUICK-START.md`.

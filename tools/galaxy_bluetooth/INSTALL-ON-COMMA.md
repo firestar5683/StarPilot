@@ -111,3 +111,7 @@ Galaxy's existing web password, cloud sessions or iPhone Bluetooth bonds.
 Pilot validation: iOS generic build and automated QR parsing/key preservation,
 rotation, old-key rejection and permission checks. Actual comma screen, camera
 scanning and revoke/re-pair hardware checks remain required.
+
+## Comma 3X pilot
+
+The same branch and bridge installer apply. Enable Bluetooth in Settings, then pair from **Settings → Device → Pair phone**. Run `tools/galaxy_bluetooth/bridge/probe.py` with `/data/galaxy-ble/venv/bin/python` and send the report before testing. Physical 3X validation is still pending. See `ios/QUICK-START.md` for the reboot, revocation and Live View checks.

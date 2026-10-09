@@ -1,6 +1,8 @@
 # StarPilot iPhone testing — quick start
 
-You can test before Nate’s Apple Developer enrollment is approved. You need a Mac with Xcode, an iPhone and your own comma 4. The app must be installed through Xcode; the ZIP is source code, not a tap-to-install iPhone download.
+You need an iPhone and your own comma 4 or comma 3X running the pilot branch. Comma 3X support is ready for initial hardware testing; it has not yet been verified on a physical 3X.
+
+If Nate sends a TestFlight invitation, install Apple’s TestFlight app and open the invitation on your iPhone. Skip steps 1–2 below. Otherwise, installing the source ZIP needs a Mac with Xcode; the ZIP is not a tap-to-install iPhone download.
 
 Keep the comma parked for setup and initial testing.
 
@@ -22,7 +24,7 @@ Use your own Apple account, SSH key and comma pairing code. You do not need Nate
 8. Press **⌘R**. Follow any device-preparation or trust prompts. If iOS asks you to trust the developer, find your account under **Settings → General → VPN & Device Management**.
 9. Allow Bluetooth, Local Network and camera access when requested. Camera access is for scanning the pairing code.
 
-Free-account installations expire after **seven days**. Connect the phone and press **⌘R** again to reinstall. TestFlight distribution must wait for an active paid developer membership.
+Free-account installations expire after **seven days**. Connect the phone and press **⌘R** again to reinstall. TestFlight installations use the expiration shown in TestFlight.
 
 ## 3. Set up your comma
 
@@ -48,7 +50,7 @@ If SSH is not set up yet, set it up on your own comma first. Your SSH public key
 
 ## 4. Pair and connect
 
-1. Enable Bluetooth on comma, then open **Settings → Pair phone** to display its QR code.
+1. Enable Bluetooth on comma, then display its QR code: **Settings → Pair phone** on comma 4, or **Settings → Device → Pair phone → MANAGE → Pair phone** on comma 3X.
 2. Open the iPhone app and tap the circular **Settings** gear.
 3. Tap **Scan pairing code**, scan your comma’s code, then select your comma from the Bluetooth device list to finish pairing.
 4. Leave the connection mode on **Automatic**. Connect both devices to the same reachable Wi-Fi network for LAN access; Bluetooth provides nearby fallback.
@@ -76,9 +78,23 @@ SSH disconnects during reboot. Reconnect using the same Mac Terminal command fro
 
 On the phone, open **Diagnostics** for grouped onboard readings and the separate **External GPU / Chestnut** panel. Missing Chestnut readings do not prove it is disconnected; the device may not be reporting telemetry.
 
-Open **Live View** for the full comma screen. It needs reachable local Wi-Fi. Wake the comma’s screen if video is blank; the current pilot pauses capture when that screen sleeps. CarPlay is not enabled in this regular phone build.
+Open **Live View** for the full comma screen. It needs reachable local Wi-Fi. Wake the comma’s screen if video is blank; the current pilot pauses capture when that screen sleeps. 
 
-## 6. First checks and feedback
+## 6. Comma 3X compatibility check
+
+Run this in the comma SSH terminal after installing the bridge:
+
+```sh
+/data/galaxy-ble/venv/bin/python /data/openpilot/tools/galaxy_bluetooth/bridge/probe.py
+```
+
+Send Nate the output. It contains the hardware model, Python version, Bluetooth capabilities, Galaxy status and a Live View encoder check; it does not include the pairing key. Look for a powered adapter with `gattServer: true`, `advertising: true`, `galaxyHTTPStatus: 200`, and `liveEncoder.available: true`. An encoder failure affects video; test Galaxy settings separately. If Bluetooth is missing, enable it in comma Settings and rerun the check.
+
+After reboot, confirm the phone can reconnect without starting anything manually. Test forgetting phones from comma Device settings: the old code should stop working, and scanning the new code should restore access. QR codes close after two minutes or when comma enters driving mode.
+
+For the first Live View test, keep the comma awake and parked. Report video FPS, dropped frames, temperatures and any UI lag with Live View on versus off. Unavailable sensors should remain blank; do not treat them as zero readings.
+
+## 7. First checks and feedback
 
 - **Galaxy:** change a harmless display preference, reopen the setting and confirm it saved.
 - **Bluetooth:** turn Wi-Fi off in iPhone Settings, leaving Bluetooth on. Confirm Galaxy’s local settings still work. Live video requires Wi-Fi.
@@ -86,7 +102,7 @@ Open **Live View** for the full comma screen. It needs reachable local Wi-Fi. Wa
 - **Live View:** confirm the image follows the comma screen and note the displayed FPS.
 - **Failure:** after ten seconds without a frame, tap **Copy diagnostics** and paste the report to Nate. The same button is available in Diagnostics.
 
-Send your iPhone model/iOS version, comma branch/version, network type, what you tried and what happened. Avoid screenshots of pairing codes or logs containing credentials.
+Send your iPhone model/iOS version, comma model and branch/version, network type, what you tried and what happened. Avoid screenshots of pairing codes or logs containing credentials.
 
 ## Apple references
 

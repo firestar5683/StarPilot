@@ -2,10 +2,34 @@
 """Read-only check of the on-device BlueZ and Galaxy prerequisites."""
 import asyncio
 import json
+from pathlib import Path
+import platform
+import shutil
+import subprocess
 import urllib.request
 
 from dbus_next import BusType
 from dbus_next.aio import MessageBus
+
+
+def live_encoder_check():
+    executable = shutil.which("ffmpeg")
+    if not executable:
+        return {"available": False, "error": "ffmpeg not found"}
+    try:
+        result = subprocess.run([
+            executable, "-hide_banner", "-loglevel", "error", "-f", "rawvideo",
+            "-pix_fmt", "rgba", "-s:v", "960x480", "-r", "20", "-i", "pipe:0",
+            "-frames:v", "1", "-an", "-c:v", "mjpeg", "-q:v", "5", "-threads", "1",
+            "-f", "rawvideo", "pipe:1",
+        ], input=bytes(960 * 480 * 4), capture_output=True, timeout=15)
+        valid = result.returncode == 0 and result.stdout.startswith(b"\xff\xd8") and result.stdout.endswith(b"\xff\xd9")
+        report = {"path": executable, "available": valid}
+        if not valid:
+            report["error"] = result.stderr.decode("utf-8", errors="replace")[-1000:] or "No complete JPEG produced"
+        return report
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"path": executable, "available": False, "error": str(error)}
 
 
 async def main():
@@ -26,7 +50,12 @@ async def main():
                              "advertising": bool(ads),
                              "supportedAdvertisements": ads.get("SupportedInstances").value if "SupportedInstances" in ads else 0,
                              "activeAdvertisements": ads.get("ActiveInstances").value if "ActiveInstances" in ads else 0})
-        result = {"adapters": adapters}
+        try:
+            model = Path("/sys/firmware/devicetree/base/model").read_text().strip("\x00\n")
+        except OSError:
+            model = "unknown"
+        result = {"model": model, "python": platform.python_version(), "adapters": adapters,
+                  "liveEncoder": live_encoder_check()}
         try:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             with opener.open("http://127.0.0.1:8082/api/device/status", timeout=10) as response:
