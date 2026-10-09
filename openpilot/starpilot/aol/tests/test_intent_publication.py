@@ -388,3 +388,66 @@ def test_expired_sample_does_not_reset_producer_sequence():
     card.pm.send('aolIntentWire', message)
     sd.sm.update(100)
     assert _paired(sd, at, at + 1_000_000) is None
+
+
+def _known_older_sm_pair(*, latest_changes=None):
+  from dataclasses import replace
+  from openpilot.starpilot.aol.intent_companion import IntentCompanion
+
+  prior, source, later, now = 1_081_445_990_726, 1_081_451_053_291, 1_081_455_731_297, 1_081_457_492_005
+  companion = IntentCompanion(object())
+  original = IntentState('card', 1, prior, prior, prior + 200_000_000, True, False, False, True, True, True)
+  pair = replace(original, sequence=2, carStateLogMonoTime=source, observedMonoTime=source,
+                 validUntilMonoTime=source + 200_000_000)
+  latest = replace(original, sequence=3, carStateLogMonoTime=later, observedMonoTime=later,
+                   validUntilMonoTime=later + 200_000_000, **(latest_changes or {}))
+  for intent in (original, pair, latest):
+    companion._observe(intent.carStateLogMonoTime, True, encode_intent(intent))
+  class SM(dict):
+    pass
+  sm = SM(aolIntentWire=encode_intent(original))
+  sm.seen = sm.valid = sm.alive = {'aolIntentWire': True}
+  sm.logMonoTime = {'aolIntentWire': prior}
+  return companion, sm, pair, latest, now
+
+
+@pytest.mark.parametrize('changes', [{}, {'allowedLatch': False}, {'pauseLateral': True},
+                                   {'pauseLongitudinal': True}, {'lateralArmed': False}, {'optionalSetRelease': False}])
+def test_known_older_sm_pair_folds_all_restrictions_without_renewing_source(changes):
+  companion, sm, pair, latest, now = _known_older_sm_pair(latest_changes=changes)
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+    result = current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=now, companion=companion)
+    assert result is not None
+    assert result.carStateLogMonoTime == result.observedMonoTime == pair.carStateLogMonoTime
+    assert result.validUntilMonoTime == pair.validUntilMonoTime
+    assert result.allowedLatch == (pair.allowedLatch and latest.allowedLatch)
+    assert result.lateralArmed == (pair.lateralArmed and latest.lateralArmed)
+    assert result.pauseLateral == (pair.pauseLateral or latest.pauseLateral)
+    assert result.pauseLongitudinal == (pair.pauseLongitudinal or latest.pauseLongitudinal)
+    assert result.optionalSetRelease == (pair.optionalSetRelease and latest.optionalSetRelease)
+    assert current_intent(sm, car_state_ns=pair.carStateLogMonoTime,
+      now_ns=pair.carStateLogMonoTime + 30_000_001, companion=companion) is None
+
+
+@pytest.mark.parametrize('fault', ['invalid', 'malformed', 'conflicting-duplicate', 'session', 'stale', 'unseen-backwards', 'future'])
+def test_older_sm_pair_still_rejects_unknown_corrupt_restart_and_expired_samples(fault):
+  from dataclasses import replace
+
+  companion, sm, pair, latest, now = _known_older_sm_pair()
+  prior = companion.samples[sm.logMonoTime['aolIntentWire']][2]
+  if fault == 'invalid':
+    sm.valid = {'aolIntentWire': False}
+  elif fault == 'malformed':
+    sm['aolIntentWire'] = b'invalid'
+  elif fault in ('conflicting-duplicate', 'session'):
+    sm['aolIntentWire'] = encode_intent(replace(prior, pauseLateral=True) if fault == 'conflicting-duplicate'
+      else replace(prior, producerSessionId='new-card'))
+  elif fault == 'stale':
+    now = prior.carStateLogMonoTime + 30_000_001
+  else:
+    at = prior.carStateLogMonoTime - 1 if fault == 'unseen-backwards' else now + 1
+    sm.logMonoTime = {'aolIntentWire': at}
+    sm['aolIntentWire'] = encode_intent(replace(prior, sequence=0 if fault == 'unseen-backwards' else 4,
+      carStateLogMonoTime=at, observedMonoTime=at, validUntilMonoTime=at + 200_000_000))
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+    assert current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=now, companion=companion) is None

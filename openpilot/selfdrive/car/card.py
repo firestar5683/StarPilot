@@ -12,6 +12,7 @@ from openpilot.cereal import log
 from opendbc.car.structs import car
 
 from openpilot.common.params import Params
+from openpilot.starpilot.card_loop_timing import CardLoopTiming
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
@@ -34,6 +35,7 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
 from openpilot.starpilot.aol.intent import AolProcessFaultContext, independent_axis_requested, read_settings
+from openpilot.starpilot.aol.transport_pause import TransportPauseFeedback
 from opendbc.car.honda.stock_aol import (
   qualified as qualified_honda_stock_aol, native_observation as honda_native_observation,
   temporary_restriction as honda_temporary_restriction,
@@ -347,6 +349,7 @@ class Car:
       self.CP.safetyConfigs[0].safetyParam |= aol_policy.safety_param_addition
       self.CP.alternativeExperience |= aol_policy.alternative_experience_addition
     self.vehicle_startup.finalize_aol_configuration(self.CI)
+    self.aol_transport_feedback = TransportPauseFeedback(self.CP) if self.aol_replay else None
     if isinstance(self.CI, GMInterface) and self.CI.CC is not None and self.CI.CC.volt_sng_plan_input is not None:
       self.CI.CC.volt_sng_plan_input.boottime = self.volt_startup_keepalive()
 
@@ -432,24 +435,37 @@ class Car:
       if handled or configured:
         tracker.claim(gesture, now_ns, key)
 
+  def timing_mark(self, name):
+    timing = getattr(self, 'loop_timing', None)
+    if timing is not None:
+      timing.mark(name)
+
   def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
 
+    self.timing_mark('can_receive_start')
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
+    self.timing_mark('can_receive_end')
     can_list = can_capnp_to_list(can_strs)
+    self.timing_mark('can_decode_end')
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
+    self.timing_mark('interface_update_end')
     self.observe_ioniq6_long_authority(can_list, CS)
+    self.timing_mark('ioniq_authority_end')
     media_owner = getattr(self, 'ioniq6_media', None)
     media_observation = media_owner.update(can_list) if media_owner is not None else None
     distance_owner = getattr(self, 'gm_distance', None)
     distance_observation = distance_owner.update(can_list) if distance_owner is not None else None
 
     # Update radar tracks from CAN
+    self.timing_mark('radar_update_start')
     RD: structs.RadarDataT | None = self.RI.update(can_list)
+    self.timing_mark('radar_update_end')
 
     self.sm.update(0)
+    self.timing_mark('submaster_end')
 
     self.update_vehicle_state_context(CS)
 
@@ -501,12 +517,16 @@ class Car:
       if self.aol_process_fault_context is None:
         self.aol_process_fault_context = AolProcessFaultContext()
       self.aol_process_fault_context.observe(self.sm, now_ns)
-      fault_active = None
+      if getattr(self, 'aol_transport_feedback', None) is None:
+        self.aol_transport_feedback = TransportPauseFeedback(self.CP)
+      transport_reset = self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
+        latched=self.aol_card_intent.allowed_latch)
+      fault_active = True if transport_reset else None
       event_ns = int(self.sm.logMonoTime['onroadEvents'])
       if (getattr(self.aol_card_intent, 'requires_fault_observation', self.aol_card_intent.explicit_latch) and
           self.sm.updated['onroadEvents'] and
           self.sm.valid['onroadEvents'] and 0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
-        fault_active = self.aol_disarming_fault(CS, event_ns, now_ns)
+        fault_active = transport_reset or self.aol_disarming_fault(CS, event_ns, now_ns)
       angle_aol, ford_aol, honda_aol, mazda_aol, preap_aol = self.aol_permission_owners()
       permission_owner = angle_aol or ford_aol or honda_aol or mazda_aol or preap_aol
       angle_panda_ready = not permission_owner or self.startup_panda_configured()
@@ -569,6 +589,7 @@ class Car:
     gm_claim = getattr(self, 'gm_distance_claim_tracker', None)
     if gm_claim is not None:
       gm_claim.observe(CS)
+    self.timing_mark('permission_and_cruise_end')
     self.manual_receipt = None
     self.traffic_receipt = None
     if (self.conditional_replay and (not REPLAY or hasattr(self, 'can_log_mono_time')) and
@@ -607,6 +628,7 @@ class Car:
       self.switchback_receipt = conditional_traffic_candidate(
         CS, self.switchback_button_tracker, self.params, self.switchback_settings_owner,
         self.CP, self.sm, now_ns=now_ns, media=media_observation, action=7)
+    self.timing_mark('conditional_params_end')
     if consumed is not None:
       self.slc_receipts.append(('confirmationAccept' if consumed.button == 'accel' else 'confirmationReject',
                                 consumed, 0.0, 0.0, now_ns))
@@ -665,9 +687,11 @@ class Car:
     for receipt in (self.traffic_receipt, self.switchback_receipt):
       if receipt is not None and receipt[0] and receipt[1] is not None:
         blocked_keys.add(key_for(receipt[1]))
+    self.timing_mark('wheel_params_start')
     self.wheel_commands = self.wheel_publisher.observe(
       self.params, self.CP, CS, now_ns=now_ns, drive_id=int(self.sm['deviceState'].startedMonoTime),
       media=media_observation, blocked_keys=blocked_keys)
+    self.timing_mark('wheel_params_end')
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
@@ -683,9 +707,15 @@ class Car:
 
   def aol_disarming_fault(self, CS, event_ns: int, now_ns: int) -> bool:
     from openpilot.starpilot.car.gm.aol import intent_disarming_fault
+    if getattr(self, 'aol_transport_feedback', None) is None:
+      self.aol_transport_feedback = TransportPauseFeedback(self.CP)
+    if self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
+        latched=getattr(getattr(self, 'aol_card_intent', None), 'allowed_latch', True)):
+      return True
     return intent_disarming_fault(self.CP, self.sm['onroadEvents'], CS,
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
-      temporary_selfdrive_lagging=qualified_gm(self.CP))
+      temporary_selfdrive_lagging=qualified_gm(self.CP),
+      temporary_source_pause=(self.aol_transport_feedback.qualified or self.aol_transport_feedback.awaiting))
 
   def aol_permission_owners(self) -> tuple[bool, bool, bool, bool, bool]:
     # CP is fixed once the drive starts; these checks ran five times per 100 Hz frame.
@@ -727,7 +757,9 @@ class Car:
     co_send = messaging.new_message('carOutput')
     co_send.valid = self.sm.all_checks(['carControl'])
     co_send.carOutput.actuatorsOutput = self.last_actuators_output
+    self.timing_mark('car_output_send_start')
     self.pm.send('carOutput', co_send)
+    self.timing_mark('car_output_send_end')
 
     # kick off controlsd step while we actuate the latest carControl packet
     cs_send = messaging.new_message('carState')
@@ -762,7 +794,9 @@ class Car:
         self.slc_producer_session, self.aol_sequence, int(cs_send.logMonoTime), int(cs_send.logMonoTime),
         int(cs_send.logMonoTime) + 200_000_000, allowed_latch, pause_lateral, pause_longitudinal, self.aol_qualified, lateral_armed,
         bool(getattr(self.aol_card_intent, "optional_set_release_policy", lambda: False)())))
+      self.timing_mark('intent_send_start')
       self.pm.send('aolIntentWire', intent_msg)
+      self.timing_mark('intent_send_end')
 
     # carState wakes selfdrived. Commit its companion intent first, so a
     # consumer scheduled at the wakeup cannot sample the preceding intent.
@@ -781,7 +815,10 @@ class Car:
       companion.starpilotCarState.lateralAuthorityUnavailable = bool(steering_authority.latched)
       companion.starpilotCarState.sourceCarStateMonoTime = int(cs_send.logMonoTime)
     self.car_gps_publisher.update(self.CI.CS, self.pm, companion)
+    self.timing_mark('car_state_send_start')
     self.pm.send('carState', cs_send)
+    self.timing_mark('car_state_send_end')
+    self.timing_source_car_state_ns = int(cs_send.logMonoTime)
 
     wheel = getattr(self, 'wheel_publisher', None)
     if wheel is not None:
@@ -1016,6 +1053,7 @@ class Car:
                     for ps, cfg in zip(pandas, self.CP.safetyConfigs, strict=True)))
 
   def publish_sendcan(self, frames, valid=True):
+    self.timing_mark('sendcan_start')
     steering_authority = getattr(getattr(getattr(self, 'CI', None), 'CS', None), 'steering_authority', None)
     monitored_steering = (getattr(getattr(self, 'CP', None), 'brand', None) == 'gm' and
                           steering_authority is not None and steering_authority.enabled)
@@ -1040,6 +1078,7 @@ class Car:
         self.pm.send('sendcan', packet)
     else:
       self.pm.send('sendcan', packet)
+    self.timing_mark('sendcan_end')
 
   def volt_cc_control_current(self):
     pair = clock_pair_ns()
@@ -1200,7 +1239,9 @@ class Car:
 
     if self.sm.valid['carControl'] and self.sm.all_alive(['carControl']):
       if self.ioniq6_long_prearmed and self.ioniq6_keepalive is not None:
+        self.timing_mark('keepalive_stop_start')
         self.ioniq6_keepalive.stop()
+        self.timing_mark('keepalive_stop_end')
         if self.ioniq6_long_lost:
           self.publish_sendcan([], valid=False)
           return
@@ -1211,17 +1252,22 @@ class Car:
                    self.can_log_mono_time if REPLAY else
                    time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_startup_keepalive() or monitored_steering else
                    int(time.monotonic() * 1e9))
+      self.timing_mark('controller_apply_start')
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
+      self.timing_mark('controller_apply_end')
       self.publish_sendcan(can_sends, valid=CS.canValid)
 
       self.CC_prev = CC
 
   def step(self):
     CS, RD = self.state_update()
+    self.timing_mark('state_update_end')
 
     if self.vehicle_startup.owner is not None:
       self.vehicle_startup.maintain(configured=self.startup_panda_configured())
+    self.timing_mark('startup_maintain_end')
     self.state_publish(CS, RD)
+    self.timing_mark('state_publish_end')
 
     initialized = (not any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
                    self.sm.seen['onroadEvents'])
@@ -1232,12 +1278,17 @@ class Car:
           self.aol_replay and native_bootstrap_supported(self.CP)):
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
 
+    self.timing_mark('controls_update_end')
     self.initialized_prev = initialized
     self.CS_prev = CS
 
   def params_thread(self, evt):
     next_cruise_read = 0.0
     while not evt.is_set():
+      timing = getattr(self, 'loop_timing', None)
+      report = timing.take_report() if timing is not None else None
+      if report is not None:
+        cloudlog.event('card.loop_late', **report)
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       if self.aol_card_intent is not None:
@@ -1250,14 +1301,26 @@ class Car:
       time.sleep(0.1)
 
   def card_thread(self):
+    self.loop_timing = CardLoopTiming() if self.aol_replay and not REPLAY else None
+    self.timing_thread_id = threading.get_native_id()
     e = threading.Event()
     t = threading.Thread(target=self.params_thread, args=(e, ))
     try:
       t.start()
       while True:
+        timing = self.loop_timing
+        if timing is not None:
+          timing.begin()
         self.vehicle_startup.check()
+        self.timing_mark('startup_check_end')
         self.step()
         self.rk.monitor_time()
+        if timing is not None:
+          timing.finish({'source_car_state_ns': getattr(self, 'timing_source_car_state_ns', 0),
+                         'source_control_ns': int(self.sm.logMonoTime['carControl']),
+                         'intent_sequence': self.aol_sequence, 'producer_session': self.slc_producer_session,
+                         'thread_id': self.timing_thread_id, 'replay': REPLAY},
+                        enabled=self.initialized_prev)
     finally:
       e.set()
       t.join()

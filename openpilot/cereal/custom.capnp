@@ -752,6 +752,17 @@ struct AolAxisState @0xfc6241ed8877b611 {
   # its requested bit and permission against AolSafetyState.
   nativeAcknowledged @11 :Bool;
   optionalSetRelease @12 :Bool;
+  # Intent retention provenance; default/old senders cannot classify a pause.
+  faultReason @13 :FaultReason;
+  faultEventMonoTime @14 :UInt64;
+  faultSessionId @15 :Text;
+
+  enum FaultReason {
+    unknown @0;
+    none @1;
+    transportPause @2;
+    critical @3;
+  }
 
   enum Mode {
     off @0;

@@ -71,6 +71,7 @@ class CardIntentTests(unittest.TestCase):
     sd.aol_car_state_log_ns, sd.aol_session_id = now, 'cancel-session'
     sd.aol_axis_decision = AxisDecision()
     sd.aol_dm_lateral_inhibit, sd.nostalgia_paddle_cancel = False, False
+    sd.aol_authority_lost = False
     sd.aol_settings = None
     sd.events, sd.state_machine = Events(), StateMachine()
     sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled
@@ -178,6 +179,7 @@ class CardIntentTests(unittest.TestCase):
     sd.aol_car_state_log_ns, sd.aol_session_id = now, 'volt-session'
     sd.aol_axis_decision = AxisDecision()
     sd.aol_dm_lateral_inhibit, sd.nostalgia_paddle_cancel = False, False
+    sd.aol_authority_lost = False
     sd.aol_settings = None
     sd.events, sd.state_machine = Events(), StateMachine()
 
@@ -699,6 +701,8 @@ class IpcAxisContractTests(unittest.TestCase):
     if intent_companion is not None or not supplied_cp:
       sd.aol_intent_companion = intent_companion
     sd.aol_session_id, sd.aol_sequence = 'authority-session', 0
+    from openpilot.starpilot.aol.transport_pause import TransportPause
+    sd.aol_transport_pause = TransportPause(sd.CP, sd.aol_session_id)
     sd.conditional_replay = False
     sd.nostalgia_paddle_cancel = False
     sd.switchback_capable = False
@@ -717,7 +721,7 @@ class IpcAxisContractTests(unittest.TestCase):
         self.messages[service] = messaging.log_from_bytes(message.to_bytes())
     self.enterContext(mock.patch.object(sd, 'pm', Publisher(), create=True))
     self.enterContext(mock.patch.object(controls, 'pm', Publisher()))
-    clock = self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns'))
+    clock = self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_000_000_000))
     recv = self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one'))
     base = 10_000_000_000
     original_message = messaging.new_message
@@ -730,7 +734,9 @@ class IpcAxisContractTests(unittest.TestCase):
 
     def step(tick, *, timeout=False, old_intent=False, allowed=True, pause=False, latched=True,
              brake=False, steering=False, gas=False, user_disable=False, observed_state=None, authority_unavailable=False, companion=True,
-             long_allowed=True, pause_long=False, state_stamp=None, intent_message=None, offset_ns=0):
+             long_allowed=True, pause_long=False, state_stamp=None, intent_message=None, offset_ns=0,
+             native_request_lat=True, native_request_long=None, native_valid=True, panda_fault=False,
+             critical_event=None, calibrated=True):
       now = base + tick * 10_000_000 + offset_ns
       clock.return_value = now
       state = car_state(brake=brake) if observed_state is None else observed_state
@@ -745,18 +751,26 @@ class IpcAxisContractTests(unittest.TestCase):
         if service == 'deviceState':
           message.deviceState.started, message.deviceState.startedMonoTime = True, base - 1_000_000_000
         elif service == 'extrinsicsCalibration':
-          message.extrinsicsCalibration.calStatus = 'calibrated'
+          message.extrinsicsCalibration.calStatus = 'calibrated' if calibrated else 'uncalibrated'
         frames.append(message.as_reader())
+      pandas = messaging.new_message('pandaStates', len(cp.safetyConfigs), valid=True, logMonoTime=now)
+      for panda, config in zip(pandas.pandaStates, cp.safetyConfigs, strict=True):
+        panda.safetyModel, panda.safetyParam = config.safetyModel, config.safetyParam
+        panda.alternativeExperience = cp.alternativeExperience
+        panda.controlsAllowed = full_op
+        panda.safetyRxChecksInvalid = panda_fault
+      frames.append(pandas.as_reader())
       intent_ns = base if old_intent else now
       intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=intent_ns)
       intent.aolIntentWire = encode_intent(IntentState('authority-card', tick + 1, intent_ns, intent_ns,
                                                      intent_ns + 200_000_000, latched, pause, pause_long, True, latched))
       if intent_message is not None:
         intent = intent_message
-      native = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
+      native = messaging.new_message('aolSafetyWire', 0, valid=native_valid, logMonoTime=now)
       native.aolSafetyWire = encode_safety(SafetyState(1, True, now, now + 200_000_000,
         int(cp.safetyConfigs[-1].safetyModel.raw), cp.safetyConfigs[-1].safetyParam,
-        allowed, full_op and long_allowed, True, full_op, 'authority-panda', sd.aol_session_id))
+        allowed, full_op and long_allowed, native_request_lat,
+        full_op if native_request_long is None else native_request_long, 'authority-panda', sd.aol_session_id))
       if companion:
         authority = messaging.new_message('starpilotCarState', valid=companion != 'invalid',
                                           logMonoTime=now - 1 if companion == 'wrong_stamp' else now)
@@ -767,6 +781,9 @@ class IpcAxisContractTests(unittest.TestCase):
       if user_disable:
         self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (
           sd.events.clear(), sd._update_steering_authority(cs), sd.events.add(log.OnroadEvent.EventName.pedalPressed))))
+      if critical_event is not None:
+        self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (
+          sd.events.clear(), sd._update_steering_authority(cs), sd.events.add(critical_event))))
       sd.step()
       control_frames = []
       with mock.patch.object(controls.sm, 'update_msgs', side_effect=lambda _timestamp, messages: control_frames.extend(messages)):
@@ -841,6 +858,253 @@ class IpcAxisContractTests(unittest.TestCase):
         self.assertIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
         self.assertEqual(state.alertText1, 'TAKE CONTROL IMMEDIATELY')
         self._assert_withdrawal_alert(controls, sd.pm.messages['selfdriveState'])
+        self.assertEqual(str(axis.faultReason), 'transportPause')
+        self.assertFalse(sd.aol_authority_lost)
+        recovered, _, command = step(18, native_request_long=False)
+        self.assertTrue(recovered.lateralActive and command.latActive)
+        self.assertFalse(sd.enabled or sd.active or recovered.longitudinalActive or command.longActive)
+
+  def _transport_callers(self):
+    from openpilot.selfdrive.car.card import Car
+    from openpilot.selfdrive.car.tests.test_hyundai_aol import candidate
+    from openpilot.starpilot.aol.intent import AolProcessFaultContext
+    from openpilot.starpilot.aol.transport_pause import TransportPauseFeedback
+    from openpilot.starpilot.car.hyundai.aol import create_intent
+
+    _, cp = candidate(True)
+    cp.safetyConfigs[-1].safetyParam |= 0x0800
+    sd, controls, step = self._authority_callers(True, cp=cp)
+    card = Car.__new__(Car)
+    card.CP = cp.as_reader()
+    services = ['aolAxisState', 'aolSafetyWire', 'pandaStates', 'onroadEvents']
+    self.enterContext(mock.patch.object(card, 'sm', messaging.SubMaster(services, ignore_avg_freq=services), create=True))
+    card.aol_process_fault_context = AolProcessFaultContext()
+    card.aol_transport_feedback = TransportPauseFeedback(card.CP)
+    card.aol_card_intent = create_intent(cp, AolSettings(True, 0., 9, 0, (0, 0, 0), (0, 0, 0)))
+    cs = car_state()
+    cs.cruiseState.available = True
+    card.aol_card_intent.update(cs, now_ns=100)
+    cs.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.lkas, pressed=True)]
+    card.aol_card_intent.update(cs, now_ns=200)
+    cs.buttonEvents = []
+    self.assertTrue(card.aol_card_intent.allowed_latch)
+
+    def feedback(now, *, axis=None, event=None, state=None):
+      frames = []
+      for service in ('pandaStates', 'aolSafetyWire'):
+        message = messaging.new_message(service, len(sd.sm[service]), valid=sd.sm.valid[service],
+                                        logMonoTime=sd.sm.logMonoTime[service])
+        setattr(message, service, sd.sm[service])
+        frames.append(message.as_reader())
+      frames += [m for m in (axis, event) if m is not None]
+      card.sm.update_msgs(now / 1e9, frames)
+      fault = card.aol_disarming_fault(cs if state is None else state,
+        int(card.sm.logMonoTime['onroadEvents']), now)
+      card.aol_card_intent.update(cs if state is None else state, fault_active=fault, now_ns=now,
+                                 standard_enabled=sd.enabled)
+      return fault
+
+    return sd, controls, step, card, feedback
+
+  def test_actual_hkg_transport_pause_preserves_intent_and_recovers_only_lateral(self):
+    from openpilot.starpilot.aol.intent_companion import IntentCompanion
+    with OpenpilotPrefix():
+      sd, controls, step, card, feedback = self._transport_callers()
+      self.assertIsInstance(sd.aol_intent_companion, IntentCompanion)
+      axis, _, command = step(0)
+      self.assertTrue(axis.lateralActive and axis.longitudinalActive and command.longActive)
+      feedback(10_000_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      axis, _, command = step(8, timeout=True, offset_ns=877_165)
+      now = int(sd.pm.messages['aolAxisState'].logMonoTime)
+      self.assertEqual(str(axis.faultReason), 'transportPause')
+      self.assertTrue(sd.pm.messages['aolAxisState'].valid)
+      self.assertFalse(sd.enabled or sd.active or command.latActive or command.longActive)
+      self._assert_withdrawal_alert(controls, sd.pm.messages['selfdriveState'])
+      self.assertFalse(feedback(now, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      axis, _, command = step(9, native_request_lat=False, native_request_long=False)
+      self.assertTrue(axis.desiredLateral)
+      self.assertFalse(axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
+      self.assertEqual(str(axis.faultReason), 'transportPause')
+      now = int(sd.pm.messages['aolAxisState'].logMonoTime)
+      self.assertFalse(feedback(now, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      axis, _, command = step(10, native_request_long=False)
+      self.assertEqual(str(axis.faultReason), 'none')
+      self.assertTrue(axis.lateralActive and command.latActive)
+      self.assertFalse(sd.enabled or sd.active or axis.longitudinalActive or command.longActive)
+      now = int(sd.pm.messages['aolAxisState'].logMonoTime)
+      feedback(now, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      self.assertTrue(card.aol_card_intent.allowed_latch)
+      self.assertFalse(step(11, latched=False, native_request_long=False)[0].lateralActive)
+      cs = car_state()
+      cs.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.cancel, pressed=True)]
+      card.aol_card_intent.update(cs, now_ns=now + 10_000_000)
+      self.assertFalse(card.aol_card_intent.allowed_latch)
+
+  def test_transport_pause_hard_upgrades_never_recover_without_withdrawal(self):
+    cases = ('native_missing', 'native_deny', 'panda_rx', 'calibration', 'permanent_eps',
+             'can_timeout', 'critical', 'producer_restart', 'invalid_then_fresh', 'cp_change', 'session_change')
+    for case in cases:
+      with self.subTest(case=case), OpenpilotPrefix():
+        sd, _, step, _, _ = self._transport_callers()
+        self.assertTrue(step(0)[0].longitudinalActive)
+        self.assertEqual(str(step(8, timeout=True)[0].faultReason), 'transportPause')
+        kwargs = {'native_request_long': False}
+        if case == 'native_missing':
+          kwargs['native_valid'] = False
+        elif case == 'native_deny':
+          kwargs['allowed'] = False
+        elif case == 'panda_rx':
+          kwargs['panda_fault'] = True
+        elif case == 'calibration':
+          kwargs['calibrated'] = False
+        elif case in ('permanent_eps', 'can_timeout'):
+          state = car_state()
+          if case == 'permanent_eps':
+            state.steerFaultPermanent = True
+          else:
+            state.canTimeout = True
+          kwargs['observed_state'] = state
+        elif case == 'critical':
+          kwargs['critical_event'] = log.OnroadEvent.EventName.controlsMismatch
+        elif case == 'producer_restart':
+          now = 10_090_000_000
+          message = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=now)
+          message.aolIntentWire = encode_intent(IntentState('restarted-card', 1, now, now,
+            now + 200_000_000, True, False, False, True, True))
+          kwargs['intent_message'] = message
+        elif case == 'invalid_then_fresh':
+          raw = sd.sm['aolIntentWire']
+          sd.aol_intent_companion._observe(sd.sm.logMonoTime['aolIntentWire'], False, raw)
+        elif case == 'cp_change':
+          cp = sd.CP.as_builder()
+          cp.safetyConfigs[-1].safetyParam ^= 1
+          sd.CP = cp.as_reader()
+        else:
+          sd.aol_session_id = 'restarted-selfdrived'
+        axis, _, command = step(9, **kwargs)
+        self.assertEqual(str(axis.faultReason), 'critical')
+        self.assertTrue(sd.aol_authority_lost)
+        self.assertFalse(axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
+        self.assertFalse(step(10, native_request_long=False)[0].lateralActive)
+
+  def test_actual_card_feedback_pairing_both_orders_and_fixed_deadline(self):
+    for order in ('axis_first', 'event_first', 'together', 'missing_event', 'missing_axis',
+                  'renew_event', 'unknown', 'critical', 'wrong_session', 'restart', 'card_restart',
+                  'mixed_fault', 'disabled', 'can_timeout'):
+      with self.subTest(order=order), OpenpilotPrefix():
+        sd, _, step, card, feedback = self._transport_callers()
+        step(0)
+        feedback(10_000_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+        step(2)
+        feedback(10_020_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+        step(4, timeout=True)
+        feedback(10_040_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+        step(6, timeout=True)
+        now = 10_060_000_000
+        proof, event = sd.pm.messages['aolAxisState'], sd.pm.messages['onroadEvents']
+        # The actual last retained-source publication is 20 ms old. Deliver
+        # these real publisher envelopes separately in either socket order.
+        if order == 'axis_first':
+          self.assertFalse(feedback(now, axis=proof))
+          self.assertFalse(card.aol_transport_feedback.qualified)
+          self.assertFalse(feedback(now, event=event))
+        elif order == 'event_first':
+          self.assertFalse(feedback(now, event=event))
+          self.assertTrue(card.aol_transport_feedback.awaiting)
+          self.assertFalse(feedback(now, axis=proof))
+        elif order == 'together':
+          self.assertFalse(feedback(now, axis=proof, event=event))
+        elif order in ('missing_event', 'missing_axis', 'renew_event'):
+          self.assertFalse(feedback(now, axis=proof if order == 'missing_event' else None,
+                                    event=event if order != 'missing_event' else None))
+          step(9, native_request_lat=False, native_request_long=False)
+          renewed = sd.pm.messages['aolAxisState']
+          next_event = event
+          if order == 'renew_event':
+            next_event = event.as_builder()
+            next_event.logMonoTime = now + 10_000_000
+            next_event = next_event.as_reader()
+          # Event occurrences and fresh axis streams cannot renew a pending
+          # exact pair beyond the first occurrence's original 30 ms deadline.
+          self.assertTrue(feedback(now + 31_000_000, axis=renewed if order == 'missing_event' else None,
+                                   event=next_event if order == 'renew_event' else None))
+          self.assertFalse(card.aol_card_intent.allowed_latch)
+          self.assertTrue(feedback(now + 32_000_000, axis=proof, event=event))
+          continue
+        else:
+          if order == 'can_timeout':
+            cs = car_state()
+            cs.canTimeout = True
+            self.assertTrue(feedback(now, axis=proof, event=event, state=cs))
+          elif order == 'card_restart':
+            from openpilot.starpilot.aol.transport_pause import TransportPauseFeedback
+            card.aol_transport_feedback = TransportPauseFeedback(card.CP)
+            self.assertTrue(feedback(now, axis=proof, event=event))
+          elif order == 'mixed_fault':
+            faults = Events()
+            faults.add(log.OnroadEvent.EventName.controlsMismatch)
+            faults.add(log.OnroadEvent.EventName.relayMalfunction)
+            mixed = messaging.new_message('onroadEvents', len(faults), valid=True, logMonoTime=now)
+            mixed.onroadEvents = faults.to_msg()
+            self.assertTrue(feedback(now, axis=proof, event=mixed.as_reader()))
+          else:
+            altered = proof.as_builder()
+            if order in ('unknown', 'critical'):
+              altered.aolAxisState.faultReason = order
+            elif order in ('wrong_session', 'restart'):
+              altered.aolAxisState.faultSessionId = 'wrong'
+              if order == 'restart':
+                altered.aolAxisState.sessionId = 'wrong'
+            else:
+              card.aol_card_intent.settings = AolSettings(False, 0., 9, 0, (0, 0, 0), (0, 0, 0))
+            fault = feedback(now, axis=altered.as_reader(), event=event)
+            if order != 'disabled':
+              self.assertTrue(fault)
+          self.assertFalse(card.aol_card_intent.allowed_latch)
+          continue
+        self.assertTrue(card.aol_card_intent.allowed_latch)
+        self.assertTrue(card.aol_transport_feedback.qualified)
+
+  def test_actual_card_unknown_and_missing_native_after_healthy_baseline_disarm(self):
+    for failure in ('unknown', 'source_zero', 'ack_false', 'native_missing', 'native_deny', 'panda_rx'):
+      with self.subTest(failure=failure), OpenpilotPrefix():
+        sd, _, step, card, feedback = self._transport_callers()
+        step(0)
+        feedback(10_000_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+        kwargs = {'native_valid': False} if failure == 'native_missing' else {'allowed': False} if failure == 'native_deny' else {
+          'panda_fault': True} if failure == 'panda_rx' else {}
+        step(1, **kwargs)
+        proof = sd.pm.messages['aolAxisState']
+        if failure in ('unknown', 'source_zero', 'ack_false'):
+          proof = proof.as_builder()
+          if failure == 'unknown':
+            proof.aolAxisState.faultReason = 'unknown'
+          elif failure == 'source_zero':
+            proof.aolAxisState.sourceCarStateMonoTime = 0
+          else:
+            proof.aolAxisState.nativeAcknowledged = False
+          proof = proof.as_reader()
+        self.assertTrue(feedback(10_010_000_000, axis=proof, event=sd.pm.messages['onroadEvents']))
+        self.assertFalse(card.aol_card_intent.allowed_latch)
+
+  def test_transport_pause_user_intent_off_is_honored_without_resuming_long(self):
+    with OpenpilotPrefix():
+      sd, _, step, card, feedback = self._transport_callers()
+      step(0)
+      feedback(10_000_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      step(8, timeout=True)
+      feedback(10_080_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      axis, _, command = step(9, latched=False, native_request_long=False)
+      self.assertFalse(sd.aol_transport_pause.active or sd.enabled or sd.active)
+      self.assertFalse(axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
+      self.assertFalse(sd.aol_authority_lost)
+      cs = car_state()
+      cs.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.cancel, pressed=True)]
+      card.aol_card_intent.update(cs, now_ns=10_090_000_000)
+      self.assertFalse(card.aol_card_intent.allowed_latch)
+
 
   def _assert_withdrawal_alert(self, controls, message):
     from openpilot.starpilot.audio.axis_alerts import AxisAlerts
@@ -1006,6 +1270,7 @@ class IpcAxisContractTests(unittest.TestCase):
 
   def test_lateral_only_receipt_loss_keeps_take_control_alert(self):
     class SM:
+      seen = {'aolIntentWire': False}
       frame = 0
 
       def __getitem__(self, service):
@@ -1021,7 +1286,7 @@ class IpcAxisContractTests(unittest.TestCase):
         return True
 
     sd = SelfdriveD.__new__(SelfdriveD)
-    sd.CP = SimpleNamespace(passive=False, openpilotLongitudinalControl=True)
+    sd.CP = car.CarParams.new_message(passive=False, openpilotLongitudinalControl=True)
     self.enterContext(mock.patch.object(sd, 'sm', SM(), create=True))
     sd.events = Events()
     sd.state_machine = StateMachine()
@@ -1041,6 +1306,7 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.aol_session_id = 'drive-session'
     sd.aol_axis_decision = AxisDecision()
     sd.aol_dm_lateral_inhibit = False
+    sd.aol_authority_lost = False
     sd.aol_settings = None
     sd.nostalgia_paddle_cancel = False
     self.enterContext(mock.patch.object(sd, 'data_sample', car_state))
@@ -1050,7 +1316,8 @@ class IpcAxisContractTests(unittest.TestCase):
 
     native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=False,
                              lateralAllowed=True, longitudinalAllowed=False)
-    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
+    intent = SimpleNamespace(producerSessionId='alert-card', allowedLatch=True, lateralArmed=True,
+                             pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \
          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', side_effect=(None, native, None, None)):
       sd.sm.frame = 1
@@ -1083,6 +1350,7 @@ class IpcAxisContractTests(unittest.TestCase):
 
   def test_lateral_only_temporary_fault_uses_existing_orange_warning(self):
     class SM:
+      seen = {'aolIntentWire': False}
       frame = 1
 
       def __getitem__(self, service):
@@ -1098,7 +1366,7 @@ class IpcAxisContractTests(unittest.TestCase):
         return True
 
     sd = SelfdriveD.__new__(SelfdriveD)
-    sd.CP = SimpleNamespace(passive=False, openpilotLongitudinalControl=True)
+    sd.CP = car.CarParams.new_message(passive=False, openpilotLongitudinalControl=True)
     self.enterContext(mock.patch.object(sd, 'sm', SM(), create=True))
     sd.events, sd.state_machine, sd.AM = Events(), StateMachine(), AlertManager()
     from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
@@ -1114,6 +1382,7 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.aol_session_id = 'drive-session'
     sd.aol_axis_decision = AxisDecision()
     sd.aol_dm_lateral_inhibit = False
+    sd.aol_authority_lost = False
     sd.aol_settings = None
     sd.nostalgia_paddle_cancel = False
     state = car_state()
@@ -1124,7 +1393,8 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.publish_selfdriveState = mock.Mock()
     native = SimpleNamespace(requestedLateral=False, requestedLongitudinal=False,
                              lateralAllowed=False, longitudinalAllowed=False)
-    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
+    intent = SimpleNamespace(producerSessionId='alert-card', allowedLatch=True, lateralArmed=True,
+                             pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
     with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent),
           mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', return_value=native)):
       sd.step()
@@ -1303,6 +1573,7 @@ class IpcAxisContractTests(unittest.TestCase):
         sd.aol_session_id = 'drive-session'
         sd.aol_axis_decision = AxisDecision()
         sd.aol_dm_lateral_inhibit = False
+        sd.aol_authority_lost = False
         sd.aol_settings = None
         sd.nostalgia_paddle_cancel = False
         sd.events, sd.state_machine = Events(), StateMachine()
@@ -1548,6 +1819,7 @@ class IpcAxisContractTests(unittest.TestCase):
         sd.aol_session_id = 'drive-session'
         sd.aol_axis_decision = AxisDecision()
         sd.aol_dm_lateral_inhibit = False
+        sd.aol_authority_lost = False
         sd.aol_settings = None
         sd.nostalgia_paddle_cancel = False
         sd.events, sd.state_machine = Events(), StateMachine()
@@ -1589,6 +1861,7 @@ class IpcAxisContractTests(unittest.TestCase):
 
   def test_native_receipt_gates_engagement_and_disables_on_loss(self):
     class SM:
+      seen = {'aolIntentWire': False}
       def __getitem__(self, service):
         if service == 'deviceState':
           return SimpleNamespace(started=True, startedMonoTime=1)
@@ -1603,7 +1876,7 @@ class IpcAxisContractTests(unittest.TestCase):
 
     def driver(aol_enabled):
       sd = SelfdriveD.__new__(SelfdriveD)
-      sd.CP = SimpleNamespace(passive=False, openpilotLongitudinalControl=True)
+      sd.CP = car.CarParams.new_message(passive=False, openpilotLongitudinalControl=True)
       self.enterContext(mock.patch.object(sd, 'sm', SM(), create=True))
       sd.events = Events()
       sd.state_machine = StateMachine()
@@ -1615,6 +1888,7 @@ class IpcAxisContractTests(unittest.TestCase):
       sd.aol_session_id = 'drive-session'
       sd.aol_axis_decision = AxisDecision()
       sd.aol_dm_lateral_inhibit = False
+      sd.aol_authority_lost = False
       sd.aol_settings = None
       sd.nostalgia_paddle_cancel = False
       self.enterContext(mock.patch.object(sd, 'data_sample', car_state))
@@ -1627,7 +1901,8 @@ class IpcAxisContractTests(unittest.TestCase):
 
     native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=True,
                              lateralAllowed=True, longitudinalAllowed=True)
-    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
+    intent = SimpleNamespace(producerSessionId='alert-card', allowedLatch=True, lateralArmed=True,
+                             pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
     sd = driver(True)
     sd.initialized = False
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \

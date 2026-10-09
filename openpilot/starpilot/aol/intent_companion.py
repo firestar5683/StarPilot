@@ -17,6 +17,7 @@ class IntentCompanion:
     self.session = None
     self.sequence = -1
     self.sequence_stamp = 0
+    self.integrity_epoch = 0
 
   def _observe(self, stamp, valid, raw):
     stamp = int(stamp)
@@ -27,6 +28,7 @@ class IntentCompanion:
       valid = False
     if intent is not None and (self.latest is None or stamp >= self.latest[0]):
       if self.session is not None and intent.producerSessionId != self.session:
+        self.integrity_epoch += 1
         self.samples.clear()
         self.sequence = -1
         self.sequence_stamp = 0
@@ -45,6 +47,8 @@ class IntentCompanion:
     if valid and intent is not None and (self.latest is None or stamp >= self.latest[0]):
       self.sequence = max(self.sequence, intent.sequence)
       self.sequence_stamp = max(self.sequence_stamp, stamp)
+    if not valid:
+      self.integrity_epoch += 1
     sample = (stamp, valid, intent)
     self.samples[stamp] = sample
     if self.latest is None or stamp >= self.latest[0]:
@@ -67,6 +71,7 @@ class IntentCompanion:
         break
       self._observe(message.logMonoTime, message.valid, message.aolIntentWire)
     else:
+      self.integrity_epoch += 1
       self.samples.clear()
       if self.latest is not None:
         self.latest = (self.latest[0], False, self.latest[2])
@@ -86,10 +91,12 @@ class IntentCompanion:
       return None
     if not all(self._fresh(sample, now_ns) for sample in (pair, self.latest, sm_sample)):
       return None
+    if self.latest[0] < source_ns:
+      return None
     intent = pair[2]
     for sample in (self.latest, sm_sample):
-      stamp, _, latest = sample
-      if stamp < source_ns or latest.producerSessionId != intent.producerSessionId:
+      _, _, latest = sample
+      if latest.producerSessionId != intent.producerSessionId:
         return None
       intent = replace(intent, allowedLatch=intent.allowedLatch and latest.allowedLatch,
                        pauseLateral=intent.pauseLateral or latest.pauseLateral,
