@@ -1,8 +1,14 @@
 import { GalaxySelect } from "./galaxy-select.js"
+import { haptic } from "./haptics.js"
 
 export const FINE_SCRUB_HOLD_MS = 300
 export const FINE_SCRUB_FACTOR = 5
 const FINE_SCRUB_JITTER_PX = 4
+
+// Standalone preferences use the same pending-value lifecycle as settings pages.
+export const switchRow = (label, enabled, reason = "") => ({
+  label, value: enabled ? "On" : "Off", reason, choices: ["Off", "On"], available: true, action: true,
+})
 
 export function numericBounds(row) {
   const min = Number(row.minimum), max = Number(row.maximum), step = Number(row.step)
@@ -36,6 +42,7 @@ export const GalaxySettingRow = {
     row: { type: Object, required: true },
     index: { type: Number, required: true },
     disabled: { type: Boolean, default: false },
+    busy: { type: Boolean, default: false },
     saveValue: { type: Function, required: true },
   },
   emits: ["open", "review", "reset-default"],
@@ -53,8 +60,8 @@ export const GalaxySettingRow = {
       const numericMax = snapNumeric(bounds.max, bounds)
       return { ...bounds, numericMax, max: Number((numericMax + bounds.step).toFixed(8)), auto: true }
     },
-    locked() { return this.disabled || this.updating || !this.row.available || (!this.row.action && !this.row.page) },
-    dimmed() { return this.updating || !this.row.available || (!this.row.action && !this.row.page) },
+    locked() { return this.busy || this.updating || this.dimmed },
+    dimmed() { return this.disabled || !this.row.available || (!this.row.action && !this.row.page) },
     currentValue() { return this.preview !== undefined ? this.preview : this.row.value },
     sliderValue() { return this.currentValue === "Auto" && this.bounds?.auto ? this.bounds.max : this.currentValue },
     displayValue() {
@@ -64,7 +71,8 @@ export const GalaxySettingRow = {
   },
   methods: {
     async commit(value) {
-      if (this.locked || String(value) === String(this.row.value)) { this.preview = undefined; return }
+      if (this.locked) return
+      if (String(value) === String(this.row.value)) { this.preview = undefined; return }
       this.preview = value
       this.updating = true
       try { await this.saveValue(this.index, value) }
@@ -72,12 +80,13 @@ export const GalaxySettingRow = {
     },
     onSwitch(event) {
       const next = event.target.checked ? "On" : "Off"
-      event.target.checked = this.currentValue === "On"
+      if (this.locked) { event.target.checked = this.currentValue === "On"; return }
       return this.commit(next)
     },
     onSelect(event) { return this.commit(event.target.value) },
     beginInteract() { if (!this.locked) this.interacting = true },
     flushSlider(raw) {
+      if (this.locked) return
       const numeric = snapNumeric(raw, this.bounds)
       const next = numeric !== null && this.bounds?.auto && numeric === this.bounds.max ? "Auto" : numeric
       this.preview = undefined
@@ -98,7 +107,7 @@ export const GalaxySettingRow = {
       this.fineScrub.baseValue = snapNumeric(this.sliderValue, this.bounds) ?? this.bounds.min
       this.fineScrub.baseX = this.fineScrub.lastX
       this.isFineScrubbing = true
-      try { globalThis.navigator?.vibrate?.(15) } catch {}
+      haptic()
     },
     onSliderInput(event) {
       if (this.locked || this.fineScrub?.active) { event.target.value = this.sliderValue; return }
@@ -159,43 +168,49 @@ export const GalaxySettingRow = {
     },
   },
   watch: {
-    locked(value) { if (value) { this.releasePointer(); this.preview = undefined } },
+    locked(value) {
+      if (value) {
+        this.releasePointer()
+        // A save locks input but owns its preview until the saved value is read.
+        if (!this.updating) this.preview = undefined
+      }
+    },
   },
   beforeUnmount() { this.clearHoldTimer() },
   template: `
-    <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' }">
+    <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' }" :inert="busy || updating" :aria-busy="busy || updating || undefined">
       <div class="gx-row__info">
         <span class="gx-row__label">{{ row.label }}</span>
         <span v-if="row.reason" class="gx-row__desc">{{ row.reason.replace('https://firestar.link/discord', '') }}<a v-if="row.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
         <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ row.value }}</span>
       </div>
       <button v-if="control !== 'slider' && showDefault" type="button"
-          class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
+          class="gx-btn gx-btn--tonal gx-setting-default" :disabled="dimmed || !row.resetAvailable"
           :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
           @click="$emit('reset-default', index)">Default</button>
       <label v-if="control === 'switch'" class="gx-switch">
-        <input type="checkbox" role="switch" :aria-label="row.label" :checked="currentValue === 'On'" :disabled="locked" @change="onSwitch">
+        <input type="checkbox" role="switch" :aria-label="row.label" :checked="currentValue === 'On'" :disabled="dimmed" @change="onSwitch">
         <span class="gx-switch__track"></span><span class="gx-switch__thumb"></span>
       </label>
       <div v-else-if="control === 'slider'" class="gx-slider-row" :class="{ 'is-fine-scrubbing': isFineScrubbing }">
         <div class="gx-slider-header"><span class="gx-row__value">{{ displayValue }}</span>
           <span v-if="interacting" class="gx-slider-hint">{{ isFineScrubbing ? 'Fine scrubbing' : 'Hold to fine scrub' }}</span>
           <button v-if="showDefault" type="button"
-          class="gx-btn gx-btn--tonal gx-setting-default" :disabled="locked || !row.resetAvailable"
+          class="gx-btn gx-btn--tonal gx-setting-default" :disabled="dimmed || !row.resetAvailable"
           :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
           @click="$emit('reset-default', index)">Default</button></div>
         <input ref="slider" type="range" class="gx-slider" :aria-label="row.label" :aria-valuetext="displayValue"
-          :min="bounds.min" :max="bounds.max" :step="bounds.step" :value="sliderValue" :disabled="locked"
+          :min="bounds.min" :max="bounds.max" :step="bounds.step" :value="sliderValue" :disabled="dimmed"
           @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"
           @pointerdown="onSliderPointerDown" @pointermove="onSliderPointerMove" @pointerup="onSliderPointerEnd"
           @pointercancel="onSliderCancel" @lostpointercapture="onSliderCancel" @keydown="beginInteract">
         <div class="gx-slider-meta"><span>{{ bounds.min }} to {{ bounds.numericMax ?? bounds.max }} {{ row.unit }}<template v-if="bounds.auto"> · Auto at right</template></span><span>Step: {{ bounds.step }} {{ row.unit }}</span></div>
       </div>
-      <GalaxySelect v-else-if="control === 'select'" class="gx-field" :aria-label="row.label" :value="currentValue" :disabled="locked" @change="onSelect">
+      <GalaxySelect v-else-if="control === 'select'" class="gx-field" :aria-label="row.label" :value="currentValue" :disabled="dimmed" @change="onSelect">
         <option v-for="choice in row.choices" :key="choice" :value="choice">{{ choice }}</option>
       </GalaxySelect>
-      <button v-else-if="control === 'group'" type="button" class="gx-btn gx-btn--tonal" :disabled="locked" @click="$emit('open', row.page)">Manage</button>
-      <button v-else-if="control === 'action' && row.action" type="button" class="gx-btn gx-btn--tonal" :disabled="locked" @click="$emit('review', index, row.confirm ? 0 : 1)">{{ row.repairValue === 'Reset' || /reset|default/i.test(row.label) ? 'Reset' : row.repairValue ? 'Set ' + row.repairValue : row.label }}</button>
+      <button v-else-if="control === 'group'" type="button" class="gx-btn gx-btn--tonal" :disabled="dimmed" @click="$emit('open', row.page)">Manage</button>
+      <button v-else-if="control === 'action' && row.action" type="button" class="gx-btn gx-btn--tonal" :disabled="dimmed" @click="$emit('review', index, row.confirm ? 0 : 1)">{{ row.repairValue === 'Reset' || /reset|default/i.test(row.label) ? 'Reset' : row.repairValue ? 'Set ' + row.repairValue : row.label }}</button>
       <span v-else class="gx-row__value gx-row__readout">{{ displayValue }}</span>
     </div>`,
 }

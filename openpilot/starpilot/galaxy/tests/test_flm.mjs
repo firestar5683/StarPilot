@@ -59,16 +59,18 @@ globalThis.document = { createElement: () => ({
 const { compile, reactive, computed } = await import('../web/vendor/vue/vue.esm-browser.js')
 const reactivePage = reactive({ selected: [segment], busy: false, requesting: false,
   operation: { ...operation, state: 'completed', processed: 1 } })
+Object.defineProperty(reactivePage, 'analysisAvailable', { get: () => FlmPage.computed.analysisAvailable.call(reactivePage) })
 const canAnalyze = computed(() => FlmPage.computed.canAnalyze.call(reactivePage))
 assert.equal(canAnalyze.value, true)
 reactivePage.requesting = true
-assert.equal(canAnalyze.value, false, 'Vue disables Analyze while completed report is still loading')
+assert.equal(canAnalyze.value, false, 'Analyze stays locked while completed report is still loading')
+assert.equal(reactivePage.analysisAvailable, true, 'background reads do not change the appearance of Analyze')
 reactivePage.requesting = false
 assert.equal(canAnalyze.value, true, 'Vue recomputes after report request retires')
 const rendered = JSON.stringify(compile(FlmPage.template)({ ...FlmPage.data(), ...FlmPage.methods, unauthorized: () => {},
   mode: 'local', inventoryStatus: 'ready', inventory,
   inventoryError: '', available: selectableSegments(inventory), operation: { ...operation, state: 'completed', processed: 1 },
-  report, operationError: '', busy: false, requesting: false, selected: [segment], canAnalyze: true, operationFeed: {},
+  report, operationError: '', busy: false, requesting: false, selected: [segment], analysisAvailable: true, canAnalyze: true, operationFeed: {},
   inventoryFeed: {}, toggle: () => {}, analyze: () => {}, resultLabel: FlmPage.methods.resultLabel,
   metric: FlmPage.methods.metric, exclusions: FlmPage.methods.exclusions, go: () => {} }, []))
 assert.match(rendered, /FLM/)

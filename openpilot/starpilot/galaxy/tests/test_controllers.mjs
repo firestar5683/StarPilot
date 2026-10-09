@@ -44,6 +44,7 @@ normal.feed.start(); await normal.reply(0)
 assert.equal(normal.requests[0].url, "./api/controllers/status")
 assert.equal(normal.requests[0].options.credentials, "same-origin")
 normal.fire(2000); await normal.reply(1)
+assert.equal(normal.updates.at(-1).busy, false)
 const saved = normal.feed.action({ operation: "save", revision: "a".repeat(64), enabled: true,
   slots: ["brightness", null, null, null, null, null, null, null, null, null] })
 assert.equal(normal.requests[2].url, "./api/controllers/action")
@@ -51,6 +52,21 @@ assert.equal(normal.requests[2].options.method, "POST")
 assert.deepEqual(JSON.parse(normal.requests[2].options.body), { operation: "save", revision: "a".repeat(64), enabled: true,
   slots: ["brightness", null, null, null, null, null, null, null, null, null] })
 await normal.reply(2); await saved
+assert.deepEqual(normal.updates.at(-1).draft, { revision: status().revision, enabled: false, slots: Array(10).fill(null) })
+assert.equal(normal.updates.at(-1).busy, false)
+
+const racing = fixture()
+racing.feed.start(); await racing.reply(0)
+racing.fire(2000)
+assert.equal(racing.updates.at(-1).busy, false, "background status reads do not lock drafts")
+const racingSave = racing.feed.action({ operation: "save", enabled: true })
+assert.equal(racing.requests[1].options.signal.aborted, true)
+assert.equal(racing.requests[2].url, "./api/controllers/action")
+assert.equal(racing.updates.at(-1).busy, true)
+await racing.reply(2, { ...status(), enabled: true })
+await racingSave
+await racing.reply(1)
+assert.equal(racing.updates.at(-1).status.enabled, true, "a late poll cannot undo a saved draft")
 
 const learning = fixture()
 learning.feed.start(); await learning.reply(0, { ...status(), learning: { slot: 4, expiresIn: 20 } })
@@ -83,6 +99,7 @@ component.state.draft.slots[0] = "brightness"
 component.feed.publish({ status: { ...status(), revision: "b".repeat(64) }, busy: false, error: "" })
 assert.equal(component.state.draft.revision, "a".repeat(64)) // A polling update cannot replace unsaved edits.
 const page = { ...component, get canEdit() { return ControllersPage.computed.canEdit.call(this) },
+  get editable() { return ControllersPage.computed.editable.call(this) },
   get dirty() { return ControllersPage.computed.dirty.call(this) },
   get changed() { return ControllersPage.computed.changed.call(this) } }
 let calls = 0
@@ -93,11 +110,16 @@ assert.equal(calls, 0)
 assert.match(ControllersPage.template, /Save these changes before learning or removing buttons/)
 
 let finishReload
-component.feed.refresh = () => new Promise((resolve) => { finishReload = resolve })
+component.feed.refresh = (replaceDraft) => {
+  assert.equal(replaceDraft, true)
+  return new Promise((resolve) => { finishReload = resolve })
+}
 const reloading = ControllersPage.methods.reload.call(page)
 assert.equal(component.state.draft.slots[0], "brightness") // The template still has a draft while reloading.
 const afterReload = { ...status(), revision: "c".repeat(64) }
-component.feed.publish({ status: afterReload, busy: false, error: "" })
+component.feed.publish({ status: afterReload, busy: false, error: "",
+    draft: { revision: afterReload.revision, enabled: afterReload.enabled, slots: afterReload.slots.slice(3).map(slot => slot.key) } })
+  assert.equal(page.changed, false, "confirmed status and draft publish together")
 finishReload(afterReload)
 await reloading
 assert.equal(component.state.draft.revision, "c".repeat(64))
@@ -107,7 +129,9 @@ component.state.draft.enabled = true
 const afterSave = { ...status(), revision: "d".repeat(64), enabled: true }
 component.feed.action = async (payload) => {
   assert.equal(payload.operation, "save")
-  component.feed.publish({ status: afterSave, busy: false, error: "" })
+  component.feed.publish({ status: afterSave, busy: false, error: "",
+    draft: { revision: afterSave.revision, enabled: afterSave.enabled, slots: afterSave.slots.slice(3).map(slot => slot.key) } })
+  assert.equal(page.changed, false, "confirmed status and draft publish together")
   return afterSave
 }
 await ControllersPage.methods.save.call(page)

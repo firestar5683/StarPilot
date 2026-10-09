@@ -43,7 +43,12 @@ export class SoundPacksFeed {
   }
 
   async run(path, body = null) {
-    if (!this.active || this.request) return
+    if (!this.active) return
+    if (this.request) {
+      if (body === null || this.busy) return
+      this.request.abort()
+      this.cancelTimer(this.timeout)
+    }
     const generation = ++this.generation
     if (this.pollTimer !== null) this.cancelTimer(this.pollTimer)
     this.pollTimer = null
@@ -126,7 +131,8 @@ export class SoundPacksFeed {
 
 export const SoundPacks = {
   components: { GxState, GxIconButton, GxNotice },
-  props: { unauthorized: { type: Function, required: true }, disabled: { type: Boolean, default: false } },
+  props: { unauthorized: { type: Function, required: true }, disabled: { type: Boolean, default: false },
+    busy: { type: Boolean, default: false } },
   emits: ["installed"],
   setup(props, { emit }) {
     const state = reactive({ status: "idle", snapshot: null, busy: false, error: "" })
@@ -146,11 +152,13 @@ export const SoundPacks = {
   mounted() { this.feed.start() },
   beforeUnmount() { this.feed.stop() },
   methods: {
-    canDownload(pack) { return !this.disabled && !this.state.busy && !this.state.error && this.state.status === "ready" &&
+    canDownload(pack) { return !this.disabled && !this.state.error && this.state.status === "ready" &&
       this.state.snapshot?.parked === true && !this.running && pack.installed === false },
+    download(pack) { if (!this.busy && !this.state.busy && this.canDownload(pack)) return this.feed.download(pack.id) },
+    cancel() { if (!this.disabled && !this.busy && !this.state.busy) return this.feed.cancel() },
   },
   template: `
-    <section class="gx-card gx-settings__section" aria-label="Sound pack catalog">
+    <section class="gx-card gx-settings__section" aria-label="Sound pack catalog" :inert="busy || state.busy" :aria-busy="busy || state.busy || undefined">
       <div class="gx-section__header"><i class="bi bi-music-note-list" aria-hidden="true"></i>
         <span class="gx-section__title">Sound pack catalog</span>
         <span v-if="state.snapshot && !state.snapshot.parked" class="gx-note gx-settings__hint">Park the vehicle to download sound packs.</span>
@@ -165,7 +173,7 @@ export const SoundPacks = {
           <strong>{{ pack.name }}</strong>
           <div class="gx-settings__controls gx-actions">
             <span v-if="pack.installed" class="gx-chip">Installed</span>
-            <GxIconButton v-else :label="'Download ' + pack.name" icon="bi-download" :disabled="!canDownload(pack)" @click="feed.download(pack.id)" />
+            <GxIconButton v-else :label="'Download ' + pack.name" icon="bi-download" :disabled="!canDownload(pack)" @click="download(pack)" />
           </div>
         </div>
         <div v-if="job" role="status">
@@ -174,7 +182,7 @@ export const SoundPacks = {
           <p v-else-if="job.state === 'cancelled'">Download cancelled.</p>
           <GxNotice tone="danger" v-else-if="job.state === 'failed'">Download failed: {{ job.error || 'Unknown error.' }}</GxNotice>
           <progress v-if="running && progress !== null" :value="progress" max="100" :aria-label="'Sound pack download ' + progress + '%'">{{ progress }}%</progress>
-          <button v-if="running" type="button" class="gx-btn gx-btn--tonal" :disabled="disabled || state.busy || !!state.error || !state.snapshot.parked" @click="feed.cancel()">Cancel download</button>
+          <button v-if="running" type="button" class="gx-btn gx-btn--tonal" :disabled="disabled || !!state.error || !state.snapshot.parked" @click="cancel()">Cancel download</button>
         </div>
       </div>
     </section>`,

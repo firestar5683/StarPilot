@@ -16,7 +16,7 @@ export const CloudProviderPage = {
   name: "CloudProviderPage",
   components: { GxState, GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ status: null, busy: false, error: "", request: null }),
+  data: () => ({ status: null, selection: null, busy: false, error: "", request: null }),
   mounted() { this.activePage = true; this.poller = new PollTimer({ read: () => this.load() }); this.poller.start(); this.load() },
   beforeUnmount() { this.activePage = false; this.poller.stop(); this.request?.abort() },
   computed: {
@@ -48,20 +48,21 @@ export const CloudProviderPage = {
       const label = this.status.providers.find(p => p.id === name).label
       if (!window.confirm(`Use ${label} after the next device reboot? The current session stays unchanged. Returning to comma restores its saved cloud identity.`)) return
       this.busy = true
+      this.selection = name
       this.error = ""
       try { await this.call({ provider: name, revision: this.status.revision, confirmed: true }) }
       catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
-      finally { this.busy = false }
+      finally { this.selection = null; this.busy = false }
     },
   },
   template: `<div class="gx-settings__developer-body">
     <GxState v-if="mode !== 'local'">Open this Developer page on your device to choose a cloud provider.</GxState>
     <template v-else>
       <GxNotice v-if="status && !status.canSelect" tone="warn">Turn off the vehicle to change this Developer setting.</GxNotice>
-      <section class="gx-card gx-settings__section"><div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div><div class="gx-row"><div class="gx-row__info">
+      <section class="gx-card gx-settings__section" :inert="busy" :aria-busy="busy || undefined"><div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div><div class="gx-row"><div class="gx-row__info">
       <label class="gx-settings__developer-provider">Cloud provider
-        <GalaxySelect class="gx-field gx-field--full" aria-label="Cloud provider" :value="status?.selected || ''"
-          :disabled="busy || !status?.canSelect" @change="select($event.target.value)">
+        <GalaxySelect class="gx-field gx-field--full" aria-label="Cloud provider" :value="selection ?? status?.selected ?? ''"
+          :disabled="!status?.canSelect" @change="select($event.target.value)">
           <option v-for="provider in status?.providers || []" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
         </GalaxySelect>
       </label></div></div></section>

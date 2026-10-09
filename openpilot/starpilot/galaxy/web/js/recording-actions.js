@@ -34,27 +34,27 @@ export const RecordingActions = {
     },
   },
   template: `
-    <div class="gx-recordings__actions gx-actions">
+    <div class="gx-recordings__actions gx-actions" :inert="busy" :aria-busy="busy || undefined">
       <template v-if="!all">
-        <button class="gx-icon-btn" :aria-label="recording.preserved ? 'Unpreserve drive' : 'Preserve drive'" :title="recording.preserved ? 'Unpreserve' : 'Preserve'" :disabled="busy" @click="save('preserve')"><i class="bi" :class="recording.preserved ? 'bi-heart-fill' : 'bi-heart'"></i></button>
+        <button class="gx-icon-btn" :aria-label="recording.preserved ? 'Unpreserve drive' : 'Preserve drive'" :title="recording.preserved ? 'Unpreserve' : 'Preserve'" @click="save('preserve')"><i class="bi" :class="recording.preserved ? 'bi-heart-fill' : 'bi-heart'"></i></button>
         <slot></slot>
-        <button class="gx-icon-btn" aria-label="Rename drive" title="Rename" :disabled="busy" @click="edit('rename')"><i class="bi bi-pencil"></i></button>
-        <button class="gx-icon-btn gx-recordings__danger" aria-label="Delete drive" title="Delete" :disabled="busy" @click="edit('delete')"><i class="bi bi-trash"></i></button>
+        <button class="gx-icon-btn" aria-label="Rename drive" title="Rename" @click="edit('rename')"><i class="bi bi-pencil"></i></button>
+        <button class="gx-icon-btn gx-recordings__danger" aria-label="Delete drive" title="Delete" @click="edit('delete')"><i class="bi bi-trash"></i></button>
       </template>
       <template v-else>
-        <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="includePreserved=false; edit('delete')">Delete non-preserved</button>
-        <button class="gx-btn gx-btn--tonal gx-recordings__danger" :disabled="busy" @click="includePreserved=true; edit('delete')">Delete all including preserved</button>
+        <button class="gx-btn gx-btn--tonal" @click="includePreserved=false; edit('delete')">Delete non-preserved</button>
+        <button class="gx-btn gx-btn--tonal gx-recordings__danger" @click="includePreserved=true; edit('delete')">Delete all including preserved</button>
       </template>
       <GxNotice tone="danger" v-if="error && !action">{{ error }}</GxNotice>
-      <GxDialog v-if="action" labelledby="gx-recording-action-title" :alert="action === 'delete'" @close="!busy && (action='')">
+      <GxDialog v-if="action" :inert="busy" labelledby="gx-recording-action-title" :alert="action === 'delete'" @close="!busy && (action='')">
         <form class="gx-stack" @submit.prevent="save()">
           <h3 id="gx-recording-action-title">{{ action === 'rename' ? 'Rename recording' : 'Delete recording?' }}</h3>
-          <label v-if="action === 'rename'">Name<input class="gx-field" v-model="name" maxlength="128" required :disabled="busy" /></label>
+          <label v-if="action === 'rename'">Name<input class="gx-field" v-model="name" maxlength="128" required /></label>
           <p v-else>Delete {{ recording.displayName || recording.routeId }}? This cannot be undone.</p>
           <p v-if="all">{{ includePreserved ? "Preserved drives will also be deleted." : "Preserved drives will be kept." }}</p>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
-          <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="action=''">Cancel</button>
-            <button class="gx-btn" :disabled="busy">{{ action === 'rename' ? 'Save name' : 'Delete recording' }}</button></div>
+          <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="action=''">Cancel</button>
+            <button class="gx-btn">{{ action === 'rename' ? 'Save name' : 'Delete recording' }}</button></div>
         </form>
       </GxDialog>
     </div>`,

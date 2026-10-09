@@ -106,13 +106,13 @@ export const SentryNotifications = {
     },
   },
   template: `
-    <section class="gx-card gx-home__card" aria-label="Sentry notifications">
+    <section class="gx-card gx-home__card" aria-label="Sentry notifications" :inert="notificationBusy" :aria-busy="notificationBusy || undefined">
       <h2>Notifications</h2>
       <p class="gx-note">Receive new locally recorded motion events. Notification channels work independently.</p>
       <p v-if="mode !== 'local'">Notification configuration is available on your connected device.</p>
       <template v-else>
         <GxNotice tone="danger" v-if="notificationError">{{ notificationError }}</GxNotice>
-        <p v-if="notificationBusy" role="status">Updating notifications…</p>
+        <p v-if="notificationBusy" class="gx-settings__save-status" role="status">Updating notifications…</p>
         <GxNotice tone="danger" v-if="notifications?.queueFull">The notification queue is full. Some events could not be queued.</GxNotice>
         <template v-if="notifications">
           <p class="gx-note">{{ notifications.deliverySemantics }}</p>
@@ -126,15 +126,15 @@ export const SentryNotifications = {
               <label>Bearer token (optional) <input v-model="drafts[name].token" class="gx-field" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>
             </div>
             <div class="gx-sentry-channel__actions gx-actions">
-            <button v-if="name !== 'webPush'" class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy" @click="save(name, true)">Save and enable</button>
-            <button v-else class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy" @click="subscribe">Subscribe this browser</button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy || !notifications.channels[name].configured" @click="save(name, !notifications.channels[name].enabled)">{{ notifications.channels[name].enabled ? 'Disable' : 'Enable' }}</button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy || !notifications.channels[name].enabled || !notifications.channels[name].configured" @click="test(name)">Send test</button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy" @click="forget(name)">Forget configuration</button>
+            <button v-if="name !== 'webPush'" class="gx-btn gx-btn--tonal" type="button" @click="save(name, true)">Save and enable</button>
+            <button v-else class="gx-btn gx-btn--tonal" type="button" @click="subscribe">Subscribe this browser</button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!notifications.channels[name].configured" @click="save(name, !notifications.channels[name].enabled)">{{ notifications.channels[name].enabled ? 'Disable' : 'Enable' }}</button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!notifications.channels[name].enabled || !notifications.channels[name].configured" @click="test(name)">Send test</button>
+            <button class="gx-btn gx-btn--tonal" type="button" @click="forget(name)">Forget configuration</button>
             </div>
           </section>
           <p v-if="notifications.subscriptionCount">Subscribed browsers: {{ notifications.subscriptionCount }}</p>
-          <button v-for="(subscription, index) in notifications.subscriptions" :key="subscription.id" class="gx-btn gx-btn--tonal" type="button" :disabled="notificationBusy" @click="remove(subscription.id)">Remove browser {{ index + 1 }}</button>
+          <button v-for="(subscription, index) in notifications.subscriptions" :key="subscription.id" class="gx-btn gx-btn--tonal" type="button" @click="remove(subscription.id)">Remove browser {{ index + 1 }}</button>
         </template>
       </template>
     </section>`,

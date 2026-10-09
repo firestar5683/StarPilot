@@ -34,7 +34,7 @@ function buttons(node) {
   if (!node || typeof node !== "object") return []
   return [...(node.type === "button" ? [node] : []), ...(Array.isArray(node.children) ? node.children.flatMap(buttons) : [])]
 }
-const context = { row, index: 2, control: "switch", currentValue: "Off", dimmed: false, locked: false,
+const context = { row, index: 2, control: "switch", currentValue: "Off", dimmed: false, locked: false, busy: false, updating: false,
   showDefault: true, onSwitch: () => {}, $emit: (...args) => events.push(args) }
 const events = []
 const button = buttons(render(context, [])).find(node => node.children === "Default")
@@ -43,7 +43,10 @@ assert.equal(button.props.disabled, false)
 assert.equal(button.props["aria-label"], "Reset Use StarPilot Widgets to default")
 button.props.onClick()
 assert.deepEqual(events, [["reset-default", 2]])
-assert.equal(buttons(render({ ...context, locked: true }, [])).find(node => node.children === "Default").props.disabled, true)
+const savingRow = render({ ...context, locked: true, busy: true }, [])
+assert.equal(savingRow.props.inert, true, "saving blocks interaction without dimming controls")
+assert.equal(buttons(savingRow).find(node => node.children === "Default").props.disabled, false)
+assert.equal(buttons(render({ ...context, dimmed: true }, [])).find(node => node.children === "Default").props.disabled, true)
 assert.equal(buttons(render({ ...context, row: { ...row, defaultValue: null }, showDefault: false }, [])).some(node => node.children === "Default"), false)
 
 // A successful mutation invalidates every active consumer without user refreshes.

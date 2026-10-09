@@ -220,7 +220,7 @@ export const Home = {
               <div><strong>{{ drive.date }}</strong><small>{{ drive.model }}</small></div>
               <div><strong>{{ drive.complete ? drive.distance : 'Analyzing' }}</strong><small>{{ drive.duration }} · {{ drive.engaged }} engaged</small></div>
               <div><small>{{ drive.ignored ? 'Excluded from totals' : drive.complete ? 'Included in totals' : 'Waiting for analysis' }}</small>
-                <button type="button" class="gx-home__link" :disabled="drives.busy" @click="ignoreDrive(drive)">
+                <button type="button" class="gx-home__link" :inert="drives.busy" :aria-busy="drives.busy || undefined" @click="ignoreDrive(drive)">
                   {{ drive.ignored ? 'Include in stats' : 'Ignore drive stats' }}</button></div>
             </div>
             <GxNotice tone="danger" v-if="drives.error">{{ drives.error }}</GxNotice>

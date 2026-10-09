@@ -130,7 +130,8 @@ assert.equal(VehicleControlsPage.components.SettingsPage, SettingsPage)
 assert.match(VehicleControlsPage.template, /initial-page="vehicle"/)
 const toggle = { label: "Automatic Brake Hold", choices: ["Off", "On"], value: "Off", available: true, action: true }
 assert.equal(settingControl(toggle), "switch")
-assert.equal(GalaxySettingRow.computed.locked.call({ disabled: false, updating: false, row: { ...toggle, available: false } }), true)
+assert.equal(GalaxySettingRow.computed.dimmed.call({ disabled: false, row: { ...toggle, available: false } }), true)
+assert.equal(GalaxySettingRow.computed.locked.call({ busy: false, updating: false, dimmed: true }), true)
 const settingRequests = [], settingStates = []
 const settings = new SettingsFeed({ publish: (state) => settingStates.push(state), later: () => 1, cancelTimer: () => {},
   fetcher: (url, options) => new Promise((resolve) => settingRequests.push({ url, options, resolve })) })

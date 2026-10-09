@@ -12,6 +12,9 @@
 .gx-settings__developer-body { display: grid; gap: var(--sp-3); }
 .gx-settings__developer-provider { display: grid; gap: var(--sp-2); font-weight: var(--fw-medium); }
 .gx-settings__save-status { position: fixed; bottom: calc(var(--bottomnav-clearance) + 8px); left: 50%; transform: translateX(-50%); z-index: var(--z-snackbar); padding: var(--sp-2) var(--sp-4); border-radius: var(--radius-full); background: var(--surface-container-high); box-shadow: var(--elev-2); }
+.gx-settings__save-status--animated { max-width: calc(100vw - 32px); margin: 0; text-align: center; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 220ms ease, visibility 0s 220ms; }
+.gx-settings__save-status--animated.is-visible { opacity: 1; visibility: visible; transition-delay: 0s; }
+@media (prefers-reduced-motion: reduce) { .gx-settings__save-status--animated { transition: none; } }
 .gx-slider-header { display: flex; align-items: baseline; gap: var(--sp-2); min-height: 24px; }
 .gx-slider-hint { color: var(--text-muted); font-size: var(--fs-xs); }
 .gx-row__readout { max-width: 55%; text-align: right; white-space: normal !important; overflow-wrap: anywhere; }

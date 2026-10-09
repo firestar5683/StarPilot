@@ -58,6 +58,9 @@ assert.equal(parked.timers.size, 1)
 parked.feed.download("one")
 assert.equal(parked.requests.length, 1)
 assert.equal(SoundPacks.methods.canDownload.call({ disabled: false, state: { busy: false, status: "ready", snapshot: snapshot(null, false) }, running: false }, packs[0]), false)
+assert.equal(SoundPacks.methods.canDownload.call({ disabled: false, busy: true,
+  state: { busy: true, status: "ready", snapshot: snapshot() }, running: false }, packs[0]), true,
+  "saving blocks interaction without changing download eligibility or icon appearance")
 parked.feed.refresh()
 assert.equal(parked.timers.size, 1) // Only the read timeout remains; parked recheck was cancelled.
 await parked.respond(1, snapshot())
@@ -72,6 +75,17 @@ assert.deepEqual(JSON.parse(parked.requests[3].options.body), { job: "job-1" })
 await parked.respond(3, snapshot(job("cancelled")))
 assert.equal(parked.timers.size, 1)
 parked.feed.stop()
+
+const racingDownload = fixture()
+racingDownload.feed.start(); await racingDownload.respond(0, snapshot())
+racingDownload.feed.refresh()
+racingDownload.feed.download("one")
+assert.equal(racingDownload.requests[1].options.signal.aborted, true)
+assert.equal(racingDownload.requests[2].url, "./api/sounds/download")
+await racingDownload.respond(2, snapshot(job("downloading")))
+await racingDownload.respond(1, snapshot())
+assert.equal(racingDownload.states.at(-1).snapshot.job.state, "downloading", "a late read cannot undo the download result")
+racingDownload.feed.stop()
 
 const parkedRecovery = fixture()
 parkedRecovery.feed.start()

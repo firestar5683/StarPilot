@@ -39,7 +39,7 @@ compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("
 const emissions = [], leaveVm = { projection: true, busy: false, dirty: true,
   state: { status: "ready", data: { editable: true }, draft: {}, drag: null, layerDrag: null, discard: null, leavePresentation: null, removeConfirm: null, error: "", needsReload: false },
   hideDevicePreview() {}, $emit: (...args) => emissions.push(args), feed: { load() {}, async save() { return true } } }
-for (const name of ["pendingLeave", "inlineLeavePrompt", "modalLeavePrompt", "canSavePending"])
+for (const name of ["pendingLeave", "inlineLeavePrompt", "modalLeavePrompt", "saveAvailable", "canSavePending"])
   Object.defineProperty(leaveVm, name, { get: () => OnroadLayoutPage.computed[name].call(leaveVm) })
 for (const name of ["requestLeave", "cancelLeave", "leave", "saveAndLeave"])
   leaveVm[name] = OnroadLayoutPage.methods[name].bind(leaveVm)

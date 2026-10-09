@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { GalaxySettingRow, settingControl, numericBounds, snapNumeric, FINE_SCRUB_HOLD_MS, FINE_SCRUB_FACTOR } from "../web/js/galaxy-setting-row.js"
 import { SettingsPage, SETTINGS_SECTIONS } from "../web/js/settings.js"
+import { reactive, computed, watch, nextTick } from "../web/vendor/vue/vue.esm-browser.js"
 
 const numeric = { label: "Following time", value: "1.5", minimum: .5, maximum: 3, step: .05, unit: "s", available: true, action: true }
 assert.equal(settingControl(numeric), "slider")
@@ -78,6 +79,52 @@ assert.equal(locked.commits.length, 0)
 const switched = control({ ...numeric, choices: ["Off", "On"], value: "Off", step: 0 })
 await switched.vm.onSwitch({ target: { checked: true } })
 assert.deepEqual(switched.commits, [[7, "On"]])
+
+// Exercise Vue's actual watcher scheduling: plain method mocks cannot catch a
+// save locking its own control and erasing the pending value on the next tick.
+for (const [row, next] of [
+  [{ ...numeric, choices: ["Off", "On"], value: "Off", step: 0 }, "On"],
+  [numeric, 2],
+  [{ ...numeric, choices: ["Stock", "Custom"], value: "Stock", step: 0 }, "Custom"],
+]) {
+  let finish, calls = 0
+  const vm = reactive({ ...GalaxySettingRow.data(), row: { ...row }, index: 0, disabled: false, busy: false,
+    saveValue: () => { calls++; return new Promise(resolve => { finish = resolve }) } })
+  for (const [key, method] of Object.entries(GalaxySettingRow.methods)) vm[key] = method.bind(vm)
+  for (const [key, getter] of Object.entries(GalaxySettingRow.computed)) {
+    const value = computed(() => getter.call(vm))
+    Object.defineProperty(vm, key, { get: () => value.value })
+  }
+  const stop = watch(() => vm.locked, value => GalaxySettingRow.watch.locked.call(vm, value))
+  const save = vm.commit(next)
+  vm.busy = true
+  await nextTick()
+  assert.equal(vm.currentValue, next, "locking during save retains the pending value")
+  assert.equal(vm.dimmed, false, "a save does not make the row unavailable")
+  await vm.commit(row.value)
+  await vm.flushSlider(row.value)
+  assert.equal(vm.currentValue, next, "duplicate change/blur events cannot clear a save")
+  assert.equal(calls, 1)
+  vm.row = { ...row, value: String(next) }
+  vm.busy = false
+  finish()
+  await save
+  await nextTick()
+  assert.equal(vm.currentValue, String(next), "readback replaces the pending value without rollback")
+  const failed = vm.commit(row.value)
+  await nextTick()
+  finish()
+  await failed
+  await nextTick()
+  assert.equal(vm.currentValue, String(next), "failed saves return to the last confirmed value")
+  vm.preview = row.value
+  vm.interacting = true
+  vm.disabled = true
+  await nextTick()
+  assert.equal(vm.preview, undefined, "availability changes still cancel an unsaved drag")
+  assert.equal(vm.interacting, false)
+  stop()
+}
 
 // Auto is an explicit labeled endpoint, never a fabricated numeric setting.
 const automatic = control({ ...numeric, label: 'Screen brightness', minimum: 0, maximum: 100,

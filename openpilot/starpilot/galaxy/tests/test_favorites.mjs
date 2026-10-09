@@ -136,8 +136,21 @@ const auth = fixture(); auth.feed.start(); await auth.reply(0, {}, 401); assert.
 const calls = [], vm = { state: { data: snapshot() }, feed: { update: (index, patch) => calls.push({ index, patch }) } }
 const event = { target: { checked: true } }
 FavoritesPage.methods.toggle.call(vm, 0, "enabled", event)
-assert.equal(event.target.checked, false)
+assert.equal(event.target.checked, true, "a toggle is never reset before its save")
 assert.deepEqual(calls, [{ index: 0, patch: { enabled: true } }])
+
+const racing = fixture(); racing.feed.start(); await racing.reply(0)
+racing.feed.load()
+const racingSave = racing.feed.update(0, { key: BOOKMARK, enabled: true })
+assert.equal(racing.requests[1].options.signal.aborted, true)
+assert.equal(racing.updates.at(-1).data.slots[0].enabled, true, "pending edits stay visible during saving")
+assert.equal(racing.feed.data.slots[0].enabled, false, "pending values do not overwrite confirmed state")
+await racing.reply(1)
+assert.equal(racing.updates.at(-1).status, "saving", "a late read cannot roll back pending values")
+await racing.reply(2, {}, 409)
+await racingSave
+assert.equal(racing.updates.at(-1).data.slots[0].enabled, false, "failed saves restore confirmed state")
+assert.equal(racing.updates.at(-1).needsReload, true)
 const visual = SETTINGS_SECTIONS.find(({ id }) => id === "visual")
 const rows = SettingsPage.computed.visibleRows.call({ initialPage: "hub", activeSection: visual, state: { data: { page: "hub" }, query: "" } })
 assert.equal(rows.filter(({ row }) => row.page === "favorites").length, 1)

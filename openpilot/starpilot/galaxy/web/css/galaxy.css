@@ -890,6 +890,7 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
 
 @container galaxy-header (max-width: 743px) {
   .gx-searchwrap { display: none; }
+  .gx-searchbox { container: galaxy-search / inline-size; }
   .gx-search-toggle {
     display: inline-flex; flex: 1 1 auto; align-items: center; justify-content: flex-start; gap: var(--sp-2);
     width: auto; min-width: 0; height: 40px; padding: 0 var(--sp-3);
@@ -900,6 +901,11 @@ button.gx-crash-row:hover { background: var(--glass-bg-hover); transform: transl
   .gx-search-toggle__label { display: inline; font-size: var(--fs-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gx-searchbox.open .gx-searchwrap { display: flex; }
   .gx-searchbox.open .gx-search-toggle { flex: none; order: 2; width: var(--touch-target); padding: 0; background: none; border: 0; color: inherit; }
+}
+
+@container galaxy-search (max-width: 100px) {
+  .gx-searchbox:not(.open) .gx-search-toggle { flex: none; width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
+  .gx-search-toggle__label { display: none; }
 }
 
 @container galaxy-header (max-width: 380px) {

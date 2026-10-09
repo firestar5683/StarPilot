@@ -1,7 +1,7 @@
 import { GxDialog } from "./dialog.js"
 import { GxState } from "./state.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
-import { SettingsFeed } from "./settings.js"
+import { SettingsFeed, settingsBusy } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 import { LiveCameraPreview } from "./cameras.js"
 import { GxNotice } from "./notice.js"
@@ -51,9 +51,11 @@ export const VasmPage = {
   computed: {
     controls() { return (this.state.data?.rows || []).map((row, index) => ({ row, index }))
       .filter(({ index }) => index !== this.state.data?.editorRow && !["Saved spot-monitor settings"].includes(this.state.data.rows[index].label)) },
-    canEdit() { return this.mode === "local" && !!this.state.data?.parked && this.state.data?.editorRow >= 0 &&
-      !!this.state.data.rows[this.state.data.editorRow]?.available && this.state.status === "ready" &&
-      !this.state.pending && !this.state.reviewing },
+    busy() { return settingsBusy(this.state) },
+    editable() { return this.mode === "local" && !!this.state.data?.parked && this.state.data?.editorRow >= 0 &&
+      !!this.state.data.rows[this.state.data.editorRow]?.available && !this.state.error },
+    canEdit() { return this.editable && !this.busy && this.state.status === "ready" },
+    drawable() { return this.editable && this.supportedFormat && !!this.state.imageName },
     supportedFormat() { return FORMATS.some(([w, h]) => w === this.state.width && h === this.state.height) },
     canDraw() { return this.canEdit && this.supportedFormat && !!this.state.imageName },
   },
@@ -160,7 +162,7 @@ export const VasmPage = {
     },
   },
   template: `
-    <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings">
+    <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>V-ASM Spot Monitoring</h2>
         <p>Highlight the side windows a driver would check in the cabin camera, and tune visual spot-monitoring options.</p></div>
         <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button></div></header>
@@ -178,10 +180,10 @@ export const VasmPage = {
             <p>The display is mirrored: vehicle left is camera right; vehicle right is camera left. Trace visible side glass, leaving pillars and interior out.</p>
             <p class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · 5 seconds…" : state.imageName ? "Snapshot ready" : "Turn off the vehicle to take a snapshot." }}</p>
             <div class="gx-actions">
-              <button v-for="side in ['cameraRight', 'cameraLeft']" :key="side" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.activeSide === side" :disabled="!canDraw" :aria-label="displaySide(side)" @click="state.activeSide=side">{{ side === 'cameraRight' ? 'Left' : 'Right' }}</button>
-              <button type="button" class="gx-icon-btn" :disabled="!canDraw || !state[state.activeSide]?.length" aria-label="Undo last region point" title="Undo last point" @click="undo(state.activeSide)"><i class="bi bi-arrow-counterclockwise"></i></button>
-              <button type="button" class="gx-icon-btn" :disabled="!canDraw || !state[state.activeSide]?.length" aria-label="Clear selected window region" title="Clear region" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>
-              <button type="button" class="gx-btn" :disabled="!canDraw" aria-label="Save Regions" @click="saveRegions">Save</button>
+              <button v-for="side in ['cameraRight', 'cameraLeft']" :key="side" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.activeSide === side" :disabled="!drawable" :aria-label="displaySide(side)" @click="state.activeSide=side">{{ side === 'cameraRight' ? 'Left' : 'Right' }}</button>
+              <button type="button" class="gx-icon-btn" :disabled="!drawable || !state[state.activeSide]?.length" aria-label="Undo last region point" title="Undo last point" @click="undo(state.activeSide)"><i class="bi bi-arrow-counterclockwise"></i></button>
+              <button type="button" class="gx-icon-btn" :disabled="!drawable || !state[state.activeSide]?.length" aria-label="Clear selected window region" title="Clear region" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>
+              <button type="button" class="gx-btn" :disabled="!drawable" aria-label="Save Regions" @click="saveRegions">Save</button>
             </div>
             <canvas ref="canvas" class="gx-vasm__canvas" :aria-label="'Mirrored camera window canvas, editing ' + displaySide(state.activeSide)"
               @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp"></canvas>
@@ -190,7 +192,7 @@ export const VasmPage = {
           </section>
           <section class="gx-card gx-settings__section" aria-label="Saved settings">
             <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.page + ':' + index" :row="row" :index="index"
-              :disabled="!state.data.parked || state.status !== 'ready' || state.reviewing || !!state.pending"
+              :busy="state.status !== 'ready' || state.reviewing || !!state.pending" :disabled="!state.data.parked || !!state.error"
               :save-value="(index, value) => feed.previewValue(index, value)"
               @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           </section>

@@ -3,6 +3,7 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { ToggleBackup } from "./toggle-backup.js"
 import { GalaxySelect } from "./galaxy-select.js"
+import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback", "versions", "version"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
@@ -287,7 +288,7 @@ export class SoftwareStatusFeed {
 }
 
 export const SoftwarePage = {
-  components: { GxDialog, GxState, GxNotice, GalaxySelect, ToggleBackup },
+  components: { GxDialog, GxState, GxNotice, GalaxySelect, GalaxySettingRow, ToggleBackup },
   name: "SoftwarePage",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, busy: false, uncertain: false, notice: "", error: "",
@@ -304,7 +305,8 @@ export const SoftwarePage = {
     operations() { return this.data?.operations },
     updateProgress() { return softwareProgress(this.data?.updater, this.operations) },
     pending() { return this.operations?.request?.state === "pending" },
-    actionDisabled() { return this.busy || this.uncertain || this.pending || !!this.error || !this.operations?.parked },
+    actionUnavailable() { return this.uncertain || this.pending || !!this.error || !this.operations?.parked },
+    actionDisabled() { return this.busy || this.actionUnavailable },
     branchOptions() {
       const available = this.operations?.availableBranches || []
       return [...new Set([this.operations?.selectedTarget, this.data?.installed.branch, ...available].filter(branch => branch && branch !== "other:"))]
@@ -330,6 +332,7 @@ export const SoftwarePage = {
     },
   },
   methods: {
+    switchRow,
     syncDraftBranch(branch) {
       this.draftBranch = this.operations?.availableBranches.includes(branch) || branch === this.data?.installed.branch ? branch : this.data?.installed.branch || ""
       this.primaryChoice = PRIMARY_BRANCHES.includes(this.draftBranch) ? this.draftBranch : this.draftBranch ? "other:" : ""
@@ -419,7 +422,7 @@ export const SoftwarePage = {
     },
   },
   template: `
-    <div class="gx-view gx-stack">
+    <div class="gx-view gx-stack" :inert="busy" :aria-busy="busy || undefined">
       <h2>Software &amp; Updates</h2>
       <GxState v-if="mode !== 'local'">Software updates are unavailable in preview.</GxState>
       <template v-else>
@@ -442,9 +445,9 @@ export const SoftwarePage = {
             </div><p v-if="updateProgress.detail" class="gx-note">{{ updateProgress.detail }}</p>
           </div>
           <div class="gx-actions">
-            <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations?.canCheck" @click="feed.action('check')">Check for updates</button>
-            <button type="button" class="gx-btn" :disabled="actionDisabled || operations?.canFastUpdate !== true || !draftBranch || !branchOptions.some(branch => branch.name === draftBranch && branch.available)" @click="askFastUpdate">{{ branchChanging ? 'Switch & update' : 'Fast Update' }}</button>
-            <button v-if="data?.updater.finalizedUpdateReady === true" type="button" class="gx-btn" :disabled="actionDisabled || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button>
+            <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations?.canCheck" @click="feed.action('check')">Check for updates</button>
+            <button type="button" class="gx-btn" :disabled="actionUnavailable || operations?.canFastUpdate !== true || !draftBranch || !branchOptions.some(branch => branch.name === draftBranch && branch.available)" @click="askFastUpdate">{{ branchChanging ? 'Switch & update' : 'Fast Update' }}</button>
+            <button v-if="data?.updater.finalizedUpdateReady === true" type="button" class="gx-btn" :disabled="actionUnavailable || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button>
           </div>
           <p v-if="operations?.reason" class="gx-note">{{ operations.reason }}</p>
           <p v-else-if="data?.updater.targetChangeFound === true" class="gx-note">Update available for {{ operations.selectedTarget }}.</p>
@@ -454,15 +457,14 @@ export const SoftwarePage = {
             <span v-if="data.updater.lastFetchAt"> · Downloaded {{ reported(data.updater.lastFetchAt) }}</span>
           </p>
           <a v-if="commitsUrl" class="gx-link" :href="commitsUrl" target="_blank" rel="noopener noreferrer"><i class="bi bi-github" aria-hidden="true"></i> View commits</a>
-          <div v-if="operations?.automaticDownloads !== undefined" class="gx-row gx-row--borderless">
-            <div class="gx-row__info"><span class="gx-row__label">Automatic downloads</span><span class="gx-row__desc">Prepare updates while parked; restart when ready.</span></div>
-            <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Download updates automatically" :checked="operations.automaticDownloads === true"
-              :disabled="busy || uncertain || !!error || !operations.canConfigure" @change="feed.configureAutomaticDownloads($event.target.checked)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
-          </div>
+          <GalaxySettingRow v-if="operations?.automaticDownloads !== undefined" class="gx-row--borderless"
+            :row="switchRow('Download updates automatically', operations.automaticDownloads, 'Prepare updates while parked; restart when ready.')"
+            :index="0" :busy="busy" :disabled="uncertain || !!error || !operations.canConfigure"
+            :save-value="(index, value) => feed.configureAutomaticDownloads(value === 'On')" />
           <p v-if="operations?.automaticDownloads === null" class="gx-note">The download preference could not be read. Choose a setting while parked to repair it.</p>
           <details v-if="data" class="gx-software-options"><summary>Advanced options</summary><div class="gx-stack">
             <div class="gx-software-branch"><label class="gx-field-group gx-grow"><span class="gx-row__label">Branch</span>
-              <GalaxySelect v-model="primaryChoice" class="gx-field gx-field--full" aria-label="Target branch" :disabled="actionDisabled || !operations.canSelect" @change="onPrimaryBranchChange">
+              <GalaxySelect v-model="primaryChoice" class="gx-field gx-field--full" aria-label="Target branch" :disabled="actionUnavailable || !operations.canSelect" @change="onPrimaryBranchChange">
                 <option value="" disabled>Choose a branch</option>
                 <option value="StarPilot" :data-description="primaryBranchHelpFor('StarPilot')">Stable — StarPilot</option>
                 <option value="Dom" :data-description="primaryBranchHelpFor('Dom')">Development — Dom</option>
@@ -473,7 +475,7 @@ export const SoftwarePage = {
             <div v-if="primaryChoice === 'other:'" class="gx-software-other-branches">
               <label for="gx-other-branch" class="gx-row__label">Other branches</label>
               <p class="gx-note">Additional branches from this installation's repository.</p>
-              <GalaxySelect id="gx-other-branch" v-model="draftBranch" class="gx-field gx-field--full" aria-label="Other branches" :disabled="actionDisabled || !operations.canSelect" @change="onOtherBranchChange">
+              <GalaxySelect id="gx-other-branch" v-model="draftBranch" class="gx-field gx-field--full" aria-label="Other branches" :disabled="actionUnavailable || !operations.canSelect" @change="onOtherBranchChange">
                 <option value="" disabled>{{ otherBranches.length ? 'Select another branch' : 'No other branches available' }}</option>
                 <option v-for="branch in otherBranches" :key="branch.name" :value="branch.name" :disabled="!branch.listed">{{ branch.name }}{{ branch.current ? ' (current)' : '' }}{{ !branch.listed && !branch.current ? ' (unavailable)' : '' }}</option>
               </GalaxySelect>
@@ -482,9 +484,9 @@ export const SoftwarePage = {
             <p v-else-if="!operations.availableBranches.length" class="gx-note">No branch list is available yet. Check for updates to refresh it.</p>
             <p v-if="branchChanging" class="gx-note">Switch &amp; update installs {{ draftBranch }} and restarts the device.</p>
             <div class="gx-actions">
-              <button v-if="canStageBranch" type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations.canSelect" @click="chooseBranch">Save target</button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations.canDownload || !operations.selectedTarget || draftBranch !== operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Normal Update</button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || operations.canRollback !== true" @click="askRollback">Previous version</button>
+              <button v-if="canStageBranch" type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations.canSelect" @click="chooseBranch">Save target</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations.canDownload || !operations.selectedTarget || draftBranch !== operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Normal Update</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || operations.canRollback !== true" @click="askRollback">Previous version</button>
             </div>
             <p class="gx-note">Normal downloads without restarting. Previous version restores your last installed build.</p>
           </div></details>
@@ -496,8 +498,8 @@ export const SoftwarePage = {
               <div class="gx-actions">
                 <GalaxySelect v-if="versionEntries.length" v-model="version" class="gx-field gx-filter-field" aria-label="Version"><option value="" disabled>Choose a version</option>
                   <option v-for="entry in versionEntries" :key="entry.hash" :value="entry.hash">{{ versionLabel(entry) }}</option></GalaxySelect>
-                <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations.canFastUpdate" @click="loadVersions">Load versions</button>
-                <button v-if="versionEntries.length" type="button" class="gx-btn" :disabled="actionDisabled || !version || version === data.installed.commit || !operations.canFastUpdate" @click="askVersion(versionEntries.find(entry => entry.hash === version))">Install version</button>
+                <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations.canFastUpdate" @click="loadVersions">Load versions</button>
+                <button v-if="versionEntries.length" type="button" class="gx-btn" :disabled="actionUnavailable || !version || version === data.installed.commit || !operations.canFastUpdate" @click="askVersion(versionEntries.find(entry => entry.hash === version))">Install version</button>
               </div><p class="gx-note">Up to 20 compatible versions of {{ draftBranch }}.</p>
             </template>
             <ul v-else-if="versionEntries.length" class="gx-build-history" aria-label="Build history"><li v-for="entry in versionEntries" :key="entry.hash"><strong>{{ entry.subject.trim() || shortCommit(entry.hash) }}</strong><small>{{ reported(entry.date) }} · {{ shortCommit(entry.hash) }}</small></li></ul>

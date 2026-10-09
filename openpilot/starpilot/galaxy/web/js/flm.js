@@ -328,31 +328,31 @@ export const FlmLiveEditor = {
     restore() { this.action('restore', { trial: this.live.state.trial }) },
     accept() { this.action('accept', { trial: this.live.state.trial }) },
   },
-  template: `<section class="gx-card gx-flm__panel gx-stack"><h3>GM Trial Tunes</h3>
+  template: `<section class="gx-card gx-flm__panel gx-stack" :inert="busy" :aria-busy="busy || undefined"><h3>GM Trial Tunes</h3>
     <p class="gx-note">Save the current manual choices from Tuning together with this surface. Applying a trial switches both; Restore returns the original session baseline. Other vehicle preferences are retained.</p>
-    <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="load" :disabled="busy">Refresh</button></div>
+    <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="load">Refresh</button></div>
     <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
     <p v-if="live && !live.available" class="gx-note">{{ live.reason || "Choose an eligible GM torque controller to edit its surface." }}</p>
-    <div v-if="live?.resettable && !live.available" class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="action('reset')" :disabled="busy">Reset this surface binding</button></div>
+    <div v-if="live?.resettable && !live.available" class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="action('reset')">Reset this surface binding</button></div>
     <template v-if="live?.available && draft">
       <p class="gx-note">{{ live.vehicle.replaceAll('_', ' ') }} · {{ live.controller === 'standard' ? 'Standard' : 'StarPilot' }}</p>
       <p v-if="!live.editable" class="gx-note">Park the vehicle to save, apply or restore a profile.</p>
       <label class="gx-field-group"><span class="gx-row__label">Profile</span><select class="gx-field" :value="id" @change="choose($event.target.value)"><option v-for="(item, key) in live.state.saved" :value="key">{{ item.label }}</option><option v-if="!live.state.saved[id]" :value="id">New profile</option></select></label>
-      <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="create" :disabled="busy || Object.keys(live.state.saved).length >= 4">New profile</button></div>
-      <label class="gx-field-group"><span class="gx-row__label">Name</span><input class="gx-field" v-model="label" maxlength="80" :disabled="busy || !live.editable"></label>
-      <label class="gx-field-group" v-for="(range, key) in live.knobs" :key="key"><span class="gx-row__label">{{ key.replaceAll('_', ' ') }}</span><input class="gx-field" type="number" v-model.number="draft.knobs[key]" :min="range.min" :max="range.max" step="0.001" :disabled="busy || !live.editable || live.inactiveKnobs?.[key]"><small v-if="live.inactiveKnobs?.[key]" class="gx-note">{{ live.inactiveKnobs[key] }}</small></label>
-      <label class="gx-row"><input type="checkbox" v-model="useCurve" :disabled="busy || !live.editable"><span>Use the selected controller base friction curve</span></label>
-      <template v-if="useCurve"><label class="gx-field-group" v-for="(speed, index) in [0,5,10,15,25]" :key="index"><span class="gx-row__label">At {{ speed }} m/s</span><input class="gx-field" type="number" min="0.05" step="0.001" v-model.number="curve[index]" :disabled="busy || !live.editable"></label></template>
+      <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="create" :disabled="Object.keys(live.state.saved).length >= 4">New profile</button></div>
+      <label class="gx-field-group"><span class="gx-row__label">Name</span><input class="gx-field" v-model="label" maxlength="80" :disabled="!live.editable"></label>
+      <label class="gx-field-group" v-for="(range, key) in live.knobs" :key="key"><span class="gx-row__label">{{ key.replaceAll('_', ' ') }}</span><input class="gx-field" type="number" v-model.number="draft.knobs[key]" :min="range.min" :max="range.max" step="0.001" :disabled="!live.editable || live.inactiveKnobs?.[key]"><small v-if="live.inactiveKnobs?.[key]" class="gx-note">{{ live.inactiveKnobs[key] }}</small></label>
+      <label class="gx-row"><input type="checkbox" v-model="useCurve" :disabled="!live.editable"><span>Use the selected controller base friction curve</span></label>
+      <template v-if="useCurve"><label class="gx-field-group" v-for="(speed, index) in [0,5,10,15,25]" :key="index"><span class="gx-row__label">At {{ speed }} m/s</span><input class="gx-field" type="number" min="0.05" step="0.001" v-model.number="curve[index]" :disabled="!live.editable"></label></template>
       <p v-for="reason in live.preconditions[id] || []" :key="reason" class="gx-note">{{ reason }}</p>
       <p v-if="live.manualConflict" class="gx-note">Manual choices changed after this trial. Keep as baseline to retain those edits, or review them before restoring; FLM will not overwrite them.</p>
       <p v-if="live.state.applied" class="gx-note">Active: {{ live.state.saved[live.state.active]?.label }}</p>
       <div class="gx-actions">
-        <button type="button" class="gx-btn" @click="save" :disabled="busy || !live.editable">Save manual choices and surface</button>
-        <button type="button" class="gx-btn gx-btn--tonal" @click="trial" :disabled="busy || !live.editable || !live.state.saved[id] || live.manualConflict || live.preconditions[id]?.length">Apply trial</button>
-        <button v-if="live.state.trial" type="button" class="gx-btn gx-btn--tonal" @click="restore" :disabled="busy || !live.editable || live.manualConflict">Restore baseline</button>
-        <button v-if="live.state.trial" type="button" class="gx-btn gx-btn--tonal" @click="accept" :disabled="busy || !live.editable">Keep as baseline</button>
-        <button v-if="live.state.applied" type="button" class="gx-btn gx-btn--tonal" @click="action('disable')" :disabled="busy || !live.editable">Use controller surface</button>
-        <button type="button" class="gx-btn gx-btn--danger" @click="action('delete', { id })" :disabled="busy || !live.editable || !live.state.saved[id] || id === live.state.active || id === live.state.baselineActive">Delete profile</button>
+        <button type="button" class="gx-btn" @click="save" :disabled="!live.editable">Save manual choices and surface</button>
+        <button type="button" class="gx-btn gx-btn--tonal" @click="trial" :disabled="!live.editable || !live.state.saved[id] || live.manualConflict || live.preconditions[id]?.length">Apply trial</button>
+        <button v-if="live.state.trial" type="button" class="gx-btn gx-btn--tonal" @click="restore" :disabled="!live.editable || live.manualConflict">Restore baseline</button>
+        <button v-if="live.state.trial" type="button" class="gx-btn gx-btn--tonal" @click="accept" :disabled="!live.editable">Keep as baseline</button>
+        <button v-if="live.state.applied" type="button" class="gx-btn gx-btn--tonal" @click="action('disable')" :disabled="!live.editable">Use controller surface</button>
+        <button type="button" class="gx-btn gx-btn--danger" @click="action('delete', { id })" :disabled="!live.editable || !live.state.saved[id] || id === live.state.active || id === live.state.baselineActive">Delete profile</button>
       </div>
     </template>
   </section>`,
@@ -395,7 +395,11 @@ export const FlmPage = {
     if (this.mode === 'local' && !document.hidden) { this.inventoryFeed.start(); this.operationFeed.start() }
   },
   beforeUnmount() { document.removeEventListener('visibilitychange', this.visibility); this.inventoryFeed.stop(); this.operationFeed.stop() },
-  computed: { available() { return selectableSegments(this.inventory) }, canAnalyze() { return this.selected.length >= 1 && this.selected.length <= 5 && !this.busy && !this.requesting && this.operation?.state !== 'running' } },
+  computed: {
+    available() { return selectableSegments(this.inventory) },
+    analysisAvailable() { return this.selected.length >= 1 && this.selected.length <= 5 && this.operation?.state !== 'running' },
+    canAnalyze() { return this.analysisAvailable && !this.busy && !this.requesting },
+  },
   methods: {
     toggle(name) { this.selected = this.selected.includes(name) ? this.selected.filter((item) => item !== name) :
       this.selected.length < 5 ? [...this.selected, name] : this.selected },
@@ -418,7 +422,7 @@ export const FlmPage = {
     metric(value) { return finite(value) ? `${value.toFixed(2)} m/s²` : 'Unavailable' },
     exclusions(items) { return items.map(([reason, count]) => `${reason.replaceAll('_', ' ')}: ${count}`).join(' · ') || 'None recorded' },
   },
-  template: `<div class="gx-view gx-flm">
+  template: `<div class="gx-view gx-flm" :inert="busy || requesting" :aria-busy="busy || requesting || undefined">
     <div class="gx-settings__header gx-page-header"><div><h2>FLM</h2><p>Review recorded torque tracking or generate GM trial choices from observed symptoms. A trial is a user-selected tune, not a fitted learner or vehicle qualification.</p></div></div>
     <GxState v-if="mode !== 'local'">Offline analysis requires authenticated local Galaxy access.</GxState>
     <template v-else>
@@ -428,7 +432,7 @@ export const FlmPage = {
       <GxNotice v-if="inventory?.scanIncomplete" tone="warn">This recording scan was incomplete. More local segments may exist.</GxNotice>
       <section class="gx-card gx-flm__panel"><h3>Choose Full Logs</h3><p class="gx-note">Select 1–5 closed local segments. Quick logs alone cannot provide this report.</p>
         <div class="gx-actions">
-          <button type="button" class="gx-btn" :disabled="!canAnalyze" @click="analyze">Analyze selected</button><button type="button" class="gx-btn gx-btn--tonal" :disabled="!canAnalyze || !gmSource?.editable" @click="train">Generate GM trials</button><span class="gx-note">{{ selected.length }} of 5 selected</span>
+          <button type="button" class="gx-btn" :disabled="!analysisAvailable" @click="analyze">Analyze selected</button><button type="button" class="gx-btn gx-btn--tonal" :disabled="!analysisAvailable || !gmSource?.editable" @click="train">Generate GM trials</button><span class="gx-note">{{ selected.length }} of 5 selected</span>
         </div>
         <p v-if="inventoryStatus === 'ready' && !available.length">No closed full logs found in this scan.</p>
         <div v-for="segment in available" :key="segment.name" class="gx-flm__choice"><label><input type="checkbox" :checked="selected.includes(segment.name)"
@@ -444,7 +448,7 @@ export const FlmPage = {
         <p v-else role="status">No analysis running.</p>
         <GxNotice tone="danger" v-if="operationError">{{ operationError }}</GxNotice>
 
-        <button v-if="operation?.state === 'running'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy || requesting" @click="operationFeed.cancelAnalysis()">Cancel analysis</button>
+        <button v-if="operation?.state === 'running'" type="button" class="gx-btn gx-btn--tonal" @click="operationFeed.cancelAnalysis()">Cancel analysis</button>
       </section>
       <section v-if="report?.gmEvidence" class="gx-card gx-flm__panel"><h3>Recorded GM symptoms</h3>
         <p>{{ report.gmEvidence.decision.reason }}</p>
@@ -454,12 +458,12 @@ export const FlmPage = {
           <input type="checkbox" v-model="accepted" :value="row.dimensionId">Confirmed
           <input type="checkbox" v-model="ignored" :value="row.dimensionId">Ignore
         </label>
-        <div class="gx-actions"><button type="button" class="gx-btn" @click="feedback" :disabled="busy || requesting">Update trial choices</button></div>
+        <div class="gx-actions"><button type="button" class="gx-btn" @click="feedback">Update trial choices</button></div>
         <section v-for="path in report.gmEvidence.paths" :key="path.key"><h4>{{ path.title }}</h4><p>{{ path.description }}</p>
           <article v-for="suggestion in path.suggestions" :key="suggestion.dimensionId"><p>{{ suggestion.observedBehavior }}</p><p>{{ suggestion.likelyInterpretation }}</p><p>{{ suggestion.primaryAdjustment }}</p><p>{{ suggestion.whatNotToTouchYet }}</p><p>{{ suggestion.ifThatWasWrong }}</p><flm-chart v-if="eventSeries(suggestion.plotData).length" :series="eventSeries(suggestion.plotData)"/></article>
           <div v-for="profile in path.profiles" :key="profile.id"><p>{{ profile.label }} · {{ profile.description }}</p>
             <p v-if="profile.unavailableReason">{{ profile.unavailableReason }}</p>
-            <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="saveReport(profile)" :disabled="busy || requesting || !gmSource?.editable || !profile.canonical">Save trial for review</button></div>
+            <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="saveReport(profile)" :disabled="!gmSource?.editable || !profile.canonical">Save trial for review</button></div>
           </div>
         </section>
       </section>

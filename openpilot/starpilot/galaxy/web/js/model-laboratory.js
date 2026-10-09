@@ -132,7 +132,8 @@ export const LaboratoryPage = {
   beforeUnmount() { this._stopUnloadGuard(); document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
   methods: {
     statusLabel: laboratoryStatusLabel,
-    can(action, model = null) { return !this.busy && laboratoryActionAllowed(this.status, action, model, this.configuration) },
+    actionAvailable(action, model = null) { return laboratoryActionAllowed(this.status, action, model, this.configuration) },
+    can(action, model = null) { return !this.busy && this.actionAvailable(action, model) },
     modelLabel(id) { return this.status?.models.find(m => m.value === id)?.label || id || "Not selected" },
     changeLateral(value) {
       this.configuration.lateralModel = value
@@ -158,7 +159,7 @@ export const LaboratoryPage = {
     },
   },
   template: `
-    <div class="gx-settings gx-models">
+    <div class="gx-settings gx-models" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>Model Laboratory</h2>
         <p>Pair lateral judgment from one model with longitudinal judgment from another, then enable the pair for the next drive.</p></div>
         <div class="gx-actions"><span class="gx-chip">{{ status ? (status.chestnutReady ? 'Chestnut ready' : 'Chestnut required') : 'Waiting for device status' }}</span><span v-if="status" class="gx-chip">{{ status.isOnroad ? 'Onroad' : 'Parked' }}</span></div></header>
@@ -166,24 +167,24 @@ export const LaboratoryPage = {
       <GxState v-else-if="loading" loading>Loading Model Laboratory…</GxState>
       <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       <GxNotice tone="danger" v-if="status?.configurationError">{{ status.configurationError }}</GxNotice>
-      <GxNotice v-if="message" tone="info">{{ message }}</GxNotice>
+      <GxNotice v-if="message" class="gx-settings__save-status" tone="info">{{ message }}</GxNotice>
       <template v-if="mode === 'local' && !loading">
       <section class="gx-card">
         <div class="gx-section__header"><i class="bi bi-download"></i><span class="gx-section__title">Available models</span></div>
         <GxSummary :items="[{label: 'Catalog models', value: availableModels.length}, {label: 'Published versions', value: status?.summary?.published || 0}, {label: 'Verified downloads', value: readyModels.length}]" />
         <p class="gx-note gx-inset">Browse Small and Big models here. Combining models requires compatible Chestnut downloads and support for running them together.</p>
         <p v-if="status && !availableModels.length" class="gx-note gx-inset">The model catalog is unavailable. Refresh to retry.</p>
-        <article v-for="m in availableModels" :key="m.value" class="gx-row gx-row--wrap"><div class="gx-row__info gx-row__info--wide"><span class="gx-row__label">{{ m.label }}</span><span class="gx-row__desc">{{ m.value }} · {{ m.small ? 'Small' : 'Big' }} · {{ m.series || 'Unknown series' }} · {{ m.version }}</span><span class="gx-row__desc">{{ m.modelLabReason || 'Pair artifact status unavailable' }}</span></div><div class="gx-actions"><span class="gx-chip">{{ statusLabel(m) }}</span><button v-if="m.small && m.modelLabEligible && m.modelLabArtifactAvailable && !m.modelLabArtifactInstalled" class="gx-btn gx-btn--tonal" :disabled="!can('download',m)" @click="act('download',m)">Download eGPU variant</button><button v-else-if="m.modelLabArtifactInstalled" class="gx-btn gx-btn--tonal" :disabled="!can('delete',m)" @click="act('delete',m)">Delete eGPU variant</button></div></article>
-        <div v-if="status?.download.downloading" class="gx-row"><div class="gx-row__info"><span class="gx-row__desc">{{ status.download.progress || 'Downloading…' }}</span></div><button class="gx-btn gx-btn--tonal" :disabled="!can('cancel')" @click="act('cancel')">Cancel download</button></div>
+        <article v-for="m in availableModels" :key="m.value" class="gx-row gx-row--wrap"><div class="gx-row__info gx-row__info--wide"><span class="gx-row__label">{{ m.label }}</span><span class="gx-row__desc">{{ m.value }} · {{ m.small ? 'Small' : 'Big' }} · {{ m.series || 'Unknown series' }} · {{ m.version }}</span><span class="gx-row__desc">{{ m.modelLabReason || 'Pair artifact status unavailable' }}</span></div><div class="gx-actions"><span class="gx-chip">{{ statusLabel(m) }}</span><button v-if="m.small && m.modelLabEligible && m.modelLabArtifactAvailable && !m.modelLabArtifactInstalled" class="gx-btn gx-btn--tonal" :disabled="!actionAvailable('download',m)" @click="act('download',m)">Download eGPU variant</button><button v-else-if="m.modelLabArtifactInstalled" class="gx-btn gx-btn--tonal" :disabled="!actionAvailable('delete',m)" @click="act('delete',m)">Delete eGPU variant</button></div></article>
+        <div v-if="status?.download.downloading" class="gx-row"><div class="gx-row__info"><span class="gx-row__desc">{{ status.download.progress || 'Downloading…' }}</span></div><button class="gx-btn gx-btn--tonal" :disabled="!actionAvailable('cancel')" @click="act('cancel')">Cancel download</button></div>
       </section>
       <section class="gx-card">
         <div class="gx-section__header"><i class="bi bi-collection"></i><span class="gx-section__title">Compose a pair</span><span class="gx-chip">{{ configuration.enabled ? 'Enabled' : 'Disabled' }}</span></div>
         <div class="gx-panel gx-stack">
-          <label class="gx-field-group"><strong>Lateral model</strong><small>Path shape, curvature, lane geometry, and driving desire</small><GalaxySelect class="gx-field" aria-label="Lateral model" :disabled="!status || busy || status.isOnroad || status.download.downloading" :value="configuration.lateralModel" @change="changeLateral($event.target.value)"><option value="">Choose a model</option><option v-for="m in readyModels" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option></GalaxySelect></label>
-          <label class="gx-field-group"><strong>Longitudinal model</strong><small>Speed, acceleration, stopping, leads, and scene confidence</small><GalaxySelect class="gx-field" aria-label="Longitudinal model" :disabled="!status || busy || status.isOnroad || status.download.downloading" :value="configuration.longitudinalModel" @change="configuration.longitudinalModel=$event.target.value;dirty=true"><option value="">Choose a model</option><option v-for="m in candidates" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option></GalaxySelect></label>
+          <label class="gx-field-group"><strong>Lateral model</strong><small>Path shape, curvature, lane geometry, and driving desire</small><GalaxySelect class="gx-field" aria-label="Lateral model" :disabled="!status || status.isOnroad || status.download.downloading" :value="configuration.lateralModel" @change="changeLateral($event.target.value)"><option value="">Choose a model</option><option v-for="m in readyModels" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option></GalaxySelect></label>
+          <label class="gx-field-group"><strong>Longitudinal model</strong><small>Speed, acceleration, stopping, leads, and scene confidence</small><GalaxySelect class="gx-field" aria-label="Longitudinal model" :disabled="!status || status.isOnroad || status.download.downloading" :value="configuration.longitudinalModel" @change="configuration.longitudinalModel=$event.target.value;dirty=true"><option value="">Choose a model</option><option v-for="m in candidates" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option></GalaxySelect></label>
           <p class="gx-row__desc">{{ modelLabel(configuration.lateralModel) }} steers · {{ modelLabel(configuration.longitudinalModel) }} paces</p>
           <p v-if="selectionError" class="gx-row__desc">{{ selectionError }}</p>
-          <div class="gx-actions"><button class="gx-btn" :disabled="!can('enable')" @click="act('enable')">Enable for next drive</button><button class="gx-btn gx-btn--tonal" :disabled="!can('disable')" @click="act('disable')">Disable</button><button class="gx-btn gx-btn--tonal" :disabled="!can('refresh')" @click="act('refresh')">Check model catalog</button></div>
+          <div class="gx-actions"><button class="gx-btn" :disabled="!actionAvailable('enable')" @click="act('enable')">Enable for next drive</button><button class="gx-btn gx-btn--tonal" :disabled="!actionAvailable('disable')" @click="act('disable')">Disable</button><button class="gx-btn gx-btn--tonal" :disabled="!actionAvailable('refresh')" @click="act('refresh')">Check model catalog</button></div>
         </div>
       </section>
       <section class="gx-card"><div class="gx-section__header"><i class="bi bi-activity"></i><span class="gx-section__title">Runtime</span><span class="gx-chip">{{ runtimeState }}</span></div><div class="gx-row"><div class="gx-row__info"><span class="gx-row__desc">Lateral: {{ modelLabel(status?.runtime.lateralModel) }}</span><span class="gx-row__desc">Longitudinal: {{ modelLabel(status?.runtime.longitudinalModel) }}</span><span v-if="status?.runtime.error" class="gx-note gx-note--danger">{{ status.runtime.error }}</span><span v-if="status && !status.runtimeSupported" class="gx-row__desc">{{ status.runtimeUnavailableReason || 'Pair runtime is unavailable.' }}</span></div></div></section>

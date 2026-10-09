@@ -507,7 +507,8 @@ export const OnroadLayoutPage = {
   },
   computed: {
     busy() { return ["loading", "saving"].includes(this.state.status) },
-    editable() { return !!this.state.data?.editable && !this.state.error && !this.busy && !this.state.needsReload && !this.state.discard },
+    editAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && !this.state.discard },
+    editable() { return this.editAvailable && !this.busy },
     dirty() { return !!this.state.draft && JSON.stringify(this.state.draft) !== JSON.stringify(this.state.data.document) },
     stockChanged() { return !!this.state.draft && JSON.stringify(this.state.draft) !== JSON.stringify(this.state.data.defaults) },
     canUndo() { return this.state.history.undo.length > 0 },
@@ -515,7 +516,8 @@ export const OnroadLayoutPage = {
     pendingLeave() { return typeof this.state.discard === "function" || ["back", "device", "projection"].includes(this.state.discard) },
     inlineLeavePrompt() { return this.projection && this.pendingLeave && this.state.leavePresentation !== "modal" },
     modalLeavePrompt() { return this.pendingLeave && this.state.leavePresentation === "modal" },
-    canSavePending() { return !!this.state.data?.editable && !this.state.error && !this.busy && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
+    saveAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
+    canSavePending() { return this.saveAvailable && !this.busy },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
@@ -999,15 +1001,15 @@ export const OnroadLayoutPage = {
     },
   },
   template: `
-    <section class="gx-settings gx-layout" aria-label="Colors and layout">
+    <section class="gx-settings gx-layout" aria-label="Colors and layout" :inert="busy" :aria-busy="busy || undefined">
       <div class="gx-settings__header gx-page-header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
         <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
 
       </div>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.editable && !(projection && state.data.reason)" tone="warn">Park the vehicle and reload to edit. If it stays unavailable, reload saved settings.</GxNotice>
       <nav class="gx-layout__tabs gx-tabs" aria-label="Layout target">
-        <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="busy || !!state.drag" @click="$emit('target', 'device')">Comma</button>
-        <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="busy || !!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
+        <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="!!state.drag" @click="$emit('target', 'device')">Comma</button>
+        <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="!!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
       </nav>
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
@@ -1015,16 +1017,16 @@ export const OnroadLayoutPage = {
         <div class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}">
           <span role="status">{{ inlineLeavePrompt ? 'Leave without saving your changes?' : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
           <template v-if="inlineLeavePrompt">
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
-            <button class="gx-btn gx-btn--danger" type="button" :disabled="busy" aria-label="Discard and leave" title="Discard and leave" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">Discard and leave</span></button>
-            <button class="gx-btn" type="button" :disabled="!canSavePending" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
+            <button class="gx-btn gx-btn--danger" type="button" aria-label="Discard and leave" title="Discard and leave" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">Discard and leave</span></button>
+            <button class="gx-btn" type="button" :disabled="!saveAvailable" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
           </template>
           <template v-else>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !canRedo || !!state.drag || !!state.layerDrag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy || !!state.drag || !!state.layerDrag" aria-label="Reload saved" title="Reload saved" @click="requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg><span class="gx-layout__action-label">Reload saved</span></button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !stockChanged || !!state.drag || !!state.layerDrag" aria-label="Reset to stock StarPilot" title="Reset to stock StarPilot" @click="resetToStock"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="gx-layout__action-label">Reset to stock</span></button>
-            <button class="gx-btn" type="button" :disabled="!editable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !canRedo || !!state.drag || !!state.layerDrag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!!state.drag || !!state.layerDrag" aria-label="Reload saved" title="Reload saved" @click="requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg><span class="gx-layout__action-label">Reload saved</span></button>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !stockChanged || !!state.drag || !!state.layerDrag" aria-label="Reset to stock StarPilot" title="Reset to stock StarPilot" @click="resetToStock"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="gx-layout__action-label">Reset to stock</span></button>
+            <button class="gx-btn" type="button" :disabled="!editAvailable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
           </template>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
@@ -1133,14 +1135,14 @@ export const OnroadLayoutPage = {
               <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets.</p>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
                 :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
-                <button class="gx-layout__row-grip gx-icon-btn" type="button" :aria-label="'Reorder ' + widget.label" :disabled="!editable || !!state.drag"
+                <button class="gx-layout__row-grip gx-icon-btn" type="button" :aria-label="'Reorder ' + widget.label" :disabled="!editAvailable || !!state.drag"
                   title="Drag to reorder. Up and down keys reorder."
                   @pointerdown="startLayerDrag($event, widget.id)" @pointermove="moveLayerDrag($event)"
                   @pointerup="endLayerDrag($event)" @pointercancel="endLayerDrag($event, true)" @lostpointercapture="endLayerDrag($event, true)"
                   @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">⠿</span></button>
                 <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
                   @click="selectWidget(widget.id)">{{ widget.label }}</button>
-                <button class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editable || !!state.drag || !!state.layerDrag"
+                <button class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
                   @click="requestRemove(widget.id)"><span aria-hidden="true">−</span></button>
               </div></div>
               <Teleport to="body"><div v-if="state.layerDrag?.moved" class="gx-layout__drag-ghost" aria-hidden="true"
@@ -1149,56 +1151,56 @@ export const OnroadLayoutPage = {
               </div></Teleport>
               <details class="gx-layout__tray"><summary>Inactive Widgets · {{ inactiveWidgets.length }}</summary><p class="gx-note">In Arrange widgets, drag onto the preview, or select Add.</p>
                 <div v-for="widget in inactiveWidgets" :key="widget.id" class="gx-layout__tray-item">
-                  <button class="gx-layout__drag-handle" type="button" :disabled="!editable || state.previewMode !== 'layout'" :aria-label="'Drag ' + widget.label + ' onto preview'"
+                  <button class="gx-layout__drag-handle" type="button" :disabled="!editAvailable || state.previewMode !== 'layout'" :aria-label="'Drag ' + widget.label + ' onto preview'"
                     @pointerdown="startDrag(widget.id, $event, true)"><i class="bi bi-grip-vertical" aria-hidden="true"></i></button><span class="gx-layout__inactive-name">{{ widget.label }}</span>
-                  <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !!state.drag" @click="add(widget.id)">Add</button>
+                  <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="add(widget.id)">Add</button>
                 </div>
                 <p v-if="!inactiveWidgets.length" class="gx-note">All available widgets are on this layout.</p>
               </details>
-              <button class="gx-btn gx-btn--tonal gx-layout__reset" type="button" :disabled="!editable || !!state.drag" @click="resetLayout">Reset this layout</button>
+              <button class="gx-btn gx-btn--tonal gx-layout__reset" type="button" :disabled="!editAvailable || !!state.drag" @click="resetLayout">Reset this layout</button>
               </div>
               <div v-show="state.inspectorPanel === 'edit'" class="gx-layout__panel">
                 <label class="gx-layout__widget-picker">Selected widget<GalaxySelect class="gx-field gx-field--full" :value="state.selected" :disabled="!!state.drag" @change="state.selected = $event.target.value">
                   <option v-for="widget in widgets" :key="widget.id" :value="widget.id">{{ widget.label }}{{ layout[widget.id].enabled ? '' : ' · Inactive' }}</option>
                 </GalaxySelect></label>
-                <div v-if="selectedWidget && !selectedPosition.enabled" class="gx-layout__panel"><p class="gx-note">Add this widget to edit its position and colors.</p><button class="gx-btn" :disabled="!editable" @click="add(state.selected)">Add to layout</button></div>
+                <div v-if="selectedWidget && !selectedPosition.enabled" class="gx-layout__panel"><p class="gx-note">Add this widget to edit its position and colors.</p><button class="gx-btn" :disabled="!editAvailable" @click="add(state.selected)">Add to layout</button></div>
               <div v-if="selectedWidget && selectedPosition.enabled" class="gx-layout__position">
                 <strong>{{ selectedWidget.label }}</strong><span class="gx-note">{{ selectedSize[0] }} × {{ selectedSize[1] + (selectedWidget.box ? 0 : selectedWidget.visualInsetTop || 0) }} pixels</span>
                 <label v-if="selectedWidget.resizable">Size
                   <input class="gx-field" type="number" step="1" :min="selectedWidget.resizable.min" :max="selectedWidget.resizable.max"
-                    :value="selectedPosition.size" :disabled="!editable || !!state.drag" @change="resizeSelected($event)"></label>
+                    :value="selectedPosition.size" :disabled="!editAvailable || !!state.drag" @change="resizeSelected($event)"></label>
                 <template v-if="selectedWidget.box">
-                  <div class="gx-layout__coordinates"><label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editable || !!state.drag" @change="boxInput('width', $event)"></label>
-                    <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editable || !!state.drag" @change="boxInput('height', $event)"></label></div>
+                  <div class="gx-layout__coordinates"><label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editAvailable || !!state.drag" @change="boxInput('width', $event)"></label>
+                    <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editAvailable || !!state.drag" @change="boxInput('height', $event)"></label></div>
                   <label for="layout-map-opacity">Map opacity · {{ selectedPosition.opacity }}%</label>
                   <input id="layout-map-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
-                    :value="selectedPosition.opacity" :disabled="!editable || !!state.drag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
+                    :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
                   <span class="gx-note">Lower values let more of the road show through. Drag the corner handle on the preview to resize.</span>
                 </template>
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
-                <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
+                <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
                 <div v-if="projection && selectedWidget.iconSize" class="gx-layout__favorite-display">
                   <span>Show as</span>
                   <div class="gx-segment" role="group" :aria-label="selectedWidget.label + ' display'">
                     <button v-for="display in ['icons', 'words']" :key="display" class="gx-btn" type="button"
                       :class="selectedPosition.display === display ? 'gx-btn--primary' : 'gx-btn--tonal'"
-                      :aria-pressed="selectedPosition.display === display" :disabled="!editable || !!state.drag || !!state.layerDrag"
+                      :aria-pressed="selectedPosition.display === display" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
                       @click="setFavoriteDisplay(display)">{{ display === 'icons' ? 'Icons' : 'Words' }}</button>
                   </div>
                 </div>
-                <div class="gx-layout__coordinates"><label>X<input class="gx-field" type="number" step="1" :min="limits.minX" :max="limits.maxX" :value="selectedPosition.x" :disabled="!editable || !!state.drag" @change="positionInput('x', $event)"></label>
-                  <label>Y<input class="gx-field" type="number" step="1" :min="limits.minY" :max="limits.maxY" :value="selectedPosition.y" :disabled="!editable || !!state.drag" @change="positionInput('y', $event)"></label></div>
+                <div class="gx-layout__coordinates"><label>X<input class="gx-field" type="number" step="1" :min="limits.minX" :max="limits.maxX" :value="selectedPosition.x" :disabled="!editAvailable || !!state.drag" @change="positionInput('x', $event)"></label>
+                  <label>Y<input class="gx-field" type="number" step="1" :min="limits.minY" :max="limits.maxY" :value="selectedPosition.y" :disabled="!editAvailable || !!state.drag" @change="positionInput('y', $event)"></label></div>
                 <span class="gx-note">Use arrow keys on a preview widget to move 1 pixel, or Shift + arrow for 10.</span>
                 <section v-if="!projection && colorFields.length" class="gx-layout__colors" :aria-label="selectedWidget.label + ' colors'">
-                  <div class="gx-layout__subhead"><h4>{{ selectedWidget.label }} colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable" @click="resetColors">Reset widget colors</button></div>
+                  <div class="gx-layout__subhead"><h4>{{ selectedWidget.label }} colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable" @click="resetColors">Reset widget colors</button></div>
                   <p class="gx-note">Only this widget in the {{ state.profile === 'large' ? 'Big' : 'Small' }} layout changes. Status indicators keep their meaning. Picking a color makes a transparent fill or border visible; use Opacity to fade it.</p>
                   <div class="gx-layout__palette"><div v-for="field in colorFields" :key="field.id" class="gx-layout__color">
                     <label :for="'layout-color-' + field.id">{{ field.label }}</label><div class="gx-layout__color-values">
-                      <input type="color" :aria-label="field.label + ' color'" :value="selectedColors[field.id].slice(0,7)" :disabled="!editable || !!state.drag" @input="colorRgb(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
-                      <input :id="'layout-color-' + field.id" class="gx-field" type="text" spellcheck="false" maxlength="9" :value="selectedColors[field.id]" :disabled="!editable || !!state.drag" @change="colorText(field.id, $event)"></div>
+                      <input type="color" :aria-label="field.label + ' color'" :value="selectedColors[field.id].slice(0,7)" :disabled="!editAvailable || !!state.drag" @input="colorRgb(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                      <input :id="'layout-color-' + field.id" class="gx-field" type="text" spellcheck="false" maxlength="9" :value="selectedColors[field.id]" :disabled="!editAvailable || !!state.drag" @change="colorText(field.id, $event)"></div>
                     <label :for="'layout-alpha-' + field.id">Opacity · {{ Math.round(alpha(selectedColors[field.id]) / 255 * 100) }}%</label>
-                    <input :id="'layout-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(selectedColors[field.id])" :disabled="!editable || !!state.drag" @input="colorAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                    <input :id="'layout-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(selectedColors[field.id])" :disabled="!editAvailable || !!state.drag" @input="colorAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                   </div></div>
                   <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
                 </section>
@@ -1206,8 +1208,8 @@ export const OnroadLayoutPage = {
               </div>
               </div>
               <section v-if="!projection" v-show="state.inspectorPanel === 'road'" class="gx-layout__colors" aria-label="Path and lane colors">
-                <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !!state.drag" @click="resetRoad">Reset road colors</button></div>
-                <label>Path style<GalaxySelect class="gx-field gx-field--full" :value="roadMode" :disabled="!editable || !!state.drag" @change="setRoadMode($event.target.value)">
+                <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="resetRoad">Reset road colors</button></div>
+                <label>Path style<GalaxySelect class="gx-field gx-field--full" :value="roadMode" :disabled="!editAvailable || !!state.drag" @change="setRoadMode($event.target.value)">
                   <option value="default">Follow Appearance Settings</option><option value="acceleration">Acceleration colors</option>
                   <option value="color">Custom color</option><option value="rainbow">Rainbow Road</option>
                 </GalaxySelect></label>
@@ -1217,10 +1219,10 @@ export const OnroadLayoutPage = {
                 </div></details>
                 <div class="gx-layout__palette"><div v-for="field in state.data.metadata.roadColorFields" :key="field.id" class="gx-layout__color">
                   <label :for="'road-color-' + field.id">{{ roadLabel(field.id) }}</label><div class="gx-layout__color-values">
-                    <input type="color" :aria-label="roadLabel(field.id) + ' color'" :value="roadColors[field.id].slice(0,7)" :disabled="!editable || !!state.drag" @input="roadRgb(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
-                    <input :id="'road-color-' + field.id" class="gx-field" type="text" spellcheck="false" maxlength="9" :value="roadColors[field.id]" :disabled="!editable || !!state.drag" @change="roadColor(field.id, $event.target.value.trim())"></div>
+                    <input type="color" :aria-label="roadLabel(field.id) + ' color'" :value="roadColors[field.id].slice(0,7)" :disabled="!editAvailable || !!state.drag" @input="roadRgb(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                    <input :id="'road-color-' + field.id" class="gx-field" type="text" spellcheck="false" maxlength="9" :value="roadColors[field.id]" :disabled="!editAvailable || !!state.drag" @change="roadColor(field.id, $event.target.value.trim())"></div>
                   <label :for="'road-alpha-' + field.id">Opacity · {{ Math.round(alpha(roadColors[field.id]) / 255 * 100) }}%</label>
-                  <input :id="'road-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(roadColors[field.id])" :disabled="!editable || !!state.drag" @input="roadAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                  <input :id="'road-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(roadColors[field.id])" :disabled="!editAvailable || !!state.drag" @input="roadAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                 </div></div>
                 <p class="gx-note">These colors apply to this layout only. The preview uses a sample road. Follow Appearance Settings previews acceleration colors; your saved Rainbow Road preference still applies while driving.</p>
                 <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
@@ -1237,14 +1239,14 @@ export const OnroadLayoutPage = {
           <button type="button" class="gx-btn gx-btn--danger" @click="confirmRemove">Remove widget</button>
         </div>
       </GxDialog>
-      <GxDialog v-if="modalLeavePrompt" class="gx-layout__leave-dialog" labelledby="gx-layout-leave-title" describedby="gx-layout-leave-body" alert @close="cancelLeave">
+      <GxDialog v-if="modalLeavePrompt" class="gx-layout__leave-dialog" :inert="busy" labelledby="gx-layout-leave-title" describedby="gx-layout-leave-body" alert @close="cancelLeave">
         <div class="gx-layout__leave-copy"><h3 id="gx-layout-leave-title">Leave without saving your changes?</h3>
           <p id="gx-layout-leave-body">Save your {{ projection ? 'Android Auto' : 'comma' }} layout before leaving, keep editing, or discard this draft.</p></div>
         <GxNotice v-if="state.error" tone="danger">{{ state.error }}</GxNotice>
         <div class="gx-layout__leave-actions">
-          <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="cancelLeave">Keep editing</button>
-          <button type="button" class="gx-btn gx-btn--danger" :disabled="busy" @click="leave(state.discard)">Discard and leave</button>
-          <button type="button" class="gx-btn" :disabled="!canSavePending" @click="saveAndLeave">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</button>
+          <button type="button" class="gx-btn gx-btn--tonal" @click="cancelLeave">Keep editing</button>
+          <button type="button" class="gx-btn gx-btn--danger" @click="leave(state.discard)">Discard and leave</button>
+          <button type="button" class="gx-btn" :disabled="!saveAvailable" @click="saveAndLeave">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</button>
         </div>
       </GxDialog>
     </section>`,

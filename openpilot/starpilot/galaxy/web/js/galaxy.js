@@ -57,7 +57,7 @@ export const GalaxyPage = {
     },
   },
   template: `
-    <div class="gx-settings gx-tunnel"><header class="gx-settings__header gx-page-header"><div><h2>Install Galaxy / Tunnel</h2>
+    <div class="gx-settings gx-tunnel" :inert="busy" :aria-busy="busy || undefined"><header class="gx-settings__header gx-page-header"><div><h2>Install Galaxy / Tunnel</h2>
       <p>Pair your device for secure remote Galaxy access.</p></div></header>
       <GxState v-if="mode !== 'local'">Pairing is available on your comma.</GxState>
       <GxState v-else-if="loading" loading>Checking pairing status…</GxState>
@@ -68,7 +68,7 @@ export const GalaxyPage = {
           <p v-if="!tunnelClientAvailable" class="gx-note gx-note--danger">The remote tunnel client is not installed on this device yet. The link will work after Galaxy's tunnel client is available.</p>
           <img src="./api/galaxy/qr.svg" alt="QR code for your Galaxy link" class="gx-tunnel__qr" />
           <p><a :href="url" target="_blank" rel="noopener" class="gx-wrap">{{ url }}</a></p>
-          <button type="button" class="gx-btn gx-btn--danger" :disabled="busy" @click="unpair">{{ busy ? 'Unpairing…' : 'Unpair' }}</button>
+          <button type="button" class="gx-btn gx-btn--danger" @click="unpair">{{ busy ? 'Unpairing…' : 'Unpair' }}</button>
         </template>
         <template v-else>
           <span class="gx-chip gx-chip--lock">Not Paired</span>
@@ -76,7 +76,7 @@ export const GalaxyPage = {
           <p v-else-if="legacyPairingAvailable">An earlier Galaxy pairing is available. Enter its password to keep the saved link, or choose a new password (at least 8 characters) for a new link.</p>
           <p v-else>First choose a password, then pair your comma. Open Galaxy remotely using the link and QR code when the tunnel is connected.</p>
           <div class="gx-actions"><input class="gx-field gx-filter-field" type="password" v-model="password" :minlength="legacyPassword || legacyPairingAvailable ? 6 : 8" maxlength="255" :autocomplete="legacyPassword ? 'current-password' : 'new-password'" :placeholder="legacyPassword ? 'Existing Galaxy password' : legacyPairingAvailable ? 'Existing or new Galaxy password' : 'New password (at least 8 characters)'" @keydown.enter="pair" />
-          <button type="button" class="gx-btn" :disabled="busy || password.trim().length < (legacyPassword || legacyPairingAvailable ? 6 : 8)" @click="pair">{{ busy ? 'Pairing…' : 'Pair' }}</button></div>
+          <button type="button" class="gx-btn" :disabled="password.trim().length < (legacyPassword || legacyPairingAvailable ? 6 : 8)" @click="pair">{{ busy ? 'Pairing…' : 'Pair' }}</button></div>
         </template>
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       </section>

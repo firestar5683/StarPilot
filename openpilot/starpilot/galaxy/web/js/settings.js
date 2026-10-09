@@ -37,6 +37,8 @@ const SECTION_LINKS = {
 
 const activeSettings = new Set()
 
+export const settingsBusy = state => ["updating", "saving"].includes(state.status) || !!state.pending || !!state.reviewing
+
 export class SettingsFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
@@ -177,6 +179,7 @@ export class SettingsFeed {
 
   async preview(row, direction, draft = null) {
     if (!this.active || !this.data?.view || this.pending || (this.request && !this.polling)) return
+    this.publish({ status: "updating", data: this.data, pending: null, error: "" })
     const data = await this.run((signal) => post(this.fetcher, "./api/settings/preview",
       { view: this.data.view, row, direction, ...(draft === null ? {} : { draft }) }, signal))
     if (data) {
@@ -250,8 +253,10 @@ export const SettingsPage = {
     const feed = new SettingsFeed({ publish: (update) => Object.assign(state, update), unauthorized: props.unauthorized })
     return { state, feed, sections: SETTINGS_SECTIONS }
   },
+  data() { return { saveStatusVisible: false } },
   computed: {
-    busy() { return ["updating", "saving"].includes(this.state.status) || !!this.state.pending },
+    busy() { return settingsBusy(this.state) },
+    savingPreference() { return ["updating", "saving"].includes(this.state.status) },
     activeSection() {
       if (this.state.developerOpen) return this.sections.at(-1)
       const page = (this.state.data?.page || "hub").split("/")[0]
@@ -279,6 +284,19 @@ export const SettingsPage = {
     },
   },
   watch: {
+    savingPreference: {
+      flush: "sync",
+      handler(saving) {
+        clearTimeout(this._saveStatusTimer)
+        if (saving) {
+          this.saveStatusVisible = true
+          this._saveStatusUntil = performance.now() + 600
+        } else {
+          this._saveStatusTimer = setTimeout(() => { this.saveStatusVisible = false },
+            Math.max(0, this._saveStatusUntil - performance.now()))
+        }
+      },
+    },
     "state.pending"() { this.flushSoundChoices() },
     "state.status"(status, previous) {
       if (previous === "saving" && status === "ready") this.state.soundChoicesDirty = false
@@ -286,9 +304,10 @@ export const SettingsPage = {
     },
   },
   mounted() { if (this.mode === "local" && !this.state.developerOpen) this.feed.start(this.initialPage) },
-  beforeUnmount() { this.feed.stop() },
+  beforeUnmount() { this.feed.stop(); clearTimeout(this._saveStatusTimer) },
   methods: {
     open(page) {
+      if (this.busy) return
       this.$emit?.("nested")
       this.state.query = ""
       this.state.panelDirection = 1
@@ -325,7 +344,7 @@ export const SettingsPage = {
       if (this.state.data?.page !== page) this.feed.load(page, { keepData: false, quiet: false })
     },
     requestRouteLeave(proceed) {
-      if (this.busy) return
+      if (this.busy || this.$refs.favoritesEditor?.busy || this.$refs.cloudProvider?.busy) return
       if (this.state.layoutOpen) this.$refs.layoutEditor.requestLeave(proceed)
       else proceed()
     },
@@ -366,10 +385,10 @@ export const SettingsPage = {
   template: `
     <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
     <FavoritesPage ref="favoritesEditor" v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
-    <section v-else class="gx-settings" :aria-label="title">
+    <section v-else class="gx-settings" :aria-label="title" :inert="busy" :aria-busy="busy || undefined">
       <div v-if="title && (initialPage !== 'hub' || atSectionRoot)" class="gx-settings__header gx-page-header"><h2>{{ title }}</h2></div>
         <div v-if="mode === 'local' && initialPage === 'hub' && atSectionRoot" class="gx-settings-tabs" aria-label="Settings sections">
-          <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" :disabled="busy" @click="selectSection(section)">{{ section.label }}</button>
+          <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" @click="selectSection(section)">{{ section.label }}</button>
         </div>
       <GxNotice v-if="!state.developerOpen && state.data && state.data.page !== 'hub' && !state.data.parked && state.data.rows.some(row => !row.available)" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
       <p class="gx-page-description" v-if="state.developerOpen">Choose where cloud accounts and uploads go. Older comma recordings keep their comma links.</p>
@@ -392,8 +411,12 @@ export const SettingsPage = {
       <p class="gx-page-description" v-else-if="initialPage === 'sentry'">{{ state.data?.subtitle || "Checking motion monitor…" }}</p>
       <GxState v-if="mode !== 'local'">Local settings are unavailable in preview.</GxState>
       <template v-else>
-        <CloudProviderPage v-if="state.developerOpen" :mode="mode" :unauthorized="unauthorized" />
-        <p v-if="state.status === 'saving' || state.status === 'updating'" class="gx-settings__save-status" role="status">Saving preference…</p>
+        <CloudProviderPage ref="cloudProvider" v-if="state.developerOpen" :mode="mode" :unauthorized="unauthorized" />
+        <Teleport to="body">
+          <p class="gx-settings__save-status gx-settings__save-status--animated"
+            :class="{ 'is-visible': saveStatusVisible }"
+            :aria-hidden="!saveStatusVisible" role="status">Saving preferences…</p>
+        </Teleport>
         <GxState v-if="state.status === 'loading'" loading>Reading your device’s saved preferences…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read these preferences. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
@@ -402,8 +425,8 @@ export const SettingsPage = {
           <Transition name="gx-panel">
           <div v-if="state.data" :key="state.data.page + activeSection.id" class="gx-settings__body">
             <div v-if="state.data.page === 'appearance' || state.data.page === 'pip'" class="gx-settings__actions gx-actions">
-              <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Colors &amp; Layout</button>
-              <button v-if="state.data.page === 'pip'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Crop editor</button>
+              <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Colors &amp; Layout</button>
+              <button v-if="state.data.page === 'pip'" type="button" class="gx-btn gx-btn--tonal" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Crop editor</button>
             </div>
             <section class="gx-card gx-settings__section">
               <div class="gx-section__header"><i class="bi" :class="activeSection.icon" aria-hidden="true"></i><span class="gx-section__title">{{ state.data.page === 'hub' ? activeSection.label : state.data.title }}</span>
@@ -411,11 +434,11 @@ export const SettingsPage = {
                 </div>
               <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
               <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
-                :disabled="busy || !!state.error || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
+                :busy="busy" :disabled="!!state.error || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
                 @open="open" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
               <div v-if="!visibleRows.length" class="gx-empty">No matching settings.</div>
             </section>
-            <SoundPacks v-if="state.data.page === 'sounds'" :unauthorized="unauthorized" :disabled="busy" @installed="refreshSoundChoices" />
+            <SoundPacks v-if="state.data.page === 'sounds'" :unauthorized="unauthorized" :busy="busy" @installed="refreshSoundChoices" />
           </div>
           </Transition>
         </div>

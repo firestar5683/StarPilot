@@ -385,14 +385,14 @@ export const LocalRecordingsPage = {
 
         </template>
       </template>
-      <GxDialog v-if="deleteSelection" labelledby="gx-delete-videos-title" describedby="gx-delete-videos-body" alert
+      <GxDialog v-if="deleteSelection" :inert="deleting !== null" labelledby="gx-delete-videos-title" describedby="gx-delete-videos-body" alert
         @close="deleting === null && (deleteSelection = null)">
         <h3 id="gx-delete-videos-title">Delete segment videos?</h3>
         <p id="gx-delete-videos-body">Delete the videos for segment {{ deleteSelection.number }}? Its logs stay on the device. This cannot be undone.</p>
         <GxNotice v-if="deleteError" tone="danger">{{ deleteError }}</GxNotice>
         <div class="gx-settings__controls gx-actions">
-          <button class="gx-btn gx-btn--tonal" :disabled="deleting !== null" @click="deleteSelection = null">Cancel</button>
-          <button class="gx-btn gx-btn--danger" :disabled="deleting !== null" @click="deleteVideos">{{ deleting ? 'Deleting…' : 'Delete videos' }}</button>
+          <button class="gx-btn gx-btn--tonal" @click="deleteSelection = null">Cancel</button>
+          <button class="gx-btn gx-btn--danger" @click="deleteVideos">{{ deleting ? 'Deleting…' : 'Delete videos' }}</button>
         </div>
       </GxDialog>
     </div>`,

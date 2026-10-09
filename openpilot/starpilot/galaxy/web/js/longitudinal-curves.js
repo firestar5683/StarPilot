@@ -2,7 +2,7 @@ import { GxDialog } from "./dialog.js"
 import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
-import { SettingsFeed } from "./settings.js"
+import { SettingsFeed, settingsBusy } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 
 export const PROFILES = Object.freeze(["aggressive", "standard", "relaxed"])
@@ -46,6 +46,7 @@ export const LongitudinalCurvesPage = {
     return { state, feed, profiles: PROFILES, categories: CATEGORIES }
   },
   computed: {
+    busy() { return settingsBusy(this.state) },
     page() { return `${this.state.profile}/${this.state.category}` },
     points() { return savedCurve(this.state.data?.page, this.state.data?.rows) },
     graph() { return curveGeometry(this.points) },
@@ -54,21 +55,21 @@ export const LongitudinalCurvesPage = {
   mounted() { if (this.mode === "local") this.feed.start(this.page) },
   beforeUnmount() { this.feed.stop() },
   methods: {
-    selectProfile(profile) { if (PROFILES.includes(profile) && !this.feed.saving) { this.state.profile = profile; this.feed.load(this.page) } },
-    selectCategory(category) { if (CATEGORIES.includes(category) && !this.feed.saving) { this.state.category = category; this.feed.load(this.page) } },
+    selectProfile(profile) { if (PROFILES.includes(profile) && !this.busy && !this.feed.saving) { this.state.profile = profile; this.feed.load(this.page) } },
+    selectCategory(category) { if (CATEGORIES.includes(category) && !this.busy && !this.feed.saving) { this.state.category = category; this.feed.load(this.page) } },
   },
   template: `
-    <section class="gx-long-curves" aria-label="Longitudinal curves">
+    <section class="gx-long-curves" aria-label="Longitudinal curves" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>Longitudinal Curves</h2>
         <p>Review acceleration, braking, and following curves for the next drive.</p></div></header>
       <GxState v-if="mode !== 'local'">Local saved curves are unavailable in preview.</GxState>
       <template v-else>
         <div class="gx-long-curves__tabs gx-tabs" role="group" aria-label="Personality profile">
           <button v-for="profile in profiles" :key="profile" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.profile === profile"
-            :disabled="state.status === 'saving'" @click="selectProfile(profile)">{{ profile }}</button></div>
+            @click="selectProfile(profile)">{{ profile }}</button></div>
         <div class="gx-long-curves__tabs gx-tabs" role="group" aria-label="Curve category">
           <button v-for="category in categories" :key="category" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="state.category === category"
-            :disabled="state.status === 'saving'" @click="selectCategory(category)">{{ category }}</button></div>
+            @click="selectCategory(category)">{{ category }}</button></div>
         <GxState v-if="state.status === 'loading'" loading>Loading saved curve…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">Saved curve is unavailable.</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
@@ -78,7 +79,7 @@ export const LongitudinalCurvesPage = {
             </div>
           <p v-if="!state.data.parked" class="gx-note">Editing requires fresh parked vehicle evidence.</p>
           <GalaxySettingRow v-if="preset" :key="state.data.page + ':preset'" :row="preset" :index="0"
-            :disabled="!state.data.parked || state.status !== 'ready' || !!state.pending"
+            :busy="state.status !== 'ready' || !!state.pending" :disabled="!state.data.parked || !!state.error"
             :save-value="(index, value) => feed.previewValue(index, value)" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           <template v-if="points && graph">
             <svg class="gx-long-curves__graph" viewBox="0 0 370 155" role="img" :aria-label="state.data.title + ' saved curve, 0 to 90 miles per hour'">
@@ -91,7 +92,7 @@ export const LongitudinalCurvesPage = {
             <p class="gx-note">Saved custom points in {{ points[0].unit }}. Use the controls below to change one point at a time.</p>
             <div class="gx-long-curves__points">
               <GalaxySettingRow v-for="point in points" :key="state.data.page + ':' + point.index" :row="state.data.rows[point.index]" :index="point.index"
-                :disabled="!state.data.parked || state.status !== 'ready' || !!state.pending"
+                :busy="state.status !== 'ready' || !!state.pending" :disabled="!state.data.parked || !!state.error"
                 :save-value="(index, value) => feed.previewValue(index, value)" />
             </div>
           </template>

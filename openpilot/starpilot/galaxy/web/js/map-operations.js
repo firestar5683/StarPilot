@@ -303,7 +303,7 @@ export const MapOperationsPanel = {
     },
   },
   template: `
-    <section class="gx-card gx-map-manager">
+    <section class="gx-card gx-map-manager" :inert="busy" :aria-busy="busy || undefined">
       <div class="gx-section__header"><i class="bi bi-map"></i><span class="gx-section__title">Speed Limit Maps</span></div>
       <div class="gx-map-manager__body">
         <p class="gx-note">Speed-limit and curve data for a whole region, used by the map provider. Choose a region to download for offline use. Downloading another region replaces the selected map.</p>
@@ -324,7 +324,7 @@ export const MapOperationsPanel = {
             <p v-if="operation.selectedForNextShadowStart" class="gx-note">Download complete. This map will be used the next time Maps starts.</p>
             <p v-if="operation.selectedGeneration && !operation.selectedForNextShadowStart" class="gx-note">A downloaded map is selected.</p>
             <p v-if="operation.errorCode" class="gx-note">{{ errorLabel(operation.errorCode) }}.</p>
-            <button v-if="running" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="client.cancel()">Cancel operation</button>
+            <button v-if="running" type="button" class="gx-btn gx-btn--tonal" @click="client.cancel()">Cancel operation</button>
           </template>
           <div class="gx-map-manager__picker"><label for="map-region-search">Search regions</label>
             <input id="map-region-search" class="gx-field" type="search" v-model="search" placeholder="Country or US state"></div>
@@ -334,15 +334,15 @@ export const MapOperationsPanel = {
               <div v-for="region in regions" :key="region.token" class="gx-map-manager__region">
                 <div><strong>{{ region.name }}</strong><small>{{ region.token }} · {{ region.groups }} groups</small>
                   <small v-if="!region.available">Unavailable: {{ region.unavailable.replaceAll('_', ' ') }}</small></div>
-                <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy || running || !region.available || !operation" @click="reviewRegion(region)">Review…</button>
+                <button type="button" class="gx-btn gx-btn--tonal" :disabled="running || !region.available || !operation" @click="reviewRegion(region)">Review…</button>
               </div>
             </div></template>
         </template>
       </div>
-      <GxDialog v-if="review" labelledby="gx-map-operations-confirm-title" @close="review=null"><h3 id="gx-map-operations-confirm-title">Replace Selected Map?</h3>
+      <GxDialog v-if="review" :inert="busy" labelledby="gx-map-operations-confirm-title" @close="review=null"><h3 id="gx-map-operations-confirm-title">Replace Selected Map?</h3>
           <p><strong>{{ review.region.name }}</strong> covers an approximate rectangle ({{ formatBounds(review.region.bounds) }}), {{ review.region.groups }} groups. This can transfer up to {{ formatBytes(catalog.maxTransferBytes) }} and use up to {{ formatBytes(catalog.maxNewDiskBytes) }} of new disk space. The result is selected for the next map service start.</p>
           <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="review=null">Cancel</button>
-            <button type="button" class="gx-btn" :disabled="busy || running || !operation" @click="confirm">Start download</button></div>
+            <button type="button" class="gx-btn" :disabled="running || !operation" @click="confirm">Start download</button></div>
         </GxDialog>
     </section>`,
 }

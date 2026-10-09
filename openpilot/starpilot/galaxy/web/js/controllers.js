@@ -44,7 +44,10 @@ export class ControllersFeed {
     this.error = ""
   }
 
-  emit() { this.publish({ status: this.status, busy: this.busy, error: this.error }) }
+  emit(replaceDraft = false) {
+    this.publish({ status: this.status, busy: this.busy, error: this.error,
+      ...(replaceDraft && this.status ? { draft: draftFrom(this.status) } : {}) })
+  }
   stop() {
     if (this.active && this.status?.editable && (this.status.learning || this.status.testing)) {
       this.fetcher("./api/controllers/action", { method: "POST", credentials: "same-origin", keepalive: true,
@@ -63,15 +66,22 @@ export class ControllersFeed {
   }
   start() { this.stop(); this.active = true; return this.refresh() }
 
-  async run(payload = null) {
-    if (!this.active || this.request) return null
+  async run(payload = null, replaceDraft = false) {
+    if (!this.active) return null
+    if (this.request) {
+      if (payload === null || this.busy) return null
+      this.request.abort()
+      this.cancelTimer(this.timeout)
+      this.generation++
+    }
     if (this.poll !== null) this.cancelTimer(this.poll)
     this.poll = null
     const generation = this.generation, request = new AbortController()
     this.request = request
-    this.busy = true
+    this.busy = payload !== null || this.status === null
     this.emit()
     this.timeout = this.later(() => request.abort(), 6000)
+    let accepted = false
     let failure = "Controller Buttons are unavailable. Reconnecting automatically…"
     try {
       const response = await this.fetcher(payload === null ? "./api/controllers/status" : "./api/controllers/action", {
@@ -88,6 +98,7 @@ export class ControllersFeed {
       if (!this.active || generation !== this.generation || request.signal.aborted) return null
       if (!validControllersStatus(data)) { failure = "Controller Buttons returned an unsupported status. Try again."; throw new Error() }
       this.status = data
+      accepted = true
       this.error = ""
       return data
     } catch {
@@ -98,12 +109,12 @@ export class ControllersFeed {
         if (this.timeout !== null) this.cancelTimer(this.timeout)
         this.request = this.timeout = null
         this.busy = false
-        this.emit()
+        this.emit(accepted && (replaceDraft || payload?.operation === "save"))
         if (this.active && this.poll === null) this.poll = this.later(() => { this.poll = null; this.refresh() }, 2000)
       }
     }
   }
-  refresh() { return this.run() }
+  refresh(replaceDraft = false) { return this.run(null, replaceDraft) }
   action(payload) { return this.run(payload) }
 }
 
@@ -128,7 +139,8 @@ export const ControllersPage = {
       (this.state.draft.enabled !== this.state.status.enabled ||
        this.state.draft.slots.some((value, index) => value !== this.state.status.slots[index + 3].key)) },
     changed() { return !!this.state.status && !!this.state.draft && this.state.draft.revision !== this.state.status.revision },
-    canEdit() { return !!this.state.status?.editable && !this.state.busy && !this.changed },
+    editable() { return !!this.state.status?.editable && !this.changed },
+    canEdit() { return this.editable && !this.state.busy },
     favorites() { return this.state.status?.slots.slice(0, 3) || [] },
     actions() { return this.state.status?.slots.slice(3) || [] },
   },
@@ -141,15 +153,11 @@ export const ControllersPage = {
   beforeUnmount() { this._stopUnloadGuard(); document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
   watch: { mode() { this.visibility() } },
   methods: {
-    async reload() {
-      const status = await this.feed.refresh()
-      if (status) this.state.draft = draftFrom(status)
-    },
+    reload() { return this.feed.refresh(true) },
     async save() {
       if (!this.canEdit || !this.dirty) return
-      const status = await this.feed.action({ operation: "save", revision: this.state.draft.revision,
+      return this.feed.action({ operation: "save", revision: this.state.draft.revision,
         enabled: this.state.draft.enabled, slots: this.state.draft.slots.map((value) => value || null) })
-      if (status) this.state.draft = draftFrom(status)
     },
     learn(slot) {
       if (this.canEdit && !this.dirty && integer(slot, 12)) return this.feed.action({ operation: "learn", revision: this.state.status.revision, slot })
@@ -162,7 +170,7 @@ export const ControllersPage = {
     },
   },
   template: `
-    <section class="gx-card gx-panel gx-stack gx-controllers" aria-label="Controller Buttons">
+    <section class="gx-card gx-panel gx-stack gx-controllers" aria-label="Controller Buttons" :inert="state.busy" :aria-busy="state.busy || undefined">
       <h3>Controller Buttons</h3>
       <p>Assign physical USB or Bluetooth buttons to Quick Select and available driving screen actions. Turn off the vehicle to edit.</p>
       <p v-if="mode !== 'local'" class="gx-note">Connect to local Galaxy to manage controller buttons.</p>
@@ -174,32 +182,32 @@ export const ControllersPage = {
           <GxNotice v-if="!state.status.editable" tone="warn">Turn off the vehicle to change controller buttons.</GxNotice>
           <GxNotice v-if="changed" tone="warn">Controller settings changed. Reload before saving.</GxNotice>
           <p v-else-if="dirty" class="gx-note">Save these changes before learning or removing buttons.</p>
-          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="state.busy" @click="reload">Reload</button>
-            <button class="gx-btn" type="button" :disabled="!canEdit || !dirty" @click="save">Save Controller Settings</button></div>
+          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="reload">Reload</button>
+            <button class="gx-btn" type="button" :disabled="!editable || !dirty" @click="save">Save Controller Settings</button></div>
           <div class="gx-controllers__switch-row"><span class="gx-row__label">Enable controller buttons</span>
-            <label class="gx-switch"><input type="checkbox" aria-label="Enable controller buttons" v-model="state.draft.enabled" :disabled="!canEdit"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
+            <label class="gx-switch"><input type="checkbox" aria-label="Enable controller buttons" v-model="state.draft.enabled" :disabled="!editable"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
           <h4>Attached Controllers</h4>
           <p v-if="!state.status.devices.length" class="gx-note">No controller is attached.</p>
           <div v-for="device in state.status.devices" :key="device.id" class="gx-row gx-controllers__row"><div class="gx-row__info"><span class="gx-row__label">{{ device.name }}</span><span class="gx-row__desc">{{ device.bus === 3 ? 'USB' : 'Bluetooth' }}</span></div></div>
           <h4>Favorite Buttons</h4>
           <div v-for="slot in favorites" :key="slot.index" class="gx-row gx-controllers__row"><div class="gx-row__info"><span class="gx-row__label">{{ slot.label }}</span>
             <span class="gx-row__desc">{{ slot.key ? 'Available when its control is ready' : 'Not assigned' }}</span></div>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>
           <h4>Action Buttons</h4>
           <div v-for="slot in actions" :key="slot.index" class="gx-row gx-controllers__row"><label class="gx-row__info gx-controllers__selector"><span class="gx-row__label">{{ slot.label }}</span>
-              <select class="gx-field" :aria-label="slot.label + ' action'" v-model="state.draft.slots[slot.index - 3]" :disabled="!canEdit">
+              <select class="gx-field" :aria-label="slot.label + ' action'" v-model="state.draft.slots[slot.index - 3]" :disabled="!editable">
                 <option :value="null">No action</option><option v-for="option in state.status.options" :key="option.key" :value="option.key">{{ option.section }} · {{ option.label }}</option>
               </select></label>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || dirty || !!state.status.learning" @click="learn(slot.index)">Learn Button</button></div>
           <p v-if="state.status.learning" role="status">Press a button for {{ state.status.slots[state.status.learning.slot].label }} within {{ Math.ceil(state.status.learning.expiresIn) }} seconds.
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="state.busy" @click="cancel">Cancel Learning</button></p>
-          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit" @click="test">{{ state.status.testing ? 'Stop test' : 'Test buttons (20s)' }}</button></div>
+            <button class="gx-btn gx-btn--tonal" type="button" @click="cancel">Cancel Learning</button></p>
+          <div class="gx-driving__actions gx-actions"><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable" @click="test">{{ state.status.testing ? 'Stop test' : 'Test buttons (20s)' }}</button></div>
           <p v-if="state.status.testing" class="gx-note">Button test shows input without running its action.</p>
           <GxNotice v-if="state.status.lastPress" tone="info">{{ state.status.lastPress.message }}</GxNotice>
           <h4>Learned Buttons</h4><p v-if="!state.status.bindings.length" class="gx-note">No buttons learned yet.</p>
           <div v-for="binding in state.status.bindings" :key="binding.deviceId + ':' + binding.code" class="gx-row gx-controllers__row">
             <div class="gx-row__info"><span class="gx-row__label">{{ binding.name }}</span><span class="gx-row__desc">Button {{ binding.code }} · {{ state.status.slots[binding.slot].label }}</span></div>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!canEdit || dirty" @click="remove(binding)">Remove</button></div>
+            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || dirty" @click="remove(binding)">Remove</button></div>
         </template>
       </template>
     </section>`,

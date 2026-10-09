@@ -72,7 +72,7 @@ export const DevicePicker = {
     },
   },
   template: `
-    <div v-if="visible" class="gx-nav-section">
+    <div v-if="visible" class="gx-nav-section" :inert="saving" :aria-busy="saving || undefined">
       <div class="gx-nav-section__title">Commas</div>
       <div v-for="(device, index) in devices" :key="device.slug" class="gx-device-picker__row">
         <button type="button" class="gx-nav-item gx-grow" :class="{active:device.slug === activeSlug}" @click="select(device)">
@@ -84,7 +84,7 @@ export const DevicePicker = {
       <form v-if="editing" @submit.prevent="save" class="gx-device-picker__form">
         <label for="gx-device-name">Rename comma</label>
         <input id="gx-device-name" class="gx-field" v-model="draft" maxlength="40" autocomplete="off" />
-        <div class="gx-actions gx-tags"><button type="submit" class="gx-btn" :disabled="saving">Save</button><button type="button" class="gx-btn gx-btn--tonal" @click="editing=''">Cancel</button></div>
+        <div class="gx-actions gx-tags"><button type="submit" class="gx-btn">Save</button><button type="button" class="gx-btn gx-btn--tonal" @click="editing=''">Cancel</button></div>
         <p v-if="error" class="gx-note gx-note--danger">{{ error }}</p>
       </form>
     </div>

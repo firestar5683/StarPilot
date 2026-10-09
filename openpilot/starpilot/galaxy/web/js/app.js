@@ -1,4 +1,5 @@
 import { rememberInstallPrompt } from "./install-app.js"
+import { toggleHaptic } from "./haptics.js"
 import { GxState } from "./state.js"
 import { BottomNav, NAV, primaryTab } from "./bottom-nav.js"
 import { GalaxyLoading } from "./loading-screen.js"
@@ -100,6 +101,7 @@ createApp({
     this.routeDirection = route.direction < 0 || primaryTab(path) < primaryTab(previous) ? -1 : 1
   } },
   methods: {
+    toggleHaptic,
     setPageActive(element, active) { element.inert = !active; element.setAttribute("aria-hidden", String(!active)) },
     reloadPage() { location.reload() },
     go(path) { navigate(path, () => { state.drawerOpen = false; state.searchPage = "" }) },
@@ -159,7 +161,7 @@ createApp({
     document.removeEventListener("visibilitychange", this.visibility)
   },
   template: `
-    <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}">
+    <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}" @change.capture="toggleHaptic">
       <header class="gx-appbar">
         <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" aria-label="Back" @click="routeBack"><i class="bi bi-arrow-left"></i></button>
         <div class="gx-appbar__pill">

@@ -2,6 +2,7 @@ import { markRaw } from "../vendor/vue/vue.esm-browser.js"
 import { GxNotice } from "./notice.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { RasterMap } from "./navigation-map.js"
+import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 // Road-line maps for the Android Auto overlay: areas saved on the comma, save-as-you-drive, and the downloader's progress.
 const object = (value) => !!value && typeof value === "object" && !Array.isArray(value)
@@ -117,7 +118,7 @@ export class OfflineRoadsClient {
 
 export const OfflineRoadMapsPanel = {
   name: "OfflineRoadMapsPanel",
-  components: { GxNotice },
+  components: { GxNotice, GalaxySettingRow },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     hasKey: { type: Boolean, default: false }, metric: { type: Boolean, default: true } },
   data: () => ({ data: null, busy: false, error: "", point: null, name: "", radius: null, confirmDelete: null, notice: "" }),
@@ -170,10 +171,11 @@ export const OfflineRoadMapsPanel = {
     usage() { const usage = this.data?.usage || {}; return { tiles: usage.tiles || 0, free: usage.freeTiles || 200000 } },
     // This counter covers this comma, not other uses of the same key.
     freeTilesLeft() { return Math.max(0, Math.floor(this.usage.free * 0.99) - this.usage.tiles) },
-    canSave() { return this.mode === "local" && !this.busy && !!this.point && !!this.data && this.data.areas.length < this.constants.maxAreas },
+    saveAvailable() { return this.mode === "local" && !!this.point && !!this.data && this.data.areas.length < this.constants.maxAreas },
+    canSave() { return this.saveAvailable && !this.busy },
   },
   methods: {
-    formatBytes, areaLabel, radiusLabel,
+    formatBytes, areaLabel, radiusLabel, switchRow,
     ensureMap() {
       if (this.map || !this.hasKey || !this.$refs.canvas) return
       this.map = markRaw(new RasterMap(this.$refs.canvas, () => {}))
@@ -219,10 +221,10 @@ export const OfflineRoadMapsPanel = {
       this.confirmDelete = null
       await this.client.action({ action: "deleteArea", id: area.id })
     },
-    setSaveDriven(value) { this.client.action({ action: "settings", patch: { saveDriven: value } }) },
+    setSaveDriven(value) { return this.client.action({ action: "settings", patch: { saveDriven: value } }) },
   },
   template: `
-    <section class="gx-card gx-offline-roads" aria-label="Offline road maps">
+    <section class="gx-card gx-offline-roads" aria-label="Offline road maps" :inert="busy" :aria-busy="busy || undefined">
       <div class="gx-section__header"><i class="bi bi-signpost-split"></i><span class="gx-section__title">Map Overlay Roads</span></div>
       <p class="gx-note">Road lines for the Android Auto map overlay. Saved areas stay on your comma, so the overlay keeps drawing roads with no signal. Downloads happen on Wi-Fi.</p>
       <p v-if="mode !== 'local'" class="gx-note">Connect to your comma to manage offline road maps.</p>
@@ -240,8 +242,8 @@ export const OfflineRoadMapsPanel = {
               <i v-for="[label, value, color] in storage.parts" :key="label" :style="{ width: (storage.cap ? Math.max(value ? 1.5 : 0, value / storage.cap * 100) : 0) + '%', background: color }"></i></div>
             <small><span v-for="[label, value, color] in storage.parts" :key="label" class="gx-offline-roads__legend"><b :style="{ background: color }"></b>{{ label }} {{ formatBytes(value) }}</span></small></div>
         </div>
-        <div class="gx-row"><span>Save roads as you drive<small class="gx-note">Keeps the roads around everywhere you drive, so familiar places work offline without planning ahead.</small></span>
-          <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Save roads as you drive" :checked="data?.settings.saveDriven" :disabled="!data || busy" @change="setSaveDriven($event.target.checked)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
+        <GalaxySettingRow :row="switchRow('Save roads as you drive', data?.settings.saveDriven, 'Keeps the roads around everywhere you drive, so familiar places work offline without planning ahead.')"
+          :index="0" :busy="busy" :disabled="!data" :save-value="(index, value) => setSaveDriven(value === 'On')" />
         <div class="gx-offline-roads__picker">
           <div v-if="hasKey" class="gx-offline-roads__map"><canvas ref="canvas" tabindex="0" aria-label="Map. Tap or press Enter to center a new offline area; drag or use arrow keys to pan."></canvas>
             <div class="gx-navigation-map__controls"><button class="gx-btn" type="button" @click="zoom(1)" aria-label="Zoom in">+</button>
@@ -257,7 +259,7 @@ export const OfflineRoadMapsPanel = {
               <p class="gx-note" role="status">≈ {{ estimate.tiles.toLocaleString() }} tiles · {{ formatBytes(estimate.downloadBytes) }} to download · {{ formatBytes(estimate.storedBytes) }} on the comma</p>
               <p v-if="estimate.tiles > freeTilesLeft" class="gx-note">Only {{ freeTilesLeft.toLocaleString() }} tiles are left in this comma's allowance this month. The area resumes after the 1st.</p>
               <div class="gx-settings__controls"><button type="button" class="gx-btn gx-btn--tonal" @click="point = null">Cancel</button>
-                <button type="button" class="gx-btn" :disabled="!canSave" @click="save">Save area</button></div>
+                <button type="button" class="gx-btn" :disabled="!saveAvailable" @click="save">Save area</button></div>
             </template>
             <p v-if="notice" class="gx-note" role="status">{{ notice }}</p>
           </div>
@@ -268,8 +270,8 @@ export const OfflineRoadMapsPanel = {
               <div v-if="area.progress && area.progress.state !== 'complete'" class="gx-offline-roads__bar"><i :style="{ width: (area.progress.total ? area.progress.done / area.progress.total * 100 : 0) + '%', background: '#9d72ff' }"></i></div></div>
             <div class="gx-navigation__actions">
               <button type="button" class="gx-btn gx-btn--tonal" @click="focus(area, area.radiusKm)">Show</button>
-              <button v-if="confirmDelete !== area.id" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="confirmDelete = area.id">Delete</button>
-              <button v-else type="button" class="gx-btn" :disabled="busy" @click="remove(area)">Delete {{ area.name }}?</button>
+              <button v-if="confirmDelete !== area.id" type="button" class="gx-btn gx-btn--tonal" @click="confirmDelete = area.id">Delete</button>
+              <button v-else type="button" class="gx-btn" @click="remove(area)">Delete {{ area.name }}?</button>
             </div>
           </li>
         </ul>

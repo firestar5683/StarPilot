@@ -182,7 +182,7 @@ export const VehicleControlsPage = {
   beforeUnmount() { this.feed.stop() },
   methods: { choose(platform) { this.feed.preview(platform) } },
   template: `
-    <section class="gx-vehicle" aria-label="Vehicle Controls">
+    <section class="gx-vehicle" aria-label="Vehicle Controls" :inert="state.busy" :aria-busy="state.busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>Vehicle Selection</h2>
         <p>Auto detects your car. A manual choice is saved for the next start; it does not change the car reported now.</p></div></header>
       <GxState v-if="mode !== 'local'">Local vehicle selection is unavailable in preview.</GxState>
@@ -197,7 +197,7 @@ export const VehicleControlsPage = {
               <p>This is a cached report, not current vehicle confirmation.</p></div></div>
           <p v-if="!state.data.parked" class="gx-note">Changes require fresh parked vehicle evidence.</p>
           <div class="gx-vehicle__actions gx-actions">
-            <button type="button" class="gx-btn" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(null)">Choose Auto detection</button></div>
+            <button type="button" class="gx-btn" :disabled="!state.data.parked || !state.data.readable" @click="choose(null)">Choose Auto detection</button></div>
           <template v-if="state.data.valid">
             <h3>Choose a Vehicle</h3>
             <div class="gx-vehicle__filters gx-actions"><GalaxySelect v-model="state.make" class="gx-field gx-field--full" aria-label="Vehicle make">
@@ -206,7 +206,7 @@ export const VehicleControlsPage = {
             <p v-if="!state.make" class="gx-note">Choose a make to see its models.</p>
             <p v-else-if="!models.length" class="gx-note">No models match this search.</p>
             <div v-else class="gx-vehicle__models"><button v-for="item in models" :key="item.platform" type="button" class="gx-btn gx-btn--tonal"
-                :aria-pressed="state.data.selected === item.platform" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(item.platform)">
+                :aria-pressed="state.data.selected === item.platform" :disabled="!state.data.parked || !state.data.readable" @click="choose(item.platform)">
                 <strong>{{ item.label }}</strong><small>{{ item.make }}</small></button></div>
           </template>
         </article>

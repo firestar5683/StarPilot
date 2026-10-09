@@ -26,6 +26,7 @@ export class FavoritesFeed {
     Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer })
     this.poller = new PollTimer({ read: () => this.load(), later, cancel: cancelTimer })
     this.error = ""
+    this.saving = false
     this.active = false; this.generation = 0; this.data = this.request = this.timer = null; this.needsReload = false
   }
   stop() {
@@ -33,11 +34,12 @@ export class FavoritesFeed {
     this.active = false; this.generation++; this.request?.abort()
     if (this.timer !== null) this.cancelTimer(this.timer)
     this.request = this.timer = null
+    this.saving = false
   }
   start() { this.stop(); this.active = true; this.poller.start(); return this.load() }
   load() { return this.run() }
   update(index, patch) {
-    if (!this.data?.editable || this.request || this.needsReload || !Number.isInteger(index) || index < 0 || index > 2 ||
+    if (!this.data?.editable || this.saving || this.needsReload || !Number.isInteger(index) || index < 0 || index > 2 ||
         !patch || Object.keys(patch).some((key) => !["key", "label", "enabled", "show_onroad", "value"].includes(key))) return
     const slots = this.data.slots.map((slot) => ({ ...slot }))
     if (Object.hasOwn(patch, "key")) {
@@ -52,18 +54,26 @@ export class FavoritesFeed {
     return this.run({ revision: this.data.revision, slots })
   }
   async run(body = null) {
-    if (!this.active || this.request) return
+    if (!this.active) return
+    if (this.request) {
+      if (body === null || this.saving) return
+      this.request.abort()
+      this.cancelTimer(this.timer)
+    }
     const request = new AbortController(), generation = ++this.generation, saving = body !== null
     this.request = request
-    if (saving || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
+    this.saving = saving
+    if (saving || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "",
+      ...(saving ? { data: { ...this.data, slots: body.slots } } : {}) })
     const fail = (error) => {
       this.error = error
       this.needsReload ||= saving
-      this.publish({ status: this.data ? "ready" : "unavailable", needsReload: this.needsReload, error })
+      this.publish({ status: this.data ? "ready" : "unavailable", data: this.data, needsReload: this.needsReload, error })
     }
     this.timer = this.later(() => {
       if (!this.active || generation !== this.generation) return
       request.abort(); this.generation++; this.request = this.timer = null
+      this.saving = false
       fail(saving ? "Saving timed out. Reload to check which Quick Select were saved." : "Reading Quick Select timed out. Reload to try again.")
     }, 5000)
     try {
@@ -83,6 +93,7 @@ export class FavoritesFeed {
       if (this.request === request) {
         if (this.timer !== null) this.cancelTimer(this.timer)
         this.request = this.timer = null
+        this.saving = false
       }
     }
   }
@@ -99,7 +110,7 @@ export const FavoritesPage = {
   },
   computed: {
     busy() { return ["loading", "saving"].includes(this.state.status) },
-    disabled() { return !this.state.data?.editable || this.busy || this.state.needsReload },
+    disabled() { return !this.state.data?.editable || this.state.needsReload },
     byKey() { return new Map((this.state.data?.options || []).map((option) => [option.key, option])) },
     groups() { return [...new Set((this.state.data?.options || []).map((option) => option.section || "Controls"))] },
   },
@@ -109,7 +120,6 @@ export const FavoritesPage = {
     select(index, event) { return this.feed.update(index, { key: event.target.value || null }) },
     toggle(index, field, event) {
       const checked = event.target.checked
-      event.target.checked = this.state.data.slots[index][field]
       return this.feed.update(index, { [field]: checked })
     },
     speed(index, event) {
@@ -119,12 +129,11 @@ export const FavoritesPage = {
     },
     label(index, event) {
       const value = event.target.value.trim().slice(0, 32)
-      event.target.value = this.state.data.slots[index].label
       if (value !== this.state.data.slots[index].label) return this.feed.update(index, { label: value })
     },
   },
   template: `
-    <section class="gx-settings gx-favorites" aria-label="Quick Select">
+    <section class="gx-settings gx-favorites" aria-label="Quick Select" :inert="busy" :aria-busy="busy || undefined">
       <div class="gx-settings__header gx-page-header"><div><h2>Quick Select</h2><p>Choose your three driving-screen shortcuts.</p></div>
         </div>
       <div class="gx-favorites__intro">

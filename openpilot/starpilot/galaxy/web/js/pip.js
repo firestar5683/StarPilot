@@ -3,7 +3,7 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { LiveCameraPreview } from "./cameras.js"
-import { SettingsFeed, isPipCropRow } from "./settings.js"
+import { SettingsFeed, isPipCropRow, settingsBusy } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 import { displayPoint, FORMATS, maskDraft, sourcePoint } from "./pip-geometry.js"
 
@@ -59,10 +59,11 @@ export const PipPage = {
   computed: {
     controls() { return (this.state.data?.rows || []).map((row, index) => ({ row, index }))
       .filter(({ row }) => !isPipCropRow(row) && !/camera availability/i.test(row.label)) },
-    canEdit() { return !!this.state.imageName && this.mode === "local" && !!this.state.data?.parked && this.state.data?.editorRow >= 0 &&
-      !!this.state.data.rows[this.state.data.editorRow]?.available && this.state.status === "ready" &&
-      !this.state.pending && !this.state.reviewing && typeof this.state.invert === "boolean" &&
+    busy() { return settingsBusy(this.state) },
+    editable() { return !!this.state.imageName && this.mode === "local" && !!this.state.data?.parked && this.state.data?.editorRow >= 0 &&
+      !!this.state.data.rows[this.state.data.editorRow]?.available && !this.state.error && typeof this.state.invert === "boolean" &&
       FORMATS.some(([w, h]) => w === this.state.width && h === this.state.height) },
+    canEdit() { return this.editable && !this.busy && this.state.status === "ready" },
     cropLimit() {
       const frame = Math.min(this.state.width, this.state.height)
       const centers = [this.state.centerLeft, this.state.centerRight].filter(Boolean)
@@ -169,7 +170,7 @@ export const PipPage = {
     },
   },
   template: `
-    <section class="gx-settings gx-pip" aria-label="Blind Spot Camera and Preview saved settings">
+    <section class="gx-settings gx-pip" aria-label="Blind Spot Camera and Preview saved settings" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>Blind Spot Camera and Preview</h2>
         <p>Shows a close-up of the cabin window as you drive. Whether it appears on your turn signal or when a car is in your blind spot depends on your settings. Choose which window each side covers and how much to zoom in.</p></div>
         <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
@@ -187,18 +188,18 @@ export const PipPage = {
             <p class="gx-note">Drag a circle onto the cabin window you want to watch. Both crops share one size.</p>
             <p class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · 5 seconds…" : state.imageName ? "Snapshot ready" : "Turn off the vehicle to take a snapshot." }}</p>
             <div class="gx-actions">
-              <button v-for="side in SIDES" :key="side.key" type="button" class="gx-btn gx-btn--tonal" :disabled="!canEdit" :aria-pressed="state.activeSide === side.key" :aria-label="side.label" @click="choose(side.key)">{{ side.key === "centerRight" ? "Left" : "Right" }}</button>
-              <button type="button" class="gx-icon-btn" :disabled="!canEdit || !state[state.activeSide]" aria-label="Clear selected camera crop" title="Clear selected crop" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>
-              <button type="button" class="gx-btn" :disabled="!canEdit" aria-label="Save Crop" @click="saveCrop">Save</button>
+              <button v-for="side in SIDES" :key="side.key" type="button" class="gx-btn gx-btn--tonal" :disabled="!editable" :aria-pressed="state.activeSide === side.key" :aria-label="side.label" @click="choose(side.key)">{{ side.key === "centerRight" ? "Left" : "Right" }}</button>
+              <button type="button" class="gx-icon-btn" :disabled="!editable || !state[state.activeSide]" aria-label="Clear selected camera crop" title="Clear selected crop" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>
+              <button type="button" class="gx-btn" :disabled="!editable" aria-label="Save Crop" @click="saveCrop">Save</button>
             </div>
             <canvas ref="canvas" class="gx-vasm__canvas" :aria-label="'Cabin source crop canvas, editing ' + (state.activeSide === 'centerRight' ? 'vehicle left' : 'vehicle right')" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp"></canvas>
             <label class="gx-slider-row"><span class="gx-row__label">Crop size <span class="gx-row__value">{{ state.cropSize }} px</span></span>
-              <input type="range" class="gx-slider" min="20" :max="cropLimit" step="1" :value="state.cropSize" :disabled="!canEdit" aria-label="Camera crop size" @input="resizeCrop(Number($event.target.value))"></label>
+              <input type="range" class="gx-slider" min="20" :max="cropLimit" step="1" :value="state.cropSize" :disabled="!editable" aria-label="Camera crop size" @input="resizeCrop(Number($event.target.value))"></label>
             <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
           </section>
           <section class="gx-card gx-settings__section" aria-label="Saved settings">
             <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.page + ':' + index" :row="row" :index="index"
-              :disabled="!state.data.parked || state.status !== 'ready' || state.reviewing || !!state.pending"
+              :busy="state.status !== 'ready' || state.reviewing || !!state.pending" :disabled="!state.data.parked || !!state.error"
               :save-value="(index, value) => feed.previewValue(index, value)"
               @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
           </section>

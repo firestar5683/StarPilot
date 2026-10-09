@@ -53,6 +53,7 @@ assert.match(note, /far enough/)
 const disabled = { mode: "local", state: { data: { parked: true, editorRow: 1,
   rows: [{}, { available: true }] }, status: "ready", pending: null, reviewing: false,
   invert: null, width: 1344, height: 760 } }
+for (const key of ["busy", "editable"]) Object.defineProperty(disabled, key, { get: () => PipPage.computed[key].call(disabled) })
 assert.equal(PipPage.computed.canEdit.call(disabled), false)
 disabled.state.invert = false
 assert.equal(PipPage.computed.canEdit.call(disabled), false)

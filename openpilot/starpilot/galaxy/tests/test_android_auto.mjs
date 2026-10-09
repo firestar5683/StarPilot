@@ -159,7 +159,8 @@ uploadPage.setup.parked = false
 assert.match(uploadPage.uploadReason, /Park/)
 uploadPage.setup.parked = true
 uploadPage.busy = true
-assert.match(uploadPage.uploadReason, /respond/)
+assert.equal(uploadPage.uploadReason, "", "a request blocks interaction without changing upload eligibility")
+assert.equal(await uploadPage.upload(), false, "the action guard still rejects uploads while busy")
 uploadPage.busy = false
 uploadPage.setup.enabled = false
 uploadPage.setup.installReady = false

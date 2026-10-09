@@ -71,14 +71,14 @@ export const ToggleBackup = {
       finally { this.busy = false }
     },
   },
-  template: `<section class="gx-card gx-panel gx-stack">
+  template: `<section class="gx-card gx-panel gx-stack" :inert="busy" :aria-busy="busy || undefined">
     <h3>Toggle backup</h3><p class="gx-note">Save your editable toggles, onroad layout and colors. Restore compatible settings while parked.</p>
-    <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="exportBackup">Back up toggles</button>
-      <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="$refs.file.click()">Restore toggles</button>
-      <input ref="file" type="file" accept=".json,application/json" class="gx-sr-only" tabindex="-1" aria-label="Choose toggle backup" :disabled="busy" @change="chooseFile"></div>
-    <p v-if="busy" role="status"><span class="gx-spinner" aria-hidden="true"></span> Working…</p>
+    <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="exportBackup">Back up toggles</button>
+      <button type="button" class="gx-btn gx-btn--tonal" @click="$refs.file.click()">Restore toggles</button>
+      <input ref="file" type="file" accept=".json,application/json" class="gx-sr-only" tabindex="-1" aria-label="Choose toggle backup" @change="chooseFile"></div>
+    <p v-if="busy" class="gx-settings__save-status" role="status"><span class="gx-spinner" aria-hidden="true"></span> Working…</p>
     <GxNotice v-if="notice" tone="success">{{ notice }}</GxNotice><GxNotice v-if="error" tone="danger">{{ error }}</GxNotice>
-    <GxDialog v-if="draft" labelledby="gx-toggle-restore-title" @close="draft=null"><h3 id="gx-toggle-restore-title">Restore {{ legacy ? 'layout' : 'toggles' }}?</h3>
+    <GxDialog v-if="draft" :inert="busy" labelledby="gx-toggle-restore-title" @close="draft=null"><h3 id="gx-toggle-restore-title">Restore {{ legacy ? 'layout' : 'toggles' }}?</h3>
       <p>{{ legacy ? 'Replace your saved layout and colors?' : 'Apply the compatible saved toggles, layout and colors from this backup? Unavailable settings will be skipped.' }} Keep the vehicle parked.</p>
       <div class="gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="draft=null">Cancel</button><button type="button" class="gx-btn" @click="restoreBackup">Restore</button></div>
     </GxDialog>
