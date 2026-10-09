@@ -83,6 +83,11 @@ def intent_disarming_fault(cp, events, state, **context):
   """An ASCM Volt ACC fault withdraws axes without erasing main-armed intent."""
   from openpilot.cereal import log
   from openpilot.starpilot.aol.intent import disarming_fault
+  if qualified_gm(cp):
+    availability = (log.OnroadEvent.EventName.commIssue, log.OnroadEvent.EventName.commIssueAvgFreq)
+    # Availability withdraws current axes; only critical faults erase main-following intent.
+    events = [event for event in events if not
+              (event.name in availability and event.softDisable and not event.immediateDisable)]
   if qualified_gm(cp) and camera_acc_pedal_profile(cp) is None and is_volt_ascm_longitudinal(cp):
     events = [event for event in events if event.name != log.OnroadEvent.EventName.accFaulted]
   return disarming_fault(events, state, **context)
