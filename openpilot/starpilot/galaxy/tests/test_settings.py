@@ -47,19 +47,20 @@ class SettingsGatewayTest(unittest.TestCase):
   def page(self, name):
     return self.gateway.page(name, self.session, self.generation)
 
-  def test_global_steering_pause_actual_angle_gateway_save_and_default(self):
+  def test_aol_steering_pause_actual_angle_gateway_save_and_default(self):
     from opendbc.car.car_helpers import interfaces
     from opendbc.car.ford.values import CAR as FORD
     self.context.value = replace(self.context.value,
                                  cp=interfaces[FORD.FORD_ESCAPE_MK4].get_non_essential_params(FORD.FORD_ESCAPE_MK4))
     self.params.put_bool('IsMetric', False, block=True)
-    page = self.page('torque')
+    self.assertFalse(any(row['label'] == 'Pause steering below' for row in self.page('torque')['rows']))
+    page = self.page('aol')
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Pause steering below')
     self.assertEqual(page['rows'][index]['unit'], 'mph')
     intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value=20)
     self.assertTrue(self.gateway.confirm(intent['intent'], self.session, self.generation))
     self.assertEqual(self.params.get('PauseLateralSpeed'), 20.)
-    page = self.page('torque')
+    page = self.page('aol')
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Pause steering below')
     intent = self.gateway.preview(page['view'], index, 0, self.session, self.generation, value=0)
     self.assertTrue(self.gateway.confirm(intent['intent'], self.session, self.generation))
@@ -728,6 +729,13 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertFalse(self.params.get_bool("LaneCentering"))
 
   def test_slc_adoption_long_preset_and_lane_change_use_owner(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR as TOYOTA
+
+    cp = interfaces[TOYOTA.TOYOTA_COROLLA_TSS2].get_non_essential_params(TOYOTA.TOYOTA_COROLLA_TSS2)
+    cp.openpilotLongitudinalControl = True
+    cp.pcmCruise = False
+    self.context.value = replace(self.context.value, cp=cp)
     slc = self.page("slc")
     adopt = next(i for i, row in enumerate(slc["rows"]) if row["label"] == "Adopt fixed offsets")
     intent = self.gateway.preview(slc["view"], adopt, 0, self.session, self.generation)
@@ -748,6 +756,13 @@ class SettingsGatewayTest(unittest.TestCase):
     assert read_saved(self.params, "LaneChangePreferences", 512)[0] is not None
 
   def test_lane_change_close_gap_uses_existing_parked_owner(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.toyota.values import CAR as TOYOTA
+
+    cp = interfaces[TOYOTA.TOYOTA_COROLLA_TSS2].get_non_essential_params(TOYOTA.TOYOTA_COROLLA_TSS2)
+    cp.openpilotLongitudinalControl = True
+    cp.pcmCruise = False
+    self.context.value = replace(self.context.value, cp=cp)
     from openpilot.starpilot.lateral.lane_change_preferences import read_saved as read_lane_change
 
     page = self.page("lane_change")
