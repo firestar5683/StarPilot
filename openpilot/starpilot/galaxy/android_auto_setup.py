@@ -22,8 +22,9 @@ class SetupRejected(RuntimeError):
 class AndroidAutoSetup:
   """Bounded upload and status owner for authenticated Galaxy routes.
 
-  The legacy ``parked`` callback and status field mean setup is admitted by the
-  shared connectivity authority, including effective offroad with ignition on.
+  The legacy ``parked`` callback and status field report the shared connectivity
+  authority for pairing and configuration, including effective offroad with ignition on.
+  Package uploads, imports, and removal require only a valid session, in either road state.
   """
 
   def __init__(self, *, parked: Callable[[], bool], enabled: Callable[[], bool],
@@ -32,25 +33,22 @@ class AndroidAutoSetup:
                bluetooth_enabled: Callable[[], bool] = lambda: False,
                install_ready: Callable[[], bool] = lambda: False,
                service_ready: Callable[[], bool] = lambda: False,
-               set_enabled: Callable[[bool], None] | None = None):
+               set_enabled: Callable[[bool], None] | None = None,
+               enable_bluetooth: Callable[[tuple], None] | None = None):
     self.parked, self.enabled, self.session_valid = parked, enabled, session_valid
     self.bluetooth_enabled = bluetooth_enabled
     self.install_ready, self.service_ready, self.set_enabled_value = install_ready, service_ready, set_enabled
+    self.enable_bluetooth_value = enable_bluetooth
     self.job = import_job or apk_identity.ImportJob()
     self.identity_status = identity_status
     self._upload_lock = threading.Lock()
 
-  def _admit(self, session: tuple) -> None:
+  def _require_session(self, session: tuple) -> None:
     if not session or not self.session_valid(session):
       raise SetupRejected('Galaxy session expired; sign in again')
-    if not self.parked():
-      raise SetupRejected('Use offroad mode or Park before Android Auto setup')
-    if not self.enabled():
-      raise SetupRejected('Enable experimental Android Auto first')
 
   def status(self, session: tuple) -> dict:
-    if not session or not self.session_valid(session):
-      raise SetupRejected('Galaxy session expired; sign in again')
+    self._require_session(session)
     ident = self.identity_status()
     return {
       'enabled': self.enabled(), 'bluetoothEnabled': self.bluetooth_enabled(), 'parked': self.parked(),
@@ -61,29 +59,39 @@ class AndroidAutoSetup:
       'wiredAvailable': False,
       'steps': [
         'The comma acts as the Android Auto phone; the car is the receiver.',
-        'Enable experimental Android Auto and upload your own Android Auto APK, XAPK, or APKM.',
+        'Enable Android Auto and upload your own Android Auto APK, XAPK, or APKM on-road or off-road.',
         'Wait for on-device certificate/key verification; replace it before expiry.',
         'In offroad mode or Park, pair the car over Bluetooth. The car then gives the comma its Wi-Fi access point.',
         'Start wireless projection after the car is selected; wired USB remains unavailable.',
       ],
     }
 
-  def enable(self, session: tuple, value: bool) -> dict:
-    if type(value) is not bool or not session or not self.session_valid(session):
+  def enable(self, session: tuple, value: bool, *, enable_bluetooth: bool = False) -> dict:
+    if type(value) is not bool or type(enable_bluetooth) is not bool or not session or not self.session_valid(session):
       raise SetupRejected('Galaxy session expired; sign in again')
     if self.set_enabled_value is None:
       raise SetupRejected('Android Auto controls are unavailable in this build')
-    if value and (not self.parked() or not self.install_ready()):
-      raise SetupRejected('Use offroad mode or Park and install the Android Auto display and encoder before enabling')
-    if not self.session_valid(session) or value and not self.parked():
+    if value and not self.install_ready():
+      raise SetupRejected('Install the Android Auto display and encoder before enabling')
+    if not self.session_valid(session):
       raise SetupRejected('Galaxy session or setup state changed')
+    if value and not self.bluetooth_enabled():
+      if not enable_bluetooth:
+        raise SetupRejected('Android Auto requires Bluetooth. Enable Bluetooth and turn on Android Auto, or cancel.')
+      if self.enable_bluetooth_value is None:
+        raise SetupRejected('Bluetooth controls are unavailable in this build')
+      self.enable_bluetooth_value(session)
+      self._require_session(session)
+      if not self.bluetooth_enabled():
+        raise SetupRejected('Bluetooth could not be enabled; Android Auto was not turned on')
+    self._require_session(session)
     self.set_enabled_value(value)
     if not self.session_valid(session):
       raise SetupRejected('Galaxy session expired; sign in again')
     return self.status(session)
 
   def upload(self, session: tuple, source: BinaryIO, length: int) -> dict:
-    self._admit(session)
+    self._require_session(session)
     if type(length) is not int or not 0 < length <= apk_identity.MAX_FILE_BYTES:
       raise SetupRejected('Invalid Android Auto package size')
     if not self._upload_lock.acquire(blocking=False):
@@ -100,7 +108,7 @@ class AndroidAutoSetup:
       with os.fdopen(fd, 'wb') as out:
         remaining = length
         while remaining:
-          self._admit(session)
+          self._require_session(session)
           chunk = source.read(min(1024 * 1024, remaining))
           if not chunk:
             raise SetupRejected('Android Auto package upload ended early')
@@ -110,8 +118,8 @@ class AndroidAutoSetup:
           remaining -= len(chunk)
         out.flush()
         os.fsync(out.fileno())
-      self._admit(session)
-      self.job.start(path=path, enabled=lambda: self.enabled() and self.parked() and self.session_valid(session))
+      self._require_session(session)
+      self.job.start(path=path, enabled=lambda: self.session_valid(session))
       started = True
       return self.status(session)
     finally:
@@ -119,11 +127,14 @@ class AndroidAutoSetup:
         path.unlink(missing_ok=True)
       self._upload_lock.release()
 
-  def remove(self, session: tuple) -> dict:
-    self._admit(session)
+  def remove(self, session: tuple, *, disconnect: Callable[[], None] | None = None) -> dict:
+    self._require_session(session)
     with self._upload_lock:
-      self._admit(session)
+      self._require_session(session)
       if self.job.busy():
         raise SetupRejected('An Android Auto import is running')
+      if disconnect is not None:
+        disconnect()
+      self._require_session(session)
       apk_identity.remove_identity()
     return self.status(session)

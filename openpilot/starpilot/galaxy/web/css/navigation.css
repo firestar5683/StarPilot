@@ -24,6 +24,7 @@
 .gx-navigation button:focus-visible,.gx-navigation input:focus-visible {outline:2px solid var(--primary);outline-offset:3px}
 .gx-navigation__section {min-width:0;overflow-wrap:anywhere}
 .gx-navigation__panel>* {margin:0}
+.gx-navigation__panel .gx-alert a {color:var(--primary);text-decoration:underline;text-underline-offset:3px}
 .gx-navigation__suggestions,.gx-navigation__field {background:var(--glass-bg);color:var(--glass-text);border:1px solid var(--glass-border);box-shadow:var(--glass-shadow);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .gx-navigation__panel .gx-btn {border-radius:14px;font-size:.85rem;min-height:44px;padding:8px 16px}
 .gx-navigation__search {display:flex;flex-wrap:nowrap;gap:8px}

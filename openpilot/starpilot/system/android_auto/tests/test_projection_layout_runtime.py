@@ -21,6 +21,26 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayoutRuntime(unittest.TestCase):
+  def test_saved_gamma_trial_reaches_only_projection_camera(self):
+    for enabled in (False, True):
+      with self.subTest(enabled=enabled):
+        helper = boundary.TestProjectionOnroad()
+        native, _ = helper.dependencies()
+        document = default_layout_for_viewport((2880, 1080))
+        document['largeUiGammaTrial'] = enabled
+        view = projection.ProjectionOnroad(dependencies=native, customization=document)
+        try:
+          self.assertIs(view.camera.large_ui_gamma_trial, enabled)
+          # Pacing follows the stream selected during rendering, not before it.
+          view.camera.stream_type = 0
+          def render(*args, **kwargs):
+            view.camera.stream_type = 2
+          view.camera.render_camera_model_layer = render
+          view._camera_layer(None, SimpleNamespace(customization=default_document()))
+          self.assertEqual(view.camera_stream, 2)
+        finally:
+          view.close()
+
   def test_absent_corrupt_wrong_canvas_default_without_rewriting(self):
     with tempfile.TemporaryDirectory() as directory:
       source = ProjectionLayoutSource(Path(directory) / 'layouts/document.json')

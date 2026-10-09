@@ -18,3 +18,10 @@ self.addEventListener("notificationclick", event => {
     return self.clients.openWindow(url)
   })())
 })
+
+// Migrate away from the legacy downloaded app shell without unregistering push.
+self.addEventListener("install", () => self.skipWaiting())
+self.addEventListener("activate", event => event.waitUntil((async () => {
+  await caches.delete("galaxy-offline-v1")
+  await self.clients.claim()
+})()))

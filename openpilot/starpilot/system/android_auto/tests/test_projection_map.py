@@ -26,7 +26,7 @@ class FakeFeed:
   def __init__(self):
     self.reads = []
 
-  def read(self, sm):
+  def read(self, sm, *, navigation_requested=None):
     self.reads.append(sm)
     return "map input"
 

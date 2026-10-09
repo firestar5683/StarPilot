@@ -6,7 +6,7 @@ export function rememberInstallPrompt(event) {
 
 export function installHelp({ secure = window.isSecureContext, agent = navigator.userAgent } = {}) {
   if (/iPhone|iPad|iPod/.test(agent)) return 'Open Galaxy in Safari, tap Share, then Add to Home Screen. Turn on Open as Web App if shown.'
-  if (!secure) return 'For the full web app, open your comma at https://galaxy.firestar.link, then choose Install Galaxy. Your local address can also be saved as a browser shortcut.'
+  if (!secure) return 'Bookmark this local address for hotspot or Wi-Fi access without Internet. For a remotely installed app, use your device-specific https://galaxy.firestar.link link from Install Galaxy / Tunnel; the public link needs Internet.'
   return 'This browser cannot install Galaxy automatically. Open the browser menu and choose Install app or Add to Home Screen. On a Mac in Safari, choose File → Add to Dock.'
 }
 

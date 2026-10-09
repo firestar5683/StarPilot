@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 import gc
+import json
 import math
 import os
 import signal
@@ -23,6 +24,7 @@ from openpilot.starpilot.system.android_auto.projection_geometry import projecti
 
 STARTUP_WAIT_SECONDS = 15.0
 CAMERA_WAIT_STEP = 0.01    # s; keeps demand/stop checks responsive while waiting for the camera
+READBACK_POLL_STEP = 0.002  # s; while a frame is still on the GPU, how often waiting checks whether it is done
 CAMERA_MAX_GAP = 0.1       # s; a shown camera silent this long stops pacing (the encoder rate applies)
 ASYNC_READBACK_FAILURES = 3  # consecutive failed asynchronous readbacks before the session reads back synchronously
 
@@ -61,8 +63,8 @@ class CameraPacer:
     self._socks: dict[str, tuple] = {}   # opened on first use, so an unshown camera costs nothing
     self._last_arrival: dict[str, float] = {}
 
-  def wait(self, stream_type, now: float) -> bool:
-    """True when a new frame of ``stream_type`` is ready, or when that camera is quiet; waits at most one step."""
+  def wait(self, stream_type, now: float, step: float = CAMERA_WAIT_STEP) -> bool:
+    """True when a new frame of ``stream_type`` is ready, or when that camera is quiet; waits at most ``step``."""
     state = self.state_for_stream.get(int(stream_type))
     if state is None:
       return True
@@ -71,7 +73,7 @@ class CameraPacer:
     poller, sock = self._socks[state]
     quiet = now - self._last_arrival.get(state, float("-inf")) >= CAMERA_MAX_GAP
     # A quiet camera must not hold rendering back: just check whether it has resumed.
-    arrived = bool(poller.poll(0 if quiet else int(CAMERA_WAIT_STEP * 1000))) and sock.receive(non_blocking=True) is not None
+    arrived = bool(poller.poll(0 if quiet else max(1, int(step * 1000)))) and sock.receive(non_blocking=True) is not None
     if arrived:
       self._last_arrival[state] = now
     return arrived or quiet
@@ -139,14 +141,15 @@ def wait_for_request(producer: FrameProducer) -> FrameRequest:
   raise TimeoutError("Android Auto did not request current UI frames")
 
 
-def run(frames_path: str, touch_path: str | None = None) -> int:
+def run(frames_path: str, touch_path: str | None = None, control_path: str | None = None) -> int:
   if os.geteuid() == 0:
     raise RuntimeError("Car display must run as the comma user")
   parent = os.getppid()
-  try:
-    os.nice(10)
-  except OSError:
-    pass
+  # SCHED_IDLE placement, set before any thread starts so they all inherit it:
+  # never compete with openpilot's own processes (see placement.py).
+  from openpilot.starpilot.system.android_auto.placement import RendererPlacement
+  placement = RendererPlacement(report=lambda event: print(json.dumps(event), flush=True))
+  placement.start()
 
   os.environ['BIG'] = '1'
   os.environ['STARPILOT_PROJECTION_READ_ONLY'] = '1'
@@ -160,6 +163,7 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
   signal.signal(signal.SIGINT, stop)
   from openpilot.starpilot.system.android_auto.headless_egl import FrameReadback, HeadlessContext
   from openpilot.starpilot.system.android_auto import gpu_nv12
+  from openpilot.starpilot.system.android_auto.projection_control import DEFAULT_CONTROL_SOCKET, NATIVE_FOCUS, ProjectionControlSender
   from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
   from openpilot.starpilot.system.android_auto.touch import TouchReceiver, DEFAULT_TOUCH_SOCKET
   import pyray as rl
@@ -191,6 +195,9 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
     resources.callback(layout.close)
     touch = TouchReceiver(touch_path or DEFAULT_TOUCH_SOCKET)
     resources.callback(touch.close)
+    control = ProjectionControlSender(control_path or DEFAULT_CONTROL_SOCKET)
+    resources.callback(control.close)
+    layout.native_focus = lambda: control.send(NATIVE_FOCUS)
     # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Visible-size targets, GPU NV12 conversion, and async readback limit GPU work and copies.
     # Altering this can degrade video smoothness or introduce lag on Android Auto.
     # Do not change it autonomously; require an explicit user request specifically for this video optimization.
@@ -228,7 +235,7 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
     pipeline = f"{pixel_format_name}, {'async' if readback.asynchronous else 'sync'} readback"
     print(f"car view pipeline: {pipeline}", flush=True)
     from openpilot.starpilot.system.android_auto import identity as identity_store
-    from openpilot.starpilot.system.android_auto.render_profile import RenderSampler, RenderSummary
+    from openpilot.starpilot.system.android_auto.render_profile import RenderPipelineSummary, RenderSampler, RenderSummary
     config = identity_store.load_config()
     sampler = None
     if config["render_profile"]:
@@ -236,8 +243,11 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       sampler.start()
       resources.callback(sampler.close)
     summary = RenderSummary(time.monotonic())
+    pipeline_summary = RenderPipelineSummary(time.monotonic_ns()) if sampler is not None else None
     camera_pacer = CameraPacer()
     in_flight_ns = 0
+    submitted_ns = 0
+    in_flight_camera = None
 
     async_failures = 0
 
@@ -261,6 +271,10 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
           return
         async_failures = 0
         producer.publish(request, pixels, in_flight_ns, pixel_format, advance=False)
+        if pipeline_summary is not None:
+          report = pipeline_summary.published(in_flight_ns, submitted_ns, time.monotonic_ns(), in_flight_camera)
+          if report is not None:
+            sampler.summary = {**(sampler.summary or {}), **report}
       finally:
         readback.release()
 
@@ -273,6 +287,7 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
     gc.freeze()
     while not stopped and os.getppid() == parent:
       now = time.monotonic()
+      placement.maintain(now)  # once a second: pins graphics-driver threads, re-pins after power saving
       pending = producer.pending_request(now)
       if pending is None:
         touch.drain()
@@ -291,18 +306,24 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       # The requested frame rate (the encoder's budget) always applies. Rendering
       # only when it is due also keeps the schedule from running ahead of real time.
       delay = producer.capture_delay(request, captured_ns)
+      # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: While waiting, publish a frame only once the GPU has finished it.
+      # The LOW-priority context queues behind the driving model for ~30 ms; blocking on it here
+      # stacked that wait on top of the next frame's CPU work and skipped camera frames (user-approved, 2026-10-08).
+      # Altering this can degrade video smoothness or introduce lag on Android Auto.
+      # Do not change it autonomously; require an explicit user request specifically for this video optimization.
       if delay > 0:
-        if readback.pending:
+        if readback.pending and readback.ready():
           publish_readback()  # never hold a finished frame back just to pace the next one
         if sampler is not None:
           sampler.rendering = False
-        time.sleep(min(delay, 0.05))
+        time.sleep(min(delay, READBACK_POLL_STEP if readback.pending else 0.05))
         continue
       if layout.camera_stream is not None:
         # Within that budget, draw as soon as the camera on screen has a new frame.
-        if readback.pending:
+        if readback.pending and readback.ready():
           publish_readback()
-        if not camera_pacer.wait(layout.camera_stream, now):
+        step = READBACK_POLL_STEP if readback.pending else CAMERA_WAIT_STEP
+        if not camera_pacer.wait(layout.camera_stream, now, step):
           if sampler is not None:
             sampler.rendering = False
           continue
@@ -322,6 +343,7 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       if readback.pending:
         # Match AAComma: publish after CPU preparation, before queuing another
         # frame's drawing. A busy renderer must not hold video until that draw ends.
+        # A frame still on the GPU when the next camera frame arrived is waited for here.
         publish_readback()
       rl.begin_texture_mode(content)
       try:
@@ -342,11 +364,16 @@ def run(frames_path: str, touch_path: str | None = None) -> int:
       producer.advance(request, captured_ns)
       readback.start(regions)
       in_flight_ns = captured_ns
+      if pipeline_summary is not None:
+        submitted_ns = time.monotonic_ns()
+        camera = layout.camera
+        in_flight_camera = ((int(layout.camera_stream), camera.client.frame_id, camera.client.timestamp_eof)
+                            if layout.camera_stream is not None and camera.frame is not None else None)
       if not readback.asynchronous:
         publish_readback()
       report = summary.frame_done(frame_began, time.monotonic())
       if report is not None and sampler is not None:
-        sampler.summary = report
+        sampler.summary = {**(sampler.summary or {}), **report}
       gui_app._frame += 1
   return 0
 
@@ -355,8 +382,9 @@ def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--frames", required=True)
   parser.add_argument("--touch")
+  parser.add_argument("--control")
   args = parser.parse_args()
-  return run(args.frames, args.touch)
+  return run(args.frames, args.touch, args.control)
 
 
 if __name__ == "__main__":

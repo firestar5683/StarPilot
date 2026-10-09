@@ -266,20 +266,21 @@ export class AndroidAutoFeed {
     return true
   }
 
-  async setEnabled(enabled) {
+  async setEnabled(enabled, enableBluetooth = false) {
     if (!this.active || this.busy || typeof enabled !== "boolean" ||
-      enabled && (!this.setup?.parked || !this.setup?.installReady)) return false
+      typeof enableBluetooth !== "boolean" || enableBluetooth && !enabled || enabled && !this.setup?.installReady) return false
+    const payload = { enabled, ...(enableBluetooth ? { enableBluetooth: true } : {}) }
     const result = await this.request("./api/android-auto/enable", {
       method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled })
-    })
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+    }, enableBluetooth ? 45000 : 8000)
     if (result === null) return false
     await this.refresh()
     return true
   }
 
   async upload(file) {
-    if (!this.active || this.busy || !this.setup?.parked || !this.setup?.enabled ||
+    if (!this.active || this.busy || !this.setup || this.setup.import?.state === "running" ||
       !file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > this.setup.maxUploadBytes) {
       this.error = "Choose an APK, XAPK, or APKM within the shown size limit."
       this.emit()
@@ -302,9 +303,8 @@ export class AndroidAutoFeed {
   }
 
   async removePackage() {
-    if (!this.active || this.busy || !this.setup?.parked || !this.setup?.enabled ||
-      this.setup.import?.state === "running" || this.runtime?.running) return false
-    const result = await this.request("./api/android-auto/identity", { method: "DELETE" })
+    if (!this.active || this.busy || !this.setup || this.setup.import?.state === "running") return false
+    const result = await this.request("./api/android-auto/identity", { method: "DELETE" }, 30000)
     if (result === null) return false
     await this.refresh()
     return true
@@ -408,7 +408,7 @@ export const AndroidAutoPage = {
   data: () => ({
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
-    installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false
+    installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false, enableOpen: false
   }),
   mounted() {
     this.feed = new AndroidAutoFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
@@ -416,7 +416,7 @@ export const AndroidAutoPage = {
     document.addEventListener("visibilitychange", this.visibility)
     if (!document.hidden) this.begin()
   },
-  beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
+  beforeUnmount() { this.finishEnable(false); document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
   watch: {
     mode() { if (!document.hidden) this.begin(); else this.feed?.stop(true) },
     localAccess() { if (!document.hidden) this.begin(); else this.feed?.stop(true) },
@@ -443,7 +443,7 @@ export const AndroidAutoPage = {
     uploadReason() {
       if (!this.packageFile) return "Choose your Android Auto package."
       if (this.packageError) return this.packageError
-      if (!this.setup?.parked) return "Use offroad mode or Park to install Android Auto support."
+      if (!this.setup) return "Load setup status first."
       if (!this.setup.enabled && !this.setup.installReady) return "The Android Auto display and encoder must be installed before uploading."
       if (this.setup.import?.state === "running") return "Wait for the current package check to finish."
       return ""
@@ -461,10 +461,8 @@ export const AndroidAutoPage = {
     problem() { return importProblem(this.setup?.import, this.installFileName) },
     hasPackage() { return !!(this.setup?.identity.installed || this.setup?.identity.expired || this.setup?.identity.error) },
     removeReason() {
-      if (!this.setup?.parked) return "Use offroad mode or Park to delete the package."
-      if (!this.setup.enabled) return "Enable Android Auto to delete the package."
+      if (!this.setup) return "Load setup status first."
       if (this.setup.import?.state === "running") return "Wait for the current package check to finish."
-      if (this.runtime?.running) return "Disconnect from your car before deleting the package."
       return ""
     },
     // Bluetooth pairing and the car's Wi-Fi handoff need no Android Auto package; only projection does.
@@ -472,7 +470,7 @@ export const AndroidAutoPage = {
       if (!this.setup) return "Load setup status first."
       if (!this.setup.installReady) return "This build is missing the Android Auto display or encoder."
       if (this.setup.enabled && !this.setup.serviceReady) return "Waiting for the Android Auto service to start."
-      if (!this.setup.bluetoothEnabled) return "Turn on Bluetooth on the Bluetooth page."
+      if (!this.setup.bluetoothEnabled && this.setup.enabled) return "Turn on Bluetooth on the Bluetooth page."
       if (!this.setup.parked) return "Use offroad mode or Park before starting pairing."
       if (this.runtime?.running) return "Disconnect from your car before pairing."
       return ""
@@ -500,10 +498,33 @@ export const AndroidAutoPage = {
       if (this.setup?.enabled && this.setup.serviceReady && !this.pairing?.active) this.loadReceivers()
     },
     refresh() { return this.feed.refresh() },
-    setEnabled(enabled) { if (!enabled) this.pairWhenReady = false; return this.feed.setEnabled(enabled) },
+    setEnabled(enabled) {
+      if (!enabled) {
+        this.pairWhenReady = false
+        this.finishEnable(false)
+        return this.feed.setEnabled(false)
+      }
+      if (!this.setup?.installReady || this.busy || this.enableOpen) return Promise.resolve(false)
+      if (this.setup.bluetoothEnabled) return this.feed.setEnabled(true)
+      this.enableOpen = true
+      return new Promise((resolve) => { this.enableResolve = resolve })
+    },
+    finishEnable(enabled) {
+      const resolve = this.enableResolve
+      this.enableResolve = null
+      this.enableOpen = false
+      resolve?.(enabled)
+    },
+    cancelEnable() { if (!this.busy) this.finishEnable(false) },
+    async confirmEnable() {
+      if (!this.enableOpen || this.busy) return false
+      const enabled = await this.feed.setEnabled(true, true)
+      this.finishEnable(enabled)
+      return enabled
+    },
     startPairing() {
       if (this.pairingReason || this.runtime?.running) return false
-      if (!this.setup.enabled) return this.feed.setEnabled(true).then((enabled) => {
+      if (!this.setup.enabled) return this.setEnabled(true).then((enabled) => {
         this.pairWhenReady = enabled
         return this.resumePairing()
       })
@@ -532,7 +553,7 @@ export const AndroidAutoPage = {
       if (this.busy || this.uploadReason) return false
       const file = this.packageFile
       Object.assign(this, { installAttempted: true, installBaseline: this.setup.import?.started ?? null, installFileName: file.name || "" })
-      if (!this.setup.enabled && !await this.feed.setEnabled(true)) { this.installAttempted = false; return false }
+      if (!this.setup.enabled && !await this.setEnabled(true)) { this.installAttempted = false; return false }
       return this.feed.upload(file)
     },
     openRemove() { if (!this.removeReason) this.removeOpen = true },
@@ -556,6 +577,7 @@ export const AndroidAutoPage = {
         <h2>Android Auto</h2>
         <p>Show the StarPilot driving view on your car’s screen. Set up support, pair your car, then connect.</p>
       </header>
+      <p class="gx-note gx-note--danger"><strong>Wi-Fi warning:</strong> Android Auto uses the comma’s Wi-Fi to project to your car and disconnects it from your current Wi-Fi network. Without cell service on the comma, Galaxy will be unavailable while Android Auto is connected.</p>
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Android Auto setup… Reconnecting automatically…" }}</GxNotice>
       <ol v-else class="gx-aa__steps">
@@ -572,14 +594,13 @@ export const AndroidAutoPage = {
                 <button v-if="hasPackage" type="button" class="gx-icon-btn gx-recordings__danger" aria-label="Delete Package" :disabled="!!removeReason" :title="removeReason || 'Delete Package'" @click="openRemove"><i class="bi bi-trash3"></i></button>
                 <span v-if="setup.enabled && !setup.serviceReady" class="gx-note" role="status">Starting…</span>
                 <div class="gx-actions gx-aa-status__actions">
-                  <button v-if="!setup.identity.installed" class="gx-btn" :disabled="!setup.parked" @click="openInstall">{{ setup.identity.expired || setup.identity.error ? 'Reinstall' : 'Install support' }}</button>
-                  <button v-else-if="expiry.level === 'soon'" class="gx-btn" :disabled="!setup.parked" @click="openInstall">Update</button>
-                  <button v-if="setup.identity.installed && !setup.enabled" class="gx-btn" :disabled="!setup.parked" @click="setEnabled(true)">Turn On</button>
+                  <button v-if="!setup.identity.installed" class="gx-btn" @click="openInstall">{{ setup.identity.expired || setup.identity.error ? 'Reinstall' : 'Install support' }}</button>
+                  <button v-else-if="expiry.level === 'soon'" class="gx-btn" @click="openInstall">Update</button>
+                  <button v-if="setup.identity.installed && !setup.enabled" class="gx-btn" @click="setEnabled(true)">Turn On</button>
                   <button v-if="setup.enabled" class="gx-btn gx-btn--tonal" @click="setEnabled(false)">Turn Off</button>
                 </div>
               </div>
               <p v-if="setup.import?.state === 'running' && !installOpen" class="gx-note" role="status">Checking your package…</p>
-              <p v-if="!setup.parked" class="gx-note">Use offroad mode or Park to make changes.</p>
             </template>
             <details class="gx-aa-wiki"><summary>Stuck installing? Common problems</summary>
               <ul>
@@ -774,11 +795,11 @@ export const AndroidAutoPage = {
           </ul>
         </details>
         <details class="gx-aa-wiki"><summary>Why are some buttons grayed out?</summary>
-          <p>For safety, installing, pairing, switching cars, and changing settings only work while the car is in <strong>Park</strong> or the comma is in <strong>offroad mode</strong>. Connect and Disconnect work any time.</p>
+          <p>Pairing, switching cars, and changing settings require <strong>Park</strong> or <strong>offroad mode</strong>. Turning Android Auto on or off, package uploads, package deletion, Connect, and Disconnect work on-road and off-road.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Why did this page or my comma’s Wi‑Fi drop when it connected?</summary>
-          <p>Android Auto talks to the car over the car’s own private Wi‑Fi. While it’s connected, the comma uses its Wi‑Fi for the car instead of your home or hotspot Wi‑Fi. If you’re using this page over Wi‑Fi near the car, it may lose its connection for a moment.</p>
-          <p>Your comma’s cell connection isn’t affected, and it goes back to your usual Wi‑Fi once Android Auto ends.</p>
+          <p>Android Auto talks to the car over the car’s own private Wi‑Fi. While it’s connected, the comma uses its Wi‑Fi for the car instead of your home or hotspot Wi‑Fi, disconnecting Galaxy over that network.</p>
+          <p>Without cell service on the comma, Galaxy will be unavailable until Android Auto disconnects and your usual Wi‑Fi reconnects. The comma’s cell connection is not affected by Android Auto.</p>
         </details>
 
         <h4>Setup and upkeep</h4>
@@ -807,9 +828,18 @@ export const AndroidAutoPage = {
         </div>
       </section>
 
+      <GxDialog v-if="enableOpen && setup" :inert="busy" labelledby="gx-aa-enable-title" describedby="gx-aa-enable-body" alert @close="cancelEnable">
+          <div><h3 id="gx-aa-enable-title">Enable Bluetooth?</h3>
+            <p id="gx-aa-enable-body">Android Auto requires Bluetooth for setup and connecting to your car. Bluetooth is currently off. Enable Bluetooth and turn on Android Auto?</p></div>
+          <div class="gx-settings__controls gx-actions">
+            <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="cancelEnable">Cancel</button>
+            <button type="button" class="gx-btn" :disabled="busy" @click="confirmEnable">{{ busy ? 'Enabling…' : 'Enable Bluetooth and Turn On' }}</button>
+          </div>
+      </GxDialog>
+
       <GxDialog v-if="removeOpen && setup" :inert="busy" labelledby="gx-aa-remove-title" describedby="gx-aa-remove-body" alert @close="closeRemove">
           <div><h3 id="gx-aa-remove-title">Remove the package?</h3>
-            <p id="gx-aa-remove-body">Are you sure you want to remove the package? The device will not connect to your car until you re-add one.</p></div>
+            <p id="gx-aa-remove-body">Are you sure you want to remove the package? Android Auto will disconnect first if connected. The device will not connect to your car until you re-add one.</p></div>
           <div class="gx-settings__controls gx-actions">
             <button type="button" class="gx-btn gx-btn--tonal" @click="closeRemove">Cancel</button>
             <button type="button" class="gx-btn gx-btn--danger" @click="removePackage">Confirm</button>
@@ -822,6 +852,7 @@ export const AndroidAutoPage = {
             <i class="bi bi-check-circle-fill gx-aa-ok" aria-hidden="true"></i>
             <h3 id="gx-aa-install-title">You’re all set</h3>
             <p>{{ expiry.label }}</p>
+            <p v-if="!setup.enabled" class="gx-note">Turn on Android Auto in step 1 to connect to your car.</p>
             <ul class="gx-aa-checks"><li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li></ul>
             <button class="gx-btn gx-aa-cta" @click="closeInstall">Done</button>
           </div>

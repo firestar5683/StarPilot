@@ -130,3 +130,48 @@ favoritePage.client.action = async () => null
 await methods.saveAs.call(favoritePage, home, "work")
 assert.equal(favoritePage.favoritePicker, "selected", "failed saves leave the inline choices open")
 console.log("Navigation autocomplete: one session per typing burst, parallel polling, session reset, usage and template passed")
+
+
+// Stars select categories; the separate remove action clears persisted IDs and suggestion markers.
+{
+  const suggestion = { id: 'search-result', searchId: 'search-session', name: 'Cafe' }
+  const saved = { id: 'saved-cafe', name: 'Cafe', latitude: 36, longitude: -115 }
+  const page = { favorites: [saved], savedSearchIds: [suggestion.id],
+    savedSuggestionPlaces: { [suggestion.id]: saved.id }, favoritePicker: 'old-picker' }
+  Object.defineProperty(page, 'savedIds', { get: () => new Set(page.favorites.map(place => place.id)) })
+  for (const name of ['isFavorite', 'favoriteKey', 'openFavorite', 'removeFavorite', 'saveAs']) page[name] = methods[name].bind(page)
+  const removed = [], savedPlaces = []
+  page.client = {
+    action: async (action, value) => { removed.push([action, value]); page.favorites = []; return { favorites: [] } },
+    save: async (place, label) => { savedPlaces.push([place, label]); return { favorites: [] } },
+  }
+  assert.equal(page.isFavorite(suggestion), true)
+  page.openFavorite(suggestion)
+  assert.equal(page.favoritePicker, page.favoriteKey(suggestion))
+  assert.deepEqual(removed, [], 'the star opens categories without removing a favorite')
+  await page.removeFavorite(suggestion)
+  assert.deepEqual(removed, [['removeFavorite', { id: saved.id }]])
+  assert.equal(page.isFavorite(suggestion), false)
+  assert.deepEqual(page.savedSearchIds, [])
+  assert.deepEqual(page.savedSuggestionPlaces, {})
+  assert.equal(page.favoritePicker, null)
+  const other = { ...saved, id: 'another-place', name: 'Park' }
+  page.openFavorite(other)
+  assert.equal(page.favoritePicker, page.favoriteKey(other))
+  await page.saveAs(other, null)
+  assert.deepEqual(savedPlaces, [[other, null]], 'another Other favorite can be saved after removing one')
+
+  page.savedSuggestionPlaces[suggestion.id] = saved.id
+  page.savedSearchIds = [suggestion.id]
+  assert.equal(page.isFavorite(suggestion), false, 'a stale suggestion marker cannot override a refreshed saved list')
+  page.favorites = [saved]
+  page.client.action = async () => null
+  await page.removeFavorite(suggestion)
+  assert.equal(page.isFavorite(suggestion), true, 'failed removal preserves the saved place for retry')
+  assert.equal(page.savedSuggestionPlaces[suggestion.id], saved.id)
+  await page.openFavorite(saved)
+  assert.equal(page.favoritePicker, page.favoriteKey(saved), 'the filled star opens the category picker')
+}
+assert.match(NavigationPage.template, /@click="removeFavorite\(place\)"><i class="bi bi-x-lg"/)
+assert.doesNotMatch(NavigationPage.template, /bi-three-dots/)
+console.log('Favorites: category picker, separate removal, another save, refreshed state and failed-removal retry passed')

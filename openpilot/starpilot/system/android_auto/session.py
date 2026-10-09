@@ -72,6 +72,7 @@ SETUP_STATUS_READY = 2
 FOCUS_PROJECTED = 1
 FOCUS_NATIVE = 2
 FOCUS_PROJECTED_NO_INPUT = 4
+FOCUS_REASON_LAUNCH_NATIVE = 2
 FOCUS_REASON_USER_SELECTION = 4
 SHUTDOWN_REASON_USER_SELECTION = 1
 
@@ -583,6 +584,14 @@ class ProjectionSession(Session):
     assert self.mode is not None
     self.allow_projection = True
     self.send(self.mode.channel, VIDEO_FOCUS_REQUEST, field(2, FOCUS_PROJECTED) + field(3, FOCUS_REASON_USER_SELECTION))
+
+  def request_native(self) -> bool:
+    """Return the display to the head unit without ending this AA connection."""
+    if self.mode is None or not self.focused:
+      return False
+    self.send(self.mode.channel, VIDEO_FOCUS_REQUEST, field(2, FOCUS_NATIVE) + field(3, FOCUS_REASON_LAUNCH_NATIVE))
+    self.event("native_focus_requested")
+    return True
 
   def dispatch(self, channel: int, kind: int, data: bytes, expected: str) -> None:
     # Once video is set up, an early focus grant or ping must not be lost while

@@ -160,6 +160,7 @@ class _Canvas:
     self.monitor: _DriverMonitorArt | None = None
     self.target: rl.RenderTexture | None = None
     self.map = None
+    self.projection_exit = None
     try:
       self.fonts = BitmapFonts(profile, default_font_directory())
       layers = {'background_layer': self._render_background}
@@ -168,6 +169,9 @@ class _Canvas:
       else:
         from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
         self.view = ProjectionOnroad.create_view(OnroadView, self.fonts, viewport=viewport, **layers)
+        from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
+        self.projection_exit = ProjectionExit(rl, self.fonts, FontRole)
+        self.view.projection_exit_layer = self.projection_exit.render
         from openpilot.starpilot.ui.onroad_map import MapOverlay, SampleTileReader
         self.map = MapOverlay(reader=SampleTileReader(), fonts=self.fonts)
         self.view.map_layer = self._render_map

@@ -86,8 +86,9 @@ export const Logs = {
       </template>
       <section v-else-if="path === '/logs/android-auto' && mode === 'local'" class="gx-settings gx-aa-logs" aria-labelledby="gx-aa-logs-title">
         <header class="gx-settings__header gx-page-header"><div><h2 id="gx-aa-logs-title">Android Auto Logs</h2>
-          <p>The last 20 connection sessions, newest first. Download the archive to attach to a bug report.</p></div></header>
+          <p>The last 20 connection sessions, newest first. The archive includes every session, a readable report for each, Android Auto settings, the car view's renderer logs, and a snapshot of the device (Wi-Fi, Bluetooth and kernel logs, build, CPU load). Hardware addresses are masked.</p></div></header>
         <div class="gx-settings__controls gx-actions"><a class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-aa-logs__format">ZIP</span></a><button type="button" class="gx-btn gx-btn--tonal" @click="aaFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
+
         <GxState v-if="aaLogs.status === 'loading'" loading>Loading Android Auto logs…</GxState>
         <GxNotice v-else-if="aaLogs.status === 'unavailable'" tone="danger">{{ aaLogs.error || 'Android Auto logs are unavailable.' }}</GxNotice>
         <GxState v-else-if="aaLogs.status === 'ready' && !aaLogs.sessions.length">No Android Auto sessions have been logged yet.</GxState>

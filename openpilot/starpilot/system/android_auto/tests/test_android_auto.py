@@ -511,6 +511,25 @@ def test_session_end_to_end_with_focus_epochs(identity):
   assert [sid for sid, _ in hu.frames] == [1, 1, 1, 1, 1, 2] and hu.shutdown_received.is_set()
 
 
+def test_session_can_return_to_native_screen_without_disconnect(identity):
+  hu = FakeHeadUnit(identity)
+  session = connect(hu, identity)
+  session.authenticate()
+  session.start("StarPilot", "comma.ai")
+  pump_until(session, lambda: session.focused)
+  assert session.request_native()
+  pump_until(session, lambda: not session.focused)
+  assert hu.focus_requests[-1] == (2, 2)
+  assert not hu.shutdown_received.is_set()
+  hu.set_focus(True)
+  pump_until(session, lambda: session.focused)
+  assert session.needs_keyframe and session.session_id == 2
+  session.shutdown()
+  session.peer.close()
+  hu.thread.join(5)
+  assert hu.error is None, hu.error
+
+
 def test_session_accepts_newer_head_unit_protocol(identity):
   hu = FakeHeadUnit(identity, version=(4, 1))  # 2025 Honda Civic head unit
   session = connect(hu, identity)

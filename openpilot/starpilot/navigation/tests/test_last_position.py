@@ -1,10 +1,15 @@
 import json
 import math
+from concurrent.futures import Future
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 from openpilot.starpilot.navigation.owner import NavigationOwner
 from openpilot.starpilot.navigation.position import LastPositionStore
 from openpilot.starpilot.navigation.runtime import RouteRuntime
+from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
 
 def test_durable_context_survives_owner_restart_loss_toggle_and_boot(tmp_path):
@@ -161,3 +166,47 @@ def test_explicit_missing_bearing_retains_saved_bearing_in_live_response(tmp_pat
   source.map_position = lambda: {'longitude': -87., 'latitude': 43., 'bearing': None, 'validForMs': 1800}
   value = owner.snapshot()['location']
   assert value['latitude'] == 43 and value['validForMs'] == 1800 and value['bearing'] == 90
+
+
+@pytest.mark.parametrize('network', ['online', 'offline', 'unknown'])
+def test_snapshot_network_is_independent_of_saved_location_and_downloads(tmp_path, monkeypatch, network):
+  monkeypatch.setattr(NavigationOwner, '_is_metric', lambda self: True)
+  source = SimpleNamespace(map_position=lambda: None, network_status=lambda: network, snapshot=lambda: None)
+  owner = NavigationOwner(tmp_path, runtime_source=source, transient_root=tmp_path / 'boot')
+  owner.position_store.record({'longitude': -88., 'latitude': 42.})
+  owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
+  result = owner.snapshot()
+  assert result['network'] == network
+  assert result['location']['lastKnown'] and result['location']['validForMs'] == 0
+
+
+def test_online_route_from_saved_location_needs_no_offline_map_downloads(tmp_path, monkeypatch):
+  monkeypatch.setattr(NavigationOwner, '_is_metric', lambda self: True)
+  source = SimpleNamespace(map_position=lambda: None, network_status=lambda: 'online', snapshot=lambda: None)
+  owner = NavigationOwner(tmp_path, runtime_source=source, transient_root=tmp_path / 'boot')
+  owner.position_store.record({'longitude': -88., 'latitude': 42., 'bearing': 90.})
+  settings = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
+  owner.select({'name': 'Library', 'longitude': -87.99, 'latitude': 42.}, settings['revision'], True)
+  route_data = {'distance': 830., 'duration': 120., 'geometry': {'coordinates': [[-88., 42.], [-87.99, 42.]]},
+                'legs': [{'steps': [{'distance': 830., 'duration': 120.,
+                                     'maneuver': {'type': 'depart', 'instruction': 'Head east'}}]}]}
+  session = Mock()
+  session.get.return_value.__enter__ = Mock(return_value=SimpleNamespace(status_code=200, iter_content=lambda _: [
+    json.dumps({'code': 'Ok', 'routes': [route_data]}).encode()]))
+  session.get.return_value.__exit__ = Mock(return_value=False)
+  executor = Mock()
+  def submit(fn, *args):
+    future = Future()
+    future.set_result(fn(*args))
+    return future
+  executor.submit.side_effect = submit
+  runtime = RouteRuntime(owner, engine=MapboxRouteEngine(session), executor=executor)
+  assert runtime.update(10, None, 0)['status'] == 'routing'
+  assert '/-88.0,42.0;-87.99,42.0' in session.get.call_args.args[0]
+  preview = runtime.update(11, None, 0)
+  assert preview['route'] == [{'longitude': -88., 'latitude': 42.}, {'longitude': -87.99, 'latitude': 42.}]
+  assert preview['status'] == 'waitingForLocation' and not preview['controlValid']
+  assert preview['locationMonoTime'] == 0 and preview['instruction'] == {}
+  owner.runtime_source.snapshot = lambda: dict(preview, instruction=None)
+  snapshot = owner.snapshot()
+  assert snapshot['network'] == 'online' and snapshot['location']['lastKnown'] and snapshot['route']

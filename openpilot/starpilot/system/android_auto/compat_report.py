@@ -18,9 +18,11 @@ import os
 import stat
 import re
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from openpilot.starpilot.system.android_auto import identity as identity_store
+from openpilot.starpilot.system.android_auto import system_snapshot
 from openpilot.starpilot.system.android_auto.session import describe_video_config
 
 SESSION_GLOB = "session-*.jsonl"
@@ -118,7 +120,7 @@ def summarize(events: list[dict]) -> dict:
   report: dict = {"started": events[0].get("t", "") if events else "", "events": len(events), "transport": "",
                   "trigger": "", "car": {}, "stages": [], "furthest_stage": "", "outcome": "no session",
                   "errors": [], "ended": [], "wifi": {}, "tls": {}, "video": {}, "usb": {}, "bluetooth": {},
-                  "focus": {"granted": 0, "lost": 0}, "ignored": [], "stats": {}}
+                  "focus": {"granted": 0, "lost": 0}, "ignored": [], "stats": {}, "health": {}}
   ignored: dict[tuple, dict] = {}
   projected = False  # the car acknowledged a frame; focus or the "streaming" stage alone do not show that
   failed_after = None
@@ -185,12 +187,18 @@ def summarize(events: list[dict]) -> dict:
       report["bluetooth"]["rfcomm_channel"] = record.get("channel")
     elif name == "attempt_failed":
       error = {"stage": record.get("stage", ""), "error": record.get("error", "")}
+      if record.get("where"):
+        error["where"] = record["where"][-1]  # the innermost frame: which call actually raised
       if error not in report["errors"]:
         report["errors"].append(error)
       if projected:
         failed_after = error["error"]
     elif name == "session_ended" and record.get("reason"):
       report["ended"].append(record["reason"])
+    elif name in ("stream_stall", "link_check_slow", "link_check_failed", "link_lost"):
+      entry = report["health"].setdefault(name, {"count": 0, "max_ms": 0})
+      entry["count"] += 1
+      entry["max_ms"] = max(entry["max_ms"], int(record.get("ms") or 0))
     elif name == "stats":
       report["stats"] = {key: value for key, value in record.items() if key not in ("t", "event")}
     elif name in IGNORED_EVENTS:
@@ -221,7 +229,7 @@ def render_text(report: dict, name: str = "") -> str:
     lines.append("Car: " + ", ".join(f"{key.replace('_', ' ')}: {value}" for key, value in car.items()))
   lines.append("Stages: " + (" > ".join(report["stages"]) or "none"))
   for error in report["errors"][-5:]:
-    lines.append(f"Error ({error['stage']}): {error['error']}")
+    lines.append(f"Error ({error['stage']}): {error['error']}" + (f"  [at {error['where']}]" if error.get("where") else ""))
   for reason in report["ended"][-3:]:
     lines.append(f"Ended by car: {reason}")
   for title, section in (("Wi-Fi", report["wifi"]), ("Bluetooth", report["bluetooth"]), ("TLS", report["tls"]),
@@ -229,6 +237,9 @@ def render_text(report: dict, name: str = "") -> str:
     if section:
       lines.append(f"{title}: " + "; ".join(f"{key.replace('_', ' ')}: {value}" for key, value in section.items()))
   lines.append(f"Focus: granted {report['focus']['granted']}, lost {report['focus']['lost']}")
+  if report["health"]:
+    lines.append("Stalls: " + "; ".join(f"{key.replace('_', ' ')} x{value['count']} (max {value['max_ms']} ms)"
+                                        for key, value in report["health"].items()))
   if report["stats"]:
     lines.append("Last stats: " + json.dumps(report["stats"], default=str)[:400])
   for entry in report["ignored"][:10]:
@@ -269,9 +280,10 @@ def shareable_config(config: dict) -> dict:
   return shared
 
 
-def bundle(log_dir: Path | None = None, config_path: Path | None = None) -> bytes:
-  """A zip for a bug report: every session log with its report, the settings and the renderer logs; never the identity
-  or a Bluetooth address."""
+def bundle(log_dir: Path | None = None, config_path: Path | None = None, *,
+           snapshot: Callable[[float], dict[str, bytes]] | None = system_snapshot.collect) -> bytes:
+  """A zip for a bug report: every session log with its report, the settings, the renderer logs and a snapshot of the
+  device (system journals, kernel log, build, load) under system/; never the identity or a full hardware address."""
   directory = log_dir or identity_store.LOG_DIR
   logs = session_logs(directory)
   output = io.BytesIO()
@@ -284,16 +296,17 @@ def bundle(log_dir: Path | None = None, config_path: Path | None = None) -> byte
         raise OSError("Android Auto bundle exceeds the size limit")
       archive.writestr(name, data)
 
-    summaries = []
+    summaries, starts = [], []
     for path in logs:
       try:
         data = read_log(path, MAX_LOG_BYTES)
       except FileNotFoundError:
         continue
       report = summarize(events_from_bytes(data))
+      starts.append(report.get("started") or "")
       summaries.append(render_text(report, path.name))
-      add(f"logs/{path.name}", data)
-      add(f"reports/{path.stem}.json", json.dumps(report, indent=2, default=str).encode())
+      add(f"logs/{path.name}", system_snapshot.redact(data))
+      add(f"reports/{path.stem}.json", system_snapshot.redact(json.dumps(report, indent=2, default=str).encode()))
     add("REPORT.txt", ("\n".join(summaries) or "No Android Auto sessions have been logged yet.\n").encode())
     config = identity_store.load_config(config_path)
     add("config.json", json.dumps(shareable_config(config), indent=2, default=str).encode())
@@ -301,4 +314,10 @@ def bundle(log_dir: Path | None = None, config_path: Path | None = None) -> byte
       data = _tail(directory / name, EXTRA_LOG_BYTES)
       if data is not None:
         add(f"logs/{name}", data)
+    if snapshot is not None:
+      # Optional context: whatever does not fit the size budget is left out rather than failing the download.
+      for name, data in snapshot(system_snapshot.window_start(starts)).items():
+        if total + len(data) > MAX_BUNDLE_BYTES:
+          continue
+        add(f"system/{name}", data)
   return output.getvalue()

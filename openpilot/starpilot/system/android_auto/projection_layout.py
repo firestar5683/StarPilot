@@ -19,9 +19,11 @@ DOCUMENT_PATH = DATA_DIR / 'layouts/document.json'
 NAV_CARD, NAV_MAP = 'nav_card', 'nav_map'
 NAV_HOME, NAV_WORK = 'nav_home', 'nav_work'
 FAVORITE_WIDGETS = (NAV_HOME, NAV_WORK)
+CAR_EXIT = 'car_exit'
 FAVORITE_SIZE = (320, 110)
 FAVORITE_ICON_SIZE = 110
-PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *FAVORITE_WIDGETS)
+CAR_EXIT_SIZE = (110, 110)
+PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *FAVORITE_WIDGETS, CAR_EXIT)
 NAV_CARD_SIZE = (560, 195)
 MAP_MIN_SIZE = (280, 200)
 MAP_OPACITY = (15, 100, 70)  # percent: min, max, default
@@ -88,7 +90,12 @@ def layout_metadata_for_viewport(viewport):
                     'note': f'Navigate to your saved {label} favorite. Tap again to end navigation. Set the address in The Galaxy.',
                     'default': {'x': width - 30 - 2 * FAVORITE_SIZE[0] - 15 + index * (FAVORITE_SIZE[0] + 15),
                                 'y': 280, 'enabled': False, 'display': 'words'}}
-  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *FAVORITE_WIDGETS]
+  exit_w, exit_h = CAR_EXIT_SIZE
+  widgets[CAR_EXIT] = {'label': 'Exit to car', 'kind': CAR_EXIT, 'width': exit_w, 'height': exit_h, 'colors': {},
+                       'required': True, 'frontmost': True,
+                       'note': "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
+                       'default': {'x': 30, 'y': height - 30 - exit_h, 'enabled': True}}
+  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *FAVORITE_WIDGETS, CAR_EXIT]
   return profile
 
 
@@ -99,7 +106,7 @@ def default_layout(screen):
 
 def default_layout_for_viewport(viewport):
   metadata = layout_metadata_for_viewport(viewport)
-  return {'version': 1, 'clock24Hour': False, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  return {'version': 1, 'clock24Hour': False, 'largeUiGammaTrial': False, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 
@@ -123,7 +130,7 @@ def validate_layout_for_viewport(value, viewport):
   metadata = layout_metadata_for_viewport(viewport)
   fields = {'version', 'canvas', 'widgets'}
   if type(value) is dict:
-    fields |= {field for field in ('widgetOrder', 'clock24Hour') if field in value}
+    fields |= {field for field in ('widgetOrder', 'clock24Hour', 'largeUiGammaTrial') if field in value}
   if (type(value) is not dict or set(value) != fields or
       type(value['version']) is not int or value['version'] != 1 or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
@@ -134,13 +141,19 @@ def validate_layout_for_viewport(value, viewport):
   if 'clock24Hour' in value and type(value['clock24Hour']) is not bool:
     raise ValueError('Invalid projection clock format')
   result.setdefault('clock24Hour', False)
+  if 'largeUiGammaTrial' in value and type(value['largeUiGammaTrial']) is not bool:
+    raise ValueError('Invalid large UI gamma trial')
+  result.setdefault('largeUiGammaTrial', False)
   for key in set(metadata['widgets']) - set(value['widgets']):
     result['widgets'][key] = dict(metadata['widgets'][key]['default'])
   if 'widgetOrder' in value:
     order = value['widgetOrder']
     if type(order) is list:
       order = [*order, *(key for key in (MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS) if key not in order)]
-    result['widgetOrder'] = validate_widget_order(order, metadata['widgets'])
+    order = validate_widget_order(order, metadata['widgets'])
+    # Older or hand-edited documents may put the escape control underneath
+    # another widget. Preserve their order while restoring this safety layer.
+    result['widgetOrder'] = [key for key in order if key != CAR_EXIT] + [CAR_EXIT]
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
     placement = result['widgets'][key]
@@ -151,6 +164,8 @@ def validate_layout_for_viewport(value, viewport):
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
+    if widget.get('required') is True and placement['enabled'] is not True:
+      raise ValueError('Required projection widget is disabled')
     if key in FAVORITE_WIDGETS and placement['display'] not in ('words', 'icons'):
       raise ValueError('Invalid favorite widget display')
     size = placement.get('size', 192)

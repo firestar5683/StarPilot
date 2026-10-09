@@ -13,7 +13,8 @@ from openpilot.starpilot.system.android_auto.current_car_ui import projected_tou
 from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites
 from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
 from openpilot.starpilot.system.android_auto.projection_layout import (
-  FAVORITE_WIDGETS, default_layout_for_viewport, layout_metadata_for_viewport, projection_customization, validate_layout_for_viewport,
+  CAR_EXIT, FAVORITE_WIDGETS, default_layout_for_viewport, layout_metadata_for_viewport, projection_customization,
+  validate_layout_for_viewport,
 )
 from openpilot.starpilot.system.android_auto.touch import InputConfig, TouchMapper, TouchReceiver, TouchSender
 from openpilot.starpilot.system.android_auto.wire import field
@@ -73,7 +74,7 @@ def test_map_above_home_blocks_touch(favorites):
 
 @pytest.mark.parametrize('ordered', [True, False])
 @pytest.mark.parametrize('display', ['words', 'icons'])
-def test_home_work_start_replace_and_end_navigation(favorites, ordered, display):
+def test_home_work_start_hide_other_and_end_navigation(favorites, ordered, display):
   view = state(ordered=ordered)
   for key in FAVORITE_WIDGETS:
     view.customization['layouts']['large'][key]['display'] = display
@@ -81,14 +82,19 @@ def test_home_work_start_replace_and_end_navigation(favorites, ordered, display)
   doc = favorites.owner.read()
   assert doc['destination']['name'] == 'My home'
   assert favorites.action('nav_home')[0] == 'end'
-  assert favorites.action('nav_work')[0] == 'start'
+  assert favorites.bounds('nav_work', view) is None
   assert doc['recents'][0]['name'] == 'My home'
   tap(favorites, view, 'nav_work')
+  assert favorites.owner.read()['destination']['name'] == 'My home', 'hidden buttons cannot replace the route'
+  tap(favorites, view, 'nav_home')
+  assert favorites.owner.read()['destination'] is None
+  tap(favorites, view, 'nav_work')
   assert favorites.owner.read()['destination']['name'] == 'My work'
-  assert favorites.action('nav_home')[0] == 'start'
+  assert favorites.bounds('nav_home', view) is None
   tap(favorites, view, 'nav_work')
   assert favorites.owner.read()['destination'] is None
   assert favorites.action('nav_work')[0] == 'start'
+  assert favorites.bounds('nav_home', view) is not None
 
 
 @pytest.mark.parametrize('change', ['drag', 'cancel', 'offroad', 'drive', 'alert', 'remove', 'relabeled', 'external_route'])
@@ -139,8 +145,12 @@ def test_overlap_uses_saved_order_and_removed_widget_cannot_intercept(favorites)
   order.remove('nav_home')
   order.append('nav_home')
   tap(favorites, view, 'nav_home')
+  assert favorites.owner.read()['destination'] is None, 'the active work button is the only overlapping touch target'
+  placements['nav_work']['enabled'] = False
+  tap(favorites, view, 'nav_home')
   assert favorites.owner.read()['destination']['name'] == 'My home'
   placements['nav_home']['enabled'] = False
+  placements['nav_work']['enabled'] = True
   tap(favorites, view, 'nav_work')
   assert favorites.owner.read()['destination']['name'] == 'My work'
 
@@ -166,7 +176,7 @@ def test_old_layout_migrates_favorites_without_enabling_or_reordering_existing_w
     layout['widgetOrder'].remove(key)
   original = copy.deepcopy(layout)
   migrated = validate_layout_for_viewport(layout, VIEWPORT)
-  assert migrated['widgetOrder'] == [*original['widgetOrder'], *FAVORITE_WIDGETS]
+  assert migrated['widgetOrder'] == [*(key for key in original['widgetOrder'] if key != CAR_EXIT), *FAVORITE_WIDGETS, CAR_EXIT]
   assert all(not migrated['widgets'][key]['enabled'] for key in FAVORITE_WIDGETS)
   assert {key: placed for key, placed in migrated['widgets'].items() if key not in FAVORITE_WIDGETS} == original['widgets']
   assert layout == original
@@ -212,11 +222,16 @@ def test_current_renderer_enables_touch_forwarding_on_custom_socket():
   process.poll.return_value = 0
   with patch('openpilot.starpilot.system.android_auto.view.subprocess.Popen', return_value=process) as popen, \
        patch.object(ViewSource, '_consumer', return_value=Mock()), \
-       patch('openpilot.starpilot.system.android_auto.view.TouchSender') as sender:
-    view = ViewSource('car', FrameRequest(1280, 720, 0, 240, 33333), Mock(), touch_path='/tmp/test-aa-touch')
-    assert popen.call_args.args[0][-2:] == ['--touch', '/tmp/test-aa-touch']
+       patch('openpilot.starpilot.system.android_auto.view.TouchSender') as sender, \
+       patch('openpilot.starpilot.system.android_auto.view.ProjectionControlReceiver') as control:
+    view = ViewSource('car', FrameRequest(1280, 720, 0, 240, 33333), Mock(), touch_path='/tmp/test-aa-touch',
+                      control_path='/tmp/test-aa-control')
+    assert popen.call_args.args[0][-4:] == ['--touch', '/tmp/test-aa-touch', '--control', '/tmp/test-aa-control']
     event = TouchEvent('down', .2, .3)
     view.send_touches([event])
     sender.return_value.send.assert_called_once_with([event])
+    control.return_value.drain.return_value = ['native_focus']
+    assert view.drain_controls() == ['native_focus']
     view.close()
     sender.return_value.close.assert_called_once()
+    control.return_value.close.assert_called_once()

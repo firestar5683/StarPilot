@@ -1,8 +1,8 @@
 """Driving health requirements for manager-owned services."""
 
-# Projection is optional even when the user has requested the service to run.
-# Its lifecycle remains visible in managerState and Android Auto's own status.
-ANCILLARY_PROCESSES = frozenset({'android_autod'})
+# Projection and local phone access are optional even when requested.
+# Their lifecycles remain visible in managerState and their own status.
+ANCILLARY_PROCESSES = frozenset({'android_autod', 'galaxy_hotspot'})
 
 
 def driving_process_failures(processes) -> set[str]:

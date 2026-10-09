@@ -112,3 +112,14 @@ def test_twenty_hz_camera_inside_a_thirty_fps_budget_draws_every_camera_frame_on
   assert len(drawn) == frames              # and nothing drawn in between
   gaps = [b - a for a, b in zip(drawn, drawn[1:], strict=False)]
   assert min(gaps) >= request.interval_us / 1e6 * 0.75 - 1e-9  # never faster than the encoder budget
+
+
+def test_shorter_step_while_a_frame_is_still_on_the_gpu():
+  pacer, socks = make_pacer()
+  pacer.wait(STREAMS.VISION_STREAM_NARROW_ROAD, 10.0)
+  sock = socks["narrowRoadCameraState"]
+  sock.arrivals = [True, False, False]
+  pacer.wait(STREAMS.VISION_STREAM_NARROW_ROAD, 10.0)
+  pacer.wait(STREAMS.VISION_STREAM_NARROW_ROAD, 10.01, current_car_ui.READBACK_POLL_STEP)
+  pacer.wait(STREAMS.VISION_STREAM_NARROW_ROAD, 10.02)
+  assert sock.timeouts[-2:] == [int(current_car_ui.READBACK_POLL_STEP * 1000), STEP_MS]

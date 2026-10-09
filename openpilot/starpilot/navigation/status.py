@@ -14,7 +14,7 @@ def boot_time_ns():
 class NavigationStatusSource:
   def __init__(self, *, mono_clock=time.monotonic_ns, boot_clock=boot_time_ns):
     from openpilot.cereal import messaging
-    self.sm = messaging.SubMaster(['starpilotNavigation', *GPS_SOURCES])
+    self.sm = messaging.SubMaster(['starpilotNavigation', *GPS_SOURCES, 'deviceState'])
     self.mono_clock, self.boot_clock = mono_clock, boot_clock
     self.gps_after_mono_ns = mono_clock()
     self.gps_offset_ns = None
@@ -36,6 +36,20 @@ class NavigationStatusSource:
   def search_position(self) -> tuple[float, float] | None:
     position = self.map_position()
     return (position['longitude'], position['latitude']) if position is not None else None
+
+  def network_status(self) -> str:
+    """The comma's connection, independent of the browser's network or downloaded maps."""
+    if self.sm is None:
+      return 'unknown'
+    self.sm.update(0)
+    try:
+      stamp, now = self.sm.logMonoTime['deviceState'], self.mono_clock()
+      if not self.sm.valid['deviceState'] or not 0 < stamp <= now <= stamp + 5_000_000_000:
+        return 'unknown'
+      kind = str(self.sm['deviceState'].networkType)
+      return 'offline' if kind == 'none' else 'online' if kind in ('wifi', 'ethernet', 'cell2G', 'cell3G', 'cell4G', 'cell5G') else 'unknown'
+    except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
+      return 'unknown'
 
   def map_position(self) -> dict | None:
     """Optional search bias; no last-known or route/control authority."""

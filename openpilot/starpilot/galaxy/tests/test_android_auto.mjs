@@ -72,6 +72,10 @@ assert.match(AndroidAutoPage.template, />Disconnect</)
 assert.match(AndroidAutoPage.template, /Automatic Connection/)
 assert.equal(await feed.setEnabled(false), true)
 assert.deepEqual(JSON.parse(calls.find(([path]) => path.endsWith("/enable"))[1].body), { enabled: false })
+assert.equal(await feed.setEnabled(true, true), true)
+assert.deepEqual(JSON.parse(calls.filter(([path]) => path.endsWith("/enable")).at(-1)[1].body),
+  { enabled: true, enableBluetooth: true })
+assert.equal(await feed.setEnabled(false, true), false, "Bluetooth consent cannot be used to disable Android Auto")
 feed.stop()
 replies["./api/android-auto/pairing/status"] = { pairing: { active: false, receiver: null, prompt: null, approved: false },
   selectedReceiver: null }
@@ -127,6 +131,27 @@ const parked = new AndroidAutoFeed({ publish: () => {}, fetcher: async (path) =>
   later: () => 1, cancelTimer: () => {} })
 await parked.start()
 assert.equal(await parked.action("./api/android-auto/pairing"), false)
+parked.uploader = async (_path, options) => {
+  assert.equal(options.body, packageFile)
+  return response({ ok: true })
+}
+for (const enabled of [true, false]) {
+  parked.setup.enabled = enabled
+  assert.equal(await parked.upload(packageFile), true, "uploads work onroad with Android Auto on or off")
+  parked.setup.enabled = enabled
+  parked.runtime = { running: true }
+  assert.equal(await parked.removePackage(), true, "deletion works onroad with Android Auto on, off, or connected")
+}
+parked.setup.import.state = "running"
+assert.equal(await parked.upload(packageFile), false, "overlapping imports remain blocked")
+assert.equal(await parked.removePackage(), false, "deletion does not race an active import")
+assert.equal(await parked.setEnabled(true), true, "enabling works onroad")
+parked.setup.installReady = false
+assert.equal(await parked.setEnabled(true), false, "enabling still requires the display and encoder")
+assert.equal(await parked.setEnabled(false), true, "disabling works even when hardware is unavailable")
+parked.stop()
+assert.equal(await parked.upload(packageFile), false, "inactive sessions cannot upload")
+assert.equal(await parked.setEnabled(true), false, "inactive sessions cannot enable Android Auto")
 
 function page(selectedSetup = setup) {
   const vm = { ...AndroidAutoPage.data(), setup: structuredClone(selectedSetup) }
@@ -156,7 +181,14 @@ uploadPage.choosePackage({ target: { files: [{ name: "large.apk", size: setup.ma
 assert.match(uploadPage.uploadReason, /maximum size/)
 uploadPage.choosePackage({ target: { files: [{ name: "ok.apk", size: 1 }] } })
 uploadPage.setup.parked = false
-assert.match(uploadPage.uploadReason, /Park/)
+assert.equal(uploadPage.uploadReason, "")
+for (const enabled of [true, false]) {
+  uploadPage.setup.enabled = enabled
+  const beforeUpload = uploadCalls.length
+  assert.equal(await uploadPage.upload(), true)
+  const expected = enabled ? [["upload", uploadPage.packageFile]] : [["enable", true], ["upload", uploadPage.packageFile]]
+  assert.deepEqual(uploadCalls.slice(beforeUpload), expected, "onroad installation can enable Android Auto before uploading")
+}
 uploadPage.setup.parked = true
 uploadPage.busy = true
 assert.equal(uploadPage.uploadReason, "", "a request blocks interaction without changing upload eligibility")
@@ -170,7 +202,65 @@ uploadPage.feed.setEnabled = async () => false
 const beforeDeniedEnable = uploadCalls.length
 assert.equal(await uploadPage.upload(), false)
 assert.equal(uploadCalls.length, beforeDeniedEnable, "failed enable never uploads")
-console.log("Android Auto: selected APK/XAPK/APKM, MIME independence, enable/upload sequencing, explicit blockers and feed boundaries passed")
+console.log("Android Auto: APK/XAPK/APKM uploads in either road state, enable/upload sequencing, explicit blockers and feed boundaries passed")
+assert.match(AndroidAutoPage.template, /<section[^>]*:inert="busy"[^>]*:aria-busy="busy \|\| undefined"/)
+assert.match(AndroidAutoPage.template, /@click="openInstall">Update/)
+assert.match(AndroidAutoPage.template, /Turning Android Auto on or off, package uploads, package deletion, Connect, and Disconnect work on-road and off-road/)
+const removePage = page({ ...setup, enabled: false, parked: false })
+removePage.runtime = { running: true }
+removePage.feed = { async removePackage() { return true } }
+assert.equal(removePage.removeReason, "")
+removePage.openRemove()
+assert.equal(removePage.removeOpen, true)
+assert.equal(await removePage.removePackage(), true)
+assert.equal(removePage.removeOpen, false)
+assert.match(AndroidAutoPage.template, /Android Auto will disconnect first if connected/)
+
+for (const parked of [true, false]) {
+  const consentPage = page({ ...setup, parked, enabled: false, bluetoothEnabled: false })
+  const consentCalls = []
+  consentPage.feed = {
+    async setEnabled(enabled, enableBluetooth) {
+      consentCalls.push(["enable", enabled, enableBluetooth])
+      consentPage.setup.enabled = enabled
+      consentPage.setup.bluetoothEnabled = enableBluetooth
+      return true
+    },
+    async upload(file) { consentCalls.push(["upload", file]); return true },
+  }
+  const canceled = consentPage.setEnabled(true)
+  assert.equal(consentPage.enableOpen, true)
+  assert.deepEqual(consentCalls, [], "opening the modal must not change either setting")
+  consentPage.cancelEnable()
+  assert.equal(await canceled, false)
+  assert.equal(consentPage.enableOpen, false)
+  assert.deepEqual(consentCalls, [])
+  assert.equal(consentPage.setup.enabled, false)
+  assert.equal(consentPage.setup.bluetoothEnabled, false)
+  consentPage.packageFile = { name: "android-auto.apk", size: 123 }
+  const canceledUpload = consentPage.upload()
+  assert.equal(consentPage.enableOpen, true)
+  consentPage.cancelEnable()
+  assert.equal(await canceledUpload, false)
+  assert.deepEqual(consentCalls, [], "canceling Turn On and Install must not upload")
+  const confirmedUpload = consentPage.upload()
+  assert.deepEqual(consentCalls, [])
+  assert.equal(await consentPage.confirmEnable(), true)
+  assert.equal(await confirmedUpload, true)
+  assert.deepEqual(consentCalls, [["enable", true, true], ["upload", consentPage.packageFile]])
+  assert.equal(consentPage.enableOpen, false)
+}
+const failedConsent = page({ ...setup, enabled: false, bluetoothEnabled: false })
+failedConsent.feed = { async setEnabled() { return false }, async upload() { assert.fail("uploaded after failed Bluetooth startup") } }
+failedConsent.packageFile = { name: "android-auto.apk", size: 123 }
+const failedUpload = failedConsent.upload()
+assert.equal(await failedConsent.confirmEnable(), false)
+assert.equal(await failedUpload, false)
+assert.equal(failedConsent.enableOpen, false)
+assert.equal(failedConsent.setup.enabled, false)
+assert.match(AndroidAutoPage.template, /Android Auto requires Bluetooth for setup and connecting to your car/)
+assert.match(AndroidAutoPage.template, /Enable Bluetooth and Turn On/)
+console.log("Android Auto: Bluetooth consent modal, cancellation, onroad enabling, and install continuation passed")
 
 class UploadRequest {
   upload = {}; status = 202; responseText = '{"ok":true}'; headers = {}; sent = null

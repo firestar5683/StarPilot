@@ -113,6 +113,20 @@ class FrameReadback:
       gl.glFlush()  # start the GPU on it now, not at the next implicit flush
     self.pending = True
 
+  def ready(self) -> bool:
+    """Never waits: True when ``finish`` would return at once (always, for synchronous readback).
+
+    The GPU context is LOW priority, so a frame can queue behind the driving
+    model for ~30 ms. Polling this while waiting for the next camera frame
+    publishes the frame as soon as it lands without blocking the next frame's
+    CPU work behind it."""
+    if not self.pending:
+      return False
+    if not self.asynchronous or self._fence is None:
+      return True
+    # A failed wait also counts as ready: finish() then reports it and drops the frame.
+    return self.gl.glClientWaitSync(self._fence, 0, 0) != GL_TIMEOUT_EXPIRED
+
   def gpu_finish(self) -> None:
     """Wait for all queued GPU work (diagnostics only; it defeats asynchronous readback)."""
     self.gl.glFinish()

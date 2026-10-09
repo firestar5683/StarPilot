@@ -138,3 +138,23 @@ def test_failed_async_readback_reports_gl_error_and_falls_back_to_sync(monkeypat
   readback.start([(7, 2, 2, 0)])
   assert not readback.asynchronous and readback.finish() is readback.pixels
   readback.close()
+
+
+def test_ready_polls_the_fence_without_waiting_or_consuming_it(monkeypatch):
+  gl = Mock()
+  gl.glFenceSync.return_value = 1
+  monkeypatch.setattr(headless_egl.C, "CDLL", lambda _name: gl)
+  readback = headless_egl.FrameReadback(16, asynchronous=True)
+  assert not readback.ready(), "nothing in flight"
+  readback.start([(7, 2, 2, 0)])
+  gl.glClientWaitSync.return_value = headless_egl.GL_TIMEOUT_EXPIRED
+  assert not readback.ready(), "still queued on the GPU"
+  gl.glClientWaitSync.assert_called_with(1, 0, 0)
+  gl.glDeleteSync.assert_not_called()
+  gl.glClientWaitSync.return_value = 0x911A  # GL_ALREADY_SIGNALED
+  assert readback.ready() and readback.pending
+  readback.release()
+  readback.fall_back_to_sync()
+  readback.start([(7, 2, 2, 0)])
+  assert readback.ready(), "synchronous readback is done when start returns"
+  readback.close()

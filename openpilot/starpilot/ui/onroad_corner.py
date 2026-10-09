@@ -71,11 +71,15 @@ class CornerHintCache:
     self.key = None
     self.failed_key = None
     self.pending = None
+    self.headless = False  # set by a windowless GL context (Android Auto), where raylib never reports a window
+
+  def _context_ready(self) -> bool:
+    return self.headless or rl.is_window_ready()
 
   def close(self) -> None:
     texture, self.texture = self.texture, None
     self.key = self.failed_key = self.pending = None
-    if texture is not None and rl.is_window_ready():
+    if texture is not None and self._context_ready():
       rl.unload_render_texture(texture)
 
   def get(self, rect):
@@ -89,7 +93,7 @@ class CornerHintCache:
   def prepare(self):
     """Called before drawing begins, never inside a parent render target."""
     key = self.pending
-    if key is None or not rl.is_window_ready():
+    if key is None or not self._context_ready():
       return
     self.close()
     size = max(1, math.ceil(150.0 * max(0.35, min(key[0] / 2160.0, key[1] / 1080.0))))

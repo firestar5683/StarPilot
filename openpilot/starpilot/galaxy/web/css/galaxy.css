@@ -1522,3 +1522,70 @@ progress { max-width: 100%; accent-color: var(--primary); }
 
 /* Descriptions are ordinary page content; notices communicate changing state. */
 .gx-settings-tabs > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+/* Phone setup: an inset grouped list in the iOS Settings manner — one hairline-separated
+   group per card, a setup sequence with status badges, and quiet footnotes. */
+.gx-setup { padding: var(--sp-5); display: grid; gap: var(--sp-3); }
+.gx-setup__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.gx-setup__header h3 { margin: 0; font-size: var(--fs-lg); }
+.gx-setup__header p { margin: var(--sp-1) 0 0; color: var(--on-surface-variant); font-size: var(--fs-sm); line-height: 1.45; max-width: 52ch; }
+.gx-setup__progress { flex: none; color: var(--on-surface-variant); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.gx-setup__footnote { margin: 0; padding-inline: var(--sp-4); color: var(--on-surface-variant); font-size: var(--fs-xs); line-height: 1.5; }
+.gx-setup__ok { color: var(--success); }
+.gx-setup__wide { justify-self: start; }
+.gx-setup__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.gx-setup__links { display: flex; flex-wrap: wrap; gap: var(--sp-5); padding-inline: var(--sp-4); }
+.gx-setup__address { display: block; margin-top: var(--sp-1); font-size: var(--fs-xs); color: var(--on-surface-variant); overflow-wrap: anywhere; user-select: all; }
+
+.gx-group { list-style: none; margin: 0; padding: 0; border-radius: var(--radius-md); background: var(--surface-container-high); overflow: hidden; }
+.gx-group--nested { background: var(--surface-container); }
+.gx-group__row { display: flex; align-items: center; gap: var(--sp-3); min-height: var(--touch-target); padding: var(--sp-3) var(--sp-4); }
+.gx-group__row + .gx-group__row { box-shadow: inset 0 1px 0 var(--outline); }
+.gx-group__row--muted { opacity: .55; }
+.gx-group__text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.gx-group__text > small { color: var(--on-surface-variant); font-size: var(--fs-xs); line-height: 1.4; }
+.gx-group__value { flex: none; display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--on-surface-variant); font-size: var(--fs-sm); }
+
+.gx-step + .gx-step { box-shadow: inset 0 1px 0 var(--outline); }
+.gx-step__row { display: flex; align-items: center; gap: var(--sp-3); padding-right: var(--sp-4); }
+.gx-step__toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-3); min-height: 60px; padding: var(--sp-3) 0 var(--sp-3) var(--sp-4);
+  border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.gx-step__toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: var(--radius-sm); }
+.gx-step__badge { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 1.5px solid var(--glass-border); color: var(--on-surface-variant); font-size: var(--fs-sm); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+.gx-step--current .gx-step__badge { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.gx-step--done .gx-step__badge { background: var(--success); border-color: var(--success); color: var(--background); }
+.gx-step__text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.gx-step__title { font-weight: var(--fw-bold); }
+.gx-step__text > small { color: var(--on-surface-variant); font-size: var(--fs-xs); }
+.gx-step--done:not(.gx-step--open) .gx-step__title { color: var(--on-surface-variant); }
+.gx-step__chevron { flex: none; color: var(--on-surface-variant); transition: transform var(--motion-fast); }
+.gx-step--open .gx-step__chevron { transform: rotate(180deg); }
+/* Body copy lines up with the step title, past the badge. */
+.gx-step__body { display: grid; gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-4) calc(var(--sp-4) + 28px + var(--sp-3)); }
+.gx-step__body > p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; max-width: 60ch; }
+.gx-step__body .gx-setup__footnote { padding-inline: 0; }
+@media (max-width: 480px) { .gx-step__body { padding-left: var(--sp-4); } }
+
+/* The one emphatic moment: the code a person compares with Android's prompt. */
+.gx-setup__code { display: grid; gap: var(--sp-1); justify-items: start; padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-sm); background: var(--primary-container); }
+.gx-setup__code > span, .gx-setup__code > small { color: var(--on-surface-variant); font-size: var(--fs-xs); }
+.gx-setup__code > strong { font-size: 2rem; font-weight: var(--fw-bold); letter-spacing: .18em; font-variant-numeric: tabular-nums; color: var(--on-surface); }
+
+.gx-segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border-radius: var(--radius-sm); background: var(--surface-container-high); }
+.gx-segmented__option { min-height: 36px; padding: 0 var(--sp-2); border: 0; border-radius: calc(var(--radius-sm) - 2px); background: none; color: var(--on-surface-variant);
+  font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); cursor: pointer; white-space: nowrap; }
+.gx-segmented__option[aria-checked="true"] { background: var(--primary); color: var(--on-primary); font-weight: var(--fw-bold); }
+.gx-segmented__option:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (max-width: 420px) { .gx-segmented { grid-auto-flow: row; grid-template-columns: 1fr 1fr; } }
+
+.gx-link-btn { min-height: var(--touch-target); padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-bold); cursor: pointer; }
+.gx-link-btn--danger { color: var(--error); }
+.gx-link-btn:disabled { opacity: .4; cursor: not-allowed; }
+.gx-link-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.gx-setup__help { padding-inline: var(--sp-4); font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.gx-setup__help summary { cursor: pointer; color: var(--primary); font-weight: var(--fw-bold); min-height: var(--touch-target); display: flex; align-items: center; }
+.gx-setup__help ol { padding-left: 1.25rem; line-height: 1.5; }
+.gx-status-dot.checking { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+@media (prefers-reduced-motion: reduce) { .gx-step__chevron { transition: none; } }
+
+.gx-hotspot__controls { border: 0; padding: 0; margin: 0; min-width: 0; }

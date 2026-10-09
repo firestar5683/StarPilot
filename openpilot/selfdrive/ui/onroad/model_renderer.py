@@ -396,9 +396,16 @@ class ModelRenderer(Widget):
       points = line[:max_idx + 1]
       if 0 < max_idx < line.shape[0] - 1:
         p0, p1 = line[max_idx], line[max_idx + 1]
-        interp_point = np.array([max_distance,
-                                 np.interp(max_distance, [p0[0], p1[0]], [p0[1], p1[1]]),
-                                 np.interp(max_distance, [p0[0], p1[0]], [p0[2], p1[2]])], dtype=points.dtype)
+        x0, x1 = float(p0[0]), float(p1[0])
+        if x1 > x0:
+          # Two increasing endpoints: plain arithmetic, the same result as np.interp without its temporaries.
+          t = min(1.0, max(0.0, (float(max_distance) - x0) / (x1 - x0)))
+          interp_y = float(p0[1]) + t * (float(p1[1]) - float(p0[1]))
+          interp_z = float(p0[2]) + t * (float(p1[2]) - float(p0[2]))
+        else:
+          interp_y = np.interp(max_distance, [p0[0], p1[0]], [p0[1], p1[1]])
+          interp_z = np.interp(max_distance, [p0[0], p1[0]], [p0[2], p1[2]])
+        interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
         points = np.concatenate((points, interp_point[None, :]), axis=0)
       prepared.append(points[points[:, 0] >= 0])
 

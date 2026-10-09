@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import time
 
 from openpilot.starpilot.system.android_auto.identity import EXPIRY_WARNING_DAYS
+from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
 from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK_VIEWPORT
 
 CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
@@ -69,6 +70,16 @@ def native_dependencies():
           pass
         raise
 
+    def _update_texture_color_filtering(self):
+      if getattr(self, 'large_ui_gamma_trial', False):
+        return super()._update_texture_color_filtering()
+      # The comma UI fades the engaged road camera to 20% color (30477f3cef). On the car
+      # screen that reads as black and white, so keep the plain look: non-road shader path.
+      self._engaged_val[0] = 0
+      self._road_camera_val[0] = 0
+      rl.set_shader_value(self.shader, self._engaged_loc, self._engaged_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+      rl.set_shader_value(self.shader, self._road_camera_loc, self._road_camera_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+
   return SimpleNamespace(rl=rl, ui_state=ui_state, camera=ProjectionRoadCamera,
                          onroad=OnroadView, monitor=DriverMonitorLayer, fonts=BitmapFonts,
                          font_role=FontRole, profile=Profile, font_directory=default_font_directory,
@@ -82,7 +93,7 @@ def native_dependencies():
 class ProjectionOnroad:
   """Separate renderer with Home/Work navigation; native UIState stays read-only."""
 
-  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None):
+  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
     self.width, self.height = viewport
     self.customization = customization
@@ -90,6 +101,7 @@ class ProjectionOnroad:
     self._certificate_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
+    self.native_focus = native_focus or (lambda: None)
     self.camera_stream = None  # the camera stream the last frame drew, or None
     self.native = dependencies or native_dependencies()
     native = self.native
@@ -100,9 +112,17 @@ class ProjectionOnroad:
       self.fonts = native.fonts(native.profile.LARGE, native.font_directory(), headless_context=True)
       self._resources.callback(self.fonts.close)
       self.camera = native.camera()
+      self.camera.large_ui_gamma_trial = bool((customization or {}).get('largeUiGammaTrial', False))
       self._resources.callback(self._close_camera)
       self.onroad = self.create_view(native.onroad, self.fonts, camera_layer=self._camera_layer, viewport=viewport)
       self._resources.callback(self._close_onroad)
+      self.exit = ProjectionExit(native.rl, self.fonts, native.font_role, lambda: self.native_focus())
+      self.onroad.projection_exit_layer = self.exit.render
+      # The view's render-prepare hooks belong to gui_app's window loop, which this renderer never runs.
+      # Without its texture, the corner hint redraws ~100 primitives every frame.
+      self._corner_cache = getattr(self.onroad, '_corner_cache', None)
+      if self._corner_cache is not None:
+        self._corner_cache.headless = True
       self.monitor = native.monitor(native.profile.LARGE)
       self._monitor_pair = None
       self._monitor_pair_ns = None
@@ -158,8 +178,10 @@ class ProjectionOnroad:
     self.onroad.close()
 
   def _camera_layer(self, rect, state):
-    self.camera_stream = self.camera.stream_type
     self.camera.render_camera_model_layer(rect, road_style=state.customization['roadColors']['large'])
+    # The camera can switch narrow/wide while rendering. Pace the stream actually
+    # drawn, not the previous selection (whose next frame may arrive later).
+    self.camera_stream = self.camera.stream_type
 
   def _driver_monitor_layer(self, rect, state):
     ui = self.native.ui_state
@@ -196,6 +218,8 @@ class ProjectionOnroad:
 
   def prepare(self):
     """Before the frame's render target is bound: offscreen map work happens here."""
+    if self._corner_cache is not None:
+      self._corner_cache.prepare()
     if self.favorites is not None:
       self.favorites.refresh()
       self.onroad.navigation_favorites.document = self.favorites.document
@@ -203,7 +227,10 @@ class ProjectionOnroad:
     placed = self._map_placement()
     if self.map is None or placed is None or not self.native.ui_state.started:
       return
-    self.map.prepare(self.map_feed.read(self.native.ui_state.sm), placed['width'], placed['height'])
+    document = self.favorites.document if self.favorites is not None else None
+    requested = bool(document['destination']) if document is not None else None
+    data = self.map_feed.read(self.native.ui_state.sm, navigation_requested=requested)
+    self.map.prepare(data, placed['width'], placed['height'])
 
   def _map_layer(self, rect, state):
     placed = self._map_placement()
@@ -294,18 +321,25 @@ class ProjectionOnroad:
         self.pip.deactivate()
         self._set_pip_showing(False)
       self._standby()
+      self.exit.draw(self.exit.document_placement(self.customization))
 
   def handle_touches(self, events):
-    if self.favorites is None:
-      return
-    if self._state is None or not self.native.ui_state.started:
-      self.favorites.cancel()
-      return
+    placed = self.exit.document_placement(self.customization)
     for event in events:
-      self.favorites.touch(event.kind, event.x * self.width, event.y * self.height,
-                           self._state, self.native.ui_state.started_frame)
+      x, y = event.x * self.width, event.y * self.height
+      if self.exit.touch(event.kind, x, y, placed):
+        if self.favorites is not None:
+          self.favorites.cancel()
+        continue
+      if self.favorites is None:
+        continue
+      if self._state is None or not self.native.ui_state.started:
+        self.favorites.cancel()
+        continue
+      self.favorites.touch(event.kind, x, y, self._state, self.native.ui_state.started_frame)
 
   def cancel_touch(self):
+    self.exit.cancel()
     if self.favorites is not None:
       self.favorites.cancel()
 

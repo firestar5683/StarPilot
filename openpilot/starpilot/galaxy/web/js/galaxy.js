@@ -2,10 +2,12 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
 import { InstallApp } from "./install-app.js"
+import { LocalAccess } from "./local-access.js"
+import { GalaxyHotspot } from "./hotspot.js"
 
 export const GalaxyPage = {
   name: "GalaxyPage",
-  components: { GxState, GxNotice, InstallApp },
+  components: { GxState, GxNotice, LocalAccess, InstallApp, GalaxyHotspot },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "" }),
@@ -84,8 +86,10 @@ export const GalaxyPage = {
         <h3><i class="bi bi-phone" aria-hidden="true"></i> Install Galaxy</h3><InstallApp />
         <p>Open your paired link and select Install Galaxy. Supported browsers show an installation prompt; otherwise, instructions appear here.</p>
         <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>
-        <p class="gx-note">Galaxy is a Progressive Web App and needs an active connection.</p>
+        <p class="gx-note">The public Galaxy link requires Internet and an active tunnel. For local use without Internet, bookmark the comma's hotspot or Wi-Fi address below.</p>
       </section>
+      <GalaxyHotspot :mode="mode" :unauthorized="unauthorized" />
+      <LocalAccess :mode="mode" :on-unauthorized="unauthorized" />
     </div>
   `,
 }

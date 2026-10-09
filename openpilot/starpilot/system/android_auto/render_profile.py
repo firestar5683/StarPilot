@@ -25,7 +25,7 @@ import os
 import sys
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 INTERVAL = 0.04    # 25 samples a second
@@ -33,6 +33,52 @@ WINDOW = 60.0
 TOP = 25
 TOP_LINES = 15
 SUMMARY_INTERVAL = 5.0
+
+
+class RenderPipelineSummary:
+  """Bounded measurements of published frames; no tracing or per-frame log I/O.
+
+  Camera EOF is an exposure timestamp, not CameraState arrival. Keep it separate
+  from renderer capture-to-publish latency so unlike clocks/stages aren't compared.
+  ID discontinuities count observations, not proof of a renderer-caused drop.
+  """
+
+  def __init__(self, now_ns: int, interval_ns: int = 5_000_000_000):
+    self.started_ns, self.interval_ns = now_ns, interval_ns
+    self.samples = deque(maxlen=240)
+    self.previous = None
+    self.repeats = self.skipped = self.resets = self.frames = 0
+
+  def published(self, captured_ns, submitted_ns, published_ns, camera=None):
+    if not captured_ns <= submitted_ns <= published_ns:
+      return None
+    camera_age = None
+    if camera is None:
+      self.previous = None
+    else:
+      stream, frame_id, eof_ns = camera
+      if 0 < eof_ns <= published_ns:
+        camera_age = published_ns - eof_ns
+      if self.previous is not None and self.previous[0] == stream:
+        delta = frame_id - self.previous[1]
+        self.repeats += delta == 0
+        self.skipped += max(0, delta - 1)
+        self.resets += delta < 0
+      self.previous = (stream, frame_id)
+    self.frames += 1
+    self.samples.append((submitted_ns - captured_ns, published_ns - submitted_ns,
+                         published_ns - captured_ns, camera_age))
+    if published_ns - self.started_ns < self.interval_ns:
+      return None
+    report = {'published_frames': self.frames, 'camera_id_repeats': self.repeats,
+              'camera_id_gaps': self.skipped, 'camera_id_resets': self.resets}
+    for index, name in enumerate(('capture_to_submit', 'submit_to_publish', 'capture_to_publish', 'camera_eof_to_publish')):
+      values = sorted(sample[index] for sample in self.samples if sample[index] is not None)
+      report[name + '_p95_ms'] = round(values[max(0, (95 * len(values) + 99) // 100 - 1)] / 1e6, 2) if values else None
+    self.started_ns = published_ns
+    self.samples.clear()
+    self.repeats = self.skipped = self.resets = self.frames = 0
+    return report
 
 
 class RenderSummary:

@@ -125,12 +125,15 @@ class ShaderState:
     self.color_count_ptr = rl.ffi.new("int[]", [0])
     self.gradient_colors_ptr = rl.ffi.new("float[]", MAX_GRADIENT_COLORS * 4)
     self.gradient_stops_ptr = rl.ffi.new("float[]", MAX_GRADIENT_COLORS)
+    # Last uploaded value per uniform: a program keeps its uniforms, so equal values need no upload.
+    self.uniform_values: dict[str, tuple] = {}
 
   def initialize(self):
     if self.initialized:
       return
 
     self.shader = rl.load_shader_from_memory(VERTEX_SHADER, FRAGMENT_SHADER)
+    self.uniform_values.clear()
 
     # Cache all uniform locations
     for uniform in self.locations.keys():
@@ -148,8 +151,19 @@ class ShaderState:
     if self.shader:
       rl.unload_shader(self.shader)
       self.shader = None
+    self.uniform_values.clear()
 
     self.initialized = False
+
+  def set_uniform(self, name: str, values: tuple, pointer, kind: int, count: int | None = None) -> None:
+    """Upload only a changed value. ``values`` is compared, not the pointer, so in-place color edits still upload."""
+    if self.uniform_values.get(name) == values:
+      return
+    if count is None:
+      rl.set_shader_value(self.shader, self.locations[name], pointer, kind)
+    else:
+      rl.set_shader_value_v(self.shader, self.locations[name], pointer, kind, count)
+    self.uniform_values[name] = values
 
 
 def _configure_shader_color(state: ShaderState, color: Optional[rl.Color],  # noqa: UP045  # rl.Color is a function, so `rl.Color | None` fails
@@ -158,32 +172,32 @@ def _configure_shader_color(state: ShaderState, color: Optional[rl.Color],  # no
 
   use_gradient = 1 if (gradient is not None and len(gradient.colors) >= 1) else 0
   state.use_gradient_ptr[0] = use_gradient
-  rl.set_shader_value(state.shader, state.locations['useGradient'], state.use_gradient_ptr, UNIFORM_INT)
+  state.set_uniform('useGradient', (use_gradient,), state.use_gradient_ptr, UNIFORM_INT)
 
   if use_gradient:
     gradient = cast(Gradient, gradient)
-    state.color_count_ptr[0] = len(gradient.colors)
-    for i in range(len(gradient.colors)):
-      c = gradient.colors[i]
+    colors = tuple((c.r, c.g, c.b, c.a) for c in gradient.colors)
+    state.color_count_ptr[0] = len(colors)
+    for i, (r, g, b, a) in enumerate(colors):
       base = i * 4
-      state.gradient_colors_ptr[base:base + 4] = [c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a / 255.0]
-    rl.set_shader_value_v(state.shader, state.locations['gradientColors'], state.gradient_colors_ptr, UNIFORM_VEC4, len(gradient.colors))
+      state.gradient_colors_ptr[base:base + 4] = [r / 255.0, g / 255.0, b / 255.0, a / 255.0]
+    state.set_uniform('gradientColors', colors, state.gradient_colors_ptr, UNIFORM_VEC4, len(colors))
 
-    for i in range(len(gradient.stops)):
-      s = float(gradient.stops[i])
-      state.gradient_stops_ptr[i] = 0.0 if s < 0.0 else 1.0 if s > 1.0 else s
-    rl.set_shader_value_v(state.shader, state.locations['gradientStops'], state.gradient_stops_ptr, UNIFORM_FLOAT, len(gradient.stops))
-    rl.set_shader_value(state.shader, state.locations['gradientColorCount'], state.color_count_ptr, UNIFORM_INT)
+    stops = tuple(0.0 if s < 0.0 else 1.0 if s > 1.0 else s for s in map(float, gradient.stops))
+    for i, s in enumerate(stops):
+      state.gradient_stops_ptr[i] = s
+    state.set_uniform('gradientStops', stops, state.gradient_stops_ptr, UNIFORM_FLOAT, len(stops))
+    state.set_uniform('gradientColorCount', (len(colors),), state.color_count_ptr, UNIFORM_INT)
 
     # Map normalized start/end to screen pixels
     start_vec = rl.Vector2(origin_rect.x + gradient.start[0] * origin_rect.width, origin_rect.y + gradient.start[1] * origin_rect.height)
     end_vec = rl.Vector2(origin_rect.x + gradient.end[0] * origin_rect.width, origin_rect.y + gradient.end[1] * origin_rect.height)
-    rl.set_shader_value(state.shader, state.locations['gradientStart'], start_vec, UNIFORM_VEC2)
-    rl.set_shader_value(state.shader, state.locations['gradientEnd'], end_vec, UNIFORM_VEC2)
+    state.set_uniform('gradientStart', (start_vec.x, start_vec.y), start_vec, UNIFORM_VEC2)
+    state.set_uniform('gradientEnd', (end_vec.x, end_vec.y), end_vec, UNIFORM_VEC2)
   else:
     color = color or rl.WHITE
     state.fill_color_ptr[0:4] = [color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0]
-    rl.set_shader_value(state.shader, state.locations['fillColor'], state.fill_color_ptr, UNIFORM_VEC4)
+    state.set_uniform('fillColor', (color.r, color.g, color.b, color.a), state.fill_color_ptr, UNIFORM_VEC4)
 
 
 def triangulate(pts: np.ndarray) -> np.ndarray:

@@ -395,6 +395,7 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__inspector { gap: 14px; }
 .gx-layout__switcher { display: flex; gap: 6px; min-width: 0; }
 .gx-layout__switcher .gx-btn { flex: 1; min-width: 0; padding-inline: 10px; }
+.gx-layout__switcher .gx-btn[aria-pressed="true"] { outline: 2px solid #c7aef7; outline-offset: -2px; box-shadow: 0 0 10px #c7aef780; }
 .gx-layout__panel { display: grid; gap: 12px; min-width: 0; }
 .gx-layout__position { border: 0; padding: 0; }
 .gx-layout__widget-picker { display: grid; gap: 8px; }
@@ -484,3 +485,7 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
   .gx-card.gx-layout__leave-dialog { width: calc(100% - 32px); padding: 24px; gap: 24px; }
   .gx-layout__leave-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Keep the pending leave decision visible without changing the bar's size. */
+.gx-layout__savebar--leave { outline: 2px solid #f4cc53; outline-offset: -2px; box-shadow: 0 0 8px #f4cc5360; }
+.gx-layout__savebar--leave > span { color: #f4cc53; }

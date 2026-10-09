@@ -24,7 +24,7 @@ class Clock:
 class Messages:
   def __init__(self, clock):
     self.clock = clock
-    names = ['starpilotNavigation', *GPS_SOURCES]
+    names = ['starpilotNavigation', *GPS_SOURCES, 'deviceState']
     self.seen = dict.fromkeys(names, True)
     self.alive = dict.fromkeys(names, True)
     self.valid = dict.fromkeys(names, True)
@@ -53,7 +53,7 @@ def source():
   messages = Messages(clock)
   with patch('openpilot.cereal.messaging.SubMaster', return_value=messages) as factory:
     result = NavigationStatusSource(mono_clock=lambda: clock.mono, boot_clock=clock.boot)
-  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState']
+  assert factory.call_args.args[0] == ['starpilotNavigation', 'gpsLocationExternal', 'gpsLocation', 'starpilotCarState', 'deviceState']
   clock.mono += 100_000_000
   messages.fix('gpsLocationExternal')
   messages.fix('gpsLocation', stamp=clock.mono - 30_000_000, longitude=-90., latitude=40.)
@@ -248,3 +248,30 @@ def test_map_position_lease_uses_oldest_envelope_or_receipt_and_expires(source):
   assert reader.map_position()['validForMs'] == 2000.
   clock.mono += 2_000_000_001
   assert reader.map_position() is None
+
+
+@pytest.mark.parametrize('kind,expected', [('none', 'offline'), ('wifi', 'online'), ('ethernet', 'online'),
+                                          ('cell2G', 'online'), ('cell3G', 'online'), ('cell4G', 'online'), ('cell5G', 'online'),
+                                          ('unexpected', 'unknown')])
+def test_network_status_uses_the_comma_device_state(source, kind, expected):
+  reader, sm, clock = source
+  sm.logMonoTime['deviceState'] = clock.mono - 1_000_000
+  sm.data['deviceState'] = NS(networkType=kind)
+  assert reader.network_status() == expected
+
+
+def test_missing_invalid_stale_or_future_network_evidence_is_unknown(source):
+  reader, sm, clock = source
+  assert reader.network_status() == 'unknown'
+  sm.data['deviceState'] = NS(networkType='none')
+  sm.logMonoTime['deviceState'] = clock.mono
+  assert reader.network_status() == 'offline'
+  sm.valid['deviceState'] = False
+  assert reader.network_status() == 'unknown'
+  sm.valid['deviceState'] = True
+  sm.logMonoTime['deviceState'] = clock.mono + 1
+  assert reader.network_status() == 'unknown'
+  sm.logMonoTime['deviceState'] = clock.mono - 5_000_000_001
+  assert reader.network_status() == 'unknown'
+  reader.close()
+  assert reader.network_status() == 'unknown'

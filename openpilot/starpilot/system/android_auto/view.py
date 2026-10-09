@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.frame_source import DEFAULT_PATH, FrameConsumer, FrameRequest, SyntheticFrames
+from openpilot.starpilot.system.android_auto.projection_control import DEFAULT_CONTROL_SOCKET, ProjectionControlReceiver
 from openpilot.starpilot.system.android_auto.touch import DEFAULT_TOUCH_SOCKET, TouchEvent, TouchSender
 
 CAR_FRAME_PATH = "/dev/shm/starpilot_android_auto_car_frame"
@@ -35,16 +36,17 @@ class UnavailableFrames:
 
 class ViewSource:
   def __init__(self, view: str, request: FrameRequest, log, *, synthetic: bool = False, mirror_path: str = DEFAULT_PATH,
-               car_path: str = CAR_FRAME_PATH, touch_path: str = DEFAULT_TOUCH_SOCKET, renderer_command: list[str] | None = None,
-               renderer_log: Path | None = None):
+               car_path: str = CAR_FRAME_PATH, touch_path: str = DEFAULT_TOUCH_SOCKET,
+               control_path: str = DEFAULT_CONTROL_SOCKET, renderer_command: list[str] | None = None, renderer_log: Path | None = None):
     self.log = log
     self.request = request
-    self.mirror_path, self.car_path, self.touch_path = mirror_path, car_path, touch_path
+    self.mirror_path, self.car_path, self.touch_path, self.control_path = mirror_path, car_path, touch_path, control_path
     self.renderer_command = renderer_command or [sys.executable, "-m", "openpilot.starpilot.system.android_auto.current_car_ui",
-                                                 "--frames", car_path, "--touch", touch_path]
+                                                 "--frames", car_path, "--touch", touch_path, "--control", control_path]
     self.renderer_log = renderer_log
     self.process: subprocess.Popen | None = None
     self.touch: TouchSender | None = None
+    self.control: ProjectionControlReceiver | None = None
     self.fallback_reason = ""
     self.started_at = time.monotonic()
     self.last_frame_at = 0.0
@@ -72,20 +74,25 @@ class ViewSource:
 
   def _start_car(self) -> None:
     self.source = self._consumer(self.car_path)
-    output = subprocess.DEVNULL
-    if self.renderer_log is not None:
-      try:
-        self.renderer_log.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        output = open(self.renderer_log, "w")
-      except OSError:
-        output = subprocess.DEVNULL
     try:
-      self.process = subprocess.Popen(self.renderer_command, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-                                      close_fds=True)
-    finally:
-      if output is not subprocess.DEVNULL:
-        output.close()
-    self.touch = TouchSender(self.touch_path)
+      self.control = ProjectionControlReceiver(self.control_path)
+      output = subprocess.DEVNULL
+      if self.renderer_log is not None:
+        try:
+          self.renderer_log.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+          output = open(self.renderer_log, "w")
+        except OSError:
+          output = subprocess.DEVNULL
+      try:
+        self.process = subprocess.Popen(self.renderer_command, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                                        close_fds=True)
+      finally:
+        if output is not subprocess.DEVNULL:
+          output.close()
+      self.touch = TouchSender(self.touch_path)
+    except BaseException:
+      self._stop_car()
+      raise
     self.started_at = time.monotonic()
     self.log("car_view_started", pid=self.process.pid)
 
@@ -115,6 +122,10 @@ class ViewSource:
   def send_touches(self, events: list[TouchEvent]) -> None:
     if self.touch is not None and self.view == "car" and events:
       self.touch.send(events)
+
+  def drain_controls(self) -> list[str]:
+    control = getattr(self, 'control', None)
+    return control.drain() if control is not None and self.view == "car" else []
 
   def check(self, now: float | None = None, *, focused: bool = True) -> None:
     """Withdraw frames when the car view is not healthy.
@@ -192,6 +203,10 @@ class ViewSource:
     if self.touch is not None:
       self.touch.close()
       self.touch = None
+    control = getattr(self, 'control', None)
+    if control is not None:
+      control.close()
+      self.control = None
     process, self.process = self.process, None
     if process is not None and process.poll() is None:
       process.terminate()

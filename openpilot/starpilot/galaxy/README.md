@@ -46,13 +46,16 @@ it labels its sample System Monitor data and cannot edit a device.
 | Maps | Local map status and a parked catalog-region download, progress, or cancellation. A completed selection takes effect at the next map service start. |
 | Cameras and Sentry | Saved PiP and V-ASM settings and bounded Sentry event metadata. The crop editor uses a browser-local still image; it does not upload that image. |
 | Sound packs | Catalog status, verified download and cancellation through the local sound owner. |
+| Install Galaxy / Tunnel | Galaxy link pairing, app install, and opt-in local Wi-Fi hotspot. The public link uses the Internet tunnel; local access uses the comma's direct HTTP address. See [hotspot setup](../../../docs/how-to/galaxy-hotspot.md). |
 
 The Vue router in `web/js/app.js` and the route handlers in `server.py` are the
 current route map. API groups include `/api/auth`, `/api/system/monitor`,
 `/api/software/status`, `/api/settings`, `/api/models`, `/api/maps`,
 `/api/sounds`, `/api/bluetooth`, `/api/vehicle-selection`, `/api/recordings`,
 `/api/sentry/events`, and `/api/flm`. An unknown API route returns an error;
-there is no arbitrary Params or shell-command endpoint.
+there is no arbitrary Params or shell-command endpoint. The retired
+`POST /api/companion` cross-origin bridge is no longer supported. Local hotspot
+access uses the same authenticated, same-origin HTTP API as local Wi-Fi.
 
 ## Access and operation rules
 
