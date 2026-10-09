@@ -1116,6 +1116,517 @@ class TestGmAol(unittest.TestCase):
                            vars(expected) if hasattr(expected, '__dict__') else expected, key)
         self.assertEqual(selected.output(cs), reference.output(cs))
 
+  def test_bolt_cancel_lateral_recovery(self):
+    for identity in (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
+                     CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+      for removed in (False, True):
+        with self.subTest(identity=identity, removed=removed):
+          self.exercise_bolt_cancel_recovery(identity, removed)
+
+  def test_bolt_cancel_fault_rearm(self):
+    for critical in ('controlsMismatch', 'calibrationInvalid', 'permanentEPS'):
+      with self.subTest(critical=critical):
+        self.exercise_bolt_cancel_recovery(CAR.CHEVROLET_BOLT_CC_2018_2021, False, critical=critical)
+
+  def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None):
+    from openpilot.cereal import log
+    from openpilot.selfdrive.car.car_events import CarEvents
+    from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+    from openpilot.selfdrive.selfdrived.state import StateMachine
+    from openpilot.selfdrive.selfdrived.events import Events, EventName, ET
+    from openpilot.starpilot.aol.runtime import AxisDecision
+    from openpilot.starpilot.aol.wire import encode_intent
+    from opendbc.can import CANParser
+    from opendbc.car.gm.bolt_cc import button_bytes
+    from opendbc.car.gm.values import AccState, CruiseButtons, GMFlags
+    from opendbc.car.gm.tests.test_bolt_pedal import params as pedal_params
+    from opendbc.car.gm.gmcan import pedal_crc
+
+    ctx = {'identity': str(identity), 'removed': removed, 'critical': critical, 'phase': 'factory'}
+    cancel_edge_ticks = []
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      for key in ('AlwaysOnLateral', 'AlphaLongitudinalEnabled'):
+        settings.put_bool(key, True, block=True)
+      factory = pedal_params(identity, pedal=True, camera=not removed, removed=removed)
+      selected = self.card(factory, settings)
+      cp, ci = selected.CP, selected.CI
+      word = cp.safetyConfigs[0].safetyParam
+      ctx['word'] = hex(word)
+      self.assertEqual(word, factory.safetyConfigs[0].safetyParam, msg=ctx)
+      self.assertEqual(cp.alternativeExperience, 32, msg=ctx)
+      self.assertTrue(cp.openpilotLongitudinalControl, msg=ctx)
+      self.assertFalse(cp.pcmCruise, msg=ctx)
+      self.assertTrue(cp.flags & GMFlags.PEDAL_LONG, msg=ctx)
+      controls = Controls()
+      self.assertEqual(controls.CP.to_dict(), cp.to_dict(), msg=ctx)
+      sd = SelfdriveD.__new__(SelfdriveD)
+      sd.CP, sd.initialized, sd.aol_replay = cp, True, True
+      sd.aol_session_id, sd.aol_axis_decision = 'bolt-cancel', AxisDecision()
+      sd.aol_dm_lateral_inhibit, sd.aol_settings = False, selected.aol_settings
+      sd.nostalgia_paddle_cancel = False
+      sd.state_machine, sd.events = StateMachine(), Events()
+      sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled
+      sd.sm = messaging.SubMaster(['aolIntentWire', 'aolSafetyWire', 'modelV2',
+                                   'extrinsicsCalibration', 'driverMonitoringState'])
+      car_events = CarEvents(cp)
+      previous = structs.CarState()
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      output = CANParser(DBC[cp.carFingerprint][Bus.pt], [('GAS_COMMAND', float('nan'))], 0)
+      neutral_pedal_seen = False
+      safety = libsafety_py.libsafety
+      safety.set_alternative_experience(32)
+      self.assertEqual(safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, word), 0, msg=ctx)
+      safety.init_tests()
+      status_owner = word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702)
+      queued_status = None
+      last_status_emission_us = None
+      def recorded_status():
+        result = []
+        for index in range(safety.get_recorded_can_count()):
+          packet = libsafety_py.make_CANPacket(0, 0, bytes(8))
+          self.assertTrue(safety.get_recorded_can(index, packet), msg=ctx)
+          if packet.addr == 0x3D1:
+            result.append((packet.addr, bytes(packet.data[0:8]), packet.bus))
+        return result
+      try:
+        # Engage only through the physical SET/release sequence.
+        for offset, counter, pedal_counter, button in ((-20_000_000, 2, 14, CruiseButtons.DECEL_SET),
+                                                       (-10_000_000, 3, 15, CruiseButtons.UNPRESS)):
+          ctx.update(phase='physical_prime', offset_ns=offset, raw_button=int(button), button_counter=counter, sensor_counter=pedal_counter)
+          prime_now = 102_289_000_000 + offset
+          _, prime_packets = feed_car(SimpleNamespace(update=lambda _: None), packer, prime_now,
+                                      counter=counter, active=True, speed=20., camera=not removed)
+          prime_packets = [packet for packet in prime_packets if packet[0] not in (0x1C4, 0x1E1)]
+          prime_packets += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': AccState.ACTIVE})]
+          sensor = bytearray(packer.make_can_msg('GAS_SENSOR', 0,
+                             {'INTERCEPTOR_GAS': 0., 'INTERCEPTOR_GAS2': 0., 'STATE': 0, 'COUNTER_PEDAL': pedal_counter})[1])
+          sensor[5] = pedal_crc(sensor)
+          if cp.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and not removed:
+            prime_packets.append(packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}))
+          # Required sensor readiness precedes each physical SET/release edge.
+          prime_packets += [(0x201, bytes(sensor), 0), (0x1E1, button_bytes(button, counter), 0)]
+          previous = ci.update([(prime_now, prime_packets)])
+          for packet in prime_packets:
+            self.assertTrue(native('rx', packet, prime_now // 1000), (packet, ctx))
+          safety.safety_tick()
+          self.assertTrue(safety.safety_config_valid(), msg=ctx)
+        self.assertTrue(previous.canValid, msg=ctx)
+        self.assertTrue(safety.get_controls_allowed(), msg=ctx)
+        # CANCEL edges withdraw ordinary cruise; MAIN remains available until its later cycle.
+        for tick in range(36):
+          now = 102_289_000_000 + tick * 10_000_000
+          fault = tick in (10, 11)
+          cancel = tick in (10, 11)
+          main = tick not in (26, 27)
+          ordinary = tick < 10
+          ctx.update(phase='scenario', tick=tick, main=main, ordinary=ordinary, fault=fault,
+                     raw_button=int(CruiseButtons.CANCEL if cancel else CruiseButtons.UNPRESS),
+                     button_counter=tick % 4, sensor_counter=tick % 16)
+          _, packets = feed_car(SimpleNamespace(update=lambda _: None), packer, now,
+                                counter=tick % 4, active=ordinary, speed=20., camera=not removed)
+          packets = [packet for packet in packets if packet[0] not in (0x1C4, 0x1E1, 0x184)]
+          packets += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 0}),
+                      packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': int(main)}),
+                      packer.make_can_msg('PSCMStatus', 0,
+                                          {'LKATorqueDeliveredStatus':
+                                           3 if critical == 'permanentEPS' and fault else 2 if tick == 20 else 0}),
+                      (0x1E1, button_bytes(CruiseButtons.CANCEL if cancel else CruiseButtons.UNPRESS, tick % 4), 0)]
+          sensor = bytearray(packer.make_can_msg('GAS_SENSOR', 0,
+                             {'INTERCEPTOR_GAS': 0., 'INTERCEPTOR_GAS2': 0., 'STATE': 0, 'COUNTER_PEDAL': tick % 16})[1])
+          sensor[5] = pedal_crc(sensor)
+          packets.append((0x201, bytes(sensor), 0))
+          if not removed:
+            packets.append(packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}))
+          self.assertTrue(any(address == 0x201 for address, _, _ in packets), msg=ctx)
+          cs = ci.update([(now, packets)])
+          ctx.update(buttonEvents=[(button.type.raw, bool(button.pressed)) for button in cs.buttonEvents],
+                     raw_wheel_button=[bytes(data).hex() for address, data, bus in packets if address == 0x1E1 and bus == 0],
+                     canValid=cs.canValid, canTimeout=cs.canTimeout,
+                     cruise_available=cs.cruiseState.available, cruise_enabled=cs.cruiseState.enabled,
+                     eps_temporary=cs.steerFaultTemporary, eps_permanent=cs.steerFaultPermanent)
+          cancel_edges = [bool(button.pressed) for button in cs.buttonEvents if button.type == structs.CarState.ButtonEvent.Type.cancel]
+          self.assertEqual(cancel_edges, [True] if tick == 10 else [False] if tick == 12 else [], msg=ctx)
+          self.assertTrue(cs.canValid, (tick, ctx))
+          self.assertFalse(cs.accFaulted, msg=ctx)
+          self.assertEqual(cs.cruiseState.available, main, msg=ctx)
+          safety.reset_recorded_can()
+          # Physical FWD precedes RX; update independent physical sources before stock status.
+          for packet in sorted(packets, key=lambda msg: msg[0] == 0x3D1):
+            if status_owner and packet[0] == 0x3D1:
+              ready = main and tick != 20 and not (critical == 'permanentEPS' and fault)
+              replace_status = queued_status is not None and ready
+              safety.set_timer(now // 1000)
+              self.assertEqual(safety.safety_fwd_hook(0, 0x3D1), -1 if replace_status else 2, ((tick, critical), ctx))
+              self.assertTrue(native('rx', packet, now // 1000), ((tick, packet), ctx))
+              self.assertEqual(recorded_status(), [queued_status] if replace_status else [], ((tick, critical), ctx))
+              if replace_status:
+                if last_status_emission_us is not None:
+                  self.assertGreaterEqual(now // 1000 - last_status_emission_us, 40_000, msg=ctx)
+                last_status_emission_us = now // 1000
+              queued_status = None
+              self.assertEqual(safety.safety_fwd_hook(0, 0x3D1), 2, (tick, ctx))
+            else:
+              self.assertTrue(native('rx', packet, now // 1000), ((tick, packet), ctx))
+          safety.safety_tick()
+          safety.set_aol_test_heartbeat(True)
+          events = car_events.update(cs, previous, structs.CarControl())
+          if fault and critical in ('controlsMismatch', 'calibrationInvalid'):
+            events.add(getattr(EventName, critical))
+          ctx['events'] = [int(event) for event in events.names]
+          self.assertEqual(EventName.buttonCancel in events.names, tick in (10, 12), msg=ctx)
+          if tick in (10, 12):
+            cancel_edge_ticks.append(tick)
+          if tick in (10, 12):
+            self.assertTrue(events.contains(ET.USER_DISABLE), msg=ctx)
+          if critical and fault:
+            self.assertTrue(events.contains(ET.NO_ENTRY), msg=ctx)
+            if critical == 'calibrationInvalid':
+              self.assertTrue(events.contains(ET.SOFT_DISABLE), msg=ctx)
+              self.assertFalse(events.contains(ET.IMMEDIATE_DISABLE), msg=ctx)
+            else:
+              self.assertTrue(events.contains(ET.IMMEDIATE_DISABLE), msg=ctx)
+          onroad = messaging.new_message('onroadEvents', 0, valid=True, logMonoTime=now)
+          onroad.onroadEvents = events.to_msg()
+          selected.sm.update_msgs(now / 1e9, [onroad.as_reader()])
+          disarm = selected.aol_disarming_fault(cs, now, now)
+          self.assertEqual(disarm, bool(fault and critical), ((tick, critical), ctx))
+          selected.aol_card_intent.update(cs, fault_active=disarm, now_ns=now, standard_enabled=ordinary)
+          expected_latch = main and (critical is None or tick < 10 or tick >= 28)
+          self.assertEqual(selected.aol_card_intent.allowed_latch, expected_latch, ((tick, critical), ctx))
+          allowed, pause_lat, pause_long = selected.aol_card_intent.output(cs)
+          intent_state = IntentState('card', tick + 1, now, now, now + 30_000_000,
+                                     allowed, pause_lat, pause_long, True, True)
+          desired = decide_axes(standard_lateral=ordinary, standard_longitudinal=ordinary,
+                                intent=intent_state, native=None, car_state=cs, initialized=True,
+                                model_ready=True, no_entry=events.contains(ET.NO_ENTRY),
+                                immediate_disable=events.contains(ET.IMMEDIATE_DISABLE),
+                                dm_lockout=False, pause_brake_mps=5.)
+          safety.aol_set_host_request(int(desired.desired_lateral) | (int(desired.desired_longitudinal) << 1))
+          mask = safety.aol_get_permission_mask()
+          ctx.update(native_permission_mask=int(mask), native_controls_allowed=bool(safety.get_controls_allowed()),
+                     host_request=(int(desired.desired_lateral) | (int(desired.desired_longitudinal) << 1)),
+                     allowed_latch=selected.aol_card_intent.allowed_latch)
+          receipt_state = SafetyState(1, True, now, now + 200_000_000,
+                                     int(structs.CarParams.SafetyModel.gm), word,
+                                     bool(mask & 1), bool(mask & 2), desired.desired_lateral,
+                                     desired.desired_longitudinal, 'panda', 'bolt-cancel')
+          intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=now)
+          intent.aolIntentWire = encode_intent(intent_state)
+          receipt = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
+          receipt.aolSafetyWire = encode_safety(receipt_state)
+          model = messaging.new_message('modelV2', valid=True, logMonoTime=now)
+          calibration = messaging.new_message('extrinsicsCalibration', valid=True, logMonoTime=now)
+          calibration.extrinsicsCalibration.calStatus = 'calibrated'
+          monitoring = messaging.new_message('driverMonitoringState', valid=True, logMonoTime=now)
+          sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
+                                       calibration.as_reader(), monitoring.as_reader()])
+          sd.aol_car_state_log_ns = now
+          sd.events = events
+          with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
+               patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
+               patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
+               patch.object(sd, 'publish_selfdriveState'):
+            sd.step()
+          ctx.update(sd_enabled=sd.enabled, sd_active=sd.active, actual_lat=sd.aol_axis_decision.lateral_active,
+                     actual_long=sd.aol_axis_decision.longitudinal_active)
+          expected_lat = expected_latch and not events.contains(ET.NO_ENTRY) and not events.contains(ET.IMMEDIATE_DISABLE) and tick != 20
+          self.assertEqual(sd.aol_axis_decision.lateral_active, expected_lat, ((tick, critical), ctx))
+          self.assertEqual(sd.aol_axis_decision.longitudinal_active, ordinary, ((tick, critical), ctx))
+          if tick >= 10:
+            self.assertFalse(sd.enabled, msg=ctx)  # Clearing CANCEL or a fault never resumes longitudinal.
+          feed(controls, now, tick, active=sd.active, enabled=sd.enabled)
+          axis = messaging.new_message('aolAxisState', valid=tick != 23, logMonoTime=now)
+          axis.aolAxisState.qualified = axis.aolAxisState.nativeAcknowledged = True
+          axis.aolAxisState.desiredLateral = sd.aol_axis_decision.desired_lateral
+          axis.aolAxisState.desiredLongitudinal = sd.aol_axis_decision.desired_longitudinal
+          axis.aolAxisState.lateralActive = sd.aol_axis_decision.lateral_active
+          axis.aolAxisState.longitudinalActive = sd.aol_axis_decision.longitudinal_active
+          axis.aolAxisState.sessionId = 'bolt-cancel'
+          axis.aolAxisState.observedMonoTime = now
+          axis.aolAxisState.validUntilMonoTime = now + 30_000_000
+          state = messaging.new_message('carState', valid=True, logMonoTime=now)
+          state.carState = cs
+          controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), state.as_reader()])
+          command, _ = controls.state_control()
+          ctx.update(command_lat=command.latActive, command_long=command.longActive)
+          self.assertEqual(command.latActive, expected_lat and tick != 23, ((tick, critical), ctx))
+          self.assertEqual(command.longActive, ordinary, ((tick, critical), ctx))
+          command.actuators.torque = .02 if command.latActive else 0.
+          _, messages = ci.apply(command.as_reader(), now + 2)
+          output.update([(now, messages)])
+          pedal_messages = [message for message in messages if message[0] == 0x200]
+          self.assertEqual(len(pedal_messages), int(tick % 4 == 0), msg=ctx)
+          for _, data, bus in pedal_messages:
+            ctx['pedal_bytes'] = bytes(data).hex()
+            self.assertEqual(bus, 0, msg=ctx)
+            self.assertEqual(len(data), 6, msg=ctx)
+            self.assertEqual(data[4] & 0xF, (tick // 4) % 16, msg=ctx)
+            self.assertEqual(data[4] & 0x70, 0, msg=ctx)
+            self.assertEqual(data[5], pedal_crc(data), msg=ctx)
+            if tick >= 10:
+              self.assertFalse(output.vl['GAS_COMMAND']['ENABLE'], ((identity, removed, tick), ctx))
+              # Disabled pedal is raw-zero; DBC physical offsets are negative sentinels.
+              self.assertEqual(bytes(data[:4]), bytes(4), msg=ctx)
+              self.assertEqual(data[4], (tick // 4) % 16, msg=ctx)
+              neutral_pedal_seen = True
+          host_status = [message for message in messages if message[0] == 0x3D1]
+          self.assertEqual(len(host_status), int(status_owner and tick % 4 == 0), ((identity, removed, tick), ctx))
+          for message in messages:
+            if message[0] == 0x3D1:
+              # Bolt host status is queued, never directly admitted; real stock RX emits it.
+              self.assertTrue(status_owner, msg=ctx)
+              self.assertEqual(message[2], 0, msg=ctx)
+              self.assertEqual(len(message[1]), 8, msg=ctx)
+              self.assertFalse(native('tx', message, now // 1000 + 1), ((tick, message), ctx))
+              queued_status = tuple(message) if ready else None
+            else:
+              self.assertTrue(native('tx', message, now // 1000 + 1), ((tick, message), ctx))
+          if tick == 18 and critical is None:
+            self.assertTrue(selected.aol_card_intent.allowed_latch, msg=ctx)
+            self.assertTrue(command.latActive, msg=ctx)
+            self.assertFalse(command.longActive, msg=ctx)
+            self.assertTrue(main, msg=ctx)
+          previous = cs
+        self.assertEqual(cancel_edge_ticks, [10, 12], msg=ctx)
+        self.assertTrue(neutral_pedal_seen, msg=ctx)
+        ctx.update(phase='stale_withdrawal')
+        stale_now = now + 2_000_000_000
+        for _ in range(10):
+          stale_now += 10_000_000
+          stale_cs = ci.update([(stale_now, [])])
+        self.assertFalse(stale_cs.canValid, msg=ctx)
+        safety.set_timer(stale_now // 1000)
+        safety.safety_tick()
+        stale_intent = IntentState('card', 100, stale_now, stale_now, stale_now + 30_000_000,
+                                   selected.aol_card_intent.allowed_latch, False, False, True, True)
+        stale_decision = decide_axes(standard_lateral=False, standard_longitudinal=False,
+                                     intent=stale_intent, native=receipt_state, car_state=stale_cs,
+                                     initialized=True, model_ready=True, no_entry=False,
+                                     immediate_disable=False, dm_lockout=False, pause_brake_mps=5.)
+        self.assertFalse(stale_decision.lateral_active, msg=ctx)
+        self.assertFalse(stale_decision.longitudinal_active, msg=ctx)
+        safety.aol_set_host_request(0)
+        feed(controls, stale_now, 100, active=False, enabled=False, can_valid=False, can_timeout=True)
+        # Last axis/receipt are deliberately not restamped: their exact bytes have expired.
+        stale_state = messaging.new_message('carState', valid=False, logMonoTime=stale_now)
+        stale_state.carState = stale_cs
+        controls.sm.update_msgs(stale_now / 1e9, [stale_state.as_reader()])
+        withdrawn, _ = controls.state_control()
+        self.assertFalse(withdrawn.latActive, msg=ctx)
+        self.assertFalse(withdrawn.longActive, msg=ctx)
+        _, neutral_messages = ci.apply(withdrawn.as_reader(), stale_now + 2)
+        safety.reset_recorded_can()
+        stale_pedal = [message for message in neutral_messages if message[0] == 0x200]
+        self.assertEqual(len(stale_pedal), 1, msg=ctx)  # CI.apply frame36 is on the unchanged25Hz schedule.
+        for _, data, bus in stale_pedal:
+          ctx['pedal_bytes'] = bytes(data).hex()
+          self.assertEqual(bus, 0, msg=ctx)
+          self.assertEqual(len(data), 6, msg=ctx)
+          self.assertEqual(bytes(data[:4]), bytes(4), msg=ctx)
+          self.assertEqual(data[4], 9, msg=ctx)
+          self.assertEqual(data[5], pedal_crc(data), msg=ctx)
+        for message in neutral_messages:
+          if message[0] == 0x3D1:
+            self.assertTrue(status_owner, msg=ctx)
+            self.assertFalse(native('tx', message, stale_now // 1000 + 1), (message, ctx))
+          else:
+            self.assertTrue(native('tx', message, stale_now // 1000 + 1), (message, ctx))
+        if status_owner:
+          self.assertEqual(safety.safety_fwd_hook(0, 0x3D1), 2, msg=ctx)
+          raw_status = next(packet for packet in packets if packet[0] == 0x3D1)
+          self.assertTrue(native('rx', raw_status, stale_now // 1000 + 2), msg=ctx)
+          self.assertEqual(recorded_status(), [], msg=ctx)  # One fresh source cannot revive expired authority.
+      finally:
+        safety.set_alternative_experience(0)
+        selected.vehicle_startup.close()
+
+
+  def test_volt_brake_lateral_recovery(self):
+    from dataclasses import replace
+    from openpilot.selfdrive.car.car_events import CarEvents
+    from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+    from openpilot.selfdrive.selfdrived.state import StateMachine
+    from openpilot.selfdrive.selfdrived.events import Events, EventName, ET
+    from openpilot.starpilot.aol.runtime import AxisDecision
+    from openpilot.starpilot.aol.wire import encode_intent, decode_intent
+    from openpilot.starpilot.nostalgia import aol_no_entry
+    from opendbc.car.gm.tests.test_ascm_intercept import params as ascm_params
+    from opendbc.car.gm.values import GMFlags
+
+    with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
+      settings = Params()
+      for key in ('AlwaysOnLateral', 'AlphaLongitudinalEnabled', 'GMAutoHold', 'VoltOnePedalMode'):
+        settings.put_bool(key, True, block=True)
+      settings.put('AolBrakePauseSpeedMps', 10., block=True)
+      selected = self.card(ascm_params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, accelerator=True, radar=True), settings)
+      cp, ci = selected.CP, selected.CI
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xD114)
+      self.assertEqual(cp.alternativeExperience, 32)
+      self.assertFalse(cp.flags & GMFlags.PEDAL_LONG)
+      self.assertTrue(cp.openpilotLongitudinalControl)
+      self.assertFalse(cp.pcmCruise)
+      self.assertEqual(selected.aol_settings.pause_brake_mps, 10.)
+      controls = Controls()
+      self.assertEqual(controls.CP.to_dict(), cp.to_dict())
+      sd = SelfdriveD.__new__(SelfdriveD)
+      sd.CP, sd.initialized, sd.aol_replay = cp, True, True
+      sd.aol_session_id, sd.aol_axis_decision = 'volt-brake', AxisDecision()
+      sd.aol_dm_lateral_inhibit, sd.aol_settings = False, selected.aol_settings
+      sd.nostalgia_paddle_cancel = False
+      sd.state_machine, sd.events = StateMachine(), Events()
+      sd.sm = messaging.SubMaster(['aolIntentWire', 'aolSafetyWire', 'modelV2',
+                                   'extrinsicsCalibration', 'driverMonitoringState'])
+      car_events = CarEvents(cp)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      safety = libsafety_py.libsafety
+      safety.set_alternative_experience(32)
+      self.assertEqual(safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, 0xD114), 0)
+      safety.init_tests()
+      resumed = paused = 0
+      ctx = {'identity': str(cp.carFingerprint), 'word': '0xd114', 'phase': 'prime'}
+      try:
+        # Warm all selected parser/native sources, with stock cruise inactive.
+        for warmup in range(20):
+          stamp = 800_000_000 + warmup * 10_000_000
+          _, frames = feed_car(SimpleNamespace(update=lambda _: None), packer, stamp,
+                               counter=warmup % 4, active=False, speed=8., camera=True)
+          frames.append(packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}))
+          previous = ci.update([(stamp, frames)])
+          for frame in frames:
+            self.assertTrue(native('rx', frame, stamp // 1000), (frame, ctx))
+          safety.safety_tick()
+        self.assertTrue(previous.canValid, msg=ctx)
+        self.assertTrue(safety.safety_config_valid(), msg=ctx)
+        self.assertFalse(safety.get_controls_allowed(), msg=ctx)
+        for tick in range(140):
+          now = 1_000_000_000 + tick * 10_000_000
+          brake = any(start <= tick < start + 12 for start in (20, 60, 100))
+          fault = tick == 138
+          ctx.update(phase='scenario', tick=tick, brake=brake, fault=fault)
+          _, packets = feed_car(SimpleNamespace(update=lambda _: None), packer, now,
+                                counter=tick % 4, active=False, speed=8., camera=True)
+          packets = [frame for frame in packets if frame[0] not in (0xC9, 0x1C4, 0xBE)]
+          packets += [packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}),
+                      packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': 1}),
+                      packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 0}),
+                      packer.make_can_msg('ECMAcceleratorPos', 0, {'BrakePedalPos': 30 if brake else 0})]
+          cs = ci.update([(now, packets)])
+          self.assertTrue(cs.canValid, msg=ctx)
+          self.assertEqual(cs.brakePressed, brake, msg=ctx)
+          self.assertFalse(cs.cruiseState.enabled, msg=ctx)
+          self.assertTrue(cs.cruiseState.available, msg=ctx)
+          for frame in packets:
+            self.assertTrue(native('rx', frame, now // 1000), (frame, ctx))
+          safety.safety_tick()
+          # The native test heartbeat isolates transport negotiation.
+          safety.set_aol_test_heartbeat(True)
+          events = car_events.update(cs, previous, structs.CarControl())
+          if cs.brakePressed and (not previous.brakePressed or not cs.standstill):
+            events.add(EventName.pedalPressed)
+          if fault:
+            events.add(EventName.controlsMismatch)
+          ctx['events'] = [int(event) for event in events.names]
+          self.assertEqual(EventName.pedalPressed in events.names, brake, msg=ctx)
+          self.assertEqual(events.contains(ET.IMMEDIATE_DISABLE), fault, msg=ctx)
+          onroad = messaging.new_message('onroadEvents', 0, valid=True, logMonoTime=now)
+          onroad.onroadEvents = events.to_msg()
+          selected.sm.update_msgs(now / 1e9, [onroad.as_reader()])
+          disarm = selected.aol_disarming_fault(cs, now, now)
+          self.assertEqual(disarm, fault, msg=ctx)
+          selected.aol_card_intent.update(cs, fault_active=disarm, now_ns=now, standard_enabled=False)
+          self.assertEqual(selected.aol_card_intent.allowed_latch, tick < 138, msg=ctx)
+          self.assertEqual(selected.aol_card_intent._main_cycle_required, tick >= 138, msg=ctx)
+          allowed, pause_lat, pause_long = selected.aol_card_intent.output(cs)
+          intent_value = IntentState('card', tick + 1, now, now, now + 200_000_000,
+                                     allowed, pause_lat, pause_long, selected.aol_qualified,
+                                     selected.aol_card_intent.allowed_latch)
+          intent = decode_intent(encode_intent(intent_value))
+          self.assertIsNotNone(intent, msg=ctx)
+          self.assertEqual(intent.allowedLatch, tick < 138, msg=ctx)
+          self.assertFalse(intent.pauseLateral, msg=ctx)
+          self.assertFalse(intent.pauseLongitudinal, msg=ctx)
+          args = dict(standard_lateral=False, standard_longitudinal=False, intent=intent, car_state=cs,
+                      initialized=True, model_ready=True,
+                      no_entry=aol_no_entry(events.names, cs, paddle_only_cancel=False, allow_below_engage_speed=True),
+                      immediate_disable=events.contains(ET.IMMEDIATE_DISABLE), dm_lockout=False, pause_brake_mps=10.)
+          wanted = decide_axes(native=None, **args)
+          expected_lat = not brake and tick < 138
+          self.assertEqual(wanted.desired_lateral, expected_lat, msg=ctx)
+          self.assertFalse(wanted.desired_longitudinal, msg=ctx)
+          safety.aol_set_host_request(int(wanted.desired_lateral))
+          mask = safety.aol_get_permission_mask()
+          ctx['native_permission_mask'] = int(mask)
+          self.assertEqual(mask, int(expected_lat), msg=ctx)
+          self.assertFalse(safety.get_controls_allowed(), msg=ctx)
+          receipt_state = SafetyState(1, True, now, now + 200_000_000, int(structs.CarParams.SafetyModel.gm),
+                                     0xD114, bool(mask & 1), False, wanted.desired_lateral, False, 'panda', 'volt-brake')
+          receipt = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
+          transport = replace(receipt_state, validUntilMonoTime=now - 1) if tick == 135 else receipt_state
+          receipt.aolSafetyWire = encode_safety(transport)
+          intent_message = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=now)
+          intent_message.aolIntentWire = encode_intent(intent_value)
+          model = messaging.new_message('modelV2', valid=True, logMonoTime=now)
+          calibration = messaging.new_message('extrinsicsCalibration', valid=True, logMonoTime=now)
+          calibration.extrinsicsCalibration.calStatus = 'calibrated'
+          monitoring = messaging.new_message('driverMonitoringState', valid=True, logMonoTime=now)
+          sd.sm.update_msgs(now / 1e9, [intent_message.as_reader(), receipt.as_reader(), model.as_reader(),
+                                       calibration.as_reader(), monitoring.as_reader()])
+          sd.aol_car_state_log_ns = now
+          sd.events = events
+          with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
+               patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
+               patch.object(sd, 'update_alerts'), patch.object(sd, 'update_conditional_mode'), \
+               patch.object(sd, 'publish_selfdriveState'):
+            sd.step()
+          actual_lat = expected_lat and tick != 135
+          self.assertFalse(sd.enabled or sd.active, msg=ctx)
+          self.assertEqual(sd.aol_axis_decision.lateral_active, actual_lat, msg=ctx)
+          self.assertFalse(sd.aol_axis_decision.longitudinal_active, msg=ctx)
+          if tick == 135:
+            self.assertIn(EventName.controlsMismatch, sd.events.names, msg=ctx)
+            self.assertFalse(sd.aol_axis_decision.native_acknowledged, msg=ctx)
+          feed(controls, now, tick, active=sd.active, enabled=sd.enabled)
+          axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
+          axis.aolAxisState.qualified = True
+          axis.aolAxisState.nativeAcknowledged = sd.aol_axis_decision.native_acknowledged
+          axis.aolAxisState.desiredLateral = sd.aol_axis_decision.desired_lateral
+          axis.aolAxisState.desiredLongitudinal = sd.aol_axis_decision.desired_longitudinal
+          axis.aolAxisState.lateralActive = sd.aol_axis_decision.lateral_active
+          axis.aolAxisState.longitudinalActive = sd.aol_axis_decision.longitudinal_active
+          axis.aolAxisState.sessionId = 'volt-brake'
+          axis.aolAxisState.observedMonoTime = now
+          axis.aolAxisState.validUntilMonoTime = now + 30_000_000
+          state = messaging.new_message('carState', valid=True, logMonoTime=now)
+          state.carState = cs
+          controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), state.as_reader()])
+          command, _ = controls.state_control()
+          self.assertEqual(command.latActive, actual_lat, msg=ctx)
+          self.assertFalse(command.longActive, msg=ctx)
+          command.actuators.torque = .02 if command.latActive else 0.
+          _, messages = ci.apply(command.as_reader(), now + 2)
+          for frame in messages:
+            self.assertTrue(native('tx', frame, now // 1000 + 1), (frame, ctx))
+          if brake:
+            paused += 1
+          if tick in (32, 72, 112):
+            self.assertTrue(command.latActive, msg=ctx)
+            resumed += 1
+          if tick == 134:
+            # These are policy-unit boundaries; the three cycles use real 8m/s CAN.
+            probe = cs.as_reader().as_builder()
+            probe.brakePressed = True
+            for speed in (9.99, 10., 10.01):
+              probe.vEgo = speed
+              self.assertEqual(decide_axes(native=receipt_state, **dict(args, car_state=probe)).desired_lateral,
+                               speed >= 10., (speed, ctx))
+          previous = cs
+        self.assertEqual(resumed, 3)
+        self.assertEqual(paused, 36)
+      finally:
+        safety.set_alternative_experience(0)
+        selected.vehicle_startup.close()
+
   def test_volt_ascm_transient_acc_real_parser_card_controls_native(self):
     self.exercise_volt_ascm_acc_intent()
 
