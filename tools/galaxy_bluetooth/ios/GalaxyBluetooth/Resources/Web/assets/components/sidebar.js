@@ -1,0 +1,220 @@
+import { html } from "/assets/vendor/arrow-core.js";
+import { hideSidebar, upperFirst } from "/assets/js/utils.js";
+
+const MENU_ITEMS = {
+  home: [
+    { name: "Home", link: "/", icon: "bi-house-fill" },
+  ],
+  recordings: [
+    { name: "Dashcam Routes", link: "/dashcam_routes", icon: "bi-camera-reels" },
+    { name: "Screen Recordings", link: "/screen_recordings", icon: "bi-record-circle" },
+  ],
+  tools: [
+    { name: "Toggles", link: "/device_settings", icon: "bi-toggle-on" },
+    { name: "Bluetooth", link: "/bluetooth", icon: "bi-bluetooth" },
+    { name: "Download Speed Limits", link: "/download_speed_limits", icon: "bi-download" },
+    { name: "Error Logs", link: "/manage_error_logs", icon: "bi-exclamation-triangle" },
+    { name: "Galaxy", link: "/galaxy", icon: "bi-globe2" },
+    { name: "Sentry Mode", link: "/sentry", icon: "bi-shield-exclamation" },
+    { name: "Controllers", link: "/wheel-controls", icon: "bi-controller" },
+    { name: "Lateral Tuning", link: "/tuning", icon: "bi-sign-turn-right" },
+    { name: "Maps", link: "/manage_maps", icon: "bi-map" },
+    { name: "Navigation", link: "/set_navigation_destination", icon: "bi-geo-alt-fill" },
+    { name: "App Keys", link: "/manage_navigation_keys", icon: "bi-key-fill" },
+    { name: "Model Manager", link: "/manage_models", icon: "bi-cpu" },
+    { name: "Model Laboratory", link: "/model_laboratory", icon: "bi-bezier2" },
+    { name: "Plots", link: "/plots", icon: "bi-graph-up-arrow" },
+    { name: "Testing Ground", link: "/testing_ground", icon: "bi-bezier2" },
+    { name: "Troubleshoot", link: "/troubleshoot", icon: "bi-tools" },
+    { name: "V-Adj Spot Monitor", link: "/manage_v_asm", icon: "bi-eye" },
+    { name: "PiP Side Camera", link: "/manage_pip_sidecam", icon: "bi-badge-hd", developerOnly: true },
+    { name: "Theme Maker", link: "/theme_maker", icon: "bi-palette-fill" },
+    { name: "Tmux Log", link: "/manage_tmux", icon: "bi-terminal" },
+    { name: "Backup and Restore", link: "/manage_toggles", icon: "bi-arrow-repeat" },
+    { name: "Software", link: "/manage_updates", icon: "bi-arrow-up-circle" },
+    { name: "Vehicle Features", link: "/vehicle_features", icon: "bi-car-front" },
+  ],
+};
+
+let galaxyDeveloperMode = false;
+const SIDEBAR_PINNED_KEY = "galaxySidebarPinned";
+let sidebarPinnedPreference = null;
+
+function defaultSidebarPinned() {
+  try {
+    return window.matchMedia?.("(min-width: 768px)")?.matches ?? window.innerWidth >= 768;
+  } catch {
+    return false;
+  }
+}
+
+function sidebarPinned() {
+  if (sidebarPinnedPreference !== null) return sidebarPinnedPreference;
+  let stored;
+  try {
+    stored = window.localStorage?.getItem(SIDEBAR_PINNED_KEY);
+  } catch {
+    stored = null;
+  }
+  if (stored === "true" || stored === "false") {
+    sidebarPinnedPreference = stored === "true";
+    return sidebarPinnedPreference;
+  }
+  return defaultSidebarPinned();
+}
+
+function setSidebarPinned(pinned) {
+  sidebarPinnedPreference = Boolean(pinned);
+  try {
+    window.localStorage?.setItem(SIDEBAR_PINNED_KEY, String(sidebarPinnedPreference));
+  } catch {
+  }
+  document.documentElement.classList.toggle("galaxy-sidebar-pinned", sidebarPinnedPreference);
+}
+
+function matchesPath(currentPath, link) {
+  if (link === "/") return currentPath === "/";
+  if (link === "/tuning" && currentPath === "/lateral_maneuvers") return true;
+  return currentPath === link || currentPath.startsWith(`${link}/`);
+}
+
+function buildSectionMarkup(section, links, currentPath) {
+  const linksMarkup = links.filter((link) => !link.developerOnly || galaxyDeveloperMode).map((link) => {
+    const active = matchesPath(currentPath, link.link) ? "active" : "";
+    return `
+      <li class="${active}">
+        <a class="menu-item-link" href="${link.link}">
+          <i class="bi ${link.icon}"></i>
+          <span>${upperFirst(link.name)}</span>
+        </a>
+      </li>
+    `;
+  }).join("");
+
+  return `
+    <div class="sidebar_widget">
+      <ul class="menu_section">
+        <li>
+          <span class="section-title">${upperFirst(section)}</span>
+          <ul id="${section}">
+            ${linksMarkup}
+          </ul>
+        </li>
+      </ul>
+    </div>
+  `;
+}
+
+async function refreshGalaxyDeveloperMode() {
+  try {
+    const response = await fetch("/api/params/all", { cache: "no-store" });
+    if (!response.ok) return;
+    const values = await response.json();
+    const next = Boolean(values?.GalaxyDeveloperMode);
+    if (next !== galaxyDeveloperMode) {
+      galaxyDeveloperMode = next;
+      renderSidebarIntoShell();
+    }
+  } catch (error) {
+    console.warn("Unable to determine Galaxy Developer Mode:", error);
+  }
+}
+
+function bindSidebarHandlers() {
+  const menuButton = document.getElementById("menu_button");
+  const underlay = document.getElementById("sidebarUnderlay");
+
+  if (!menuButton || !underlay) return;
+
+  const pinButton = document.getElementById("sidebar_pin_button");
+  pinButton?.addEventListener("click", () => {
+    const pinned = !sidebarPinned();
+    setSidebarPinned(pinned);
+    const sidebar = document.getElementById("sidebar");
+    hideSidebar();
+    sidebar?.classList.toggle("pinned", pinned);
+    pinButton.setAttribute("aria-pressed", String(pinned));
+    pinButton.setAttribute("title", pinned ? "Unpin navigation" : "Pin navigation");
+    pinButton.querySelector("i")?.classList.toggle("bi-pin-angle-fill", pinned);
+    pinButton.querySelector("i")?.classList.toggle("bi-pin-angle", !pinned);
+  });
+
+  if (menuButton.dataset.boundClick !== "1") {
+    menuButton.dataset.boundClick = "1";
+    menuButton.addEventListener("click", () => {
+      const sidebar = document.getElementById("sidebar");
+      const currentUnderlay = document.getElementById("sidebarUnderlay");
+      if (!sidebar || !currentUnderlay) return;
+      if (sidebar.classList.contains("pinned")) return;
+      const open = sidebar.classList.toggle("visible");
+      currentUnderlay.classList.toggle("hidden", !open);
+      menuButton.setAttribute("aria-expanded", String(open));
+    });
+  }
+
+  underlay.onclick = hideSidebar;
+
+  document.querySelectorAll("#sidebar a.menu-item-link").forEach((anchor) => {
+    if (anchor.dataset.boundClick === "1") return;
+    anchor.dataset.boundClick = "1";
+    anchor.addEventListener("click", (event) => {
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      event.preventDefault();
+      const href = anchor.getAttribute("href") || "/";
+      const navigate = window.__theGalaxyNavigate;
+      if (typeof navigate === "function") {
+        navigate(href);
+      } else {
+        window.location.assign(href);
+      }
+      hideSidebar();
+      window.scrollTo(0, 0);
+    });
+  });
+}
+
+function renderSidebarIntoShell(currentPath) {
+  const shell = document.getElementById("sidebar_shell");
+  if (!shell) return;
+
+  const activePath = currentPath || window.location.pathname;
+  const pinned = sidebarPinned();
+  const sectionsMarkup = Object.entries(MENU_ITEMS)
+    .map(([section, links]) => buildSectionMarkup(section, links, activePath))
+    .join("");
+
+  shell.innerHTML = `
+    <div id="sidebarUnderlay" class="hidden"></div>
+    <div id="sidebar" class="sidebar${pinned ? " pinned" : ""}">
+      <div>
+        <div class="title">
+          <img class="logo" src="/assets/images/main_logo.png" alt="Galaxy logo" />
+          <div class="title_text sidebar_header">
+            <p>Galaxy</p>
+          </div>
+          <button id="sidebar_pin_button" class="sidebar-pin-button" type="button"
+                  aria-label="Toggle pinned navigation" aria-pressed="${pinned}"
+                  title="${pinned ? "Unpin navigation" : "Pin navigation"}">
+            <i class="bi ${pinned ? "bi-pin-angle-fill" : "bi-pin-angle"}"></i>
+          </button>
+        </div>
+        <hr />
+        ${sectionsMarkup}
+      </div>
+    </div>
+  `;
+
+  bindSidebarHandlers();
+}
+
+export function Sidebar(currentPath) {
+  setTimeout(() => {
+    document.documentElement.classList.toggle("galaxy-sidebar-pinned", sidebarPinned());
+    renderSidebarIntoShell(currentPath);
+    refreshGalaxyDeveloperMode();
+  }, 0);
+  return html`<div id="sidebar_shell"></div>`;
+}

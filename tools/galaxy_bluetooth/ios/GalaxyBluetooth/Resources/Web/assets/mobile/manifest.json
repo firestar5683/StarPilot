@@ -1,0 +1,17 @@
+{
+  "name": "Galaxy",
+  "short_name": "Galaxy",
+  "description": "Control and configure your openpilot device from anywhere.",
+  "icons": [
+    { "src": "/assets/images/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/assets/images/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/assets/images/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ],
+  "id": "46bf2df73deba8e1512c35de",
+  "scope": "/",
+  "background_color": "#06060f",
+  "theme_color": "#8b6cc5",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary"
+}

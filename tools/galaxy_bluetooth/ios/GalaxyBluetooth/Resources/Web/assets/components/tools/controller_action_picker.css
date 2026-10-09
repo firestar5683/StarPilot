@@ -1,0 +1,84 @@
+.controllerActionDialog {
+  --picker-bg: var(--sidebar-bg, #191923);
+  --picker-field: var(--main-bg, #101018);
+  --picker-border: var(--sidebar-border-color, #454052);
+  --picker-radius: var(--border-radius-lg, 12px);
+  --picker-accent: #bda2ff;
+  box-sizing: border-box;
+  width: min(720px, calc(100% - 24px));
+  max-width: calc(100% - 24px);
+  max-height: calc(100dvh - 24px);
+  padding: 20px;
+  border: 1px solid var(--picker-border);
+  border-radius: var(--picker-radius);
+  background: var(--picker-bg);
+  color: var(--text-color, #e8e8f0);
+  font: inherit;
+  overflow: hidden;
+}
+.controllerActionDialog[open] { display: flex; flex-direction: column; gap: 12px; }
+.controllerActionDialog::backdrop { background: rgba(0, 0, 0, .65); backdrop-filter: blur(4px); }
+.controllerActionDialog--dipper {
+  --picker-bg: var(--surface-container-high, #211b32);
+  --picker-field: var(--surface-container);
+  --picker-border: var(--outline-variant);
+  --picker-radius: var(--radius-lg);
+  --picker-accent: var(--primary);
+  color: var(--on-surface);
+}
+.controllerActionDialog header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.controllerActionDialog h3, .controllerActionDialog p { margin: 0; }
+.controllerActionDialog h3 { font-size: 1.15em; }
+.controllerActionDialog [data-current] { overflow-wrap: anywhere; }
+.controllerActionDialog label { display: grid; gap: 6px; font-size: .9em; }
+.controllerActionDialog input, .controllerActionDialog select {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px;
+  background: var(--picker-field); color: inherit; border: 1px solid var(--picker-border);
+  border-radius: var(--border-radius-md, var(--radius-sm, 8px)); padding: 10px; font: inherit;
+}
+/* Native option popups do not consistently inherit the select background. */
+.controllerActionDialog select { color-scheme: dark; }
+.controllerActionDialog select option {
+  background-color: var(--picker-bg, #211b32);
+  color: var(--on-surface, var(--text-color, #e8e8f0));
+}
+.controllerActionDialog button { cursor: pointer; font: inherit; min-height: 44px; }
+.controllerActionDialog--classic button {
+  border: 1px solid var(--picker-border); border-radius: var(--border-radius-md, 8px);
+  background: var(--picker-field); color: inherit; padding: 10px 14px;
+}
+.controllerActionResults { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
+.controllerActionDialog .controllerActionOption {
+  flex: none; display: flex; flex-direction: column; align-items: stretch; white-space: normal;
+  text-align: left; width: 100%; height: auto; gap: 5px; padding: 12px; overflow-wrap: anywhere;
+}
+.controllerActionOption small { font-size: .85em; opacity: .72; font-weight: normal; }
+.controllerActionDialog--dipper .controllerActionOption { color: var(--on-surface); border-radius: var(--radius-sm); }
+.controllerActionDialog .controllerActionOption[aria-pressed="true"] { border: 2px solid var(--picker-accent); }
+.controllerActionDialog :focus-visible { outline: 2px solid var(--picker-accent); outline-offset: -2px; }
+.controllerActionDialog button:disabled { cursor: not-allowed; opacity: .5; }
+.controllerActionDialog [data-count] { font-size: .85em; opacity: .72; }
+@media (max-width: 480px), (max-height: 500px) {
+  .controllerActionDialog { padding: 12px; }
+  .controllerActionDialog[open] { gap: 8px; }
+}
+
+.controllerActionDialog .controllerActionCategory[hidden] { display: none; }
+.controllerActionGroup { flex: none; border: 1px solid var(--picker-border); border-radius: var(--radius-sm, 8px); }
+.controllerActionGroup summary { padding: 12px; cursor: pointer; min-height: 44px; box-sizing: border-box; overflow-wrap: anywhere; }
+.controllerActionGroupItems { display: grid; gap: 8px; padding: 0 8px 8px; }
+
+.controllerActionDialog--dipper .controllerActionSubgroup { background: var(--surface-container, #211c31); }
+.controllerActionDialog--dipper .controllerActionSubgroup > summary { font-size: .95em; }
+
+/* Clear parent/child hierarchy in both shared New Galaxy pickers. */
+.controllerActionDialog--dipper .controllerActionResults > .controllerActionGroup > summary { font-weight: 650; }
+.controllerActionDialog--dipper .controllerActionGroupItems { padding-inline-start: 20px; }
+.controllerActionDialog--dipper .controllerActionSubgroup {
+  border-inline-start: 3px solid color-mix(in srgb, var(--picker-accent) 48%, var(--picker-border));
+  background: var(--surface-container-low, #191522);
+}
+.controllerActionDialog--dipper .controllerActionSubgroup > summary { font-weight: 450; color: var(--on-surface-variant); }
+@media (max-width: 480px) {
+  .controllerActionDialog--dipper .controllerActionGroupItems { padding-inline-start: 14px; }
+}

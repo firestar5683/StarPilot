@@ -1,0 +1,1 @@
+{"repository":"https://github.com/firestar5683/StarPilot","revision":"2a12dbd0ad94b46f8a7b6099d32d7216b7676f79","path":"starpilot/system/the_galaxy","bundleChanges":["Treat native shell as installed in mobile/js/install.js","Use phone loopback for localDeviceUrl in mobile/js/views/Galaxy.js and Recordings.js"]}
