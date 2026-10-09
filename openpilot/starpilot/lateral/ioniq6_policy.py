@@ -30,9 +30,10 @@ HKG_CANFD_BASE_FRICTION_THRESHOLD = 0.39
 IONIQ_6_CARS = (CAR.HYUNDAI_IONIQ_6,)
 
 
-def get_hkg_canfd_base_friction_threshold(v_ego: float) -> float:
-  base = float(np.interp(v_ego, [1 * CV.MPH_TO_MS, 20 * CV.MPH_TO_MS, 75 * CV.MPH_TO_MS], [0.16, 0.19, 0.27]))
-  return max(base, HKG_CANFD_BASE_FRICTION_THRESHOLD)
+def get_hkg_canfd_base_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0) -> float:
+  base = float(np.interp(v_ego, [50 * CV.MPH_TO_MS, 65 * CV.MPH_TO_MS, 75 * CV.MPH_TO_MS], [0.39, 0.55, 0.65]))
+  center_weight = float(np.interp(abs(desired_lateral_accel), [0.25, 0.65], [1.0, 0.0]))
+  return HKG_CANFD_BASE_FRICTION_THRESHOLD + (base - HKG_CANFD_BASE_FRICTION_THRESHOLD) * center_weight
 
 
 def is_ioniq_6_2025_model(CP) -> bool:
@@ -494,7 +495,7 @@ def get_ioniq_6_2023_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
   return 1.0 - reduction
 
 def get_ioniq_6_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0, desired_lateral_jerk: float = 0.0) -> float:
-  base_threshold = max(get_hkg_canfd_base_friction_threshold(v_ego), IONIQ_6_BASE_FRICTION_THRESHOLD)
+  base_threshold = max(get_hkg_canfd_base_friction_threshold(v_ego, desired_lateral_accel), IONIQ_6_BASE_FRICTION_THRESHOLD)
   transition_envelope = _ioniq_6_transition_envelope(v_ego, desired_lateral_accel, desired_lateral_jerk)
   phase = _ioniq_6_transition_phase(desired_lateral_accel, desired_lateral_jerk)
   turn_in_weight = max(phase, 0.0)

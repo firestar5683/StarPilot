@@ -259,7 +259,7 @@ def feedforward_scale(s: Ioniq6Surface, speed: float, accel: float, jerk: float,
 
 
 def friction_threshold(s: Ioniq6Surface, speed: float, accel: float, jerk: float) -> float:
-  threshold = max(base.get_hkg_canfd_base_friction_threshold(speed), base.IONIQ_6_BASE_FRICTION_THRESHOLD)
+  threshold = max(base.get_hkg_canfd_base_friction_threshold(speed, accel), base.IONIQ_6_BASE_FRICTION_THRESHOLD)
   envelope = base._ioniq_6_transition_envelope(speed, accel, jerk)
   phase = base._ioniq_6_transition_phase(accel, jerk)
   unwind_speed = _sigmoid((speed - base.IONIQ_6_UNWIND_HIGH_SPEED_SPEED) / base.IONIQ_6_UNWIND_HIGH_SPEED_SPEED_WIDTH)
