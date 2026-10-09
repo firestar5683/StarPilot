@@ -42,9 +42,11 @@ IONIQ_6_RESPONSE_MULTIPLIER = 1.2
 IONIQ_6_CANFD_SCC_ACCEL_STEP = (6.0 / 50.0) * IONIQ_6_RESPONSE_MULTIPLIER
 IONIQ_6_CANFD_SCC_DECEL_STEP = (15.0 / 50.0) * IONIQ_6_RESPONSE_MULTIPLIER
 EV9_CANFD_SCC_DECEL_STEP = 10.0 / 50.0
-RAY_PEDAL_COMMAND_CAP = 0.35  # Ray firmware voltage scaling is route-derived; validate before raising.
-RAY_PEDAL_RATE_UP = 0.012     # per 25 Hz command (0.30 normalized pedal per second)
+RAY_PEDAL_COMMAND_CAP = 0.55
+RAY_PEDAL_RATE_UP = 0.02
 RAY_PEDAL_RATE_DOWN = 0.06
+RAY_PEDAL_OVERSPEED_CUTOFF = 0.5
+RAY_PEDAL_TAPER_BELOW_TARGET = 0.75
 GENESIS_G90_STOP_HOLD_SPEED_BP = [0.0, 0.03, 0.08, 0.16, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0]
 GENESIS_G90_STOP_HOLD_ACCEL_V = [-0.10, -0.10, -0.12, -0.18, -0.30, -0.50, -0.75, -1.00, -1.40, -1.80]
 GENESIS_G90_STOP_HOLD_RELAX_SPEED_BP = [0.0, 0.08, 0.16, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0]
@@ -768,7 +770,8 @@ class CarController(CarControllerBase):
     lead_data = self._can_lead_data.update(lead_distance, lead_rel_speed, lead_visible)
 
     # HUD messages
-    sys_warning, sys_state, left_lane_warning, right_lane_warning = process_hud_alert(CC.enabled, self.car_fingerprint,
+    stinger_hud_enabled = CC.enabled or (self.CP.carFingerprint == CAR.KIA_STINGER_2022 and CC.latActive)
+    sys_warning, sys_state, left_lane_warning, right_lane_warning = process_hud_alert(stinger_hud_enabled, self.car_fingerprint,
                                                                                       hud_control)
 
     if blended_hda2:
@@ -809,12 +812,12 @@ class CarController(CarControllerBase):
 
     # Button messages
     if not self.long_active_ecu:
-      if self.cancel_counter > CANCEL_BUTTON_DELAY_FRAMES:
-        can_sends.append(hyundaican.create_clu11(self.packer, self.frame, CS.clu11, Buttons.CANCEL, self.CP))
-      elif self._ray_pedal and CC.enabled and CS.out.cruiseState.enabled:
-        if (self.frame - self.last_button_frame) * DT_CTRL > 0.1:
+      if self._ray_pedal and CC.enabled and CS.out.cruiseState.enabled:
+        if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
           can_sends.append(hyundaican.create_clu11(self.packer, self.frame, CS.clu11, Buttons.CANCEL, self.CP))
           self.last_button_frame = self.frame
+      elif self.cancel_counter > CANCEL_BUTTON_DELAY_FRAMES:
+        can_sends.append(hyundaican.create_clu11(self.packer, self.frame, CS.clu11, Buttons.CANCEL, self.CP))
       elif CC.cruiseControl.resume and not self._ray_pedal:
         # send resume at a max freq of 10Hz
         if (self.frame - self.last_button_frame) * DT_CTRL > 0.1:
@@ -829,14 +832,29 @@ class CarController(CarControllerBase):
     if self._ray_pedal and self.frame % 4 == 0:
       pedal_ready = CS.ray_pedal_valid and CS.ray_pedal_state == 0
       pedal_active = (CC.longActive and pedal_ready and not CC.cruiseControl.override and
-                      not CS.out.gasPressed and not CS.out.brakePressed and
-                      not CS.out.cruiseState.enabled)
+                      not CS.out.gasPressed and not CS.out.brakePressed)
       if pedal_active:
-        target = float(np.clip(accel / CarControllerParams.ACCEL_MAX * RAY_PEDAL_COMMAND_CAP,
-                               0.0, RAY_PEDAL_COMMAND_CAP))
-        self._ray_pedal_gas_last = rate_limit(
-          target, self._ray_pedal_gas_last, -RAY_PEDAL_RATE_DOWN, RAY_PEDAL_RATE_UP,
-        )
+        set_speed = hud_control.setSpeed
+        if not np.isfinite(set_speed) or set_speed < 1.0:
+          self._ray_pedal_gas_last = 0.0
+        else:
+          speed_error = set_speed - CS.out.vEgo
+          if speed_error <= -RAY_PEDAL_OVERSPEED_CUTOFF:
+            self._ray_pedal_gas_last = 0.0
+          else:
+            pedal_offset = float(np.interp(CS.out.vEgo, [0., 2., 4., 8., 12., 20.],
+                                           [0.08, 0.13, 0.20, 0.32, 0.42, 0.48]))
+            pedal_gain = 2.0 if accel < 0.0 else 0.22
+            target = float(np.clip(pedal_offset + accel * pedal_gain, 0.0, RAY_PEDAL_COMMAND_CAP))
+            if speed_error < 0.0:
+              target *= float(np.clip(0.65 * (1.0 + speed_error / RAY_PEDAL_OVERSPEED_CUTOFF), 0.0, 1.0))
+            elif speed_error < RAY_PEDAL_TAPER_BELOW_TARGET:
+              target *= 0.65 + 0.35 * speed_error / RAY_PEDAL_TAPER_BELOW_TARGET
+            if target <= 0.001:
+              self._ray_pedal_gas_last = 0.0
+            else:
+              next_gas = rate_limit(target, self._ray_pedal_gas_last, -RAY_PEDAL_RATE_DOWN, RAY_PEDAL_RATE_UP)
+              self._ray_pedal_gas_last = min(next_gas, target)
       else:
         self._ray_pedal_gas_last = 0.0
       can_sends.append(create_gas_interceptor_command(
@@ -1025,9 +1043,12 @@ class CarController(CarControllerBase):
             left_sound_active=left_warning.sound_active, right_sound_active=right_warning.sound_active,
           )
         else:
+          host_speed = getattr(CS.out, "vEgoRaw", None) \
+            if self.CP.carFingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN else None
           adrv_messages = hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame,
                                                              car_fingerprint=self.CP.carFingerprint,
-                                                             drive_gear=drive_gear)
+                                                             drive_gear=drive_gear,
+                                                             v_ego=host_speed)
         can_sends.extend(adrv_messages)
         # The front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat
         # and stops publishing object tracks when it disappears.

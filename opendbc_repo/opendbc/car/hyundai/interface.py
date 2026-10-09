@@ -201,6 +201,8 @@ class CarInterface(CarInterfaceBase):
       if ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
         ret.steerControlType = structs.CarParams.SteerControlType.angle
         ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CANFD_ANGLE_STEERING.value
+        if candidate == CAR.KIA_SPORTAGE_HEV_2026:
+          ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.CANFD_NO_STOCK_LKA.value
       if candidate == CAR.HYUNDAI_IONIQ_6:
         # Keep lateral active through stops: zeroing torque at standstill dropped the
         # stop-turn hold and forced a rate-limit re-ramp from zero on every pull-away
@@ -331,8 +333,8 @@ class CarInterface(CarInterfaceBase):
 
     if candidate == CAR.HYUNDAI_ELANTRA_2021:
       ret.longitudinalActuatorDelay = 0.22
-      ret.stopAccel = -0.85
-      ret.stoppingDecelRate = 0.35
+      ret.stopAccel = -1.1
+      ret.stoppingDecelRate = 0.55
 
     if candidate == CAR.HYUNDAI_ELANTRA_HEV_2024:
       ret.longitudinalActuatorDelay = 0.22
@@ -393,7 +395,7 @@ class CarInterface(CarInterfaceBase):
 
       if not skip_disable_ecu:
         disable_can_recv = can_recv
-        if CP.carFingerprint == CAR.KIA_EV6 and can_recv is not None:
+        if CP.carFingerprint in (CAR.KIA_EV6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN) and can_recv is not None:
           hyundaicanfd.cache_adrv_0x51_template(CP.carFingerprint, None)
           base_can_recv = can_recv
           adrv_bus = CanBus(CP).ACAN

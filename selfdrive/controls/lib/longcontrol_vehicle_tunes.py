@@ -46,6 +46,9 @@ TOYOTA_COROLLA_TARGET_FILTER_UP_TAU = 0.30
 TOYOTA_COROLLA_TARGET_FILTER_DOWN_TAU = 0.18
 TOYOTA_COROLLA_TARGET_FILTER_BRAKE_BYPASS = -0.75
 TOYOTA_COROLLA_TARGET_FILTER_DROP_BYPASS = 0.45
+TOYOTA_COROLLA_STOPPED_LEAD_HOLD_MAX_EGO_SPEED = 0.5
+TOYOTA_COROLLA_STOPPED_LEAD_HOLD_MAX_DISTANCE = 8.0
+TOYOTA_COROLLA_STOPPED_LEAD_HOLD_MAX_SPEED = 0.35
 VOLT_CRUISE_INTEGRATOR_MIN_SPEED = 8.0
 VOLT_CRUISE_INTEGRATOR_TARGET_MAX = 0.12
 VOLT_CRUISE_INTEGRATOR_ERROR_MAX = 0.12
@@ -452,6 +455,18 @@ class LongControlVehicleTuning:
     alpha = DT_CTRL / (tau + DT_CTRL)
     self.toyota_corolla_filtered_a_target += alpha * (float(a_target) - self.toyota_corolla_filtered_a_target)
     return self.toyota_corolla_filtered_a_target
+
+  def hold_toyota_corolla_for_stopped_lead(self, v_ego, leads=None):
+    if not self.is_toyota_corolla_tss2 or v_ego > TOYOTA_COROLLA_STOPPED_LEAD_HOLD_MAX_EGO_SPEED:
+      return False
+
+    return any(
+      bool(getattr(lead, "status", False)) and
+      0.0 < float(getattr(lead, "dRel", 0.0)) <= TOYOTA_COROLLA_STOPPED_LEAD_HOLD_MAX_DISTANCE and
+      abs(float(getattr(lead, "yRel", 0.0))) <= 1.75 and
+      abs(float(getattr(lead, "vLead", 0.0))) <= TOYOTA_COROLLA_STOPPED_LEAD_HOLD_MAX_SPEED
+      for lead in (leads or ())
+    )
 
   def get_integrator_freeze(self, last_output_accel, a_target, error, v_ego, accel_limits):
     volt_test_tune_handoff = self.is_volt and testing_ground.use_2

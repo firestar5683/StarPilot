@@ -22,6 +22,9 @@ class LayoutWidget(Widget):
     """Whether this visual should suppress the on-road background tap."""
     return True
 
+  def contains_pointer(self, mouse_pos) -> bool:
+    return rl.check_collision_point_rec(mouse_pos, self.rect)
+
   def _render(self, rect: rl.Rectangle) -> bool | int | None:
     # Subclasses will implement self._render instead of render
     # to integrate with openpilot.system.ui.widgets.Widget

@@ -96,6 +96,8 @@ static bool ford_lka_steering = false;
 static bool ford_extended_lateral = false;
 static bool ford_longitudinal = false;
 static bool ford_cancel_resume_button = false;
+static bool ford_mach_e_curvature = false;
+static int ford_path_angle_last = 0;
 
 // Curvature rate limits
 #define FORD_LIMITS(limit_lateral_acceleration) {                                               \
@@ -121,10 +123,10 @@ static bool ford_cancel_resume_button = false;
 
 static const AngleSteeringLimits FORD_STEERING_LIMITS = FORD_LIMITS(false);
 
-#define FORD_EXTENDED_LIMITS(limit_lateral_acceleration) {                                      \
+#define FORD_EXTENDED_LIMITS(limit_lateral_acceleration, max_curvature_error) {                 \
   .max_angle = 1000,                                                                            \
   .angle_deg_to_can = 50000,                                                                    \
-  .max_angle_error = 100,                                                                       \
+  .max_angle_error = (max_curvature_error),                                                     \
   .angle_rate_up_lookup = {                                                                     \
     {5., 16., 25.},                                                                             \
     {0.0025, 0.0014, 0.00018}                                                                   \
@@ -140,7 +142,7 @@ static const AngleSteeringLimits FORD_STEERING_LIMITS = FORD_LIMITS(false);
   .inactive_angle_is_zero = true,                                                               \
 }
 
-static const AngleSteeringLimits FORD_EXTENDED_STEERING_LIMITS = FORD_EXTENDED_LIMITS(false);
+static const AngleSteeringLimits FORD_EXTENDED_STEERING_LIMITS = FORD_EXTENDED_LIMITS(false, 100);
 
 static void ford_rx_hook(const CANPacket_t *msg) {
   if (msg->bus == FORD_MAIN_BUS) {
@@ -318,7 +320,8 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
   // Safety check for LateralMotionControl2 action
   if (msg->addr == FORD_LateralMotionControl2) {
     static const AngleSteeringLimits FORD_CANFD_STEERING_LIMITS = FORD_LIMITS(true);
-    static const AngleSteeringLimits FORD_CANFD_EXTENDED_STEERING_LIMITS = FORD_EXTENDED_LIMITS(true);
+    static const AngleSteeringLimits FORD_CANFD_EXTENDED_STEERING_LIMITS = FORD_EXTENDED_LIMITS(true, 100);
+    static const AngleSteeringLimits FORD_MACH_E_CURVATURE_LIMITS = FORD_EXTENDED_LIMITS(true, 300);
 
     // Signal: LatCtl_D2_Rq
     bool steer_control_enabled = ((msg->data[0] >> 4) & 0x7U) != 0U;
@@ -336,9 +339,19 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     if (ford_extended_lateral) {
       violation |= desired_path_offset != 0;
       violation |= (desired_curvature_rate < -1024) || (desired_curvature_rate > 1023);
-      violation |= desired_path_angle != 0;
+      if (desired_path_angle != 0) {
+        const float speed = vehicle_speed.max / VEHICLE_SPEED_FACTOR;
+        const float curvature = (float)SAFETY_ABS(desired_curvature) / 50000.0f;
+        const float path_angle = (float)SAFETY_ABS(desired_path_angle) / 2000.0f;
+        const float combined_acceleration = (curvature + path_angle / SAFETY_MAX(speed, 1.0f)) * speed * speed;
+        violation |= !ford_mach_e_curvature || !steer_control_enabled || !controls_allowed;
+        violation |= (speed < 3.0f) || (speed >= 8.8f);
+        violation |= (SAFETY_ABS(desired_curvature) < 975) || (SAFETY_ABS(desired_path_angle) > 320);
+        violation |= (desired_curvature * desired_path_angle <= 0) || (combined_acceleration > 2.5f);
+        violation |= SAFETY_ABS(desired_path_angle - ford_path_angle_last) > 110;
+      }
       violation |= steer_angle_cmd_checks(desired_curvature, steer_control_enabled,
-                                          FORD_CANFD_EXTENDED_STEERING_LIMITS);
+                                          ford_mach_e_curvature ? FORD_MACH_E_CURVATURE_LIMITS : FORD_CANFD_EXTENDED_STEERING_LIMITS);
       if (!steer_control_enabled) {
         violation |= (desired_curvature != 0) || (desired_curvature_rate != 0);
       }
@@ -352,6 +365,8 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
 
     if (violation) {
       tx = false;
+    } else {
+      ford_path_angle_last = desired_path_angle;
     }
   }
 
@@ -406,8 +421,11 @@ static safety_config ford_init(uint16_t param) {
 
   const uint16_t FORD_PARAM_CANFD = 2;
   const uint16_t FORD_PARAM_LKA_STEERING = 4;
+  const uint16_t FORD_PARAM_MACH_E_CURVATURE = 8;
   const bool ford_canfd = GET_FLAG(param, FORD_PARAM_CANFD);
   ford_lka_steering = GET_FLAG(param, FORD_PARAM_LKA_STEERING);
+  ford_mach_e_curvature = ford_canfd && GET_FLAG(param, FORD_PARAM_MACH_E_CURVATURE);
+  ford_path_angle_last = 0;
   ford_extended_lateral = false;
   ford_cancel_resume_button = false;
 

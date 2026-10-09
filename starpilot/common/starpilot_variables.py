@@ -21,7 +21,7 @@ from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, EV_CAR as HYUNDAI_EV_
 from opendbc.car.interfaces import TORQUE_SUBSTITUTE_PATH, CarInterfaceBase, GearShifter
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.subaru.values import SUBARU_REDNECK_CRUISE_CARS, SUBARU_STOP_START_CARS, SubaruFlags
-from opendbc.car.tesla.values import CAR as TESLA_CAR
+from opendbc.car.tesla.values import CAR as TESLA_CAR, TeslaFlags
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR, ToyotaStarPilotFlags
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.constants import CV
@@ -198,6 +198,7 @@ CANCEL_BUTTON_MAPPINGS = (
 
 AOL_LKAS_MIGRATION_KEY = "AOLLKASMigratedToButtonControl"
 FORD_LKAS_MIGRATION_KEY = "FordLKASButtonControlMigrated"
+SONATA_HYBRID_LKAS_MIGRATION_KEY = "SonataHybridLKASButtonControlMigrated"
 
 
 def sync_reboot_marker(marker_path: Path, enabled: bool, params: Params) -> bool:
@@ -443,6 +444,18 @@ def migrate_ford_lkas_button_default(car_make: str, params: Params | None = None
   return True
 
 
+def migrate_sonata_hybrid_lkas_button_default(car_model: str, params: Params | None = None) -> bool:
+  params = params or Params(return_defaults=True)
+  if car_model != HYUNDAI_CAR.HYUNDAI_SONATA_HYBRID or params.get_bool(SONATA_HYBRID_LKAS_MIGRATION_KEY):
+    return False
+
+  if params.get_int("LKASButtonControl") == BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]:
+    params.put_int("LKASButtonControl", BUTTON_FUNCTIONS["AOL_TOGGLE"])
+
+  params.put_bool(SONATA_HYBRID_LKAS_MIGRATION_KEY, True)
+  return True
+
+
 class StarPilotVariables:
   def __init__(self):
     self.params = Params(return_defaults=True)
@@ -634,6 +647,8 @@ class StarPilotVariables:
       clear_update_flag = False
     # CarParams uses this value to select the matching Panda safety configuration.
     toggle.tesla_cooperative_steering = self.params.get_bool("TeslaCoopSteering")
+    toggle.tesla_aol_screen_tap_requested = self.params.get_bool("TeslaAOLScreenTap") and self.params.get_bool("AlwaysOnLateral")
+    toggle.tesla_aol_screen_brake_disengage_requested = self.params.get_bool("TeslaAOLDisengageOnBrake")
     toggle.rivian_angle_control = self.params.get_bool("RivianAngleControl")
 
     fallback_platform = GM_CAR.CHEVROLET_BOLT_ACC_2022_2023 if HARDWARE.get_device_type() == "pc" else MOCK.MOCK
@@ -662,6 +677,7 @@ class StarPilotVariables:
     toggle.car_make = CP.brand
     migrate_ford_lkas_button_default(toggle.car_make, self.params)
     toggle.car_model = CP.carFingerprint
+    migrate_sonata_hybrid_lkas_button_default(toggle.car_model, self.params)
     toggle.disable_openpilot_long = self.get_value("DisableOpenpilotLongitudinal", condition=not alpha_longitudinal)
     friction = CP.lateralTuning.torque.friction
     if not math.isfinite(friction):
@@ -862,6 +878,13 @@ class StarPilotVariables:
     )
     toggle.always_on_lateral_main = toggle.always_on_lateral and not prohibited_main_aol
     toggle.always_on_lateral_pause_speed = self.get_value("PauseAOLOnBrake", cast=float, condition=toggle.always_on_lateral)
+    toggle.tesla_aol_disengage_on_brake = self.get_value(
+      "TeslaAOLDisengageOnBrake", condition=toggle.always_on_lateral and toggle.car_make == "tesla"
+    )
+    toggle.tesla_aol_screen_tap = self.get_value(
+      "TeslaAOLScreenTap", condition=toggle.always_on_lateral and toggle.car_make == "tesla" and
+      toggle.car_model in (TESLA_CAR.TESLA_MODEL_3, TESLA_CAR.TESLA_MODEL_Y) and bool(CP.flags & TeslaFlags.AOL_SCREEN_BUTTON),
+    )
 
     main_cruise_button_control = self.get_button_function("MainCruiseButtonControl")
     toggle.main_cruise_aol_toggle = _main_cruise_aol_allowed(main_cruise_button_control)
@@ -1458,6 +1481,8 @@ class StarPilotVariables:
     speed_limit_confirmation = self.get_value("SLCConfirmation", condition=toggle.speed_limit_controller)
     toggle.speed_limit_confirmation_higher = self.get_value("SLCConfirmationHigher", condition=speed_limit_confirmation)
     toggle.speed_limit_confirmation_lower = self.get_value("SLCConfirmationLower", condition=speed_limit_confirmation)
+    # Legacy setting is hidden in the current UI. SLC's pedal and +/- overrides
+    # remain available regardless of its saved value; keep loading it for compatibility.
     slc_override_method = self.get_value("SLCOverride", cast=float, condition=toggle.speed_limit_controller)
     toggle.speed_limit_controller_override_manual = slc_override_method == 1
     toggle.speed_limit_controller_override_set_speed = slc_override_method == 2
@@ -1494,8 +1519,6 @@ class StarPilotVariables:
     toggle.startup_alert_bottom = self.get_value("StartupMessageBottom", cast=str, default="")
 
     if toggle.simple_mode:
-      toggle.alert_volume_controller = False
-
       toggle.color_scheme = "stock"
       toggle.current_holiday_theme = "stock"
       toggle.holiday_themes = False

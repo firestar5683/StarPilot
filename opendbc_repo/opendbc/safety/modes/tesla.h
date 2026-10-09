@@ -4,6 +4,9 @@
 
 static bool tesla_longitudinal = false;
 static bool tesla_coop_steering = false;
+static bool tesla_aol_screen_button = false;
+static bool tesla_screen_disengage_on_brake = false;
+static bool tesla_touch_initialized = false;
 static bool tesla_stock_aeb = false;
 
 #define TESLA_STEERING_DISENGAGE_TORQUE 500  // cNm
@@ -94,6 +97,20 @@ static bool tesla_get_quality_flag_valid(const CANPacket_t *msg) {
   return valid;
 }
 
+static void tesla_rx_all_hook(const CANPacket_t *msg) {
+  // The add-on's UI message is asynchronous, not a required periodic safety input.
+  if (tesla_aol_screen_button && (msg->bus == 1U) && (msg->addr == 0x3DFU) && (GET_LEN(msg) == 8)) {
+    const bool screen_button = msg->data[3] == 3U;  // UI_activeTouchPoints
+    if (tesla_touch_initialized && screen_button && !lkas_button_prev && !steering_disengage &&
+        !(tesla_screen_disengage_on_brake && brake_pressed)) {
+      lkas_on = !aol_allowed;
+    }
+    // A touch held during startup is not an engagement request.
+    tesla_touch_initialized = true;
+    lkas_button_prev = screen_button;
+  }
+}
+
 static void tesla_rx_hook(const CANPacket_t *msg) {
 
   if (msg->bus == 0U) {
@@ -112,6 +129,9 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       steering_disengage = (hands_on_level >= 3) ||
                            (tesla_coop_steering && (SAFETY_ABS(torsion_bar_torque) > TESLA_STEERING_DISENGAGE_TORQUE)) ||
                            ((eac_status == 0) && (eac_error_code == 9));
+      if (tesla_aol_screen_button && steering_disengage) {
+        lkas_on = false;
+      }
     }
 
     // Vehicle speed (DI_speed)
@@ -136,6 +156,9 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     // Brake pressed
     if (msg->addr == 0x39dU) {
       brake_pressed = (msg->data[2] & 0x03U) == 2U;
+      if (tesla_screen_disengage_on_brake && brake_pressed) {
+        lkas_on = false;
+      }
     }
 
     // Cruise and Autopark/Summon state
@@ -166,7 +189,11 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
 
       pcm_cruise_check(cruise_engaged);
 
-      acc_main_on = ((cruise_state == 1) || cruise_engaged) && !tesla_autopark;
+      const bool acc_main_on_now = ((cruise_state == 1) || cruise_engaged) && !tesla_autopark;
+      if (tesla_aol_screen_button && acc_main_on && !acc_main_on_now && !brake_pressed) {
+        lkas_on = false;
+      }
+      acc_main_on = acc_main_on_now;
     }
 
     if (msg->addr == 0x155U) {
@@ -187,7 +214,8 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       bool tesla_stock_lkas_now = steering_control_type == 2;  // "LANE_KEEP_ASSIST"
 
       // Only consider rising edges while controls are not allowed
-      if (tesla_stock_lkas_now && !tesla_stock_lkas_prev && !controls_allowed) {
+      if (tesla_stock_lkas_now && !tesla_stock_lkas_prev &&
+          !(controls_allowed || (tesla_aol_screen_button && aol_allowed))) {
         tesla_stock_lkas = true;
       }
       if (!tesla_stock_lkas_now) {
@@ -337,6 +365,11 @@ static safety_config tesla_init(uint16_t param) {
   };
 
   SAFETY_UNUSED(param);
+  const uint16_t TESLA_FLAG_AOL_SCREEN_BUTTON = 512;
+  const uint16_t TESLA_FLAG_AOL_SCREEN_DISENGAGE_ON_BRAKE = 1024;
+  tesla_aol_screen_button = GET_FLAG(param, TESLA_FLAG_AOL_SCREEN_BUTTON);
+  tesla_screen_disengage_on_brake = tesla_aol_screen_button && GET_FLAG(param, TESLA_FLAG_AOL_SCREEN_DISENGAGE_ON_BRAKE);
+  tesla_touch_initialized = false;
 #ifdef ALLOW_DEBUG
   const uint16_t TESLA_FLAG_LONGITUDINAL_CONTROL = 1;
   const uint16_t TESLA_FLAG_COOP_STEERING = 256;
@@ -377,6 +410,7 @@ static safety_config tesla_init(uint16_t param) {
 
 const safety_hooks tesla_hooks = {
   .init = tesla_init,
+  .rx_all = tesla_rx_all_hook,
   .rx = tesla_rx_hook,
   .tx = tesla_tx_hook,
   .fwd = tesla_fwd_hook,

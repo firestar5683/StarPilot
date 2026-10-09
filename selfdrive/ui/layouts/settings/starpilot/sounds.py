@@ -10,6 +10,7 @@ from openpilot.starpilot.common.starpilot_variables import ACTIVE_THEME_PATH
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MouseEvent, MousePos
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import Widget, DialogResult
+from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.widgets.label import gui_label
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
@@ -185,7 +186,15 @@ class SoundsManagerView(AdjustorTogglesPanelView):
 
   def _activate_target(self, target: str):
     if target == "action:restore_defaults":
-      self._controller._restore_defaults()
+      def on_result(result: DialogResult):
+        if result == DialogResult.CONFIRM:
+          self._controller._restore_defaults()
+
+      gui_app.push_widget(ConfirmDialog(
+        tr("Reset all sound volumes, cooldown, and custom alerts to their defaults?"),
+        tr("Reset All"),
+        callback=on_result,
+      ))
 
   def _measure_content_height(self, content_width: float) -> float:
     col_width = (content_width - SECTION_GAP) / 2
@@ -232,10 +241,12 @@ class SoundsManagerView(AdjustorTogglesPanelView):
 
     current_y = y + GROUP_TOP_INSET
 
-    label_rect = rl.Rectangle(x + 24, current_y, width - 48, 28)
+    label_rect = rl.Rectangle(x + 24, current_y - 4, width - 48, 28)
     gui_label(label_rect, tr("Reset All"), 28, AetherListColors.SUBTEXT, FontWeight.MEDIUM,
               alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT)
-    self._reset_rect = rl.Rectangle(label_rect.x + label_rect.width - 140, label_rect.y, 140, 24)
+    reset_width = min(240.0, label_rect.width)
+    self._reset_rect = rl.Rectangle(label_rect.x + label_rect.width - reset_width,
+                                    current_y - GROUP_TOP_INSET, reset_width, GROUP_TOP_INSET + label_rect.height)
     self._interactive_rects["action:restore_defaults"] = self._reset_rect
     current_y += 28
     for index, key in enumerate(all_keys):

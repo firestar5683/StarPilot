@@ -629,6 +629,16 @@ TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
   CAR.TOYOTA_RAV4H,
 }
 
+# The Camry uses the legacy camera AEB replacement for Auto Hold. The
+# 2019-2021 RAV4 uses it only with the detected hybrid powertrain.
+TOYOTA_AUTO_HOLD_AEB_CARS = {CAR.TOYOTA_CAMRY_TSS2}
+
+
+def uses_toyota_auto_hold_aeb(CP: CarParams) -> bool:
+  return (CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS or
+          (CP.carFingerprint == CAR.TOYOTA_RAV4_TSS2 and bool(CP.flags & ToyotaFlags.HYBRID.value)))
+
+
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
 

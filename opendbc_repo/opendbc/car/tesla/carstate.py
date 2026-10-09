@@ -1,12 +1,12 @@
 import copy
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.tesla.values import (
   DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaSafetyFlags,
-  CAR, LEGACY_CARS,
+  CAR, LEGACY_CARS, TeslaFlags,
 )
 from opendbc.car.tesla.preap.carstate import get_preap_can_parsers, update_preap
 from opendbc.car.tesla.preap.engagement import PreAPEngagement
@@ -17,6 +17,20 @@ ButtonType = structs.CarState.ButtonEvent.Type
 
 TESLA_GAS_PRESS_ON = 0.8
 TESLA_GAS_PRESS_OFF = 0.4
+
+
+class TeslaScreenCANParser(CANParser):
+  def __init__(self):
+    super().__init__("tesla_model3_vehicle", [("UI_status2", 0)], CANBUS.vehicle)
+
+  def update(self, strings, sendcan=False):
+    if strings and not isinstance(strings[0], list | tuple):
+      strings = [strings]
+    # Match Panda's exact-length check before producing engagement button events.
+    return super().update([
+      (timestamp, [frame for frame in frames if frame[0] == 0x3DF and len(frame[1]) == 8])
+      for timestamp, frames in strings
+    ], sendcan)
 
 
 def update_tesla_gas_pressed(previous: bool, pedal_position: float) -> bool:
@@ -51,6 +65,7 @@ class CarState(CarStateBase):
     self.cruise_buttons = 0
     self.prev_cruise_buttons = 0
     self.gas_pressed = False
+    self.active_touch_points = None
     self.msg_stw_actn_req = None
     self.speed_units = "MPH"
     self.cooperative_steering = any(
@@ -85,6 +100,16 @@ class CarState(CarStateBase):
     if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
       return False
     return super().update_button_enable(buttonEvents)
+
+  def update_screen_button(self, cp_vehicle):
+    events = []
+    for touch_points in cp_vehicle.vl_all["UI_status2"]["UI_activeTouchPoints"]:
+      touch_points = int(touch_points)
+      # Establish a baseline first; a touch already held during boot is not an engagement request.
+      if self.active_touch_points is not None:
+        events.extend(create_button_events(touch_points, self.active_touch_points, {3: ButtonType.lkas}))
+      self.active_touch_points = touch_points
+    return events
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
@@ -181,6 +206,8 @@ class CarState(CarStateBase):
     else:
       pass
     # Buttons # ToDo: add Gap adjust button
+    if self.CP.flags & TeslaFlags.AOL_SCREEN_BUTTON:
+      ret.buttonEvents = list(ret.buttonEvents) + self.update_screen_button(can_parsers[Bus.adas])
 
     # Messages needed by carcontroller
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])
@@ -279,5 +306,7 @@ class CarState(CarStateBase):
       }
     return {
       Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
-      Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party)
+      Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party),
+      **({Bus.adas: TeslaScreenCANParser()}
+         if CP.flags & TeslaFlags.AOL_SCREEN_BUTTON else {}),
     }

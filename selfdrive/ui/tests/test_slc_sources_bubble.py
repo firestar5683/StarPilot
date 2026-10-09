@@ -80,39 +80,19 @@ def test_visible_source_rows_honor_active_only_and_source_order():
   ]
   # When no sources have a valid speed reading (> 0), returns empty list (triggers empty state)
   assert visible_source_rows(
-    source_defs, {key: 0.0 for key in values}, "Map Data", ("Map Data",),
+    source_defs, dict.fromkeys(values, 0.0), "Map Data", ("Map Data",),
   ) == []
 
 
-def test_source_label_color_override_and_engagement_states():
-  from openpilot.selfdrive.ui.onroad.starpilot.slc_speed_limit import _source_label_color
-  from openpilot.selfdrive.ui.onroad.hud_renderer import COLORS
-  from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
+def test_header_reuses_diagnostic_source_icons_without_unknown_fallback():
+  from openpilot.selfdrive.ui.onroad.starpilot.slc_speed_limit import source_icon_key
 
-  # Engaged and not overridden -> Active green
-  ui_state.status = UIStatus.ENGAGED
-  color = _source_label_color(255, is_overridden=False)
-  assert (color.r, color.g, color.b, color.a) == (COLORS.ENGAGED.r, COLORS.ENGAGED.g, COLORS.ENGAGED.b, 255)
-
-  # Engaged but overridden -> Disengaged/override gray
-  color_overridden = _source_label_color(255, is_overridden=True)
-  assert (color_overridden.r, color_overridden.g, color_overridden.b, color_overridden.a) == (
-    COLORS.DISENGAGED.r, COLORS.DISENGAGED.g, COLORS.DISENGAGED.b, 255
-  )
-
-  # Disengaged -> Disengaged/override gray
-  ui_state.status = UIStatus.DISENGAGED
-  color_disengaged = _source_label_color(255, is_overridden=False)
-  assert (color_disengaged.r, color_disengaged.g, color_disengaged.b, color_disengaged.a) == (
-    COLORS.DISENGAGED.r, COLORS.DISENGAGED.g, COLORS.DISENGAGED.b, 255
-  )
-
-  # Override UI status -> Disengaged/override gray
-  ui_state.status = UIStatus.OVERRIDE
-  color_ui_override = _source_label_color(255, is_overridden=False)
-  assert (color_ui_override.r, color_ui_override.g, color_ui_override.b, color_ui_override.a) == (
-    COLORS.OVERRIDE.r, COLORS.OVERRIDE.g, COLORS.OVERRIDE.b, 255
-  )
+  assert source_icon_key("Vision") == "camera"
+  assert source_icon_key("Dashboard") == "dashboard"
+  assert source_icon_key("Map Data") == "map"
+  assert source_icon_key("Mapbox") == "map"
+  assert source_icon_key("None") is None
+  assert source_icon_key("Unexpected") is None
 
 
 def test_vision_pulse_ignores_same_limit_source_flapping(monkeypatch):

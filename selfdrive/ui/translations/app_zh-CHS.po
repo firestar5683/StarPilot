@@ -1172,3 +1172,19 @@ msgstr "✓ 已订阅"
 #, python-format
 msgid "🔥 Firehose Mode 🔥"
 msgstr "🔥 Firehose 模式 🔥"
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Off"
+msgstr ""
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Weekly"
+msgstr ""
+
+#: selfdrive/ui/layouts/settings/starpilot/maps.py
+msgid "Auto: Monthly"
+msgstr ""
+
+#: selfdrive/ui/onroad/starpilot/navigation_card.py
+msgid "Then"
+msgstr ""

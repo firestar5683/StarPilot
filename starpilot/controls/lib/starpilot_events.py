@@ -189,7 +189,7 @@ class StarPilotEvents:
       else:
         self.events.add(StarPilotEventName.openpilotCrashed)
 
-    if self.starpilot_planner.starpilot_vcruise.slc.speed_limit_changed_timer == DT_MDL and starpilot_toggles.speed_limit_changed_alert:
+    if self.starpilot_planner.starpilot_vcruise.slc.limit_change_started and starpilot_toggles.speed_limit_changed_alert:
       self.events.add(StarPilotEventName.speedLimitChanged)
 
     self.startup_seen |= sm["starpilotSelfdriveState"].alertText1 == starpilot_toggles.startup_alert_top and sm["starpilotSelfdriveState"].alertText2 == starpilot_toggles.startup_alert_bottom

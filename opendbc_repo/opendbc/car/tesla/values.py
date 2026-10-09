@@ -144,10 +144,14 @@ class TeslaSafetyFlags(IntFlag):
   FLAG_EXTERNAL_PANDA = 4
   FLAG_HW1 = 8
   COOP_STEERING = 256
+  AOL_SCREEN_BUTTON = 512
+  AOL_SCREEN_DISENGAGE_ON_BRAKE = 1024
 
 
 class TeslaFlags(IntFlag):
   LONG_CONTROL = 1
+  HAS_VEHICLE_BUS = 2
+  AOL_SCREEN_BUTTON = 4
 
 
 class CruiseButtons:

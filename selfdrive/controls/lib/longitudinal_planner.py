@@ -21,6 +21,8 @@ from openpilot.selfdrive.controls.lib.lead_follow_policy import apply as apply_f
 from openpilot.selfdrive.controls.lib.lead_follow_policy import is_nonurgent_duplicate_vision_follow
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_far_follow_output_slew_rates,
+  get_far_follow_output_slew_min_speed,
+  is_kia_niro_ev_follow_lead,
   get_follow_prebrake_min_headway,
   get_honda_accord_lead_departure_tune,
   get_honda_accord_stop_go_accel_cap,
@@ -35,11 +37,14 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   is_gm_silverado_early_follow_lead,
   is_toyota_rav4_tss2_post_departure_tune,
   get_toyota_rav4_tss2_early_lead_cap,
+  get_toyota_corolla_braking_lead_cap,
+  is_toyota_corolla_early_radar_follow_lead,
+  use_stopped_lead_position,
+  use_model_lead_filter_sync,
   is_toyota_rav4_tss2_radar_follow_lead,
   get_toyota_sienna_post_departure_restop_cap,
   get_untracked_slow_lead_decel_scale,
-  get_toyota_prius_stopped_lead_obstacle_bias,
-  get_honda_crv_5g_stopped_lead_obstacle_bias,
+  get_stopped_lead_obstacle_bias,
   get_honda_crv_5g_low_speed_stopped_lead_cap,
   allow_honda_crv_5g_vision_gap_settle,
   get_honda_crv_5g_early_radar_follow_cap,
@@ -579,7 +584,8 @@ def get_accel_from_plan(speeds, accels, action_t=DT_MDL, vEgoStopping=0.05):
 class LongitudinalPlanner:
   def __init__(self, CP, init_v=0.0, init_a=0.0, dt=DT_MDL):
     self.CP = CP
-    self.mpc = LongitudinalMpc(dt=dt)
+    self.mpc = LongitudinalMpc(dt=dt, hold_stopped_lead_position=use_stopped_lead_position(CP),
+                              sync_model_lead_filters=use_model_lead_filter_sync(CP))
     self.fcw = False
     self.dt = dt
     self.model_allow_throttle = True
@@ -602,6 +608,7 @@ class LongitudinalPlanner:
     self.output_a_target = 0.0
     self.output_should_stop = False
     self.far_follow_brake_slew_rate, self.far_follow_release_slew_rate = get_far_follow_output_slew_rates(CP)
+    self.far_follow_slew_min_speed = get_far_follow_output_slew_min_speed(CP, VEHICLE_FAR_FOLLOW_SLEW_MIN_SPEED)
     self.untracked_slow_lead_decel_scale = get_untracked_slow_lead_decel_scale(CP)
     self.tracked_lead_catchup_headway_margins = get_tracked_lead_catchup_headway_margins(CP)
     self.far_follow_output_slew_active = False
@@ -1411,7 +1418,7 @@ class LongitudinalPlanner:
       if bool(getattr(lead, "status", False)) and
       abs(float(getattr(lead, "yRel", 0.0))) <= VEHICLE_FAR_FOLLOW_SLEW_MAX_LATERAL_OFFSET
     ]
-    safe_far_follow = bool(centered_leads and float(v_ego) >= VEHICLE_FAR_FOLLOW_SLEW_MIN_SPEED)
+    safe_far_follow = bool(centered_leads and float(v_ego) >= self.far_follow_slew_min_speed)
     for lead in centered_leads:
       distance = float(getattr(lead, "dRel", 0.0))
       closing_speed = max(0.0, float(v_ego) - float(getattr(lead, "vLead", v_ego)))
@@ -2133,6 +2140,13 @@ class LongitudinalPlanner:
       any(is_toyota_rav4_tss2_radar_follow_lead(self.CP, lead, scene_v_ego)
           for lead in (self.lead_one, self.lead_two))
     )
+    niro_follow = (
+      not experimental_mode and
+      not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
+      not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
+      not bool(getattr(sm['starpilotPlan'], 'stopSignConfirmed', False)) and
+      any(is_kia_niro_ev_follow_lead(self.CP, lead, scene_v_ego) for lead in (self.lead_one, self.lead_two))
+    )
     lightning_stopped_radar_follow = (
       experimental_mode and
       not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
@@ -2144,8 +2158,10 @@ class LongitudinalPlanner:
     # StarPilot trackingLead is debounce/model-length based. Keep a raw close-lead
     # safety path so ACC/chill does not ignore a visible lead during that debounce.
     lead_control_active = (
-      tracking_lead or raw_close_lead_control or early_truck_follow or rav4_radar_follow or
-      lightning_stopped_radar_follow
+      tracking_lead or raw_close_lead_control or early_truck_follow or rav4_radar_follow or niro_follow or
+      lightning_stopped_radar_follow or
+      any(is_toyota_corolla_early_radar_follow_lead(self.CP, lead, scene_v_ego)
+          for lead in (self.lead_one, self.lead_two))
     )
     lead_one_active = bool(self.lead_one.status and lead_control_active)
     effective_t_follow = self.get_dynamic_t_follow(sm['starpilotPlan'].tFollow, self.lead_one if lead_one_active else None, v_ego)
@@ -2363,17 +2379,13 @@ class LongitudinalPlanner:
 
     stopped_lead_obstacle_bias = (0.0, 0.0)
     if (
-      self.mode == 'acc' and
       not bool(getattr(sm['modelV2'].action, 'shouldStop', False)) and
       not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
       not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
       not bool(getattr(sm['carState'], 'standstill', False))
     ):
       stopped_lead_obstacle_bias = tuple(
-        max(
-          get_toyota_prius_stopped_lead_obstacle_bias(self.CP, lead, scene_v_ego),
-          get_honda_crv_5g_stopped_lead_obstacle_bias(self.CP, lead, scene_v_ego),
-        )
+        get_stopped_lead_obstacle_bias(self.CP, lead, scene_v_ego, self.mode)
         for lead in (self.lead_one, self.lead_two)
       )
 
@@ -2585,6 +2597,16 @@ class LongitudinalPlanner:
     vision_low_speed_stop_active = False
     vision_brake_cap_active = False
     if lead_control_active:
+      if (not experimental_mode and
+          not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
+          not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
+          not bool(getattr(sm['starpilotPlan'], 'stopSignConfirmed', False))):
+        corolla_cap = get_toyota_corolla_braking_lead_cap(
+          self.CP, self.lead_one, v_ego,
+          desired_follow_distance(v_ego, self.lead_one.vLead, effective_t_follow), output_accel_min,
+        )
+        if corolla_cap is not None:
+          close_lead_caps.append(corolla_cap)
       for lead in (self.lead_one, self.lead_two):
         rav4_early_lead_cap = get_toyota_rav4_tss2_early_lead_cap(
           self.CP, lead, v_ego, output_accel_min,

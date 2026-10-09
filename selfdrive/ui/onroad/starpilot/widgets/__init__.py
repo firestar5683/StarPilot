@@ -1,6 +1,5 @@
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.base import LayoutWidget
-from openpilot.selfdrive.ui.onroad.starpilot.widgets.set_speed import SetSpeedWidget
-from openpilot.selfdrive.ui.onroad.starpilot.widgets.speed_limit import SpeedLimitWidget
+from openpilot.selfdrive.ui.onroad.starpilot.widgets.unified_speed import UnifiedSpeedWidget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.pedal_icons import PedalIconsWidget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.aethergauge import AetherGaugeWidget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.personality_button import PersonalityButtonWidget
@@ -11,8 +10,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.widgets.model_source import ModelSo
 
 __all__ = [
   "LayoutWidget",
-  "SetSpeedWidget",
-  "SpeedLimitWidget",
+  "UnifiedSpeedWidget",
   "PedalIconsWidget",
   "AetherGaugeWidget",
   "PersonalityButtonWidget",

@@ -1335,6 +1335,7 @@ FW_VERSIONS = {
     (Ecu.fwdCamera, 0x7c4, None): [
       b'\xf1\x00CL4 MFC  AT CAN LHD 1.00 1.02 99210-GG000 240708',
       b'\xf1\x00CL4 MFC  AT USA LHD 1.00 1.02 99210-GG000 240708',
+      b'\xf1\x00CL4 MFC  AT USA LHD 1.00 1.04 99210-GG100 251205',
     ],
     (Ecu.fwdRadar, 0x7d0, None): [
       b'\xf1\x00CL4_ RDR -----      1.00 1.01 99110-GG000         ',

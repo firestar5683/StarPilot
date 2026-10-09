@@ -51,6 +51,7 @@ def _load_starpilot_onroad_view(monkeypatch):
   dummy_widget = type("DummyWidget", (), {})
   color = SimpleNamespace(r=0, g=0, b=0, a=255)
 
+  stub_module("openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam", PipSideCamera=dummy_widget)
   stub_module("openpilot.selfdrive.ui.onroad.augmented_road_view", AugmentedRoadView=AugmentedRoadView)
   stub_module(
     "openpilot.selfdrive.ui.onroad.starpilot.starpilot_border",
@@ -68,8 +69,7 @@ def _load_starpilot_onroad_view(monkeypatch):
   stub_module("openpilot.selfdrive.ui.onroad.starpilot.widget_layout_manager", WidgetLayoutManager=dummy_widget)
   stub_module(
     "openpilot.selfdrive.ui.onroad.starpilot.widgets",
-    SetSpeedWidget=dummy_widget,
-    SpeedLimitWidget=dummy_widget,
+    UnifiedSpeedWidget=dummy_widget,
     PedalIconsWidget=dummy_widget,
     AetherGaugeWidget=dummy_widget,
     PersonalityButtonWidget=dummy_widget,
@@ -192,6 +192,7 @@ def test_starpilot_road_overlays_use_the_parent_scissor(monkeypatch):
   view.model_renderer = SimpleNamespace(
     _path=SimpleNamespace(projected_points=SimpleNamespace(size=1)),
     _track_edge_vertices=SimpleNamespace(size=4),
+    _path_edge_width=0.3,
   )
   view._font_bold = object()
   view._get_border_width = lambda: 0
@@ -209,3 +210,9 @@ def test_starpilot_road_overlays_use_the_parent_scissor(monkeypatch):
   view._render_extra_road_overlays(object())
 
   assert events == ["path_edges", "adjacent_lanes", "stopping_point"]
+
+  events.clear()
+  view.model_renderer._path_edge_width = 0.0
+  view._render_extra_road_overlays(object())
+
+  assert events == ["adjacent_lanes", "stopping_point"]

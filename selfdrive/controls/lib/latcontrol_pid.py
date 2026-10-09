@@ -8,6 +8,7 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import (
   RAV4_TSS2_CARS,
   SUBARU_IMPREZA_CARS,
+  get_honda_crv_5g_pid_kp_scale,
   get_honda_crv_5g_pid_output,
   get_rav4_tss2_pid_output,
   get_subaru_impreza_pid_output_scale,
@@ -105,6 +106,7 @@ class LatControlPID(LatControl):
     self.honda_lateral_pid_ki_scale = 1.0
     self.is_civic_bosch_modified = CP.carFingerprint == HONDA.HONDA_CIVIC_BOSCH and bool(CP.flags & HondaFlags.EPS_MODIFIED)
     self.is_honda_crv_5g = CP.carFingerprint == HONDA.HONDA_CRV_5G
+    self.is_honda_crv_5g_stock_eps = self.is_honda_crv_5g and not bool(CP.flags & HondaFlags.EPS_MODIFIED)
     self.is_subaru_impreza = CP.carFingerprint in SUBARU_IMPREZA_CARS
     self.is_rav4_tss2 = CP.carFingerprint in RAV4_TSS2_CARS
     self.prev_angle_steers_des_no_offset = 0.0
@@ -162,6 +164,10 @@ class LatControlPID(LatControl):
         self.modified_civic_steering_pressed_prev = steering_pressed
 
       freeze_integrator = steer_limited_by_safety or steering_pressed or CS.vEgo < 5
+
+      if self.is_honda_crv_5g_stock_eps:
+        kp_scale = self.honda_lateral_pid_kp_scale * get_honda_crv_5g_pid_kp_scale(angle_steers_des_no_offset, CS.vEgo)
+        self.pid._k_p = [self.base_kp_bp, scale_lateral_pid_gain_values(self.base_kp_v, kp_scale)]
 
       output_torque = self.pid.update(error,
                                 feedforward=ff,

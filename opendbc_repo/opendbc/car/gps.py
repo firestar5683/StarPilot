@@ -8,6 +8,7 @@ from typing import Any
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.gm.values import CAR as GM_CAR
+from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
 
 
 CarGpsSample = dict[str, Any]
@@ -124,12 +125,66 @@ def parse_chevrolet_bolt_can_gps(position: Mapping[str, float]) -> CarGpsSample 
   }
 
 
+def parse_volkswagen_taos_can_gps(position: Mapping[str, float], motion: Mapping[str, float],
+                                altitude: Mapping[str, float], status: Mapping[str, float]) -> CarGpsSample | None:
+  packet_ids = (position["GNSS_Nachrichtenpaket_ID1"], motion["GNSS_Nachrichtenpaket_ID2"],
+                altitude["GNSS_Nachrichtenpaket_ID4"], status["GNSS_Nachrichtenpaket_ID5"])
+  if len(set(packet_ids)) != 1:
+    return None
+
+  timestamp_ms = int(status["GNSS_UTC_Zeit"]) * 1000
+  if timestamp_ms == 0:
+    return None
+
+  latitude = float(position["GNSS_LatitudeMagnitude"])
+  longitude = float(position["GNSS_LongitudeMagnitude"])
+  coordinates_valid = (math.isfinite(latitude) and math.isfinite(longitude) and
+                       0.0 <= latitude <= 90.0 and 0.0 <= longitude <= 180.0 and (latitude != 0.0 or longitude != 0.0))
+  if coordinates_valid:
+    latitude *= -1.0 if position["GNSS_LatitudeSouth"] else 1.0
+    longitude *= -1.0 if position["GNSS_LongitudeWest"] else 1.0
+  else:
+    latitude = longitude = 0.0
+
+  satellite_count = int(status["GNSS_Genutzte_Satelliten"])
+  hemisphere_validated = position["GNSS_LatitudeSouth"] == 0 and position["GNSS_LongitudeWest"] == 1
+  has_fix = (coordinates_valid and hemisphere_validated and position["GNSS_PositionStatus"] == 3 and status["GNSS_Empfaenger_Status"] == 1 and
+             bool(status["GNSS_GPS_in_Nutzung"] or status["GNSS_GLONASS_in_Nutzung"]) and 4 <= satellite_count <= 31)
+
+  speed = float(motion["GNSS_Speed"])
+  bearing = float(motion["GNSS_Bearing"])
+  speed_valid = math.isfinite(speed) and 0.0 <= speed <= 127.5
+  bearing_valid = math.isfinite(bearing) and 0.0 <= bearing < 360.0
+  speed = speed if has_fix and speed_valid else 0.0
+  bearing = bearing if has_fix and bearing_valid else 0.0
+  height = float(altitude["GNSS_Ortung_Hoehe"])
+  height_valid = math.isfinite(height) and -500.0 <= height <= 7686.0
+  heading_rad = math.radians(bearing)
+
+  return {
+    "latitude": latitude,
+    "longitude": longitude,
+    "altitude": height if has_fix and height_valid else 0.0,
+    "speed": speed,
+    "bearingDeg": bearing,
+    "horizontalAccuracy": 20.0,
+    "unixTimestampMillis": timestamp_ms,
+    "verticalAccuracy": 50.0 if height_valid else 500.0,
+    "bearingAccuracyDeg": 10.0 if has_fix and bearing_valid and speed > 1.0 else 180.0,
+    "speedAccuracy": 1.5 if speed_valid and bearing_valid else 100.0,
+    "hasFix": has_fix,
+    "satelliteCount": satellite_count if 0 <= satellite_count <= 31 else 0,
+    "vNED": [speed * math.cos(heading_rad), speed * math.sin(heading_rad), 0.0] if bearing_valid else [0.0, 0.0, 0.0],
+  }
+
+
 FORD_MACH_E_GPS_MESSAGES = (
   "APIMGPS_Data_Nav_1_FD1",
   "APIMGPS_Data_Nav_2_FD1",
   "APIMGPS_Data_Nav_3_FD1",
 )
 CHEVROLET_BOLT_GPS_MESSAGES = ("TCICOnStarGPSPosition",)
+VOLKSWAGEN_TAOS_GPS_MESSAGES = ("GNSS_01", "GNSS_02", "GNSS_04", "GNSS_05")
 
 CHEVROLET_BOLT_GPS_CARS = (
   GM_CAR.CHEVROLET_BOLT_ACC_2022_2023,
@@ -141,6 +196,11 @@ CHEVROLET_BOLT_GPS_CARS = (
 
 
 CAR_GPS_CONFIGS: dict[str, CarGpsConfig] = {
+  VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1: CarGpsConfig(
+    brand="volkswagen",
+    messages=VOLKSWAGEN_TAOS_GPS_MESSAGES,
+    decoder=parse_volkswagen_taos_can_gps,
+  ),
   FORD_CAR.FORD_MUSTANG_MACH_E_MK1: CarGpsConfig(
     brand="ford",
     messages=FORD_MACH_E_GPS_MESSAGES,

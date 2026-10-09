@@ -11,6 +11,8 @@ from openpilot.common.constants import CV
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.values import CAR
 from opendbc.car.gm.values import CAR as GM_CAR, GMFlags
+from opendbc.car.hyundai.interface import CarInterface as HyundaiCarInterface
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.ford.interface import CarInterface as FordCarInterface
 from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.toyota.interface import CarInterface as ToyotaCarInterface
@@ -39,6 +41,8 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_honda_accord_lead_departure_tune,
   get_honda_accord_stop_go_accel_cap,
   get_honda_crv_5g_stopped_lead_obstacle_bias,
+  get_kia_ev9_stopped_lead_obstacle_bias,
+  get_stopped_lead_obstacle_bias,
   get_honda_crv_5g_low_speed_stopped_lead_cap,
   allow_honda_crv_5g_vision_gap_settle,
   is_honda_crv_5g_early_radar_follow_lead,
@@ -121,6 +125,30 @@ def test_mpc_duplicate_lead_filters_do_not_cross_contaminate_tracks():
   assert mpc.duplicate_lead_v_filters[1].x == pytest.approx(28.0)
 
 
+def test_mpc_recovers_reverse_terminal_cruise_plan():
+  mpc = LongitudinalMpc()
+  mpc.set_cur_state(20.65, 1.05)
+  positions = [0., 1.436, 5.776, 13.108, 23.554, 37.173, 53.812, 72.856, 92.651, 110.775, 125.258, 134.177, 127.994]
+  speeds = [20.65, 20.72, 20.94, 21.29, 21.66, 21.86, 21.62, 20.35, 17.42, 13.29, 8.67, 3.56, -15.95]
+  accels = [1.05, 1.05, 1.05, .95, .59, .034, -.67, -2.13, -3.5, -3.5, -3.5, -3.5, -20.93]
+  for i, state in enumerate(zip(positions, speeds, accels, strict=True)):
+    mpc.solver.set(i, 'x', np.asarray(state))
+  mpc.prev_a = np.interp(T_IDXS_MPC + mpc.dt, T_IDXS_MPC, accels)
+  radar = log.RadarState.new_message()
+
+  for _ in range(20):
+    mpc.set_weights(250.0, 100.0, 5.5, v_ego=20.65)
+    mpc.set_accel_limits(-0.5, 1.05)
+    mpc.set_cur_state(20.65, 1.05)
+    trajectories = [np.zeros(len(T_IDXS_MPC)) for _ in range(4)]
+    mpc.update(radar, 55.0 / 3.6, *trajectories, 0.75, 1.6, tracking_lead=False)
+    assert mpc.solution_status == 0
+
+  assert np.min(mpc.v_solution) >= -0.01
+  assert mpc.params[-1, 0] - 0.01 <= mpc.a_solution[-1] <= mpc.params[-1, 1] + 0.01
+  assert np.interp(0.2, T_IDXS_MPC, mpc.a_solution) < 0.0
+
+
 def test_prius_stopped_lead_obstacle_bias_is_small_and_vehicle_specific():
   prius = ToyotaCarInterface.get_non_essential_params(TOYOTA_CAR.TOYOTA_PRIUS)
   other = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
@@ -160,6 +188,25 @@ def test_honda_crv_5g_stopped_lead_tune_is_vehicle_specific():
   assert allow_honda_crv_5g_vision_gap_settle(crv)
   assert not allow_honda_crv_5g_vision_gap_settle(civic)
   assert get_standstill_gap_settle_max_extra_gap(crv) > get_standstill_gap_settle_max_extra_gap(civic)
+
+
+def test_kia_ev9_stopped_lead_buffer_is_low_speed_and_vehicle_specific():
+  ev9 = HyundaiCarInterface.get_non_essential_params(HYUNDAI_CAR.KIA_EV9)
+  other = HyundaiCarInterface.get_non_essential_params(HYUNDAI_CAR.KIA_EV6)
+  prius = ToyotaCarInterface.get_non_essential_params(TOYOTA_CAR.TOYOTA_PRIUS)
+  stopped_lead = make_lead(status=True, d_rel=6.8, v_lead=0.1, model_prob=0.99)
+
+  bias = get_kia_ev9_stopped_lead_obstacle_bias(ev9, stopped_lead, v_ego=3.0)
+  assert bias == pytest.approx(1.5)
+  assert get_kia_ev9_stopped_lead_obstacle_bias(other, stopped_lead, v_ego=3.0) == pytest.approx(0.0)
+  assert get_kia_ev9_stopped_lead_obstacle_bias(ev9, stopped_lead, v_ego=8.0) == pytest.approx(0.0)
+  assert get_stopped_lead_obstacle_bias(ev9, stopped_lead, v_ego=3.0, mode="blended") == pytest.approx(1.5)
+  assert get_stopped_lead_obstacle_bias(other, stopped_lead, v_ego=3.0, mode="blended") == pytest.approx(0.0)
+  assert get_stopped_lead_obstacle_bias(prius, stopped_lead, v_ego=3.0, mode="blended") == pytest.approx(0.0)
+  assert get_stopped_lead_obstacle_bias(prius, stopped_lead, v_ego=3.0, mode="acc") > 0.0
+  assert get_kia_ev9_stopped_lead_obstacle_bias(
+    ev9, make_lead(status=True, d_rel=6.8, v_lead=2.0), v_ego=3.0,
+  ) == pytest.approx(0.0)
 
 
 def test_honda_crv_5g_early_radar_follow_admits_high_closing_centered_lead():
@@ -351,6 +398,30 @@ def test_hrv_far_follow_output_slew_damps_only_continuous_safe_follow():
     v_ego, prev_target=initial, target=0.4, output_should_stop=False, panic_bypass=False,
   )
   assert smoothed == pytest.approx(-0.5)
+
+
+def test_niro_ev_far_follow_slew_is_vehicle_specific_and_preserves_urgent_braking():
+  CP = HyundaiCarInterface.get_non_essential_params(HYUNDAI_CAR.KIA_NIRO_EV)
+  next_gen = HyundaiCarInterface.get_non_essential_params(HYUNDAI_CAR.KIA_NIRO_EV_2ND_GEN)
+  planner = LongitudinalPlanner(CP, init_v=16.0)
+  planner.lead_one = make_lead(status=True, d_rel=45.0, v_lead=15.0, model_prob=0.99, y_rel=0.0)
+  planner.lead_two = make_lead(status=False)
+
+  assert get_far_follow_output_slew_rates(CP) == pytest.approx((2.0, 1.25))
+  assert get_far_follow_output_slew_rates(next_gen) == (0.0, 0.0)
+  first = planner.get_vehicle_far_follow_slew_target(16.0, 0.0, -0.4, False, False)
+  release = planner.get_vehicle_far_follow_slew_target(16.0, first, 0.3, False, False)
+  assert first == pytest.approx(-0.4)
+  assert release == pytest.approx(first + 1.25 * planner.dt)
+
+  planner.lead_one.dRel = 18.0
+  assert planner.get_vehicle_far_follow_slew_target(16.0, release, -1.5, False, False) == pytest.approx(-1.5)
+  assert not planner.far_follow_output_slew_active
+
+  planner.lead_one.dRel = 45.0
+  planner.lead_one.vLead = 10.0
+  assert planner.get_vehicle_far_follow_slew_target(16.0, release, -1.5, False, False) == pytest.approx(-1.5)
+  assert not planner.far_follow_output_slew_active
 
 
 def test_crv_far_follow_output_slew_damps_nonurgent_lead_transition():
@@ -833,6 +904,21 @@ def test_lightning_stopped_lead_guard_tune_is_vehicle_specific():
   assert get_tracked_lead_catchup_bias_gain(lightning) == pytest.approx(1.0)
   assert get_tracked_lead_catchup_headway_margins(civic) is None
   assert get_tracked_lead_catchup_bias_gain(civic) is None
+
+
+def test_mach_e_standstill_gap_settle_covers_observed_gap_without_changing_other_cars():
+  mach_e = FordCarInterface.get_non_essential_params(FORD_CAR.FORD_MUSTANG_MACH_E_MK1)
+  civic = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  lead = make_lead(status=True, d_rel=7.7, v_lead=0.0, radar=True, model_prob=1.0, y_rel=0.0)
+
+  assert get_standstill_gap_settle_max_extra_gap(mach_e) == pytest.approx(2.5)
+  assert get_standstill_gap_settle_max_extra_gap(civic) == pytest.approx(1.5)
+  assert LongitudinalPlanner.is_radar_standstill_gap_settle_candidate(
+    lead, 0.0, 5.5, max_extra_gap=get_standstill_gap_settle_max_extra_gap(mach_e))
+  assert not LongitudinalPlanner.is_radar_standstill_gap_settle_candidate(
+    lead, 0.0, 5.5, max_extra_gap=get_standstill_gap_settle_max_extra_gap(civic))
+  assert not LongitudinalPlanner.is_radar_standstill_gap_settle_candidate(
+    lead, 0.5, 5.5, max_extra_gap=get_standstill_gap_settle_max_extra_gap(mach_e))
 
 
 def test_lightning_stopped_radar_lead_handoff_is_narrow_and_vehicle_specific():

@@ -70,3 +70,20 @@ def test_run_builds_one_payload_for_both_navigation_publishers():
   instruction_payload = navigationd._publish_nav_instruction.calls[0][3]
   state_payload = navigationd._publish_nav_state.calls[0][3]
   assert instruction_payload is state_payload
+
+
+def test_navigation_state_timestamp_refreshes_even_when_instruction_is_unchanged():
+  navigationd = Navigationd.__new__(Navigationd)
+  navigationd._last_nav_state = None
+  navigationd.params_memory = type("Memory", (), {})()
+  navigationd.params_memory.put_nonblocking = Recorder()
+  navigationd.params_memory.remove = Recorder()
+  payload = {"maneuverType": "turn", "maneuverModifier": "right", "maneuverDistance": 55.0}
+
+  navigationd._publish_nav_state(object(), object(), True, payload)
+  navigationd._publish_nav_state(object(), object(), True, payload)
+
+  states = [args[1] for args in navigationd.params_memory.put_nonblocking.calls]
+  assert len(states) == 2
+  assert all(state["valid"] and state["updatedAtMonotonic"] > 0 for state in states)
+  assert states[0]["updatedAtMonotonic"] < states[1]["updatedAtMonotonic"]

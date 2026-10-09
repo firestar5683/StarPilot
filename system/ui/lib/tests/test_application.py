@@ -1,9 +1,38 @@
+import os
 from importlib.resources import as_file
 from types import SimpleNamespace
 
 import pytest
 
 from openpilot.system.ui.lib import application
+
+
+def test_default_fps_uses_shared_target_or_fps_override():
+  assert application._DEFAULT_FPS == int(os.getenv("FPS", "60"))
+
+
+def test_big_ui_adaptive_fps_uses_60_active_15_idle(monkeypatch):
+  monkeypatch.setattr(application, "OFFSCREEN", False)
+  monkeypatch.setattr(application, "RECORD", False)
+  now = [100.0]
+  monkeypatch.setattr(application.time, "monotonic", lambda: now[0])
+
+  app = object.__new__(application.GuiApplication)
+  app._full_target_fps = 60
+  app._target_fps = 60
+  applied_targets = []
+  app._set_target_fps = applied_targets.append
+
+  app.configure_adaptive_rendering(True)
+  assert app._idle_target_fps == 15
+  assert applied_targets[-1] == 60
+
+  now[0] += application.UI_INTERACTION_FPS_DURATION + 0.01
+  app._apply_render_mode()
+  assert applied_targets[-1] == 15
+
+  app.set_render_mode(True)
+  assert applied_targets[-1] == 60
 
 
 def test_raylib_target_fps_uses_mici_display_refresh(monkeypatch):
@@ -134,3 +163,58 @@ def test_brand_font_is_not_replaced_by_language_fallback(monkeypatch):
 
   assert application.font_fallback(brand_font) is brand_font
   assert application.font_fallback(SimpleNamespace(texture=SimpleNamespace(id=3))) is unifont
+
+
+def test_scissor_mode_shifted_for_direct_framebuffer(monkeypatch):
+  orig_scissor_calls = []
+  monkeypatch.setattr(application.rl, "begin_scissor_mode", lambda x, y, w, h: orig_scissor_calls.append((x, y, w, h)))
+  if hasattr(application.rl, "_orig_begin_scissor_mode"):
+    delattr(application.rl, "_orig_begin_scissor_mode")
+
+  app = object.__new__(application.GuiApplication)
+  app._scale = 1.0
+  app._pixel_scale_x = 1.0
+  app._pixel_scale_y = 1.0
+  app._render_texture = None
+  app._burn_in_shift = lambda: (2.0, -1.0)
+
+  app._patch_scissor_mode()
+  application.rl.begin_scissor_mode(100, 200, 300, 400)
+
+  assert orig_scissor_calls[-1] == (102, 199, 300, 400)
+
+  # Inside an offscreen render texture, scissor must remain unshifted
+  app._render_texture = SimpleNamespace()
+  application.rl.begin_scissor_mode(100, 200, 300, 400)
+  assert orig_scissor_calls[-1] == (100, 200, 300, 400)
+
+  # Clean up patched function
+  if hasattr(application.rl, "_orig_begin_scissor_mode"):
+    application.rl.begin_scissor_mode = application.rl._orig_begin_scissor_mode
+
+
+def test_needs_render_texture_bypassed_on_tici_by_default(monkeypatch):
+  monkeypatch.setattr(application, "PC", False)
+  monkeypatch.setattr(application, "DEVICE_TYPE", "tici")
+  monkeypatch.setattr(application, "BURN_IN_MODE", False)
+  monkeypatch.setattr(application, "RECORD", False)
+  monkeypatch.setattr(application, "MICI_FORCE_RENDER_TEXTURE", False)
+  monkeypatch.setattr(application, "TICI_FORCE_RENDER_TEXTURE", False)
+  monkeypatch.setattr(application, "WHITE_LUMINANCE_CAP", 1.0)
+
+  app = object.__new__(application.GuiApplication)
+  app._scale = 1.0
+
+  # On TICI by default, render texture MUST be False (saving 21.8 ms)
+  assert app._needs_render_texture() is False
+
+  # Explicit override forces render texture
+  monkeypatch.setattr(application, "TICI_FORCE_RENDER_TEXTURE", True)
+  assert app._needs_render_texture() is True
+
+  # Recording mode forces render texture
+  monkeypatch.setattr(application, "TICI_FORCE_RENDER_TEXTURE", False)
+  monkeypatch.setattr(application, "RECORD", True)
+  assert app._needs_render_texture() is True
+
+

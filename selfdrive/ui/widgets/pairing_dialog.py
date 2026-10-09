@@ -93,9 +93,9 @@ class PairingDialog(Widget):
     title_font = gui_app.font(FontWeight.NORMAL)
     left_width = int(content_rect.width * 0.5 - 15)
 
-    title_wrapped = wrap_text(title_font, title, 75, left_width)
-    rl.draw_text_ex(title_font, "\n".join(title_wrapped), rl.Vector2(content_rect.x, y), 75, 0.0, rl.BLACK)
-    y += len(title_wrapped) * 75 + 60
+    title_wrapped = "\n".join(wrap_text(title_font, title, 75, left_width))
+    rl.draw_text_ex(title_font, title_wrapped, rl.Vector2(content_rect.x, y), 75, 0.0, rl.BLACK)
+    y += measure_text_cached(title_font, title_wrapped, 75).y + 60
 
     # Two columns: instructions and QR code
     remaining_height = content_rect.height - (y - content_rect.y)
@@ -128,8 +128,8 @@ class PairingDialog(Widget):
       text_x = rect.x + circle_radius * 2 + 40
       text_width = rect.width - (circle_radius * 2 + 40)
 
-      wrapped = wrap_text(font, text, 47, int(text_width))
-      text_height = len(wrapped) * 47
+      wrapped = "\n".join(wrap_text(font, text, 47, int(text_width)))
+      text_height = measure_text_cached(font, wrapped, 47).y
       circle_y = y + text_height // 2
 
       # Circle and number
@@ -139,7 +139,7 @@ class PairingDialog(Widget):
       rl.draw_text_ex(font, number, (int(circle_x - number_size.x // 2), int(circle_y - number_size.y // 2)), 30, 0, rl.WHITE)
 
       # Text
-      rl.draw_text_ex(font, "\n".join(wrapped), rl.Vector2(text_x, y), 47, 0.0, rl.BLACK)
+      rl.draw_text_ex(font, wrapped, rl.Vector2(text_x, y), 47, 0.0, rl.BLACK)
       y += text_height + 50
 
   def _render_qr_code(self, rect: rl.Rectangle) -> None:

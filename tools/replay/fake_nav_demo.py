@@ -113,6 +113,7 @@ SCENARIOS = [
 def build_nav_state(params_memory: Params, scenario: dict) -> None:
   params_memory.put_nonblocking("NavInstructionState", {
     "valid": True,
+    "updatedAtMonotonic": time.monotonic(),
     "maneuverModifier": str(scenario["modifier"]),
     "maneuverType": str(scenario["type"]),
     "maneuverPrimaryText": str(scenario["primary"]),

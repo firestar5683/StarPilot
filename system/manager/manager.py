@@ -996,6 +996,10 @@ def manager_init() -> None:
   migrate_starpilot_param_renames(params, params_cache)
   last_timing = _log_boot_timing("manager_init", "param_renames", manager_init_start, last_timing)
 
+  from openpilot.starpilot.common.cache_compat import retire_foreign_caches
+  retire_foreign_caches(params.get_param_path(), params_cache.get_param_path(),
+                        Path(cache_params_path).parent / 'dom-derived-cache-recovery')
+
   params.clear_all(ParamKeyFlag.CLEAR_ON_MANAGER_START)
   params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
   params.clear_all(ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION)

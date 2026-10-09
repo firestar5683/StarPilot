@@ -387,6 +387,7 @@ def gen_long_ocp():
                         (a_max - a_ego),
                         ((x_obstacle - x_ego) - lead_danger_factor * (desired_dist_comfort)) / (v_ego + 10.))
   ocp.model.con_h_expr = constraints
+  ocp.model.con_h_expr_e = constraints
 
   x0 = np.zeros(X_DIM)
   ocp.constraints.x0 = x0
@@ -399,10 +400,17 @@ def gen_long_ocp():
   ocp.cost.Zl = cost_weights
   ocp.cost.Zu = cost_weights
   ocp.cost.zu = cost_weights
+  ocp.cost.zl_e = cost_weights
+  ocp.cost.Zl_e = cost_weights
+  ocp.cost.Zu_e = cost_weights
+  ocp.cost.zu_e = cost_weights
 
   ocp.constraints.lh = np.zeros(CONSTR_DIM)
   ocp.constraints.uh = 1e4*np.ones(CONSTR_DIM)
   ocp.constraints.idxsh = np.arange(CONSTR_DIM)
+  ocp.constraints.lh_e = np.zeros(CONSTR_DIM)
+  ocp.constraints.uh_e = 1e4*np.ones(CONSTR_DIM)
+  ocp.constraints.idxsh_e = np.arange(CONSTR_DIM)
 
   # The HPIPM solver can give decent solutions even when it is stopped early
   # Which is critical for our purpose where compute time is strictly bounded
@@ -428,9 +436,11 @@ def gen_long_ocp():
 
 
 class LongitudinalMpc:
-  def __init__(self, mode='acc', dt=DT_MDL):
+  def __init__(self, mode='acc', dt=DT_MDL, *, hold_stopped_lead_position=False, sync_model_lead_filters=False):
     self.mode = mode
     self.dt = dt
+    self.hold_stopped_lead_position = hold_stopped_lead_position
+    self.sync_model_lead_filters = sync_model_lead_filters
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.source = SOURCES[2]
     # Initialize smoothing filters with default time constants
@@ -501,7 +511,7 @@ class LongitudinalMpc:
 
     # Set L2 slack cost on lower bound constraints
     Zl = np.array(constraint_cost_weights)
-    for i in range(N):
+    for i in range(N+1):
       self.solver.cost_set(i, 'Zl', Zl)
 
   def set_weights(self, acceleration_jerk=1.0, danger_jerk=1.0, speed_jerk=1.0, prev_accel_constraint=True,
@@ -601,7 +611,7 @@ class LongitudinalMpc:
         self.solver.set(i, 'x', self.x0)
 
   @staticmethod
-  def extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego=0.0):
+  def extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego=0.0, *, hold_stopped_lead_position=False):
     speed_mph = v_ego * CV.MS_TO_MPH
     bp = [0, 20, 35]
     exp_weight = np.interp(speed_mph, bp, [1.0, 1.0, 0.0])  # Full exp at <20, blend to constant at 35
@@ -617,7 +627,10 @@ class LongitudinalMpc:
 
     # Constant acceleration component
     v_lead_traj_const = np.clip(v_lead + a_lead * T_IDXS, 0.0, 1e8)
-    x_lead_traj_const = x_lead + v_lead * T_IDXS + 0.5 * a_lead * T_IDXS**2
+    position_time = T_IDXS
+    if hold_stopped_lead_position and a_lead < 0.0:
+      position_time = np.minimum(T_IDXS, max(v_lead, 0.0) / -a_lead)
+    x_lead_traj_const = x_lead + v_lead * position_time + 0.5 * a_lead * position_time**2
 
     # Blend based on weight
     v_lead_traj = exp_weight * v_lead_traj_exp + (1 - exp_weight) * v_lead_traj_const
@@ -633,6 +646,18 @@ class LongitudinalMpc:
     if lead_active:
       model_lead_xv = build_model_lead_trajectory(model_lead, lead, v_ego)
       if model_lead_xv is not None:
+        if self.sync_model_lead_filters:
+          a_lead = soften_far_radar_lead_accel(
+            lead.dRel, lead.vLead, lead.aLeadK, v_ego,
+            get_T_FOLLOW() if t_follow is None else t_follow,
+            radar=bool(getattr(lead, "radar", False)),
+          )
+          self.lead_a_filter.update(float(np.clip(a_lead, -10., 5.)))
+          self.lead_v_filter.update(float(np.clip(lead.vLead, 0.0, 1e8)))
+          for lead_filter in (self.duplicate_lead_x_filters[lead_index],
+                              self.duplicate_lead_a_filters[lead_index],
+                              self.duplicate_lead_v_filters[lead_index]):
+            lead_filter.initialized = False
         return model_lead_xv
 
     if lead_active:
@@ -688,7 +713,8 @@ class LongitudinalMpc:
       self.duplicate_lead_x_filters[lead_index].initialized = False
       self.duplicate_lead_a_filters[lead_index].initialized = False
       self.duplicate_lead_v_filters[lead_index].initialized = False
-    lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego)
+    lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego,
+                                    hold_stopped_lead_position=self.hold_stopped_lead_position)
     return lead_xv
 
   @staticmethod

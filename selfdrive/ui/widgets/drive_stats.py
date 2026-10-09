@@ -702,7 +702,7 @@ class DriveStatsDashboard:
     max_distance = max(max_distance, 1.0)
     slot_width = plot.width / max(len(self._data.daily_distance), 1)
     bar_width = min(78.0, slot_width * 0.52)
-    value_headroom = 38.0
+    value_headroom = 48.0
     bar_area_height = max(1.0, plot.height - value_headroom)
     for index, day in enumerate(self._data.daily_distance):
       center_x = plot.x + slot_width * (index + 0.5)
@@ -712,13 +712,13 @@ class DriveStatsDashboard:
 
       if day.distance > 0.0:
         value_text = _format_decimal(day.distance)
-        value_size = measure_text_cached(self._font_medium, value_text, 21)
+        value_size = measure_text_cached(self._font_medium, value_text, 26)
         value_y = max(plot.y + 4, bar_rect.y - value_size.y - 8)
         rl.draw_text_ex(
           self._font_medium,
           value_text,
           rl.Vector2(center_x - value_size.x / 2, value_y),
-          21,
+          26,
           0,
           MUTED_COLOR,
         )

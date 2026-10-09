@@ -70,11 +70,13 @@ class FavoriteRadialMenu:
 
   def __init__(self, params: Any, params_memory: Any,
                option_provider: Callable[[], Iterable[dict[str, Any]]], *,
-               clock: Callable[[], float] = time.monotonic):
+               clock: Callable[[], float] = time.monotonic,
+               cache_render_texture: Callable[..., Any] | None = None):
     self._params = params
     self._params_memory = params_memory
     self._option_provider = option_provider
     self._clock = clock
+    self._cache_render_texture = cache_render_texture
 
     self._state = self.STATE_COLLAPSED
     self._selected_slot: int | None = None
@@ -723,11 +725,48 @@ class FavoriteRadialMenu:
     x0 = self._rect.x
     y0 = self._rect.y + self._rect.height
     is_pressed = self._corner_press is not None
-
     size = 150.0 * scale
+    texture_size = max(1, int(round(size)))
+    texture_scale = texture_size / 150.0
+    # Cache the hint's two appearances instead of rebuilding the mesh every frame.
+    cache = self._cache_render_texture
+    texture = None
+    if cache is not None:
+      variant = "pressed" if is_pressed else "idle"
+      texture = cache(
+        f"favorite-corner-hint:{texture_size}:{variant}",
+        texture_size,
+        texture_size,
+        lambda: FavoriteRadialMenu._draw_corner_hint_geometry(
+          texture_scale, is_pressed, 0.0, float(texture_size),
+        ),
+      )
+
+    if texture is not None:
+      rl.begin_blend_mode(rl.BlendMode.BLEND_ALPHA_PREMULTIPLY)
+      try:
+        rl.draw_texture_pro(
+          texture,
+          rl.Rectangle(0, 0, texture_size, -texture_size),
+          rl.Rectangle(x0, y0 - size, size, size),
+          rl.Vector2(0, 0),
+          0.0,
+          rl.WHITE,
+        )
+      finally:
+        rl.end_blend_mode()
+      return
+
+    self._draw_corner_hint_geometry(scale, is_pressed, x0, y0)
+
+  @classmethod
+  def _draw_corner_hint_geometry(cls, scale: float, is_pressed: bool,
+                                 x0: float, y0: float) -> None:
+    size = 150.0 * scale
+
     steps = 48
 
-    # 1. Precompute edge vertices to minimize per-frame allocations
+    # Build the gradient mesh once for this cached appearance.
     v_origin = rl.Vector2(x0, y0)
     inv_steps = 1.0 / steps
     pts_top = [rl.Vector2(x0, y0 - size * (k * inv_steps)) for k in range(steps + 1)]
@@ -747,7 +786,7 @@ class FavoriteRadialMenu:
       purple_a = int(purple_max_alpha * ((1.0 - t_mid) ** 1.75))
 
       for col in (rl.Color(8, 6, 18, base_a) if base_a > 0 else None,
-                  self._sample_aether_color(t_mid, purple_a) if purple_a > 0 else None):
+                  cls._sample_aether_color(t_mid, purple_a) if purple_a > 0 else None):
         if col is None:
           continue
         if i == 0:
@@ -757,8 +796,8 @@ class FavoriteRadialMenu:
           rl.draw_triangle(v_tb, v_ra, v_rb, col)
 
     # 3. Ultra-Polished Frosted-Glass Vector Arrow (Nestled deep in purple corner)
-    center = self.corner_center(self._rect)
-    cx, cy = center.x, center.y
+    inset = (cls.CORNER_HINT_RING_RADIUS + cls.CORNER_HINT_EDGE_MARGIN) * scale
+    cx, cy = x0 + inset, y0 - inset
 
     tip = rl.Vector2(cx + 15.0 * scale, cy - 15.0 * scale)
     tail = rl.Vector2(cx - 15.0 * scale, cy + 15.0 * scale)

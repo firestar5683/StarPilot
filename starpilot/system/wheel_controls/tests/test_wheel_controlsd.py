@@ -328,6 +328,27 @@ def test_only_key_down_is_dispatched(monkeypatch):
   daemon.close()
 
 
+def test_duplicate_key_down_packets_execute_only_once_until_release(monkeypatch):
+  params = FakeParams({"IsOffroad": False})
+  memory = FakeParams()
+  wheel_controlsd.upsert_mapping(source(), 30, 0, params)
+  daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  triggered = []
+  monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: triggered.append(slot) or True)
+  read_fd, write_fd = os.pipe()
+  os.set_blocking(read_fd, False)
+  daemon.sources[read_fd] = source()
+  daemon.buffers[read_fd] = bytearray()
+
+  for value in (1, 1, 1, 0, 1):
+    os.write(write_fd, wheel_controlsd.INPUT_EVENT.pack(0, 0, wheel_controlsd.EV_KEY, 30, value))
+  daemon._read_events(read_fd)
+
+  assert triggered == [0, 0]
+  os.close(write_fd)
+  daemon.close()
+
+
 def test_stale_selector_event_after_controller_disconnect_is_ignored():
   params = FakeParams({"IsOffroad": False})
   memory = FakeParams()

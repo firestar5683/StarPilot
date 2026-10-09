@@ -161,12 +161,16 @@ class LongControl:
     if not preserve_stop_release:
       self.stop_release_counter = 0
 
-  def _stop_release_ready(self, CS, a_target, should_stop, has_lead, starpilot_toggles):
+  def _stop_release_ready(self, CS, a_target, should_stop, has_lead, starpilot_toggles, leads=None):
     if self.long_control_state != LongCtrlState.stopping:
       self.stop_release_counter = 0
       return True
 
     if should_stop or CS.brakePressed:
+      self.stop_release_counter = 0
+      return False
+
+    if self.vehicle_tuning.hold_toyota_corolla_for_stopped_lead(CS.vEgo, leads):
       self.stop_release_counter = 0
       return False
 
@@ -247,7 +251,9 @@ class LongControl:
       )
 
     previous_long_control_state = self.long_control_state
-    allow_stopping_release = self._stop_release_ready(CS, a_target, should_stop, has_lead, starpilot_toggles)
+    allow_stopping_release = self._stop_release_ready(
+      CS, a_target, should_stop, has_lead, starpilot_toggles, leads=leads,
+    )
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill, starpilot_toggles,

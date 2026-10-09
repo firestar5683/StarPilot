@@ -147,6 +147,34 @@ class TestToyotaSafetyBase(common.CarSafetyTest, common.LongitudinalAccelSafetyT
     self.safety.set_alternative_experience(0)
     self.assertFalse(self._tx(hold_msg))
 
+  def test_auto_brake_hold_aeb_replacement_only_at_standstill(self):
+    if (not self.LONGITUDINAL or
+        self.safety.get_current_safety_param() & (ToyotaSafetyFlags.STOCK_LONGITUDINAL.value | ToyotaSafetyFlags.SECOC.value)):
+      raise unittest.SkipTest("Toyota AEB Auto Hold requires non-SecOC openpilot longitudinal control")
+
+    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.ALLOW_AEB)
+    hold_msg = libsafety_py.make_CANPacket(0x344, 0, b"\xfd\x80\x00\x00\x00\x00\x00\xcc")
+
+    self._rx(self._speed_msg(0))
+    self._rx(self._toggle_aol(True))
+    self._rx(self._user_gas_msg(False))
+    self.assertTrue(self._tx(hold_msg))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0x344))
+
+    self._rx(self._speed_msg(1.0))
+    self.assertFalse(self._tx(hold_msg))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x344))
+
+    self._rx(self._speed_msg(0))
+    self._rx(self._user_gas_msg(True))
+    self.assertFalse(self._tx(hold_msg))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x344))
+
+    self._rx(self._user_gas_msg(False))
+    self._rx(self._toggle_aol(False))
+    self.assertFalse(self._tx(hold_msg))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x344))
+
   # Only allow LTA msgs with no actuation
   def test_lta_steer_cmd(self):
     for engaged, req, req2, torque_wind_down, angle in itertools.product([True, False],

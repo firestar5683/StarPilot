@@ -117,6 +117,7 @@ class HyundaiSafetyFlags(IntFlag):
 
 
 class HyundaiStarPilotSafetyFlags(IntFlag):
+  CANFD_NO_STOCK_LKA = 4096  # CAN-FD only; classic CAN uses this bit for NON_SCC.
   AOL_MAIN_LKAS_ON_ENGAGE = 128
   AOL_MAIN_LKAS_SYNC = 32
   HAS_LDA_BUTTON = 1024
@@ -605,6 +606,7 @@ class CAR(Platforms):
   KIA_K4_2025 = HyundaiCanFDPlatformConfig(
     [
       HyundaiCarDocs("Kia K4 (without HDA II) 2025", car_parts=CarParts.common([CarHarness.hyundai_a])),
+      HyundaiCarDocs("Kia K4 (without HDA II) 2026", car_parts=CarParts.common([CarHarness.hyundai_a])),
       HyundaiCarDocs("Kia K4 (with HDA II) 2025", car_parts=CarParts.common([CarHarness.hyundai_r])),
     ],
     CarSpecs(mass=2987 * CV.LB_TO_KG, wheelbase=2.72, steerRatio=13.4),

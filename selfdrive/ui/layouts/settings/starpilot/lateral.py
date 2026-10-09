@@ -118,6 +118,13 @@ class StarPilotLateralLayout(_SettingsPage):
     # ── 1. Steering Behavior ──
     self._behavior_rows = [
       SettingRow(
+        "TeslaAOLDisengageOnBrake", "toggle", tr_noop("Disengage AOL on Brake"),
+        subtitle=tr_noop("Keep steering off after pressing the brake until openpilot is engaged again."),
+        get_state=lambda: p.get_bool("TeslaAOLDisengageOnBrake"),
+        set_state=lambda s: p.put_bool("TeslaAOLDisengageOnBrake", s),
+        visible=lambda: aol_on() and cs.isTesla,
+      ),
+      SettingRow(
         "PauseAOLOnBrake", "value", tr_noop("Pause AOL On Brake"),
         subtitle=tr_noop("Pause AOL below this speed while brake is pressed."),
         get_value=lambda: f"{p.get_int('PauseAOLOnBrake')} mph",
@@ -197,15 +204,14 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
       SettingRow(
         "LaneChangeCloseGap", "toggle", tr_noop("Close Gap On Lane Change"),
-        subtitle=tr_noop("Allows for a temporary shorter follow distance behind lead so that openpilot merges smoothly " +
-                         "out of current lane, it will allow car to accelerate as it changes lanes."),
+        subtitle=tr_noop("Temporarily shorten the following gap and allow acceleration while changing lanes."),
         get_state=lambda: p.get_bool("LaneChangeCloseGap"),
         set_state=lambda s: p.put_bool("LaneChangeCloseGap", s),
         visible=lc_on,
       ),
       SettingRow(
         "LaneChangeCloseGapSeconds", "value", tr_noop("Temporary Follow Distance"),
-        subtitle=tr_noop("Follow distance to hold while changing lanes. Only applied when shorter than your normal gap."),
+        subtitle=tr_noop("Gap to use during lane changes, only when shorter than your normal gap."),
         get_value=self._get_lane_change_close_gap_display,
         on_click=lambda: self._show_slider("LaneChangeCloseGapSeconds", 0.25, 1.0, step=0.05, unit="s", value_type="float"),
         visible=close_gap_on,

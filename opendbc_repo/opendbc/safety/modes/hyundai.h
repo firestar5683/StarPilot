@@ -330,7 +330,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
     const int expected_track2 = 497 + (2 * ((int)track1 - 264));
     if ((msg->data[4] & 0x70U) != 0U ||
         (msg->data[5] != hyundai_ray_pedal_checksum(msg)) ||
-        (enabled && (track1 < 264U || track1 > 397U || track2 < 497U || track2 > 766U ||
+        (enabled && (track1 < 264U || track1 > 473U || track2 < 497U || track2 > 919U ||
                      SAFETY_ABS((int)track2 - expected_track2) > 40)) ||
         (!enabled && ((track1 != 0U) || (track2 != 0U))) ||
         longitudinal_interceptor_checks(msg) ||

@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.starpilot.common import starpilot_variables as spv
 
 
@@ -169,6 +171,38 @@ def test_ford_lkas_default_migration_ignores_other_brands():
   assert spv.migrate_ford_lkas_button_default("honda", params) is False
   assert params.get_int("LKASButtonControl") == spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]
   assert params.get_bool(spv.FORD_LKAS_MIGRATION_KEY) is False
+
+
+def test_sonata_hybrid_lkas_default_migrates_once_without_enabling_aol():
+  params = _FakeParams(ints={"LKASButtonControl": spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]})
+
+  assert spv.migrate_sonata_hybrid_lkas_button_default("HYUNDAI_SONATA_HYBRID", params) is True
+  assert params.get_int("LKASButtonControl") == spv.BUTTON_FUNCTIONS["AOL_TOGGLE"]
+  assert params.get_bool(spv.SONATA_HYBRID_LKAS_MIGRATION_KEY) is True
+  assert params.get_bool("AlwaysOnLateral") is False
+
+  params.put_int("LKASButtonControl", spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"])
+  assert spv.migrate_sonata_hybrid_lkas_button_default("HYUNDAI_SONATA_HYBRID", params) is False
+  assert params.get_int("LKASButtonControl") == spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]
+
+
+@pytest.mark.parametrize("action", [value for value in spv.BUTTON_FUNCTIONS.values()
+                                  if value != spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]])
+def test_sonata_hybrid_lkas_default_preserves_custom_mapping(action):
+  params = _FakeParams(ints={"LKASButtonControl": action})
+
+  assert spv.migrate_sonata_hybrid_lkas_button_default(spv.HYUNDAI_CAR.HYUNDAI_SONATA_HYBRID, params) is True
+  assert params.get_int("LKASButtonControl") == action
+
+
+@pytest.mark.parametrize("car_model", [candidate for candidate in spv.HYUNDAI_CAR
+                                     if candidate != spv.HYUNDAI_CAR.HYUNDAI_SONATA_HYBRID] + ["FORD_ESCAPE_MK4", "MOCK"])
+def test_sonata_hybrid_lkas_default_ignores_other_vehicles(car_model):
+  params = _FakeParams(ints={"LKASButtonControl": spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]})
+
+  assert spv.migrate_sonata_hybrid_lkas_button_default(car_model, params) is False
+  assert params.get_int("LKASButtonControl") == spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]
+  assert params.get_bool(spv.SONATA_HYBRID_LKAS_MIGRATION_KEY) is False
 
 
 def test_sync_reboot_marker_uses_manager_guard(tmp_path):

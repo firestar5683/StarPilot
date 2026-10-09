@@ -166,11 +166,9 @@ class StarPilotPlanner:
 
     CS = sm["carState"]
     blinker_on = CS.leftBlinker or CS.rightBlinker
-    signal_pause = blinker_on and starpilot_toggles.pause_lateral_below_signal
 
     self.lateral_check = v_ego >= starpilot_toggles.pause_lateral_below_speed
     self.lateral_check |= not blinker_on and starpilot_toggles.pause_lateral_below_signal
-    self.lateral_check |= CS.standstill and not signal_pause
     self.lateral_check &= not sm["starpilotCarState"].pauseLateral
 
     # Blinker-based lateral resume delay: after blinker turns off, delay lateral
@@ -384,7 +382,9 @@ class StarPilotPlanner:
     starpilotPlan.slcSpeedLimit = self.starpilot_vcruise.slc_target
     starpilotPlan.slcSpeedLimitOffset = self.starpilot_vcruise.slc_offset
     starpilotPlan.slcSpeedLimitSource = self.starpilot_vcruise.slc.source
-    starpilotPlan.speedLimitChanged = self.starpilot_vcruise.slc.speed_limit_changed_timer > DT_MDL
+    starpilotPlan.slcPresentedSpeedLimitSource = self.starpilot_vcruise.slc.presented_source
+    starpilotPlan.slcIsLimitingMaxSet = self.starpilot_vcruise.slc_is_limiting_max_set
+    starpilotPlan.speedLimitChanged = self.starpilot_vcruise.slc.confirmation_pending
     starpilotPlan.unconfirmedSlcSpeedLimit = self.starpilot_vcruise.slc.unconfirmed_speed_limit
 
     starpilotPlan.themeUpdated = theme_updated

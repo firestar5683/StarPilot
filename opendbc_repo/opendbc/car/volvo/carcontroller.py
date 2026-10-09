@@ -248,12 +248,12 @@ class CarController(CarControllerBase):
     # LCA_5 (formerly SPEED_1) - 0x67 - 50 Hz
     # Contains wheel speeds + LCA signals (LCA_TURN_BITS, LCA_5_STEER)
     if self.frame % 2 == 0: # 50 Hz
-      # Initialize counter from CarState on first run
-      if self.lca_5_counter is None:
+      if not lat_active or self.lca_5_counter is None:
         self.lca_5_counter = CS.msg_lca_5['COUNTER']
 
       # Increment counter by +4, wrap at 15 (0xF never used)
-      self.lca_5_counter = (self.lca_5_counter + 4) % 15
+      if lat_active:
+        self.lca_5_counter = (self.lca_5_counter + 4) % 15
 
       can_sends.append(create_lca_5_message(self.packer, lat_active, apply_angle,
                                             CS.msg_lca_5, self.lca_5_counter))

@@ -39,8 +39,8 @@ sys.modules["openpilot.selfdrive.controls.lib.longitudinal_planner"] = _module(
 )
 sys.modules["openpilot.starpilot.controls.lib.starpilot_vcruise"] = _module(
   "openpilot.starpilot.controls.lib.starpilot_vcruise",
-  get_active_slc_control_target=lambda enabled, set_speed_limit, target, offset, overridden_speed, *_args, **_kwargs: (
-    float(overridden_speed or target) + float(offset) if enabled and set_speed_limit else 0.0
+  get_active_slc_control_target=lambda enabled, target, offset, overridden_speed, *_args, **_kwargs: (
+    float(overridden_speed or target) + float(offset) if enabled else 0.0
   ),
 )
 

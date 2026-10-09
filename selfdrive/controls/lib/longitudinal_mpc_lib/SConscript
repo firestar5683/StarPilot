@@ -28,6 +28,8 @@ casadi_cost_0 = [
 casadi_constraints = [
   f'{gen}/long_constraints/long_constr_h_fun.c',
   f'{gen}/long_constraints/long_constr_h_fun_jac_uxt_zt.c',
+  f'{gen}/long_constraints/long_constr_h_e_fun.c',
+  f'{gen}/long_constraints/long_constr_h_e_fun_jac_uxt_zt.c',
 ]
 
 build_files = [f'{gen}/acados_solver_long.c'] + casadi_model + casadi_cost_y + casadi_cost_e +  \

@@ -32,13 +32,13 @@ def create_lat_ctl_msg(packer, CAN: CanBus, active: bool, ramp_type: int, precis
 
 
 def create_lat_ctl2_msg(packer, CAN: CanBus, mode: int, ramp_type: int, precision_type: int,
-                        curvature: float, curvature_rate: float, counter: int):
+                        curvature: float, curvature_rate: float, counter: int, path_angle: float = 0.0):
   values = {
     "LatCtl_D2_Rq": mode,
     "LatCtlRampType_D_Rq": ramp_type,
     "LatCtlPrecision_D_Rq": precision_type,
     "LatCtlPathOffst_L_Actl": 0.0,
-    "LatCtlPath_An_Actl": 0.0,
+    "LatCtlPath_An_Actl": path_angle,
     "LatCtlCurv_No_Actl": curvature,
     "LatCtlCrv_NoRate2_Actl": curvature_rate,
     "HandsOffCnfm_B_Rq": 0,

@@ -1,9 +1,5 @@
 # StarPilot
 
-## Galaxy Bluetooth experiment
-
-This fork includes a native iPhone shell for Galaxy and a comma-side Bluetooth request bridge. See [tools/galaxy_bluetooth](tools/galaxy_bluetooth/README.md) for the Xcode project, device setup, tests, and current limits. Physical iPhone/comma 4 testing is pending; the bridge is started separately for the first experiment.
-
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/firestar5683/StarPilot)
 [![Discord](https://img.shields.io/discord/1387432184121393333?label=Discord)](https://firestar.link/discord)
 [![Last Updated](https://img.shields.io/github/last-commit/firestar5683/StarPilot/StarPilot)](https://github.com/firestar5683/StarPilot)

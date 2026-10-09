@@ -71,6 +71,27 @@ static uint16_t volvo_ecm_1_addr;
 static uint16_t volvo_bus1_cruise_control_addr;
 static bool volvo_c1;
 
+#define VOLVO_STOCK_LCA5_FRAMES 4U
+#define VOLVO_STOCK_LCA5_MAX_AGE_US 100000U
+static uint8_t volvo_stock_lca5_data[VOLVO_STOCK_LCA5_FRAMES][8];
+static uint32_t volvo_stock_lca5_ts[VOLVO_STOCK_LCA5_FRAMES];
+static bool volvo_stock_lca5_valid[VOLVO_STOCK_LCA5_FRAMES];
+static uint8_t volvo_stock_lca5_index;
+
+static bool volvo_lca5_stock_relay(const CANPacket_t *msg) {
+  const uint32_t now = microsecond_timer_get();
+  bool matches_stock = false;
+  for (uint8_t i = 0U; i < VOLVO_STOCK_LCA5_FRAMES; i++) {
+    bool matches = volvo_stock_lca5_valid[i] &&
+                   (safety_get_ts_elapsed(now, volvo_stock_lca5_ts[i]) <= VOLVO_STOCK_LCA5_MAX_AGE_US);
+    for (uint8_t byte = 0U; byte < 8U; byte++) {
+      matches &= msg->data[byte] == volvo_stock_lca5_data[i][byte];
+    }
+    matches_stock |= matches;
+  }
+  return matches_stock;
+}
+
 static int volvo_be_15(const CANPacket_t *msg, uint8_t byte) {
   return (int)(((uint16_t)(msg->data[byte] & 0x7FU) << 8U) | msg->data[byte + 1U]);
 }
@@ -159,6 +180,15 @@ static void volvo_rx_hook(const CANPacket_t *msg) {
 
   // Main bus (bus 0) messages
   if (msg->bus == VOLVO_MAIN_BUS) {
+    if (msg->addr == VOLVO_LCA_5) {
+      for (uint8_t byte = 0U; byte < 8U; byte++) {
+        volvo_stock_lca5_data[volvo_stock_lca5_index][byte] = msg->data[byte];
+      }
+      volvo_stock_lca5_ts[volvo_stock_lca5_index] = microsecond_timer_get();
+      volvo_stock_lca5_valid[volvo_stock_lca5_index] = true;
+      volvo_stock_lca5_index = (volvo_stock_lca5_index + 1U) % VOLVO_STOCK_LCA5_FRAMES;
+    }
+
     // Update brake pedal and cruise state from BCM2
     if (msg->addr == VOLVO_LCA_2) {
       // DBC: SG_ BRAKE_PEDAL_PRESSED_A : 47|1@0+ (-1,1) - inverted in DBC, so we invert raw bit
@@ -263,9 +293,13 @@ static bool volvo_tx_hook(const CANPacket_t *msg) {
   // LCA frame also contains an angle-shaped field, but the imported controller
   // deliberately leaves that field at the observed vehicle value.
   if (msg->addr == VOLVO_LCA_5) {
-    const int desired_angle = volvo_lca_5_angle(msg);
-    tx &= SAFETY_ABS(desired_angle) <= VOLVO_MAX_ANGLE_CAN;
-    tx &= !steer_angle_cmd_checks(desired_angle, controls_allowed, VOLVO_ANGLE_STEERING_LIMITS);
+    if (!controls_allowed && volvo_lca5_stock_relay(msg)) {
+      desired_angle_last = SAFETY_CLAMP(angle_meas.values[0], -VOLVO_MAX_ANGLE_CAN, VOLVO_MAX_ANGLE_CAN);
+    } else {
+      const int desired_angle = volvo_lca_5_angle(msg);
+      tx &= SAFETY_ABS(desired_angle) <= VOLVO_MAX_ANGLE_CAN;
+      tx &= !steer_angle_cmd_checks(desired_angle, controls_allowed, VOLVO_ANGLE_STEERING_LIMITS);
+    }
   }
 
   // Keep the two torque-authority arms and the companion LCA angle bounded even
@@ -357,6 +391,10 @@ static bool volvo_tx_hook(const CANPacket_t *msg) {
 static safety_config volvo_init(uint16_t param) {
   bool spa = GET_FLAG(param, VOLVO_FLAG_SPA);
   volvo_c1 = GET_FLAG(param, VOLVO_FLAG_C1);
+  volvo_stock_lca5_index = 0U;
+  for (uint8_t i = 0U; i < VOLVO_STOCK_LCA5_FRAMES; i++) {
+    volvo_stock_lca5_valid[i] = false;
+  }
 
   if (volvo_c1) {
     static const CanMsg VOLVO_C1_TX_MSGS[] = {

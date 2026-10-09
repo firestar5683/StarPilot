@@ -201,13 +201,10 @@ def get_traffic_border_colors() -> tuple[rl.Color, rl.Color] | None:
   flicker_active = (int(rl.get_time() * 1000) % (interval * 2)) < interval
 
   def get_half_border_color(blindspot, turn_signal):
-    if turn_signal and show_signal:
-      if blindspot:
-        return TRAFFIC_COLOR if flicker_active else CEM_OVERRIDE_COLOR
-      else:
-        return CEM_OVERRIDE_COLOR if flicker_active else rl.Color(0, 0, 0, 0)
-    elif blindspot and show_blindspot:
+    if blindspot and show_blindspot:
       return TRAFFIC_COLOR
+    if turn_signal and show_signal:
+      return CEM_OVERRIDE_COLOR if flicker_active else rl.Color(0, 0, 0, 0)
     else:
       return rl.Color(0, 0, 0, 0)
 

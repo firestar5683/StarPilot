@@ -4,6 +4,8 @@ import pytest
 
 from cereal import car
 from opendbc.car.ford.values import CAR as FORD_CAR
+from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
+from openpilot.common.gps import get_gps_location_service
 import openpilot.system.manager.process_config as process_config
 from openpilot.system.manager.process_config import (
   allow_uploads,
@@ -174,3 +176,15 @@ def test_ublox_has_single_external_gps_publisher(monkeypatch, car_gps, expected)
 
   assert ublox(True, params, car.CarParams.new_message(), SimpleNamespace()) is expected
   assert params.get_bool("CarGpsAvailable") is car_gps
+
+
+def test_taos_uses_the_car_gps_service(monkeypatch):
+  monkeypatch.setattr("openpilot.system.manager.process_config.ublox_available", lambda: True)
+  CP = car.CarParams.new_message()
+  CP.brand = "volkswagen"
+  CP.carFingerprint = VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1
+  params = GpsParams(CP)
+
+  assert not ublox(True, params, CP, SimpleNamespace())
+  assert params.get_bool("CarGpsAvailable")
+  assert get_gps_location_service(params) == "gpsLocationExternal"

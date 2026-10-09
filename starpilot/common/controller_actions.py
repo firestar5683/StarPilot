@@ -66,7 +66,7 @@ CONTROLLER_ACTION_OPTIONS = (
   {
     "key": CONTROLLER_ACTION_TOGGLE_AOL,
     "label": "Toggle AOL",
-    "description": "Toggles Always On Lateral like the vehicle LKAS button; it does not change the AOL setting.",
+    "description": "Arms or disarms Always On Lateral for the current drive and updates the blue AOL border. The AOL master setting is unchanged.",
     "section": "Controller Actions",
   },
   {

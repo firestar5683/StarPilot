@@ -30,12 +30,12 @@ class WidgetLayoutManager:
     active_widgets = [w for w in self.zones["left"] if w.is_visible]
 
     # Left zone stacks vertically from the top-left offset
-    # X anchor is the shared left-control center (content x + 146).
-    center_x = self.content_rect.x + WIDGET_ANCHOR_OFFSET
+    # Keep wide cards inside the content rect without moving compact widgets.
     current_y = self.content_rect.y + 45
 
     for widget in active_widgets:
       w, h = widget.get_size()
+      center_x = self.content_rect.x + max(float(WIDGET_ANCHOR_OFFSET), w / 2 + 30)
       widget.set_rect(rl.Rectangle(center_x - w / 2, current_y, w, h))
       current_y += h + self.spacing
 

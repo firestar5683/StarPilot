@@ -10,9 +10,10 @@ from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.scroll_panel2 import GuiScrollPanel2
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget, DialogResult
+from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
     AetherListColors, AetherListMetrics, AetherScrollbar,
-    draw_hud_background, draw_soft_card, draw_action_pill, draw_selection_list_row,
+    draw_hud_background, draw_action_pill, draw_selection_list_row,
     draw_empty_state_card, draw_busy_ring, draw_list_scroll_fades,
     draw_rounded_fill, draw_rounded_stroke, draw_text_fit_common,
     draw_download_icon,
@@ -167,9 +168,6 @@ class SimpleDownloadManager(Widget):
     self._slug_map: dict[str, str] = {}
     self._item_rects: dict[str, rl.Rectangle] = {}
     self._pill_rects: list[rl.Rectangle] = []
-    self._confirm_target: str | None = None
-    self._confirm_yes_rect = rl.Rectangle(0, 0, 0, 0)
-    self._confirm_no_rect = rl.Rectangle(0, 0, 0, 0)
     self._close_rect = rl.Rectangle(0, 0, 0, 0)
     self._cancel_rect = rl.Rectangle(0, 0, 0, 0)
     self._info_message = ""
@@ -234,7 +232,6 @@ class SimpleDownloadManager(Widget):
     _add_to_downloadable_list(self.params, self.downloadable_list_param, display_name)
     self._info_message = f"Deleted \"{display_name}\""
     self._info_message_until = time.monotonic() + 2.5
-    self._confirm_target = None
     self._refresh_list()
 
   def _start_download(self, display_name: str):
@@ -266,12 +263,6 @@ class SimpleDownloadManager(Widget):
     for i, prect in enumerate(self._pill_rects):
       if rl.check_collision_point_rec(pos, prect):
         return f"mode:{i}"
-    if self._confirm_target is not None:
-      if rl.check_collision_point_rec(pos, self._confirm_yes_rect):
-        return "confirm_yes"
-      if rl.check_collision_point_rec(pos, self._confirm_no_rect):
-        return "confirm_no"
-      return None
     if self._downloading:
       if rl.check_collision_point_rec(pos, self._cancel_rect):
         return "cancel_download"
@@ -301,7 +292,6 @@ class SimpleDownloadManager(Widget):
       if mode != self._active_mode:
         self._active_mode = mode
         self._scroll_offset = 0.0
-        self._confirm_target = None
         self._refresh_list()
     elif target.startswith("item:"):
       idx = int(target.split(":")[1])
@@ -310,13 +300,15 @@ class SimpleDownloadManager(Widget):
         if self._active_mode == self.MODE_SELECT:
           self._select_asset(item)
         elif self._active_mode == self.MODE_DELETE:
-          self._confirm_target = item
+          def on_result(result: DialogResult):
+            if result == DialogResult.CONFIRM:
+              self._delete_asset(item)
+
+          gui_app.push_widget(ConfirmDialog(
+            tr("Delete \"{name}\"?").format(name=item), tr("DELETE"), callback=on_result,
+          ))
         elif self._active_mode == self.MODE_DOWNLOAD:
           self._start_download(item)
-    elif target == "confirm_yes" and self._confirm_target is not None:
-      self._delete_asset(self._confirm_target)
-    elif target == "confirm_no":
-      self._confirm_target = None
     elif target == "cancel_download":
       self._cancel_download()
 
@@ -450,7 +442,9 @@ class SimpleDownloadManager(Widget):
 
     # Measure content
     n_items = len(self._list_items)
-    content_height = float(n_items * self.ITEM_HEIGHT)
+    prog_h = 140
+    progress_space = prog_h + 40 if self._downloading else 0
+    content_height = float(n_items * self.ITEM_HEIGHT + progress_space)
 
     self._scroll_panel.set_enabled(True)
     self._scroll_offset = self._scroll_panel.update(scroll_rect, max(content_height, scroll_rect.height))
@@ -475,7 +469,6 @@ class SimpleDownloadManager(Widget):
 
       if self._downloading:
         # Download progress display
-        prog_h = 140
         prog_rect = rl.Rectangle(scroll_rect.x + 20, scroll_rect.y + self._scroll_offset + 20,
                                  scroll_rect.width - 40, prog_h)
         draw_rounded_fill(prog_rect, with_alpha(rl.Color(255, 255, 255, 8), 255), radius_px=16)
@@ -508,49 +501,7 @@ class SimpleDownloadManager(Widget):
           AetherListColors.HEADER, font_size=24,
         )
 
-        item_y += prog_h + 40
-
-      if self._confirm_target is not None:
-        # Confirm overlay
-        confirm_w = min(720, scroll_rect.width - 60)
-        confirm_h = 220
-        confirm_rect = rl.Rectangle(
-          scroll_rect.x + (scroll_rect.width - confirm_w) / 2,
-          scroll_rect.y + self._scroll_offset + (scroll_rect.height - confirm_h) / 2,
-          confirm_w, confirm_h,
-        )
-        draw_soft_card(confirm_rect, rl.Color(20, 19, 25, 255), with_alpha(AetherListColors.PANEL_BORDER, 160),
-                       radius=0.03, segments=18)
-
-        confirm_font = gui_app.font(FontWeight.MEDIUM)
-        confirm_msg = tr("Delete \"{name}\"?").format(name=self._confirm_target)
-        draw_text_fit_common(
-          confirm_font, confirm_msg,
-          rl.Vector2(confirm_rect.x + 24, confirm_rect.y + 32),
-          confirm_rect.width - 48, 32,
-          align_center=True, color=AetherListColors.HEADER,
-        )
-
-        btn_w = (confirm_rect.width - 60) / 2
-        btn_y = confirm_rect.y + confirm_rect.height - 76
-        btn_h = 52
-
-        self._confirm_no_rect = snap_rect(rl.Rectangle(confirm_rect.x + 20, btn_y, btn_w, btn_h))
-        self._confirm_yes_rect = snap_rect(rl.Rectangle(confirm_rect.x + confirm_rect.width - btn_w - 20, btn_y, btn_w, btn_h))
-
-        no_hovered = self._pressed_target == "confirm_no"
-        yes_hovered = self._pressed_target == "confirm_yes"
-
-        draw_action_pill(self._confirm_no_rect, tr("CANCEL"),
-                         with_alpha(rl.Color(255, 255, 255, 14 if no_hovered else 8), 255),
-                         with_alpha(rl.Color(255, 255, 255, 36), 255),
-                         AetherListColors.SUBTEXT, font_size=24)
-        draw_action_pill(self._confirm_yes_rect, tr("DELETE"),
-                         with_alpha(AetherListColors.DANGER, 60 if yes_hovered else 36),
-                         with_alpha(AetherListColors.DANGER, 120),
-                         AetherListColors.HEADER, font_size=24)
-
-        item_y += confirm_h + 20
+        item_y += progress_space
 
       # Draw list items
       for idx, item in enumerate(self._list_items):

@@ -13,6 +13,7 @@ from openpilot.common.pid import PIDController
 from openpilot.selfdrive.controls.lib.drive_helpers import MIN_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import *  # noqa: F403
+from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import get_genesis_g70_center_measurement_damping_gain
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -95,6 +96,7 @@ class LatControlTorque(LatControl):
     self.steer_release_i_decay = 0.8
     self.prev_steering_pressed = False
     self.prev_output_torque = 0.0
+    self.gv70_previous_feedforward = None
     self.debug_counter = 0
     self.prev_desired_lateral_accel = 0.0
     self.starpilot_lateral_state = custom.StarPilotLateralState.new_message()
@@ -107,6 +109,8 @@ class LatControlTorque(LatControl):
     self.is_genesis_g90 = CP.carFingerprint in GENESIS_G90_CARS
     self.is_genesis_g70 = CP.carFingerprint in GENESIS_G70_CARS
     self.is_genesis_gv70 = CP.carFingerprint in GENESIS_GV70_CARS
+    if self.is_genesis_gv70:
+      self.pid._k_d = [GENESIS_GV70_MEASUREMENT_DAMPING_SPEED_BP, GENESIS_GV70_MEASUREMENT_DAMPING_V]
     self.is_palisade = CP.carFingerprint in PALISADE_CARS
     self.is_prius = CP.carFingerprint in PRIUS_CARS
     self.is_standard_prius = CP.carFingerprint == TOYOTA_CAR.TOYOTA_PRIUS
@@ -236,6 +240,7 @@ class LatControlTorque(LatControl):
     if not active:
       output_torque = 0.0
       self.prev_output_torque = 0.0
+      self.gv70_previous_feedforward = None
       pid_log.active = False
       self._clear_starpilot_lateral_state()
       self.pid.reset()
@@ -547,9 +552,26 @@ class LatControlTorque(LatControl):
 
       if CS.vEgo < self.low_speed_reset_threshold:
         self.pid.reset()
+      if self.is_genesis_gv70:
+        ff *= get_genesis_gv70_center_output_scale(setpoint, CS.vEgo)
+        ff *= get_genesis_gv70_low_speed_center_overshoot_scale(setpoint, measurement, CS.vEgo)
+        ff *= get_genesis_gv70_high_speed_error_scale(setpoint, measurement, desired_lateral_jerk, CS.vEgo)
+        ff *= get_genesis_gv70_reversal_output_scale(setpoint, measurement, desired_lateral_jerk, CS.vEgo)
+        if not CS.steeringPressed and not self.prev_steering_pressed and self.gv70_previous_feedforward is not None:
+          ff = get_genesis_gv70_stabilized_output(
+            ff, self.gv70_previous_feedforward, setpoint, desired_lateral_jerk, CS.vEgo, self.dt,
+          )
+        self.gv70_previous_feedforward = ff
+      if self.is_genesis_g70:
+        damping_gain = 0.0 if CS.steeringPressed else get_genesis_g70_center_measurement_damping_gain(
+          CS.vEgo, setpoint, measurement, desired_lateral_jerk,
+        )
+        self.pid._k_d = [[0.0], [damping_gain]]
       freeze_integrator = (steer_limited_by_safety or CS.steeringPressed or
                            CS.vEgo < self.low_speed_reset_threshold or unwind_detected)
-      output_lataccel = self.pid.update(pid_log.error, error_rate=-measurement_rate, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
+      error_rate = 0.0 if self.is_genesis_gv70 and CS.steeringPressed else -measurement_rate
+      output_lataccel = self.pid.update(pid_log.error, error_rate=error_rate, speed=CS.vEgo, feedforward=ff,
+                                       freeze_integrator=freeze_integrator)
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
       if bolt_2022_2023_tuned_path_active:
         output_torque *= get_bolt_2022_2023_center_output_scale(setpoint, CS.vEgo)
@@ -647,6 +669,9 @@ class LatControlTorque(LatControl):
         output_torque *= tucson_4th_gen_center_taper
       elif genesis_g70_active:
         output_torque *= genesis_g70_center_output_taper
+        output_torque *= get_genesis_g70_highway_turn_in_output_scale(
+          output_torque, setpoint, measurement, desired_lateral_jerk, CS.vEgo,
+        )
         output_torque *= get_genesis_g70_high_speed_error_scale(
           setpoint, measurement, desired_lateral_jerk, CS.vEgo,
         )
@@ -656,21 +681,6 @@ class LatControlTorque(LatControl):
         if not CS.steeringPressed:
           output_torque = get_genesis_g70_stabilized_output(
             output_torque, self.prev_output_torque, setpoint, measurement, desired_lateral_jerk, CS.vEgo, self.dt,
-          )
-      elif self.is_genesis_gv70:
-        output_torque *= get_genesis_gv70_center_output_scale(setpoint, CS.vEgo)
-        output_torque *= get_genesis_gv70_low_speed_center_overshoot_scale(
-          setpoint, measurement, CS.vEgo,
-        )
-        output_torque *= get_genesis_gv70_high_speed_error_scale(
-          setpoint, measurement, desired_lateral_jerk, CS.vEgo,
-        )
-        output_torque *= get_genesis_gv70_reversal_output_scale(
-          setpoint, measurement, desired_lateral_jerk, CS.vEgo,
-        )
-        if not CS.steeringPressed:
-          output_torque = get_genesis_gv70_stabilized_output(
-            output_torque, self.prev_output_torque, setpoint, desired_lateral_jerk, CS.vEgo, self.dt,
           )
       elif sonata_hybrid_active:
         output_torque *= sonata_hybrid_center_taper

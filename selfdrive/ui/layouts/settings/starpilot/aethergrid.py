@@ -9,6 +9,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, M
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.scroll_panel2 import GuiScrollPanel2
 from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.system.ui.lib.wrap_text import wrap_text as wrap_body_text
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.label import gui_label
 
@@ -214,7 +215,7 @@ def draw_text_fit_common(
     render_width = measure_text_cached(font, text, actual_font_size, spacing=spacing).x
   else:
     render_width = size.x
-  nudge_y = (font_size - actual_font_size) / 2
+  nudge_y = (font_size - actual_font_size) * FONT_SCALE / 2
   draw_x = pos.x
   if align_center:
     draw_x = pos.x + (max_width - render_width) / 2
@@ -382,8 +383,9 @@ def point_hits(mouse_pos: MousePos, rect: rl.Rectangle, parent_rect: rl.Rectangl
   return hit.width > 0 and hit.height > 0 and rl.check_collision_point_rec(mouse_pos, hit)
 
 
-def wrap_text(font: rl.Font, text: str, max_width: float, font_size: float, max_lines: int = 2) -> list[str]:
-  spacing = font_size * 0.15
+def wrap_text(font: rl.Font, text: str, max_width: float, font_size: float, max_lines: int = 2,
+              *, spacing: float | None = None) -> list[str]:
+  spacing = font_size * 0.15 if spacing is None else spacing
   words = text.split()
   lines: list[str] = []
   current = ""
@@ -762,7 +764,7 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
   PAGE_COMMIT_RATIO = 0.20
   PAGE_ANIM_DURATION = 0.28
   PAGE_SNAP_DURATION = 0.20
-  PAGE_INDICATOR_HEIGHT = 44
+  PAGE_INDICATOR_HEIGHT = 56
 
 
 
@@ -1007,13 +1009,16 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
     track_h = 10.0
     track_w = seg_w * n
     start_x = rect.x + (rect.width - track_w) / 2
-    track_y = rect.y + rect.height - 16
+    track_y = rect.y + rect.height - 12
 
     label = f"{self._current_page + 1} / {self._page_count}"
     lf = gui_app.font(FontWeight.MEDIUM)
-    ls = 16.0
-    lw = measure_text_cached(lf, label, int(ls)).x
-    rl.draw_text_ex(lf, label, rl.Vector2(int(rect.x + (rect.width - lw) / 2), int(track_y - ls - 6)), int(ls), 0, with_alpha(AetherListColors.MUTED, 200))
+    ls = 22.0
+    label_size = measure_text_cached(lf, label, int(ls))
+    rl.draw_text_ex(
+      lf, label, rl.Vector2(int(rect.x + (rect.width - label_size.x) / 2), int(track_y - label_size.y - 4)),
+      int(ls), 0, with_alpha(AetherListColors.MUTED, 200),
+    )
 
     track_col = with_alpha(AetherListColors.MUTED, 60)
     rl.draw_rectangle_rounded(rl.Rectangle(start_x, track_y, track_w, track_h), 0.5, 8, track_col)
@@ -1025,7 +1030,8 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
 
     if self._page_count > 8:
       more_x = int(start_x + track_w + 10)
-      rl.draw_text_ex(lf, "···", rl.Vector2(more_x, int(track_y - 2)), 14, 0, AetherListColors.MUTED)
+      more_h = measure_text_cached(lf, "···", 14).y
+      rl.draw_text_ex(lf, "···", rl.Vector2(more_x, int(track_y + track_h - more_h)), 14, 0, AetherListColors.MUTED)
 
   # ── lifecycle ──────────────────────────────────────────────
 
@@ -1434,11 +1440,23 @@ class BreadcrumbController:
     aether_end_scissor_mode()
 PANEL_HEADER_TITLE_Y: int = 34
 PANEL_HEADER_SUBTITLE_Y: int = 78
-PANEL_HEADER_TITLE_FONT_SIZE: int = 30
-PANEL_HEADER_SUBTITLE_FONT_SIZE: int = 26
+PANEL_HEADER_TITLE_FONT_SIZE: int = 44
+PANEL_HEADER_SUBTITLE_FONT_SIZE: int = 32
 PANEL_HEADER_TITLE_FONT: FontWeight = FontWeight.SEMI_BOLD
 PANEL_HEADER_SUBTITLE_FONT: FontWeight = FontWeight.NORMAL
-PANEL_HEADER_SUBTITLE_LINE_HEIGHT: float = 30.0  # subtitle_size(26) + interline_gap(4)
+SETTINGS_ROW_TITLE_FONT_SIZE: int = 40
+SETTINGS_ROW_SUBTITLE_FONT_SIZE: int = 28
+SETTINGS_ROW_VALUE_FONT_SIZE: int = 34
+
+
+def _settings_panel_header_layout(width: float, subtitle: str | None, title_size: int, subtitle_size: int,
+                                  subtitle_weight: FontWeight = PANEL_HEADER_SUBTITLE_FONT,
+                                  min_title_height: float = 0.0) -> tuple[float, list[str], float, float]:
+  title_height = max(title_size * FONT_SCALE, min_title_height)
+  line_height = subtitle_size * FONT_SCALE + SPACING.xs
+  lines = wrap_text(gui_app.font(subtitle_weight), subtitle, width, subtitle_size, max_lines=4, spacing=0) if subtitle else []
+  height = title_height + (SPACING.sm + len(lines) * line_height - SPACING.xs if lines else 0.0)
+  return title_height, lines, line_height, height
 
 
 def draw_settings_panel_header(header_rect: rl.Rectangle, title: str, subtitle: str | None = None,
@@ -1450,19 +1468,22 @@ def draw_settings_panel_header(header_rect: rl.Rectangle, title: str, subtitle: 
                                 title_color: rl.Color = AetherListColors.HEADER,
                                 subtitle_color: rl.Color = AetherListColors.SUBTEXT,
                                 title_weight: FontWeight = PANEL_HEADER_TITLE_FONT,
-                                subtitle_weight: FontWeight = PANEL_HEADER_SUBTITLE_FONT):
+                                subtitle_weight: FontWeight = PANEL_HEADER_SUBTITLE_FONT,
+                                min_title_height: float = 0.0):
   if not title:
     return
   title_font = gui_app.font(title_weight)
-  y = header_rect.y
-  rl.draw_text_ex(title_font, title, rl.Vector2(header_rect.x, y), title_size, 0, title_color)
-  y += title_size + 8
-  if subtitle:
+  title_height, desc_lines, line_height, _ = _settings_panel_header_layout(
+    header_rect.width * max_subtitle_width, subtitle, title_size, subtitle_size, subtitle_weight, min_title_height,
+  )
+  y = header_rect.y + (title_height - title_size * FONT_SCALE) / 2
+  draw_text_fit_common(title_font, title, rl.Vector2(header_rect.x, y), header_rect.width * max_title_width, title_size, color=title_color)
+  y = header_rect.y + title_height + SPACING.sm
+  if desc_lines:
     desc_font = gui_app.font(subtitle_weight)
-    desc_lines = wrap_text(desc_font, subtitle, header_rect.width * max_subtitle_width, subtitle_size, max_lines=4)
     for line in desc_lines:
-      rl.draw_text_ex(desc_font, line, rl.Vector2(header_rect.x, y), subtitle_size, 0, subtitle_color)
-      y += subtitle_size + 4
+      draw_text_fit_common(desc_font, line, rl.Vector2(header_rect.x, y), header_rect.width * max_subtitle_width, subtitle_size, color=subtitle_color)
+      y += line_height
 
 
 
@@ -1590,7 +1611,6 @@ def draw_standard_toggle_row(
     pressed=pressed,
     is_last=is_last,
     show_chevron=False,
-    title_size=36, subtitle_size=26,
     style=style,
   )
 
@@ -1783,7 +1803,7 @@ def draw_action_pill(
   draw_text_fit_common(
     gui_app.font(FontWeight.SEMI_BOLD),
     text,
-    rl.Vector2(rect.x + 12, rect.y + (rect.height - font_size) / 2),
+    rl.Vector2(rect.x + 12, rect.y + (rect.height - font_size * FONT_SCALE) / 2),
     max(1.0, rect.width - 24),
     font_size,
     align_center=True,
@@ -2013,12 +2033,12 @@ def draw_section_header(
 ):
   if title:
     trailing_reserved = min(320.0, rect.width * 0.38) if trailing_text else 0.0
-    title_rect = rl.Rectangle(rect.x, rect.y + (rect.height - title_size) / 2, max(1.0, rect.width - trailing_reserved), title_size + 4)
+    title_rect = rl.Rectangle(rect.x, rect.y, max(1.0, rect.width - trailing_reserved), rect.height)
     alignment = rl.GuiTextAlignment.TEXT_ALIGN_CENTER if align_center else rl.GuiTextAlignment.TEXT_ALIGN_LEFT
     gui_label(title_rect, title, title_size, title_color or style.subtitle_color, FontWeight.SEMI_BOLD, alignment=alignment)
 
   if trailing_text:
-    trailing_rect = rl.Rectangle(rect.x, rect.y + (rect.height - trailing_size) / 2, rect.width, trailing_size + 4)
+    trailing_rect = rect
     gui_label(
       trailing_rect,
       trailing_text,
@@ -2065,14 +2085,28 @@ def draw_empty_state_card(
     FontWeight.MEDIUM,
     alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
   )
-  gui_label(
-    rl.Rectangle(card_rect.x + inset_x, body_y, max(1.0, card_rect.width - inset_x * 2), resolved_body_h),
-    body,
-    body_size,
-    style.subtitle_color,
-    FontWeight.NORMAL,
-    alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
-  )
+  resolved_body_h = min(resolved_body_h, max(0.0, card_rect.y + card_rect.height - body_y))
+  font = gui_app.font(FontWeight.NORMAL)
+  line_height = body_size * FONT_SCALE
+  line_gap = 4.0
+  max_lines = int((resolved_body_h + line_gap) // (line_height + line_gap))
+  if not body or max_lines < 1:
+    return
+  body_width = max(1.0, card_rect.width - inset_x * 2)
+  if "\n" not in body and measure_text_cached(font, body, body_size).x <= body_width:
+    lines = [body]
+  else:
+    lines = wrap_body_text(font, body, body_size, int(body_width))
+  if len(lines) > max_lines:
+    lines = lines[:max_lines - 1] + [truncate_text_ellipsis(font, " ".join(lines[max_lines - 1:]), body_width, body_size)]
+  text_y = body_y + (resolved_body_h - len(lines) * line_height - (len(lines) - 1) * line_gap) / 2
+  for line in lines:
+    gui_label(
+      rl.Rectangle(card_rect.x + inset_x, text_y, body_width, line_height),
+      line, body_size, style.subtitle_color, FontWeight.NORMAL,
+      alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
+    )
+    text_y += line_height + line_gap
 
 
 def draw_list_group_shell(
@@ -2099,9 +2133,9 @@ def draw_settings_list_row(
   pressed: bool = False,
   is_last: bool = False,
   show_chevron: bool = True,
-  title_size: int = 36,
-  subtitle_size: int = 26,
-  value_size: int = 28,
+  title_size: int = SETTINGS_ROW_TITLE_FONT_SIZE,
+  subtitle_size: int = SETTINGS_ROW_SUBTITLE_FONT_SIZE,
+  value_size: int = SETTINGS_ROW_VALUE_FONT_SIZE,
   separator_inset: int = 24,
   title_color: rl.Color | None = None,
   subtitle_color: rl.Color | None = None,
@@ -2139,9 +2173,9 @@ def draw_settings_list_row(
     text_width = max(100.0, text_right - text_left)
 
     if subtitle:
-      eff_title_size = min(36, title_size)
-      eff_sub_size = min(26, subtitle_size)
-      total_h = eff_title_size + eff_sub_size + 4
+      eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size)
+      eff_sub_size = min(SETTINGS_ROW_SUBTITLE_FONT_SIZE, subtitle_size)
+      total_h = (eff_title_size + eff_sub_size) * FONT_SCALE + SPACING.xs
       start_y = draw_rect.y + (draw_rect.height - total_h) / 2
 
       draw_text_fit_common(
@@ -2152,13 +2186,13 @@ def draw_settings_list_row(
       )
       draw_text_fit_common(
         gui_app.font(FontWeight.NORMAL), subtitle,
-        rl.Vector2(text_left, start_y + eff_title_size + 4),
+        rl.Vector2(text_left, start_y + eff_title_size * FONT_SCALE + SPACING.xs),
         text_width, eff_sub_size,
         color=resolved_subtitle_color,
       )
     else:
-      eff_title_size = min(36, title_size)
-      title_y = draw_rect.y + (draw_rect.height - eff_title_size) / 2
+      eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size)
+      title_y = draw_rect.y + (draw_rect.height - eff_title_size * FONT_SCALE) / 2
       draw_text_fit_common(
         gui_app.font(FontWeight.SEMI_BOLD), title,
         rl.Vector2(text_left, title_y),
@@ -2188,11 +2222,11 @@ def draw_settings_list_row(
   if value:
     if is_narrow and draw_rect.height >= 86 and not subtitle:
       # Adaptive Two-Line Stacked Layout: Title on top, Value spanning full width below
-      eff_title_size = min(34, title_size)
-      eff_value_size = min(28, value_size)
+      eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size)
+      eff_value_size = min(SETTINGS_ROW_VALUE_FONT_SIZE, value_size)
       available_w = max(100.0, draw_rect.width - 48 - (32 if show_chevron else 0))
 
-      total_h = eff_title_size + eff_value_size + 6
+      total_h = (eff_title_size + eff_value_size) * FONT_SCALE + 6
       start_y = draw_rect.y + (draw_rect.height - total_h) / 2
 
       draw_text_fit_common(
@@ -2203,7 +2237,7 @@ def draw_settings_list_row(
       )
       draw_text_fit_common(
         gui_app.font(FontWeight.MEDIUM), value,
-        rl.Vector2(text_left, start_y + eff_title_size + 6),
+        rl.Vector2(text_left, start_y + eff_title_size * FONT_SCALE + 6),
         available_w, eff_value_size,
         color=resolved_subtitle_color if resolved_value_color == resolved_title_color else resolved_value_color,
       )
@@ -2219,13 +2253,13 @@ def draw_settings_list_row(
         t_width = max(100.0, draw_rect.width - 48 - v_width - (32 if show_chevron else 0))
         v_right = chevron_rect.x - 16 if show_chevron else draw_rect.x + draw_rect.width - 24
 
-      eff_value_size = min(28, value_size) if is_narrow else min(32, value_size)
-      value_y = draw_rect.y + (draw_rect.height - eff_value_size) / 2
+      eff_value_size = min(SETTINGS_ROW_VALUE_FONT_SIZE, value_size)
+      value_y = draw_rect.y + (draw_rect.height - eff_value_size * FONT_SCALE) / 2
 
       if subtitle:
-        eff_title_size = min(34, title_size)
-        eff_sub_size = min(26, subtitle_size)
-        total_h = eff_title_size + eff_sub_size + 4
+        eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size)
+        eff_sub_size = min(SETTINGS_ROW_SUBTITLE_FONT_SIZE, subtitle_size)
+        total_h = (eff_title_size + eff_sub_size) * FONT_SCALE + SPACING.xs
         start_y = draw_rect.y + (draw_rect.height - total_h) / 2
 
         draw_text_fit_common(
@@ -2236,13 +2270,13 @@ def draw_settings_list_row(
         )
         draw_text_fit_common(
           gui_app.font(FontWeight.NORMAL), subtitle,
-          rl.Vector2(text_left, start_y + eff_title_size + 4),
+          rl.Vector2(text_left, start_y + eff_title_size * FONT_SCALE + SPACING.xs),
           t_width, eff_sub_size,
           color=resolved_subtitle_color,
         )
       else:
-        eff_title_size = min(36, title_size) if is_narrow else title_size
-        title_y = draw_rect.y + (draw_rect.height - eff_title_size) / 2
+        eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size) if is_narrow else title_size
+        title_y = draw_rect.y + (draw_rect.height - eff_title_size * FONT_SCALE) / 2
 
         draw_text_fit_common(
           gui_app.font(FontWeight.SEMI_BOLD), title,
@@ -2267,9 +2301,9 @@ def draw_settings_list_row(
   text_right = chevron_rect.x - 12 if show_chevron else draw_rect.x + draw_rect.width - 24
   text_width = max(100.0, text_right - text_left)
   if subtitle:
-    eff_title_size = min(36, title_size)
-    eff_sub_size = min(26, subtitle_size)
-    total_h = eff_title_size + eff_sub_size + 4
+    eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size)
+    eff_sub_size = min(SETTINGS_ROW_SUBTITLE_FONT_SIZE, subtitle_size)
+    total_h = (eff_title_size + eff_sub_size) * FONT_SCALE + SPACING.xs
     start_y = draw_rect.y + (draw_rect.height - total_h) / 2
     draw_text_fit_common(
       gui_app.font(FontWeight.SEMI_BOLD), title,
@@ -2279,13 +2313,13 @@ def draw_settings_list_row(
     )
     draw_text_fit_common(
       gui_app.font(FontWeight.NORMAL), subtitle,
-      rl.Vector2(text_left, start_y + eff_title_size + 4),
+      rl.Vector2(text_left, start_y + eff_title_size * FONT_SCALE + SPACING.xs),
       text_width, eff_sub_size,
       color=resolved_subtitle_color,
     )
   else:
-    eff_title_size = min(36, title_size)
-    title_y = draw_rect.y + (draw_rect.height - eff_title_size) / 2
+    eff_title_size = min(SETTINGS_ROW_TITLE_FONT_SIZE, title_size)
+    title_y = draw_rect.y + (draw_rect.height - eff_title_size * FONT_SCALE) / 2
     draw_text_fit_common(
       gui_app.font(FontWeight.SEMI_BOLD), title,
       rl.Vector2(text_left, title_y),
@@ -2323,7 +2357,7 @@ def draw_selectable_chip(rect: rl.Rectangle, text: str, *,
   draw_text_fit_common(
     resolved_font,
     text,
-    rl.Vector2(rect.x + padding_x, rect.y + (rect.height - font_size) / 2),
+    rl.Vector2(rect.x + padding_x, rect.y + (rect.height - font_size * FONT_SCALE) / 2),
     max(1.0, rect.width - padding_x * 2),
     font_size,
     align_center=True,
@@ -2554,7 +2588,7 @@ class AetherInlineRangeControl(Widget):
     draw_text_fit_common(
       self._font,
       label,
-      rl.Vector2(rect.x + 10, rect.y + (rect.height - 22) / 2),
+      rl.Vector2(rect.x + 10, rect.y + (rect.height - 22 * FONT_SCALE) / 2),
       max(1.0, rect.width - 20),
       22,  # font_size in draw_button
       align_center=True,
@@ -2846,7 +2880,7 @@ class AetherAdjustorRow(Widget):
       draw_rounded_fill(fill_rect, with_alpha(self._color, fill_alpha), radius_px=bar_h // 2)
 
     inset = 18
-    title_y = bar_rect.y + (bar_h - title_fs) / 2
+    title_y = bar_rect.y + (bar_h - title_fs * FONT_SCALE) / 2
     rl.draw_text_ex(self._font_title, self._title,
                     rl.Vector2(bar_rect.x + inset, title_y),
                     title_fs, 0, self._style.title_color)
@@ -2855,7 +2889,7 @@ class AetherAdjustorRow(Widget):
     value_w = measure_text_cached(self._font_value, value_str, value_fs).x
     rl.draw_text_ex(self._font_value, value_str,
                     rl.Vector2(bar_rect.x + bar_rect.width - inset - value_w,
-                               bar_rect.y + (bar_h - value_fs) / 2),
+                               bar_rect.y + (bar_h - value_fs * FONT_SCALE) / 2),
                     value_fs, 0, self._style.title_color)
 
     if self._subtitle:
@@ -2950,11 +2984,11 @@ def draw_selection_list_row(
   subtitle_font = gui_app.font(FontWeight.NORMAL)
 
   if subtitle:
-    text_height = title_size + subtitle_size + 8
+    text_height = (title_size + subtitle_size) * FONT_SCALE + 8
     title_y = info_rect.y + (info_rect.height - text_height) / 2
-    subtitle_y = title_y + title_size + 8
+    subtitle_y = title_y + title_size * FONT_SCALE + 8
   else:
-    title_y = info_rect.y + (info_rect.height - title_size) / 2
+    title_y = info_rect.y + (info_rect.height - title_size * FONT_SCALE) / 2
     subtitle_y = title_y
 
   draw_text_fit_common(
@@ -2979,7 +3013,10 @@ def draw_selection_list_row(
   if action_text:
     if action_pill:
       available_w = max(96.0, action_rect.width - 28)
-      chip_w = min(available_w, action_pill_width) if action_pill_width is not None else min(available_w, max(96.0, 42 + len(action_text) * 9))
+      pill_width = action_pill_width
+      if pill_width is None:
+        pill_width = max(96.0, math.ceil(measure_text_cached(title_font, action_text, action_text_size).x) + 24)
+      chip_w = min(available_w, pill_width)
       chip_h = min(float(action_pill_height), max(36.0, action_rect.height - 28))
       chip_rect = rl.Rectangle(action_rect.x + action_rect.width - chip_w - 18, action_rect.y + (action_rect.height - chip_h) / 2, chip_w, chip_h)
       draw_action_pill(
@@ -3095,14 +3132,13 @@ class AetherButton(Widget):
       accent = self._accent_color or AetherListColors.PRIMARY
       bg = accent if enabled else rl.Color(accent.r, accent.g, accent.b, 80)
       border = with_alpha(accent, 190 if enabled else 70)
+      if hovered:
+        bg = rl.Color(min(bg.r + 10, 255), min(bg.g + 10, 255), min(bg.b + 10, 255), bg.a)
+      if pressed:
+        bg = rl.Color(max(bg.r - 8, 0), max(bg.g - 8, 0), max(bg.b - 8, 0), bg.a)
     else:
-      bg = rl.Color(255, 255, 255, 10 if enabled else 5)
+      bg = rl.Color(255, 255, 255, (20 if pressed else 14 if hovered else 10) if enabled else 5)
       border = rl.Color(255, 255, 255, 22 if enabled else 10)
-
-    if hovered:
-      bg = rl.Color(min(bg.r + 10, 255), min(bg.g + 10, 255), min(bg.b + 10, 255), bg.a)
-    if pressed:
-      bg = rl.Color(max(bg.r - 8, 0), max(bg.g - 8, 0), max(bg.b - 8, 0), bg.a)
 
     rl.draw_rectangle_rounded(rect, 0.18, 12, bg)
     rl.draw_rectangle_rounded_lines_ex(rect, 0.18, 12, 1, border)
@@ -3112,7 +3148,7 @@ class AetherButton(Widget):
     draw_text_fit_common(
       gui_app.font(FontWeight.MEDIUM),
       self.text,
-      rl.Vector2(rect.x + 18, rect.y + (rect.height - self._font_size) / 2),
+      rl.Vector2(rect.x + 18, rect.y + (rect.height - self._font_size * FONT_SCALE) / 2),
       max(1.0, rect.width - 36),
       self._font_size,
       align_center=True,
@@ -3140,7 +3176,7 @@ class AetherChip:
     draw_text_fit_common(
       gui_app.font(FontWeight.MEDIUM),
       self.text,
-      rl.Vector2(rect.x + 12, rect.y + (rect.height - self._font_size) / 2),
+      rl.Vector2(rect.x + 12, rect.y + (rect.height - self._font_size * FONT_SCALE) / 2),
       max(1.0, rect.width - 24),
       self._font_size,
       align_center=True,
@@ -3265,7 +3301,7 @@ class AetherSettingsView(PanelManagerView):
     if self._parent_toggle:
       mid = f"parent_toggle:{self._parent_toggle.label}"
       rect = self._interactive_rects.get(mid)
-      if rect and point_hits(mouse_pos, rect, None, pad_x=6, pad_y=6):
+      if rect and point_hits(mouse_pos, rect, None, pad_x=0, pad_y=0):
         return mid
     return super()._target_at(mouse_pos)
 
@@ -3290,32 +3326,29 @@ class AetherSettingsView(PanelManagerView):
     elif row.type == "toggle" and row.set_state and row.get_state:
       row.set_state(not row.get_state())
 
+  def _header_text(self) -> tuple[str, str]:
+    title, subtitle = self._header_title, self._header_subtitle
+    if self._parent_toggle:
+      title = title or self._parent_toggle.label
+      subtitle = subtitle or self._parent_toggle.subtitle
+    return tr(title), tr(subtitle) if subtitle else ""
+
+  def _header_text_width(self, width: float) -> float:
+    right_inset = SPACING.xl
+    if self._parent_toggle:
+      right_inset = AETHER_LIST_METRICS.toggle_width + AETHER_LIST_METRICS.toggle_right_inset + SPACING.lg
+    return max(100.0, width - SPACING.xl - right_inset)
+
   def _compute_header_height(self, content_width: float) -> float:
     if not self._has_header:
       return 0.0
-    if self._parent_toggle:
-      h = max(float(AETHER_LIST_METRICS.toggle_height), 54.0)  # toggle vs title(46px + 8px gap)
-      subtitle_text = tr(self._parent_toggle.subtitle) if self._parent_toggle.subtitle else ""
-      if self._header_subtitle:
-        subtitle_text = tr(self._header_subtitle)
-      if subtitle_text:
-        toggle_take = AETHER_LIST_METRICS.toggle_width + AETHER_LIST_METRICS.toggle_right_inset + 16
-        col_w = max(100.0, content_width + AETHER_LIST_METRICS.content_right_gutter - toggle_take)
-        desc_font = gui_app.font(FontWeight.NORMAL)
-        desc_lines = wrap_text(desc_font, subtitle_text, col_w, 29, max_lines=4)
-        h += len(desc_lines) * PANEL_HEADER_SUBTITLE_LINE_HEIGHT + 12.0
-      h += SECTION_GAP
-      return h
-    h = 54.0  # title (46px) + inner gap (8px)
-    if self._header_subtitle:
-      subtitle_text = tr(self._header_subtitle)
-      if subtitle_text:
-        desc_font = gui_app.font(FontWeight.NORMAL)
-        col_w = (content_width - self.COLUMN_GAP) / 2 if self._uses_two_columns(content_width) else content_width
-        desc_lines = wrap_text(desc_font, subtitle_text, col_w, 29, max_lines=4)
-        h += len(desc_lines) * PANEL_HEADER_SUBTITLE_LINE_HEIGHT + 12.0
-    h += SECTION_GAP
-    return h
+    _, subtitle = self._header_text()
+    _, _, _, height = _settings_panel_header_layout(
+      self._header_text_width(content_width + AETHER_LIST_METRICS.content_right_gutter), subtitle,
+      PANEL_HEADER_TITLE_FONT_SIZE, PANEL_HEADER_SUBTITLE_FONT_SIZE,
+      min_title_height=AETHER_LIST_METRICS.toggle_height if self._parent_toggle else 0.0,
+    )
+    return height + SECTION_GAP
 
   def _render(self, rect: rl.Rectangle):
     self.set_rect(rect)
@@ -3357,25 +3390,18 @@ class AetherSettingsView(PanelManagerView):
                              AetherListColors.PANEL_BG, fade_height=self._fade_height)
 
   def _draw_header(self, rect: rl.Rectangle):
-    title = tr(self._header_title) if self._header_title else ""
-    subtitle = tr(self._header_subtitle) if self._header_subtitle else ""
+    title, subtitle = self._header_text()
+    text_rect = rl.Rectangle(rect.x + SPACING.xl, rect.y, self._header_text_width(rect.width), rect.height)
+    draw_settings_panel_header(
+      text_rect, title, subtitle, max_title_width=1.0, max_subtitle_width=1.0,
+      min_title_height=AETHER_LIST_METRICS.toggle_height if self._parent_toggle else 0.0,
+    )
 
     if self._parent_toggle:
       toggle = self._parent_toggle
-
-      display_title = title if title else tr(toggle.label)
-      subtitle_text = subtitle if subtitle else (tr(toggle.subtitle) if toggle.subtitle else "")
-
-      toggle_take = AETHER_LIST_METRICS.toggle_width + AETHER_LIST_METRICS.toggle_right_inset + 16
-      text_rect = rl.Rectangle(rect.x, rect.y, max(100.0, rect.width - toggle_take), rect.height)
-      draw_settings_panel_header(text_rect, display_title, subtitle_text, title_size=30, subtitle_size=26, max_subtitle_width=1.0)
-
       toggle_id = f"parent_toggle:{toggle.label}"
-      tw = AETHER_LIST_METRICS.toggle_width
       th = AETHER_LIST_METRICS.toggle_height
-      ri = AETHER_LIST_METRICS.toggle_right_inset
-      toggle_rect = rl.Rectangle(rect.x + rect.width - tw - ri, rect.y, tw, th)
-      self._interactive_rects[toggle_id] = toggle_rect
+      self._interactive_rects[toggle_id] = rl.Rectangle(rect.x, rect.y, rect.width, rect.height - SECTION_GAP)
 
       toggle_value = toggle.get_state()
 
@@ -3388,8 +3414,6 @@ class AetherSettingsView(PanelManagerView):
         radius_px=100,
         bg_color=rl.Color(12, 10, 18, 255),
       )
-    else:
-      draw_settings_panel_header(rect, title, subtitle, title_size=30, subtitle_size=26)
 
   def _active_sections(self) -> list[SettingSection]:
     if self._tab_defs and self._active_tab_key:
@@ -3483,11 +3507,11 @@ class AetherSettingsView(PanelManagerView):
         group_h = max(section_h, right_h)
 
         draw_section_header(
-          rl.Rectangle(rect.x, y, col_w, SECTION_HEADER_HEIGHT),
+          rl.Rectangle(rect.x + SPACING.xl, y, col_w - SPACING.xl * 2, SECTION_HEADER_HEIGHT),
           tr(section.title), style=self._panel_style,
         )
         draw_section_header(
-          rl.Rectangle(rect.x + col_w + self.COLUMN_GAP, y, col_w, SECTION_HEADER_HEIGHT),
+          rl.Rectangle(rect.x + col_w + self.COLUMN_GAP + SPACING.xl, y, col_w - SPACING.xl * 2, SECTION_HEADER_HEIGHT),
           tr(right_section.title), style=self._panel_style,
         )
         y += SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
@@ -3514,7 +3538,7 @@ class AetherSettingsView(PanelManagerView):
                     section: SettingSection, rows: list[SettingRow]) -> float:
     if section.title:
       draw_section_header(
-        rl.Rectangle(x, y, width, SECTION_HEADER_HEIGHT),
+        rl.Rectangle(x + SPACING.xl, y, width - SPACING.xl * 2, SECTION_HEADER_HEIGHT),
         tr(section.title),
         style=self._panel_style,
       )
@@ -3555,7 +3579,6 @@ class AetherSettingsView(PanelManagerView):
         pressed=pressed,
         is_last=is_last,
         show_chevron=row.on_click is not None,
-        title_size=36, subtitle_size=26, value_size=30,
         style=self._panel_style,
       )
     elif row.type == "action":
@@ -3571,7 +3594,7 @@ class AetherSettingsView(PanelManagerView):
         pressed=pressed,
         is_last=is_last,
         action_pill=True,
-        title_size=36, subtitle_size=26,
+        title_size=SETTINGS_ROW_TITLE_FONT_SIZE, subtitle_size=SETTINGS_ROW_SUBTITLE_FONT_SIZE,
         action_pill_height=AETHER_LIST_METRICS.toggle_height, action_text_size=26,
         action_text_color=action_text_color,
         action_fill=action_fill,
@@ -3887,8 +3910,8 @@ class AetherTile(Widget):
     
     title_color = rl.WHITE if (enabled and is_active) else rl.Color(236, 242, 250, 255)
     
-    title_y = ry + (rh / 2) - title_size - 2
-    status_y = ry + (rh / 2) + 6
+    title_y = ry + (rh - (title_size + status_size) * FONT_SCALE - 8) / 2
+    status_y = title_y + title_size * FONT_SCALE + 8
     
     max_text_width = rw - (content_pad * 2) - int(rh * 0.40) - 10
     font = getattr(self, "_font", gui_app.font(FontWeight.MEDIUM))
@@ -4003,7 +4026,7 @@ class HubTile(AetherTile):
       icon_scale = min(0.80, max(0.56, text_scale * 0.72))
       icon_h = CUSTOM_ICON_BASE_SIZE * CUSTOM_ICON_SCALE_MULT * icon_scale
 
-    total_h = icon_h + (gap if icon_h > 0 else 0) + title_size + (gap if desc_to_render else 0) + desc_size
+    total_h = icon_h + (gap if icon_h > 0 else 0) + (title_size + desc_size) * FONT_SCALE + (gap if desc_to_render else 0)
     content_top = ry + max(0, (rh - total_h) / 2)
 
     if self.custom_icon_key:
@@ -4017,7 +4040,7 @@ class HubTile(AetherTile):
     draw_text_fit_common(self._font_title, title_text,
                         rl.Vector2(rx + content_pad, content_top),
                         max_w, title_size, align_center=True, color=rl.WHITE)
-    content_top += title_size
+    content_top += title_size * FONT_SCALE
 
     if desc_to_render:
       content_top += gap
@@ -5410,7 +5433,7 @@ class AetherSegmentedControl(Widget):
         draw_text_fit_common(
           self._font,
           label,
-          rl.Vector2(face_rect.x + 16, face_rect.y + (face_rect.height - title_size) / 2),
+          rl.Vector2(face_rect.x + 16, face_rect.y + (face_rect.height - title_size * FONT_SCALE) / 2),
           face_rect.width - 32,
           title_size,
           align_center=True,
@@ -5599,4 +5622,3 @@ class TileGrid(Widget):
           tile.set_parent_rect(parent_rect)
         tile.render(snap_rect(rl.Rectangle(row_x + c * (row_tile_w + self._gap), rect.y + y_offset + r * (tile_h + self._gap), row_tile_w, tile_h)))
         tile_idx += 1
-

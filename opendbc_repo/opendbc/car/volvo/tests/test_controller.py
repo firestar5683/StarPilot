@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from opendbc.can.parser import CANParser
 from opendbc.car.volvo.carcontroller import CarController
 from opendbc.car.volvo.helpers import checksum_lca_5_message
 from opendbc.car.volvo.interface import CarInterface
@@ -56,21 +57,36 @@ def test_controller_emits_valid_eight_byte_messages_and_lca5_checksum():
   assert data[2] == checksum_lca_5_message(data[0], data[1], data[3], data[4], data[5])
 
 
-def test_controller_relays_stock_lca5_angle_when_inactive():
-  cp = CarInterface.get_non_essential_params("VOLVO_XC40_RECHARGE")
+@pytest.mark.parametrize("fingerprint", [CAR.POLESTAR_2, CAR.VOLVO_XC40_RECHARGE])
+def test_controller_relays_complete_stock_lca5_when_inactive(fingerprint):
+  cp = CarInterface.get_non_essential_params(fingerprint)
   controller = CarController(DBC[cp.carFingerprint], cp)
+  parser = CANParser("volvo_mid_1", [("LCA_5", 50)], 0)
+  stock_data = bytes.fromhex("88c04cef1190ba00")
+  parser.update([0, [(0x67, stock_data, 0)]])
   cs = _state()
-  cs.msg_lca_5["LCA_5_STEER"] = 12.0
+  cs.msg_lca_5 = parser.vl["LCA_5"]
   cc = SimpleNamespace(latActive=False, actuators=_Actuators())
+  safety = libsafety_py.libsafety
+  config = cp.safetyConfigs[0]
+  assert safety.set_safety_hooks(config.safetyModel.raw, config.safetyParam) == 0
+  safety.init_tests()
+  safety.set_controls_allowed(False)
+  safety.safety_rx_hook(libsafety_py.make_CANPacket(0x67, 0, stock_data))
 
   _, can_sends = controller.update(cc, cs, 0, None)
   lca5 = next(msg for msg in can_sends if msg[0] == 0x67)
+  assert lca5[1] == stock_data
+  assert safety.safety_tx_hook(libsafety_py.make_CANPacket(lca5[0], lca5[2], lca5[1]))
 
-  # The inactive path must not manufacture a new angle command.
-  raw = ((lca5[1][6] & 0x7F) << 8) | lca5[1][7]
-  if raw & (1 << 14):
-    raw -= 1 << 15
-  assert abs(raw * 0.05596 - 12.0) < 0.1
+  cs.msg_lca_5["COUNTER"] = 7
+  controller.update(cc, cs, 0, None)
+  controller.update(cc, cs, 0, None)
+  controller.update(cc, cs, 0, None)
+  cc.latActive = True
+  _, can_sends = controller.update(cc, cs, 0, None)
+  active_lca5 = next(msg for msg in can_sends if msg[0] == 0x67)
+  assert active_lca5[1][3] >> 4 == 11
 
 
 @pytest.mark.parametrize("fingerprint", [CAR.POLESTAR_2, CAR.VOLVO_XC40_RECHARGE])

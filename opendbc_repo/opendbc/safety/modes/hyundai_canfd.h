@@ -65,6 +65,7 @@
 static bool hyundai_canfd_alt_buttons = false;
 static bool hyundai_canfd_lka_steering_alt = false;
 static bool hyundai_canfd_angle_steering = false;
+static bool hyundai_canfd_no_stock_lka = false;
 static bool hyundai_ccnc = false;
 static bool hyundai_canfd_ccnc_angle_long = false;
 static bool hyundai_canfd_lka_alt_drive_gear = false;
@@ -100,7 +101,8 @@ static bool hyundai_canfd_lka_alt_openpilot_allowed(void) {
 }
 
 static bool hyundai_canfd_lka_alt_stock_forwarding(void) {
-  return hyundai_canfd_lka_steering_alt && hyundai_canfd_angle_steering && !hyundai_canfd_lka_alt_openpilot_allowed();
+  return hyundai_canfd_lka_steering_alt && hyundai_canfd_angle_steering &&
+         !hyundai_canfd_no_stock_lka && !hyundai_canfd_lka_alt_openpilot_allowed();
 }
 
 static void hyundai_canfd_rx_all_hook(const CANPacket_t *msg) {
@@ -270,6 +272,10 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
       const int lkas_angle_active = (msg->data[9] >> 4U) & 0x3U;
       const bool steer_angle_req = lkas_angle_active != 1;
 
+      if (hyundai_canfd_no_stock_lka && steer_angle_req && !hyundai_canfd_lka_alt_openpilot_allowed()) {
+        tx = false;
+      }
+
       int desired_angle = (msg->data[11] << 6U) | (msg->data[10] >> 2U);
       desired_angle = to_signed(desired_angle, 14);
 
@@ -364,6 +370,7 @@ static safety_config hyundai_canfd_init(uint16_t param) {
   const uint16_t HYUNDAI_PARAM_CANFD_LKA_STEERING_ALT = 128;
   const uint16_t HYUNDAI_PARAM_CANFD_ALT_BUTTONS = 32;
   const uint16_t HYUNDAI_PARAM_CANFD_ANGLE_STEERING = 1024;
+  const uint16_t HYUNDAI_PARAM_CANFD_NO_STOCK_LKA = 4096U;
   const uint16_t HYUNDAI_PARAM_CCNC = 32768U;
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_TX_MSGS[] = {
@@ -479,12 +486,15 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     {0x7C4, 2, 8, .check_relay = true},  /* camera support frame */ \
     {0xEA, 2, 24, .check_relay = true},  /* MDPS support frame */ \
 
-  hyundai_common_init(param);
+  // This CAN-FD-only bit is independent of classic CAN's NON_SCC mode.
+  hyundai_common_init(param & ~HYUNDAI_PARAM_CANFD_NO_STOCK_LKA);
 
   gen_crc_lookup_table_16(0x1021, hyundai_canfd_crc_lut);
   hyundai_canfd_alt_buttons = GET_FLAG(param, HYUNDAI_PARAM_CANFD_ALT_BUTTONS);
   hyundai_canfd_lka_steering_alt = GET_FLAG(param, HYUNDAI_PARAM_CANFD_LKA_STEERING_ALT);
   hyundai_canfd_angle_steering = GET_FLAG(param, HYUNDAI_PARAM_CANFD_ANGLE_STEERING);
+  hyundai_canfd_no_stock_lka = hyundai_canfd_angle_steering && hyundai_canfd_lka_steering &&
+                             hyundai_canfd_lka_steering_alt && GET_FLAG(param, HYUNDAI_PARAM_CANFD_NO_STOCK_LKA);
   hyundai_ccnc = GET_FLAG(param, HYUNDAI_PARAM_CCNC);
   hyundai_canfd_ccnc_angle_long = hyundai_longitudinal && hyundai_canfd_lka_steering &&
                                   hyundai_canfd_lka_steering_alt && hyundai_canfd_angle_steering && hyundai_ccnc;

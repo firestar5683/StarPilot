@@ -145,6 +145,7 @@ def test_ray_controller_heartbeats_and_only_actuates_when_ready(speed):
   )
   hud = SimpleNamespace(
     visualAlert=CarControl.HUDControl.VisualAlert.none,
+    setSpeed=20.0,
     leftLaneVisible=True, rightLaneVisible=True,
     leftLaneDepart=False, rightLaneDepart=False,
   )
@@ -167,23 +168,23 @@ def test_ray_controller_heartbeats_and_only_actuates_when_ready(speed):
   controller.frame = 16
   messages = controller.create_can_msgs(True, 0, False, 0.0, 2.0, False,
                                         hud, actuators, CS, CC, 2, 0)
-  assert next(dat for addr, dat, bus in messages if addr == 0x200 and bus == 0)[:4] == bytes(4)
-  assert any(addr == 0x4F1 and bus == 0 for addr, _, bus in messages)  # cancel stock CC
+  assert next(dat for addr, dat, bus in messages if addr == 0x200 and bus == 0)[4] & 0x80
+  assert any(addr == 0x4F1 and bus == 0 and dat[0] & 7 == 4 for addr, dat, bus in messages)
 
   CS.out.cruiseState.enabled = False
   CS.out.brakePressed = True
   assert pedal_msg(2.0, 20)[:4] == bytes(4)
   CS.out.brakePressed = False
   assert pedal_msg(2.0, 24)[4] & 0x80
-  assert controller._ray_pedal_gas_last == pytest.approx(0.012)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.02)
   assert pedal_msg(2.0, 28)[4] & 0x80
-  assert controller._ray_pedal_gas_last == pytest.approx(0.024)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.04)
   CS.out.brakePressed = True
   assert pedal_msg(2.0, 32)[:4] == bytes(4)
   assert controller._ray_pedal_gas_last == 0.0
   CS.out.brakePressed = False
   assert pedal_msg(2.0, 36)[4] & 0x80
-  assert controller._ray_pedal_gas_last == pytest.approx(0.012)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.02)
 
   CC.longActive = False
   assert pedal_msg(2.0, 40)[:4] == bytes(4)
@@ -197,6 +198,49 @@ def test_ray_controller_heartbeats_and_only_actuates_when_ready(speed):
   for fault in range(1, 6):
     CS.ray_pedal_state = fault
     assert pedal_msg(2.0, 48 + 4 * fault)[:4] == bytes(4)
+
+  CS.ray_pedal_state = 0
+  CS.out.vEgo = 10.0
+  assert pedal_msg(0.0, 72)[4] & 0x80
+  assert pedal_msg(-1.0, 76)[:4] == bytes(4)
+
+  CS.out.vEgo = 12.0
+  for frame in range(80, 80 + 4 * 40, 4):
+    pedal_msg(1.5, frame)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.55)
+  for frame in range(240, 240 + 4 * 12, 4):
+    dat = pedal_msg(-1.5, frame)
+  assert dat[:4] == bytes(4)
+
+  for frame in range(288, 288 + 4 * 40, 4):
+    pedal_msg(1.5, frame)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.55)
+  hud.setSpeed = 12.0
+  pedal_msg(1.5, 448)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.55 * 0.65)
+  hud.setSpeed = 11.8
+  dat = pedal_msg(1.5, 452)
+  assert controller._ray_pedal_gas_last == pytest.approx(0.55 * 0.65 * 0.6)
+  assert dat[4] & 0x80
+  hud.setSpeed = 11.4
+  assert pedal_msg(1.5, 456)[:4] == bytes(4)
+  hud.setSpeed = float('nan')
+  assert pedal_msg(1.5, 460)[:4] == bytes(4)
+  hud.setSpeed = 20.0
+  assert pedal_msg(-0.3, 464)[:4] == bytes(4)
+  CS.out.vEgo = 15.0
+  hud.setSpeed = 53.0 / 3.6
+  pedal_msg(-0.16, 468)
+  assert controller._ray_pedal_gas_last < 0.1
+  CS.out.vEgo = 12.0
+  hud.setSpeed = 8.0 / 3.6
+  assert pedal_msg(-0.3, 472)[:4] == bytes(4)
+  hud.setSpeed = 145.0 / 3.6
+  assert pedal_msg(1.5, 476)[4] & 0x80
+  assert controller._ray_pedal_gas_last == pytest.approx(0.02)
+  assert pedal_msg(1.5, 480)[4] & 0x80
+  assert controller._ray_pedal_gas_last == pytest.approx(0.04)
+  assert pedal_msg(-0.3, 484)[:4] == bytes(4)
 
 
 @pytest.mark.parametrize("candidate", [CAR.KIA_RAY_EV, CAR.HYUNDAI_KONA_EV_NON_SCC])
@@ -216,6 +260,7 @@ def test_ray_stock_cruise_cancellation_survives_accelerator_override(candidate):
   )
   hud = SimpleNamespace(
     visualAlert=CarControl.HUDControl.VisualAlert.none,
+    setSpeed=20.0,
     leftLaneVisible=True, rightLaneVisible=True, leftLaneDepart=False, rightLaneDepart=False,
   )
   actuators = SimpleNamespace(longControlState=CarControl.Actuators.LongControlState.off)
@@ -236,6 +281,7 @@ def test_ray_stock_cruise_cancellation_survives_accelerator_override(candidate):
     assert pedal[:4] == bytes(4)
     assert not (pedal[4] & 0x80)
     assert not cancel_frames(messages(24))  # retain the existing cancellation rate limit
+    assert cancel_frames(messages(25))
     assert cancel_frames(messages(32))
 
   CS.out.cruiseState.enabled = False

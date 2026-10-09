@@ -3,6 +3,7 @@ from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.common.conversions import Conversions as CV
+from opendbc.car.gps import get_car_gps_config
 from opendbc.car.volkswagen.values import DBC, CanBus, NetworkLocation, TransmissionType, GearShifter, \
                                                       CarControllerParams, VolkswagenFlags
 
@@ -24,6 +25,32 @@ class CarState(CarStateBase):
     self.travel_assist_available = False
     self.curvature_meas = 0.
     self.klr_stock_values = {}
+    self.car_gps_config = get_car_gps_config(CP)
+    self.car_gps_supported = self.car_gps_config is not None
+    self.car_gps = None
+    self._car_gps_timestamp_nanos = 0
+
+  def _update_car_gps(self, cp) -> None:
+    if self.car_gps_config is None:
+      return
+
+    timestamps = [max(cp.ts_nanos[name].values(), default=0) for name in self.car_gps_config.messages]
+    if min(timestamps) > self._car_gps_timestamp_nanos and max(timestamps) - min(timestamps) <= 2_000_000_000:
+      gps = self.car_gps_config.decoder(*(cp.vl[name] for name in self.car_gps_config.messages))
+      if gps is not None and (self.car_gps is None or not gps["hasFix"] or
+                              gps["unixTimestampMillis"] > self.car_gps["unixTimestampMillis"]):
+        timestamp_nanos = max(timestamps)
+        gps["timestamp_nanos"] = timestamp_nanos
+        self.car_gps = gps
+        self._car_gps_timestamp_nanos = timestamp_nanos
+
+    if self.car_gps is not None and cp._last_update_nanos - self._car_gps_timestamp_nanos > 2_500_000_000:
+      if self.car_gps["hasFix"]:
+        self.car_gps = {**self.car_gps, "hasFix": False, "speed": 0.0, "vNED": [0.0, 0.0, 0.0],
+                        "bearingAccuracyDeg": 180.0, "timestamp_nanos": cp._last_update_nanos}
+
+  def get_car_gps(self):
+    return self.car_gps
 
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
@@ -51,6 +78,7 @@ class CarState(CarStateBase):
     pt_cp = can_parsers[Bus.pt]
     cam_cp = can_parsers[Bus.cam]
     ext_cp = pt_cp if self.CP.networkLocation == NetworkLocation.fwdCamera else cam_cp
+    self._update_car_gps(pt_cp)
 
     if self.CP.flags & VolkswagenFlags.PQ:
       return self.update_pq(pt_cp, cam_cp, ext_cp)
@@ -427,6 +455,9 @@ class CarState(CarStateBase):
 
     # manually configure some optional and variable-rate/edge-triggered messages
     pt_messages, cam_messages = [], []
+    gps_config = get_car_gps_config(CP)
+    if gps_config is not None:
+      pt_messages += [(name, 0) for name in gps_config.messages]
 
     if not CP.flags & VolkswagenFlags.MLB:
       pt_messages += [

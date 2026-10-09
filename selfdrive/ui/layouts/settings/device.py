@@ -20,6 +20,7 @@ from openpilot.system.hardware import HARDWARE, PC, TICI
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import multilang, tr, tr_noop
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
 from openpilot.system.ui.widgets.html_render import HtmlModal
@@ -80,7 +81,7 @@ class GalaxyQRDialog(Widget):
 
   def _render_centered_text(self, rect: rl.Rectangle, text: str, y: float, font_size: int, color: rl.Color, font_weight: FontWeight = FontWeight.NORMAL) -> None:
     font = gui_app.font(font_weight)
-    size = rl.measure_text_ex(font, text, font_size, 0)
+    size = measure_text_cached(font, text, font_size)
     rl.draw_text_ex(font, text, rl.Vector2(rect.x + (rect.width - size.x) / 2, y), font_size, 0, color)
 
   def _render(self, rect: rl.Rectangle):

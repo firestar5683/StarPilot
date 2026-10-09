@@ -26,6 +26,33 @@ ENABLE_BUTTONS = (Buttons.RES_ACCEL, Buttons.SET_DECEL, Buttons.CANCEL)
 BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: ButtonType.decelCruise,
                 Buttons.GAP_DIST: ButtonType.gapAdjustCruise, Buttons.CANCEL: ButtonType.cancel}
 
+
+class Ev6AolArmingState:
+  def __init__(self, lkas_on_engage: bool):
+    self.lkas_on_engage = lkas_on_engage
+    self.main_on = False
+    self.lkas_on = False
+    self.prev_main_button = False
+    self.prev_lkas_button = False
+    self.prev_cruise_button = Buttons.NONE
+
+  def update(self, main_button: bool, lkas_button: bool, cruise_button: int):
+    if main_button and not self.prev_main_button:
+      self.main_on = not self.main_on
+    if lkas_button and not self.prev_lkas_button:
+      self.lkas_on = not self.lkas_on
+    if (self.lkas_on_engage and cruise_button != self.prev_cruise_button and
+        self.prev_cruise_button in (Buttons.SET_DECEL, Buttons.RES_ACCEL)):
+      self.lkas_on = True
+    self.prev_main_button = main_button
+    self.prev_lkas_button = lkas_button
+    self.prev_cruise_button = cruise_button
+
+  @property
+  def authorized(self) -> bool:
+    return self.main_on or self.lkas_on
+
+
 IONIQ_6_BLINDSPOT_RIGHT_MASK = 0x08
 IONIQ_6_BLINDSPOT_LEFT_MASK = 0x10
 CANFD_CAMERA_LEAD_MIN_DISTANCE = 0.1
@@ -138,6 +165,13 @@ class CarState(CarStateBase):
     self.buttons_counter = 0
     self.main_cruise_on = False
     self.main_cruise_tracking = bool(getattr(FPCP, "flags", 0) & HyundaiStarPilotFlags.MAIN_CRUISE_STATE_TRACKING)
+    self.ev6_aol_arming = None
+    if CP.carFingerprint == CAR.KIA_EV6 and CP.openpilotLongitudinalControl and not CP.pcmCruise:
+      lkas_on_engage = any(
+        config.safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE
+        for config in (*CP.safetyConfigs, *FPCP.safetyConfigs)
+      )
+      self.ev6_aol_arming = Ev6AolArmingState(lkas_on_engage)
     if CP.carFingerprint == CAR.KIA_RAY_EV:
       self.ray_pedal_state = 5
       self.ray_pedal_valid = False
@@ -180,6 +214,10 @@ class CarState(CarStateBase):
     # To avoid re-engaging when openpilot cancels, check user engagement intention via buttons
     # Main button also can trigger an engagement on these cars
     return any(btn in ENABLE_BUTTONS for btn in self.cruise_buttons) or any(self.main_buttons)
+
+  @property
+  def ev6_aol_authorized(self) -> bool:
+    return self.ev6_aol_arming is not None and self.ev6_aol_arming.authorized
 
   def update_main_cruise(self, ret: structs.CarState,
                          button_events: list[structs.CarState.ButtonEvent] | None = None) -> bool:
@@ -640,6 +678,13 @@ class CarState(CarStateBase):
                         *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
                         *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas}),
                         *create_button_events(self.left_paddle, prev_left_paddle, {1: ButtonType.altButton2})]
+    if self.ev6_aol_arming is not None:
+      buttons = cp.vl_all[self.cruise_btns_msg_canfd]
+      for main, lkas, cruise in zip(buttons["ADAPTIVE_CRUISE_MAIN_BTN"], buttons["LDA_BTN"], buttons["CRUISE_BUTTONS"], strict=True):
+        self.ev6_aol_arming.update(bool(main), bool(lkas), int(cruise))
+      if not ret.cruiseState.available:
+        self.ev6_aol_arming.main_on = False
+
     if self.CP.openpilotLongitudinalControl and (self.CP.carFingerprint == CAR.KIA_EV9 or self.main_cruise_tracking):
       ret.cruiseState.available = self.update_main_cruise(ret)
 

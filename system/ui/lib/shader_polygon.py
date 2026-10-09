@@ -1,8 +1,12 @@
+import os
 import pyray as rl
 import numpy as np
+from raylib import rl as raw_rl
 from dataclasses import dataclass
 from typing import Any, Optional, cast
 from openpilot.system.ui.lib.application import gui_app, GL_VERSION
+
+USE_VERTEX_GRADIENTS = os.getenv("USE_VERTEX_GRADIENTS", "1") == "1"
 
 MAX_GRADIENT_COLORS = 20  # includes stops as well
 
@@ -200,6 +204,56 @@ def triangulate(pts: np.ndarray) -> np.ndarray:
   return tri_strip
 
 
+def _draw_strip_vertex_gradient(tri_strip: np.ndarray, gradient: Gradient, origin_rect: rl.Rectangle) -> None:
+  n = len(tri_strip)
+  if n < 3 or not gradient.colors:
+    return
+
+  start_x = origin_rect.x + gradient.start[0] * origin_rect.width
+  start_y = origin_rect.y + gradient.start[1] * origin_rect.height
+  end_x = origin_rect.x + gradient.end[0] * origin_rect.width
+  end_y = origin_rect.y + gradient.end[1] * origin_rect.height
+
+  dx = start_x - end_x
+  dy = start_y - end_y
+  len2 = max(dx * dx + dy * dy, 1e-6)
+
+  vx = tri_strip[:, 0] - end_x
+  vy = tri_strip[:, 1] - end_y
+  t = np.clip((vx * dx + vy * dy) / len2, 0.0, 1.0)
+
+  colors = gradient.colors
+  stops = gradient.stops if len(gradient.stops) == len(colors) else [i / max(1, len(colors) - 1) for i in range(len(colors))]
+  r_stops = [c.r for c in colors]
+  g_stops = [c.g for c in colors]
+  b_stops = [c.b for c in colors]
+  a_stops = [c.a for c in colors]
+
+  r = np.interp(t, stops, r_stops).astype(np.uint8)
+  g = np.interp(t, stops, g_stops).astype(np.uint8)
+  b = np.interp(t, stops, b_stops).astype(np.uint8)
+  a = np.interp(t, stops, a_stops).astype(np.uint8)
+
+  rl_begin = raw_rl.rlBegin
+  rl_end = raw_rl.rlEnd
+  rl_color = raw_rl.rlColor4ub
+  rl_vertex = raw_rl.rlVertex2f
+
+  rl_begin(4)  # RL_TRIANGLES
+  for i in range(2, n):
+    if i % 2 == 0:
+      i0, i1, i2 = i, i - 2, i - 1
+    else:
+      i0, i1, i2 = i, i - 1, i - 2
+    rl_color(r[i0], g[i0], b[i0], a[i0])
+    rl_vertex(tri_strip[i0, 0], tri_strip[i0, 1])
+    rl_color(r[i1], g[i1], b[i1], a[i1])
+    rl_vertex(tri_strip[i1, 0], tri_strip[i1, 1])
+    rl_color(r[i2], g[i2], b[i2], a[i2])
+    rl_vertex(tri_strip[i2, 0], tri_strip[i2, 1])
+  rl_end()
+
+
 def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
                  color: Optional[rl.Color] = None, gradient: Gradient | None = None):
 
@@ -215,12 +269,19 @@ def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
 
   # Triangulate via interleaving
   tri_strip = triangulate(pts)
-  vertices = rl.ffi.from_buffer("Vector2 *", tri_strip)
+  if len(tri_strip) < 3:
+    return
 
   if gradient is None:
+    vertices = rl.ffi.from_buffer("Vector2 *", tri_strip)
     rl.draw_triangle_strip(vertices, len(tri_strip), color or rl.WHITE)
     return
 
+  if USE_VERTEX_GRADIENTS:
+    _draw_strip_vertex_gradient(tri_strip, gradient, origin_rect)
+    return
+
+  vertices = rl.ffi.from_buffer("Vector2 *", tri_strip)
   state = ShaderState.get_instance()
   state.initialize()
 

@@ -1,10 +1,11 @@
 from opendbc.car import Bus, structs, get_safety_config, uds
 from opendbc.car.toyota.carstate import CarState
-from opendbc.car.toyota.carcontroller import CarController
+from opendbc.car.toyota.carcontroller import CarController, uses_rav4_hybrid_sdsu_longitudinal
 from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
                                                   MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR, \
-                                                  ToyotaSafetyFlags, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS
+                                                  ToyotaSafetyFlags, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, \
+                                                  uses_toyota_auto_hold_aeb
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -101,7 +102,7 @@ class CarInterface(CarInterfaceBase):
       # https://engage.toyota.com/static/images/toyota_safety_sense/TSS_Applicability_Chart.pdf
       stop_and_go = candidate != CAR.TOYOTA_AVALON
 
-    elif candidate in (CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_RAV4_TSS2_2023, CAR.TOYOTA_RAV4_PRIME):
+    elif candidate in ANGLE_CONTROL_CAR:
       ret.lateralTuning.init('pid')
       ret.lateralTuning.pid.kiBP = [0.0]
       ret.lateralTuning.pid.kpBP = [0.0]
@@ -165,7 +166,9 @@ class CarInterface(CarInterfaceBase):
 
     toyota_auto_hold = Params(return_defaults=True).get_bool("ToyotaAutoHold")
     if toyota_auto_hold and ret.openpilotLongitudinalControl and candidate in TOYOTA_AUTO_HOLD_CARS:
-      ret.alternativeExperience |= ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
+      ret.alternativeExperience |= (ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+                                    if uses_toyota_auto_hold_aeb(ret)
+                                    else ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD)
       ret.flags |= ToyotaFlags.AUTO_BRAKE_HOLD.value
 
     if not ret.openpilotLongitudinalControl:
@@ -173,7 +176,8 @@ class CarInterface(CarInterfaceBase):
 
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter.
-    ret.minEnableSpeed = -1. if (stop_and_go or ret.enableGasInterceptorDEPRECATED) else MIN_ACC_SPEED
+    rav4_hybrid_sdsu_long_defaults = uses_rav4_hybrid_sdsu_longitudinal(ret)
+    ret.minEnableSpeed = -1. if (stop_and_go or ret.enableGasInterceptorDEPRECATED or rav4_hybrid_sdsu_long_defaults) else MIN_ACC_SPEED
 
     prius_long_defaults = candidate in LEGACY_PRIUS_CAR and ret.openpilotLongitudinalControl
     camry_hybrid_long_defaults = (candidate == CAR.TOYOTA_CAMRY and ret.openpilotLongitudinalControl and
@@ -190,7 +194,7 @@ class CarInterface(CarInterfaceBase):
       if ret.flags & ToyotaFlags.HYBRID.value:
         ret.longitudinalActuatorDelay = 0.05
 
-    if camry_hybrid_long_defaults:
+    if camry_hybrid_long_defaults or rav4_hybrid_sdsu_long_defaults:
       # The THS eCVT responds much faster than the legacy non-TSS2 ICE tune.
       ret.longitudinalActuatorDelay = 0.05
       ret.vEgoStopping = 0.25

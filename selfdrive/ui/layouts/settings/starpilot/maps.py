@@ -94,7 +94,7 @@ STATUS_CARD_HEIGHT = 232.0
 SEGMENTED_CONTROL_HEIGHT = 68.0
 BROWSER_SECTION_HEADER_HEIGHT = 56.0
 BROWSER_REGION_ROW_HEIGHT = 104.0
-BROWSER_EMPTY_STATE_HEIGHT = 128.0
+BROWSER_EMPTY_STATE_HEIGHT = 208.0
 BROWSER_INSET = 18.0
 
 HEADER_GAP = 16.0
@@ -260,8 +260,6 @@ class MapsManagerView(PanelManagerView):
           action_text_size=26,
           action_pill_height=56,
           action_pill_width=154,
-          title_size=32,
-          subtitle_size=22,
           row_separator=PANEL_STYLE.divider_color,
           current_bg=PANEL_STYLE.current_fill,
           current_border=PANEL_STYLE.current_border,
@@ -307,8 +305,6 @@ class MapsManagerView(PanelManagerView):
         action_text_size=26,
         action_pill_height=56,
         action_pill_width=154 if selected else 128,
-        title_size=32,
-        subtitle_size=22,
         row_separator=PANEL_STYLE.divider_color,
         current_bg=PANEL_STYLE.current_fill,
         current_border=PANEL_STYLE.current_border,
@@ -354,7 +350,7 @@ class MapsManagerView(PanelManagerView):
 
     # Subtitle / Body Progress Description (26pt)
     gui_text_box(
-      rl.Rectangle(content_x, rect.y + 58, summary_w, 54),
+      rl.Rectangle(content_x, rect.y + 58, summary_w, 68),
       self._controller._progress_body(),
       26,
       AetherListColors.SUBTEXT,
@@ -456,9 +452,10 @@ class StarPilotMapsLayout(_SettingsPage):
     )
     self._schedule_button = self._child(
       AetherButton(
-        lambda: tr("Update: {}").format(_localized_schedule_label(self._params.get('PreferredSchedule'))),
+        self._schedule_action_label,
         self._on_schedule,
         emphasized=False,
+        font_size=26,
       )
     )
 
@@ -791,6 +788,13 @@ class StarPilotMapsLayout(_SettingsPage):
       gui_app.push_widget(alert_dialog(tr("Please select 'Whole U.S.' or pick individual states from the list below.")))
     else:
       self._on_download()
+
+  def _schedule_action_label(self) -> str:
+    return {
+      "Manually": tr("Auto: Off"),
+      "Weekly": tr("Auto: Weekly"),
+      "Monthly": tr("Auto: Monthly"),
+    }[schedule_label(self._params.get("PreferredSchedule"))]
 
   def _on_schedule(self):
     localized_options = [(value, tr(label)) for value, label in MAP_SCHEDULE_LABELS.items()]

@@ -216,7 +216,6 @@ class StarPilotAcceleration:
 
     effective_slc_target = get_active_slc_control_target(
       getattr(starpilot_toggles, "speed_limit_controller", False),
-      getattr(starpilot_toggles, "set_speed_limit", False),
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_target", 0.0),
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_offset", 0.0),
       getattr(getattr(self.starpilot_planner.starpilot_vcruise, "slc", None), "overridden_speed", 0.0),
@@ -271,7 +270,6 @@ class StarPilotAcceleration:
     v_ego_diff = v_ego_cluster - v_ego
     effective_slc_target = get_active_slc_control_target(
       getattr(starpilot_toggles, "speed_limit_controller", False),
-      getattr(starpilot_toggles, "set_speed_limit", False),
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_target", 0.0),
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_offset", 0.0),
       getattr(getattr(self.starpilot_planner.starpilot_vcruise, "slc", None), "overridden_speed", 0.0),
@@ -312,7 +310,6 @@ class StarPilotAcceleration:
       v_ego_cluster = v_ego
     effective_slc_target = get_active_slc_control_target(
       getattr(starpilot_toggles, "speed_limit_controller", False),
-      getattr(starpilot_toggles, "set_speed_limit", False),
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_target", 0.0),
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_offset", 0.0),
       getattr(getattr(self.starpilot_planner.starpilot_vcruise, "slc", None), "overridden_speed", 0.0),

@@ -558,6 +558,66 @@ def test_update_releases_stopping_on_small_sustained_positive_target():
   assert lc.long_control_state == LongCtrlState.starting
 
 
+def test_corolla_holds_stop_until_close_lead_moves():
+  CP = make_longcontrol_cp(
+    brand="toyota",
+    carFingerprint=TOYOTA_CAR.TOYOTA_COROLLA_TSS2,
+  )
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  CS = car.CarState.new_message(vEgo=0.0, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+  lead = SimpleNamespace(status=True, dRel=6.2, yRel=0.0, vLead=0.1)
+
+  for _ in range(40):
+    output_accel = lc.update(
+      active=True,
+      CS=CS,
+      a_target=0.18,
+      should_stop=False,
+      accel_limits=(-3.0, 2.0),
+      starpilot_toggles=make_toggles(),
+      has_lead=True,
+      leads=(lead, None),
+    )
+    assert lc.long_control_state == LongCtrlState.stopping
+    assert output_accel <= 0.0
+
+  lead.vLead = 0.6
+  lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.18,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+    has_lead=True,
+    leads=(lead, None),
+  )
+  assert lc.long_control_state == LongCtrlState.pid
+
+
+def test_non_corolla_releases_stop_with_stopped_lead_as_before():
+  CP = make_longcontrol_cp(brand="honda")
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.stopping
+  CS = car.CarState.new_message(vEgo=0.0, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+  lead = SimpleNamespace(status=True, dRel=6.2, yRel=0.0, vLead=0.1)
+
+  lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.18,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+    has_lead=True,
+    leads=(lead, None),
+  )
+  assert lc.long_control_state == LongCtrlState.pid
+
+
 def test_corolla_tss2_stop_release_ramps_positive_target():
   CP = make_longcontrol_cp(
     brand="toyota",

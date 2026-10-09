@@ -23,6 +23,9 @@ _CENTER_ERROR_DEADBAND = 0.08
 _E2E_MAX_PATH_STD = 0.35
 _E2E_BREAK_IN_START = 0.15
 _E2E_BREAK_IN_FULL = 0.50
+_E2E_MIN_LANE_AUTHORITY = 0.20
+_E2E_BOUNDARY_LANE_AUTHORITY = 0.50
+_E2E_BOUNDARY_MARGIN = 0.40
 
 
 class LaneCenteringController:
@@ -146,7 +149,16 @@ class LaneCenteringController:
               0.0,
               1.0,
             )
-            error *= 1.0 - e2e_authority * float(break_in)
+            path_clearance = min(model_y - left, right - model_y)
+            boundary_weight = float(np.clip(
+              (_MIN_CENTER_TO_LINE + _E2E_BOUNDARY_MARGIN - path_clearance) / _E2E_BOUNDARY_MARGIN,
+              0.0,
+              1.0,
+            ))
+            lane_authority = _E2E_MIN_LANE_AUTHORITY + boundary_weight * (
+              _E2E_BOUNDARY_LANE_AUTHORITY - _E2E_MIN_LANE_AUTHORITY
+            )
+            error *= 1.0 - e2e_authority * float(break_in) * (1.0 - lane_authority)
       except (AttributeError, TypeError, ValueError):
         pass
 
