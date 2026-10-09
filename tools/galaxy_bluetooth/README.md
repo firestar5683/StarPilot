@@ -1,12 +1,13 @@
-# Galaxy Bluetooth for iPhone
+# Galaxy Bluetooth for iPhone and Android
 
-A working prototype source project that bundles StarPilot's existing Galaxy mobile interface inside a native SwiftUI / WKWebView iPhone app. Requests to the comma travel through Core Bluetooth instead of Wi-Fi or a Galaxy relay.
+Native iPhone and Android prototype apps that bundle StarPilot's existing Galaxy mobile interface and send local requests over encrypted Bluetooth to a separate comma-side bridge. The iPhone shell uses SwiftUI/WKWebView; Android uses a Java pairing screen, WebView and the platform BLE client.
 
-**Hardware testing is in progress.** A signed app has launched on a physical iPhone, connected to the comma 4 bridge, and loaded the dashboard with the phone's Wi-Fi and cellular disabled. The bridge excludes unused learning history that initially exceeded its body limit. Subsequent device logs confirmed compact responses but approximately 61 seconds spent transferring Toggles data through sequential Bluetooth reads. The app and bridge now support push notifications in bounded batches; that transfer mode and a real setting change still need hardware verification. Automated protocol/proxy tests pass. Run the included BlueZ probe before testing on another device.
+**Hardware testing is in progress.** The iPhone app connected and loaded Galaxy with phone Wi-Fi/cellular off. Notification streaming reduced the earlier settings transfer from 61 seconds to 24.75 seconds. A subsequent smaller Toggles snapshot is modeled as 17 response packets rather than 102; its hardware timing and a real setting write still need verification. The Android debug APK compiles, its signature and bundled assets verify, and its automated tests pass, but no Android phone was available for installation, rendering or Bluetooth tests. Start with the [Android tester guide](android/TESTER-GUIDE.md) before expanding the pilot.
 
 ## What is included
 
 - An Xcode project for iPhone, iOS 17 or later, with no third-party iOS packages.
+- A native [Android project](android/README.md), Android 8.0 or later, with a verified debug APK build, protected pairing storage and a first-tester guide.
 - Galaxy mobile and classic assets, pinned to StarPilot commit `2a12dbd0ad94b46f8a7b6099d32d7216b7676f79`.
 - A separate Python service on the comma using its existing BlueZ daemon. It does not patch StarPilot, the driving code or the Bluetooth kernel.
 - AES-256-GCM encryption using a private pairing key, per-session challenges and monotonic request counters, direction-bound authentication, and compressed messages.
@@ -17,15 +18,15 @@ A working prototype source project that bundles StarPilot's existing Galaxy mobi
 ## How the connection works
 
 ```text
-Galaxy interface bundled on iPhone
-  → HTTP server bound only to 127.0.0.1 on that same iPhone
-  → native Core Bluetooth transport
+Galaxy interface bundled on phone
+  → iPhone: HTTP bound only to 127.0.0.1 / Android: origin-restricted native web messages
+  → native phone Bluetooth transport
   → encrypted BLE GATT messages
   → comma-side bridge
   → Galaxy at 127.0.0.1:8082 on the comma
 ```
 
-The two HTTP hops stay inside their respective devices. The iPhone-to-comma connection uses Bluetooth. Galaxy's screens and server-side settings behavior are retained. The phone's loopback server rejects external origins and requires a private app header for API requests.
+Both apps use Bluetooth between phone and comma; the bridge forwards HTTP only inside the comma. iPhone uses a private loopback server with an app header and origin checks. Android uses bundled HTTPS content and native web messages restricted to its local top-level origin. Galaxy's existing screens and server-side settings behavior are retained. See the Android README for its current feature limits.
 
 For faster loading, the authenticated health response advertises `notificationStream`. After verifying it, the phone subscribes to a separate notification characteristic (`bd490005-6dc1-4de7-a7d0-6cdb441f7650`) before opening Galaxy. The bridge compresses raw HTTP bytes before base64 encoding and pushes up to eight MTU-bounded fragments without requiring reads. Each window has a tagged ACK that releases the next batch. The final ACK follows successful decryption and verification of the entire response. Shared notifications carry a session/request tag; publishers are serialized, and the phone ignores frames for other clients or requests. Subscriptions alone cannot execute an API request: the request still must pass authentication, session and replay checks.
 
