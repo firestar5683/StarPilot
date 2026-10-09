@@ -22,12 +22,20 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private var peripheral: CBPeripheral?
     private var rx: CBCharacteristic?
     private var tx: CBCharacteristic?
+    private var notify: CBCharacteristic?
     private var key: SymmetricKey?
     private var keyText = ""
     private var session = ""
     var sessionIdentifier: String { session }
     private var supportsReadStream = false
     private var activeReadStream = false
+    private var supportsNotifications = false
+    private var activeNotifications = false
+    private var pairingVerified = false
+    private var notificationTag = Data()
+    private var notificationCount = 0
+    private var notificationBuffer: [Data] = []
+    private var notificationTimeout: Task<Void, Never>?
     private var counter: UInt64 = 0
     private var queue: [Pending] = []
     private var active: Pending?
@@ -105,10 +113,15 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         peripheral = nil
         rx = nil
         tx = nil
+        notify = nil
         session = ""
         counter = 0
         supportsReadStream = false
         activeReadStream = false
+        supportsNotifications = false
+        activeNotifications = false
+        pairingVerified = false
+        notificationBuffer = []
     }
 
     private func failConnection(_ message: String) {
@@ -161,13 +174,17 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         activeCancelled = false
         awaitingAck = false
         writeIndex = 0
+        activeNotifications = supportsNotifications && active.path != "/_bridge/health"
+        notificationCount = 0
+        notificationBuffer = []
         activeReadStream = supportsReadStream && active.path != "/_bridge/health"
         do {
+            notificationTag = try Wire.streamTag(session: session, counter: counter)
             let request = BridgeRequest(id: active.id, session: session, counter: counter, path: active.path,
                                         method: active.method, headers: active.headers, body: active.body.base64EncodedString(),
-                                        responseCodec: 2, responseFlow: activeReadStream ? "read-stream" : nil)
+                                        responseCodec: 2, responseFlow: activeNotifications ? "notify-window8" : activeReadStream ? "read-stream" : nil)
             outgoing = Wire.packets(try Wire.seal(request, key: key, direction: "request"),
-                                    size: min(180, peripheral.maximumWriteValueLength(for: .withoutResponse)))
+                                    size: min(supportsNotifications ? 512 : 180, peripheral.maximumWriteValueLength(for: .withoutResponse)))
             timeoutTask = Task { @MainActor [weak self] in
                 let seconds: UInt64 = active.path == "/_bridge/health" ? 10 : 90
                 try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
@@ -184,6 +201,8 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         guard let peripheral, let rx, active != nil else { return }
         if writeIndex < outgoing.count {
             peripheral.writeValue(outgoing[writeIndex], for: rx, type: .withResponse)
+        } else if activeNotifications {
+            drainNotifications()
         } else if let tx {
             peripheral.readValue(for: tx)
         }
@@ -191,10 +210,12 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     private func finish(_ result: Result<BridgeResponse, Error>) {
         timeoutTask?.cancel()
+        notificationTimeout?.cancel()
         timeoutTask = nil
         let previous = active
         active = nil
         outgoing = []
+        notificationBuffer = []
         if activeCancelled { previous?.completion.resume(throwing: CancellationError()) }
         else { previous?.completion.resume(with: result) }
         activeCancelled = false
@@ -203,11 +224,13 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     private func failAll(_ error: Error) {
         timeoutTask?.cancel()
+        notificationTimeout?.cancel()
         let pending = queue
         queue = []
         let previous = active
         active = nil
         outgoing = []
+        notificationBuffer = []
         previous?.completion.resume(throwing: error)
         pending.forEach { $0.completion.resume(throwing: error) }
     }
@@ -251,7 +274,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: Wire.service) }) else {
             failConnection("Galaxy Bluetooth service was not found."); return
         }
-        peripheral.discoverCharacteristics([CBUUID(string: Wire.rx), CBUUID(string: Wire.tx), CBUUID(string: Wire.info)], for: service)
+        peripheral.discoverCharacteristics([CBUUID(string: Wire.rx), CBUUID(string: Wire.tx), CBUUID(string: Wire.info), CBUUID(string: Wire.notify)], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -259,6 +282,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         guard error == nil else { failConnection(error!.localizedDescription); return }
         rx = service.characteristics?.first { $0.uuid == CBUUID(string: Wire.rx) }
         tx = service.characteristics?.first { $0.uuid == CBUUID(string: Wire.tx) }
+        notify = service.characteristics?.first { $0.uuid == CBUUID(string: Wire.notify) }
         guard rx != nil, tx != nil, let info = service.characteristics?.first(where: { $0.uuid == CBUUID(string: Wire.info) }) else {
             failConnection("The comma bridge has incompatible Bluetooth characteristics."); return
         }
@@ -273,6 +297,8 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             if let response = completedResponse {
                 completedResponse = nil
                 finish(.success(response))
+            } else if activeNotifications {
+                drainNotifications()
             } else if let tx {
                 peripheral.readValue(for: tx)
             }
@@ -286,26 +312,40 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         guard peripheral == self.peripheral else { return }
         if let error { failConnection(error.localizedDescription); return }
         guard let data = characteristic.value else { failConnection("Empty Bluetooth response."); return }
+        if characteristic.uuid == CBUUID(string: Wire.notify) {
+            receiveNotification(data)
+            return
+        }
         if characteristic.uuid == CBUUID(string: Wire.info) {
             guard data.count == 17, data.first == 1 else { failConnection("Unsupported bridge protocol."); return }
             session = Data(data.dropFirst()).hex
+            let handshakeSession = session
             status = "Verifying the pairing key…"
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+            Task { @MainActor [weak self, weak peripheral] in
+                guard let self, let peripheral else { return }
                 do {
                     let response = try await self.request(path: "/_bridge/health", method: "GET", headers: [:], body: Data())
+                    guard peripheral == self.peripheral, self.session == handshakeSession else { return }
                     guard response.status == 200 else { throw BridgeError.message("Bridge verification failed.") }
                     let health = try JSONDecoder().decode(BridgeHealth.self, from: response.bodyData)
                     guard health.protocol == 1, health.transport == "bluetooth" else {
                         throw BridgeError.message("Unsupported bridge protocol.")
                     }
                     self.supportsReadStream = health.readStream == true
-                    try PairingKeyStore.save(self.keyText)
-                    self.connectionTimeout?.cancel()
-                    self.connected = true
-                    self.connecting = false
-                    self.status = "Connected over Bluetooth"
-                } catch { self.failConnection("Pairing failed: \(error.localizedDescription)") }
+                    self.pairingVerified = true
+                    if health.notificationStream == true {
+                        guard let notify = self.notify, notify.properties.contains(.notify) else {
+                            throw BridgeError.message("Bluetooth services are cached. Forget Galaxy in iPhone Bluetooth Settings, then reconnect.")
+                        }
+                        self.status = "Enabling fast Bluetooth transfers…"
+                        peripheral.setNotifyValue(true, for: notify)
+                    } else {
+                        try self.completeConnection()
+                    }
+                } catch {
+                    guard peripheral == self.peripheral, self.session == handshakeSession else { return }
+                    self.failConnection("Pairing failed: \(error.localizedDescription)")
+                }
             }
             return
         }
@@ -336,5 +376,78 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             awaitingAck = true
             peripheral.writeValue(Data([2]) + data.subdata(in: 1..<5), for: rx, type: .withResponse)
         } catch { failConnection("Could not verify the encrypted response: \(error.localizedDescription)") }
+    }
+
+    private func completeConnection() throws {
+        try PairingKeyStore.save(keyText)
+        connectionTimeout?.cancel()
+        connected = true
+        connecting = false
+        status = supportsNotifications ? "Connected with fast Bluetooth transfers" : "Connected over Bluetooth"
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard peripheral == self.peripheral, characteristic.uuid == CBUUID(string: Wire.notify), pairingVerified else { return }
+        guard error == nil, characteristic.isNotifying else {
+            failConnection(error?.localizedDescription ?? "Bluetooth push subscription ended. Reconnect to check any pending setting change.")
+            return
+        }
+        supportsNotifications = true
+        do { try completeConnection() }
+        catch { failConnection(error.localizedDescription) }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
+        guard peripheral == self.peripheral, invalidatedServices.contains(where: { $0.uuid == CBUUID(string: Wire.service) }) else { return }
+        failConnection("The bridge's Bluetooth services changed. Scan and reconnect.")
+    }
+
+    private func receiveNotification(_ data: Data) {
+        guard active != nil, activeNotifications else { return }
+        do {
+            // Unrelated client/request frames must not enter this assembler.
+            guard try Wire.notificationPacket(data, tag: notificationTag) != nil else { return }
+            notificationTimeout?.cancel()
+            let requestID = active?.id
+            notificationTimeout = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard !Task.isCancelled, let self, self.active?.id == requestID else { return }
+                self.failConnection("Bluetooth push stalled. Reconnect to check any pending setting change.")
+            }
+            if awaitingAck || writeIndex < outgoing.count {
+                guard notificationBuffer.count < Wire.notificationWindow else {
+                    throw BridgeError.message("Bluetooth notification window exceeded.")
+                }
+                notificationBuffer.append(data)
+            } else {
+                try consumeNotification(data)
+            }
+        } catch { failConnection("Could not verify Bluetooth push data: \(error.localizedDescription)") }
+    }
+
+    private func drainNotifications() {
+        while active != nil, activeNotifications, !awaitingAck, !notificationBuffer.isEmpty {
+            let data = notificationBuffer.removeFirst()
+            do { try consumeNotification(data) }
+            catch { failConnection("Could not verify Bluetooth push data: \(error.localizedDescription)") }
+        }
+    }
+
+    private func consumeNotification(_ data: Data) throws {
+        guard let packet = try Wire.notificationPacket(data, tag: notificationTag), let peripheral, let rx else { return }
+        if let message = try assembler.append(packet), let key {
+            let response = try Wire.open(message, as: BridgeResponse.self, key: key, direction: "response")
+            guard response.id == active?.id, response.session == session, response.counter == counter,
+                  (100...599).contains(response.status), let body = Data(base64Encoded: response.body), body.count <= Wire.maxBody else {
+                throw BridgeError.message("Bluetooth response identity did not match the request.")
+            }
+            completedResponse = response
+        }
+        notificationCount += 1
+        if completedResponse != nil || notificationCount % Wire.notificationWindow == 0 {
+            awaitingAck = true
+            let sequence = Wire.number(packet.subdata(in: 1..<5))
+            peripheral.writeValue(Wire.notificationAck(tag: notificationTag, sequence: sequence), for: rx, type: .withResponse)
+        }
     }
 }

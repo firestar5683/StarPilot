@@ -1,6 +1,7 @@
 """Galaxy BLE v1: bounded framing and authenticated, direction-bound messages."""
 import json
 import base64
+import hashlib
 import os
 import struct
 import zlib
@@ -11,6 +12,8 @@ SERVICE_UUID = "bd490001-6dc1-4de7-a7d0-6cdb441f7650"
 RX_UUID = "bd490002-6dc1-4de7-a7d0-6cdb441f7650"
 TX_UUID = "bd490003-6dc1-4de7-a7d0-6cdb441f7650"
 INFO_UUID = "bd490004-6dc1-4de7-a7d0-6cdb441f7650"
+NOTIFY_UUID = "bd490005-6dc1-4de7-a7d0-6cdb441f7650"
+NOTIFICATION_WINDOW = 8
 MAX_FRAME = 2 * 1024 * 1024
 MAX_BODY = 1024 * 1024
 AAD_PREFIX = b"galaxy-ble-v1/"
@@ -125,3 +128,14 @@ def packets(frame, size=180):
         raise ValueError("Invalid ATT payload size")
     for sequence, start in enumerate(range(0, len(frame), size - 5)):
         yield b"\x01" + struct.pack(">I", sequence) + frame[start:start + size - 5]
+
+
+def stream_tag(session, counter):
+    return hashlib.sha256(bytes.fromhex(session) + struct.pack(">Q", counter)).digest()[:8]
+
+
+def notification_packets(frame, tag, size):
+    if len(tag) != 8 or not 20 <= size <= 512:
+        raise ValueError("Invalid notification framing")
+    for sequence, start in enumerate(range(0, len(frame), size - 13)):
+        yield b"\x03" + tag + struct.pack(">I", sequence) + frame[start:start + size - 13]

@@ -8,7 +8,7 @@ import sys
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-from protocol import MAX_BODY, packets, seal
+from protocol import MAX_BODY, packets, seal, stream_tag, notification_packets, NOTIFICATION_WINDOW
 from proxy import INTERNAL_PARAMS, PARAMS_SNAPSHOT_LIMIT
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -17,6 +17,7 @@ parser.add_argument("--packet-size", type=int, default=180, choices=range(20, 51
 args = parser.parse_args()
 paths = ["/api/params/all", "/assets/components/tools/device_settings_layout.json?v=settings-tier-1", "/api/params/defaults"]
 old_operations = new_operations = 0
+notification_count = notification_acks = 0
 for path in paths:
     with urllib.request.urlopen(args.galaxy_url.rstrip("/") + path, timeout=10) as response:
         content_type = response.headers.get("Content-Type", "application/json")
@@ -41,7 +42,12 @@ for path in paths:
     new_packets = len(list(packets(compact, args.packet_size)))
     old_operations += old_packets * 2
     new_operations += new_packets + 1
+    pushed = len(list(notification_packets(compact, stream_tag("01" * 16, 1), args.packet_size)))
+    credits = (pushed + NOTIFICATION_WINDOW - 1) // NOTIFICATION_WINDOW
+    notification_count += pushed
+    notification_acks += credits
     print(f"{path}: HTTP {len(body)} B; encrypted {len(legacy)} → {len(compact)} B; "
           f"response packets {old_packets} → {new_packets}")
 print(f"First settings load: {old_operations} → {new_operations} response read/ACK operations")
+print(f"Notification mode: {notification_count} pushed packets, {notification_acks} window ACKs, zero response reads")
 print("Counts exclude request writes and wait polling; this is not measured Bluetooth latency.")

@@ -7,7 +7,9 @@ struct Interop {
         let key = SymmetricKey(data: Data((0..<32).map(UInt8.init)))
         let oldHealth = try JSONDecoder().decode(BridgeHealth.self, from: Data("{\"protocol\":1,\"transport\":\"bluetooth\"}".utf8))
         let newHealth = try JSONDecoder().decode(BridgeHealth.self, from: Data("{\"protocol\":1,\"transport\":\"bluetooth\",\"readStream\":true}".utf8))
+        let pushHealth = try JSONDecoder().decode(BridgeHealth.self, from: Data("{\"protocol\":1,\"transport\":\"bluetooth\",\"notificationStream\":true}".utf8))
         precondition(oldHealth.readStream == nil && newHealth.readStream == true)
+        precondition(oldHealth.notificationStream == nil && pushHealth.notificationStream == true)
         let input = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         let request = try Wire.open(Data(input.dropFirst(4)), as: BridgeRequest.self, key: key, direction: "request")
         precondition(request.path == "/api/params")
@@ -41,6 +43,35 @@ struct Interop {
             let decoded = try Wire.open(completeCompact!, as: BridgeResponse.self, key: key, direction: "response")
             precondition(decoded.bodyData == rawBody)
         }
+        let notifications = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[5]))
+        let tag = try Wire.streamTag(session: String(repeating: "01", count: 16), counter: 2)
+        let otherTag = try Wire.streamTag(session: String(repeating: "01", count: 16), counter: 3)
+        var offset = 0
+        var count = 0
+        var pushAssembler = FrameAssembler()
+        var acknowledgements = Data()
+        var pushComplete: Data?
+        while offset < notifications.count {
+            let length = Int(Wire.number(notifications.subdata(in: offset..<(offset + 4))))
+            offset += 4
+            let notification = notifications.subdata(in: offset..<(offset + length))
+            offset += length
+            let unrelated = try Wire.notificationPacket(notification, tag: otherTag)
+            precondition(unrelated == nil)
+            let packet = try Wire.notificationPacket(notification, tag: tag)!
+            pushComplete = try pushAssembler.append(packet)
+            count += 1
+            if count % Wire.notificationWindow == 0 || pushComplete != nil {
+                acknowledgements.append(Wire.notificationAck(tag: tag, sequence: Wire.number(packet.subdata(in: 1..<5))))
+            }
+        }
+        let pushed = try Wire.open(pushComplete!, as: BridgeResponse.self, key: key, direction: "response")
+        precondition(pushed.bodyData == rawBody)
+        do {
+            _ = try Wire.notificationPacket(Data([3]) + tag + Data(repeating: 0, count: 4), tag: tag)
+            fatalError("Truncated notification was accepted")
+        } catch {}
+        try acknowledgements.write(to: URL(fileURLWithPath: CommandLine.arguments[6]))
 
         let valid = Data("PUT /api/params HTTP/1.1\r\nHost: 127.0.0.1:9000\r\nContent-Length: 2\r\n\r\n{}".utf8)
         let incomplete = try LocalRequest.parse(Data(valid.dropLast()))

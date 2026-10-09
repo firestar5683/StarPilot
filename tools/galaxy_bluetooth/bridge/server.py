@@ -17,7 +17,8 @@ from dbus_next.aio import MessageBus
 from dbus_next.constants import PropertyAccess
 from dbus_next.service import ServiceInterface, dbus_property, method
 
-from protocol import Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, open_message, packets, seal
+from protocol import (Assembler, INFO_UUID, RX_UUID, SERVICE_UUID, TX_UUID, NOTIFY_UUID,
+                      NOTIFICATION_WINDOW, open_message, packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy, error_response
 
 ROOT = "/link/galaxy/ble"
@@ -25,6 +26,7 @@ SERVICE_PATH = ROOT + "/service0"
 GATT_SERVICE = "org.bluez.GattService1"
 GATT_CHAR = "org.bluez.GattCharacteristic1"
 LOG = logging.getLogger("galaxy-ble")
+NOTIFICATION_ACK_TIMEOUT = 15
 
 
 class Session:
@@ -40,10 +42,19 @@ class Session:
         self.packet_size = 20
         self.read_stream = False
         self.response_started = 0
+        self.notification_stream = False
+        self.notification_tag = b""
+        self.notification_ack = asyncio.Event()
+        self.notification_expected_ack = None
+        self.notification_task = None
+        self.closed = False
 
     def close(self):
+        self.closed = True
         if self.task:
             self.task.cancel()
+        if self.notification_task:
+            self.notification_task.cancel()
 
 
 class Gateway:
@@ -51,6 +62,8 @@ class Gateway:
         self.key = key
         self.proxy = proxy
         self.sessions = {}
+        self.notifier = None
+        self.notification_lock = asyncio.Lock()
 
     def session(self, options, fresh=False):
         device = options.get("device")
@@ -78,9 +91,22 @@ class Gateway:
         if options.get("offset", Variant("q", 0)).value:
             raise DBusError("org.bluez.Error.InvalidOffset", "Long writes are not used")
         try:
+            if len(value) == 13 and value[0] == 4:
+                sequence = struct.unpack(">I", value[9:])[0]
+                if (not state.notification_stream or not state.response or bytes(value[1:9]) != state.notification_tag
+                        or sequence != state.notification_expected_ack or state.index != sequence + 1
+                        or state.notification_ack.is_set()):
+                    raise ValueError("Unexpected notification acknowledgement")
+                state.notification_ack.set()
+                state.notification_expected_ack = None
+                if state.index == len(state.response):
+                    self.acknowledged(state)
+                return
             if len(value) == 5 and value[0] == 2:
                 sequence = struct.unpack(">I", value[1:])[0]
-                if state.read_stream and state.response:
+                if state.notification_stream:
+                    raise ValueError("Notification responses require a tagged acknowledgement")
+                elif state.read_stream and state.response:
                     if state.index != len(state.response) or sequence != len(state.response) - 1:
                         raise ValueError("Unexpected stream acknowledgement")
                     self.acknowledged(state)
@@ -103,7 +129,8 @@ class Gateway:
 
     def acknowledged(self, state):
         LOG.info("Response delivered: %d packets in %.2fs (%s)", len(state.response),
-                 time.monotonic() - state.response_started, "read stream" if state.read_stream else "per-packet ACK")
+                 time.monotonic() - state.response_started,
+                 "notification stream" if state.notification_stream else "read stream" if state.read_stream else "per-packet ACK")
         state.response = []
         state.index = 0
         state.busy = False
@@ -112,6 +139,8 @@ class Gateway:
         state = self.session(options)
         if options.get("offset", Variant("q", 0)).value:
             raise DBusError("org.bluez.Error.InvalidOffset", "Packets fit inside the negotiated MTU")
+        if state.notification_stream:
+            return b"\x00"
         if not state.response or state.index >= len(state.response):
             return b"\x00"
         packet = state.response[state.index]
@@ -131,19 +160,29 @@ class Gateway:
                 raise ValueError("Invalid session or replayed request")
             if not isinstance(request.get("id"), str) or len(request["id"]) > 64:
                 raise ValueError("Invalid request identifier")
+            if counter > 0xffffffffffffffff:
+                raise ValueError("Invalid counter")
+            fast = request.get("responseCodec") == 2
+            notify = fast and request.get("responseFlow") == "notify-window8"
+            if notify and (self.notifier is None or not self.notifier.notifying):
+                raise ValueError("Subscribe to notifications before requesting that response flow")
             state.counter = counter  # Consume before invoking any mutating endpoint.
             response = await asyncio.to_thread(self.proxy.handle, request)
             response["session"] = state.challenge.hex()
             response["counter"] = counter
-            fast = request.get("responseCodec") == 2
+            state.notification_stream = notify
+            state.notification_tag = stream_tag(state.challenge.hex(), counter) if notify else b""
             state.read_stream = fast and request.get("responseFlow") == "read-stream"
             frame = seal(response, self.key, "response", compact_body=fast)
             size = state.packet_size if fast else min(180, state.packet_size)
-            state.response = list(packets(frame, size))
+            state.response = list(notification_packets(frame, state.notification_tag, size) if notify else packets(frame, size))
             state.index = 0
             state.response_started = time.monotonic()
-            LOG.info("Response prepared: %d bytes, %d packets, ATT payload %d, %.2fs",
-                     len(frame), len(state.response), size, time.monotonic() - started)
+            LOG.info("Response prepared: %d bytes, %d packets, ATT payload %d, %.2fs (%s)",
+                     len(frame), len(state.response), size, time.monotonic() - started,
+                     "notification stream" if notify else "read stream" if state.read_stream else "per-packet ACK")
+            if notify:
+                state.notification_task = asyncio.create_task(self.push_response(state))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -152,6 +191,36 @@ class Gateway:
             state.busy = False
         finally:
             state.task = None
+
+    async def push_response(self, state):
+        response = state.response
+        try:
+            # BlueZ broadcasts Value notifications. Serialize publishers and
+            # tag frames so other subscribed clients ignore unrelated traffic.
+            async with self.notification_lock:
+                while state.response is response and response and not state.closed:
+                    if self.notifier is None or not self.notifier.notifying:
+                        raise RuntimeError("Notification subscription ended")
+                    window = response[state.index:state.index + NOTIFICATION_WINDOW]
+                    state.notification_ack.clear()
+                    state.notification_expected_ack = state.index + len(window) - 1
+                    for packet in window:
+                        if state.closed or not self.notifier.notifying:
+                            raise RuntimeError("Notification session ended")
+                        state.index += 1
+                        self.notifier.send(packet)
+                        # Bound the burst and yield to D-Bus/ATT. No fragment or
+                        # original HTTP request is retransmitted on a timeout.
+                        await asyncio.sleep(0.004)
+                    await asyncio.wait_for(state.notification_ack.wait(), timeout=NOTIFICATION_ACK_TIMEOUT)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            LOG.warning("Notification transfer interrupted (%s); reconnect to check request outcome", type(error).__name__)
+            # Keep the session busy until a fresh INFO handshake replaces it.
+        finally:
+            if state.notification_task is asyncio.current_task():
+                state.notification_task = None
 
 
 class GattService(ServiceInterface):
@@ -210,6 +279,47 @@ class Characteristic(ServiceInterface):
         return {"UUID": Variant("s", self.UUID), "Service": Variant("o", self.Service), "Flags": Variant("as", self.Flags)}
 
 
+class NotificationCharacteristic(Characteristic):
+    def __init__(self, gateway):
+        super().__init__(NOTIFY_UUID, ["notify"], gateway, "notify")
+        self.value = b""
+        self.notifying = False
+        gateway.notifier = self
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Value(self) -> 'ay':
+        return self.value
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Notifying(self) -> 'b':
+        return self.notifying
+
+    @method()
+    def StartNotify(self):
+        if not self.notifying:
+            self.notifying = True
+            self.emit_properties_changed({"Notifying": True})
+            LOG.info("Bluetooth push enabled")
+
+    @method()
+    def StopNotify(self):
+        self.notifying = False
+        self.emit_properties_changed({"Notifying": False})
+        LOG.info("Bluetooth push disabled")
+        for state in self.gateway.sessions.values():
+            if state.notification_task:
+                state.notification_task.cancel()
+
+    def send(self, packet):
+        if not self.notifying:
+            raise RuntimeError("Not subscribed")
+        self.value = bytes(packet)
+        self.emit_properties_changed({"Value": self.value})
+
+    def props(self):
+        return {**super().props(), "Value": Variant("ay", self.value), "Notifying": Variant("b", self.notifying)}
+
+
 class Application(ServiceInterface):
     def __init__(self, objects):
         super().__init__("org.freedesktop.DBus.ObjectManager")
@@ -264,6 +374,7 @@ async def serve(args):
         SERVICE_PATH + "/rx": Characteristic(RX_UUID, ["write"], gateway, "rx"),
         SERVICE_PATH + "/tx": Characteristic(TX_UUID, ["read"], gateway, "tx"),
         SERVICE_PATH + "/info": Characteristic(INFO_UUID, ["read"], gateway, "info"),
+        SERVICE_PATH + "/notify": NotificationCharacteristic(gateway),
     }
     bus.export(ROOT, Application(objects))
     for path, interface in objects.items():

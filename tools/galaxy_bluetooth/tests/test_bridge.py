@@ -8,18 +8,34 @@ import zlib
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
 from dbus_next import Variant, DBusError
 from Crypto.Cipher import AES
-from protocol import Assembler, MAX_BODY, MAX_FRAME, open_message, packets, seal
+from protocol import (Assembler, MAX_BODY, MAX_FRAME, NOTIFICATION_WINDOW, open_message,
+                      packets, seal, stream_tag, notification_packets)
 from proxy import GalaxyProxy, PARAMS_SNAPSHOT_LIMIT, validate_target
-from server import Application, Characteristic, GattService, Gateway, SERVICE_PATH
+from server import Application, Characteristic, NotificationCharacteristic, GattService, Gateway, SERVICE_PATH
 
 KEY = bytes(range(32))
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_notification_packet_tags_binary_and_mtu(self):
+        tag = stream_tag("01" * 16, 1)
+        self.assertNotEqual(tag, stream_tag("01" * 16, 2))
+        self.assertNotEqual(tag, stream_tag("02" * 16, 1))
+        value = {"body": base64.b64encode(bytes(range(256)) * 100).decode(), "status": 200}
+        frame = seal(value, KEY, "response", compact_body=True)
+        for size in (20, 180, 244, 512):
+            assembler = Assembler()
+            for packet in notification_packets(frame, tag, size):
+                self.assertLessEqual(len(packet), size)
+                self.assertEqual(packet[1:9], tag)
+                decoded = assembler.add(b"\x01" + packet[9:])
+            self.assertEqual(open_message(decoded, KEY, "response"), value)
+
     def test_roundtrip_all_att_sizes_and_binary_body(self):
         value = {"body": base64.b64encode(bytes(range(256)) * 32).decode(), "unicode": "Galaxy ✨", "status": 200}
         frame = seal(value, KEY, "response")
@@ -299,6 +315,144 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.gateway.write(b"\x02" + struct.pack(">I", count - 1), self.options)
         self.assertFalse(self.state.response)
         self.assertFalse(self.state.busy)
+
+    def notifications(self):
+        notifier = NotificationCharacteristic(self.gateway)
+        sent = []
+        def changed(values, *args):
+            if "Value" in values:
+                sent.append(values["Value"])
+        notifier.emit_properties_changed = changed
+        NotificationCharacteristic.StartNotify.__wrapped__(notifier)
+        self.assertTrue(notifier.props()["Notifying"].value)
+        self.assertEqual(notifier.props()["Flags"].value, ["notify"])
+        return notifier, sent
+
+    async def wait_for_packets(self, sent, count):
+        async def wait():
+            while len(sent) < count:
+                await asyncio.sleep(0.001)
+        await asyncio.wait_for(wait(), timeout=2)
+
+    def notification_body(self):
+        body = json.dumps([{ "repeated_setting": n, "label": "Galaxy ✨" } for n in range(2000)]).encode()
+        def response(request):
+            self.proxy.calls += 1
+            return {"id": request["id"], "status": 200, "headers": {}, "body": base64.b64encode(body).decode()}
+        self.proxy.handle = response
+        return body
+
+    async def test_notifications_are_bounded_and_verified_before_final_ack(self):
+        notifier, sent = self.notifications()
+        body = self.notification_body()
+        self.options["mtu"] = Variant("q", 517)
+        await self.submit(response_codec=2, response_flow="notify-window8")
+        publisher = self.state.notification_task
+        count = len(self.state.response)
+        self.assertGreater(count, NOTIFICATION_WINDOW)
+        await self.wait_for_packets(sent, NOTIFICATION_WINDOW)
+        await asyncio.sleep(0.03)
+        self.assertEqual(len(sent), NOTIFICATION_WINDOW, "Publisher must wait for window credit")
+        tag = self.state.notification_tag
+        for bad in (b"\x04" + bytes(8) + struct.pack(">I", 7),
+                    b"\x04" + tag + struct.pack(">I", 0), b"\x02" + struct.pack(">I", 7)):
+            with self.assertRaises(DBusError):
+                self.gateway.write(bad, self.options)
+        self.assertEqual(self.gateway.read(self.options), b"\x00")
+        assembler = Assembler()
+        cursor = 0
+        while cursor < count:
+            end = min(cursor + NOTIFICATION_WINDOW, count)
+            await self.wait_for_packets(sent, end)
+            for packet in sent[cursor:end]:
+                self.assertLessEqual(len(packet), 512)
+                data = assembler.add(b"\x01" + packet[9:])
+            self.assertTrue(self.state.busy)
+            if end == count:
+                response = open_message(data, KEY, "response")
+                self.assertEqual(base64.b64decode(response["body"]), body)
+            self.gateway.write(b"\x04" + tag + struct.pack(">I", end - 1), self.options)
+            cursor = end
+        await publisher
+        self.assertFalse(self.state.busy)
+        self.assertEqual(self.proxy.calls, 1)
+        await self.submit(response_codec=2, response_flow="notify-window8")
+        self.assertEqual(self.proxy.calls, 1, "A replay cannot execute the setting change twice")
+        self.assertFalse(self.state.response)
+
+    async def test_no_notifications_or_proxy_call_before_subscription_and_authentication(self):
+        await self.submit(response_codec=2, response_flow="notify-window8")
+        self.assertEqual(self.proxy.calls, 0)
+        notifier, sent = self.notifications()
+        await self.submit(response_codec=2, response_flow="notify-window8", key=bytes(32))
+        await self.submit(response_codec=2, response_flow="notify-window8", session="00" * 16)
+        self.assertFalse(sent)
+        self.assertEqual(self.proxy.calls, 0)
+
+    async def test_notification_subscription_end_and_fresh_session_cancel_without_retry(self):
+        notifier, sent = self.notifications()
+        self.notification_body()
+        await self.submit(response_codec=2, response_flow="notify-window8")
+        publisher = self.state.notification_task
+        await self.wait_for_packets(sent, NOTIFICATION_WINDOW)
+        NotificationCharacteristic.StopNotify.__wrapped__(notifier)
+        with self.assertRaises(asyncio.CancelledError):
+            await publisher
+        self.assertTrue(self.state.busy)
+        self.assertEqual(self.proxy.calls, 1)
+        new_state = self.gateway.session(self.options, fresh=True)
+        self.assertTrue(self.state.closed)
+        self.assertFalse(new_state.busy)
+        self.assertNotEqual(self.state.challenge, new_state.challenge)
+        with self.assertRaises(DBusError):
+            self.gateway.write(b"\x04" + self.state.notification_tag + struct.pack(">I", 7), self.options)
+
+    async def test_missing_notification_ack_stops_at_one_window_without_repeating_mutation(self):
+        notifier, sent = self.notifications()
+        self.notification_body()
+        with patch("server.NOTIFICATION_ACK_TIMEOUT", 0.03):
+            await self.submit(response_codec=2, response_flow="notify-window8")
+            publisher = self.state.notification_task
+            await publisher
+        self.assertEqual(len(sent), NOTIFICATION_WINDOW)
+        self.assertTrue(self.state.busy)
+        self.assertEqual(self.proxy.calls, 1)
+        with self.assertRaises(DBusError):
+            await self.submit(counter=2, response_codec=2, response_flow="notify-window8")
+        self.assertEqual(self.proxy.calls, 1)
+
+    async def test_clients_have_distinct_tags_and_serialized_publishers(self):
+        notifier, sent = self.notifications()
+        self.notification_body()
+        await self.submit(response_codec=2, response_flow="notify-window8")
+        first_task = self.state.notification_task
+        first_count = len(self.state.response)
+        other_options = {"device": Variant("o", "/org/bluez/hci0/dev_11_12_13_14_15_16"), "mtu": Variant("q", 185)}
+        other = self.gateway.session(other_options, fresh=True)
+        request = {"id": "other", "session": other.challenge.hex(), "counter": 1, "method": "PUT", "path": "/api/params",
+                   "body": "", "responseCodec": 2, "responseFlow": "notify-window8"}
+        for packet in packets(seal(request, KEY, "request")):
+            self.gateway.write(packet, other_options)
+        await other.task
+        second_task = other.notification_task
+        self.assertNotEqual(self.state.notification_tag, other.notification_tag)
+        offset = 0
+        for state, options, count in [(self.state, self.options, first_count), (other, other_options, len(other.response))]:
+            cursor = 0
+            while cursor < count:
+                end = min(cursor + NOTIFICATION_WINDOW, count)
+                await self.wait_for_packets(sent, offset + end)
+                window = sent[offset + cursor:offset + end]
+                self.assertTrue(all(p[1:9] == state.notification_tag for p in window))
+                if state is self.state:
+                    with self.assertRaises(DBusError):
+                        self.gateway.write(b"\x04" + state.notification_tag + struct.pack(">I", end - 1), other_options)
+                self.gateway.write(b"\x04" + state.notification_tag + struct.pack(">I", end - 1), options)
+                cursor = end
+            offset += count
+        await first_task
+        await second_task
+        self.assertEqual(self.proxy.calls, 2)
 
 
 if __name__ == "__main__":

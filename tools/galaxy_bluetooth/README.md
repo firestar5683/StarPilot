@@ -2,7 +2,7 @@
 
 A working prototype source project that bundles StarPilot's existing Galaxy mobile interface inside a native SwiftUI / WKWebView iPhone app. Requests to the comma travel through Core Bluetooth instead of Wi-Fi or a Galaxy relay.
 
-**Hardware testing is in progress.** A signed app has launched on a physical iPhone, connected to the comma 4 bridge, and loaded the dashboard with the phone's Wi-Fi and cellular disabled. The first Toggles test exposed an oversized internal parameter in StarPilot's settings response; the bridge now excludes that unused learning-history field. The corrected Toggles transfer and a real setting change still need hardware verification. Automated protocol/proxy tests pass. Run the included BlueZ probe before testing on another device.
+**Hardware testing is in progress.** A signed app has launched on a physical iPhone, connected to the comma 4 bridge, and loaded the dashboard with the phone's Wi-Fi and cellular disabled. The bridge excludes unused learning history that initially exceeded its body limit. Subsequent device logs confirmed compact responses but approximately 61 seconds spent transferring Toggles data through sequential Bluetooth reads. The app and bridge now support push notifications in bounded batches; that transfer mode and a real setting change still need hardware verification. Automated protocol/proxy tests pass. Run the included BlueZ probe before testing on another device.
 
 ## What is included
 
@@ -10,7 +10,7 @@ A working prototype source project that bundles StarPilot's existing Galaxy mobi
 - Galaxy mobile and classic assets, pinned to StarPilot commit `2a12dbd0ad94b46f8a7b6099d32d7216b7676f79`.
 - A separate Python service on the comma using its existing BlueZ daemon. It does not patch StarPilot, the driving code or the Bluetooth kernel.
 - AES-256-GCM encryption using a private pairing key, per-session challenges and monotonic request counters, direction-bound authentication, and compressed messages.
-- MTU-aware fragmentation, compact HTTP response compression, and a negotiated read stream with one acknowledgement after the complete response. Older apps/bridges retain the original per-fragment acknowledgement mode. No automatic retry of a settings change.
+- MTU-aware fragmentation, compact HTTP response compression, and negotiated push notifications with eight fragments per acknowledgement window. Older apps/bridges retain the read-stream or original per-fragment acknowledgement mode. No automatic retry of a settings change.
 - Shared concurrent settings reads and a five-minute in-memory catalog/defaults cache, cleared after any write or new connection. Current toggle values are never cached.
 - Read-only hardware diagnostics, automated bridge tests and Swift/Python interoperability checks.
 
@@ -27,7 +27,11 @@ Galaxy interface bundled on iPhone
 
 The two HTTP hops stay inside their respective devices. The iPhone-to-comma connection uses Bluetooth. Galaxy's screens and server-side settings behavior are retained. The phone's loopback server rejects external origins and requires a private app header for API requests.
 
-For faster loading, the authenticated health response advertises `readStream`. The phone opts in only after verifying it. The bridge compresses raw HTTP bytes before base64 encoding, permits response packets up to 512 bytes within the negotiated ATT MTU, and advances one fragment per successful read. The phone verifies the complete authenticated response before sending the final ACK. A read error closes the session; it never retries a fragment or a mutating request. Existing characteristic UUIDs and flags remain unchanged. The old per-fragment mode remains available for compatibility.
+For faster loading, the authenticated health response advertises `notificationStream`. After verifying it, the phone subscribes to a separate notification characteristic (`bd490005-6dc1-4de7-a7d0-6cdb441f7650`) before opening Galaxy. The bridge compresses raw HTTP bytes before base64 encoding and pushes up to eight MTU-bounded fragments without requiring reads. Each window has a tagged ACK that releases the next batch. The final ACK follows successful decryption and verification of the entire response. Shared notifications carry a session/request tag; publishers are serialized, and the phone ignores frames for other clients or requests. Subscriptions alone cannot execute an API request: the request still must pass authentication, session and replay checks.
+
+Bursts stop after eight packets without an ACK. Missing credit times out after 15 seconds without retransmitting fragments or the HTTP request. The phone also detects a 15-second stall after a transfer begins and retains its overall request timeout. An interrupted transfer requires reconnection and checking the setting's outcome. Small requests use the larger negotiated write payload too. The existing RX/TX/INFO characteristics retain their UUIDs and flags, and older bridges/apps use read-stream or per-fragment ACK mode.
+
+When updating from the earlier read-only prototype, disconnect the app and forget the comma/Galaxy entry in iPhone **Settings > Bluetooth** once so iOS discovers the new characteristic. The native app handles service invalidation and reports a stale service cache explicitly rather than silently staying in the slow read mode. Keep the app's pairing key; forgetting the system Bluetooth entry does not replace it.
 
 Startup reads only `LanguageSetting`, rather than the entire parameter snapshot. Toggles reuses its catalog/defaults for up to five minutes; opening it again still fetches current values. Any non-GET request invalidates cached metadata and concurrent reads before and after forwarding the write. The cache does not persist across connections.
 
@@ -144,7 +148,7 @@ node tests/settings_load.mjs
 
 The tests check actual local HTTP forwarding, binary response preservation, finite SSE, body limits, redirect/path restrictions, encryption tamper rejection, GATT packet/ACK behavior, and replay/session rejection. The interoperability check compiles the production Swift wire/parser files on macOS and exchanges messages with Python in both directions. It requires Xcode's command line tools.
 
-To compare response sizes without modifying settings, run `python3 scripts/benchmark_settings.py --galaxy-url http://YOUR_COMMA:8082`. Add `--packet-size 512` only to model a connection whose negotiated MTU permits that payload. The default comparison uses 180-byte packets. This prints byte/operation counts, never parameter values or keys, and does not measure actual Bluetooth loading time. Both the bridge and iPhone app must be updated for the full optimization.
+To compare response sizes without modifying settings, run `python3 scripts/benchmark_settings.py --galaxy-url http://YOUR_COMMA:8082`. Add `--packet-size 512` only to model a connection whose negotiated MTU permits that payload. The default comparison uses 180-byte packets. This prints byte/operation counts for legacy reads, read streams and windowed notifications, never parameter values or keys, and does not measure actual Bluetooth loading time. Both the bridge and iPhone app must be updated for the full optimization.
 
 To regenerate the included Xcode project after adding Swift files, run `python3 scripts/create_xcode_project.py`.
 

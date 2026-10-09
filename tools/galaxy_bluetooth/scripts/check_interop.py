@@ -6,11 +6,12 @@ import json
 import platform
 import subprocess
 import sys
+import struct
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bridge"))
-from protocol import open_message, seal
+from protocol import open_message, seal, stream_tag, notification_packets, NOTIFICATION_WINDOW
 
 if platform.system() != "Darwin":
     raise SystemExit("The Swift/CryptoKit interoperability check requires macOS and Xcode.")
@@ -35,7 +36,19 @@ with tempfile.TemporaryDirectory(prefix="galaxy-interop-") as folder:
     compact_file.write_bytes(seal({"id": "compact", "session": "01" * 16, "counter": 2,
                                   "status": 200, "headers": {}, "body": base64.b64encode(raw).decode()},
                                  bytes(range(32)), "response", compact_body=True))
-    subprocess.run([str(executable), str(input_file), str(output_file), str(compact_file), str(body_file)], check=True)
+    tag = stream_tag("01" * 16, 2)
+    notification_file, ack_file = work / "notifications.bin", work / "acks.bin"
+    notifications = list(notification_packets(compact_file.read_bytes(), tag, 512))
+    notification_file.write_bytes(b"".join(struct.pack(">I", len(p)) + p for p in notifications))
+    subprocess.run([str(executable), str(input_file), str(output_file), str(compact_file), str(body_file),
+                    str(notification_file), str(ack_file)], check=True)
+    acks = ack_file.read_bytes()
+    expected = [min(start + NOTIFICATION_WINDOW, len(notifications)) - 1
+                for start in range(0, len(notifications), NOTIFICATION_WINDOW)]
+    assert len(acks) == len(expected) * 13
+    for index, sequence in enumerate(expected):
+        assert acks[index * 13:(index + 1) * 13] == b"\x04" + tag + struct.pack(">I", sequence)
+    print("Swift accepted Python notification packets and produced matching tagged window ACKs")
     response = open_message(output_file.read_bytes()[4:], bytes(range(32)), "response")
     assert response["body"] == request["body"] and response["id"] == request["id"] and response["status"] == 200
     print("Python successfully decrypted and decompressed the Swift response")

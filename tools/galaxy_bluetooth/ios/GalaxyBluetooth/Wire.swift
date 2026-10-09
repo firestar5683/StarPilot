@@ -29,6 +29,7 @@ struct BridgeHealth: Decodable {
     let `protocol`: Int
     let transport: String
     let readStream: Bool?
+    let notificationStream: Bool?
 }
 
 enum BridgeError: LocalizedError {
@@ -44,6 +45,8 @@ enum Wire {
     static let rx = "bd490002-6dc1-4de7-a7d0-6cdb441f7650"
     static let tx = "bd490003-6dc1-4de7-a7d0-6cdb441f7650"
     static let info = "bd490004-6dc1-4de7-a7d0-6cdb441f7650"
+    static let notify = "bd490005-6dc1-4de7-a7d0-6cdb441f7650"
+    static let notificationWindow = 8
     static let maxFrame = 2 * 1024 * 1024
     static let maxBody = 1024 * 1024
 
@@ -114,6 +117,27 @@ enum Wire {
         return stride(from: 0, to: frame.count, by: payloadSize).enumerated().map { sequence, start in
             Data([1]) + uint32(UInt32(sequence)) + frame.subdata(in: start..<min(start + payloadSize, frame.count))
         }
+    }
+
+    static func streamTag(session: String, counter: UInt64) throws -> Data {
+        guard let challenge = Data(hex: session), challenge.count == 16 else {
+            throw BridgeError.message("Invalid Bluetooth session.")
+        }
+        var value = counter.bigEndian
+        let number = withUnsafeBytes(of: &value) { Data($0) }
+        return Data(SHA256.hash(data: challenge + number).prefix(8))
+    }
+
+    static func notificationPacket(_ packet: Data, tag: Data) throws -> Data? {
+        guard packet.count >= 9, packet.first == 3 else { throw BridgeError.message("Invalid Bluetooth notification.") }
+        guard packet.subdata(in: 1..<9) == tag else { return nil }
+        guard packet.count >= 14 else { throw BridgeError.message("Truncated Bluetooth notification.") }
+        // Reuse the bounded, ordered assembler used by the read transport.
+        return Data([1]) + packet.dropFirst(9)
+    }
+
+    static func notificationAck(tag: Data, sequence: UInt32) -> Data {
+        Data([4]) + tag + uint32(sequence)
     }
 }
 
