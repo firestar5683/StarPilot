@@ -17,6 +17,7 @@ export const ModelLaboratory = {
       download: {},
       summary: {},
       models: [],
+      availableModelsOpen: false,
     }
   },
   computed: {
@@ -204,6 +205,8 @@ export const ModelLaboratory = {
           <span class="gx-section__title">Available models</span>
           <span class="gx-section__count">{{ summary.ready || 0 }} downloaded · {{ Math.max((summary.published || 0) - (summary.ready || 0), 0) }} available to download</span>
         </div>
+        <button type="button" class="gx-manage-btn" :aria-expanded="availableModelsOpen" aria-controls="gx-laboratory-models" @click="availableModelsOpen = !availableModelsOpen">{{ availableModelsOpen ? 'Close' : 'Manage' }}<i class="bi" :class="availableModelsOpen ? 'bi-chevron-up' : 'bi-chevron-down'" aria-hidden="true"></i></button>
+        <div id="gx-laboratory-models" v-show="availableModelsOpen">
         <div style="padding: 0 var(--sp-4) var(--sp-3); color:var(--text-muted); font-size:var(--fs-sm);">
           Download eGPU-compatible small models. These are separate from the small models in Model Manager because they are compiled for the eGPU.
         </div>
@@ -224,6 +227,7 @@ export const ModelLaboratory = {
             </button>
           </div>
         </article>
+        </div>
       </div>
 
       <div class="gx-card">
