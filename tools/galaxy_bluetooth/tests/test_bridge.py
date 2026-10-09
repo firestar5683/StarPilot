@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
 from dbus_next import Variant
 from protocol import Assembler, MAX_BODY, MAX_FRAME, open_message, packets, seal
-from proxy import GalaxyProxy, validate_target
+from proxy import GalaxyProxy, PARAMS_SNAPSHOT_LIMIT, validate_target
 from server import Application, Characteristic, GattService, Gateway, SERVICE_PATH
 
 KEY = bytes(range(32))
@@ -78,6 +78,16 @@ class Fixture(BaseHTTPRequestHandler):
             self.respond(200, b'data: waiting\n\n', "text/event-stream")
         elif self.path == "/api/binary":
             self.respond(200, bytes(range(256)), "image/jpeg")
+        elif self.path == "/api/params/all":
+            self.respond(200, json.dumps({"Metric": True, "LanguageSetting": "en",
+                                         "LongitudinalPersonalityProfiles": {"custom": [1, 2, 3]},
+                                         "LiveTorqueParameters": "learning history" * 110000}).encode())
+        elif self.path == "/api/params/all?remaining-large":
+            self.respond(200, json.dumps({"Metric": True, "OtherValue": "x" * MAX_BODY}).encode())
+        elif self.path == "/api/params/all?upstream-large":
+            self.respond(200, b"x" * (PARAMS_SNAPSHOT_LIMIT + 1))
+        elif self.path == "/api/params/all?invalid":
+            self.respond(200, b"[1, 2, 3]")
         else:
             self.respond(200, b'{"online":true}')
 
@@ -111,6 +121,23 @@ class ProxyTests(unittest.TestCase):
         result = self.request("/api/params", "PUT", body, {"Content-Type": "application/json"})
         self.assertEqual(base64.b64decode(result["body"]), body)
         self.assertEqual(Fixture.seen[-1], ("PUT", "/api/params", body))
+
+    def test_large_learning_history_does_not_block_toggles(self):
+        result = self.request("/api/params/all")
+        self.assertEqual(result["status"], 200)
+        data = base64.b64decode(result["body"])
+        self.assertLess(len(data), MAX_BODY)
+        self.assertEqual(json.loads(data), {"Metric": True, "LanguageSetting": "en",
+                                           "LongitudinalPersonalityProfiles": {"custom": [1, 2, 3]}})
+        assembler = Assembler()
+        for packet in packets(seal(result, KEY, "response")):
+            message = assembler.add(packet)
+        self.assertEqual(open_message(message, KEY, "response"), result)
+
+    def test_parameter_snapshot_is_still_bounded_and_requires_an_object(self):
+        self.assertEqual(self.request("/api/params/all?remaining-large")["status"], 413)
+        self.assertEqual(self.request("/api/params/all?upstream-large")["status"], 413)
+        self.assertEqual(self.request("/api/params/all?invalid")["status"], 502)
 
     def test_preserves_query_binary_sse_and_filters_headers(self):
         result = self.request("/api/params?key=Metric", headers={"Cookie": "a=b", "Host": "bad", "Authorization": "bad"})

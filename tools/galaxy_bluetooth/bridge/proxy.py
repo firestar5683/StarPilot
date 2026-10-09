@@ -12,6 +12,12 @@ REQUEST_HEADERS = {"content-type", "accept", "cookie", "range"}
 RESPONSE_HEADERS = {"content-type", "content-range", "accept-ranges", "content-disposition"}
 METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
 MEDIA_PREFIXES = ("/video/", "/screen_recordings/", "/api/screen_recordings/download/", "/api/sentry/video/")
+# StarPilot includes this binary learning history in its all-parameters endpoint.
+# Galaxy's bundled UI never reads it and it is not a toggle in the settings catalog.
+# Bound the upstream snapshot separately, then retain every other parameter within
+# the existing BLE body limit. No parameter on the comma is modified.
+PARAMS_SNAPSHOT_LIMIT = 8 * MAX_BODY
+INTERNAL_PARAMS = {"LiveTorqueParameters"}
 
 
 def validate_target(target):
@@ -79,17 +85,30 @@ class GalaxyProxy:
                     return error_response(request_id, 501, "Continuous media streams are not supported over this BLE bridge.")
                 if content_type.startswith("text/event-stream") and target.split("?")[0] not in ("/api/routes", "/api/screen_recordings/list"):
                     return error_response(request_id, 501, "Continuous event streams are not supported; use a snapshot endpoint.")
+                compact_parameters = method == "GET" and target.split("?")[0] == "/api/params/all"
+                read_limit = PARAMS_SNAPSHOT_LIMIT if compact_parameters else MAX_BODY
                 chunks, total = [], 0
                 deadline = time.monotonic() + 35
-                while total <= MAX_BODY:
+                while total <= read_limit:
                     if time.monotonic() > deadline:
                         return error_response(request_id, 504, "Galaxy response took too long to complete.")
-                    chunk = response.read1(min(65536, MAX_BODY + 1 - total))
+                    chunk = response.read1(min(65536, read_limit + 1 - total))
                     if not chunk:
                         break
                     chunks.append(chunk)
                     total += len(chunk)
                 data = b"".join(chunks)
+                if len(data) > read_limit:
+                    return error_response(request_id, 413, "Galaxy response exceeds the bounded bridge read limit.")
+                if compact_parameters and response.status == 200:
+                    try:
+                        values = json.loads(data)
+                    except (ValueError, UnicodeDecodeError):
+                        return error_response(request_id, 502, "Galaxy returned invalid settings JSON.")
+                    if not isinstance(values, dict):
+                        return error_response(request_id, 502, "Galaxy returned an invalid settings snapshot.")
+                    data = json.dumps({k: v for k, v in values.items() if k not in INTERNAL_PARAMS},
+                                      separators=(",", ":"), ensure_ascii=False).encode()
                 if len(data) > MAX_BODY:
                     return error_response(request_id, 413, "Response exceeds the 1 MiB BLE limit.")
                 if 300 <= response.status < 400:

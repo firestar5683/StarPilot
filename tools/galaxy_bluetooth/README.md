@@ -2,7 +2,7 @@
 
 A working prototype source project that bundles StarPilot's existing Galaxy mobile interface inside a native SwiftUI / WKWebView iPhone app. Requests to the comma travel through Core Bluetooth instead of Wi-Fi or a Galaxy relay.
 
-**Hardware validation is pending.** The app compiles and links as an unsigned ARM64 iPhone executable, and automated protocol/proxy tests pass. This has not yet connected to a physical iPhone and comma 4. Bluetooth support in StarPilot does not by itself establish that its installed kernel, controller firmware and BlueZ configuration support this particular LE peripheral service; run the included probe before testing.
+**Hardware testing is in progress.** A signed app has launched on a physical iPhone, connected to the comma 4 bridge, and loaded the dashboard with the phone's Wi-Fi and cellular disabled. The first Toggles test exposed an oversized internal parameter in StarPilot's settings response; the bridge now excludes that unused learning-history field. The corrected Toggles transfer and a real setting change still need hardware verification. Automated protocol/proxy tests pass. Run the included BlueZ probe before testing on another device.
 
 ## What is included
 
@@ -28,6 +28,8 @@ The two HTTP hops stay inside their respective devices. The iPhone-to-comma conn
 
 Map search, online map tiles, model downloads and software updates can still require internet access on the phone or comma, as they do in Galaxy today. Bluetooth replaces the connection between the phone and comma; it does not make those external services available offline.
 
+Local toggles and settings are intended to work with Wi-Fi and cellular disabled on either or both devices. Bluetooth must stay enabled, Galaxy must be running on the comma, and the bridge must remain running. The bridge omits `LiveTorqueParameters` from `/api/params/all`: it is internal learning history, is not in the Toggles catalog, and is unused by the bundled UI. Every other parameter is retained. This changes the transferred snapshot only; it does not delete or modify the parameter on the comma.
+
 ## Run on iPhone
 
 1. Open `ios/GalaxyBluetooth.xcodeproj` in Xcode 16 or later.
@@ -36,6 +38,8 @@ Map search, online map tiles, model downloads and software updates can still req
 4. Allow Bluetooth access when prompted.
 5. Start the bridge on your comma using the steps below, paste its 64-character pairing key into the app and select **Scan for comma**.
 6. Select **Galaxy** in the scan results. The app verifies the key before opening Galaxy and saves the key in the iPhone Keychain.
+
+If Xcode fails while copying iPhone debugging symbols, try **Product > Scheme > Edit Scheme > Run > Info** and turn off **Debug executable**, then run again. This launches without attaching the debugger; it does not fix an unavailable USB connection.
 
 An iOS Simulator can help inspect the shell but cannot validate this Bluetooth connection. A development-signed install from Xcode is required; this project is not an App Store submission or a signed IPA.
 
@@ -82,6 +86,8 @@ If you need to view the pairing key again, run this locally on the comma and do 
 
 Test while parked. Open Home and verify device status, then open Settings and read the existing values. Change an ordinary display preference and confirm it on the comma. Disconnect and reconnect, and confirm the key is remembered.
 
+For an offline test, disable Wi-Fi and cellular on the iPhone while leaving Bluetooth enabled. Open Toggles, read a display preference, change it, and verify the result on the comma. Before disabling the comma's network too, use the startup service below so the bridge survives the SSH session ending. Repeat with both devices offline, then reconnect and read back the preference. Settings load errors remain visible with a **Retry loading toggles** button; retrying this button only reads the settings.
+
 If a mutating request times out after transmission, its outcome can be unknown. Reconnect and read the setting before retrying. Cancelling a queued request removes it; cancelling a partially sent request closes the connection; an already-sent request may finish on the comma while the app drains its response.
 
 ## Optional startup service
@@ -113,11 +119,11 @@ You can then remove `/data/galaxy-ble` and delete the iPhone app. Flashing back 
 
 - The app runs in the foreground. It does not claim background reconnect or persistent background execution.
 - HTTP API requests are serialized over Bluetooth. Settings and status are the first hardware validation target; high-frequency plots may be slow.
-- Request/response bodies are limited to 1 MiB, with a 2 MiB bounded encrypted/decoded envelope. Large exports/uploads return an error.
+- Request/response bodies are limited to 1 MiB, with a 2 MiB bounded encrypted/decoded envelope. The all-parameters snapshot may be read up to 8 MiB before its unused internal learning history is omitted; the resulting BLE response must still fit the 1 MiB limit. Large exports/uploads return an error.
 - Finite event-stream responses, such as a route list, are buffered until complete. Continuous EventSource streams are not implemented; the mobile log view already uses snapshots.
 - Video downloads and video/multipart live streams are rejected explicitly. Direct media element loads, continuous camera viewing, direct downloads and browser push notifications are not supported in this prototype.
 - A few image elements request dynamic files without the app's API header. These may not render; JSON settings and normal `fetch` / XHR requests are the supported path.
-- Galaxy's UI bundle is pinned. A different StarPilot version may need a matching bundle; `UPSTREAM.json` records the revision and three small native-shell adaptations.
+- Galaxy's UI bundle is pinned. A different StarPilot version may need a matching bundle; `UPSTREAM.json` records the revision and four small native-shell adaptations.
 - One saved pairing key is supported at a time. The bridge creates independent sessions for up to four clients. Encryption protects payloads; radio jamming or unauthenticated connection flooding can still disrupt availability.
 
 ## Development checks

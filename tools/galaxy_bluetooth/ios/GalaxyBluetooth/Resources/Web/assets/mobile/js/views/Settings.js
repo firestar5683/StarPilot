@@ -33,6 +33,7 @@ export const Settings = {
       values: {},
       expanded: {},
       loading: true,
+      loadError: "",
       activeSectionSlug: "",
       defaultSectionSlug: "lateral-steering",
     }
@@ -78,6 +79,8 @@ export const Settings = {
     modeSection(s) { return this.layout.find(section => section.name === s.name && section.params.some(p => p.key === LONGITUDINAL_MODE_KEY)) },
     ordinaryParams(s) { return s.params.filter(p => !this.isModeParam(p)) },
     async load() {
+      this.loading = true
+      this.loadError = ""
       try {
         const [layout, values, defaults] = await Promise.all([
           api.getLayout(), api.getParams(), api.getDefaults(),
@@ -91,6 +94,7 @@ export const Settings = {
           this.activeSectionSlug = (preferred || this.sections[0]).slug
         }
       } catch (e) {
+        this.loadError = "Failed to load settings: " + (e?.message || e)
         showSnackbar("Failed to load settings: " + (e?.message || e), "error")
       } finally {
         this.loading = false
@@ -155,6 +159,11 @@ export const Settings = {
       <DevModeBanner :hidden-count="hiddenAdvancedCount" :dev-mode-on="devModeOn" />
 
       <div v-if="loading" class="gx-loading">{{ tr("Loading configuration...") }}</div>
+
+      <div v-else-if="loadError" class="gx-card" role="alert">
+        <p>{{ loadError }}</p>
+        <button type="button" class="gx-btn" @click="load">Retry loading toggles</button>
+      </div>
 
       <template v-else-if="sections.length">
         <div v-if="searchActive">
