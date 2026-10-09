@@ -239,12 +239,68 @@ struct CompanionView: View {
                     Spacer()
                     Circle().fill(diagnostics.fresh ? Color.green : Color.orange).frame(width: 8, height: 8)
                 }.padding(18).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
-                metricCards("Temperatures", icon: "thermometer.medium", values: diagnostics.fresh ? diagnostics.snapshot?.temperatures ?? [] : [])
-                metricCards("Frame & message rates", icon: "waveform.path", values: diagnostics.fresh ? diagnostics.snapshot?.rates ?? [] : [])
+                metricSection("Temperatures", icon: "thermometer.medium", values: temperatures, thermal: true)
+                metricSection("Frame rates", icon: "speedometer", values: rates.filter { $0.unit == "FPS" }, thermal: false)
+                metricSection("Message rates", icon: "waveform.path", values: rates.filter { $0.unit != "FPS" }, thermal: false)
                 Text("Unavailable sensors show no reading. Message rates reflect updates observed by the comma UI.")
                     .font(.caption).foregroundStyle(.secondary)
                 copyButton.frame(maxWidth: .infinity)
             }.padding(20).frame(maxWidth: 700).frame(maxWidth: .infinity)
+        }
+    }
+    private var temperatures: [DiagnosticMetric] {
+        diagnostics.fresh ? diagnostics.snapshot?.temperatures ?? [] : []
+    }
+    private var rates: [DiagnosticMetric] {
+        diagnostics.fresh ? diagnostics.snapshot?.rates ?? [] : []
+    }
+    private func component(_ metric: DiagnosticMetric, thermal: Bool) -> String {
+        let name = metric.name.lowercased()
+        if thermal {
+            if name.hasPrefix("sensor:") { return "Additional hardware sensors" }
+            if name.contains("cpu") || name.contains("dsp") || name.contains("soc") { return "Processors" }
+            if name.contains("gpu") { return name.contains("external") ? "External GPU" : "Onboard GPU" }
+            if name.contains("memory") { return "Memory" }
+            if name.contains("pmic") { return "Power management" }
+            if name.contains("modem") || name.contains("gnss") { return "Connectivity & positioning" }
+            if name.contains("intake") || name.contains("exhaust") { return "Cooling" }
+            return "Other temperatures"
+        }
+        if name.contains("camera") { return "Cameras" }
+        if name == "ui" { return "Display" }
+        if name.contains("model") || name.contains("plan") { return "Models & planning" }
+        if name.contains("carstate") || name.contains("carcontrol") || name.contains("selfdrive") { return "Driving" }
+        if name.contains("device") || name.contains("peripheral") { return "Device" }
+        return "Other services"
+    }
+    private func metricSection(_ title: String, icon: String, values: [DiagnosticMetric], thermal: Bool) -> some View {
+        let order = thermal
+            ? ["Processors", "Onboard GPU", "External GPU", "Memory", "Power management", "Cooling", "Connectivity & positioning", "Other temperatures", "Additional hardware sensors"]
+            : ["Display", "Cameras", "Models & planning", "Driving", "Device", "Other services"]
+        return VStack(alignment: .leading, spacing: 16) {
+            Label(title, systemImage: icon).font(.title3.bold())
+            if values.isEmpty {
+                Text("No readings available").font(.subheadline).foregroundStyle(.secondary)
+            }
+            ForEach(order, id: \.self) { group in
+                let readings = values.filter { component($0, thermal: thermal) == group }
+                if !readings.isEmpty {
+                    if group == "Additional hardware sensors" || group == "Other services" || group == "Other temperatures" {
+                        DisclosureGroup {
+                            metricCards("", icon: icon, values: readings).padding(.top, 12)
+                        } label: {
+                            HStack {
+                                Text(group).font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text("\(readings.count)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.tint(purple).padding(16)
+                            .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+                    } else {
+                        metricCards(group, icon: icon, values: readings)
+                    }
+                }
+            }
         }
     }
     private var drivingStatus: String {
@@ -259,7 +315,7 @@ struct CompanionView: View {
     }
     private func metricCards(_ title: String, icon: String, values: [DiagnosticMetric]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: icon).font(.headline)
+            if !title.isEmpty { Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary) }
             if values.isEmpty {
                 Text("No readings available").font(.subheadline).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(18)

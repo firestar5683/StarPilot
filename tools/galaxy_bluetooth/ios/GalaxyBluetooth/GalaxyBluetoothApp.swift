@@ -8,14 +8,14 @@ struct GalaxyBluetoothApp: App {
 }
 
 enum CompanionTab: String, CaseIterable, Identifiable {
-    case galaxy = "Galaxy", live = "Live View", diagnostics = "Diagnostics", connections = "Connections"
+    case galaxy = "Galaxy", live = "Live View", diagnostics = "Diagnostics", connections = "Settings"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .galaxy: "sparkles"
         case .live: "play.rectangle"
         case .diagnostics: "chart.xyaxis.line"
-        case .connections: "slider.horizontal.3"
+        case .connections: "gearshape.fill"
         }
     }
 }
@@ -216,7 +216,7 @@ struct GalaxyRootView: View {
                         .background(.white.opacity(0.07), in: Capsule())
                 }
                 HStack(spacing: 4) {
-                    ForEach(CompanionTab.allCases) { tab in
+                    ForEach(CompanionTab.allCases.filter { $0 != .connections }) { tab in
                         Button { select(tab) } label: {
                             VStack(spacing: 5) {
                                 Image(systemName: tab.icon).font(.system(size: 17, weight: .semibold))
@@ -226,6 +226,15 @@ struct GalaxyRootView: View {
                                 .background(model.tab == tab ? brandPurple.opacity(0.3) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
                         }.buttonStyle(.plain).accessibilityAddTraits(model.tab == tab ? .isSelected : [])
                     }
+                    Button { select(.connections) } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "gearshape.fill").font(.system(size: 17, weight: .semibold))
+                                .frame(width: 36, height: 36)
+                                .background(model.tab == .connections ? brandPurple.opacity(0.4) : Color.white.opacity(0.08), in: Circle())
+                            Text("Settings").font(.system(size: 10, weight: .semibold))
+                        }.frame(width: 60).padding(.vertical, 4)
+                            .foregroundStyle(model.tab == .connections ? Color.white : Color.secondary)
+                    }.buttonStyle(.plain).accessibilityAddTraits(model.tab == .connections ? .isSelected : [])
                 }.padding(4).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
             }.padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
             ZStack {
