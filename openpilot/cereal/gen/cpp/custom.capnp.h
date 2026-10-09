@@ -841,7 +841,7 @@ struct CustomReserved6 {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(f98d843bfd7004a3, 0, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(f98d843bfd7004a3, 10, 3)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -5076,6 +5076,63 @@ public:
   }
 #endif  // !CAPNP_LITE
 
+  inline float getAccelerationJerk() const;
+
+  inline bool getCscControllingSpeed() const;
+
+  inline float getCscSpeed() const;
+
+  inline bool getCscTraining() const;
+
+  inline float getDangerFactor() const;
+
+  inline float getDangerJerk() const;
+
+  inline  ::int64_t getDesiredFollowDistance() const;
+
+  inline bool getExperimentalMode() const;
+
+  inline bool getForcingStop() const;
+
+  inline float getForcingStopLength() const;
+
+  inline bool hasStarpilotEvents() const;
+  inline ::capnp::AnyPointer::Reader getStarpilotEvents() const;
+
+  inline bool hasStarpilotToggles() const;
+  inline  ::capnp::Text::Reader getStarpilotToggles() const;
+
+  inline float getIncreasedStoppedDistance() const;
+
+  inline bool getLateralCheck() const;
+
+  inline float getLaneWidthLeft() const;
+
+  inline float getLaneWidthRight() const;
+
+  inline float getMaxAcceleration() const;
+
+  inline float getMinAcceleration() const;
+
+  inline bool getRedLight() const;
+
+  inline float getRoadCurvature() const;
+
+  inline float getSlcMapSpeedLimit() const;
+
+  inline float getSlcMapboxSpeedLimit() const;
+
+  inline float getSlcNextSpeedLimit() const;
+
+  inline float getSlcOverriddenSpeed() const;
+
+  inline float getSlcSpeedLimit() const;
+
+  inline float getSlcSpeedLimitOffset() const;
+
+  inline bool hasSlcSpeedLimitSource() const;
+  inline  ::capnp::Text::Reader getSlcSpeedLimitSource() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -5103,6 +5160,96 @@ public:
 #if !CAPNP_LITE
   inline ::kj::StringTree toString() const { return asReader().toString(); }
 #endif  // !CAPNP_LITE
+
+  inline float getAccelerationJerk();
+  inline void setAccelerationJerk(float value);
+
+  inline bool getCscControllingSpeed();
+  inline void setCscControllingSpeed(bool value);
+
+  inline float getCscSpeed();
+  inline void setCscSpeed(float value);
+
+  inline bool getCscTraining();
+  inline void setCscTraining(bool value);
+
+  inline float getDangerFactor();
+  inline void setDangerFactor(float value);
+
+  inline float getDangerJerk();
+  inline void setDangerJerk(float value);
+
+  inline  ::int64_t getDesiredFollowDistance();
+  inline void setDesiredFollowDistance( ::int64_t value);
+
+  inline bool getExperimentalMode();
+  inline void setExperimentalMode(bool value);
+
+  inline bool getForcingStop();
+  inline void setForcingStop(bool value);
+
+  inline float getForcingStopLength();
+  inline void setForcingStopLength(float value);
+
+  inline bool hasStarpilotEvents();
+  inline ::capnp::AnyPointer::Builder getStarpilotEvents();
+  inline ::capnp::AnyPointer::Builder initStarpilotEvents();
+
+  inline bool hasStarpilotToggles();
+  inline  ::capnp::Text::Builder getStarpilotToggles();
+  inline void setStarpilotToggles( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initStarpilotToggles(unsigned int size);
+  inline void adoptStarpilotToggles(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownStarpilotToggles();
+
+  inline float getIncreasedStoppedDistance();
+  inline void setIncreasedStoppedDistance(float value);
+
+  inline bool getLateralCheck();
+  inline void setLateralCheck(bool value);
+
+  inline float getLaneWidthLeft();
+  inline void setLaneWidthLeft(float value);
+
+  inline float getLaneWidthRight();
+  inline void setLaneWidthRight(float value);
+
+  inline float getMaxAcceleration();
+  inline void setMaxAcceleration(float value);
+
+  inline float getMinAcceleration();
+  inline void setMinAcceleration(float value);
+
+  inline bool getRedLight();
+  inline void setRedLight(bool value);
+
+  inline float getRoadCurvature();
+  inline void setRoadCurvature(float value);
+
+  inline float getSlcMapSpeedLimit();
+  inline void setSlcMapSpeedLimit(float value);
+
+  inline float getSlcMapboxSpeedLimit();
+  inline void setSlcMapboxSpeedLimit(float value);
+
+  inline float getSlcNextSpeedLimit();
+  inline void setSlcNextSpeedLimit(float value);
+
+  inline float getSlcOverriddenSpeed();
+  inline void setSlcOverriddenSpeed(float value);
+
+  inline float getSlcSpeedLimit();
+  inline void setSlcSpeedLimit(float value);
+
+  inline float getSlcSpeedLimitOffset();
+  inline void setSlcSpeedLimitOffset(float value);
+
+  inline bool hasSlcSpeedLimitSource();
+  inline  ::capnp::Text::Builder getSlcSpeedLimitSource();
+  inline void setSlcSpeedLimitSource( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initSlcSpeedLimitSource(unsigned int size);
+  inline void adoptSlcSpeedLimitSource(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownSlcSpeedLimitSource();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -14010,6 +14157,433 @@ inline  ::cereal::StarPilotModelDataV2::VisionObservation::Stream StarPilotModel
 inline void StarPilotModelDataV2::VisionObservation::Builder::setStream( ::cereal::StarPilotModelDataV2::VisionObservation::Stream value) {
   _builder.setDataField< ::cereal::StarPilotModelDataV2::VisionObservation::Stream>(
       ::capnp::bounded<22>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getAccelerationJerk() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getAccelerationJerk() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setAccelerationJerk(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::getCscControllingSpeed() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<32>() * ::capnp::ELEMENTS);
+}
+
+inline bool CustomReserved6::Builder::getCscControllingSpeed() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<32>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setCscControllingSpeed(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<32>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getCscSpeed() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getCscSpeed() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setCscSpeed(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::getCscTraining() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<33>() * ::capnp::ELEMENTS);
+}
+
+inline bool CustomReserved6::Builder::getCscTraining() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<33>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setCscTraining(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<33>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getDangerFactor() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getDangerFactor() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setDangerFactor(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getDangerJerk() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getDangerJerk() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setDangerJerk(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::int64_t CustomReserved6::Reader::getDesiredFollowDistance() const {
+  return _reader.getDataField< ::int64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::int64_t CustomReserved6::Builder::getDesiredFollowDistance() {
+  return _builder.getDataField< ::int64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setDesiredFollowDistance( ::int64_t value) {
+  _builder.setDataField< ::int64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::getExperimentalMode() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<34>() * ::capnp::ELEMENTS);
+}
+
+inline bool CustomReserved6::Builder::getExperimentalMode() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<34>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setExperimentalMode(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<34>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::getForcingStop() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<35>() * ::capnp::ELEMENTS);
+}
+
+inline bool CustomReserved6::Builder::getForcingStop() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<35>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setForcingStop(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<35>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getForcingStopLength() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getForcingStopLength() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setForcingStopLength(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::hasStarpilotEvents() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool CustomReserved6::Builder::hasStarpilotEvents() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline ::capnp::AnyPointer::Reader CustomReserved6::Reader::getStarpilotEvents() const {
+  return ::capnp::AnyPointer::Reader(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline ::capnp::AnyPointer::Builder CustomReserved6::Builder::getStarpilotEvents() {
+  return ::capnp::AnyPointer::Builder(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline ::capnp::AnyPointer::Builder CustomReserved6::Builder::initStarpilotEvents() {
+  auto result = ::capnp::AnyPointer::Builder(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+  result.clear();
+  return result;
+}
+
+inline bool CustomReserved6::Reader::hasStarpilotToggles() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool CustomReserved6::Builder::hasStarpilotToggles() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader CustomReserved6::Reader::getStarpilotToggles() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder CustomReserved6::Builder::getStarpilotToggles() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void CustomReserved6::Builder::setStarpilotToggles( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder CustomReserved6::Builder::initStarpilotToggles(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void CustomReserved6::Builder::adoptStarpilotToggles(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> CustomReserved6::Builder::disownStarpilotToggles() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline float CustomReserved6::Reader::getIncreasedStoppedDistance() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getIncreasedStoppedDistance() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setIncreasedStoppedDistance(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::getLateralCheck() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS);
+}
+
+inline bool CustomReserved6::Builder::getLateralCheck() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setLateralCheck(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<36>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getLaneWidthLeft() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getLaneWidthLeft() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setLaneWidthLeft(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getLaneWidthRight() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getLaneWidthRight() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setLaneWidthRight(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getMaxAcceleration() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getMaxAcceleration() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setMaxAcceleration(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getMinAcceleration() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getMinAcceleration() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setMinAcceleration(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<12>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::getRedLight() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<37>() * ::capnp::ELEMENTS);
+}
+
+inline bool CustomReserved6::Builder::getRedLight() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<37>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setRedLight(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<37>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getRoadCurvature() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getRoadCurvature() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setRoadCurvature(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<13>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getSlcMapSpeedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getSlcMapSpeedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setSlcMapSpeedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getSlcMapboxSpeedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getSlcMapboxSpeedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setSlcMapboxSpeedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getSlcNextSpeedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getSlcNextSpeedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setSlcNextSpeedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<16>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getSlcOverriddenSpeed() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getSlcOverriddenSpeed() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setSlcOverriddenSpeed(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getSlcSpeedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getSlcSpeedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setSlcSpeedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<18>() * ::capnp::ELEMENTS, value);
+}
+
+inline float CustomReserved6::Reader::getSlcSpeedLimitOffset() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+
+inline float CustomReserved6::Builder::getSlcSpeedLimitOffset() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+inline void CustomReserved6::Builder::setSlcSpeedLimitOffset(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CustomReserved6::Reader::hasSlcSpeedLimitSource() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool CustomReserved6::Builder::hasSlcSpeedLimitSource() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader CustomReserved6::Reader::getSlcSpeedLimitSource() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder CustomReserved6::Builder::getSlcSpeedLimitSource() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void CustomReserved6::Builder::setSlcSpeedLimitSource( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder CustomReserved6::Builder::initSlcSpeedLimitSource(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void CustomReserved6::Builder::adoptSlcSpeedLimitSource(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> CustomReserved6::Builder::disownSlcSpeedLimitSource() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
 }
 
 inline bool StarPilotRadarState::Reader::hasLeadLeft() const {
