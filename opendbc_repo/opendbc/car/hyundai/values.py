@@ -17,7 +17,7 @@ class CarControllerParams:
   ACCEL_MAX = 2.0 # m/s^2
   ANGLE_LIMITS = AngleSteeringLimitsVM(360, MAX_ANGLE_RATE=5)
 
-  def __init__(self, CP):
+  def __init__(self, CP, vEgoRaw=100.):
     self.ACCEL_MAX = 3.5 if is_blended_alpha(CP) else type(self).ACCEL_MAX
     self.STEER_DELTA_UP = 3
     self.STEER_DELTA_DOWN = 7
@@ -28,12 +28,16 @@ class CarControllerParams:
     self.STEER_STEP = 1  # 100 Hz
 
     if CP.flags & HyundaiFlags.CANFD:
-      self.STEER_MAX = 270
+      self.STEER_MAX = 270 if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING else 409
       self.STEER_DRIVER_ALLOWANCE = 250
       self.STEER_DRIVER_MULTIPLIER = 2
       self.STEER_THRESHOLD = 250
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
+      if (not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and 0 <= vEgoRaw < 15 and
+          CP.carFingerprint != CAR.KIA_CARNIVAL_HEV_4TH_GEN):
+        self.STEER_DELTA_UP = 10
+        self.STEER_DELTA_DOWN = 8
 
     # To determine the limit for your car, find the maximum value that the stock LKAS will request.
     # If the max stock LKAS request is <384, add your car to this list.

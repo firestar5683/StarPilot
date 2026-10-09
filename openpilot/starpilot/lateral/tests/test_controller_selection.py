@@ -114,13 +114,28 @@ class TestControllerSelection(unittest.TestCase):
         self.assertAlmostEqual(standard.torque_params.latAccelFactor, cp.lateralTuning.torque.latAccelFactor)
         if vehicle == HYUNDAI.HYUNDAI_IONIQ_6:
           self.assertEqual(standard.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
-          self.assertEqual(policy.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+          self.assertEqual(policy.pid.pos_limit, policy.torque_params.latAccelFactor)
+          self.assertEqual(policy.pid.neg_limit, -policy.torque_params.latAccelFactor)
           self.assertEqual(policy.torque_params.latAccelFactor,
                            struct.unpack('f', struct.pack('f', cp.lateralTuning.torque.latAccelFactor * 1.22))[0])
           for controller, multiplier in ((standard, 1.0), (policy, 1.22)):
             controller.update_torque_parameters(3.3, 0.0, 0.12)
             expected = struct.unpack('f', struct.pack('f', 3.3 * multiplier))[0]
             self.assertEqual(controller.torque_params.latAccelFactor, expected)
+
+  def test_ioniq_startup_saturation_and_first_live_update_are_continuous(self):
+    cp = cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
+    controller = LatControlTorque(cp.as_reader(), interfaces[HYUNDAI.HYUNDAI_IONIQ_6](cp), DT_CTRL,
+                                  controller_mode=ControllerMode.STARPILOT)
+    before = (controller.pid.pos_limit, controller.pid.neg_limit)
+    for sign in (-1, 1):
+      controller.pid.reset()
+      accel = controller.pid.update(0., feedforward=sign * 100., freeze_integrator=True)
+      self.assertEqual(accel, sign * controller.torque_params.latAccelFactor)
+      self.assertAlmostEqual(controller.torque_from_lateral_accel(accel, controller.torque_params), sign)
+    controller.update_torque_parameters(cp.lateralTuning.torque.latAccelFactor,
+                                        cp.lateralTuning.torque.latAccelOffset, cp.lateralTuning.torque.friction)
+    self.assertEqual((controller.pid.pos_limit, controller.pid.neg_limit), before)
 
   def test_explicit_policy_preserves_legacy_output_through_reset(self):
     sequence = ((False, 2.0, 4.0, -0.0005, False),
@@ -161,7 +176,8 @@ class TestControllerSelection(unittest.TestCase):
       legacy = Controls()
       self.assertEqual(legacy.lateral_controller_selection, default_selection(cp))
       self.assertIsNotNone(selected_policy(legacy.LaC))
-      self.assertEqual(legacy.LaC.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+      self.assertEqual(legacy.LaC.pid.pos_limit, legacy.LaC.torque_params.latAccelFactor)
+      self.assertEqual(legacy.LaC.pid.neg_limit, -legacy.LaC.torque_params.latAccelFactor)
       self.assertIsNone(legacy.torque_host)
       from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY as TORQUE_DOCUMENT_KEY, replace_field, serialize_document
       tune = cp.lateralTuning.torque

@@ -758,14 +758,9 @@ class Ioniq6TorquePolicy:
     self.dt = parent.dt
     self.is_2025 = is_ioniq_6_2025_model(CP)
     self.vehicle_factor = float(CP.lateralTuning.torque.latAccelFactor)
-    # Startup limits use raw CP calibration before the 1.22 factor; using compensated
-    # parameters would widen them before the first live torque update.
-    startup_params = CP.lateralTuning.torque.as_builder()
-    startup_pos_limit = parent.lateral_accel_from_torque(parent.steer_max, startup_params)
-    startup_neg_limit = parent.lateral_accel_from_torque(-parent.steer_max, startup_params)
     parent.pid = PIDController([[0.0], [KP_INTERP[-1]]], KI, rate=1 / self.dt)
-    parent.pid.set_limits(startup_pos_limit, startup_neg_limit)
     parent.torque_params.latAccelFactor = self.vehicle_factor * IONIQ_6_BASE_LAT_ACCEL_FACTOR_MULT
+    parent.update_limits()
     self.request_buffer_len = int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt)
     self.curvature_request_buffer = deque([0.0] * self.request_buffer_len, maxlen=self.request_buffer_len)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)

@@ -163,6 +163,8 @@ class CarController(CarControllerBase):
       self._ray_prev_lat_active = CC.latActive
 
     # steering torque
+    if self.CP.flags & HyundaiFlags.CANFD and self.angle_vm is None:
+      self.params = CarControllerParams(self.CP, CS.out.vEgoRaw)
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
     apply_torque = (0 if self.angle_vm is not None else
                     apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params))
