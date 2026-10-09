@@ -22,6 +22,8 @@ class SteeringAuthority:
     self.seen_active = False
     self.last_active_ns = 0
     self.active_since_ns = 0
+    self.command_edge_ns = 0
+    self.acquire_since_ns = 0
     self.status_ns = 0
     self.status = -1
     self.bad_since_ns = 0
@@ -61,6 +63,14 @@ class SteeringAuthority:
     if not active and self.command_active:
       self.neutral_since_ns = now_ns
     if active:
+      if not self.command_active:
+        self.command_edge_ns = now_ns
+        # A measured inactive response to emitted neutral requires active acquisition.
+        # Retain episode/feed history, and never renew an acquisition on brief edges.
+        if (not self.acquire_since_ns and self.neutral_since_ns and
+            self.neutral_since_ns < self.status_ns <= now_ns and
+            now_ns - self.status_ns <= EPS_STATUS_TIMEOUT_NS and self.status == 0):
+          self.acquire_since_ns = now_ns
       # A sustained emitted neutral with healthy inactive feedback is a new acquisition.
       # Brief withdrawals retain the confirmed episode; a fault latch never clears here.
       if (not self.latched and self.neutral_since_ns and
@@ -69,6 +79,7 @@ class SteeringAuthority:
           self.status in (0, 1)):
         self.seen_active = False
         self.active_since_ns = 0
+        self.acquire_since_ns = now_ns
         self.bad_since_ns = self.bad_samples = 0
         self.last_sample_ns = self.status_ns
       self.neutral_since_ns = 0
@@ -106,7 +117,7 @@ class SteeringAuthority:
         self.latched = False
         self.disable_ns = self.neutral_ns = 0
         self.main_off = False
-        self.last_active_ns = self.active_since_ns = 0
+        self.last_active_ns = self.active_since_ns = self.acquire_since_ns = 0
         self.seen_active = False
         self.bad_since_ns = self.bad_samples = 0
 
@@ -117,7 +128,7 @@ class SteeringAuthority:
     if healthy and deliberate_pause and not self.latched:
       self.seen_active = False
       self.command_active = False
-      self.last_active_ns = self.active_since_ns = 0
+      self.last_active_ns = self.active_since_ns = self.acquire_since_ns = 0
       self.bad_since_ns = self.bad_samples = 0
       self.last_sample_ns = self.status_ns
     # A missing EPS feed must retain a fault even after host health gates emit neutral.
@@ -130,21 +141,26 @@ class SteeringAuthority:
                 not CS.brakePressed and not CS.regenBraking and not cancel and
                 not CS.standstill and CS.vEgo >= self.min_speed and not CS.steeringPressed)
     fresh_status = 0 < self.status_ns <= now_ns and now_ns - self.status_ns <= EPS_STATUS_TIMEOUT_NS
-    if eligible and fresh_status and self.status_ns > self.active_since_ns and self.status_ns != self.last_sample_ns:
+    if eligible and fresh_status and self.status_ns > max(self.active_since_ns, self.command_edge_ns) and self.status_ns != self.last_sample_ns:
       self.last_sample_ns = self.status_ns
       if self.status == 1:
+        self.acquire_since_ns = 0
         self.seen_active = True
         self.bad_since_ns = self.bad_samples = 0
       elif self.status not in (2, 3):
         if not self.bad_since_ns:
           self.bad_since_ns = self.status_ns
         self.bad_samples += 1
-        if self.seen_active:
+        if self.seen_active and (self.status != 0 or not self.acquire_since_ns):
           self.latched = True
       else:
         self.bad_since_ns = self.bad_samples = 0
+    # A confirmed neutral acquisition has a fixed deadline, even if repeated edges
+    # place every inactive sample before the latest active command.
+    if eligible and self.acquire_since_ns and now_ns - self.acquire_since_ns >= EPS_STATUS_TIMEOUT_NS:
+      self.latched = True
     if (eligible and self.bad_samples >= 2 and self.bad_since_ns and
-        now_ns - self.active_since_ns >= EPS_STATUS_TIMEOUT_NS):
+        now_ns - max(self.active_since_ns, self.acquire_since_ns) >= EPS_STATUS_TIMEOUT_NS):
       self.latched = True
     if not recent_command or CS.steeringPressed or CS.standstill or CS.vEgo < self.min_speed:
       self.bad_since_ns = self.bad_samples = 0

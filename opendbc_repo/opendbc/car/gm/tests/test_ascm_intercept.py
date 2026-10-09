@@ -26,8 +26,8 @@ def params(car, *, sascm=False, accelerator=True, radar=False, alpha=False, rele
 class TestAscmIntercept(unittest.TestCase):
   def authority_frame(self, ci, packer, tick, *, status=1, active=True, main=True,
                       regen=False, brake=False, button=CruiseButtons.UNPRESS, driver=0., speed=8., torque=0.02,
-                      malformed=False, physical_delay_ns=0, eps_missing=False):
-    now = 1_000_000_000 + tick * 10_000_000
+                      malformed=False, physical_delay_ns=0, eps_missing=False, now_ns=None, eps_stamp_ns=None, emit_eps=None):
+    now = 1_000_000_000 + tick * 10_000_000 if now_ns is None else now_ns
     values = {
       'ECMCruiseControl': {'CruiseActive': 0},
       'ECMEngineStatus': {'CruiseMainOn': int(main), 'BrakePressed': int(brake)},
@@ -46,15 +46,17 @@ class TestAscmIntercept(unittest.TestCase):
                 packer.make_can_msg('ASCMLKASteeringCmd', 2, {}),
                 packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {}),
                 packer.make_can_msg('AEBCmd', 2, {})]
-    if tick % 10 == 0 and not eps_missing:
+    eps_packets = []
+    if (tick % 10 == 0 if emit_eps is None else emit_eps) and not eps_missing:
       pscm = packer.make_can_msg('PSCMStatus', 0, {'LKATorqueDeliveredStatus': status,
                                                 'LKADriverAppldTrq': driver, 'LKATorqueDelivered': 0})
       if malformed:
         packets.append((0x184, b'\x00', 0))
-      packets.append(pscm)
+      eps_packets.append(pscm)
     physical = [packet for packet in packets if packet[0] in (0xC9, 0xBE, 0xBD, 0x1E1)]
     other = [packet for packet in packets if packet[0] not in (0xC9, 0xBE, 0xBD, 0x1E1)]
-    cs = ci.update([(now - physical_delay_ns, physical), (now, other)])
+    cs = ci.update(sorted([(now - physical_delay_ns, physical), (now, other),
+                           (now if eps_stamp_ns is None else eps_stamp_ns, eps_packets)], key=lambda packet: packet[0]))
     if tick >= 10 and not eps_missing:
       self.assertTrue(cs.canValid, (tick, status))
       self.assertFalse(cs.canTimeout, tick)
@@ -231,6 +233,88 @@ class TestAscmIntercept(unittest.TestCase):
             cs = self.authority_frame(ci, packer, tick)
             self.assertTrue(cs.steerFaultTemporary, tick)
           self.assertTrue(ci.CS.steering_authority.latched)
+
+  def test_volt_route24_eps_sample_before_resumed_command(self):
+    # Route 24: 163.588 ms between active sends, 131.971 ms of emitted neutral.
+    # Exercise the actual interface/parser/controller path; do not assign monitor history.
+    for subsequent_status in (1, 0, 3, -1, "edge-zero"):
+      with self.subTest(subsequent_status=subsequent_status):
+        cp = params(CAR.CHEVROLET_VOLT_ASCM, sascm=True, alpha=True, radar=True)
+        ci, packer = CarInterface(cp), CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        for tick in range(30):
+          self.authority_frame(ci, packer, tick, now_ns=232_790_000_000 + tick * 10_000_000)
+        self.assertTrue(ci.CS.steering_authority.seen_active)
+        timeline = ((233_179_157_875, True, None, 1),
+                    (233_195_000_000, True, 233_182_155_170, 1),
+                    (233_203_000_000, False, None, 1),
+                    (233_210_774_096, False, None, 1),
+                    (233_230_000_000, False, None, 1),
+                    (233_243_000_000, False, None, 1),
+                    (233_253_611_922, False, None, 1),
+                    (233_267_000_000, False, None, 1),
+                    (233_274_000_000, False, None, 1),
+                    (233_281_143_669, False, None, 1),
+                    (233_298_000_000, False, 233_282_094_035, 0),
+                    (233_306_000_000, False, None, 0),
+                    (233_314_029_085, False, None, 0),
+                    (233_328_000_000, True, None, 0),
+                    (233_335_000_000, True, None, 0),
+                    (233_342_745_540, True, None, 0),
+                    (233_346_666_621, True, None, 0))
+        for tick, (now, active, stamp, status) in enumerate(timeline, 30):
+          cs = self.authority_frame(ci, packer, tick, now_ns=now, active=active, status=status,
+                                    emit_eps=stamp is not None, eps_stamp_ns=stamp)
+          self.assertFalse(ci.CS.steering_authority.latched, (now, stamp))
+          self.assertFalse(cs.steerFaultTemporary, now)
+        monitor = ci.CS.steering_authority
+        self.assertTrue(monitor.seen_active)  # Short neutral retains genuine fault history.
+        self.assertEqual(monitor.command_edge_ns, 233_342_745_540)
+        self.assertEqual(monitor.status_ns, 233_282_094_035)
+        self.assertEqual(monitor.acquire_since_ns, 233_342_745_540)
+        if subsequent_status == "edge-zero":
+          # Every 10Hz zero arrives during emitted neutral, before the next resume.
+          # Thus no post-edge bad sample is counted; short edges must not renew 300ms.
+          self.authority_frame(ci, packer, 47, now_ns=233_360_000_000, active=False, emit_eps=False)
+          self.authority_frame(ci, packer, 48, now_ns=233_370_000_000, active=False, emit_eps=False)
+          self.authority_frame(ci, packer, 49, now_ns=233_386_000_000, active=False,
+                               status=0, emit_eps=True, eps_stamp_ns=233_382_063_562)
+          for tick in range(50, 76):
+            now = 233_386_000_000 + (tick - 49) * 10_000_000
+            active = 50 <= tick <= 52 or 60 <= tick <= 61 or tick >= 70
+            cs = self.authority_frame(ci, packer, tick, now_ns=now, active=active,
+                                      status=0, emit_eps=tick in (59, 69),
+                                      eps_stamp_ns=now - 5_000_000)
+            self.assertEqual(monitor.acquire_since_ns, 233_342_745_540, now)
+            self.assertEqual(monitor.bad_samples, 0, now)
+            self.assertEqual(monitor.latched, now >= 233_642_745_540, now)
+          self.assertTrue(cs.steerFaultTemporary)
+          continue
+        # The next measured inactive status arrives 39ms after resume; normal response
+        # is active at 138ms. A permanently inactive response must still fault at 300ms.
+        cs = self.authority_frame(ci, packer, 47, now_ns=233_386_000_000,
+                                  status=0, emit_eps=True, eps_stamp_ns=233_382_063_562)
+        self.assertFalse(monitor.latched)
+        self.assertFalse(cs.steerFaultTemporary)
+        for tick in range(48, 57):
+          self.authority_frame(ci, packer, tick, now_ns=233_386_000_000 + (tick - 47) * 10_000_000,
+                               emit_eps=False)
+        cs = self.authority_frame(ci, packer, 57, now_ns=233_486_000_000,
+                                  status=max(0, subsequent_status), malformed=subsequent_status == -1,
+                                  emit_eps=True, eps_stamp_ns=233_481_278_455)
+        self.assertEqual(monitor.latched, subsequent_status == -1)
+        self.assertEqual(cs.steerFaultPermanent, subsequent_status == 3)
+        if subsequent_status in (3, -1):
+          continue
+        for tick in range(58, 74):
+          now = 233_486_000_000 + (tick - 57) * 10_000_000
+          cs = self.authority_frame(ci, packer, tick, now_ns=now,
+                                    status=subsequent_status, emit_eps=tick == 67,
+                                    active=not (subsequent_status == 0 and 62 <= tick < 69))
+          if subsequent_status == 0:
+            self.assertEqual(monitor.acquire_since_ns, 233_342_745_540, now)
+          self.assertEqual(monitor.latched, subsequent_status == 0 and now >= 233_642_745_540, now)
+        self.assertEqual(cs.steerFaultTemporary, subsequent_status == 0)
+        self.assertTrue(monitor.seen_active)
 
   def test_eight_manual_ids_have_stock_acc_default(self):
     self.assertEqual(len(ASCM_INTERCEPT_CAR), 8)
