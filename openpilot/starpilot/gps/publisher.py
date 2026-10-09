@@ -15,25 +15,31 @@ class CarGpsPublisher:
   def __init__(self, *, mono_clock=time.monotonic_ns, boot_clock=boot_time_ns):
     self.mono_clock, self.boot_clock = mono_clock, boot_clock
     self.last_source_ns = 0
+    self.cached_gps = None
 
-  def update(self, car_state, pm):
+  def update(self, car_state, pm, message=None):
     getter = getattr(car_state, "get_car_gps", None)
     fix = getter() if getter is not None else None
-    if fix is None:
-      return
-    source_ns = int(fix["timestamp_nanos"])
-    if source_ns <= self.last_source_ns:
-      return
-    self.last_source_ns = source_ns
-    before, boot, after = self.mono_clock(), self.boot_clock(), self.mono_clock()
-    # pandad timestamps received CAN in BOOTTIME; Python Events use MONOTONIC.
-    age = boot - source_ns
-    if not 0 <= after - before <= 1_000_000 or not 0 <= age <= GPS_MAX_AGE_NS:
-      return
-    stamp = before - age
-    if stamp <= 0:
-      return
-    message = messaging.new_message("starpilotCarState", valid=bool(fix["hasFix"]), logMonoTime=after)
-    message.starpilotCarState.gps = {key: fix[key] for key in FIELDS}
-    message.starpilotCarState.gps.sourceMonoTime = stamp
+    gps, after = None, 0
+    if fix is not None:
+      source_ns = int(fix["timestamp_nanos"])
+      if source_ns > self.last_source_ns:
+        self.last_source_ns = source_ns
+        before, boot, after = self.mono_clock(), self.boot_clock(), self.mono_clock()
+        # pandad timestamps received CAN in BOOTTIME; Python Events use MONOTONIC.
+        age = boot - source_ns
+        if 0 <= after - before <= 1_000_000 and 0 <= age <= GPS_MAX_AGE_NS:
+          stamp = before - age
+          if stamp > 0:
+            gps = {key: fix[key] for key in FIELDS}
+            gps["vNED"] = list(fix["vNED"])
+            gps["sourceMonoTime"] = stamp
+            self.cached_gps = gps if fix["hasFix"] else None
+    if message is None:
+      if gps is None:
+        return
+      message = messaging.new_message("starpilotCarState", valid=bool(gps["hasFix"]), logMonoTime=after)
+    gps = gps if gps is not None else self.cached_gps
+    if gps is not None and 0 < gps["sourceMonoTime"] <= int(message.logMonoTime) <= gps["sourceMonoTime"] + GPS_MAX_AGE_NS:
+      message.starpilotCarState.gps = gps
     pm.send("starpilotCarState", message)

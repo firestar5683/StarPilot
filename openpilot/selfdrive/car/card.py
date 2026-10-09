@@ -440,7 +440,6 @@ class Car:
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
-    self.car_gps_publisher.update(self.CI.CS, self.pm)
     self.observe_ioniq6_long_authority(can_list, CS)
     media_owner = getattr(self, 'ioniq6_media', None)
     media_observation = media_owner.update(can_list) if media_owner is not None else None
@@ -775,6 +774,13 @@ class Car:
         publish_stock_status(self.pm, self.CP, internal, session=self.slc_producer_session,
                              sequence=self.slc_cruise_event_id, car_state_stamp=int(cs_send.logMonoTime),
                              valid=bool(cs_send.valid and not CS.canTimeout))
+    companion = None
+    steering_authority = getattr(self.CI.CS, 'steering_authority', None)
+    if self.CP.brand == 'gm' and steering_authority is not None and steering_authority.enabled:
+      companion = messaging.new_message('starpilotCarState', valid=bool(cs_send.valid), logMonoTime=int(cs_send.logMonoTime))
+      companion.starpilotCarState.lateralAuthorityUnavailable = bool(steering_authority.latched)
+      companion.starpilotCarState.sourceCarStateMonoTime = int(cs_send.logMonoTime)
+    self.car_gps_publisher.update(self.CI.CS, self.pm, companion)
     self.pm.send('carState', cs_send)
 
     wheel = getattr(self, 'wheel_publisher', None)
@@ -1010,13 +1016,16 @@ class Car:
                     for ps, cfg in zip(pandas, self.CP.safetyConfigs, strict=True)))
 
   def publish_sendcan(self, frames, valid=True):
+    steering_authority = getattr(getattr(getattr(self, 'CI', None), 'CS', None), 'steering_authority', None)
+    monitored_steering = (getattr(getattr(self, 'CP', None), 'brand', None) == 'gm' and
+                          steering_authority is not None and steering_authority.enabled)
     packet = can_list_to_can_capnp(frames, msgtype='sendcan', valid=valid)
     if getattr(self, 'volt_cc_selected', False):
       # CAN producer/parser and pandad send age use BOOTTIME; Python controls/device envelopes use MONOTONIC.
       builder = messaging.log_from_bytes(packet).as_builder()
       builder.logMonoTime = int(getattr(self, 'volt_cc_now_boot_ns', 0))
       packet = builder.to_bytes()
-    elif self.volt_startup_keepalive():
+    elif self.volt_startup_keepalive() or monitored_steering:
       builder = messaging.log_from_bytes(packet).as_builder()
       builder.logMonoTime = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
       packet = builder.to_bytes()
@@ -1195,10 +1204,13 @@ class Car:
         if self.ioniq6_long_lost:
           self.publish_sendcan([], valid=False)
           return
+      steering_authority = getattr(self.CI.CS, 'steering_authority', None)
+      monitored_steering = self.CP.brand == 'gm' and steering_authority is not None and steering_authority.enabled
       # send car controls over can
       now_nanos = (self.volt_cc_now_boot_ns if getattr(self, 'volt_cc_selected', False) else
                    self.can_log_mono_time if REPLAY else
-                   time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_startup_keepalive() else int(time.monotonic() * 1e9))
+                   time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.volt_startup_keepalive() or monitored_steering else
+                   int(time.monotonic() * 1e9))
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
       self.publish_sendcan(can_sends, valid=CS.canValid)
 

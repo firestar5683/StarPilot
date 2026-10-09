@@ -2,7 +2,7 @@
 from math import fabs, exp
 import numpy as np
 
-from opendbc.car import get_safety_config, structs
+from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.pedal import supported_pedal_detected
 from opendbc.car.gm.pedal_capability import pedal_candidate
 from opendbc.car.common.conversions import Conversions as CV
@@ -50,6 +50,7 @@ class CarInterface(CarInterfaceBase):
     return super().apply(c, now_nanos)
 
   def update(self, can_packets):
+    self.CS.steering_authority.observe(can_packets)
     if malibu_hybrid_profile(self.CP) is not None:
       self.CS.hybrid_buttons.observe_packets(can_packets)
     if (is_bolt_pedal_removed_profile(self.CP) or is_bolt_pedal_removed_profile(self.CP, stock_only=True)):
@@ -63,7 +64,9 @@ class CarInterface(CarInterfaceBase):
     if is_conventional_cc_pedal_profile(self.CP):
       self.CS.conventional_cancel_credit.observe(can_packets)
     if not is_bolt_cc_profile(self.CP):
-      return super().update(can_packets)
+      ret = super().update(can_packets)
+      self.CS.steering_authority.update(ret, self.can_parsers[Bus.pt]._last_update_nanos)
+      return ret
     adaptive = (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and
                 self.CP.safetyConfigs[0].safetyParam == 0xC140)
     camera_source = getattr(self, "bolt_cc_camera_observed", (0, b""))

@@ -127,6 +127,8 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
   decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal
   pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled
   gps @31 :Gps;
+  lateralAuthorityUnavailable @32 :Bool;
+  sourceCarStateMonoTime @33 :UInt64;
 
   struct Gps {
     sourceMonoTime @0 :UInt64;  # CAN observation converted to CLOCK_MONOTONIC

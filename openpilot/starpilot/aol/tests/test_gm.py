@@ -1162,6 +1162,7 @@ class TestGmAol(unittest.TestCase):
       self.assertEqual(controls.CP.to_dict(), cp.to_dict(), msg=ctx)
       sd = SelfdriveD.__new__(SelfdriveD)
       sd.CP, sd.initialized, sd.aol_replay = cp, True, True
+      sd.enabled = sd.active = False
       sd.aol_session_id, sd.aol_axis_decision = 'bolt-cancel', AxisDecision()
       sd.aol_dm_lateral_inhibit, sd.aol_settings = False, selected.aol_settings
       sd.nostalgia_paddle_cancel = False
@@ -1322,6 +1323,7 @@ class TestGmAol(unittest.TestCase):
           sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
                                        calibration.as_reader(), monitoring.as_reader()])
           sd.aol_car_state_log_ns = now
+          sd.conditional_car_state_valid = cs.canValid and not cs.canTimeout
           sd.events = events
           with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
                patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
@@ -1471,6 +1473,7 @@ class TestGmAol(unittest.TestCase):
       self.assertEqual(controls.CP.to_dict(), cp.to_dict())
       sd = SelfdriveD.__new__(SelfdriveD)
       sd.CP, sd.initialized, sd.aol_replay = cp, True, True
+      sd.enabled = sd.active = False
       sd.aol_session_id, sd.aol_axis_decision = 'volt-brake', AxisDecision()
       sd.aol_dm_lateral_inhibit, sd.aol_settings = False, selected.aol_settings
       sd.nostalgia_paddle_cancel = False
@@ -1484,6 +1487,7 @@ class TestGmAol(unittest.TestCase):
       self.assertEqual(safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, 0xD114), 0)
       safety.init_tests()
       resumed = paused = 0
+      previous_sd_onroad = None
       ctx = {'identity': str(cp.carFingerprint), 'word': '0xd114', 'phase': 'prime'}
       try:
         # Warm all selected parser/native sources, with stock cruise inactive.
@@ -1491,6 +1495,8 @@ class TestGmAol(unittest.TestCase):
           stamp = 800_000_000 + warmup * 10_000_000
           _, frames = feed_car(SimpleNamespace(update=lambda _: None), packer, stamp,
                                counter=warmup % 4, active=False, speed=8., camera=True)
+          frames = [frame for frame in frames if frame[0] != 0x184]
+          frames.append(packer.make_can_msg('PSCMStatus', 0, {'LKATorqueDeliveredStatus': 1}))
           frames.append(packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}))
           previous = ci.update([(stamp, frames)])
           for frame in frames:
@@ -1499,23 +1505,25 @@ class TestGmAol(unittest.TestCase):
         self.assertTrue(previous.canValid, msg=ctx)
         self.assertTrue(safety.safety_config_valid(), msg=ctx)
         self.assertFalse(safety.get_controls_allowed(), msg=ctx)
-        for tick in range(140):
+        for tick in range(146):
           now = 1_000_000_000 + tick * 10_000_000
           brake = any(start <= tick < start + 12 for start in (20, 60, 100))
           fault = tick == 138
-          ctx.update(phase='scenario', tick=tick, brake=brake, fault=fault)
+          main = tick not in (140, 141)
+          ctx.update(phase='scenario', tick=tick, brake=brake, fault=fault, main=main)
           _, packets = feed_car(SimpleNamespace(update=lambda _: None), packer, now,
                                 counter=tick % 4, active=False, speed=8., camera=True)
-          packets = [frame for frame in packets if frame[0] not in (0xC9, 0x1C4, 0xBE)]
-          packets += [packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}),
-                      packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': 1}),
+          packets = [frame for frame in packets if frame[0] not in (0xC9, 0x1C4, 0xBE, 0x184)]
+          packets += [packer.make_can_msg('PSCMStatus', 0, {'LKATorqueDeliveredStatus': 1}),
+                      packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0}),
+                      packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': int(main)}),
                       packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': 0}),
                       packer.make_can_msg('ECMAcceleratorPos', 0, {'BrakePedalPos': 30 if brake else 0})]
           cs = ci.update([(now, packets)])
           self.assertTrue(cs.canValid, msg=ctx)
           self.assertEqual(cs.brakePressed, brake, msg=ctx)
           self.assertFalse(cs.cruiseState.enabled, msg=ctx)
-          self.assertTrue(cs.cruiseState.available, msg=ctx)
+          self.assertEqual(cs.cruiseState.available, main, msg=ctx)
           for frame in packets:
             self.assertTrue(native('rx', frame, now // 1000), (frame, ctx))
           safety.safety_tick()
@@ -1531,27 +1539,30 @@ class TestGmAol(unittest.TestCase):
           self.assertEqual(events.contains(ET.IMMEDIATE_DISABLE), fault, msg=ctx)
           onroad = messaging.new_message('onroadEvents', 0, valid=True, logMonoTime=now)
           onroad.onroadEvents = events.to_msg()
-          selected.sm.update_msgs(now / 1e9, [onroad.as_reader()])
-          disarm = selected.aol_disarming_fault(cs, now, now)
-          self.assertEqual(disarm, fault, msg=ctx)
+          card_onroad = onroad.as_reader() if fault or previous_sd_onroad is None else previous_sd_onroad
+          selected.sm.update_msgs(now / 1e9, [card_onroad])
+          disarm = selected.aol_disarming_fault(cs, int(card_onroad.logMonoTime), now)
+          self.assertEqual(disarm, tick in (136, 138, 139), msg=ctx)
           selected.aol_card_intent.update(cs, fault_active=disarm, now_ns=now, standard_enabled=False)
-          self.assertEqual(selected.aol_card_intent.allowed_latch, tick < 138, msg=ctx)
-          self.assertEqual(selected.aol_card_intent._main_cycle_required, tick >= 138, msg=ctx)
+          expected_latch = main and (tick < 136 or tick >= 142)
+          self.assertEqual(selected.aol_card_intent.allowed_latch, expected_latch, msg=ctx)
+          self.assertEqual(selected.aol_card_intent._main_cycle_required, 136 <= tick < 140, msg=ctx)
           allowed, pause_lat, pause_long = selected.aol_card_intent.output(cs)
           intent_value = IntentState('card', tick + 1, now, now, now + 200_000_000,
                                      allowed, pause_lat, pause_long, selected.aol_qualified,
                                      selected.aol_card_intent.allowed_latch)
           intent = decode_intent(encode_intent(intent_value))
           self.assertIsNotNone(intent, msg=ctx)
-          self.assertEqual(intent.allowedLatch, tick < 138, msg=ctx)
+          self.assertEqual(intent.allowedLatch, expected_latch, msg=ctx)
           self.assertFalse(intent.pauseLateral, msg=ctx)
           self.assertFalse(intent.pauseLongitudinal, msg=ctx)
-          args = dict(standard_lateral=False, standard_longitudinal=False, intent=intent, car_state=cs,
-                      initialized=True, model_ready=True,
-                      no_entry=aol_no_entry(events.names, cs, paddle_only_cancel=False, allow_below_engage_speed=True),
-                      immediate_disable=events.contains(ET.IMMEDIATE_DISABLE), dm_lockout=False, pause_brake_mps=10.)
-          wanted = decide_axes(native=None, **args)
-          expected_lat = not brake and tick < 138
+          no_entry = aol_no_entry(events.names, cs, paddle_only_cancel=False, allow_below_engage_speed=True)
+          immediate_disable = events.contains(ET.IMMEDIATE_DISABLE)
+          wanted = decide_axes(native=None, standard_lateral=False, standard_longitudinal=False,
+                               intent=intent, car_state=cs, initialized=True, model_ready=True,
+                               no_entry=no_entry, immediate_disable=immediate_disable,
+                               dm_lockout=False, pause_brake_mps=10.)
+          expected_lat = not brake and expected_latch
           self.assertEqual(wanted.desired_lateral, expected_lat, msg=ctx)
           self.assertFalse(wanted.desired_longitudinal, msg=ctx)
           safety.aol_set_host_request(int(wanted.desired_lateral))
@@ -1573,6 +1584,7 @@ class TestGmAol(unittest.TestCase):
           sd.sm.update_msgs(now / 1e9, [intent_message.as_reader(), receipt.as_reader(), model.as_reader(),
                                        calibration.as_reader(), monitoring.as_reader()])
           sd.aol_car_state_log_ns = now
+          sd.conditional_car_state_valid = cs.canValid and not cs.canTimeout
           sd.events = events
           with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
                patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \
@@ -1580,12 +1592,22 @@ class TestGmAol(unittest.TestCase):
                patch.object(sd, 'publish_selfdriveState'):
             sd.step()
           actual_lat = expected_lat and tick != 135
+          actual_onroad = messaging.new_message('onroadEvents', 0, valid=True, logMonoTime=now)
+          actual_onroad.onroadEvents = sd.events.to_msg()
+          previous_sd_onroad = actual_onroad.as_reader()
           self.assertFalse(sd.enabled or sd.active, msg=ctx)
           self.assertEqual(sd.aol_axis_decision.lateral_active, actual_lat, msg=ctx)
           self.assertFalse(sd.aol_axis_decision.longitudinal_active, msg=ctx)
           if tick == 135:
+            self.assertTrue(sd.aol_authority_lost, msg=ctx)
             self.assertIn(EventName.controlsMismatch, sd.events.names, msg=ctx)
             self.assertFalse(sd.aol_axis_decision.native_acknowledged, msg=ctx)
+          if tick in (136, 137):
+            self.assertFalse(sd.aol_axis_decision.lateral_active, msg=ctx)
+            self.assertFalse(selected.aol_card_intent.allowed_latch, msg=ctx)
+          if tick == 142:
+            self.assertTrue(sd.aol_axis_decision.lateral_active, msg=ctx)
+            self.assertFalse(selected.aol_card_intent._main_cycle_required, msg=ctx)
           feed(controls, now, tick, active=sd.active, enabled=sd.enabled)
           axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=now)
           axis.aolAxisState.qualified = True
@@ -1618,7 +1640,10 @@ class TestGmAol(unittest.TestCase):
             probe.brakePressed = True
             for speed in (9.99, 10., 10.01):
               probe.vEgo = speed
-              self.assertEqual(decide_axes(native=receipt_state, **dict(args, car_state=probe)).desired_lateral,
+              self.assertEqual(decide_axes(native=receipt_state, standard_lateral=False, standard_longitudinal=False,
+                                           intent=intent, car_state=probe, initialized=True, model_ready=True,
+                                           no_entry=no_entry, immediate_disable=immediate_disable,
+                                           dm_lockout=False, pause_brake_mps=10.).desired_lateral,
                                speed >= 10., (speed, ctx))
           previous = cs
         self.assertEqual(resumed, 3)
@@ -1664,6 +1689,7 @@ class TestGmAol(unittest.TestCase):
       self.assertEqual(controls.CP.to_dict(), cp.to_dict())
       sd = SelfdriveD.__new__(SelfdriveD)
       sd.CP, sd.initialized, sd.aol_replay = cp, True, True
+      sd.enabled = sd.active = False
       sd.aol_session_id, sd.aol_axis_decision = 'ascm-acc-fault', AxisDecision()
       sd.aol_dm_lateral_inhibit, sd.aol_settings = False, selected.aol_settings
       sd.nostalgia_paddle_cancel = False
@@ -1707,10 +1733,9 @@ class TestGmAol(unittest.TestCase):
           packets = [packet for packet in packets if packet[0] not in (0x1C4, 0x3D1, 0x184)]
           packets += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': AccState.FAULTED if fault else AccState.ACTIVE if ordinary else 0}),
                       packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': int(main)}),
-                      packer.make_can_msg('PSCMStatus', 0, {'LKATorqueDeliveredStatus': 3 if critical == 'permanentEPS' and fault else 2 if tick == 20 else 0}),
+                      packer.make_can_msg('PSCMStatus', 0, {'LKATorqueDeliveredStatus': 3 if critical == 'permanentEPS' and fault else 2 if tick == 20 else 1}),
                       packer.make_can_msg('ASCMActiveCruiseControlStatus', 2, {'ACCCruiseState': 0})]
           self.assertFalse(any(address == 0x201 for address, _, _ in packets))
-          ci.update([(now - 1_000_000, packets)])
           cs = ci.update([(now, packets)])
           self.assertTrue(cs.canValid, tick)
           self.assertEqual(cs.accFaulted, fault)
@@ -1758,6 +1783,7 @@ class TestGmAol(unittest.TestCase):
           sd.sm.update_msgs(now / 1e9, [intent.as_reader(), receipt.as_reader(), model.as_reader(),
                                        calibration.as_reader(), monitoring.as_reader()])
           sd.aol_car_state_log_ns = now
+          sd.conditional_car_state_valid = cs.canValid and not cs.canTimeout
           sd.events = events
           with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', True), \
                patch.object(sd, 'data_sample', return_value=cs), patch.object(sd, 'update_events'), \

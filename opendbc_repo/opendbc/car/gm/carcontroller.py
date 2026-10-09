@@ -568,7 +568,7 @@ class CarController(CarControllerBase):
       if self.CP.openpilotLongitudinalControl:
         stock_steer_ready = (stock_steer_ready and CS.pedal_sensor_healthy and
                             0 < CS.pedal_sensor_ts_nanos <= now_nanos <= CS.pedal_sensor_ts_nanos + PEDAL_SENSOR_TIMEOUT_NS)
-    lat_active = CC.latActive and stock_steer_ready
+    lat_active = CC.latActive and stock_steer_ready and not CS.steering_authority.latched
 
     # Steering (Active: 50Hz, inactive: 10Hz)
     steer_step = self.params.STEER_STEP if lat_active else self.params.INACTIVE_STEER_STEP
@@ -605,6 +605,7 @@ class CarController(CarControllerBase):
       self.apply_torque_last = apply_torque
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_torque, idx, lat_active))
+      CS.steering_authority.command(now_nanos, lat_active)
 
     status_bolt = self.CP.carFingerprint in NO_ACC_BOLT_CAR and (
       is_bolt_present_no_acc_pedal_profile(self.CP) or is_bolt_pedal_removed_profile(self.CP))

@@ -29,6 +29,7 @@ from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from opendbc.car.gm.aol import native_bootstrap_supported
+from opendbc.car.gm.steering_authority import monitored_profile
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
@@ -95,6 +96,9 @@ class SelfdriveD:
     self.aol_sequence = 0
     self.aol_axis_decision = AxisDecision()
     self.aol_dm_lateral_inhibit = False
+    self.aol_authority_lost = False
+    self.steering_authority_unavailable = False
+    self.steering_authority_pair = None
     self.force_stop_hold_alert = HoldAlertState()
     self.aol_car_state_log_ns = 0
     self.aol_last_intent = None
@@ -262,10 +266,44 @@ class SelfdriveD:
       self.big_model_chestnut = False
     return big_failed
 
+  def _update_steering_authority(self, CS):
+    if not monitored_profile(self.CP):
+      self.steering_authority_unavailable = False
+      return
+    now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+    service = 'starpilotCarState'
+    source_ns = self.aol_car_state_log_ns
+    source_current = bool(getattr(self, 'conditional_car_state_valid', False) and CS.canValid and not CS.canTimeout and
+                          0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS)
+    envelope_current = bool(self.sm.seen.get(service, False) and self.sm.valid.get(service, False) and
+                            self.sm.alive.get(service, False))
+    pair = None
+    if source_current and envelope_current:
+      message_ns = int(self.sm.logMonoTime[service])
+      companion = self.sm[service]
+      if (int(companion.sourceCarStateMonoTime) == message_ns and 0 < message_ns <= now_ns and
+          now_ns - message_ns <= INTENT_MAX_AGE_NS):
+        if message_ns == source_ns:
+          pair = (source_ns, bool(companion.lateralAuthorityUnavailable))
+          self.steering_authority_pair = pair
+        elif message_ns > source_ns:
+          previous = getattr(self, 'steering_authority_pair', None)
+          if previous is not None and previous[0] == source_ns:
+            pair = previous
+    previous_axes = self.aol_axis_decision
+    expected_active = self.active or previous_axes.lateral_active or previous_axes.longitudinal_active
+    if pair is not None:
+      self.steering_authority_unavailable = pair[1]
+    elif expected_active:
+      self.steering_authority_unavailable = True
+    if getattr(self, 'steering_authority_unavailable', False):
+      self.events.add(EventName.controlsMismatch)
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
     self.events.clear()
+    self._update_steering_authority(CS)
     self.tesla_stock_alerts = []
     self.nostalgia_paddle_cancel = False
     action_owner = getattr(self, 'controller_action_owner', None)
@@ -842,21 +880,37 @@ class SelfdriveD:
     self.conditional_status = result.status
     self.conditional_result = result
 
+  def _decide_aol_axes(self, CS, intent, native):
+    return decide_axes(
+      standard_lateral=self.active, standard_longitudinal=self.enabled and self.CP.openpilotLongitudinalControl,
+      intent=intent, native=native, car_state=CS, initialized=self.initialized,
+      model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+                       self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+      no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
+                           allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
+                                                     and ev6_aol_qualified(self.CP, marked_only=True)),
+                           cruise_main_required=getattr(self, 'aol_cruise_main_required', True),
+                           allow_below_engage_speed=bool(is_volt_ascm_longitudinal(self.CP) and
+                                                       not self.CP.flags & GMFlags.PEDAL_LONG)),
+      immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
+      dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
+                      self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
+                      self.sm['driverMonitoringState'].alertLevel == AlertLevel.three),
+      pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
+      lateral_inhibit=self.aol_dm_lateral_inhibit)
+
   def step(self):
     CS = self.data_sample()
     self.update_events(CS)
     native = None
-    lost_active_aol = False
+    lost_active_aol = bool(self.aol_replay and getattr(self, 'steering_authority_unavailable', False) and
+                           (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active))
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       if native is None and self.initialized:
         lost_active_aol = self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active
         self.events.add(EventName.controlsMismatch)
-    if not self.CP.passive and self.initialized:
-      self.enabled, self.active = self.state_machine.update(self.events)
-    if lost_active_aol and ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
-      self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     if self.aol_replay:
       intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
                               previous=getattr(self, 'aol_last_intent', None))
@@ -865,23 +919,32 @@ class SelfdriveD:
         self.aol_dm_lateral_inhibit = True
       elif intent is not None and not intent.allowedLatch:
         self.aol_dm_lateral_inhibit = False
-      self.aol_axis_decision = decide_axes(
-        standard_lateral=self.active, standard_longitudinal=self.enabled and self.CP.openpilotLongitudinalControl,
-        intent=intent, native=native, car_state=CS, initialized=self.initialized,
-        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
-                         self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
-        no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
-                             allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
-                                                       and ev6_aol_qualified(self.CP, marked_only=True)),
-                             cruise_main_required=getattr(self, 'aol_cruise_main_required', True),
-                             allow_below_engage_speed=bool(is_volt_ascm_longitudinal(self.CP) and
-                                                         not self.CP.flags & GMFlags.PEDAL_LONG)),
-        immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
-        dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
-                        self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
-                        self.sm['driverMonitoringState'].alertLevel == AlertLevel.three),
-        pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
-        lateral_inhibit=self.aol_dm_lateral_inhibit)
+      previous = self.aol_axis_decision
+      requested = self._decide_aol_axes(CS, intent, native)
+      source_current = bool(intent is not None and getattr(self, 'conditional_car_state_valid', False) and
+                            CS.canValid and not CS.canTimeout)
+      driver_override = bool(CS.brakePressed or CS.regenBraking or CS.gasPressed or
+                             self.events.contains(ET.USER_DISABLE))
+      lost_companion = bool((previous.lateral_active or previous.longitudinal_active) and
+                            not source_current and not self.events.contains(ET.USER_DISABLE))
+      lost_permission = bool(native is not None and not driver_override and (
+        previous.lateral_active and requested.desired_lateral and native.requestedLateral and
+        not native.lateralAllowed and not CS.steeringPressed and not self.events.contains(ET.OVERRIDE_LATERAL) or
+        previous.longitudinal_active and requested.desired_longitudinal and native.requestedLongitudinal and
+        not native.longitudinalAllowed and not self.events.contains(ET.OVERRIDE_LONGITUDINAL)))
+      if self.initialized and (lost_active_aol or lost_companion or lost_permission):
+        lost_active_aol = True
+        self.aol_authority_lost = True
+      elif source_current and not intent.allowedLatch:
+        self.aol_authority_lost = False
+      if getattr(self, 'aol_authority_lost', False):
+        self.events.add(EventName.controlsMismatch)
+    if not self.CP.passive and self.initialized:
+      self.enabled, self.active = self.state_machine.update(self.events)
+    if lost_active_aol and ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
+      self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
+    if self.aol_replay:
+      self.aol_axis_decision = self._decide_aol_axes(CS, intent, native)
     elif getattr(self, 'ordinary_axis_ack_required', False):
       self.aol_axis_decision = decide_ordinary_axis(
         requested=bool(self.initialized and self.conditional_car_state_valid and

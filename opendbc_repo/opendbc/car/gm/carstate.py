@@ -1,3 +1,4 @@
+from opendbc.car.gm.steering_authority import SteeringAuthority
 from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, BrakeSource, volt_cc_pedal_profile
 from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
@@ -35,6 +36,7 @@ BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.D
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    self.steering_authority = SteeringAuthority(CP)
     self.car_gps_tracker = CarGpsTracker(CP)
     self.car_gps_supported = self.car_gps_tracker.config is not None
     self.hybrid_profile = malibu_hybrid_profile(CP)
