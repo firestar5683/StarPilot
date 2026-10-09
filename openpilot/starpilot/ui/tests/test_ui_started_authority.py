@@ -12,6 +12,30 @@ from openpilot.selfdrive.ui.ui_state import UIState, UIStatus
 from openpilot.starpilot.ui.runtime_snapshot import current_message
 
 
+def test_replay_messages_use_clock_sample_after_receipt():
+  from openpilot.tools.replay.display_clock import ClockSample
+  from openpilot.starpilot.ui.runtime_snapshot import display_message
+  from openpilot.starpilot.ui.tests.test_runtime_snapshot import NOW, SubMasterFake
+
+  ui = MagicMock(spec=UIState)
+  ui.sm = SubMasterFake()
+  ui.replay_sample = ClockSample(NOW, None, NOW, epoch=1, valid=True)
+  ui._projection_params_at = time_now = 0
+  ui.replay_clock = MagicMock()
+  ui.replay_clock.sample.side_effect = lambda: ClockSample(time_now, None, time_now, epoch=1, valid=True)
+
+  def receive(_):
+    nonlocal time_now
+    time_now = NOW + 100_000
+    ui.sm.put('carControl', NS(latActive=True), age_ns=-100_000)
+
+  ui.sm.update = receive
+  UIState.update(ui)
+  assert display_message(ui.sm, 'carControl', ui.replay_sample.now_ns).latActive
+  assert ui.sm.replay_sample is ui.replay_sample
+  ui._reset_replay_state.assert_not_called()
+
+
 def owner():
   ui = object.__new__(UIState)
   messages = {'deviceState': NS(started=False, chestnutPresent=False),

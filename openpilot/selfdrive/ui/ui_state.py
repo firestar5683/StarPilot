@@ -194,12 +194,12 @@ class UIState:
 
   def update(self) -> None:
     if getattr(self, "replay_clock", None) is not None:
+      self.sm.update(0)
       sample = self.replay_clock.sample()
       if sample.epoch is not None and (self.replay_sample is None or sample.epoch != self.replay_sample.epoch):
         self._reset_replay_state()
       self.replay_sample = sample
       self.sm.replay_sample = sample
-      self.sm.update(0)
       self._update_state()
       self._update_status()
       now = time.monotonic()
