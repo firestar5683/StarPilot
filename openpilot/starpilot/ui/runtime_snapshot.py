@@ -5,6 +5,8 @@ an observed value. This module has no transport construction or write path.
 """
 
 from openpilot.starpilot.ui.onroad_customization import default_document, read_customization
+# Temporary old-route replay compatibility; remove with the marked hook below.
+from openpilot.starpilot.ui.old_starpilot_route_shim import speed_limit_fallback
 
 from collections.abc import Callable
 from dataclasses import replace
@@ -558,6 +560,11 @@ class RuntimeSnapshotAdapter:
         self._slc_sign_cache = None
     else:
       self._slc_sign_cache = None
+    # Temporary old StarPilot route replay shim. Retire by deleting this call
+    # and its import; remaining cleanup is documented in
+    # openpilot/starpilot/ui/old_starpilot_route_shim.py.
+    observation = speed_limit_fallback(ui, observation, now_ns, cruise_kph=cruise,
+                                      car=display_car if display_car_valid else None, read_message=display_message)
     experimental = bool(display_selfdrive.experimentalMode) if display_selfdrive is not None else _flag(params, "ExperimentalMode")
     observed_experimental = bool(display_selfdrive.experimentalMode) if display_selfdrive is not None else False
     persona = _personality(_text(params, "LongitudinalPersonality", "1"))

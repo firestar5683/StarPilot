@@ -123,6 +123,7 @@ class UIState:
         "vehicleParameters",
         "testJoystick",
         "rawAudioData",
+        *(["customReserved6"] if self.replay_clock is not None else []),
       ],
       ignore_alive=["starpilotSelfdriveState", "starpilotLateralState"], ignore_valid=["starpilotSelfdriveState", "starpilotLateralState"],
       ignore_avg_freq=["starpilotSelfdriveState", "starpilotLateralState"],

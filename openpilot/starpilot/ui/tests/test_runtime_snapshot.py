@@ -97,6 +97,56 @@ def ui_fake():
 
 
 class TestRuntimeSnapshot(unittest.TestCase):
+  # Temporary old-route replay compatibility: remove this entire test when support is removed.
+  # Cleanup instructions: openpilot/starpilot/ui/old_starpilot_route_shim.py.
+  def test_legacy_slc_is_replay_only_display_fallback(self):
+    from openpilot.tools.replay.display_clock import ClockSample
+    from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
+    ui = ui_fake()
+    legacy = messaging.new_message('customReserved6', valid=True).customReserved6
+    legacy.slcSpeedLimit, legacy.slcSpeedLimitOffset, legacy.slcSpeedLimitSource = 13.4112, 2.2352, 'None'
+    ui.sm.put('customReserved6', legacy)
+    ui.sm.valid['slcState'] = False
+    adapter = RuntimeSnapshotAdapter(ui)
+    self.assertNotEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.speed_limit.kind, ObservationKind.VALID)
+    ui.replay_sample = ui.sm.replay_sample = ClockSample(NOW, None, NOW, epoch=1, valid=True)
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
+    observation = state.speed_limit
+    self.assertAlmostEqual(observation.speed_limit_mps, 13.4112, places=4)
+    self.assertAlmostEqual(observation.offset_mps, 2.2352, places=4)
+    self.assertEqual(observation.source, 'unknown')
+    self.assertFalse(observation.action_enabled)
+    self.assertIsNone(observation.decision_id)
+    presentation = resolve_unified_speed(state)
+    self.assertEqual(presentation.posted_text, '30')
+    self.assertEqual(presentation.limit_text, '35')
+    self.assertEqual(presentation.offset_text, '+5')
+    self.assertEqual(presentation.active_side, 'none')
+    ui.params.values['SpeedLimitController'] = '1'
+    ui.sm['carState'].canValid, ui.sm['carState'].canTimeout = True, False
+    ui.sm['carControl'].longActive = True
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
+    presentation = resolve_unified_speed(state)
+    self.assertEqual((presentation.active_side, presentation.status), ('slc', 'Active'))
+    from openpilot.starpilot.ui.onroad_state import slc_controls
+    from openpilot.starpilot.ui.presentation import Profile
+    self.assertEqual(slc_controls(Profile.LARGE, state), ())
+    ui.sm['carState'].vCruiseCluster = 40.0
+    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
+    self.assertEqual((presentation.active_side, presentation.status), ('max', 'MAX limiting'))
+    legacy.slcOverriddenSpeed = 20.0
+    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
+    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Set-speed override'))
+    legacy.slcOverriddenSpeed = 0.0
+    ui.sm['carControl'].longActive = False
+    presentation = resolve_unified_speed(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad)
+    self.assertEqual((presentation.active_side, presentation.status), ('none', 'Disengaged'))
+    ui.sm.valid['slcState'] = True
+    self.assertEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.speed_limit.source, 'dashboard')
+    ui.sm.valid['slcState'] = False
+    ui.sm.logMonoTime['customReserved6'] = NOW - 1_000_000_001
+    self.assertNotEqual(adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad.speed_limit.kind, ObservationKind.VALID)
+
   def test_replay_display_survives_qlog_intervals_and_expires(self):
     from openpilot.tools.replay.display_clock import ClockSample
     for service, interval_ns in (('vehicleParameters', 250_000_000),

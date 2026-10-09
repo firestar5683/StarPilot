@@ -58,6 +58,7 @@ _services: dict[str, tuple] = {
   "longitudinalPlan": (True, 20., 10),
   "starpilotLongitudinalPlan": (True, 20., 10),
   "slcState": (True, 20., 10),
+  "customReserved6": (False, 20., 10),  # Historical starpilotPlan, replay only.
   "slcAction": (True, 0., 1),
   "slcCruiseEvent": (True, 0., 1),
   "slcDashboardObservation": (True, 100., 10),

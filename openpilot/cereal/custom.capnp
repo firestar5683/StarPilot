@@ -523,6 +523,22 @@ struct CustomReserved5 @0xa5cd762cd951a455 {
 }
 
 struct CustomReserved6 @0xf98d843bfd7004a3 {
+  # Temporary old StarPilot route replay compatibility: historical starpilotPlan at Event @113.
+  # Adapter and retirement instructions: openpilot/starpilot/ui/old_starpilot_route_shim.py.
+  # Keep field ordinals/types frozen. When old-route replay support is removed,
+  # empty this struct but retain its type ID.
+  # Historical prefix fields preserve the wire layout needed to decode the SLC fields below.
+  accelerationJerk @0 :Float32; cscControllingSpeed @1 :Bool; cscSpeed @2 :Float32;
+  cscTraining @3 :Bool; dangerFactor @4 :Float32; dangerJerk @5 :Float32;
+  desiredFollowDistance @6 :Int64; experimentalMode @7 :Bool; forcingStop @8 :Bool;
+  forcingStopLength @9 :Float32; starpilotEvents @10 :AnyPointer; starpilotToggles @11 :Text;
+  increasedStoppedDistance @12 :Float32; lateralCheck @13 :Bool; laneWidthLeft @14 :Float32;
+  laneWidthRight @15 :Float32; maxAcceleration @16 :Float32; minAcceleration @17 :Float32;
+  redLight @18 :Bool; roadCurvature @19 :Float32;
+  # Historical SLC values (speeds/offsets in m/s); replay display only.
+  slcMapSpeedLimit @20 :Float32;
+  slcMapboxSpeedLimit @21 :Float32; slcNextSpeedLimit @22 :Float32; slcOverriddenSpeed @23 :Float32;
+  slcSpeedLimit @24 :Float32; slcSpeedLimitOffset @25 :Float32; slcSpeedLimitSource @26 :Text;
 }
 
 struct StarPilotRadarState @0xb86e6369214c01c8 {

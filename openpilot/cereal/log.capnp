@@ -2644,6 +2644,9 @@ struct Event {
     starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
     slcVisionObservation @111 :Custom.StarPilotModelDataV2;
     customReserved5 @112 :Custom.CustomReserved5;
+    # Temporary historical starpilotPlan replay transport.
+    # When old-route replay support is removed, retain reserved slot @113.
+    # Adapter: openpilot/starpilot/ui/old_starpilot_route_shim.py.
     customReserved6 @113 :Custom.CustomReserved6;
     starpilotRadarState @114 :Custom.StarPilotRadarState;
     starpilotSelfdriveState @115 :Custom.StarPilotSelfdriveState;
