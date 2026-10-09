@@ -7,7 +7,7 @@ export function rememberInstallPrompt(event) {
 export function installHelp({ secure = window.isSecureContext, agent = navigator.userAgent } = {}) {
   if (/iPhone|iPad|iPod/.test(agent)) return 'Open Galaxy in Safari, tap Share, then Add to Home Screen. Turn on Open as Web App if shown.'
   if (!secure) return 'For the full web app, open your comma at https://galaxy.firestar.link, then choose Install Galaxy. Your local address can also be saved as a browser shortcut.'
-  return 'This browser does not support installation as a app. Use its menu to choose Install app or Add to Home Screen. On a Mac in Safari, choose File → Add to Dock.'
+  return 'This browser cannot install Galaxy automatically. Open the browser menu and choose Install app or Add to Home Screen. On a Mac in Safari, choose File → Add to Dock.'
 }
 
 export const InstallApp = {
@@ -41,8 +41,8 @@ export const InstallApp = {
       } catch { this.message = installHelp(); this.help = true }
     },
   },
-  template: `<div v-if="!installed" class="gx-nav-section">
-    <button type="button" class="gx-nav-item" @click="install"><i class="bi bi-download"></i><span>Install Galaxy</span></button>
+  template: `<div v-if="!installed" class="gx-install-app">
+    <button type="button" class="gx-btn gx-btn--tonal" @click="install"><i class="bi bi-download" aria-hidden="true"></i><span>Install Galaxy</span></button>
     <p v-if="help" class="gx-note gx-install-help">{{ message }}</p>
   </div>`,
 }

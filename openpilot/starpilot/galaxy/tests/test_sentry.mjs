@@ -14,7 +14,7 @@ assert.equal(validSentryEvents({ ...inventory, events: [{ ...inventory.events[0]
 assert.equal(validSentryEvents({ ...inventory, events: [{ ...inventory.events[0], path: '/secret' }] }), false)
 assert.equal(validSentryEvents({ ...inventory, events: [inventory.events[0], inventory.events[0]] }), false)
 assert.equal(validSentryEvents({ ...inventory, source: 'remote' }), false)
-assert.match(SentryEventsPage.template, /System clock times may be inaccurate/)
+assert.match(SentryEventsPage.template, /device clock and may be inaccurate/)
 assert.match(SentryEventsPage.template, /<img[^>]*event.images[^>]*api\/sentry\/image\//)
 assert.doesNotMatch(SentryEventsPage.template, /v-html|deleteEvent|Download/)
 assert.match(CamerasPage.template, /View motion events/)

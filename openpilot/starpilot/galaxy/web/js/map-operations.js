@@ -17,6 +17,8 @@ const ACTION_ERRORS = {
   not_parked: "Map downloads need a fresh parked status. Refresh and try again.",
   operation_changed: "This map download changed. Refresh its status before trying again.",
 }
+// 503 codes that mean "not ready yet" rather than a hard failure.
+const SERVICE_PENDING = new Set(["owner_unavailable", "unavailable"])
 const integer = (value) => Number.isSafeInteger(value) && value >= 0
 const nullableText = (value) => value === null || typeof value === "string" && value.length <= 128
 const bounds = (value) => value === null || Array.isArray(value) && value.length === 4 &&
@@ -134,7 +136,9 @@ export class MapOperationsClient {
         }
         if (body?.code === "package_unavailable")
           throw new Error("Offline map package is unavailable on this device.")
-        throw new Error("Offline maps service is unavailable.")
+        if (SERVICE_PENDING.has(body?.code))
+          throw new Error("Offline maps are starting up. Reconnecting automatically…")
+        throw new Error(typeof body?.error === "string" && body.error ? body.error : "Offline maps are unavailable. Try again shortly.")
       }
       if (!response.ok) throw new Error("Map request was rejected.")
       const data = payload

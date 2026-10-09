@@ -172,8 +172,9 @@ export const VehicleControlsPage = {
   computed: {
     makes() { return [...new Set((this.state.data?.choices || []).map((item) => item.make))] },
     models() {
+      if (!this.state.make) return []
       const needle = this.state.query.trim().toLocaleLowerCase()
-      return (this.state.data?.choices || []).filter((item) => (!this.state.make || item.make === this.state.make) &&
+      return (this.state.data?.choices || []).filter((item) => item.make === this.state.make &&
         (!needle || `${item.make} ${item.label} ${item.platform}`.toLocaleLowerCase().includes(needle)))
     },
   },
@@ -182,8 +183,8 @@ export const VehicleControlsPage = {
   methods: { choose(platform) { this.feed.preview(platform) } },
   template: `
     <section class="gx-vehicle" aria-label="Vehicle Controls">
-      <div class="gx-card gx-vehicle__header gx-page-header"><h2>Vehicle Selection</h2>
-        <p>Auto detects your car. A manual choice is saved for the next start; it does not change the car reported now.</p></div>
+      <header class="gx-settings__header gx-page-header"><div><h2>Vehicle Selection</h2>
+        <p>Auto detects your car. A manual choice is saved for the next start; it does not change the car reported now.</p></div></header>
       <GxState v-if="mode !== 'local'">Local vehicle selection is unavailable in preview.</GxState>
       <template v-else>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
@@ -200,9 +201,11 @@ export const VehicleControlsPage = {
           <template v-if="state.data.valid">
             <h3>Choose a Vehicle</h3>
             <div class="gx-vehicle__filters gx-actions"><GalaxySelect v-model="state.make" class="gx-field gx-field--full" aria-label="Vehicle make">
-                <option value="">All makes</option><option v-for="make in makes" :key="make" :value="make">{{ make }}</option></GalaxySelect>
-              <input v-model="state.query" class="gx-field" type="search" aria-label="Search vehicle models" placeholder="Search models"></div>
-            <div class="gx-vehicle__models"><button v-for="item in models" :key="item.platform" type="button" class="gx-btn gx-btn--tonal"
+                <option value="" disabled>Choose a make</option><option v-for="make in makes" :key="make" :value="make">{{ make }}</option></GalaxySelect>
+              <input v-if="state.make" v-model="state.query" class="gx-field" type="search" aria-label="Search vehicle models" placeholder="Search models"></div>
+            <p v-if="!state.make" class="gx-note">Choose a make to see its models.</p>
+            <p v-else-if="!models.length" class="gx-note">No models match this search.</p>
+            <div v-else class="gx-vehicle__models"><button v-for="item in models" :key="item.platform" type="button" class="gx-btn gx-btn--tonal"
                 :aria-pressed="state.data.selected === item.platform" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(item.platform)">
                 <strong>{{ item.label }}</strong><small>{{ item.make }}</small></button></div>
           </template>

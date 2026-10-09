@@ -184,8 +184,8 @@ export const BluetoothPage = {
   },
   template: `
     <section class="gx-driving" aria-label="Bluetooth">
-      <div class="gx-card gx-driving__intro gx-page-header"><h2>Bluetooth</h2>
-        <p>View, pair and manage nearby and saved devices.</p></div>
+      <header class="gx-settings__header gx-page-header"><div><h2>Bluetooth</h2>
+        <p>View, pair and manage nearby and saved devices.</p></div></header>
       <GxState v-if="mode !== 'local'">Bluetooth requires the device. No radio was checked in preview.</GxState>
       <template v-else>
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>

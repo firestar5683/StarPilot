@@ -81,20 +81,21 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
         const title = await page.getByRole('heading', { name: 'Navigation', exact: true }).boundingBox()
         assert(header && header.y >= 0 && header.height >= 44, 'shared header is visible')
         assert(title.y >= header.y + header.height, 'Navigation title sits below the shared header')
-        assert.equal(await page.getByRole('button', { name: 'Menu', exact: true }).isVisible(), true)
+        // Bottom nav and the drawer menu are mutually exclusive: mobile shows the bar, desktop shows the menu.
+        assert.equal(await page.getByRole('button', { name: 'Menu', exact: true }).isVisible(), width >= 768)
+        assert.equal(await page.locator('.blur-nav').isVisible(), width < 768)
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
         for (const name of ['Destination', 'Offline Maps', 'Setup']) {
           const tab = page.getByRole('group', { name: 'Navigation tools' }).getByRole('button', { name, exact: true })
           await tab.click()
           await page.mouse.move(0, 0)
           assert.equal(await tab.getAttribute('aria-pressed'), 'true')
-          await page.waitForFunction(el => getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)', await tab.elementHandle())
           const colors = await tab.evaluate(el => {
             const style = getComputedStyle(el)
             return { text: style.color, background: style.backgroundColor }
           })
           assert.notEqual(colors.text, colors.background, 'selected tab text must remain visible')
-          assert.equal(colors.background, 'rgba(0, 0, 0, 0)', 'selected tab uses the navigation underline style')
+          assert.notEqual(colors.background, 'rgba(0, 0, 0, 0)', 'selected tab uses the shared selected-button style')
         }
         await page.getByRole('button', { name: 'Destination', exact: true }).click()
         await page.screenshot({ path: `/private/tmp/navigation-shell-${theme}-${width}.png`, fullPage: true })
@@ -102,7 +103,7 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
     }
     for (const pinned of [false, true]) {
       await page.locator('.gx-app').evaluate((el, pinned) => el.classList.toggle('gx-nav-pinned', pinned), pinned)
-      for (const width of [360, 390, 768, 1024, 1280]) {
+      for (const width of [768, 1024, 1280]) {
         await page.setViewportSize({ width, height: 844 })
         const pill = await page.locator('.gx-appbar__pill').boundingBox()
         const status = await page.locator('.gx-appbar__right').boundingBox()

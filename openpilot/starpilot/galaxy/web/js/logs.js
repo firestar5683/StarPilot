@@ -64,12 +64,14 @@ export const Logs = {
         <MenuTile icon="bi-terminal" title="tmux Live View" description="Read the launcher console tail" @select="openTmux" />
         <MenuTile icon="bi-wrench" title="Troubleshoot" description="Read device and vehicle diagnostics" @select="openTroubleshoot" />
       </div>
-      <TroubleshootPage v-else-if="path === '/logs/troubleshoot'" :mode="mode" :unauthorized="unauthorized" />
-      <TmuxPage v-else-if="path === '/logs/tmux'" :mode="mode" :unauthorized="unauthorized" />
+      <TroubleshootPage v-else-if="path === '/logs/troubleshoot'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
+      <TmuxPage v-else-if="path === '/logs/tmux'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
       <template v-else-if="path === '/logs/monitor'"><SystemMonitor :mode="mode" :unauthorized="unauthorized" /></template>
       <template v-else-if="path === '/logs/crashes' && mode === 'local'">
 
         <h2>Crash Reports</h2>
+        <p class="gx-note">Local reports saved when a process stops unexpectedly.</p>
+        <GxNotice tone="danger" v-if="crashes.error">{{ crashes.error }}</GxNotice>
         <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"></div>
         <p v-if="crashes.scanIncomplete" class="gx-note">Directory scan is incomplete; newer reports may be omitted.</p>
         <p v-else-if="crashes.listLimited" class="gx-note">Showing the 200 newest reports; older reports are omitted.</p>
@@ -81,14 +83,11 @@ export const Logs = {
         </div>
         <GxState v-if="crashes.previewStatus === 'loading'" loading>Loading report…</GxState>
         <section v-else-if="crashes.preview" class="gx-card gx-crash-preview gx-panel"><div class="gx-crash-preview__head"><strong>{{ crashes.preview.name }}</strong><button type="button" class="gx-btn gx-btn--tonal" @click="copyPreview">Copy visible text</button></div><p v-if="crashes.preview.truncated" class="gx-note">Preview truncated to the first 256 KiB.</p><pre>{{ crashes.preview.text }}</pre></section>
-        <GxNotice tone="danger" v-if="crashes.error">{{ crashes.error }}</GxNotice>
       </template>
-      <section v-else-if="path === '/logs/android-auto' && mode === 'local'" class="gx-aa-logs" aria-labelledby="gx-aa-logs-title">
-        <header class="gx-aa-logs__header">
-          <div><h2 id="gx-aa-logs-title">Android Auto Logs</h2>
-            <p class="gx-note">The last 20 connection sessions, newest first. The archive includes every session, a readable report for each, Android Auto settings without Bluetooth addresses, and the car view's renderer logs.</p></div>
-          <div class="gx-aa-logs__actions"><a class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-aa-logs__format">ZIP</span></a><button type="button" class="gx-btn gx-btn--tonal" @click="aaFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
-        </header>
+      <section v-else-if="path === '/logs/android-auto' && mode === 'local'" class="gx-settings gx-aa-logs" aria-labelledby="gx-aa-logs-title">
+        <header class="gx-settings__header gx-page-header"><div><h2 id="gx-aa-logs-title">Android Auto Logs</h2>
+          <p>The last 20 connection sessions, newest first. Download the archive to attach to a bug report.</p></div></header>
+        <div class="gx-settings__controls gx-actions"><a class="gx-btn" :href="bundleUrl()" download><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span>Download all logs</span><span class="gx-aa-logs__format">ZIP</span></a><button type="button" class="gx-btn gx-btn--tonal" @click="aaFeed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span></button></div>
         <GxState v-if="aaLogs.status === 'loading'" loading>Loading Android Auto logs…</GxState>
         <GxNotice v-else-if="aaLogs.status === 'unavailable'" tone="danger">{{ aaLogs.error || 'Android Auto logs are unavailable.' }}</GxNotice>
         <GxState v-else-if="aaLogs.status === 'ready' && !aaLogs.sessions.length">No Android Auto sessions have been logged yet.</GxState>

@@ -2,11 +2,10 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
 import { InstallApp } from "./install-app.js"
-import { LocalAccess } from "./local-access.js"
 
 export const GalaxyPage = {
   name: "GalaxyPage",
-  components: { GxState, GxNotice, LocalAccess, InstallApp },
+  components: { GxState, GxNotice, InstallApp },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "" }),
@@ -58,8 +57,8 @@ export const GalaxyPage = {
     },
   },
   template: `
-    <div class="gx-settings gx-tunnel"><header class="gx-page-header"><h2>Install Galaxy / Tunnel</h2>
-      <p>Pair your device for secure remote Galaxy access.</p></header>
+    <div class="gx-settings gx-tunnel"><header class="gx-settings__header gx-page-header"><div><h2>Install Galaxy / Tunnel</h2>
+      <p>Pair your device for secure remote Galaxy access.</p></div></header>
       <GxState v-if="mode !== 'local'">Pairing is available on your comma.</GxState>
       <GxState v-else-if="loading" loading>Checking pairing status…</GxState>
       <section v-else class="gx-card gx-panel">
@@ -87,7 +86,6 @@ export const GalaxyPage = {
         <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>
         <p class="gx-note">Galaxy is a Progressive Web App and needs an active connection.</p>
       </section>
-      <LocalAccess :mode="mode" :on-unauthorized="unauthorized" />
     </div>
   `,
 }

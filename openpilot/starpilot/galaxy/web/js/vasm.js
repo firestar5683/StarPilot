@@ -161,15 +161,16 @@ export const VasmPage = {
   },
   template: `
     <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings">
-      <header class="gx-settings__header gx-page-header"><div><h2>V-ASM Spot Monitoring</h2></div>
-        <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
+      <header class="gx-settings__header gx-page-header"><div><h2>V-ASM Spot Monitoring</h2>
+        <p>Highlight the side windows a driver would check in the cabin camera, and tune visual spot-monitoring options.</p></div>
+        <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button></div></header>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
       <GxState v-if="mode !== 'local'">Local saved settings are unavailable in preview.</GxState>
       <template v-else>
         <GxState v-if="state.status === 'loading'" loading>Reading camera regions and spot-monitoring preferences…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read camera regions or spot-monitoring preferences. Reconnecting automatically…</GxNotice>
-        <GxNotice tone="danger" v-if="state.error">{{ state.error }}
-          </GxNotice>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
+        <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
         <div v-if="state.data" class="gx-settings__body">
 
           <section class="gx-card gx-vasm__editor" aria-label="Camera window region editor">
@@ -184,7 +185,6 @@ export const VasmPage = {
             </div>
             <canvas ref="canvas" class="gx-vasm__canvas" :aria-label="'Mirrored camera window canvas, editing ' + displaySide(state.activeSide)"
               @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp"></canvas>
-            <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
             <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
             <p class="gx-note">A saved choice alone does not activate monitoring.</p>
           </section>

@@ -217,8 +217,11 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
         await x.press('Tab')
         await page.getByRole('button', {name:'Widgets', exact:true}).click()
         await rows.last().scrollIntoViewIfNeeded()
-        await page.getByRole('button', {name:'Menu', exact:true}).click()
-        await page.getByRole('complementary', {name:'Galaxy navigation'}).getByRole('button', {name:'Tools', exact:true}).click()
+        if (width < 768) await page.locator('.blur-nav').getByRole('button', {name:'Tools', exact:true}).click()
+        else {
+          await page.getByRole('button', {name:'Menu', exact:true}).click()
+          await page.getByRole('complementary', {name:'Galaxy navigation'}).getByRole('button', {name:'Tools', exact:true}).click()
+        }
         const dialog = page.getByRole('alertdialog', {name:'Leave without saving your changes?'})
         await dialog.waitFor()
         assert.equal(new URL(page.url()).hash, '#' + route, 'navigation waits for confirmation')
@@ -235,8 +238,11 @@ const projection = JSON.parse(execFileSync(process.env.PYTHON || 'python3', ['-c
         assert.equal(await dialog.count(), 0)
         assert.equal(new URL(page.url()).hash, '#' + route)
         assert.equal(await page.getByRole('button', {name:'Save changes', exact:true}).isEnabled(), true)
-        await page.getByRole('button', {name:'Menu', exact:true}).click()
-        await page.getByRole('complementary', {name:'Galaxy navigation'}).getByRole('button', {name:'Tools', exact:true}).click()
+        if (width < 768) await page.locator('.blur-nav').getByRole('button', {name:'Tools', exact:true}).click()
+        else {
+          await page.getByRole('button', {name:'Menu', exact:true}).click()
+          await page.getByRole('complementary', {name:'Galaxy navigation'}).getByRole('button', {name:'Tools', exact:true}).click()
+        }
         await dialog.getByRole('button', {name:'Discard and leave', exact:true}).click()
         await page.waitForURL('**#/tools')
         assert.equal(await dialog.count(), 0)

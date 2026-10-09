@@ -57,6 +57,7 @@ export const CloudProviderPage = {
   template: `<div class="gx-settings__developer-body">
     <GxState v-if="mode !== 'local'">Open this Developer page on your device to choose a cloud provider.</GxState>
     <template v-else>
+      <GxNotice v-if="status && !status.canSelect" tone="warn">Turn off the vehicle to change this Developer setting.</GxNotice>
       <section class="gx-card gx-settings__section"><div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div><div class="gx-row"><div class="gx-row__info">
       <label class="gx-settings__developer-provider">Cloud provider
         <GalaxySelect class="gx-field gx-field--full" aria-label="Cloud provider" :value="status?.selected || ''"
@@ -65,7 +66,6 @@ export const CloudProviderPage = {
         </GalaxySelect>
       </label></div></div></section>
       <GxNotice v-if="status?.restartRequired" tone="warn">{{ selected?.label }} applies after the next reboot. No automatic reboot will occur.</GxNotice>
-      <GxNotice v-else-if="status && !status.canSelect" tone="warn">Turn off the vehicle to change this Developer setting.</GxNotice>
 
       <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
     </template></div>`,

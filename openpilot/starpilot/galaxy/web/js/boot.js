@@ -7,9 +7,15 @@ function failed() {
   status.classList.add("gx-boot--failed")
   retry.hidden = false
 }
+function dismiss() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { status.remove(); return }
+  status.classList.add("gx-boot--done")
+  status.addEventListener("transitionend", () => status.remove(), { once: true })
+  setTimeout(() => status.remove(), 800)
+}
 const timer = setTimeout(failed, 10000)
 import("./app.js").then(() => {
   clearTimeout(timer)
-  if (document.querySelector("#galaxy-app .gx-app")) status.remove()
+  if (document.querySelector("#galaxy-app .gx-app")) dismiss()
   else failed()
 }).catch(() => { clearTimeout(timer); failed() })

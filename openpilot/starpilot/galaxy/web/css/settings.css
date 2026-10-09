@@ -5,6 +5,7 @@
 .gx-settings__section .gx-section__header .gx-icon-btn { flex: none; height: 40px; min-height: 40px; width: 40px; min-width: 40px; }
 .gx-settings__section .gx-section__header .gx-icon-btn:hover { background: var(--glass-bg-hover); }
 .gx-settings__body, .gx-settings-tabs { animation: gx-fade-in var(--motion-base) ease-out; }
+.gx-panel-stage .gx-settings__body { animation: none; }
 @media (prefers-reduced-motion: reduce) { .gx-settings__body, .gx-settings-tabs { animation: none; } }
 .gx-settings__section { padding: 0; }
 .gx-settings__section .gx-section__header { cursor: default; }

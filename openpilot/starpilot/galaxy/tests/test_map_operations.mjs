@@ -101,7 +101,7 @@ const partial = fixture()
 partial.client.start()
 await partial.reply(0, { code: 'owner_unavailable' }, 503)
 await partial.reply(1, status)
-assert.match(partial.publishes.at(-1).error, /unavailable/)
+assert.match(partial.publishes.at(-1).error, /starting up|Reconnecting/)
 assert.equal(partial.client.catalog, null)
 partial.client.stop()
 

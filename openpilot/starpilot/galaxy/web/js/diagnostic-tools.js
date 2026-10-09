@@ -4,7 +4,6 @@ import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
 import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
-import { LocalAccess } from "./local-access.js"
 
 const text = (value, max = 1024) => typeof value === "string" && value.length <= max
 const rows = value => Array.isArray(value) && value.length <= 128 && value.every(row => row && text(row.label, 128) && text(row.value))
@@ -94,24 +93,24 @@ const methods = {
     const link = document.createElement("a"); link.href = url; link.download = "starpilot-console.txt"; link.click(); URL.revokeObjectURL(url) },
 }
 export const TroubleshootPage = {
-  components: { GxState, GxIconButton, GxNotice, LocalAccess }, props, ...lifecycle,
+  components: { GxState, GxIconButton, GxNotice }, props, ...lifecycle,
   setup: props => setup(props, false), methods: { ...methods, report: troubleshootReport },
-  template: `<section class="gx-settings"><div class="gx-settings__header gx-page-header"><h2>Troubleshoot</h2></div>
-    <p>Read-only device, vehicle and selected settings. Change settings in Toggles.</p>
-    <div class="gx-settings__controls gx-actions"><GxIconButton label="Copy report" icon="bi-clipboard" :disabled="!state.data" @click="copyText(report(state.data))" /><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/settings')">Toggles</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/monitor')">System Monitor</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/crashes')">Crash Reports</button></div>
-    <GxState v-if="state.loading && !state.error" loading>Loading report…</GxState><GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice><GxNotice v-if="state.notice && !state.error" tone="info">{{ state.notice }}</GxNotice>
+  template: `<section class="gx-settings"><header class="gx-settings__header gx-page-header"><div><h2>Troubleshoot</h2>
+    <p>Read-only device, vehicle and settings snapshot. Copy it when reporting a problem.</p></div></header>
+    <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
+    <GxNotice v-if="state.notice && !state.error" tone="info">{{ state.notice }}</GxNotice>
+    <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/monitor')">System Monitor</button><button class="gx-btn gx-btn--tonal" @click="$emit('navigate', '/logs/crashes')">Crash Reports</button><GxIconButton label="Copy report" icon="bi-clipboard" :disabled="!state.data" @click="copyText(report(state.data))" /></div>
+    <GxState v-if="state.loading && !state.error" loading>Loading report…</GxState>
     <template v-if="state.data"><section class="gx-card gx-panel"><h3>Device Snapshot</h3><p>State: {{ state.data.device.state || 'Unavailable' }}</p><p>Vehicle: {{ state.data.vehicle.available ? state.data.vehicle.fingerprint : 'Unavailable' }}</p><p>Brand: {{ state.data.vehicle.brand || 'Unavailable' }} · Longitudinal: {{ state.data.vehicle.longitudinal ? 'Available' : 'Unavailable' }} · Steering: {{ state.data.vehicle.steering || 'Unavailable' }}</p><dl class="gx-details"><template v-for="row in state.data.snapshot" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></template></dl></section>
-      <section v-for="section in state.data.sections" :key="section.title" class="gx-card gx-panel"><h3>{{ section.title }}</h3><dl class="gx-details"><template v-for="row in section.rows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></template></dl></section><p class="gx-note">{{ state.data.note }}</p></template>
-    <LocalAccess v-if="state.error" :mode="mode" :on-unauthorized="unauthorized" /></section>`,
+      <section v-for="section in state.data.sections" :key="section.title" class="gx-card gx-panel"><h3>{{ section.title }}</h3><dl class="gx-details"><template v-for="row in section.rows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></template></dl></section><p class="gx-note">{{ state.data.note }}</p></template></section>`,
 }
 export const TmuxPage = {
-  components: { GxState, GxIconButton, GxNotice, LocalAccess }, props, ...lifecycle,
+  components: { GxState, GxIconButton, GxNotice }, props, ...lifecycle,
   setup: props => setup(props, true), methods,
-  template: `<section class="gx-settings"><div class="gx-settings__header gx-page-header"><h2>tmux Live View</h2></div>
-    <p>Read-only launcher console tail. No commands or keyboard input are sent to the comma.</p>
-    <div class="gx-settings__controls gx-actions"><GxIconButton :label="state.live ? 'Pause console updates' : 'Resume console updates'" :icon="state.live ? 'bi-pause-fill' : 'bi-play-fill'" :disabled="mode !== 'local'" @click="feed.setLive(!state.live)" /><GxIconButton label="Copy console text" icon="bi-clipboard" :disabled="!state.data?.text" @click="copyText(state.data.text)" /><GxIconButton label="Download console text" icon="bi-download" :disabled="!state.data?.text" @click="saveText(state.data.text)" /></div>
+  template: `<section class="gx-settings"><header class="gx-settings__header gx-page-header"><div><h2>tmux Live View</h2>
+    <p>Live view of the launcher console, refreshed every few seconds.</p></div></header>
     <GxState v-if="state.loading && !state.error" loading>Loading console…</GxState><GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice><GxNotice v-if="state.notice && !state.error" tone="info">{{ state.notice }}</GxNotice>
-    <section v-if="state.data" class="gx-card gx-crash-preview gx-panel"><p v-if="!state.data.available">{{ state.data.reason }}</p><p v-else>Pane: {{ state.data.pane }}</p><pre class="gx-pre">{{ state.data.text }}</pre></section>
-    <p class="gx-note gx-tool-footer" role="status">{{ state.live ? 'Live · every 2 seconds while visible' : 'Paused' }}<span v-if="state.data?.truncated"> · showing the latest console lines</span></p>
-    <LocalAccess v-if="state.error || state.data?.available === false" :mode="mode" :on-unauthorized="unauthorized" /></section>`,
+    <div class="gx-settings__controls gx-actions"><GxIconButton :label="state.live ? 'Pause console updates' : 'Resume console updates'" :icon="state.live ? 'bi-pause-fill' : 'bi-play-fill'" :disabled="mode !== 'local'" @click="feed.setLive(!state.live)" /><GxIconButton label="Copy console text" icon="bi-clipboard" :disabled="!state.data?.text" @click="copyText(state.data.text)" /><GxIconButton label="Download console text" icon="bi-download" :disabled="!state.data?.text" @click="saveText(state.data.text)" /></div>
+    <section v-if="state.data" class="gx-card gx-crash-preview gx-panel"><p v-if="!state.data.available">{{ state.data.reason }}</p><pre class="gx-pre">{{ state.data.text }}</pre></section>
+    <p class="gx-note gx-tool-footer" role="status">{{ state.live ? 'Live · every 2 seconds while visible' : 'Paused' }}<span v-if="state.data?.truncated"> · showing the latest console lines</span></p></section>`,
 }

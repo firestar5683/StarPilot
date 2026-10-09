@@ -60,8 +60,9 @@ for (const component of [TroubleshootPage, TmuxPage]) {
   assert.match(setup.state.error, /sample mode/)
   setup.feed.stop()
 }
-assert.ok(TroubleshootPage.template.includes("'/settings'"))
-assert.ok(TmuxPage.template.includes('No commands or keyboard input'))
+assert.ok(TroubleshootPage.template.includes("'/logs/monitor'"))
+assert.ok(TroubleshootPage.template.includes("'/logs/crashes'"))
+assert.ok(TmuxPage.template.includes('launcher console'))
 assert.ok(TmuxPage.template.includes('state.data.text'))
 console.log('Diagnostic tools: actual Vue templates/setup; read-only report, bounded console, pause/resume/visibility/unmount/auth and stable error content passed')
 

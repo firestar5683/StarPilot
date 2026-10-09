@@ -411,10 +411,11 @@ export const NavigationPage = {
   },
   template: `
     <div class="gx-view gx-navigation">
-      <h2 class="gx-navigation__title">Navigation</h2>
-      <div class="gx-navigation__tabs gx-tabs" role="group" aria-label="Navigation tools">
+      <header class="gx-settings__header gx-page-header"><div><h2>Navigation</h2>
+        <p>Set a destination, prepare offline maps, and configure navigation and Mapbox.</p></div></header>
+      <div class="gx-tabs gx-actions" role="group" aria-label="Navigation tools">
         <button v-for="item in [{id:'route',label:'Destination'},{id:'maps',label:'Offline Maps'},{id:'setup',label:'Setup'}]" :key="item.id"
-          type="button" class="gx-btn" :class="tab === item.id ? '' : 'gx-btn--tonal'" :aria-pressed="tab === item.id" @click="tab=item.id">{{ item.label }}</button>
+          type="button" class="gx-btn gx-btn--tonal" :aria-pressed="tab === item.id" @click="tab=item.id">{{ item.label }}</button>
       </div>
       <div v-if="tab === 'maps'" class="gx-navigation__offline">
         <OfflineRoadMapsPanel :mode="mode" :unauthorized="unauthorized" :has-key="!!data?.hasKey" :metric="data?.isMetric !== false" />
@@ -448,7 +449,7 @@ export const NavigationPage = {
       </template>
       <template v-else>
         <div class="gx-navigation__workspace">
-        <div class="gx-card gx-navigation__panel">
+        <div class="gx-navigation__panel">
           <p v-if="mode === 'local' && !data" role="status" class="gx-note">{{ error ? 'Navigation could not be loaded.' : 'Connecting to your comma…' }}</p>
           <button v-if="mode === 'local' && !data && error" type="button" class="gx-btn" @click="client.load()">Try again</button>
           <p v-if="mode !== 'local'" class="gx-card gx-navigation__section gx-note">Connect to your comma to set up navigation and choose a destination.</p>
@@ -527,9 +528,7 @@ export const NavigationPage = {
               <button type="button" class="gx-btn gx-btn--danger" :disabled="!available" @click="client.action('clear')">End navigation</button>
             </div>
           </section>
-          <section v-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your public Mapbox key to search for places and plan a route. Your key stays on your comma.</p>
-            <form @submit.prevent="saveKey(true)" class="gx-navigation__search"><label for="navigation-inline-token" class="gx-sr-only">Public Mapbox access token</label><input id="navigation-inline-token" class="gx-field" type="password" autocomplete="off" v-model="token" placeholder="pk.…" maxlength="2048" required :disabled="!available"><button type="submit" class="gx-btn" :disabled="!available || !token.trim()">Save and enable</button></form><button type="button" class="gx-btn gx-btn--tonal" @click="tab='setup'">Key details</button>
-          </section>
+          <section v-if="data && !data.hasKey" class="gx-card gx-navigation__section"><h3>Connect Mapbox</h3><p>Add your public Mapbox key to search for places and plan a route. Your key stays on your comma.</p><button type="button" class="gx-btn" @click="tab='setup'">Set up Mapbox</button></section>
           <section v-else-if="data && !data.enabled" class="gx-card gx-navigation__section"><h3>Navigation is off</h3><button type="button" class="gx-btn" :disabled="!available" @click="client.action('configure',{patch:{enabled:true}})">Turn on navigation</button></section>
           <template v-else>
             <p v-if="busy || searchPending" role="status" class="gx-navigation__busy">{{ searchPending ? 'Searching…' : 'Working…' }}</p>

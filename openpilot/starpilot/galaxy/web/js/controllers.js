@@ -72,7 +72,7 @@ export class ControllersFeed {
     this.busy = true
     this.emit()
     this.timeout = this.later(() => request.abort(), 6000)
-    let failure = "Controller Buttons are unavailable. Reload before trying again."
+    let failure = "Controller Buttons are unavailable. Reconnecting automatically…"
     try {
       const response = await this.fetcher(payload === null ? "./api/controllers/status" : "./api/controllers/action", {
         credentials: "same-origin", cache: "no-store", signal: request.signal,
@@ -167,9 +167,8 @@ export const ControllersPage = {
       <p>Assign physical USB or Bluetooth buttons to Quick Select and available driving screen actions. Turn off the vehicle to edit.</p>
       <p v-if="mode !== 'local'" class="gx-note">Connect to local Galaxy to manage controller buttons.</p>
       <template v-else>
-        <GxNotice :tone="state.error ? 'danger' : 'info'" v-if="state.error || !state.status || !state.status.available" :busy="state.busy && !state.error">
-          {{ state.error || (!state.status ? 'Checking attached controllers…' : 'Controller Buttons are unavailable.') }}
-          <button type="button" class="gx-btn gx-btn--tonal" :disabled="state.busy" @click="reload">Refresh</button>
+        <GxNotice :tone="state.error ? 'danger' : 'info'" v-if="state.error || !state.status || !state.status.available">
+          {{ state.error || (!state.status ? 'Checking attached controllers…' : 'Controller Buttons are unavailable. Reconnecting automatically…') }}
         </GxNotice>
         <template v-if="state.status?.available">
           <GxNotice v-if="!state.status.editable" tone="warn">Turn off the vehicle to change controller buttons.</GxNotice>

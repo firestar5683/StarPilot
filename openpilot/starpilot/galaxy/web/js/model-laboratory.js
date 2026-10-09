@@ -159,15 +159,15 @@ export const LaboratoryPage = {
   },
   template: `
     <div class="gx-settings gx-models">
-      <section class="gx-card">
-        <div class="gx-section__header"><i class="bi bi-bezier2"></i><span class="gx-section__title">Model Laboratory</span></div>
-        <div class="gx-panel gx-stack"><span class="gx-row__desc">Use lateral judgment from one model and longitudinal judgment from another.</span><div class="gx-actions"><span class="gx-chip">{{ status ? (status.chestnutReady ? 'Chestnut ready' : 'Chestnut required') : 'Waiting for device status' }}</span><span v-if="status" class="gx-chip">{{ status.isOnroad ? 'Onroad' : 'Parked' }}</span></div></div>
-        <p v-if="mode !== 'local'" class="gx-note gx-inset">Model Laboratory is available on the device. Preview does not configure a pair.</p>
-        <GxState v-else-if="loading" loading>Loading Model Laboratory…</GxState>
-        <GxNotice tone="danger" v-if="error" class="gx-inset">{{ error }}</GxNotice>
-        <p v-if="status?.configurationError" class="gx-note gx-note--danger gx-inset">{{ status.configurationError }}</p>
-        <GxNotice v-if="message" tone="info" class="gx-inset">{{ message }}</GxNotice>
-      </section>
+      <header class="gx-settings__header gx-page-header"><div><h2>Model Laboratory</h2>
+        <p>Pair lateral judgment from one model with longitudinal judgment from another, then enable the pair for the next drive.</p></div>
+        <div class="gx-actions"><span class="gx-chip">{{ status ? (status.chestnutReady ? 'Chestnut ready' : 'Chestnut required') : 'Waiting for device status' }}</span><span v-if="status" class="gx-chip">{{ status.isOnroad ? 'Onroad' : 'Parked' }}</span></div></header>
+      <GxState v-if="mode !== 'local'">Model Laboratory is available on the device. Preview does not configure a pair.</GxState>
+      <GxState v-else-if="loading" loading>Loading Model Laboratory…</GxState>
+      <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
+      <GxNotice tone="danger" v-if="status?.configurationError">{{ status.configurationError }}</GxNotice>
+      <GxNotice v-if="message" tone="info">{{ message }}</GxNotice>
+      <template v-if="mode === 'local' && !loading">
       <section class="gx-card">
         <div class="gx-section__header"><i class="bi bi-download"></i><span class="gx-section__title">Available models</span></div>
         <GxSummary :items="[{label: 'Catalog models', value: availableModels.length}, {label: 'Published versions', value: status?.summary?.published || 0}, {label: 'Verified downloads', value: readyModels.length}]" />
@@ -187,5 +187,6 @@ export const LaboratoryPage = {
         </div>
       </section>
       <section class="gx-card"><div class="gx-section__header"><i class="bi bi-activity"></i><span class="gx-section__title">Runtime</span><span class="gx-chip">{{ runtimeState }}</span></div><div class="gx-row"><div class="gx-row__info"><span class="gx-row__desc">Lateral: {{ modelLabel(status?.runtime.lateralModel) }}</span><span class="gx-row__desc">Longitudinal: {{ modelLabel(status?.runtime.longitudinalModel) }}</span><span v-if="status?.runtime.error" class="gx-note gx-note--danger">{{ status.runtime.error }}</span><span v-if="status && !status.runtimeSupported" class="gx-row__desc">{{ status.runtimeUnavailableReason || 'Pair runtime is unavailable.' }}</span></div></div></section>
+      </template>
     </div>`,
 }

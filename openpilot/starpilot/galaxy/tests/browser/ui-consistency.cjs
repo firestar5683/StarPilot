@@ -144,7 +144,7 @@ const { resolve } = require('node:path')
   await page.locator('.gx-settings-tabs button').first().click()
 
   await page.goto(base + '#/tools')
-  await page.locator('.blur-nav').waitFor()
+  await page.locator('.gx-appbar').waitFor()
   await page.evaluate(async () => (await import('./js/router.js')).navigate('/settings'))
   await manage.click()
   await page.waitForTimeout(250)

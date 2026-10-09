@@ -50,11 +50,10 @@ export const SentryEventsPage = {
   methods: { systemTime },
   template: `
     <div class="gx-view gx-home" aria-label="Sentry motion events">
-      <div class="gx-home__hero"><div><h1>Motion Events</h1>
-        <p class="gx-note">Local motion records only · System clock times may be inaccurate</p></div>
-        </div>
+      <header class="gx-settings__header gx-page-header"><div><h2>Sentry</h2>
+        <p>Review motion events, configure motion monitoring, and manage notifications. Timestamps use the device clock and may be inaccurate.</p></div></header>
 
-      <SettingsPage :mode="mode" :unauthorized="unauthorized" initial-page="sentry" title="Motion monitoring settings" />
+      <SettingsPage :mode="mode" :unauthorized="unauthorized" initial-page="sentry" title="" />
       <SentryNotifications :mode="mode" :unauthorized="unauthorized" />
       <GxState v-if="mode !== 'local'">Local motion records are unavailable in preview.</GxState>
       <template v-else>

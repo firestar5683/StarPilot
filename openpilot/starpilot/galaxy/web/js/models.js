@@ -440,19 +440,19 @@ export const ModelsPage = {
       <GxState v-else-if="loading" loading>Reading installed models and available downloads…</GxState>
 
       <template v-else>
+        <header class="gx-settings__header gx-page-header"><div><h2>Model Manager</h2>
+          <p>Bundled model files, download state, and runtime health.</p></div></header>
+        <GxNotice v-if="message" tone="info">{{ message }}</GxNotice>
+        <GxNotice v-if="error" tone="danger" title="Model Manager">{{ error }}</GxNotice>
+        <GxNotice v-if="status.isOnroad" tone="warn">Park the vehicle before changing or downloading models.</GxNotice>
+        <GxNotice v-if="status.downloading" :title="'Downloading ' + downloadTargetLabel">{{ status.progress || 'Keep the device connected until the download finishes.' }}</GxNotice>
         <section class="gx-card">
           <div class="gx-section__header">
             <i aria-hidden="true" class="bi bi-cpu"></i>
-            <span class="gx-section__title">Model Manager</span>
+            <span class="gx-section__title">Installed models</span>
           </div>
           <GxSummary :items="[{label: 'Installed', value: summary.installed}, {label: 'Missing', value: summary.missing}, {label: 'Total', value: summary.total}]" />
           <p class="gx-model-selection">Selected: <strong>{{ currentLabel }}</strong></p>
-          <div class="gx-panel-footer">
-            <GxNotice v-if="message" tone="info">{{ message }}</GxNotice>
-            <GxNotice v-if="error" tone="danger" title="Model Manager">{{ error }}</GxNotice>
-            <GxNotice v-if="status.isOnroad" tone="warn">Park the vehicle before changing or downloading models.</GxNotice>
-            <GxNotice v-if="status.downloading" :title="'Downloading ' + downloadTargetLabel">{{ status.progress || 'Keep the device connected until the download finishes.' }}</GxNotice>
-          </div>
         </section>
 
         <section v-if="status.jetlink" class="gx-card">

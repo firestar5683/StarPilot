@@ -7,6 +7,12 @@ import { GalaxySelect } from "./galaxy-select.js"
 const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback", "versions", "version"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
 const UPDATER_ACTIVE = new Set(["checking...", "downloading...", "finalizing update...", "updating..."])
+const PRIMARY_BRANCHES = ["StarPilot", "Dom"]
+const PRIMARY_BRANCH_LABELS = { StarPilot: "Stable — StarPilot", Dom: "Development — Dom" }
+const PRIMARY_BRANCH_HELP = {
+  StarPilot: "Stable releases. Recommended for most users.",
+  Dom: "Latest features and fixes under development. Updates regularly and may introduce bugs.",
+}
 const unavailableOperations = () => ({ parked: false, availableBranches: [], selectedTarget: null,
   canCheck: false, canFastUpdate: false, canRollback: false, canDownload: false, canSelect: false, canInstall: false,
   reason: "Update controls are unavailable", request: null })
@@ -285,7 +291,7 @@ export const SoftwarePage = {
   name: "SoftwarePage",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, busy: false, uncertain: false, notice: "", error: "",
-    draftBranch: "", draftTouched: false, dialog: null, historyKind: "recent", version: "" }),
+    draftBranch: "", primaryChoice: "", draftTouched: false, dialog: null, historyKind: "recent", version: "" }),
   created() {
     this.feed = new SoftwareStatusFeed({ includeHistory: false, publish: (update) => {
       Object.assign(this.$data, update)
@@ -304,7 +310,15 @@ export const SoftwarePage = {
       return [...new Set([this.operations?.selectedTarget, this.data?.installed.branch, ...available].filter(branch => branch && branch !== "other:"))]
         .map(name => ({ name, available: available.includes(name) || name === this.data?.installed.branch }))
     },
-    canStageBranch() { return !!this.draftBranch && this.operations?.availableBranches.includes(this.draftBranch) && this.draftBranch !== this.operations.selectedTarget },
+    primaryBranchHelp() { return PRIMARY_BRANCH_HELP[this.primaryChoice] || "" },
+    otherBranches() {
+      const available = this.operations?.availableBranches || []
+      const selected = this.operations?.selectedTarget
+      const installed = this.data?.installed?.branch
+      return [...new Set([selected, installed, ...available].filter(branch => branch && branch !== "other:" && !PRIMARY_BRANCHES.includes(branch)))]
+        .map(name => ({ name, listed: available.includes(name), current: name === installed }))
+    },
+    canStageBranch() { return !!this.draftBranch && this.draftBranch !== "other:" && this.operations?.availableBranches.includes(this.draftBranch) && this.draftBranch !== this.operations.selectedTarget },
     branchChanging() { return !!this.draftBranch && this.draftBranch !== this.data?.installed.branch },
     versionEntries() {
       const history = this.operations?.history
@@ -318,9 +332,22 @@ export const SoftwarePage = {
   methods: {
     syncDraftBranch(branch) {
       this.draftBranch = this.operations?.availableBranches.includes(branch) || branch === this.data?.installed.branch ? branch : this.data?.installed.branch || ""
+      this.primaryChoice = PRIMARY_BRANCHES.includes(this.draftBranch) ? this.draftBranch : this.draftBranch ? "other:" : ""
     },
-    changeBranch() { this.draftTouched = true; this.version = "" },
-    branchLabel(branch) { return branch === "StarPilot" ? "StarPilot — Release" : branch === "Dom" ? "Dom — Development" : branch },
+    changeBranch() { this.draftTouched = true; this.version = ""; this.primaryChoice = PRIMARY_BRANCHES.includes(this.draftBranch) ? this.draftBranch : this.draftBranch ? "other:" : "" },
+    onPrimaryBranchChange() {
+      this.draftTouched = true
+      this.version = ""
+      if (this.primaryChoice === "other:") {
+        if (!this.otherBranches.some(option => option.name === this.draftBranch)) {
+          const selected = this.operations?.selectedTarget
+          this.draftBranch = this.otherBranches.some(option => option.name === selected) ? selected : ""
+        }
+      } else this.draftBranch = this.primaryChoice
+    },
+    onOtherBranchChange() { this.draftTouched = true; this.version = "" },
+    branchLabel(branch) { return PRIMARY_BRANCH_LABELS[branch] || branch },
+    primaryBranchHelpFor(branch) { return PRIMARY_BRANCH_HELP[branch] || "" },
     versionLabel(entry) { return `${entry.subject.trim() || this.shortCommit(entry.hash)} · ${entry.date ? new Date(entry.date).toLocaleDateString() : this.shortCommit(entry.hash)}` },
     shown(value) { return value ?? "Unavailable" },
     reported(value) { return value ? new Date(value).toLocaleString() : "Unavailable" },
@@ -434,11 +461,25 @@ export const SoftwarePage = {
           </div>
           <p v-if="operations?.automaticDownloads === null" class="gx-note">The download preference could not be read. Choose a setting while parked to repair it.</p>
           <details v-if="data" class="gx-software-options"><summary>Advanced options</summary><div class="gx-stack">
-            <label class="gx-field-group"><span class="gx-row__label">Branch</span>
-              <GalaxySelect v-model="draftBranch" class="gx-field gx-field--full" aria-label="Target branch" :disabled="actionDisabled || !operations.canSelect" @change="changeBranch">
-                <option v-for="branch in branchOptions" :key="branch.name" :value="branch.name" :disabled="!branch.available">{{ branchLabel(branch.name) }}{{ branch.name === data.installed.branch ? ' (installed)' : '' }}</option>
+            <div class="gx-software-branch"><label class="gx-field-group gx-grow"><span class="gx-row__label">Branch</span>
+              <GalaxySelect v-model="primaryChoice" class="gx-field gx-field--full" aria-label="Target branch" :disabled="actionDisabled || !operations.canSelect" @change="onPrimaryBranchChange">
+                <option value="" disabled>Choose a branch</option>
+                <option value="StarPilot" :data-description="primaryBranchHelpFor('StarPilot')">Stable — StarPilot</option>
+                <option value="Dom" :data-description="primaryBranchHelpFor('Dom')">Development — Dom</option>
+                <option value="other:">Other branches…</option>
               </GalaxySelect>
-            </label>
+            </label></div>
+            <p v-if="primaryBranchHelp" class="gx-note">{{ primaryBranchHelp }}</p>
+            <div v-if="primaryChoice === 'other:'" class="gx-software-other-branches">
+              <label for="gx-other-branch" class="gx-row__label">Other branches</label>
+              <p class="gx-note">Additional branches from this installation's repository.</p>
+              <GalaxySelect id="gx-other-branch" v-model="draftBranch" class="gx-field gx-field--full" aria-label="Other branches" :disabled="actionDisabled || !operations.canSelect" @change="onOtherBranchChange">
+                <option value="" disabled>{{ otherBranches.length ? 'Select another branch' : 'No other branches available' }}</option>
+                <option v-for="branch in otherBranches" :key="branch.name" :value="branch.name" :disabled="!branch.listed">{{ branch.name }}{{ branch.current ? ' (current)' : '' }}{{ !branch.listed && !branch.current ? ' (unavailable)' : '' }}</option>
+              </GalaxySelect>
+            </div>
+            <p v-if="draftBranch && !operations.availableBranches.includes(draftBranch)" class="gx-note">This branch is not in the updater's available list and cannot be selected yet.</p>
+            <p v-else-if="!operations.availableBranches.length" class="gx-note">No branch list is available yet. Check for updates to refresh it.</p>
             <p v-if="branchChanging" class="gx-note">Switch &amp; update installs {{ draftBranch }} and restarts the device.</p>
             <div class="gx-actions">
               <button v-if="canStageBranch" type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations.canSelect" @click="chooseBranch">Save target</button>

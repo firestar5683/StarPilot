@@ -183,8 +183,9 @@ export const ToggleSearch = {
   template: `
     <div class="gx-searchbox" :class="{ open: state.open }">
       <button type="button" ref="toggle" class="gx-icon-btn gx-search-toggle" :aria-label="state.open ? 'Close search' : 'Search toggles'" :aria-expanded="state.open"
-        :disabled="!enabled" @click="toggle"><i class="bi" :class="state.open ? 'bi-x-lg' : 'bi-search'"></i></button>
+        :disabled="!enabled" @click="toggle"><i class="bi" :class="state.open ? 'bi-x-lg' : 'bi-search'"></i><span v-if="!state.open" class="gx-search-toggle__label" aria-hidden="true">Search</span></button>
       <div class="gx-searchwrap">
+      <i class="bi bi-search gx-search__icon" aria-hidden="true"></i>
       <input ref="input" v-model="state.query" class="gx-search gx-appbar__search" type="search" placeholder="Search toggles…"
         aria-label="Search toggles" :disabled="!enabled" role="combobox" aria-autocomplete="list"
         :aria-expanded="showResults" aria-controls="gx-toggle-search-results"

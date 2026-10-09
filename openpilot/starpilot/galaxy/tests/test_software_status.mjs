@@ -239,8 +239,10 @@ assert.equal(revoked.states.at(-1).status, "idle")
 const page = (selectedTarget = "Dom", availableBranches = ["StarPilot", "Dom", "beta"], installedBranch = "Dom") => {
   const state = { operations: { ...operations, selectedTarget, availableBranches }, data: {
     installed: { ...installed, branch: installedBranch } }, actionDisabled: false,
-    draftBranch: "", draftTouched: false, dialog: null }
+    draftBranch: "", primaryChoice: "", draftTouched: false, dialog: null }
   Object.defineProperty(state,"branchOptions",{get:()=>SoftwarePage.computed.branchOptions.call(state)})
+  Object.defineProperty(state,"otherBranches",{get:()=>SoftwarePage.computed.otherBranches.call(state)})
+  Object.defineProperty(state,"primaryBranchHelp",{get:()=>SoftwarePage.computed.primaryBranchHelp.call(state)})
   Object.defineProperty(state,"canStageBranch",{get:()=>SoftwarePage.computed.canStageBranch.call(state)})
   return state
 }
@@ -275,8 +277,28 @@ assert.equal(sentinel.requests.length, 1)
 assert.deepEqual(page("Dom", ["Dom", "other:"]).branchOptions.map(branch=>branch.name), ["Dom"])
 sentinel.feed.stop()
 
-assert.equal(SoftwarePage.methods.branchLabel("StarPilot"), "StarPilot — Release")
-assert.equal(SoftwarePage.methods.branchLabel("Dom"), "Dom — Development")
+assert.equal(SoftwarePage.methods.branchLabel("StarPilot"), "Stable — StarPilot")
+assert.equal(SoftwarePage.methods.branchLabel("Dom"), "Development — Dom")
+
+const namedBranches = page("StarPilot", ["StarPilot", "Dom", "beta"], "StarPilot")
+SoftwarePage.methods.syncDraftBranch.call(namedBranches, "StarPilot")
+assert.equal(namedBranches.primaryChoice, "StarPilot")
+assert.equal(namedBranches.draftBranch, "StarPilot")
+const otherBranches = page("beta", ["StarPilot", "Dom", "beta"], "Dom")
+SoftwarePage.methods.syncDraftBranch.call(otherBranches, "beta")
+assert.equal(otherBranches.primaryChoice, "other:")
+assert.equal(otherBranches.draftBranch, "beta")
+assert.deepEqual(otherBranches.otherBranches.map(branch => branch.name), ["beta"])
+otherBranches.primaryChoice = "Dom"
+assert.equal(otherBranches.primaryBranchHelp, "Latest features and fixes under development. Updates regularly and may introduce bugs.")
+otherBranches.draftBranch = "beta"
+otherBranches.primaryChoice = "other:"
+SoftwarePage.methods.onPrimaryBranchChange.call(otherBranches)
+assert.equal(otherBranches.draftBranch, "beta")
+assert.match(SoftwarePage.template, /Stable — StarPilot/)
+assert.match(SoftwarePage.template, /Development — Dom/)
+assert.match(SoftwarePage.template, /Other branches…/)
+assert.match(SoftwarePage.template, /onPrimaryBranchChange/)
 assert.match(SoftwarePage.template, /Check for updates/)
 assert.match(SoftwarePage.template, /Normal Update/)
 assert.match(SoftwarePage.template, /Restart &amp; install/)

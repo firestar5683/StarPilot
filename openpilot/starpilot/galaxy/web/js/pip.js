@@ -63,6 +63,12 @@ export const PipPage = {
       !!this.state.data.rows[this.state.data.editorRow]?.available && this.state.status === "ready" &&
       !this.state.pending && !this.state.reviewing && typeof this.state.invert === "boolean" &&
       FORMATS.some(([w, h]) => w === this.state.width && h === this.state.height) },
+    cropLimit() {
+      const frame = Math.min(this.state.width, this.state.height)
+      const centers = [this.state.centerLeft, this.state.centerRight].filter(Boolean)
+      const fromCenters = centers.map(([x, y]) => 2 * Math.min(x, this.state.width - x, y, this.state.height - y))
+      return Math.max(20, Math.floor(Math.min(frame, ...fromCenters)))
+    },
   },
   methods: {
     pointerDown(event) {
@@ -110,12 +116,16 @@ export const PipPage = {
       this.redraw()
     },
     resizeCrop(value) {
-      if (!this.canEdit) return
-      if (!maskDraft(this.state.width, this.state.height, value, this.state.centerLeft, this.state.centerRight)) {
-        this.state.localNote = "That crop size would cross the image edge or leave no configured side."
-        return
-      }
+      if (!this.canEdit || !Number.isFinite(value)) return
+      value = Math.round(value)
+      if (this.state.centerLeft || this.state.centerRight) {
+        if (!maskDraft(this.state.width, this.state.height, value, this.state.centerLeft, this.state.centerRight)) {
+          this.state.localNote = "That crop size would cross the image edge or leave no configured side."
+          return
+        }
+      } else if (value < 20 || value > Math.min(this.state.width, this.state.height)) return
       this.state.cropSize = value
+      this.state.localNote = "Draft only; review both centers and crop size before saving."
       this.redraw()
     },
     async saveCrop() {
@@ -145,20 +155,6 @@ export const PipPage = {
         ctx.strokeStyle = "#38404e"
         ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke()
       }
-      const preview = this.$refs.preview
-      const center = this.state[this.state.activeSide]
-      if (preview && this.liveCamera?.image && center) {
-        if (preview.width !== 300 || preview.height !== 300) preview.width = preview.height = 300
-        const crop = preview.getContext("2d")
-        crop.save()
-        if (this.state.invert) { crop.translate(300, 0); crop.scale(-1, 1) }
-        const size = this.state.cropSize
-        crop.drawImage(this.liveCamera.image, (center[0] - size / 2) * this.liveCamera.image.naturalWidth / w,
-          (center[1] - size / 2) * this.liveCamera.image.naturalHeight / h,
-          size * this.liveCamera.image.naturalWidth / w, size * this.liveCamera.image.naturalHeight / h, 0, 0, 300, 300)
-        crop.restore()
-      }
-      if (preview && (!center || !this.liveCamera?.image)) preview.getContext("2d")?.clearRect(0, 0, preview.width, preview.height)
       for (const side of SIDES) {
         const center = this.state[side.key]
         if (!center) continue
@@ -175,30 +171,30 @@ export const PipPage = {
   template: `
     <section class="gx-settings gx-pip" aria-label="Blind Spot Camera and Preview saved settings">
       <header class="gx-settings__header gx-page-header"><div><h2>Blind Spot Camera and Preview</h2>
-        <p>Adjust the native Blind Spot Camera crop on a cabin snapshot.</p></div>
-        <button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button></header>
+        <p>Shows a close-up of the cabin window as you drive. Whether it appears on your turn signal or when a car is in your blind spot depends on your settings. Choose which window each side covers and how much to zoom in.</p></div>
+        <div class="gx-actions"><button type="button" class="gx-icon-btn" :disabled="state.cameraWarming" aria-label="Take a new cabin snapshot" title="New snapshot" @click="liveCamera.refresh()"><i class="bi bi-camera"></i></button><button type="button" class="gx-icon-btn" aria-label="Position side cameras" title="Position side cameras" @click="go('/theme_maker')"><i class="bi bi-layout-wtf" aria-hidden="true"></i></button></div></header>
       <GxState v-if="mode !== 'local'">Local saved settings are unavailable in preview.</GxState>
       <template v-else>
         <GxNotice v-if="state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
         <GxState v-if="state.status === 'loading'" loading>Reading blind-spot camera preferences and crop positions…</GxState>
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read blind-spot camera preferences or crop positions. Reconnecting automatically…</GxNotice>
-        <GxNotice tone="danger" v-if="state.error">{{ state.error }}
-          </GxNotice>
+        <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
+        <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
         <div v-if="state.data" class="gx-settings__body">
 
           <section class="gx-card gx-vasm__editor" aria-label="Blind Spot Camera crop editor">
             <h3>Camera Crop</h3>
-            <p class="gx-note">Drag a circle to position it. Drag its edge to resize both crops.</p>
+            <p class="gx-note">Drag a circle onto the cabin window you want to watch. Both crops share one size.</p>
             <p class="gx-note gx-camera-status" role="status">{{ state.cameraWarming ? "Warming up the camera · 5 seconds…" : state.imageName ? "Snapshot ready" : "Turn off the vehicle to take a snapshot." }}</p>
-            <GxNotice tone="danger" v-if="state.cameraError">{{ state.cameraError }}</GxNotice>
-            <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
             <div class="gx-actions">
               <button v-for="side in SIDES" :key="side.key" type="button" class="gx-btn gx-btn--tonal" :disabled="!canEdit" :aria-pressed="state.activeSide === side.key" :aria-label="side.label" @click="choose(side.key)">{{ side.key === "centerRight" ? "Left" : "Right" }}</button>
               <button type="button" class="gx-icon-btn" :disabled="!canEdit || !state[state.activeSide]" aria-label="Clear selected camera crop" title="Clear selected crop" @click="clear(state.activeSide)"><i class="bi bi-eraser"></i></button>
               <button type="button" class="gx-btn" :disabled="!canEdit" aria-label="Save Crop" @click="saveCrop">Save</button>
             </div>
             <canvas ref="canvas" class="gx-vasm__canvas" :aria-label="'Cabin source crop canvas, editing ' + (state.activeSide === 'centerRight' ? 'vehicle left' : 'vehicle right')" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp" @lostpointercapture="pointerUp"></canvas>
-            <div class="gx-pip__preview"><canvas ref="preview" aria-label="Live selected crop preview"></canvas><small>Selected circle · {{ state.cropSize }} px</small></div>
+            <label class="gx-slider-row"><span class="gx-row__label">Crop size <span class="gx-row__value">{{ state.cropSize }} px</span></span>
+              <input type="range" class="gx-slider" min="20" :max="cropLimit" step="1" :value="state.cropSize" :disabled="!canEdit" aria-label="Camera crop size" @input="resizeCrop(Number($event.target.value))"></label>
+            <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
           </section>
           <section class="gx-card gx-settings__section" aria-label="Saved settings">
             <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.page + ':' + index" :row="row" :index="index"

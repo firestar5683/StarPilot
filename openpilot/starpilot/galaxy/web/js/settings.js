@@ -27,7 +27,8 @@ export const SETTINGS_SECTIONS = Object.freeze([
 // Crop numeric rows and the inline editor row are controlled from the dedicated
 // Blind Spot Camera page; they stay writable through the settings API for the
 // widget/VASM editor but must not surface in the generic toggles list.
-export const isPipCropRow = (row) => row.label === "Visual camera crop editor" || /^Vehicle (left|right) crop/.test(row.label || "")
+export const isPipCropRow = (row) => ["Visual camera crop editor", "Camera crop size", "Restore default camera crop"].includes(row.label) ||
+  /^Vehicle (left|right) crop/.test(row.label || "")
 
 const SECTION_LINKS = {
   device: [{ label: "Display", page: "display", value: "Adjust screen brightness and display timing" }, { label: "Data Uploads", page: "data", value: "Choose mobile-data uploads and usage-statistics sharing" }],
@@ -245,7 +246,7 @@ export const SettingsPage = {
     initialPage: { type: String, default: "hub" }, title: { type: String, default: "Toggles" },
     initialSection: { type: String, default: null }, returnTo: { type: Function, default: null } },
   setup(props) {
-    const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", searchOpen: false, section: "lateral", layoutOpen: false, favoritesOpen: false, soundChoicesDirty: false, parents: [], developerOpen: props.initialSection === "developer" })
+    const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", searchOpen: false, section: "lateral", layoutOpen: false, favoritesOpen: false, soundChoicesDirty: false, parents: [], developerOpen: props.initialSection === "developer", panelDirection: 1 })
     const feed = new SettingsFeed({ publish: (update) => Object.assign(state, update), unauthorized: props.unauthorized })
     return { state, feed, sections: SETTINGS_SECTIONS }
   },
@@ -290,6 +291,7 @@ export const SettingsPage = {
     open(page) {
       this.$emit?.("nested")
       this.state.query = ""
+      this.state.panelDirection = 1
       if (page === "ui_layout") { this.feed.stop(); this.state.layoutOpen = true }
       else if (page === "favorites") { this.feed.stop(); this.state.favoritesOpen = true }
       else {
@@ -308,6 +310,11 @@ export const SettingsPage = {
     closeFavorites() { this.state.favoritesOpen = false; this.state.section = "visual"; this.feed.start("hub") },
     selectSection(section) {
       if (this.busy) return
+      if (this.sections) {
+        const from = this.sections.findIndex((item) => item.id === this.state.section)
+        const to = this.sections.findIndex((item) => item.id === section.id)
+        if (from !== -1 && to !== -1) this.state.panelDirection = to < from ? -1 : 1
+      }
       this.state.parents = []
       this.state.section = section.id
       this.state.developerOpen = section.id === "developer"
@@ -335,6 +342,7 @@ export const SettingsPage = {
     },
     back() {
       if (this.state.developerOpen) return
+      this.state.panelDirection = -1
       const page = this.state.data?.page || this.initialPage
       this.state.section = this.activeSection?.id || this.state.section
       this.state.query = ""
@@ -359,7 +367,7 @@ export const SettingsPage = {
     <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
     <FavoritesPage ref="favoritesEditor" v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
     <section v-else class="gx-settings" :aria-label="title">
-      <div v-if="initialPage !== 'hub' || atSectionRoot" class="gx-settings__header gx-page-header"><h2>{{ title }}</h2></div>
+      <div v-if="title && (initialPage !== 'hub' || atSectionRoot)" class="gx-settings__header gx-page-header"><h2>{{ title }}</h2></div>
         <div v-if="mode === 'local' && initialPage === 'hub' && atSectionRoot" class="gx-settings-tabs" aria-label="Settings sections">
           <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" :disabled="busy" @click="selectSection(section)">{{ section.label }}</button>
         </div>
@@ -390,22 +398,26 @@ export const SettingsPage = {
         <GxNotice tone="danger" v-else-if="state.status === 'unavailable' && !state.error">The device could not read these preferences. Reconnecting automatically…</GxNotice>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}
           </GxNotice>
-        <div v-if="state.data && !state.developerOpen" :key="state.data.page + activeSection.id" class="gx-settings__body">
-          <div v-if="state.data.page === 'appearance' || state.data.page === 'pip'" class="gx-settings__actions gx-actions">
-            <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Colors &amp; Layout</button>
-            <button v-if="state.data.page === 'pip'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Crop editor</button>
+        <div v-if="!state.developerOpen" class="gx-panel-stage" :style="{'--panel-direction': state.panelDirection}">
+          <Transition name="gx-panel">
+          <div v-if="state.data" :key="state.data.page + activeSection.id" class="gx-settings__body">
+            <div v-if="state.data.page === 'appearance' || state.data.page === 'pip'" class="gx-settings__actions gx-actions">
+              <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Colors &amp; Layout</button>
+              <button v-if="state.data.page === 'pip'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Crop editor</button>
+            </div>
+            <section class="gx-card gx-settings__section">
+              <div class="gx-section__header"><i class="bi" :class="activeSection.icon" aria-hidden="true"></i><span class="gx-section__title">{{ state.data.page === 'hub' ? activeSection.label : state.data.title }}</span>
+                <button v-if="state.data.page !== 'hub' && state.data.rows.length" type="button" class="gx-icon-btn" :aria-label="state.searchOpen ? 'Close page search' : 'Search within this page'" :aria-pressed="state.searchOpen" @click="togglePageSearch"><i class="bi" :class="state.searchOpen ? 'bi-x-lg' : 'bi-search'" aria-hidden="true"></i></button>
+                </div>
+              <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
+              <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
+                :disabled="busy || !!state.error || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
+                @open="open" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
+              <div v-if="!visibleRows.length" class="gx-empty">No matching settings.</div>
+            </section>
+            <SoundPacks v-if="state.data.page === 'sounds'" :unauthorized="unauthorized" :disabled="busy" @installed="refreshSoundChoices" />
           </div>
-          <section class="gx-card gx-settings__section">
-            <div class="gx-section__header"><i class="bi" :class="activeSection.icon" aria-hidden="true"></i><span class="gx-section__title">{{ state.data.page === 'hub' ? activeSection.label : state.data.title }}</span>
-              <button v-if="state.data.page !== 'hub' && state.data.rows.length" type="button" class="gx-icon-btn" :aria-label="state.searchOpen ? 'Close page search' : 'Search within this page'" :aria-pressed="state.searchOpen" @click="togglePageSearch"><i class="bi" :class="state.searchOpen ? 'bi-x-lg' : 'bi-search'" aria-hidden="true"></i></button>
-              </div>
-            <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
-            <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
-              :disabled="busy || !!state.error || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
-              @open="open" @review="(index, direction) => feed.preview(index, direction)" @reset-default="index => feed.resetDefault(index)" />
-            <div v-if="!visibleRows.length" class="gx-empty">No matching settings.</div>
-          </section>
-          <SoundPacks v-if="state.data.page === 'sounds'" :unauthorized="unauthorized" :disabled="busy" @installed="refreshSoundChoices" />
+          </Transition>
         </div>
         <GxDialog v-if="state.pending" labelledby="gx-settings-confirm-title" @close="feed.cancel()"><h3 id="gx-settings-confirm-title">Confirm Saved Preference</h3><p>{{ state.pending.question }}</p>
             <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn gx-btn--tonal" @click="feed.cancel()">Cancel</button>

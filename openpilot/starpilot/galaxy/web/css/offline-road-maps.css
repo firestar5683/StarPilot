@@ -1,6 +1,8 @@
 /* Offline road maps for the Android Auto overlay (#/navigation, Offline Maps tab). */
 .gx-navigation__offline { display: grid; gap: 16px; padding: 0 0 96px; }
 .gx-offline-roads { padding: 24px; display: grid; gap: 14px; }
+/* Keep the section header flush with the card's rounded top like every other Galaxy card. */
+.gx-offline-roads > .gx-section__header { margin: -24px -24px 0; }
 .gx-offline-roads__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
 .gx-offline-roads__stat { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, currentColor 6%, transparent); }
 .gx-offline-roads__stat span { font-size: .78rem; opacity: .7; }

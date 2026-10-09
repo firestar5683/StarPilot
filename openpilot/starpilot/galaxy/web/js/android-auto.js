@@ -556,7 +556,7 @@ export const AndroidAutoPage = {
         <p>Show the StarPilot driving view on your car’s screen. Set up support, pair your car, then connect.</p>
       </header>
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
-      <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Android Auto setup…" }} <button class="gx-btn gx-btn--tonal" :disabled="busy" @click="refresh">Refresh</button></GxNotice>
+      <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Android Auto setup… Reconnecting automatically…" }}</GxNotice>
       <ol v-else class="gx-aa__steps">
         <li class="gx-card gx-aa-step" :class="{ 'gx-aa-step--done': supportReady }">
           <div class="gx-aa-step__head">
