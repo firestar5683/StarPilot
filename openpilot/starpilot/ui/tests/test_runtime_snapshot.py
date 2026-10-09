@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from openpilot.cereal import log, messaging
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind
-from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter as NativeRuntimeSnapshotAdapter, current_alert, current_message
+from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter as NativeRuntimeSnapshotAdapter, current_alert, current_message, display_message
 from openpilot.starpilot.ui.settings_state import Destination
 from openpilot.starpilot.ui.onroad_customization import default_document
 from openpilot.starpilot.ui.shell import ShellMode
@@ -97,6 +97,27 @@ def ui_fake():
 
 
 class TestRuntimeSnapshot(unittest.TestCase):
+  def test_replay_display_survives_qlog_intervals_and_expires(self):
+    from openpilot.tools.replay.display_clock import ClockSample
+    for service, interval_ns in (('vehicleParameters', 250_000_000),
+                                 ('driverStateV2', 500_000_000), ('driverMonitoringState', 500_000_000)):
+      with self.subTest(service=service):
+        sm = SubMasterFake()
+        message = NS()
+        sm.put(service, message, age_ns=interval_ns + 20_000_000)
+        self.assertIsNone(display_message(sm, service, NOW, after_frame=1))
+        sm.replay_sample = ClockSample(NOW, None, NOW, epoch=1, valid=True)
+        self.assertIs(display_message(sm, service, NOW, after_frame=1), message)
+        self.assertIsNone(current_message(sm, service, NOW, after_frame=1))
+        self.assertIsNone(display_message(sm, service, NOW + 2 * interval_ns, after_frame=1))
+        self.assertIsNone(display_message(sm, service, NOW, after_frame=3))
+        self.assertIsNone(display_message(sm, service, NOW - 2 * interval_ns, after_frame=1))
+        sm.valid[service] = False
+        self.assertIsNone(display_message(sm, service, NOW, after_frame=1))
+        sm.valid[service] = True
+        sm.replay_sample = ClockSample(None, None, NOW, epoch=2)
+        self.assertIsNone(display_message(sm, service, NOW, after_frame=1))
+
   def test_replay_uses_recorded_time_without_rewriting_messages(self):
     from openpilot.tools.replay.display_clock import ClockSample
     ui = ui_fake()

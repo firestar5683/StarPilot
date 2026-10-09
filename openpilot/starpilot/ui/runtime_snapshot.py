@@ -105,7 +105,13 @@ def current_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0,
 
 def display_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0) -> Any | None:
   """Allow a bounded UI frame gap without extending control-action freshness."""
-  return _message_at_age(sm, service, now_ns, after_frame, 200_000_000)
+  max_age_ns = 200_000_000
+  if getattr(sm, 'replay_sample', None) is not None:
+    spec = SERVICE_LIST[service]
+    if spec.frequency and spec.decimation:
+      # Account for qlog decimation during replay.
+      max_age_ns = max(max_age_ns, min(1_000_000_000, int(2e9 * spec.decimation / spec.frequency)))
+  return _message_at_age(sm, service, now_ns, after_frame, max_age_ns)
 
 
 def current_curve_message(sm: Any, now_ns: int, *, after_frame: int = 0) -> Any | None:
