@@ -418,17 +418,21 @@ void pandad_run(Panda *panda) {
         axis_input = {true, axis.getQualified(), axis.getSessionId().cStr(), axis.getObservedMonoTime(),
                       axis.getValidUntilMonoTime(), axis_event.getLogMonoTime(),
                       axis.getDesiredLateral(), axis.getDesiredLongitudinal()};
+
         if (is_onroad && sm.allAliveAndValid({"deviceState", "aolIntentWire"})) {
           auto intent_event = sm["aolIntentWire"];
           axis_input.retain_lateral_arm = aol_armed_intent(intent_event.getAolIntentWire(),
               intent_event.getLogMonoTime(), axis.getSourceCarStateMonoTime(), now_ns);
+          axis_input.optional_set_release = axis.getOptionalSetRelease() &&
+            aol_armed_intent(intent_event.getAolIntentWire(), intent_event.getLogMonoTime(),
+                             axis.getSourceCarStateMonoTime(), now_ns, true);
         }
       }
       const uint8_t aol_expected_mode = aol_status ? aol_status->safety_mode : 0U;
       auto plan = aol_negotiator.prepare(aol_runtime ? aol_status : std::nullopt, axis_input, now_ns, aol_expected_mode);
       bool aol_write_ok = plan.capable && panda->set_aol_axis_request(plan.request_mask);
       if (aol_write_ok) {
-        engaged = engaged || plan.request_mask != 0U || plan.retain_lateral_arm;
+        engaged = engaged || (plan.request_mask & 0x3U) != 0U || plan.retain_lateral_arm;
       }
       process_panda_state(panda, &pm, engaged, is_onroad, spoofing_started);
       auto aol_after = aol_write_ok ? panda->get_aol_safety_state() : std::nullopt;

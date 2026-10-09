@@ -78,6 +78,10 @@ class CarState(CarStateBase):
     self.cruise_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.main_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.lda_button = 0
+    self.ev6_aol_samples = ()
+    self.ev6_aol_sample_stamp_ns = 0
+    self.ev6_aol_timeout_ns = 0
+    self.ev6_aol_source_healthy = False
     self.left_paddle = 0
 
     self.gear_msg_canfd = "ACCELERATOR" if CP.flags & HyundaiFlags.EV else \
@@ -477,6 +481,23 @@ class CarState(CarStateBase):
     if self.CP.flags & HyundaiFlags.EV:
       ret.cruiseState.nonAdaptive = cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["MSLA_ENABLED"] == 1
 
+    from opendbc.car.hyundai.ev6_aol import qualified as ev6_aol_qualified
+    self.ev6_aol_samples = ()
+    self.ev6_aol_source_healthy = False
+    if ev6_aol_qualified(self.CP):
+      from opendbc.can.parser import MAX_BAD_COUNTER
+      source = cp.message_states.get(cp.dbc.name_to_msg[self.cruise_btns_msg_canfd].address)
+      self.ev6_aol_sample_stamp_ns = int(source.timestamps[-1]) if source is not None and source.timestamps else 0
+      self.ev6_aol_timeout_ns = int(source.timeout_threshold) if source is not None else 0
+      now = cp._last_update_nanos
+      bus_timeout = cp.bus_timeout
+      self.ev6_aol_source_healthy = bool(
+        not bus_timeout and source is not None and source.timestamps
+        and source.valid(now, bus_timeout) and source.counter_fail < MAX_BAD_COUNTER
+        and 0 < self.ev6_aol_sample_stamp_ns <= now
+        and now - self.ev6_aol_sample_stamp_ns <= source.timeout_threshold)
+      values = cp.vl_all[self.cruise_btns_msg_canfd]
+      self.ev6_aol_samples = tuple(zip(values['ADAPTIVE_CRUISE_MAIN_BTN'], values['LDA_BTN'], values['CRUISE_BUTTONS'], strict=True))
     prev_cruise_buttons = self.cruise_buttons[-1]
     prev_main_buttons = self.main_buttons[-1]
     prev_lda_button = self.lda_button
@@ -608,7 +629,8 @@ class CarState(CarStateBase):
           existing.add(name)
       if not CP.openpilotLongitudinalControl:
         msgs.append(("SCC_CONTROL", 50))
-      cam_msgs.append(("CAM_0x2a4", 20))
+      if ("CAM_0x2a4", 20) not in cam_msgs:
+        cam_msgs.append(("CAM_0x2a4", 20))
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN),
       # Native CANParser accepts NaN to subscribe without a CAN-valid frequency gate.

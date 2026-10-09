@@ -733,6 +733,7 @@ struct AolAxisState @0xfc6241ed8877b611 {
   # Fresh negotiated native status exists; each active axis separately checks
   # its requested bit and permission against AolSafetyState.
   nativeAcknowledged @11 :Bool;
+  optionalSetRelease @12 :Bool;
 
   enum Mode {
     off @0;
@@ -775,6 +776,7 @@ struct AolAxisState @0xfc6241ed8877b611 {
     settingsQualified @10 :Bool;
     # Selection feedback only; allowedLatch retains its driving gates.
     lateralArmed @11 :Bool;
+    optionalSetRelease @12 :Bool;
   }
 
   # A separate modeld-owned payload carried by reserved Event Data @126.

@@ -93,6 +93,7 @@ struct AolAxisInput {
   bool desired_lateral = false;
   bool desired_longitudinal = false;
   bool retain_lateral_arm = false;
+  bool optional_set_release = false;
 };
 
 struct AolWritePlan {
@@ -115,10 +116,14 @@ public:
 
   AolWritePlan prepare(const std::optional<aol_safety_health_t> &before, const AolAxisInput &axis,
                        uint64_t now_ns, uint8_t expected_mode) {
-    if (expected_mode != expected_mode_) {
+    const uint16_t param = before ? before->safety_param : 0U;
+    const bool optional_capable = before && ((before->capability_flags & 0x2U) != 0U);
+    if (expected_mode != expected_mode_ || param != expected_param_ || optional_capable != optional_capable_) {
       reset_pending_ = true;
     }
     expected_mode_ = expected_mode;
+    expected_param_ = param;
+    optional_capable_ = optional_capable;
     if (!aol_capable(before, expected_mode, registry_)) {
       reset_pending_ = true;
       return {};
@@ -132,7 +137,10 @@ public:
       }
       if (!reset_pending_) {
         return {true, static_cast<uint8_t>((axis.desired_lateral ? 0x1U : 0U) |
-                                           (axis.desired_longitudinal ? 0x2U : 0U)), axis.retain_lateral_arm};
+                                           (axis.desired_longitudinal ? 0x2U : 0U) |
+                                           ((axis.optional_set_release && (before->capability_flags & 0x2U) != 0U &&
+                                             (before->safety_param == 0x815U || before->safety_param == 0x895U)) ? 0x4U : 0U)),
+                axis.retain_lateral_arm};
       }
     }
     return {true, 0U};
@@ -141,6 +149,11 @@ public:
   AolOutcome complete(const AolWritePlan &plan, bool write_ok,
                       const std::optional<aol_safety_health_t> &after) {
     if (!plan.capable || !write_ok || !aol_capable(after, expected_mode_, registry_)) {
+      reset_pending_ = true;
+      return {};
+    }
+    if (after->safety_param != expected_param_ ||
+        (((plan.request_mask & 0x4U) != 0U) && (after->capability_flags & 0x2U) == 0U)) {
       reset_pending_ = true;
       return {};
     }
@@ -155,4 +168,6 @@ private:
   std::string session_;
   bool reset_pending_ = true;
   uint8_t expected_mode_ = 0;
+  uint16_t expected_param_ = 0;
+  bool optional_capable_ = false;
 };

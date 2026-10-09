@@ -168,7 +168,7 @@ void Panda::send_heartbeat(bool engaged) {
 }
 
 bool Panda::set_aol_axis_request(uint8_t axis_mask) {
-  return handle->control_write(0xf5, axis_mask & 0x3U, 0) >= 0;
+  return handle->control_write(0xf5, axis_mask & 0x7U, 0) >= 0;
 }
 
 void Panda::set_can_speed_kbps(uint16_t bus, uint16_t speed) {

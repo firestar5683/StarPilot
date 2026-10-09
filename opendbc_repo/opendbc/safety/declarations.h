@@ -277,6 +277,7 @@ bool lateral_controls_allowed(void);
 bool longitudinal_controls_allowed(void);
 void aol_set_host_request(uint8_t axis_mask);
 uint8_t aol_get_permission_mask(void);
+extern bool aol_optional_release_capable;
 uint8_t aol_get_request_mask(void);
 extern bool relay_malfunction;
 extern bool gas_pressed;

@@ -183,7 +183,112 @@ class TestHyundaiCanfdLKASteeringAltEV(TestHyundaiCanfdBase):
   GAS_MSG = ("ACCELERATOR", "ACCELERATOR_PEDAL")
 
 
-class TestHyundaiCanfdLKASteeringLongEV(HyundaiLongitudinalBase, TestHyundaiCanfdLKASteeringEV):
+class HyundaiCanfdLongitudinalMixin:
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
+    super().setUp()
+    if self.release:
+      self.LONGITUDINAL = False
+      if self.SAFETY_PARAM & HyundaiSafetyFlags.CANFD_LKA_STEER_MSG:
+        alternate = self.SAFETY_PARAM & HyundaiSafetyFlags.CANFD_LKA_STEER_MSG_ALT
+        self.STEER_MSG, self.STEER_BUS = ("LKAS_ALT" if alternate else "LKAS"), 0
+        steering, camera = (0x110, 0x362) if alternate else (0x50, 0x2A4)
+        self.TX_MSGS = [[steering, 0], [camera, 0], [0x1CF, 1]]
+        self.RELAY_MALFUNCTION_ADDRS = {0: (steering, camera)}
+        self.FWD_BLACKLISTED_ADDRS = {2: [steering, camera]}
+      else:
+        self.TX_MSGS = [[0x12A, 0], [0x1E0, 0], [0x1A0, 0], [0x1CF, 2]]
+        relay = [0x12A, 0x1E0]
+        if self.SAFETY_PARAM & HyundaiSafetyFlags.CAMERA_SCC:
+          if self.SAFETY_PARAM & HyundaiSafetyFlags.CCNC:
+            self.TX_MSGS += [[0x161, 0], [0x162, 0]]
+            relay += [0x161, 0x162]
+          else:
+            self.TX_MSGS += [[0x160, 0]]
+        self.RELAY_MALFUNCTION_ADDRS = {0: tuple(relay)}
+        self.FWD_BLACKLISTED_ADDRS = {2: relay}
+
+  def _pcm_status_msg(self, enable):
+    return TestHyundaiCanfdBase._pcm_status_msg(self, enable)
+
+  def test_enable_control_allowed_from_cruise(self):
+    if self.release:
+      HyundaiButtonBase.test_enable_control_allowed_from_cruise(self)
+    else:
+      super().test_enable_control_allowed_from_cruise()
+
+  def test_disable_control_allowed_from_cruise(self):
+    if self.release:
+      common.CarSafetyTest.test_disable_control_allowed_from_cruise(self)
+    else:
+      super().test_disable_control_allowed_from_cruise()
+
+  def test_sampling_cruise_buttons(self):
+    if self.release:
+      HyundaiButtonBase.test_sampling_cruise_buttons(self)
+    else:
+      super().test_sampling_cruise_buttons()
+
+  def test_cruise_engaged_prev(self):
+    if self.release:
+      common.CarSafetyTest.test_cruise_engaged_prev(self)
+    else:
+      super().test_cruise_engaged_prev()
+
+  def test_button_sends(self):
+    if self.release:
+      if self.SAFETY_PARAM & HyundaiSafetyFlags.CANFD_ALT_BUTTONS:
+        TestHyundaiCanfdLFASteeringAltButtonsBase.test_button_sends(self)
+      else:
+        HyundaiButtonBase.test_button_sends(self)
+    else:
+      super().test_button_sends()
+
+  def test_set_resume_buttons(self):
+    if not self.release:
+      super().test_set_resume_buttons()
+    else:
+      for previous in range(8):
+        for current in range(8):
+          self.safety.set_controls_allowed(False)
+          for button in (0, *([previous] * 10), current):
+            self._rx(self._button_msg(button))
+            self.assertFalse(self.safety.get_controls_allowed(), (previous, current, button))
+          self.assertFalse(self._tx(self._accel_msg(1)))
+
+  def test_cancel_button(self):
+    if not self.release:
+      super().test_cancel_button()
+    else:
+      self._rx(self._pcm_status_msg(False))
+      self._rx(self._button_msg(2))
+      self._rx(self._pcm_status_msg(True))
+      self.assertTrue(self.safety.get_controls_allowed())
+      self._rx(self._button_msg(4))
+      self.assertTrue(self.safety.get_controls_allowed())
+      self.assertFalse(self._tx(self._accel_msg(1)))
+      self._rx(self._pcm_status_msg(False))
+      self.assertFalse(self.safety.get_controls_allowed())
+
+  def _acc_cancel_msg(self, cancel, accel=0):
+    values = {"ACCMode": 4 if cancel else 0, "aReqRaw": accel, "aReqValue": accel}
+    return self.packer.make_can_msg_safety("SCC_CONTROL", self.PT_BUS, values)
+
+  def test_tester_present_allowed(self, ecu_disable=True):
+    super().test_tester_present_allowed(ecu_disable=ecu_disable and not self.release)
+
+  def test_disabled_ecu_alive(self):
+    if not self.release:
+      super().test_disabled_ecu_alive()
+    else:
+      self.assertFalse(self.safety.get_relay_malfunction())
+      self._rx(self._pcm_status_msg(False))
+      self.assertFalse(self.safety.get_relay_malfunction())
+      self.assertFalse(self._tx(self._accel_msg(1)))
+
+
+class TestHyundaiCanfdLKASteeringLongEV(HyundaiCanfdLongitudinalMixin, HyundaiLongitudinalBase, TestHyundaiCanfdLKASteeringEV):
 
   SAFETY_PARAM = HyundaiSafetyFlags.CANFD_LKA_STEER_MSG | HyundaiSafetyFlags.LONG | HyundaiSafetyFlags.EV_GAS
 
@@ -223,7 +328,7 @@ class TestHyundaiCanfdLKASteeringAltLongEV(TestHyundaiCanfdLKASteeringLongEV):
 
 
 # Tests longitudinal for ICE, hybrid, EV cars with LFA steering
-class TestHyundaiCanfdLFASteeringLongBase(HyundaiLongitudinalBase, TestHyundaiCanfdLFASteeringBase):
+class TestHyundaiCanfdLFASteeringLongBase(HyundaiCanfdLongitudinalMixin, HyundaiLongitudinalBase, TestHyundaiCanfdLFASteeringBase):
 
   FWD_BLACKLISTED_ADDRS = {2: [0x12a, 0x1e0, 0x1a0, 0x160]}
 
@@ -270,7 +375,8 @@ class TestHyundaiCanfdLFASteeringLongAltButtons(TestHyundaiCanfdLFASteeringLongB
 
   def test_acc_cancel(self):
     # Alt buttons does not use SCC_CONTROL to cancel if longitudinal
-    pass
+    if self.release:
+      TestHyundaiCanfdLFASteeringAltButtonsBase.test_acc_cancel(self)
 
 
 class TestHyundaiCanfdCCNC(TestHyundaiCanfdLFASteeringBase):
@@ -334,11 +440,8 @@ class TestHyundaiCanfdCCNCAltButtons(TestHyundaiCanfdCCNC):
 
 class TestHyundaiCanfdCCNCLongAltButtons(TestHyundaiCanfdCCNCLong):
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_canfd_generated")
-    self.safety = libsafety_py.libsafety
-    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd,
-                                 self.SAFETY_PARAM | HyundaiSafetyFlags.CANFD_ALT_BUTTONS | HyundaiSafetyFlags.LONG)
-    self.safety.init_tests()
+    self.SAFETY_PARAM |= HyundaiSafetyFlags.CANFD_ALT_BUTTONS | HyundaiSafetyFlags.LONG
+    super().setUp()
 
   _button_msg = TestHyundaiCanfdLFASteeringAltButtonsBase._button_msg
   test_button_sends = TestHyundaiCanfdLFASteeringAltButtonsBase.test_button_sends

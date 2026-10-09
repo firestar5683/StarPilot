@@ -59,6 +59,7 @@ const int MAX_WRONG_COUNTERS = 5;
 // This can be set by the safety hooks
 bool controls_allowed = false;
 const AolSafetyPolicy *aol_policy = NULL;
+bool aol_optional_release_capable = false;
 uint8_t aol_host_axis_mask = 0U;
 uint32_t aol_host_request_ts = 0U;
 void aol_set_host_request(uint8_t axis_mask) {
@@ -66,7 +67,7 @@ void aol_set_host_request(uint8_t axis_mask) {
     aol_host_axis_mask = axis_mask & 0x3U;
     aol_host_request_ts = microsecond_timer_get();
     if (aol_policy->host_request != NULL) {
-      aol_policy->host_request(aol_host_axis_mask);
+      aol_policy->host_request(aol_host_axis_mask | (aol_optional_release_capable ? (axis_mask & 0x4U) : 0U));
     }
   } else {
     aol_host_axis_mask = 0U;
@@ -535,6 +536,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
     aol_policy->reset();
   }
   aol_policy = NULL;
+  aol_optional_release_capable = false;
   aol_host_axis_mask = 0U;
   aol_host_request_ts = 0U;
   relay_malfunction_reset();

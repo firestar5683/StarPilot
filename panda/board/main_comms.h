@@ -80,7 +80,7 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
           .permission_mask = aol_get_permission_mask(),
           .safety_mode = (uint8_t)current_safety_mode,
           .safety_param = current_safety_param,
-          .capability_flags = (aol_policy != NULL) ? 0x1U : 0U,
+          .capability_flags = (aol_policy != NULL) ? (0x1U | (aol_optional_release_capable ? 0x2U : 0U)) : 0U,
         };
         for (unsigned int i = 0U; i < sizeof(status); i++) {
           resp[i] = ((uint8_t *)&status)[i];

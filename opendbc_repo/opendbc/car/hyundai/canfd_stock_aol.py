@@ -97,6 +97,9 @@ LONG_EV_CARS = frozenset((CAR.HYUNDAI_IONIQ_5, CAR.HYUNDAI_KONA_EV_2ND_GEN))
 
 
 def qualified_long(cp, *, marked_only=False):
+  if cp.carFingerprint == CAR.KIA_EV6:
+    from opendbc.car.hyundai.ev6_aol import qualified as ev6_qualified
+    return ev6_qualified(cp, marked_only=marked_only)
   if cp.carFingerprint not in LONG_EV_CARS or not cp.openpilotLongitudinalControl or cp.pcmCruise:
     return False
   word = _base_word(cp, experiences=(0, 32))

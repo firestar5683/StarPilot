@@ -55,7 +55,7 @@ inline std::vector<uint8_t> encode_aol_safety_wire(const AolSafetyWireFields &fi
 // Card's armed bit keeps a previously authorized session alive while its axis
 // request is zero. It never grants an actuator request or native permission.
 inline bool aol_armed_intent(kj::ArrayPtr<const capnp::byte> bytes, uint64_t message_ns,
-                             uint64_t car_state_ns, uint64_t now_ns) {
+                             uint64_t car_state_ns, uint64_t now_ns, bool optional_release = false) {
   constexpr uint64_t MAX_AGE_NS = 30000000ULL;
   if (bytes.size() < 16U || bytes.size() > 512U || bytes.size() % 8U != 0U ||
       message_ns == 0U || car_state_ns == 0U || message_ns > now_ns ||
@@ -76,7 +76,7 @@ inline bool aol_armed_intent(kj::ArrayPtr<const capnp::byte> bytes, uint64_t mes
     auto producer = intent.getProducerSessionId();
     return intent.getKind() == 2U && intent.getVersion() == 1U &&
            producer.size() > 0U && producer.size() <= 96U &&
-           intent.getSettingsQualified() && intent.getLateralArmed() &&
+           intent.getSettingsQualified() && (optional_release ? intent.getOptionalSetRelease() : intent.getLateralArmed()) &&
            intent.getCarStateLogMonoTime() == message_ns &&
            intent.getObservedMonoTime() <= now_ns &&
            now_ns - intent.getObservedMonoTime() <= MAX_AGE_NS &&

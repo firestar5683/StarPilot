@@ -50,6 +50,7 @@ class IntentState:
   pauseLongitudinal: bool
   settingsQualified: bool
   lateralArmed: bool = False
+  optionalSetRelease: bool = False
 
 
 def _bounded_id(value: str) -> str:
@@ -121,7 +122,7 @@ def decode_intent(raw: bytes) -> IntentState | None:
     result = IntentState(_bounded_id(str(value.get('producerSessionId', ''))), int(value['sequence']),
                          int(value['carStateLogMonoTime']), int(value['observedMonoTime']), int(value['validUntilMonoTime']),
                          bool(value['allowedLatch']), bool(value['pauseLateral']), bool(value['pauseLongitudinal']),
-                         bool(value['settingsQualified']), bool(value.get('lateralArmed', False)))
+                         bool(value['settingsQualified']), bool(value.get('lateralArmed', False)), bool(value.get('optionalSetRelease', False)))
     if result.validUntilMonoTime < result.observedMonoTime:
       return None
     return result
@@ -136,7 +137,8 @@ def encode_intent(value: IntentState) -> bytes:
     sequence=value.sequence, carStateLogMonoTime=value.carStateLogMonoTime,
     observedMonoTime=value.observedMonoTime, validUntilMonoTime=value.validUntilMonoTime,
     allowedLatch=value.allowedLatch, pauseLateral=value.pauseLateral,
-    pauseLongitudinal=value.pauseLongitudinal, settingsQualified=value.settingsQualified, lateralArmed=value.lateralArmed)
+    pauseLongitudinal=value.pauseLongitudinal, settingsQualified=value.settingsQualified,
+    lateralArmed=value.lateralArmed, optionalSetRelease=value.optionalSetRelease)
   data = message.to_bytes()
   if len(data) > MAX_WIRE_BYTES:
     raise ValueError('AOL intent payload exceeds wire bound')

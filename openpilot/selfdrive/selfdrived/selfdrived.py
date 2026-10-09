@@ -10,6 +10,7 @@ import openpilot.cereal.messaging as messaging
 
 from openpilot.cereal import log
 from opendbc.car.structs import car
+from opendbc.car.hyundai.ev6_aol import qualified as ev6_aol_qualified
 from openpilot.cereal.visionipc import VisionStreamType
 from msgq.visionipc import VisionIpcClient
 
@@ -763,6 +764,8 @@ class SelfdriveD:
       axis.longitudinalActive = self.aol_axis_decision.longitudinal_active
       axis.desiredLateral = self.aol_axis_decision.desired_lateral
       axis.desiredLongitudinal = self.aol_axis_decision.desired_longitudinal
+      axis.optionalSetRelease = bool(self.aol_replay and self.aol_last_intent is not None
+                                     and self.aol_last_intent.optionalSetRelease)
       axis.nativeAcknowledged = self.aol_axis_decision.native_acknowledged
       axis.qualified = self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)
       self.pm.send('aolAxisState', axis_msg)
@@ -868,6 +871,8 @@ class SelfdriveD:
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
         no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
+                             allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
+                                                       and ev6_aol_qualified(self.CP, marked_only=True)),
                              cruise_main_required=getattr(self, 'aol_cruise_main_required', True),
                              allow_below_engage_speed=bool(is_volt_ascm_longitudinal(self.CP) and
                                                          not self.CP.flags & GMFlags.PEDAL_LONG)),

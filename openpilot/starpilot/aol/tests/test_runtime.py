@@ -24,6 +24,104 @@ def car_state(*, brake=False):
 
 
 class CardIntentTests(unittest.TestCase):
+  def test_optional_cancel_preserves_only_current_owned_lateral(self):
+    from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
+    from opendbc.car.gm.values import CAR as GM
+    from openpilot.starpilot.aol.vehicle import policy_for
+    from openpilot.starpilot.nostalgia import aol_no_entry
+    from openpilot.starpilot.tests.test_ev6_startup import params
+
+    cp = params(alpha=True, radar=True)
+    policy = policy_for(cp)
+    cp.safetyConfigs[0].safetyParam |= policy.safety_param_addition
+    cp.alternativeExperience |= policy.alternative_experience_addition
+    self.assertEqual((cp.safetyConfigs[0].safetyParam, cp.alternativeExperience), (0x815, 32))
+    gm = ordinary_params(GM.CHEVROLET_VOLT_ASCM, alpha=True, sascm=True, radar=True)
+    now = 4_000_000_000
+    state = car_state()
+    state.cruiseState.available = True
+    button = car.CarState.ButtonEvent.Type.cancel
+    cancel = log.OnroadEvent.EventName.buttonCancel
+
+    class SM(dict):
+      model_ready = True
+      def all_checks(self, services=None):
+        return self.model_ready or services is None or 'modelV2' not in services
+
+    sm = SM(driverMonitoringState=SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False),
+            extrinsicsCalibration=SimpleNamespace(calStatus=log.ExtrinsicsCalibration.Status.calibrated))
+    services = ('aolSafetyWire', 'aolIntentWire')
+    sm.valid = dict.fromkeys(services, True)
+    sm.alive = dict.fromkeys(services, True)
+    sm.seen = dict.fromkeys(services, True)
+    sm.logMonoTime = dict.fromkeys(services, now)
+    sd = SelfdriveD.__new__(SelfdriveD)
+    sd.CP = cp.as_reader()
+    sd.initialized, sd.enabled, sd.active = True, True, True
+    sd.aol_replay, sd.axis_transport_required = True, True
+    sd.aol_car_state_log_ns, sd.aol_session_id = now, 'cancel-session'
+    sd.aol_axis_decision = AxisDecision()
+    sd.aol_dm_lateral_inhibit, sd.nostalgia_paddle_cancel = False, False
+    sd.aol_settings = None
+    sd.events, sd.state_machine = Events(), StateMachine()
+    sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled
+
+    def step(*, pressed=True, case=None, extra=None):
+      sd.aol_dm_lateral_inhibit = False
+      state.buttonEvents = [] if pressed is None else [car.CarState.ButtonEvent(type=button, pressed=pressed)]
+      sd.events.clear()
+      if pressed is not None:
+        sd.events.add(cancel)
+      if extra is not None:
+        sd.events.add(extra)
+      sm.seen['aolIntentWire'] = case != 'missing'
+      sm.seen['aolSafetyWire'] = case != 'native_missing'
+      sm.model_ready = case != 'model'
+      sm['driverMonitoringState'].lockout = case == 'dm'
+      state.canValid = case != 'invalid_rx'
+      sm['aolIntentWire'] = encode_intent(IntentState('card', 1, now,
+        now - 30_000_001 if case == 'stale' else now, now + 200_000_000,
+        case != 'false_latch', False, False, case != 'unqualified', True, case != 'optional_off'))
+      if case == 'malformed':
+        sm['aolIntentWire'] = b'malformed'
+      sm['aolSafetyWire'] = encode_safety(SafetyState(1, True, now, now + 200_000_000,
+        int(sd.CP.safetyConfigs[0].safetyModel.raw), int(sd.CP.safetyConfigs[-1].safetyParam),
+        case != 'native_denied', False, case != 'native_mismatch', False, 'panda', 'cancel-session'))
+      sd.step()
+      return sd.aol_axis_decision
+
+    with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now), \
+         mock.patch.object(sd, 'sm', sm, create=True), mock.patch.object(sd, 'data_sample', return_value=state), \
+         mock.patch.object(sd, 'update_events'), mock.patch.object(sd, 'update_alerts'), \
+         mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'), \
+         mock.patch('openpilot.selfdrive.selfdrived.selfdrived.aol_no_entry', wraps=aol_no_entry) as veto:
+      for pressed in (True, False, None):
+        retained = step(pressed=pressed)
+        self.assertTrue(retained.desired_lateral and retained.lateral_active)
+        self.assertFalse(sd.enabled or sd.active or retained.desired_longitudinal or retained.longitudinal_active)
+        self.assertTrue(veto.call_args.kwargs['allow_lateral_cancel'])
+        if pressed is not None:
+          self.assertIn(cancel, sd.events.names)
+      self.assertTrue(aol_no_entry([cancel], state, paddle_only_cancel=False))
+      for case in ('missing', 'false_latch', 'optional_off', 'stale', 'unqualified', 'malformed',
+                   'invalid_rx', 'model', 'dm', 'native_missing', 'native_denied', 'native_mismatch'):
+        with self.subTest(case=case):
+          sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled
+          blocked = step(case=case)
+          self.assertFalse(blocked.lateral_active or blocked.longitudinal_active or sd.enabled or sd.active)
+          if case in ('missing', 'false_latch', 'optional_off', 'stale', 'unqualified', 'malformed'):
+            self.assertFalse(veto.call_args.kwargs['allow_lateral_cancel'])
+      for extra in (log.OnroadEvent.EventName.doorOpen, log.OnroadEvent.EventName.calibrationInvalid,
+                    log.OnroadEvent.EventName.canError):
+        with self.subTest(extra=extra):
+          self.assertFalse(step(extra=extra).lateral_active)
+      for optional in (False, True):
+        with self.subTest(gm_optional=optional):
+          sd.CP = gm.as_reader()
+          sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled
+          self.assertFalse(step(case=None if optional else 'optional_off').lateral_active)
+          self.assertFalse(veto.call_args.kwargs['allow_lateral_cancel'])
+
   def test_volt_ascm_low_speed_continuation_and_engagement_gates(self):
     # Route 14 crosses 5 kph while enabled; the stock no-entry event must
     # still block a new longitudinal engagement, without dropping active axes.
@@ -641,7 +739,7 @@ class IpcAxisContractTests(unittest.TestCase):
 
     native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=False,
                              lateralAllowed=True, longitudinalAllowed=False)
-    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False)
+    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \
          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', side_effect=(None, native, None, None)):
       sd.sm.frame = 1
@@ -714,7 +812,7 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.publish_selfdriveState = mock.Mock()
     native = SimpleNamespace(requestedLateral=False, requestedLongitudinal=False,
                              lateralAllowed=False, longitudinalAllowed=False)
-    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False)
+    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
     with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent),
           mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', return_value=native)):
       sd.step()
@@ -1216,7 +1314,7 @@ class IpcAxisContractTests(unittest.TestCase):
 
     native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=True,
                              lateralAllowed=True, longitudinalAllowed=True)
-    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False)
+    intent = SimpleNamespace(allowedLatch=True, lateralArmed=True, pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
     sd = driver(True)
     sd.initialized = False
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \

@@ -124,6 +124,18 @@ class HyundaiECUStartup:
       raise RuntimeError('Hyundai AOL finalization requires configured startup')
     if self.prepared_for(ci.CP):
       return
+    from opendbc.car.hyundai.ev6_aol import qualified as ev6_aol_qualified
+    if self.outcome is Outcome.SENT_UNCONFIRMED and ev6_aol_qualified(ci.CP, marked_only=True):
+      expected = deepcopy(self.prepared_cp)
+      configs = expected.get('safetyConfigs', [])
+      if len(configs) != 1 or configs[0]['safetyParam'] != 0x15 or expected['alternativeExperience'] != 0:
+        raise RuntimeError('EV6 prepared LONG profile cannot be finalized')
+      configs[0]['safetyParam'] |= 0x0800
+      expected['alternativeExperience'] = 32
+      if ci.CP.to_dict() != expected:
+        raise RuntimeError('EV6 AOL finalization changed unrelated CarParams')
+      self.prepared_cp = expected
+      return
     from opendbc.car.hyundai.canfd_stock_aol import qualified as stock_aol_qualified
     if (self.outcome not in (Outcome.STOCK_UNTOUCHED, Outcome.STOCK_RESTORED) or
         not stock_aol_qualified(ci.CP, marked_only=True)):

@@ -549,6 +549,9 @@ class Car:
       engagement_observation = ({"standard_active": bool(host_enabled and
         (self.sm['carControl'].latActive or self.sm['carControl'].longActive))}
         if getattr(self.aol_card_intent, 'observe_active_engagement', False) else {})
+      observe_physical = getattr(self.aol_card_intent, 'observe_physical_samples', None)
+      if observe_physical is not None:
+        observe_physical(self.CI.CS, now_ns=now_ns)
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
                                   standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
                                                     else host_control_enabled), **engagement_observation)
@@ -758,7 +761,8 @@ class Car:
         lateral_armed = self.aol_card_intent.allowed_latch
       intent_msg.aolIntentWire = encode_intent(IntentState(
         self.slc_producer_session, self.aol_sequence, int(cs_send.logMonoTime), int(cs_send.logMonoTime),
-        int(cs_send.logMonoTime) + 200_000_000, allowed_latch, pause_lateral, pause_longitudinal, self.aol_qualified, lateral_armed))
+        int(cs_send.logMonoTime) + 200_000_000, allowed_latch, pause_lateral, pause_longitudinal, self.aol_qualified, lateral_armed,
+        bool(getattr(self.aol_card_intent, "optional_set_release_policy", lambda: False)())))
       self.pm.send('aolIntentWire', intent_msg)
 
     # carState wakes selfdrived. Commit its companion intent first, so a

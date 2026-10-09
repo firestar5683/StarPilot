@@ -74,6 +74,11 @@ class TestHyundaiHda2LongAol(unittest.TestCase):
       self.safety.set_aol_test_heartbeat(True)
       self.safety.aol_set_host_request(3)
       self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+      self.rx('CRUISE_BUTTONS', {'CRUISE_BUTTONS': 4, 'LDA_BTN': 1})
+      self.assertFalse(self.safety.get_controls_allowed())
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+      self.assertFalse(self.safety.safety_tx_hook(self.steering()))
+      self.rx('CRUISE_BUTTONS')
       self.arm()
       self.assertEqual(self.safety.aol_get_permission_mask(), 0 if self.release else 1)
       self.assertEqual(bool(self.safety.safety_tx_hook(self.steering())), not self.release)
@@ -90,8 +95,10 @@ class TestHyundaiHda2LongAol(unittest.TestCase):
       for raw, value in ((2.01, 0), (0, 2.01), (-3.51, 0), (0, -3.51)):
         self.assertFalse(self.safety.safety_tx_hook(self.accel(raw, value)))
       self.rx('CRUISE_BUTTONS', {'CRUISE_BUTTONS': 4})
-      self.assertEqual(self.safety.aol_get_permission_mask(), 0)
-      self.assertFalse(self.safety.safety_tx_hook(self.steering()))
+      self.assertFalse(self.safety.get_controls_allowed())
+      self.assertEqual(self.safety.aol_get_permission_mask(), 0 if self.release else 1)
+      self.assertEqual(bool(self.safety.safety_tx_hook(self.steering())), not self.release)
+      self.assertFalse(self.safety.safety_tx_hook(self.accel(.1, .1)))
 
   def test_required_sources_wrong_bus_expiry_and_fresh_rearm(self):
     for word in (0x0815, 0x0895):
