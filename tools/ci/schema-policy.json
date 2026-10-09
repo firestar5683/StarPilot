@@ -9,12 +9,11 @@
     "opendbc_repo/opendbc/car/include/c++.capnp": "fb306076cd38c27af1aed20fac6395e9a46fbe5b5df6a248b5f1b6845a079c44",
     "opendbc_repo/opendbc/car/rlog.capnp": "76331a09f36764d08228ba1ed6c03419cc8cdfcc797db98c4d56fab52a6ac050"
   },
-  "log_sha256": "6e54f7f8b0b74ae224aae14e72dfeba6c1a5554b2611b5f43bb6a894a3fed6c1",
+  "log_sha256": "bf39b822e577afdd6caacabde77261ac5c0929767c2f0e4ff7d5e5429e3d4c14",
   "custom_header": "using Cxx = import \"/include/c++.capnp\";\n$Cxx.namespace(\"cereal\");\nusing Car = import \"/car.capnp\";\n\n@0xb526ba661d550a59;\n\n# custom.capnp: a home for empty structs reserved for custom forks\n# These structs are guaranteed to remain reserved and empty in mainline\n# cereal, so use these if you want custom events in your fork.\n\n# DO rename the structs\n# DON'T change the identifier (e.g. @0x81c2f05a394cf4af)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
   "historical_empty_slots": [
     1,
-    5,
-    6
+    5
   ],
   "historical_restored": {
     "10": {
@@ -174,6 +173,13 @@
       "body": "\n  accelPressed @0 :Bool;\n  alwaysOnLateralEnabled @1 :Bool;\n  brakeLights @2 :Bool;\n  dashboardSpeedLimit @3 :Float32;\n  decelPressed @4 :Bool;\n  distancePressed @5 :Bool;\n  distanceLongPressed @6 :Bool;\n  distanceVeryLongPressed @7 :Bool;\n  ecoGear @8 :Bool;\n  forceCoast @9 :Bool;\n  isParked @10 :Bool;\n  pauseLateral @11 :Bool;\n  pauseLongitudinal @12 :Bool;\n  sportGear @13 :Bool;\n  trafficModeEnabled @14 :Bool;\n  gasStack @15 :Bool;  # Compatibility with older StarPilot payloads\n  modePressed @16 :Bool;\n  customPressed @17 :Bool;\n  alwaysOnLateralAllowed @18 :Bool;\n  dashboardStopSign @19 :UInt8;  # 0 = no signal / platform doesn't publish\n  cancelPressed @20 :Bool;\n  cancelLongPressed @21 :Bool;\n  cancelVeryLongPressed @22 :Bool;\n  pedalMaxRegen @23 :Bool;  # pedal at max regen, driver should use brake for more decel\n  pedalLongActive @24 :Bool;  # Pre-AP pedal longitudinal mode is active (enableLongControl)\n  teslaCCEngaged @25 :Bool;  # rising edge of stock Tesla CC engaging (no-pedal mode)\n  teslaCCDisengaged @26 :Bool;  # falling edge of stock Tesla CC\n  teslaCCNotArmed @27 :Bool;  # lateral engaged but DI_cruiseState != STANDBY/ENABLED\n  accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal\n  decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal\n  pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled",
       "source_commit": "6de77049b3c3dc77c7275e9ff724a96f9e72a19d",
       "source_path": "cereal/custom.capnp"
+    },
+    "6": {
+      "type_id": "0xf98d843bfd7004a3",
+      "name": "CustomReserved6",
+      "body": "\naccelerationJerk @0 :Float32; cscControllingSpeed @1 :Bool; cscSpeed @2 :Float32;\ncscTraining @3 :Bool; dangerFactor @4 :Float32; dangerJerk @5 :Float32;\ndesiredFollowDistance @6 :Int64; experimentalMode @7 :Bool; forcingStop @8 :Bool;\nforcingStopLength @9 :Float32; starpilotEvents @10 :AnyPointer; starpilotToggles @11 :Text;\nincreasedStoppedDistance @12 :Float32; lateralCheck @13 :Bool; laneWidthLeft @14 :Float32;\nlaneWidthRight @15 :Float32; maxAcceleration @16 :Float32; minAcceleration @17 :Float32;\nredLight @18 :Bool; roadCurvature @19 :Float32;\nslcMapSpeedLimit @20 :Float32;\nslcMapboxSpeedLimit @21 :Float32; slcNextSpeedLimit @22 :Float32; slcOverriddenSpeed @23 :Float32;\nslcSpeedLimit @24 :Float32; slcSpeedLimitOffset @25 :Float32; slcSpeedLimitSource @26 :Text;\n",
+      "source_commit": "77b44257a0a2a6e574d8e375ab61004be21b7a6e",
+      "source_path": "openpilot/cereal/custom.capnp"
     }
   },
   "reviewed_enum_additions": {

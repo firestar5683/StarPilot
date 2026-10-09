@@ -181,3 +181,34 @@ class SchemaPolicyTest(unittest.TestCase):
         changed = self.schemas.copy()
         changed[path] = changed[path].replace(original, replacement)
         self.assertTrue(any('occupied prefix changed' in error for error in validate(changed, self.policy, self.sync)))
+
+  def test_replay_slc_prefix_preserves_fields_and_allows_append(self):
+    self.assertNotIn(6, self.policy['historical_empty_slots'])
+    path = 'openpilot/cereal/custom.capnp'
+    original = b'slcSpeedLimitSource @26 :Text;'
+    self.assertIn(original, self.schemas[path])
+    appended = self.schemas.copy()
+    appended[path] = appended[path].replace(original, original + b'\n  futureStatus @27 :UInt32;')
+    self.assertEqual(validate(appended, self.policy, self.sync), [])
+    for before, after in ((b'accelerationJerk @0 :Float32;', b'accelerationJerk @0 :UInt32;'),
+                          (b'starpilotEvents @10 :AnyPointer;', b'starpilotEvents @10 :Text;'),
+                          (b'slcSpeedLimit @24 :Float32;', b'slcSpeedLimit @25 :Float32;'),
+                          (original, b''),
+                          (b'struct CustomReserved6 @0xf98d843bfd7004a3 {',
+                           b'struct DifferentEvent @0xf98d843bfd7004a3 {')):
+      with self.subTest(after=after):
+        changed = self.schemas.copy()
+        self.assertIn(before, changed[path])
+        changed[path] = changed[path].replace(before, after)
+        self.assertTrue(any('occupied prefix changed' in error for error in validate(changed, self.policy, self.sync)))
+
+  def test_replay_slc_event_keeps_original_type_id_and_ordinal(self):
+    path = 'openpilot/cereal/log.capnp'
+    original = b'customReserved6 @113 :Custom.CustomReserved6;'
+    self.assertIn(original, self.schemas[path])
+    for after in (b'customReserved6 @113 :Custom.CustomReserved5;',
+                  b'customReserved6 @114 :Custom.CustomReserved6;'):
+      with self.subTest(after=after):
+        changed = self.schemas.copy()
+        changed[path] = changed[path].replace(original, after)
+        self.assertTrue(validate(changed, self.policy, self.sync))
