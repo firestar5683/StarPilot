@@ -7,11 +7,25 @@ struct GalaxyBluetoothApp: App {
     var body: some Scene { WindowGroup { GalaxyRootView(model: model) } }
 }
 
+enum CompanionTab: String, CaseIterable, Identifiable {
+    case galaxy = "Galaxy", live = "Live View", diagnostics = "Diagnostics", connections = "Connections"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .galaxy: "sparkles"
+        case .live: "play.rectangle"
+        case .diagnostics: "chart.xyaxis.line"
+        case .connections: "slider.horizontal.3"
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     let diagnostics = CompanionDiagnostics()
     @Published var showDiagnostics = false
+    @Published var tab: CompanionTab = .connections
     private var phoneActive = false
     private var carPlayActive = false
     private var monitorTask: Task<Void, Never>?
@@ -115,6 +129,7 @@ final class AppModel: ObservableObject {
         assets.inUseRoot = root
         server.useWebRoot(root)
         opened = true
+        if tab == .connections { tab = .galaxy }
     }
     func disconnect() {
         wantsConnection = false; opened = false
@@ -190,28 +205,60 @@ struct GalaxyRootView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            if model.opened, let url = server.url {
+            VStack(spacing: 14) {
                 HStack {
-                    Image(systemName: model.transport.usesLAN ? "wifi" : "antenna.radiowaves.left.and.right")
-                        .foregroundStyle(model.transport.connected ? .green : .orange)
-                    Text("Galaxy · \(model.transport.label)").font(.subheadline.weight(.semibold))
+                    Text("StarPilot").font(.title3.bold())
                     Spacer()
-                    Button("Live") { model.showDiagnostics = true }.font(.subheadline)
-                    Button("Connections") { model.showConnections = true }.font(.subheadline)
-                }.padding(.horizontal, 16).padding(.vertical, 10)
-                // Keep the screen mounted across connection switches.
-                GalaxyWebView(url: url, requestKey: server.localSecret)
-            } else { connectionView }
+                    HStack(spacing: 5) {
+                        Circle().fill(model.transport.connected ? Color.green : Color.orange).frame(width: 6, height: 6)
+                        Text(model.transport.label).font(.caption.weight(.medium))
+                    }.padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.white.opacity(0.07), in: Capsule())
+                }
+                HStack(spacing: 4) {
+                    ForEach(CompanionTab.allCases) { tab in
+                        Button { select(tab) } label: {
+                            VStack(spacing: 5) {
+                                Image(systemName: tab.icon).font(.system(size: 17, weight: .semibold))
+                                Text(tab.rawValue).font(.system(size: 10, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .foregroundStyle(model.tab == tab ? Color.white : Color.secondary)
+                                .background(model.tab == tab ? brandPurple.opacity(0.3) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+                        }.buttonStyle(.plain).accessibilityAddTraits(model.tab == tab ? .isSelected : [])
+                    }
+                }.padding(4).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+            }.padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
+            ZStack {
+                if model.opened, let url = server.url {
+                    GalaxyWebView(url: url, requestKey: server.localSecret)
+                        .opacity(model.tab == .galaxy ? 1 : 0)
+                        .allowsHitTesting(model.tab == .galaxy)
+                        .accessibilityHidden(model.tab != .galaxy)
+                }
+                if model.tab == .live || model.tab == .diagnostics {
+                    CompanionView(diagnostics: model.diagnostics)
+                } else if model.tab == .connections || !model.opened {
+                    connectionView
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color.black)
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $model.showConnections) { connectionView.preferredColorScheme(.dark) }
-        .fullScreenCover(isPresented: $model.showDiagnostics) { CompanionView(diagnostics: model.diagnostics) }
+        .onChange(of: model.showConnections) { _, show in
+            if show { select(.connections); model.showConnections = false }
+        }
+        .onChange(of: model.showDiagnostics) { _, show in
+            if show { select(.live); model.showDiagnostics = false }
+        }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
         .task(id: scenePhase) {
             model.setPhoneActive(scenePhase == .active)
             if scenePhase == .active { await model.assets.check() }
         }
+    }
+    private func select(_ tab: CompanionTab) {
+        model.tab = tab
+        model.diagnostics.live = tab == .live
     }
     private let brandPurple = Color(red: 0.55, green: 0.36, blue: 0.96)
 
@@ -226,7 +273,6 @@ struct GalaxyRootView: View {
                     Text("Galaxy companion")
                         .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity).padding(.top, 8)
-                Button("Live View & diagnostics") { model.showDiagnostics = true }.buttonStyle(.bordered)
                 Text("Connect your comma").font(.title2.bold())
                 Picker("Connection", selection: $model.mode) {
                     ForEach(ConnectionMode.allCases) { Text($0.title).tag($0) }
@@ -242,7 +288,7 @@ struct GalaxyRootView: View {
                         .padding(14).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     Text(lan.status).font(.caption).foregroundStyle(.secondary)
                 }
-                Button { model.connect(); if model.opened { model.showConnections = false } } label: {
+                Button { model.connect(); if model.opened { select(.galaxy) } } label: {
                     Text("Connect").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
                 }.buttonStyle(.borderedProminent).tint(brandPurple)
                 Text(model.connectionMessage).font(.subheadline).foregroundStyle(.secondary)
@@ -292,8 +338,8 @@ struct GalaxyRootView: View {
                 Text("Screens are saved on your iPhone. GitHub updates apply next time you open Galaxy, without interrupting your current screen.")
                     .font(.caption).foregroundStyle(.secondary)
                 if model.opened {
-                    Button("Back to Galaxy") { model.showConnections = false }
-                    Button("Disconnect") { model.disconnect(); model.showConnections = false }
+                    Button("Back to Galaxy") { select(.galaxy) }
+                    Button("Disconnect") { model.disconnect(); select(.connections) }
                 }
                 if !server.error.isEmpty { Text(server.error).foregroundStyle(.red) }
             }.padding(24).frame(maxWidth: 560).frame(maxWidth: .infinity)

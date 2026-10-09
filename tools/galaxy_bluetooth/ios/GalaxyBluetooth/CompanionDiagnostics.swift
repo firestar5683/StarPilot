@@ -37,7 +37,7 @@ final class CompanionDiagnostics: ObservableObject {
     @Published var status = "Connect and pair with comma to read diagnostics." { didSet { record(status) } }
     @Published var screenStatus = "Live View uses local Wi-Fi." { didSet { record(screenStatus) } }
     @Published var live = true { didSet { if live { waitingSince = Date() } } }
-    @Published var phoneVisible = false { didSet { if phoneVisible && !oldValue { waitingSince = Date() }; updateActivity() } }
+    @Published var phoneVisible = false { didSet { if phoneVisible && !oldValue { waitingSince = Date(); copiedLog = false }; updateActivity() } }
     @Published var carPlayActive = false { didSet { updateActivity() } }
     @Published private(set) var receivedAt: Date?
     @Published private(set) var frameAt: Date?
@@ -185,65 +185,100 @@ final class CompanionDiagnostics: ObservableObject {
 
 struct CompanionView: View {
     @ObservedObject var diagnostics: CompanionDiagnostics
-    @Environment(\.dismiss) private var dismiss
+    private let purple = Color(red: 0.55, green: 0.36, blue: 0.96)
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 8) {
-                Toggle("Live View", isOn: $diagnostics.live).padding(.horizontal, 20)
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    if diagnostics.live {
-                        VStack(spacing: 8) {
-                            GeometryReader { space in
-                                if diagnostics.frameFresh, let image = diagnostics.screen {
-                                    Image(uiImage: image).resizable().scaledToFit()
-                                        .frame(width: space.size.width, height: space.size.height)
-                                        .accessibilityLabel("Live comma display")
-                                } else {
-                                    ContentUnavailableView("No live frame", systemImage: "display", description: Text(diagnostics.screenStatus))
-                                        .frame(width: space.size.width, height: space.size.height)
-                                }
-                            }
-                            Text(diagnostics.screenStatus).font(.caption).foregroundStyle(.secondary)
-                            if diagnostics.canCopyLog {
-                                Text("Still waiting for a frame. Copy diagnostics to share what happened.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Button(diagnostics.copiedLog ? "Copied diagnostics" : "Copy diagnostics", systemImage: diagnostics.copiedLog ? "checkmark" : "doc.on.doc") {
-                                    UIPasteboard.general.string = diagnostics.diagnosticLog()
-                                    diagnostics.copiedLog = true
-                                }.buttonStyle(.bordered).tint(.purple)
-                            }
-                        }
-                    } else {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 20) {
-                                Text(diagnostics.fresh ? diagnostics.status : "Disconnected or outdated telemetry")
-                                    .foregroundStyle(diagnostics.fresh ? Color.green : Color.orange)
-                                if diagnostics.fresh, let sample = diagnostics.snapshot {
-                                    Text(sample.engaged.map { $0 ? "Engaged" : "Not engaged" } ?? "Driving status not reported").font(.headline)
-                                    metrics("Temperatures", sample.temperatures)
-                                    metrics("Frame and message rates", sample.rates)
-                                }
-                                Text("Missing sensors are not reported. Message rates are observed by the UI; they are not rendering FPS.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }.padding(20)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("StarPilot Live")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            if diagnostics.live { liveView } else { diagnosticView }
         }
-        .preferredColorScheme(.dark)
+        .background(Color.black)
         .onAppear { diagnostics.phoneVisible = true; UIApplication.shared.isIdleTimerDisabled = diagnostics.live }
         .onChange(of: diagnostics.live) { _, live in UIApplication.shared.isIdleTimerDisabled = live }
         .onDisappear { diagnostics.phoneVisible = false; UIApplication.shared.isIdleTimerDisabled = false }
     }
-    private func metrics(_ title: String, _ values: [DiagnosticMetric]) -> some View {
+    private var liveView: some View {
+        VStack(spacing: 16) {
+            GeometryReader { space in
+                if diagnostics.frameFresh, let image = diagnostics.screen {
+                    Image(uiImage: image).resizable().scaledToFit()
+                        .frame(width: space.size.width, height: space.size.height)
+                        .accessibilityLabel("Live comma display")
+                } else {
+                    ContentUnavailableView("Waiting for live video", systemImage: "play.rectangle", description: Text(diagnostics.screenStatus))
+                        .frame(width: space.size.width, height: space.size.height)
+                }
+            }.background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
+            Label(diagnostics.screenStatus, systemImage: diagnostics.frameFresh ? "wifi" : "clock")
+                .font(.caption).foregroundStyle(.secondary)
+            if diagnostics.canCopyLog {
+                Text("No frame received. Copy diagnostics to share what happened.")
+                    .font(.caption).foregroundStyle(.secondary)
+                copyButton
+            }
+        }.padding(16)
+    }
+    private var diagnosticView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Live diagnostics").font(.title2.bold())
+                        Text(diagnostics.fresh ? "Updating every 2 seconds" : diagnostics.status)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("READ ONLY").font(.system(size: 9, weight: .bold)).tracking(1)
+                        .padding(8).background(purple.opacity(0.18), in: Capsule()).foregroundStyle(purple)
+                }
+                HStack(spacing: 12) {
+                    Image(systemName: "car.side.fill").font(.title2).foregroundStyle(purple)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(drivingStatus).font(.headline)
+                        Text(diagnostics.fresh ? "Telemetry connected" : "Waiting for fresh telemetry")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Circle().fill(diagnostics.fresh ? Color.green : Color.orange).frame(width: 8, height: 8)
+                }.padding(18).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+                metricCards("Temperatures", icon: "thermometer.medium", values: diagnostics.fresh ? diagnostics.snapshot?.temperatures ?? [] : [])
+                metricCards("Frame & message rates", icon: "waveform.path", values: diagnostics.fresh ? diagnostics.snapshot?.rates ?? [] : [])
+                Text("Unavailable sensors show no reading. Message rates reflect updates observed by the comma UI.")
+                    .font(.caption).foregroundStyle(.secondary)
+                copyButton.frame(maxWidth: .infinity)
+            }.padding(20).frame(maxWidth: 700).frame(maxWidth: .infinity)
+        }
+    }
+    private var drivingStatus: String {
+        guard diagnostics.fresh, let engaged = diagnostics.snapshot?.engaged else { return "Driving status unavailable" }
+        return engaged ? "StarPilot engaged" : "StarPilot not engaged"
+    }
+    private var copyButton: some View {
+        Button(diagnostics.copiedLog ? "Copied diagnostics" : "Copy diagnostics", systemImage: diagnostics.copiedLog ? "checkmark" : "doc.on.doc") {
+            UIPasteboard.general.string = diagnostics.diagnosticLog()
+            diagnostics.copiedLog = true
+        }.buttonStyle(.bordered).tint(purple)
+    }
+    private func metricCards(_ title: String, icon: String, values: [DiagnosticMetric]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title3.bold())
-            if values.isEmpty { Text("Not reported").foregroundStyle(.secondary) }
-            ForEach(Array(values.enumerated()), id: \.offset) { _, metric in
-                HStack { Text(metric.name); Spacer(); Text(metric.display).monospacedDigit().foregroundStyle(.secondary) }
+            Label(title, systemImage: icon).font(.headline)
+            if values.isEmpty {
+                Text("No readings available").font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(18)
+                    .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 12)], spacing: 12) {
+                    ForEach(Array(values.enumerated()), id: \.offset) { _, metric in
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(metric.name).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                                .lineLimit(2).frame(minHeight: 30, alignment: .topLeading)
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text(metric.value.map { String(format: "%.1f", $0) } ?? "—")
+                                    .font(.system(size: 29, weight: .semibold, design: .rounded)).monospacedDigit()
+                                Text(metric.unit).font(.caption).foregroundStyle(purple).lineLimit(1).minimumScaleFactor(0.6)
+                            }.minimumScaleFactor(0.7).lineLimit(1)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                }
             }
         }
     }
