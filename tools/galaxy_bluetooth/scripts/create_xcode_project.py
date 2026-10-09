@@ -27,17 +27,20 @@ for file in files:
 obj("plist", 'isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";')
 obj("web", 'isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Web; sourceTree = "<group>";')
 obj("build-web", f'isa = PBXBuildFile; fileRef = {uid("web")};')
+obj("branding", 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Branding.xcassets; sourceTree = "<group>";')
+obj("build-branding", f'isa = PBXBuildFile; fileRef = {uid("branding")};')
 obj("app", 'isa = PBXFileReference; explicitFileType = wrapper.application; path = GalaxyBluetooth.app; sourceTree = BUILT_PRODUCTS_DIR;')
-obj("code-group", 'isa = PBXGroup; children = (' + ','.join([uid(f.name) for f in files] + [uid("plist"), uid("web")]) + '); path = GalaxyBluetooth; sourceTree = "<group>";')
+obj("code-group", 'isa = PBXGroup; children = (' + ','.join([uid(f.name) for f in files] + [uid("plist"), uid("web"), uid("branding")]) + '); path = GalaxyBluetooth; sourceTree = "<group>";')
 obj("products", f'isa = PBXGroup; children = ({uid("app")}); name = Products; sourceTree = "<group>";')
 obj("root-group", f'isa = PBXGroup; children = ({uid("code-group")},{uid("products")}); sourceTree = "<group>";')
 obj("sources", 'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (' + ','.join(uid("build-" + f.name) for f in files) + '); runOnlyForDeploymentPostprocessing = 0;')
-obj("resources", f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({uid("build-web")}); runOnlyForDeploymentPostprocessing = 0;')
+obj("resources", f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({uid("build-web")},{uid("build-branding")}); runOnlyForDeploymentPostprocessing = 0;')
 obj("frameworks", 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;')
 for configuration in ("Debug", "Release"):
     obj("project-" + configuration, f'isa = XCBuildConfiguration; name = {configuration}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; CLANG_ENABLE_MODULES = YES; }};')
     optimization = "-Onone" if configuration == "Debug" else "-O"
     obj("target-" + configuration, f'''isa = XCBuildConfiguration; name = {configuration}; buildSettings = {{
+      ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
       PRODUCT_NAME = "$(TARGET_NAME)";
       PRODUCT_BUNDLE_IDENTIFIER = link.galaxy.bluetooth;
       INFOPLIST_FILE = GalaxyBluetooth/Info.plist;

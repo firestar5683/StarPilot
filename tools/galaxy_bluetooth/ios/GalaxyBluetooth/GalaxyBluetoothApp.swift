@@ -188,7 +188,7 @@ struct GalaxyRootView: View {
                 GalaxyWebView(url: url, requestKey: server.localSecret)
             } else { connectionView }
         }
-        .background(Color(red: 0.06, green: 0.05, blue: 0.09))
+        .background(Color.black)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $model.showConnections) { connectionView.preferredColorScheme(.dark) }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
@@ -201,12 +201,20 @@ struct GalaxyRootView: View {
             }
         }
     }
+    private let brandPurple = Color(red: 0.55, green: 0.36, blue: 0.96)
+
     private var connectionView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Image(systemName: "sparkles").font(.system(size: 48)).foregroundStyle(.purple).padding(.top, 28)
-                Text("Galaxy").font(.largeTitle.bold())
-                Text("Your comma, wherever you connect.").font(.title3).foregroundStyle(.secondary)
+                VStack(spacing: 8) {
+                    Image("StarPilotHero")
+                        .resizable().scaledToFit()
+                        .frame(maxWidth: 480)
+                        .accessibilityLabel("StarPilot")
+                    Text("Galaxy companion")
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity).padding(.top, 8)
+                Text("Connect your comma").font(.title2.bold())
                 Picker("Connection", selection: $model.mode) {
                     ForEach(ConnectionMode.allCases) { Text($0.title).tag($0) }
                 }.pickerStyle(.segmented)
@@ -221,8 +229,9 @@ struct GalaxyRootView: View {
                         .padding(14).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     Text(lan.status).font(.caption).foregroundStyle(.secondary)
                 }
-                Button("Connect") { model.connect(); if model.opened { model.showConnections = false } }
-                    .buttonStyle(.borderedProminent).tint(.purple)
+                Button { model.connect(); if model.opened { model.showConnections = false } } label: {
+                    Text("Connect").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
+                }.buttonStyle(.borderedProminent).tint(brandPurple)
                 Text(model.connectionMessage).font(.subheadline).foregroundStyle(.secondary)
                 if model.mode != .lan {
                     Divider()
@@ -230,7 +239,7 @@ struct GalaxyRootView: View {
                     Text("On comma, open Settings → Pair phone. Scan its code here, then select your comma below. After pairing once, the app reconnects automatically.")
                         .font(.subheadline).foregroundStyle(.secondary)
                     Button("Scan pairing code") { model.showPairingScanner = true }
-                        .buttonStyle(.borderedProminent).tint(.purple)
+                        .buttonStyle(.borderedProminent).tint(brandPurple)
                         .sheet(isPresented: $model.showPairingScanner) {
                             PairingScannerSheet { model.importPairingKey($0) }
                         }
@@ -274,7 +283,7 @@ struct GalaxyRootView: View {
                     Button("Disconnect") { model.disconnect(); model.showConnections = false }
                 }
                 if !server.error.isEmpty { Text(server.error).foregroundStyle(.red) }
-            }.padding(28)
-        }
+            }.padding(24).frame(maxWidth: 560).frame(maxWidth: .infinity)
+        }.background(Color.black).tint(brandPurple)
     }
 }
