@@ -239,9 +239,10 @@ struct CompanionView: View {
                     Spacer()
                     Circle().fill(diagnostics.fresh ? Color.green : Color.orange).frame(width: 8, height: 8)
                 }.padding(18).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
-                metricSection("Temperatures", icon: "thermometer.medium", values: temperatures, thermal: true)
-                metricSection("Frame rates", icon: "speedometer", values: rates.filter { $0.unit == "FPS" }, thermal: false)
-                metricSection("Message rates", icon: "waveform.path", values: rates.filter { $0.unit != "FPS" }, thermal: false)
+                metricSection("Temperatures", icon: "thermometer.medium", values: temperatures.filter { !isExternalGPU($0) }, thermal: true)
+                metricSection("Frame rates", icon: "speedometer", values: rates.filter { $0.unit == "FPS" && !isExternalGPU($0) }, thermal: false)
+                metricSection("Message rates", icon: "waveform.path", values: rates.filter { $0.unit != "FPS" && !isExternalGPU($0) }, thermal: false)
+                externalGPUView
                 Text("Unavailable sensors show no reading. Message rates reflect updates observed by the comma UI.")
                     .font(.caption).foregroundStyle(.secondary)
                 copyButton.frame(maxWidth: .infinity)
@@ -254,12 +255,42 @@ struct CompanionView: View {
     private var rates: [DiagnosticMetric] {
         diagnostics.fresh ? diagnostics.snapshot?.rates ?? [] : []
     }
+    private func isExternalGPU(_ metric: DiagnosticMetric) -> Bool {
+        let name = metric.name.lowercased()
+        return name.contains("external gpu") || name.contains("chestnut") || name.hasPrefix("sensor: amdgpu")
+    }
+    private var externalGPUView: some View {
+        let sensors = temperatures.filter(isExternalGPU)
+        let updates = rates.filter(isExternalGPU)
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("External GPU", systemImage: "cpu").font(.title3.bold())
+                Spacer()
+                Text("CHESTNUT").font(.system(size: 9, weight: .bold)).tracking(1).foregroundStyle(purple)
+            }
+            if sensors.isEmpty && updates.isEmpty {
+                Text("No Chestnut telemetry reported.").font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                if !sensors.isEmpty { metricCards("Temperatures", icon: "thermometer.medium", values: sensors) }
+                if !updates.isEmpty { metricCards("Telemetry rates", icon: "waveform.path", values: updates) }
+            }
+        }.padding(18).background(purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(purple.opacity(0.25), lineWidth: 1))
+    }
+    private func metricName(_ metric: DiagnosticMetric) -> String {
+        switch metric.name {
+        case "External GPU": "GPU temperature"
+        case "External GPU memory": "Memory temperature"
+        case "chestnutState": "Telemetry updates"
+        default: metric.name
+        }
+    }
     private func component(_ metric: DiagnosticMetric, thermal: Bool) -> String {
         let name = metric.name.lowercased()
         if thermal {
             if name.hasPrefix("sensor:") { return "Additional hardware sensors" }
             if name.contains("cpu") || name.contains("dsp") || name.contains("soc") { return "Processors" }
-            if name.contains("gpu") { return name.contains("external") ? "External GPU" : "Onboard GPU" }
+            if name.contains("gpu") { return "Onboard GPU" }
             if name.contains("memory") { return "Memory" }
             if name.contains("pmic") { return "Power management" }
             if name.contains("modem") || name.contains("gnss") { return "Connectivity & positioning" }
@@ -275,7 +306,7 @@ struct CompanionView: View {
     }
     private func metricSection(_ title: String, icon: String, values: [DiagnosticMetric], thermal: Bool) -> some View {
         let order = thermal
-            ? ["Processors", "Onboard GPU", "External GPU", "Memory", "Power management", "Cooling", "Connectivity & positioning", "Other temperatures", "Additional hardware sensors"]
+            ? ["Processors", "Onboard GPU", "Memory", "Power management", "Cooling", "Connectivity & positioning", "Other temperatures", "Additional hardware sensors"]
             : ["Display", "Cameras", "Models & planning", "Driving", "Device", "Other services"]
         return VStack(alignment: .leading, spacing: 16) {
             Label(title, systemImage: icon).font(.title3.bold())
@@ -324,7 +355,7 @@ struct CompanionView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 12)], spacing: 12) {
                     ForEach(Array(values.enumerated()), id: \.offset) { _, metric in
                         VStack(alignment: .leading, spacing: 12) {
-                            Text(metric.name).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                            Text(metricName(metric)).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                                 .lineLimit(2).frame(minHeight: 30, alignment: .topLeading)
                             HStack(alignment: .firstTextBaseline, spacing: 4) {
                                 Text(metric.value.map { String(format: "%.1f", $0) } ?? "—")
