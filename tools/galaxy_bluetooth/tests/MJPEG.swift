@@ -10,14 +10,15 @@ struct MJPEGTests {
             bytes.append(Data("--galaxy-frame\r\nContent-Type: image/jpeg\r\nContent-Length: \(image.count)\r\n\r\n".utf8))
             bytes.append(image); bytes.append(Data("\r\n".utf8))
         }
+        let heartbeatBody = Data(String(repeating: "\r\n", count: 10).utf8) + body
         for chunked in [false, true] {
             var wire = Data("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=galaxy-frame\r\n\(chunked ? "Transfer-Encoding: chunked\r\n" : "")\r\n".utf8)
             if chunked {
-                for offset in stride(from: 0, to: body.count, by: 7) {
-                    let part = body.subdata(in: offset..<min(offset + 7, body.count))
+                for offset in stride(from: 0, to: heartbeatBody.count, by: 7) {
+                    let part = heartbeatBody.subdata(in: offset..<min(offset + 7, heartbeatBody.count))
                     wire.append(Data("\(String(part.count, radix: 16))\r\n".utf8)); wire.append(part); wire.append(Data("\r\n".utf8))
                 }
-            } else { wire.append(body) }
+            } else { wire.append(heartbeatBody) }
             for fragment in [1, 2, 3, 17, 65_536] {
                 var parser = MJPEGParser(); var decoded: [Data] = []
                 for offset in stride(from: 0, to: wire.count, by: fragment) {

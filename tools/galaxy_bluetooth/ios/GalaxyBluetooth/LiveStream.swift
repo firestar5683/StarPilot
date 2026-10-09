@@ -65,6 +65,8 @@ struct MJPEGParser {
         var frames: [Data] = []
         while true {
             if frameLength == nil {
+                while body.starts(with: Data("\r\n".utf8)) { body.removeFirst(2) }
+                if body.isEmpty { break }
                 guard let end = body.range(of: delimiter) else {
                     guard body.count <= 1024 else { throw URLError(.cannotParseResponse) }; break
                 }
