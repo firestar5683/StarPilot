@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui import ui_state as module
+from openpilot.system.ui.lib.application import MouseEvent, MousePos
 from openpilot.starpilot.ui.display_preferences import read_preferences
 
 
@@ -80,11 +81,62 @@ class DisplayDeviceTests(unittest.TestCase):
     self.device.invalidate_display_preferences()
     self.device._refresh_display_preferences()
     self.device._interaction_time = 1
-    with patch.object(self.device, "_reset_interactive_timeout") as reset:
+    with patch.object(self.device, "_reset_interactive_timeout", wraps=self.device._reset_interactive_timeout) as reset, \
+         patch.object(module.time, "monotonic", return_value=100.):
       self.state.ignition = True
       self.device._update_wakefulness()
       reset.assert_called_once()
+      self.assertEqual(self.device._interaction_time, 130.)
     self.assertTrue(self.device.awake)
+
+  def test_forced_offroad_uses_parked_timeout_with_live_ignition(self):
+    for saved in (False, True):
+      with self.subTest(saved=saved):
+        self.params.put_bool("StarPilotDisplayPreferencesEnabled", saved, block=True)
+        self.params.put("ScreenTimeout", 5, block=True)
+        self.params.put("ScreenTimeoutOnroad", 20, block=True)
+        self.state.started = self.state.ignition = True
+        device = module.Device()
+        callback = Mock()
+        device.add_interactive_timeout_callback(callback)
+        with patch.object(device, "_start_brightness_thread"), \
+             patch.object(module, "PC", False), \
+             patch.object(module.gui_app, "_mouse_events", []), \
+             patch.object(module.gui_app, "set_should_render"), \
+             patch.object(module.time, "monotonic", return_value=100.) as clock:
+          device.update()
+          self.assertTrue(device.awake)
+          self.state.started = False  # hardwared force-offroad, physical ignition remains ON.
+          clock.return_value = 101.
+          device.update()
+          self.assertTrue(self.state.ignition)
+          self.assertEqual(device.interactive_timeout, 5 if saved else 30)
+          self.assertEqual(device._interaction_time, 106. if saved else 131.)
+          self.assertTrue(device.awake)
+          clock.return_value = 140.
+          device.update()
+          self.assertFalse(device.awake)
+          module.HARDWARE.set_display_power.assert_called_with(False)
+          callback.assert_called_once()
+          clock.return_value = 140.1
+          device.update()
+          self.assertFalse(device.awake)
+          self.assertEqual(device._brightness_target, 0)
+          callback.assert_called_once()
+          module.gui_app.mouse_events.append(MouseEvent(MousePos(0., 0.), 0, True, False, True, 141.))
+          clock.return_value = 141.
+          device.update()
+          self.assertTrue(device.awake)
+          module.HARDWARE.set_display_power.assert_called_with(True)
+          module.gui_app.mouse_events.clear()
+          self.state.started = True
+          clock.return_value = 142.
+          device.update()
+          self.assertTrue(device.awake)
+          self.assertEqual(device.interactive_timeout, 20 if saved else 10)
+          clock.return_value = 200.
+          device.update()
+          self.assertTrue(device.awake)  # Effective onroad remains awake after its UI timeout.
 
   def test_invalid_saved_values_fail_to_existing_auto_policy(self):
     self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)

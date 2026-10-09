@@ -464,10 +464,10 @@ class Device:
       return self._override_interactive_timeout
 
     if self._display_preferences.enabled:
-      return self._display_preferences.driving_timeout if ui_state.ignition else self._display_preferences.parked_timeout
+      return self._display_preferences.driving_timeout if ui_state.started else self._display_preferences.parked_timeout
 
     ignition_timeout = 10 if gui_app.big_ui() else 5
-    return ignition_timeout if ui_state.ignition else 30
+    return ignition_timeout if ui_state.started else 30
 
   def _reset_interactive_timeout(self) -> None:
     self._interaction_time = time.monotonic() + self.interactive_timeout
@@ -484,7 +484,7 @@ class Device:
       self.invalidate_display_preferences()
     self._refresh_display_preferences()
 
-    if self._display_preferences.enabled and started_changed:
+    if started_changed:
       self._reset_interactive_timeout()
     self._display_started = bool(ui_state.started)
 
@@ -562,7 +562,7 @@ class Device:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(not self._screen_off and (ui_state.ignition or not interaction_timeout or PC))
+    self._set_awake(not self._screen_off and (ui_state.started or not interaction_timeout or PC))
 
   def _set_awake(self, on: bool):
     if on != self._awake:
