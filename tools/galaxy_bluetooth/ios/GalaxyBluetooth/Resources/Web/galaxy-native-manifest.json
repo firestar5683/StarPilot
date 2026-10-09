@@ -393,12 +393,12 @@
       "size": 378
     },
     {
-      "path": "assets/images/android-chrome-192x192.png",
+      "path": "assets/images/app-icon-192x192.png",
       "sha256": "c446c434d055dee7ffb97ca0159aeb808ffef76875d9da510c869c10ea36008c",
       "size": 21101
     },
     {
-      "path": "assets/images/android-chrome-512x512.png",
+      "path": "assets/images/app-icon-512x512.png",
       "sha256": "60e390abc1f844556e88a4790ae3e622b297cbd2342ec9dff05dfe458773bdfc",
       "size": 104448
     },
@@ -439,8 +439,8 @@
     },
     {
       "path": "assets/images/site.webmanifest",
-      "sha256": "7a9e07ce1f7386689917602ddc5a75750ad842e605ff764f67173529c181bf04",
-      "size": 263
+      "sha256": "83b9e0eeee3bb43df34c6c619c1cd2ef9a824c2661d885e3d2ffc9b3dd2bfd1b",
+      "size": 279
     },
     {
       "path": "assets/js/snackbar.js",
@@ -784,8 +784,8 @@
     },
     {
       "path": "assets/mobile/manifest.json",
-      "sha256": "3a9e63ffa4f64177cab2683ab457a703ad7800942fc8317ff6c3f1317500d064",
-      "size": 725
+      "sha256": "d68a9e0d0ef77c61424718e640033f56f1583e87458124c8cbcd2b0091852874",
+      "size": 713
     },
     {
       "path": "assets/service-worker.js",

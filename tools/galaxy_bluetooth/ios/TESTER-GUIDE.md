@@ -1,7 +1,6 @@
 # iPhone: Wi-Fi first, Bluetooth fallback pilot
 
 This is an experimental development build. Keep comma parked while testing.
-Android remains on its earlier Bluetooth-only implementation.
 
 ## Install and connect
 
