@@ -765,12 +765,15 @@ struct AolAxisState @0xfc6241ed8877b611 {
   faultReason @13 :FaultReason;
   faultEventMonoTime @14 :UInt64;
   faultSessionId @15 :Text;
+  intentProducerSessionId @16 :Text;
+  intentIntegrityEpoch @17 :UInt64;
 
   enum FaultReason {
     unknown @0;
     none @1;
     transportPause @2;
     critical @3;
+    availabilityPause @4;
   }
 
   enum Mode {

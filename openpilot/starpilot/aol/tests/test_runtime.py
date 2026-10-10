@@ -15,12 +15,9 @@ from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.starpilot.aol.intent import AolCardIntent, AolSettings, disarming_fault, read_settings
 from openpilot.starpilot.aol.runtime import AxisDecision, current_intent, current_native, decide_axes
+from openpilot.starpilot.aol.tests import test_ioniq_availability as availability_fixture
+from openpilot.starpilot.aol.tests.test_ioniq_availability import car_state
 from openpilot.starpilot.aol.wire import IntentState, SafetyState, encode_intent, encode_safety
-
-
-def car_state(*, brake=False):
-  return car.CarState(canValid=True, gearShifter=car.CarState.GearShifter.drive,
-                      vEgo=20.0, brakePressed=brake)
 
 
 def sample_car_state(sd, state, stamp):
@@ -654,154 +651,8 @@ class CardIntentTests(unittest.TestCase):
                          (held_ticks != CRUISE_LONG_PRESS, held_ticks == CRUISE_LONG_PRESS))
 
 
-
-
 class IpcAxisContractTests(unittest.TestCase):
-  def _authority_callers(self, full_op, *, cp=None, intent_companion=None):
-    self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False))
-    from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
-    from opendbc.car.gm.values import CAR
-    from openpilot.selfdrive.controls.controlsd import Controls
-    from openpilot.starpilot.aol.vehicle import policy_for
-    from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
-    from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
-
-    params = Params()
-    params.put_bool('OpenpilotEnabledToggle', True, block=True)
-    params.put_bool('SafeMode', False, block=True)
-    params.put_bool('AlwaysOnLateral', True, block=True)
-    supplied_cp = cp is not None
-    if cp is None:
-      cp = ordinary_params(CAR.CHEVROLET_VOLT_ASCM, alpha=True, sascm=True, radar=True)
-    policy = policy_for(cp)
-    cp.safetyConfigs[-1].safetyParam |= policy.safety_param_addition
-    cp.alternativeExperience |= policy.alternative_experience_addition
-    params.put('CarParams', cp.to_bytes(), block=True)
-    controls = Controls()
-    sd = SelfdriveD(CP=cp.as_reader()) if supplied_cp else SelfdriveD.__new__(SelfdriveD)
-    sd.params = params
-    sd.CP = cp.as_reader()
-    services = ['deviceState', 'pandaStates', 'driverMonitoringState', 'extrinsicsCalibration', 'modelV2',
-                'carState', 'aolIntentWire', 'aolSafetyWire', 'starpilotCarState']
-    self.enterContext(mock.patch.object(sd, 'sm', messaging.SubMaster(services, ignore_avg_freq=services), create=True))
-    sd.sm.update = mock.Mock()
-    sd.events, sd.state_machine, sd.AM = Events(), StateMachine(), AlertManager()
-    sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled if full_op else log.SelfdriveState.OpenpilotState.disabled
-    sd.enabled = sd.active = full_op
-    sd.mismatch_counter = 0
-    sd.events_prev = []
-    sd.experimental_mode = sd.requested_experimental_mode = False
-    sd.initialized = sd.aol_replay = True
-    sd.aol_authority_lost = sd.aol_dm_lateral_inhibit = False
-    sd.aol_axis_decision = AxisDecision()
-    sd.aol_settings = None
-    sd.aol_car_state_log_ns = 0
-    sd.conditional_car_state_valid = False
-    sd.aol_last_intent = None
-    if intent_companion is not None or not supplied_cp:
-      sd.aol_intent_companion = intent_companion
-    sd.aol_session_id, sd.aol_sequence = 'authority-session', 0
-    from openpilot.starpilot.aol.transport_pause import TransportPause
-    sd.aol_transport_pause = TransportPause(sd.CP, sd.aol_session_id)
-    sd.conditional_replay = False
-    sd.nostalgia_paddle_cancel = False
-    sd.switchback_capable = False
-    sd.switchback_cooldown = SwitchbackCooldown()
-    sd.switchback_setting_ns, sd.switchback_cooldown_ns = 0, 300_000_000_000
-    sd.personality, sd.is_metric = 1, False
-    sd.CS_prev = car_state()
-    sd.car_state_sock = object()
-    sd.update_conditional_mode = mock.Mock()
-    self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (sd.events.clear(), sd._update_steering_authority(cs))))
-
-    class Publisher:
-      def __init__(self):
-        self.messages = {}
-      def send(self, service, message):
-        self.messages[service] = messaging.log_from_bytes(message.to_bytes())
-    self.enterContext(mock.patch.object(sd, 'pm', Publisher(), create=True))
-    self.enterContext(mock.patch.object(controls, 'pm', Publisher()))
-    clock = self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_000_000_000))
-    recv = self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one'))
-    base = 10_000_000_000
-    original_message = messaging.new_message
-    def clocked_message(*args, **kwargs):
-      message = original_message(*args, **kwargs)
-      if 'logMonoTime' not in kwargs:
-        message.logMonoTime = clock.return_value
-      return message
-    self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.new_message', clocked_message))
-
-    def step(tick, *, timeout=False, old_intent=False, allowed=True, pause=False, latched=True,
-             brake=False, steering=False, gas=False, user_disable=False, observed_state=None, authority_unavailable=False, companion=True,
-             long_allowed=True, pause_long=False, state_stamp=None, intent_message=None, offset_ns=0,
-             native_request_lat=True, native_request_long=None, native_valid=True, panda_fault=False,
-             critical_event=None, calibrated=True):
-      now = base + tick * 10_000_000 + offset_ns
-      clock.return_value = now
-      state = car_state(brake=brake) if observed_state is None else observed_state
-      state.cruiseState.available = True
-      state.steeringPressed, state.gasPressed = steering, gas
-      state_event = messaging.new_message('carState', valid=True, logMonoTime=now if state_stamp is None else state_stamp)
-      state_event.carState = state
-      recv.return_value = None if timeout else state_event.as_reader()
-      frames = []
-      for service in ('deviceState', 'driverMonitoringState', 'extrinsicsCalibration', 'modelV2'):
-        message = messaging.new_message(service, valid=True, logMonoTime=now)
-        if service == 'deviceState':
-          message.deviceState.started, message.deviceState.startedMonoTime = True, base - 1_000_000_000
-        elif service == 'extrinsicsCalibration':
-          message.extrinsicsCalibration.calStatus = 'calibrated' if calibrated else 'uncalibrated'
-        frames.append(message.as_reader())
-      pandas = messaging.new_message('pandaStates', len(cp.safetyConfigs), valid=True, logMonoTime=now)
-      for panda, config in zip(pandas.pandaStates, cp.safetyConfigs, strict=True):
-        panda.safetyModel, panda.safetyParam = config.safetyModel, config.safetyParam
-        panda.alternativeExperience = cp.alternativeExperience
-        panda.controlsAllowed = full_op
-        panda.safetyRxChecksInvalid = panda_fault
-      frames.append(pandas.as_reader())
-      intent_ns = base if old_intent else now
-      intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=intent_ns)
-      intent.aolIntentWire = encode_intent(IntentState('authority-card', tick + 1, intent_ns, intent_ns,
-                                                     intent_ns + 200_000_000, latched, pause, pause_long, True, latched))
-      if intent_message is not None:
-        intent = intent_message
-      native = messaging.new_message('aolSafetyWire', 0, valid=native_valid, logMonoTime=now)
-      native.aolSafetyWire = encode_safety(SafetyState(1, True, now, now + 200_000_000,
-        int(cp.safetyConfigs[-1].safetyModel.raw), cp.safetyConfigs[-1].safetyParam,
-        allowed, full_op and long_allowed, native_request_lat,
-        full_op if native_request_long is None else native_request_long, 'authority-panda', sd.aol_session_id))
-      if companion:
-        authority = messaging.new_message('starpilotCarState', valid=companion != 'invalid',
-                                          logMonoTime=now - 1 if companion == 'wrong_stamp' else now)
-        authority.starpilotCarState.sourceCarStateMonoTime = now - 1 if companion == 'wrong_source' else now
-        authority.starpilotCarState.lateralAuthorityUnavailable = authority_unavailable
-        frames.append(authority.as_reader())
-      sd.sm.update_msgs(now / 1e9, frames + [intent.as_reader(), native.as_reader()])
-      if user_disable:
-        self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (
-          sd.events.clear(), sd._update_steering_authority(cs), sd.events.add(log.OnroadEvent.EventName.pedalPressed))))
-      if critical_event is not None:
-        self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (
-          sd.events.clear(), sd._update_steering_authority(cs), sd.events.add(critical_event))))
-      sd.step()
-      control_frames = []
-      with mock.patch.object(controls.sm, 'update_msgs', side_effect=lambda _timestamp, messages: control_frames.extend(messages)):
-        feed(controls, now, tick * 5, active=False, enabled=False)
-      model = messaging.new_message('modelV2', valid=True, logMonoTime=now)
-      model.modelV2 = next(message.modelV2 for message in control_frames if message.which() == 'modelV2')
-      model.modelV2.action.desiredCurvature = 0.
-      control_state = messaging.new_message('carState', valid=sd.conditional_car_state_valid,
-                                            logMonoTime=sd.aol_car_state_log_ns)
-      control_state.carState = sd.CS_prev
-      replaced = ('carState', 'aolSafetyWire', 'modelV2', 'aolAxisState', 'selfdriveState')
-      controls.sm.update_msgs(now / 1e9, [message for message in control_frames if message.which() not in replaced] +
-                             [control_state.as_reader(), native.as_reader(), model.as_reader(),
-                              sd.pm.messages['aolAxisState'], sd.pm.messages['selfdriveState']])
-      command, lac_log = controls.state_control()
-      controls.publish(command, lac_log)
-      return sd.pm.messages['aolAxisState'].aolAxisState, sd.pm.messages['selfdriveState'].selfdriveState, command
-    return sd, controls, step
+  _authority_callers = availability_fixture.IoniqAvailabilityTests._authority_callers
 
   def test_ioniq6_fresh_backlog_companion_keeps_axes_and_stale_loss_warns(self):
     from opendbc.car import gen_empty_fingerprint
@@ -1104,7 +955,6 @@ class IpcAxisContractTests(unittest.TestCase):
       cs.buttonEvents = [car.CarState.ButtonEvent(type=car.CarState.ButtonEvent.Type.cancel, pressed=True)]
       card.aol_card_intent.update(cs, now_ns=10_090_000_000)
       self.assertFalse(card.aol_card_intent.allowed_latch)
-
 
   def _assert_withdrawal_alert(self, controls, message):
     from openpilot.starpilot.audio.axis_alerts import AxisAlerts
@@ -1960,7 +1810,6 @@ class IpcAxisContractTests(unittest.TestCase):
     old_long = SimpleNamespace(requestedLateral=False, requestedLongitudinal=True,
                                lateralAllowed=False, longitudinalAllowed=True)
     self.assertEqual(decide(True, old_long).mode, 'longitudinalOnly')
-
 
   def test_card_selfdrive_panda_cadence_and_four_modes(self):
     with OpenpilotPrefix():

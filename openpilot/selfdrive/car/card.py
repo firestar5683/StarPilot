@@ -531,7 +531,8 @@ class Car:
       if getattr(self, 'aol_transport_feedback', None) is None:
         self.aol_transport_feedback = TransportPauseFeedback(self.CP)
       transport_reset = self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
-        latched=self.aol_card_intent.allowed_latch, cancel_source_ns=self.aol_cancel_source(CS, now_ns))
+        latched=self.aol_card_intent.allowed_latch, cancel_source_ns=self.aol_cancel_source(CS, now_ns),
+        intent_producer_session=getattr(self, 'slc_producer_session', ''))
       fault_active = True if transport_reset else None
       event_ns = int(self.sm.logMonoTime['onroadEvents'])
       if (getattr(self.aol_card_intent, 'requires_fault_observation', self.aol_card_intent.explicit_latch) and
@@ -743,9 +744,15 @@ class Car:
       self.aol_transport_feedback = TransportPauseFeedback(self.CP)
     if self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
         latched=getattr(getattr(self, 'aol_card_intent', None), 'allowed_latch', True),
-        cancel_source_ns=self.aol_cancel_source(CS, now_ns)):
+        cancel_source_ns=self.aol_cancel_source(CS, now_ns),
+        intent_producer_session=getattr(self, 'slc_producer_session', '')):
       return True
-    return intent_disarming_fault(self.CP, self.sm['onroadEvents'], CS,
+    events = self.sm['onroadEvents']
+    if self.aol_transport_feedback.retention_qualified or self.aol_transport_feedback.retention_pending:
+      from openpilot.starpilot.aol.transport_pause import AVAILABILITY_EVENTS
+      events = [event for event in events if not
+                (event.name in AVAILABILITY_EVENTS and event.softDisable and not event.immediateDisable)]
+    return intent_disarming_fault(self.CP, events, CS,
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
       temporary_selfdrive_lagging=qualified_gm(self.CP),
       temporary_source_pause=(self.aol_transport_feedback.qualified or self.aol_transport_feedback.awaiting))
@@ -852,6 +859,9 @@ class Car:
     self.pm.send('carState', cs_send)
     self.timing_mark('car_state_send_end')
     self.timing_source_car_state_ns = int(cs_send.logMonoTime)
+    timing = getattr(self, 'loop_timing', None)
+    if timing is not None:
+      timing.observe_output(bool(co_send.valid), int(co_send.logMonoTime), int(cs_send.logMonoTime), self.sm)
 
     wheel = getattr(self, 'wheel_publisher', None)
     if wheel is not None:
@@ -1334,6 +1344,9 @@ class Car:
       report = timing.take_report() if timing is not None else None
       if report is not None:
         cloudlog.event('card.loop_late', **report)
+      output_report = timing.take_output_report() if timing is not None else None
+      if output_report is not None:
+        cloudlog.event('card.output_invalid', **output_report)
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       if self.aol_card_intent is not None:

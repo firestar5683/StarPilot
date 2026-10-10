@@ -156,7 +156,7 @@ def test_actual_sd_controls_card_inventory_callers(failure):
           state = replace(state, pandaInventory=(slot,))
         return real_encode(state)
 
-      with mock.patch('openpilot.starpilot.aol.tests.test_runtime.encode_safety', production_shaped_wire):
+      with mock.patch('openpilot.starpilot.aol.tests.test_ioniq_availability.encode_safety', production_shaped_wire):
         axis, _, command = step(0)
         assert axis.lateralActive and axis.longitudinalActive and command.latActive and command.longActive
         assert not feedback(NOW, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])

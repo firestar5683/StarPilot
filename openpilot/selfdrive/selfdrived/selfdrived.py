@@ -35,7 +35,7 @@ from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
-from openpilot.starpilot.aol.transport_pause import TransportPause
+from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -767,6 +767,13 @@ class SelfdriveD:
       alerts.append(notification)
     if not recovery.monitor.visible(now_ns):
       clear_event_types.add(RADAR_RECOVERY_EVENT)
+    if getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause':
+      warning = Alert("Steering Paused", "Communication Issue", log.SelfdriveState.AlertStatus.normal,
+        log.SelfdriveState.AlertSize.small, AlertPriority.LOW, car.CarControl.HUDControl.VisualAlert.none,
+        (log.SelfdriveState.AudibleAlert.prompt if
+         now_ns <= getattr(self, 'aol_availability_chime_until_ns', 0) else log.SelfdriveState.AudibleAlert.none), 0.)
+      warning.alert_type, warning.event_type = 'aolAvailability/warning', ET.WARNING
+      alerts.append(warning)
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
     recovery.selected(self.AM.current_alert)
@@ -811,6 +818,10 @@ class SelfdriveD:
       axis.sessionId = self.aol_session_id
       axis.faultReason = reason
       axis.faultSessionId = self.aol_session_id
+      accepted_intent = getattr(self, 'aol_last_intent', None)
+      accepted_companion = getattr(self, 'aol_intent_companion', None)
+      axis.intentProducerSessionId = accepted_intent.producerSessionId if accepted_intent is not None else ''
+      axis.intentIntegrityEpoch = accepted_companion.integrity_epoch if accepted_companion is not None else 0
       axis.faultEventMonoTime = getattr(self, 'aol_fault_event_ns', 0)
       axis.sequence = self.aol_sequence
       axis.sourceCarStateMonoTime = self.aol_car_state_log_ns
@@ -986,6 +997,21 @@ class SelfdriveD:
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
           self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
         user_disable=self.events.contains(ET.USER_DISABLE))
+      if not hasattr(self, 'aol_availability_pause'):
+        self.aol_availability_pause = AvailabilityPause(self.CP, self.aol_session_id)
+      availability = self.aol_availability_pause.observe(
+        cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS, native=native, now_ns=now_ns,
+        companion=intent_companion, intent=intent, events=self.events.to_msg(),
+        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+        source_current=source_current, prior_lateral_active=previous.lateral_active,
+        hard_fault=bool(self.aol_authority_lost or lost_active_aol or lost_companion or lost_permission or upgraded),
+        healthy_native=self.aol_transport_pause.observed_native)
+      if availability:
+        if previous_fault_reason != 'availabilityPause':
+          self.aol_availability_ordinary_warning = self.enabled
+          self.aol_availability_chime_until_ns = time.monotonic_ns() + 400_000_000
+        self.aol_availability_long_inhibit = True
       if pause and source_current and requested.lateral_active:
         # Ordinary controls were disabled at the first pause. Fresh normal AOL
         # gates and exact native acknowledgment recover only its lateral axis.
@@ -998,7 +1024,8 @@ class SelfdriveD:
       elif source_current and not intent.allowedLatch:
         self.aol_authority_lost = False
       self.aol_fault_reason = ('critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
-                               self.events.contains(ET.SOFT_DISABLE) else 'transportPause' if pause else 'none')
+                               self.events.contains(ET.SOFT_DISABLE) and not availability else
+                               'availabilityPause' if availability else 'transportPause' if pause else 'none')
       if self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
         self.record_aol_authority_loss(now_ns=now_ns, companion=intent_companion, drained=intent_drained, native=native,
           source_current=source_current, lost_active=lost_active_aol, lost_companion=lost_companion,
@@ -1011,7 +1038,28 @@ class SelfdriveD:
     if lost_active_aol and ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
       self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     if self.aol_replay:
+      if (not availability and source_current and self.enabled and self.events.contains(ET.ENABLE) and
+          not self.events.contains(ET.NO_ENTRY) and not self.events.contains(ET.IMMEDIATE_DISABLE) and
+          not self.events.contains(ET.SOFT_DISABLE)):
+        self.aol_availability_long_inhibit = False
+      if getattr(self, 'aol_availability_long_inhibit', False):
+        # Keep ordinary state truthful until a fresh accepted ENABLE. AOL's
+        # separately acknowledged lateral recovery does not reengage LONG.
+        self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+        self.enabled = self.active = False
+        if ET.ENABLE in self.state_machine.current_alert_types:
+          self.state_machine.current_alert_types.remove(ET.ENABLE)
+        if (availability and getattr(self, 'aol_availability_ordinary_warning', False) and
+            self.state_machine.soft_disable_timer > 0 and
+            ET.SOFT_DISABLE not in self.state_machine.current_alert_types):
+          self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
       self.aol_axis_decision = self._decide_aol_axes(CS, intent, native)
+      if availability:
+        self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
+      elif getattr(self, 'aol_availability_long_inhibit', False):
+        decision = self.aol_axis_decision
+        self.aol_axis_decision = AxisDecision(desired_lateral=decision.desired_lateral,
+          lateral_active=decision.lateral_active, native_acknowledged=decision.native_acknowledged)
       if pause:
         # Negotiate the fresh lateral request while output and ordinary LONG
         # remain off; requiring an active ack before requesting would deadlock.
@@ -1030,6 +1078,9 @@ class SelfdriveD:
         self.events.add(EventName.steerTempUnavailableSilent)
       if ET.WARNING not in self.state_machine.current_alert_types:
         self.state_machine.current_alert_types.append(ET.WARNING)
+    if (getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause' and
+        ET.WARNING not in self.state_machine.current_alert_types):
+      self.state_machine.current_alert_types.append(ET.WARNING)
     self.update_alerts(CS)
     self.update_conditional_mode(CS)
 

@@ -349,3 +349,166 @@ def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monk
   assert daemon.is_metric is True and daemon.experimental_mode is True
   assert daemon.slc_requested_configuration == 'configuration'
   assert daemon.v_cruise_helper.intervals == 'intervals'
+
+
+def _output_receiver():
+  from types import SimpleNamespace
+  average = SimpleNamespace(count=4, get_average=lambda: 0.02)
+  recent = SimpleNamespace(count=2, get_average=lambda: 0.025)
+  tracker = SimpleNamespace(prev_time=0.85, min_freq=40., max_freq=120., avg_dt=average, recent_avg_dt=recent)
+  return SimpleNamespace(logMonoTime={'carControl': 1234}, seen={'carControl': True},
+    valid={'carControl': True}, alive={'carControl': False}, freq_ok={'carControl': False},
+    recv_time={'carControl': 0.85}, freq_tracker={'carControl': tracker})
+
+
+def test_output_initial_invalid_and_healthy_samples_do_not_read_clock(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.starpilot import card_loop_timing as module
+  def unexpected_clock():
+    raise AssertionError('healthy/initial invalid diagnostic read a clock')
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic_ns=unexpected_clock))
+  timing = CardLoopTiming()
+  receiver = _output_receiver()
+  timing.observe_output(False, 1, 2, receiver)
+  timing.observe_output(False, 3, 4, receiver)
+  timing.observe_output(True, 5, 6, receiver)
+  timing.observe_output(True, 7, 8, receiver)
+  assert timing.take_output_report() is None
+  assert not timing.output_pending and timing.output_dropped == 0
+
+
+def test_output_transition_records_exact_receiver_health_and_observation_age(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.starpilot import card_loop_timing as module
+  clock_reads = []
+  def observation_time():
+    clock_reads.append(1)
+    return 1_000_000_000
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic_ns=observation_time))
+  timing = CardLoopTiming()
+  receiver = _output_receiver()
+  timing.observe_output(True, 100, 200, receiver)
+  timing.observe_output(False, 300, 400, receiver)
+  assert timing.take_output_report() == {
+    'snapshot_ns': 1_000_000_000, 'car_output_ns': 300, 'source_car_state_ns': 400,
+    'source_control_ns': 1234, 'seen': True, 'valid': True, 'alive': False, 'freq_ok': False,
+    'receiver_time_s': 0.85, 'previous_receiver_time_s': 0.85, 'min_frequency': 40., 'max_frequency': 120.,
+    'average_count': 4, 'average_dt_s': 0.02, 'recent_count': 2, 'recent_average_dt_s': 0.025,
+    'dropped_reports': 0, 'receiver_age_ns': 150_000_000}
+  # A sustained fault does not generate another transition or clock sample.
+  timing.observe_output(False, 500, 600, receiver)
+  assert timing.take_output_report() is None and len(clock_reads) == 1
+
+
+def test_output_fault_snapshot_is_detached_and_empty_averages_are_not_read(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.starpilot import card_loop_timing as module
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic_ns=lambda: 1_000_000_000))
+  timing = CardLoopTiming()
+  receiver = _output_receiver()
+  tracker = receiver.freq_tracker['carControl']
+  def unexpected_average():
+    raise AssertionError('empty frequency average was read')
+  tracker.avg_dt = SimpleNamespace(count=0, get_average=unexpected_average)
+  tracker.recent_avg_dt = SimpleNamespace(count=0, get_average=unexpected_average)
+  timing.observe_output(True, 1, 2, receiver)
+  receiver.valid['carControl'] = False
+  timing.observe_output(False, 3, 4, receiver)
+  for flags in (receiver.seen, receiver.valid, receiver.alive, receiver.freq_ok):
+    flags['carControl'] = True
+  receiver.logMonoTime['carControl'] = 9999
+  receiver.recv_time['carControl'] = 999.
+  tracker.prev_time = tracker.min_freq = tracker.max_freq = 999.
+  tracker.avg_dt.count = tracker.recent_avg_dt.count = 99
+  report = timing.take_output_report()
+  assert report['seen'] is True and report['valid'] is False
+  assert report['alive'] is False and report['freq_ok'] is False
+  assert report['source_control_ns'] == 1234 and report['car_output_ns'] == 3
+  assert report['source_car_state_ns'] == 4 and report['receiver_age_ns'] == 150_000_000
+  assert report['receiver_time_s'] == report['previous_receiver_time_s'] == 0.85
+  assert report['min_frequency'] == 40. and report['max_frequency'] == 120.
+  assert report['average_count'] == report['recent_count'] == 0
+  assert report['average_dt_s'] is None and report['recent_average_dt_s'] is None
+
+
+def test_output_rate_limit_exact_boundary_queue_two_and_dropped_count(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.starpilot import card_loop_timing as module
+  clock = Clock()
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic_ns=lambda: clock.wall))
+  timing = CardLoopTiming()
+  receiver = _output_receiver()
+  def transition(sequence):
+    timing.observe_output(True, sequence, sequence, receiver)
+    timing.observe_output(False, sequence, sequence, receiver)
+  transition(1)
+  clock.advance(timing.REPORT_INTERVAL_NS - 1)
+  transition(2)
+  assert len(timing.output_pending) == 1 and timing.output_dropped == 1
+  clock.advance(1)
+  transition(3)
+  assert len(timing.output_pending) == 2
+  clock.advance(timing.REPORT_INTERVAL_NS)
+  transition(4)
+  assert len(timing.output_pending) == 2 and timing.output_dropped == 2
+  first, second = timing.take_output_report(), timing.take_output_report()
+  assert first['car_output_ns'] == 3 and first['dropped_reports'] == 1
+  assert second['car_output_ns'] == 4 and second['dropped_reports'] == 2
+  assert second['snapshot_ns'] - first['snapshot_ns'] == 5_000_000_000
+  assert timing.take_output_report() is None
+
+
+def test_actual_params_worker_formats_output_snapshot_before_settings_reads(monkeypatch):
+  import threading
+  from types import SimpleNamespace
+  from openpilot.selfdrive.car import card as module
+  from openpilot.starpilot import card_loop_timing as timing_module
+  main_tid = threading.get_native_id()
+  order, errors = [], []
+  stopped = threading.Event()
+  clock = Clock()
+  timing = CardLoopTiming(clock)
+  monkeypatch.setattr(timing_module, 'time', SimpleNamespace(monotonic_ns=lambda: 1_000_000_000))
+  def event(name, **report):
+    assert threading.get_native_id() != main_tid
+    order.append((name, report, threading.get_native_id()))
+  monkeypatch.setattr(module.cloudlog, 'event', event)
+  finish(timing, clock, 80_877_165)
+  timing.observe_output(True, 1, 2, _output_receiver())
+  timing.observe_output(False, 3, 4, _output_receiver())
+  assert not order
+  daemon: Any = module.Car.__new__(module.Car)
+  daemon.loop_timing = timing
+  def read_bool(key):
+    order.append(('read', key, threading.get_native_id()))
+    return False
+  daemon.params = SimpleNamespace(get_bool=read_bool)
+  daemon.CP = SimpleNamespace(openpilotLongitudinalControl=False, pcmCruise=False)
+  daemon.aol_card_intent = None
+  daemon.v_cruise_helper = SimpleNamespace(intervals=None)
+  daemon.read_slc_configuration = lambda: 'configuration'
+  monkeypatch.setattr(module, 'read_cruise_intervals', lambda *a, **k: 'intervals')
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: 1., sleep=lambda _: stopped.set()))
+  monkeypatch.setattr(module, 'drop_realtime', lambda: None)
+  monkeypatch.setattr(module, 'set_core_affinity', lambda _: None)
+  def run():
+    try:
+      daemon.params_thread(stopped)
+    except BaseException as exc:
+      errors.append(exc)
+      stopped.set()
+  worker = threading.Thread(target=run)
+  worker.start()
+  try:
+    worker.join(2.)
+  finally:
+    stopped.set()
+    worker.join(2.)
+  assert not worker.is_alive() and not errors
+  assert [name for name, _, _ in order] == ['card.loop_late', 'card.output_invalid', 'read', 'read']
+  assert order[0][1]['frames'][0]['end_ns'] - order[0][1]['frames'][0]['start_ns'] == 80_877_165
+  assert order[1][1]['car_output_ns'] == 3 and order[1][1]['receiver_age_ns'] == 150_000_000
+  assert [value for name, value, _ in order if name == 'read'] == ['IsMetric', 'ExperimentalMode']
+  assert {tid for _, _, tid in order} == {worker.native_id} and worker.native_id != main_tid
+  assert timing.take_report() is None and timing.take_output_report() is None
+  assert daemon.slc_requested_configuration == 'configuration' and daemon.v_cruise_helper.intervals == 'intervals'

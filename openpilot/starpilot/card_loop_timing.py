@@ -11,6 +11,10 @@ class CardLoopTiming:
   def __init__(self, clock=None):
     self.clock = clock or self._clock
     self.pending = deque(maxlen=2)
+    self.output_pending = deque(maxlen=2)
+    self.output_was_valid = False
+    self.output_last_report_ns = None
+    self.output_dropped = 0
     self.points = []
     self.previous = None
     self.previous_end = None
@@ -62,3 +66,37 @@ class CardLoopTiming:
                     'thread_cpu_ns': b[2] - a[2], 'process_cpu_ns': b[3] - a[3]}
                    for a, b in zip(points, points[1:], strict=False)]})
     return {**context, 'between_loops_ns': between, 'dropped_reports': dropped, 'frames': frames}
+
+  def observe_output(self, valid, co_ns, cs_ns, sm):
+    previous = self.output_was_valid
+    self.output_was_valid = valid
+    if valid or not previous:
+      return
+    now = time.monotonic_ns()
+    if self.output_last_report_ns is not None and now - self.output_last_report_ns < self.REPORT_INTERVAL_NS:
+      self.output_dropped += 1
+      return
+    tracker = sm.freq_tracker['carControl']
+    if len(self.output_pending) == self.output_pending.maxlen:
+      self.output_dropped += 1
+    # Scalar tuple detached from mutable receiver state; no formatting or I/O.
+    self.output_pending.append((now, co_ns, cs_ns, sm.logMonoTime['carControl'],
+      sm.seen['carControl'], sm.valid['carControl'], sm.alive['carControl'], sm.freq_ok['carControl'],
+      sm.recv_time['carControl'], tracker.prev_time, tracker.min_freq, tracker.max_freq,
+      tracker.avg_dt.count, tracker.avg_dt.get_average() if tracker.avg_dt.count else None,
+      tracker.recent_avg_dt.count, tracker.recent_avg_dt.get_average() if tracker.recent_avg_dt.count else None,
+      self.output_dropped))
+    self.output_last_report_ns = now
+
+  def take_output_report(self):
+    try:
+      values = self.output_pending.popleft()
+    except IndexError:
+      return None
+    names = ('snapshot_ns', 'car_output_ns', 'source_car_state_ns', 'source_control_ns',
+      'seen', 'valid', 'alive', 'freq_ok', 'receiver_time_s', 'previous_receiver_time_s',
+      'min_frequency', 'max_frequency', 'average_count', 'average_dt_s',
+      'recent_count', 'recent_average_dt_s', 'dropped_reports')
+    report = dict(zip(names, values, strict=True))
+    report['receiver_age_ns'] = report['snapshot_ns'] - int(report['receiver_time_s'] * 1e9)
+    return report
