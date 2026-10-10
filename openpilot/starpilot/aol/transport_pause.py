@@ -11,7 +11,7 @@ def cp_identity(cp):
           tuple((int(c.safetyModel.raw), int(c.safetyParam)) for c in cp.safetyConfigs))
 
 
-def healthy_transport(sm, cp, cs, session, now_ns, native=None):
+def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None):
   """Require the live, exact native configuration, including every Panda."""
   try:
     native = native or current_native(sm, cp, now_ns=now_ns, axis_session_id=session)
@@ -19,35 +19,40 @@ def healthy_transport(sm, cp, cs, session, now_ns, native=None):
         not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent or
         native.requestedLateral and not native.lateralAllowed or
         native.requestedLongitudinal and not native.longitudinalAllowed):
-      return False
+      return None
     coherent = bool(native.pandaInventory)
     if coherent and (int(sm.logMonoTime['aolSafetyWire']) != native.observedMonoTime or
                      not 0 < native.observedMonoTime <= now_ns <= native.validUntilMonoTime or
                      now_ns - native.observedMonoTime > SAFETY_MAX_AGE_NS or
                      native.validUntilMonoTime - native.observedMonoTime > SAFETY_MAX_AGE_NS):
-      return False
+      return None
     if coherent and (not native_inventory_matches_cp(native, cp) or
                      any(p.safetyRxChecksInvalid or p.heartbeatLost or p.faults or
                          (native.requestedLongitudinal and str(config.safetyModel) not in ('silent', 'noOutput') and
                           not p.controlsAllowed)
                          for p, config in zip(native.pandaInventory, cp.safetyConfigs, strict=True))):
-      return False
+      return None
     # v2 carries exact producer-read health under its monotonic 200ms lease.
     # The independently conflated BOOTTIME PandaStates is a latest veto only.
     stamp = int(sm.logMonoTime['pandaStates'])
     if not (sm.seen['pandaStates'] and sm.valid['pandaStates'] and sm.alive['pandaStates'] and
             stamp > 0 and (coherent or stamp <= now_ns and now_ns - stamp <= SAFETY_MAX_AGE_NS)):
-      return False
+      return None
     pandas = sm['pandaStates']
     if not cp.safetyConfigs or len(pandas) != len(cp.safetyConfigs):
-      return False
-    return all(int(p.safetyModel.raw) == int(c.safetyModel.raw) and p.safetyParam == c.safetyParam and
+      return None
+    return native if all(int(p.safetyModel.raw) == int(c.safetyModel.raw) and p.safetyParam == c.safetyParam and
                p.alternativeExperience == cp.alternativeExperience and not p.safetyRxChecksInvalid and
                not p.heartbeatLost and not p.faults and
                (not native.requestedLongitudinal or str(c.safetyModel) in ('silent', 'noOutput') or p.controlsAllowed)
-               for p, c in zip(pandas, cp.safetyConfigs, strict=True))
+               for p, c in zip(pandas, cp.safetyConfigs, strict=True)) else None
   except (AttributeError, KeyError, IndexError, TypeError, ValueError):
-    return False
+    return None
+
+
+def healthy_transport(sm, cp, cs, session, now_ns, native=None):
+  """Require the live, exact native configuration, including every Panda."""
+  return _healthy_transport_native(sm, cp, cs, session, now_ns, native) is not None
 
 
 class TransportPause:
@@ -181,7 +186,8 @@ class TransportPauseFeedback:
       baseline = bool(reason == 'none' and axis.nativeAcknowledged and
                       0 < axis.sourceCarStateMonoTime <= stamp and
                       stamp - axis.sourceCarStateMonoTime <= AXIS_MAX_AGE_NS)
-      transport_healthy = healthy_transport(sm, cp, cs, str(axis.sessionId), now_ns)
+      native = _healthy_transport_native(sm, cp, cs, str(axis.sessionId), now_ns)
+      transport_healthy = native is not None
       cancel_native = (self._longitudinal_cancel_current(sm, cp, cs, axis, now_ns, latched=latched,
                                                         cancel_source_ns=cancel_source_ns)
                        if current and continuity and baseline and not transport_healthy else None)
@@ -207,7 +213,6 @@ class TransportPauseFeedback:
         self.signature = signature
         return False
       if transport_healthy:
-        native = current_native(sm, cp, now_ns=now_ns, axis_session_id=str(axis.sessionId))
         if (not latched or native is not None and not native.requestedLongitudinal or
             self.longitudinal_cancel_ns and now_ns - self.longitudinal_cancel_ns > SAFETY_MAX_AGE_NS):
           self.longitudinal_cancel_ns = 0
@@ -257,7 +262,6 @@ class TransportPauseFeedback:
           self.longitudinal_cancel_ns = int(cancel_source_ns)
           self.last_cancel_source_ns = int(cancel_source_ns)
         self.session = str(axis.sessionId)
-        native = current_native(sm, cp, now_ns=now_ns, axis_session_id=self.session)
         lateral_baseline = bool(axis.desiredLateral and axis.lateralActive and native is not None and
                                 native.pandaInventory and native.requestedLateral and native.lateralAllowed)
         self.lateral_baseline_ns = now_ns if lateral_baseline else 0

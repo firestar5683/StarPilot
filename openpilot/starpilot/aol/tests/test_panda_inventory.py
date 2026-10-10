@@ -506,3 +506,44 @@ def test_ev6_cancel_never_exempts_controls_mismatch_or_critical_events(event):
     assert caller.fault()
     caller.assert_no_exemption()
     assert not caller.card.aol_card_intent.allowed_latch
+
+
+@pytest.mark.parametrize('change', ['latest_fault', 'cp_change', 'native_expiry', 'borrowed_owner'])
+def test_feedback_native_snapshot_is_revalidated_each_observation(change):
+  from openpilot.starpilot.aol import transport_pause
+
+  cp = configured_cp()
+  state = bound_state(cp)
+  services = ['aolAxisState', 'aolSafetyWire', 'pandaStates', 'onroadEvents']
+  sm = messaging.SubMaster(services, ignore_avg_freq=services)
+  initial = sm_for(cp, state)
+  native = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=NOW)
+  native.aolSafetyWire = encode_safety(state)
+  pandas = messaging.new_message('pandaStates', len(cp.safetyConfigs), valid=True, logMonoTime=NOW + BOOT_OFFSET)
+  pandas.pandaStates = initial['pandaStates']
+  axis = messaging.new_message('aolAxisState', valid=True, logMonoTime=NOW)
+  axis.aolAxisState = {'sessionId': state.axisSessionId, 'sequence': 1,
+    'sourceCarStateMonoTime': NOW, 'observedMonoTime': NOW, 'validUntilMonoTime': NOW + 30_000_000,
+    'qualified': True, 'desiredLateral': True, 'lateralActive': True, 'nativeAcknowledged': True,
+    'faultReason': 'none', 'faultSessionId': state.axisSessionId}
+  events = messaging.new_message('onroadEvents', 0, valid=True, logMonoTime=NOW)
+  sm.update_msgs(NOW / 1e9, [native.as_reader(), pandas.as_reader(), axis.as_reader(), events.as_reader()])
+  feedback = transport_pause.TransportPauseFeedback(cp)
+  with mock.patch.object(transport_pause, 'current_native', wraps=current_native) as validate:
+    assert not feedback.observe(sm, cp, car_state(), NOW)
+    assert validate.call_count == 1
+    assert feedback.lateral_baseline_ns == NOW and feedback.lateral_inventory
+    later = NOW + 1_000_000
+    if change == 'latest_fault':
+      pandas.pandaStates[-1].heartbeatLost = True
+      sm.update_msgs(later / 1e9, [pandas.as_reader()])
+    elif change == 'cp_change':
+      cp.safetyConfigs[-1].safetyParam ^= 1
+    else:
+      bad = (replace(state, validUntilMonoTime=NOW + 500_000) if change == 'native_expiry' else
+             replace(state, pandaSerial='borrowed-owner'))
+      native.aolSafetyWire = encode_safety(bad)
+      sm.update_msgs(later / 1e9, [native.as_reader()])
+    assert feedback.observe(sm, cp, car_state(), later)
+    assert validate.call_count == 2
+    assert feedback.failed and not feedback.qualified and not feedback.awaiting
