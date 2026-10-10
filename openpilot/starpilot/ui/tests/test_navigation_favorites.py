@@ -6,6 +6,57 @@ import pytest
 from openpilot.starpilot.ui.onroad_navigation_favorites import NavigationFavorites
 
 
+@pytest.mark.parametrize('key', ['nav_home', 'nav_work', 'bookmark'])
+@pytest.mark.parametrize('display', ['icons', 'words'])
+@pytest.mark.parametrize('background', [True, False])
+@pytest.mark.parametrize('opacity', [0, 40, 100])
+def test_appearance_scales_ink_and_optional_background(key, display, background, opacity):
+  fonts = Mock()
+  fonts.measure.return_value = NS(width=10)
+  card = NavigationFavorites(fonts)
+  state = NS(customization={'layouts': {'large': {key: {'x': 100, 'y': 200, 'enabled': True,
+                                                      'display': display, 'opacity': opacity, 'background': background}}}},
+             alert=NS(size='none'))
+  # A missing favorite also exercises the status badge's opacity and background.
+  with patch('pyray.draw_rectangle_rounded') as fill, patch('pyray.draw_rectangle_rounded_lines_ex') as border, \
+       patch('pyray.draw_line_ex') as lines, patch('pyray.draw_circle') as badge:
+    card.render(key, state)
+  assert fill.call_count == border.call_count == int(background)
+  if background:
+    assert fill.call_args.args[-1].a == round(245 * opacity / 100)
+    assert border.call_args.args[-1].a == round((255 if key == 'bookmark' else 170) * opacity / 100)
+  assert all(call.args[-1].a == round(255 * opacity / 100) for call in fonts.draw.call_args_list)
+  if display == 'icons':
+    assert lines.call_count > 0
+    assert all(call.args[-1].a == round(255 * opacity / 100) for call in lines.call_args_list)
+    assert badge.call_count == int(background and key != 'bookmark')
+    if background and key != 'bookmark':
+      assert badge.call_args.args[-1].a == round(255 * opacity / 100)
+
+
+@pytest.mark.parametrize('display', ['words', 'icons'])
+def test_bookmark_stays_visible_during_navigation_and_needs_no_favorite(display):
+  fonts = Mock()
+  fonts.measure.return_value = NS(width=10)
+  card = NavigationFavorites(fonts)
+  placed = {'x': 100, 'y': 200, 'enabled': True, 'display': display, 'opacity': 50, 'background': False}
+  state = NS(customization={'layouts': {'large': {'bookmark': placed, 'nav_home': {**placed, 'enabled': True}}}},
+             alert=NS(size='none'))
+  home = {'id': 'home', 'label': 'home'}
+  card.document = {'favorites': [home], 'destination': home, 'enabled': True, 'token': 'key'}
+  with patch('pyray.draw_rectangle_rounded') as background, patch('pyray.draw_rectangle_rounded_lines_ex'), \
+       patch('pyray.draw_line_ex') as lines:
+    card.render('bookmark', state)
+  background.assert_not_called()
+  assert [call.args[0] for call in fonts.draw.call_args_list] == (['Bookmark', 'Save event'] if display == 'words' else [])
+  if display == 'icons':
+    assert lines.call_count == 5
+  fonts.draw.reset_mock()
+  placed['enabled'] = False
+  card.render('bookmark', state)
+  fonts.draw.assert_not_called()
+
+
 @pytest.mark.parametrize('key', ['nav_home', 'nav_work'])
 def test_card_changes_to_end_navigation_only_for_its_destination(key):
   fonts = Mock()

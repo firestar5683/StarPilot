@@ -8,7 +8,7 @@ import unittest
 from openpilot.starpilot.system.android_auto.display_profile import record_screen, read_screen
 from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
-  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, CAR_EXIT, placement_size,
+  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, BOOKMARK_WIDGET, CAR_EXIT, ACTION_WIDGETS, placement_size,
 )
 from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
@@ -18,6 +18,53 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_bookmark_is_opt_in_and_upgrades_existing_layouts_without_changing_them(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    bookmark = document['widgets'].pop(BOOKMARK_WIDGET)
+    self.assertFalse(bookmark['enabled'])
+    self.assertEqual((bookmark['opacity'], bookmark['background'], bookmark['display']), (100, True, 'words'))
+    document['widgets']['current_speed']['x'] += 20
+    document['widgetOrder'] = [key for key in metadata['widgetOrder'] if key != BOOKMARK_WIDGET]
+    original = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, original)
+    self.assertEqual(migrated['widgets'].pop(BOOKMARK_WIDGET), bookmark)
+    self.assertEqual(migrated['widgets'], original['widgets'])
+    self.assertEqual(migrated['widgetOrder'], [*original['widgetOrder'][:-1], BOOKMARK_WIDGET, CAR_EXIT])
+    bookmark.update(enabled=True, display='icons', opacity=35, background=False, x=2740)
+    migrated['widgets'][BOOKMARK_WIDGET] = bookmark
+    self.assertEqual(placement_size(BOOKMARK_WIDGET, metadata['widgets'][BOOKMARK_WIDGET], bookmark), (110, 110))
+    self.assertEqual(validate_layout(migrated, SCREEN), migrated)
+    self.assertEqual(decode_layout(json.dumps(migrated).encode(), SCREEN), migrated)
+
+  def test_action_appearance_migrates_and_survives_serialization(self):
+    document = default_layout(SCREEN)
+    for key in ACTION_WIDGETS:
+      document['widgets'][key].pop('opacity')
+      document['widgets'][key].pop('background')
+    original = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, original)
+    for key in ACTION_WIDGETS:
+      self.assertEqual(migrated['widgets'][key], {**document['widgets'][key], 'opacity': 100, 'background': True})
+    for key, opacity in zip(ACTION_WIDGETS, (0, 45, 70, 100), strict=True):
+      migrated['widgets'][key].update(opacity=opacity, background=False)
+    decoded = decode_layout(json.dumps(migrated).encode(), SCREEN)
+    self.assertEqual(decoded, migrated)
+    projected = projection_customization(decoded, default_document())
+    for key in ACTION_WIDGETS:
+      self.assertEqual(projected['layouts']['large'][key], migrated['widgets'][key])
+
+  def test_action_appearance_is_strictly_validated(self):
+    for key in ACTION_WIDGETS:
+      for field, values in [('opacity', (-1, 101, 50.5, True, None, '50')), ('background', (0, 1, None, 'false', [], {}))]:
+        for value in values:
+          document = default_layout(SCREEN)
+          document['widgets'][key][field] = value
+          with self.subTest(key=key, field=field, value=value), self.assertRaises(ValueError):
+            validate_layout(document, SCREEN)
+
   def test_gamma_trial_is_opt_in_and_strictly_boolean(self):
     document = default_layout(SCREEN)
     self.assertFalse(document['largeUiGammaTrial'])

@@ -285,7 +285,7 @@ class OnroadView:
           submit("nav_map", lambda: map_layer(content, state))
       if "nav_card" in state.customization["layouts"]["large"]:
         submit("nav_card", lambda: self.navigation.render(state))
-      for key in ("nav_home", "nav_work"):
+      for key in ("nav_home", "nav_work", "bookmark"):
         if key in state.customization["layouts"]["large"]:
           submit(key, lambda key=key: self.navigation_favorites.render(key, state))
       if "car_exit" in state.customization["layouts"]["large"]:
@@ -381,7 +381,7 @@ class OnroadView:
       elif not ordered or "nav_card" not in state.customization["layouts"]["large"]:
         self.navigation.render(state)
       if not ordered:
-        for key in ("nav_home", "nav_work"):
+        for key in ("nav_home", "nav_work", "bookmark"):
           self.navigation_favorites.render(key, state)
         self._driving_mode(state, right_shift / 2)
         self._clock(state, right_shift / 2)

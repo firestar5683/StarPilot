@@ -15,8 +15,8 @@ metadata.widgets.steering_wheel.default.x += 1020
 metadata.widgets.nav_card = { label: "Turn-by-turn", kind: "nav_card", width: 560, height: 195, colors: {},
   default: { x: 2250, y: 415, enabled: true } }
 metadata.widgets.nav_map = { label: "Map overlay", kind: "nav_map", width: 860, height: 410, colors: {},
-  box: { minWidth: 280, maxWidth: 2820, minHeight: 200, maxHeight: 1020 }, opacity: { min: 15, max: 100, default: 70 },
-  default: { x: 1950, y: 625, enabled: false, width: 860, height: 410, opacity: 70 } }
+  box: { minWidth: 280, maxWidth: 2820, minHeight: 200, maxHeight: 1020 }, opacity: { min: 15, max: 100, default: 50 },
+  default: { x: 1950, y: 625, enabled: false, width: 860, height: 410, opacity: 50 } }
 for (const [index, label] of ["Home", "Work"].entries()) {
   const key = `nav_${label.toLowerCase()}`
   metadata.widgets[key] = { label, kind: key, width: 320, height: 110, iconSize: 110, colors: {},
@@ -25,7 +25,13 @@ for (const [index, label] of ["Home", "Work"].entries()) {
 metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
   default: { x: 30, y: 954, enabled: true } }
-metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work", "car_exit"]
+metadata.widgets.bookmark = { label: 'Bookmark', kind: 'bookmark', width: 320, height: 110, iconSize: 110, colors: {},
+  default: {x: 2530, y: 155, enabled: false, display: 'words'} }
+for (const key of ['nav_home', 'nav_work', 'bookmark', 'car_exit']) {
+  Object.assign(metadata.widgets[key], {opacity: {min: 0, max: 100, default: 100}, backgroundToggle: true})
+  Object.assign(metadata.widgets[key].default, {opacity: 100, background: true})
+}
+metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work", "bookmark", "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
 const doc = { version: 2, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
@@ -91,12 +97,14 @@ const vm = {
   finishColorEdit() { this.state.history.group = null },
 }
 Object.defineProperties(vm, {
+  canUndo: { get: () => vm.state.history.undo.length > 0 },
+  canRedo: { get: () => vm.state.history.redo.length > 0 },
   profile: { get: () => profile },
   layout: { get: () => vm.state.draft.layouts.large },
   selectedWidget: { get: () => profile.widgets[vm.state.selected] },
   selectedPosition: { get: () => vm.state.draft.layouts.large[vm.state.selected] },
 })
-for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "requestRemove", "reorderLayer", "startLayerDrag", "setFavoriteDisplay"])
+for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "setWidgetBackground", "undo", "redo", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "requestRemove", "reorderLayer", "startLayerDrag", "setFavoriteDisplay"])
   vm[name] = OnroadLayoutPage.methods[name].bind(vm)
 const pointer = (x, y) => ({ clientX: x, clientY: y, pointerId: 7, button: 0, preventDefault() {}, stopPropagation() {} })
 vm.startResize("nav_map", pointer(1950 + 860, 625 + 410))
@@ -117,7 +125,7 @@ assert.equal(validDocument(vm.state.draft, data.metadata), true)
 
 // Home and Work use the same add, place, layer-order, remove and save controls.
 vm.state.data = data
-for (const key of ["nav_home", "nav_work"]) {
+for (const key of ["nav_home", "nav_work", "bookmark"]) {
   assert.equal(vm.layout[key].enabled, false)
   vm.add(key)
   assert.equal(vm.layout[key].enabled, true)
@@ -156,6 +164,56 @@ for (const display of ['emoji', null, true, 1]) {
   assert.equal(validDocument(invalid, data.metadata), false)
 }
 
+// Each action has independent appearance, undo/redo, strict validation and saved preview values.
+vm.editAvailable = true
+for (const [index, key] of ['nav_home', 'nav_work', 'bookmark', 'car_exit'].entries()) {
+  vm.state.selected = key
+  vm.finishColorEdit()
+  const before = copy(vm.state.draft)
+  vm.opacityInput({target: {value: String(25 + index * 10)}})
+  vm.setWidgetBackground({target: {checked: false}})
+  assert.equal(vm.layout[key].opacity, 25 + index * 10)
+  assert.equal(vm.layout[key].background, false)
+  vm.undo()
+  assert.equal(vm.layout[key].background, true)
+  vm.undo()
+  assert.deepEqual(vm.state.draft, before)
+  vm.redo()
+  vm.redo()
+  const payload = projectionPayload({revision: 'appearance', document: vm.state.draft}, data.metadata)
+  assert.equal(payload.document.widgets[key].opacity, 25 + index * 10)
+  assert.equal(payload.document.widgets[key].background, false)
+  const preview = OnroadLayoutPage.computed.renderWidgets.call({layerWidgets: [{id: key, ...profile.widgets[key]}], layout: vm.layout})[0]
+  assert.equal(preview.opacity, 25 + index * 10)
+  assert.equal(preview.background, false)
+  assert.equal(validDocument(vm.state.draft, data.metadata), true)
+  for (const change of [{opacity: -1}, {opacity: 101}, {opacity: 50.5}, {opacity: true}, {background: 0}, {background: 'false'}]) {
+    const invalid = copy(vm.state.draft)
+    Object.assign(invalid.layouts.large[key], change)
+    assert.equal(validDocument(invalid, data.metadata), false)
+  }
+  for (const blocked of [{editable: false}, {state: {...vm.state, drag: {}}}, {state: {...vm.state, layerDrag: {}}}]) {
+    OnroadLayoutPage.methods.opacityInput.call({...vm, ...blocked}, {target: {value: '90'}})
+    OnroadLayoutPage.methods.setWidgetBackground.call({...vm, ...blocked}, {target: {checked: true}})
+    assert.equal(vm.layout[key].opacity, 25 + index * 10)
+    assert.equal(vm.layout[key].background, false)
+  }
+}
+vm.state.selected = 'bookmark'
+vm.add('bookmark')
+vm.setFavoriteDisplay('icons')
+assert.deepEqual(widgetSize(profile.widgets.bookmark, vm.layout.bookmark), [110, 110])
+assert.equal(projectionPayload({document: vm.state.draft}, data.metadata).document.widgets.bookmark.display, 'icons')
+assert.equal(vm.layout.bookmark.opacity, 45)
+assert.equal(vm.layout.bookmark.background, false)
+vm.setFavoriteDisplay('words')
+assert.deepEqual(widgetSize(profile.widgets.bookmark, vm.layout.bookmark), [320, 110])
+for (const change of [{opacity: {min: 0, max: 101, default: 100}}, {backgroundToggle: false}]) {
+  const invalid = copy(data)
+  Object.assign(invalid.metadata.profiles.large.widgets.car_exit, change)
+  assert.equal(validSnapshot(invalid), false)
+}
+
 // The escape control moves normally but cannot be disabled, removed, or placed below another widget.
 vm.state.selected = 'car_exit'
 assert.equal(profile.widgets.car_exit.label, 'Exit to car')
@@ -186,4 +244,5 @@ assert.match(OnroadLayoutPage.template, />Top · Required</)
 assert.match(LayoutWidgetPreview.template, /data-preview-icon="door-exit"/)
 
 compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
-console.log("Projection widgets: map resizing/opacity, Home/Work add/move/order/remove, strict documents and payload passed")
+compile(LayoutWidgetPreview.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
+console.log("Projection widgets: map resizing/opacity, Home/Work/Bookmark add/move/order/remove, appearance, strict documents and payload passed")

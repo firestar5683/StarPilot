@@ -8,6 +8,10 @@ const response = (value, status = 200) => ({ ok: status === 200, status, json: a
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 
 assert(validNavigation(snapshot()))
+for (const key of ['avoidTolls', 'avoidHighways', 'avoidFerries']) {
+  for (const value of [true, false]) assert(validNavigation({ ...snapshot(), [key]: value }))
+  for (const value of ['true', 1, null, []]) assert(!validNavigation({ ...snapshot(), [key]: value }))
+}
 assert(!validNavigation({ ...snapshot(), route: [{ latitude: 90, longitude: Infinity }] }))
 assert(!validNavigation({ ...snapshot(), destination: { ...place, latitude: 120 } }))
 assert(!validNavigation({ ...snapshot(), instruction: { text: "Turn left" } }))

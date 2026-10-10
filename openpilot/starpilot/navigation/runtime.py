@@ -6,7 +6,7 @@ import math
 import time
 import uuid
 
-from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError
+from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError, ROUTE_AVOIDANCES
 from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
 from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SOURCES, bearing, select_location
@@ -51,7 +51,8 @@ class RouteRuntime:
     settings = self.owner.read_routing()
     selected = settings['destination']
     destination_key = None if selected is None else (selected['id'], selected['longitude'], selected['latitude'])
-    key = settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive_id
+    exclusions = tuple(value for key, value in ROUTE_AVOIDANCES.items() if settings[key])
+    key = settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive_id, exclusions
     if key != self.key:
       self.key, self.route = key, None
       self.routes = []
@@ -103,7 +104,7 @@ class RouteRuntime:
             self.preview_only = True
             self.fetch_key = self.key
             self.future = self.executor.submit(self.engine.fetch, settings['token'],
-                                               (saved['longitude'], saved['latitude']), settings['destination'], saved.get('bearing'))
+                                               (saved['longitude'], saved['latitude']), settings['destination'], saved.get('bearing'), exclusions)
       return result
     stamp, coordinates, speed, bearing = position
     result['locationMonoTime'] = stamp
@@ -111,7 +112,7 @@ class RouteRuntime:
       result['status'] = 'routeUnavailable' if self.retry_after > now_ns else 'routing'
       if self.future is None and now_ns >= self.retry_after:
         self.fetch_key = self.key
-        self.future = self.executor.submit(self.engine.fetch, settings['token'], coordinates, settings['destination'], bearing)
+        self.future = self.executor.submit(self.engine.fetch, settings['token'], coordinates, settings['destination'], bearing, exclusions)
       return result
     progress = self.route.progress(coordinates, speed, bearing)
     self.off_route_since = (self.off_route_since or now_ns) if progress.off_route else 0

@@ -1,4 +1,7 @@
 import uuid
+from unittest.mock import patch
+
+import pytest
 
 from openpilot.starpilot.system.android_auto.projection_control import NATIVE_FOCUS, ProjectionControlReceiver, ProjectionControlSender
 from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
@@ -26,6 +29,26 @@ class Graphics:
   @classmethod
   def draw_line_ex(cls, *values): cls.lines.append(values)
 
+@pytest.mark.parametrize('background', [True, False])
+@pytest.mark.parametrize('opacity', [0, 40, 100])
+def test_exit_appearance_preserves_tap_action(background, opacity):
+  calls = []
+  control = ProjectionExit(Graphics, lambda: calls.append(NATIVE_FOCUS))
+  placed = {**default_layout_for_viewport((2880, 1080))['widgets'][CAR_EXIT],
+            'opacity': opacity, 'background': background}
+  with patch.object(Graphics, 'draw_rectangle_rounded') as fill, \
+       patch.object(Graphics, 'draw_rectangle_rounded_lines_ex') as border, patch.object(Graphics, 'draw_line_ex') as lines:
+    control.draw(placed)
+  assert fill.call_count == border.call_count == int(background)
+  if background:
+    assert fill.call_args.args[-1][-1] == round(166 * opacity / 100)
+    assert border.call_args.args[-1][-1] == round(200 * opacity / 100)
+  assert lines.call_count == 6
+  assert all(call.args[-1][-1] == round(230 * opacity / 100) for call in lines.call_args_list)
+  x, y = placed['x'] + 48, placed['y'] + 48
+  assert control.touch('down', x, y, placed)
+  assert control.touch('up', x, y, placed)
+  assert calls == [NATIVE_FOCUS]
 
 
 def test_car_widget_tap_requests_native_focus_and_drag_does_not():

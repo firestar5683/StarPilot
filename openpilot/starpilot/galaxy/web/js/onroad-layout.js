@@ -122,12 +122,14 @@ export function validDocument(document, metadata) {
     return keysEqual(layout, Object.keys(profile.widgets)) && Object.entries(layout).every(([id, position]) => {
       const widget = profile.widgets[id], limits = placementLimits(profile, id, layout)
       const resizable = widget.resizable, box = widget.box, opacity = widget.opacity
-      return keysEqual(position, resizable ? ["x", "y", "enabled", "size"] : box ? ["x", "y", "enabled", "width", "height", "opacity"] : ["x", "y", "enabled", ...(widget.iconSize ? ["display"] : [])]) &&
+      return keysEqual(position, ["x", "y", "enabled", ...(resizable ? ["size"] : []), ...(box ? ["width", "height"] : []),
+        ...(opacity ? ["opacity"] : []), ...(widget.iconSize ? ["display"] : []), ...(widget.backgroundToggle ? ["background"] : [])]) &&
         (!widget.iconSize || ["words", "icons"].includes(position.display)) &&
+        (!widget.backgroundToggle || typeof position.background === "boolean") &&
+        (!opacity || (Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
         (!resizable || (Number.isInteger(position.size) && position.size >= resizable.min && position.size <= resizable.max)) &&
         (!box || (Number.isInteger(position.width) && position.width >= box.minWidth && position.width <= box.maxWidth &&
-          Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight &&
-          Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
+          Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight)) &&
         typeof position.enabled === "boolean" && (!widget.required || position.enabled === true) &&
         Number.isFinite(position.x) && Number.isFinite(position.y) &&
         position.x >= limits.minX && position.x <= limits.maxX && position.y >= limits.minY && position.y <= limits.maxY &&
@@ -185,12 +187,18 @@ export function validSnapshot(data) {
           ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
           widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
           widget.opacity.default > widget.opacity.max)) return false
+      if (widget.opacity && (!projection || !["nav_map", "nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
+          !object(widget.opacity) || ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
+          widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
+          widget.opacity.default > widget.opacity.max)) return false
+      if (widget.backgroundToggle != null && (!projection || !["nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
+          widget.backgroundToggle !== true || !widget.opacity)) return false
       if (widget.resizable && (widget.kind !== "steering_wheel" || !Number.isInteger(widget.resizable.min) ||
           !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
           widget.resizable.default !== widget.width || widget.width !== widget.height ||
           widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||
           widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
-      if (widget.iconSize != null && (!projection || !["nav_home", "nav_work"].includes(widget.kind) ||
+      if (widget.iconSize != null && (!projection || !["nav_home", "nav_work", "bookmark"].includes(widget.kind) ||
           !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
       if (widget.required != null && (!projection || widget.kind !== "car_exit" || widget.required !== true)) return false
       if (widget.frontmost != null && (!projection || widget.kind !== "car_exit" || widget.frontmost !== true)) return false
@@ -404,19 +412,20 @@ export const LayoutWidgetPreview = {
         <circle cx="30" cy="31" r="6" fill="white" />
         <path d="M20 47 Q20 38 30 38 Q40 38 40 47 Z" fill="white" />
       </g>
-      <g v-else-if="['nav_home', 'nav_work'].includes(widget.kind)">
-        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
+      <g v-else-if="['nav_home', 'nav_work', 'bookmark'].includes(widget.kind)" :opacity="(widget.opacity ?? 100) / 100">
+        <rect v-if="widget.background !== false" x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
         <g v-if="widget.display === 'icons'" transform="translate(23 23) scale(2.6667)" fill="none" stroke="#c7aef7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path v-if="widget.kind === 'nav_home'" d="M3 11 L12 3 L21 11 M5 9 V21 H10 V14 H14 V21 H19 V9" />
+          <path v-else-if="widget.kind === 'bookmark'" d="M6 3 H18 V21 L12 16 L6 21 Z" />
           <path v-else d="M8 7 V4 H16 V7 M3 7 H21 V21 H3 Z M3 12 L10 15 H14 L21 12 M10 13 V17 H14 V13" />
         </g>
         <template v-else>
         <text :x="widget.width / 2" y="48" text-anchor="middle" font-size="34" font-weight="600" fill="#c7aef7">{{ widget.label }}</text>
-        <text :x="widget.width / 2" y="89" text-anchor="middle" font-size="25" fill="#c7aef7">Navigate</text>
+        <text :x="widget.width / 2" y="89" text-anchor="middle" font-size="25" fill="#c7aef7">{{ widget.kind === 'bookmark' ? 'Save event' : 'Navigate' }}</text>
         </template>
       </g>
-      <g v-else-if="widget.kind === 'car_exit'">
-        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="15" fill="#0f0d17a6" stroke="#c7aef7c8" stroke-width="3" />
+      <g v-else-if="widget.kind === 'car_exit'" :opacity="(widget.opacity ?? 100) / 100">
+        <rect v-if="widget.background !== false" x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="15" fill="#0f0d17a6" stroke="#c7aef7c8" stroke-width="3" />
         <g data-preview-icon="door-exit" fill="none" stroke="#c7aef7e6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M54 20 H24 V76 H54" />
           <path d="M38 48 H78 M67 37 L78 48 L67 59" />
@@ -438,7 +447,7 @@ export const LayoutWidgetPreview = {
           <mask id="gx-nav-map-mask"><rect :width="widget.width" :height="widget.height" :rx="Math.min(widget.width, widget.height) * .08" fill="url(#gx-nav-map-fade)" /></mask>
         </defs>
         <g mask="url(#gx-nav-map-mask)" :transform="'scale(' + widget.width / 600 + ' ' + widget.height / 450 + ')'" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <g :opacity="(widget.opacity ?? 70) / 100">
+          <g :opacity="(widget.opacity ?? 50) / 100">
           <rect width="600" height="450" fill="#0b0f16" opacity=".45" />
           <g stroke="#000000a8" vector-effect="non-scaling-stroke">
             <path d="M-20 120 Q200 150 640 90 M90 -20 L130 480 M430 -20 Q400 200 470 480 M-20 330 L640 360 M260 -20 L250 480" stroke-width="11" vector-effect="non-scaling-stroke" />
@@ -563,7 +572,8 @@ export const OnroadLayoutPage = {
         visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0) }
       const [width, height] = widgetSize(widget, this.layout[widget.id])
       return { ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
-        ...(widget.box ? { opacity: this.layout[widget.id].opacity } : {}) } }) },
+        ...(widget.opacity ? { opacity: this.layout[widget.id].opacity } : {}),
+        ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {}) } }) },
     inactiveWidgets() { return this.widgets.filter(({ id }) => !this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id)) },
     availableProfiles() { return this.state.data?.supportedProfiles || (this.state.data?.activeProfile ? [this.state.data.activeProfile] : []) },
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
@@ -877,10 +887,18 @@ export const OnroadLayoutPage = {
     },
     opacityInput(event) {
       const value = Number(event.target.value), range = this.selectedWidget?.opacity
-      if (!this.editable || this.state.drag || !range || !Number.isInteger(value) || value < range.min || value > range.max) return
+      if (!this.editable || this.state.drag || this.state.layerDrag || !range || !Number.isInteger(value) || value < range.min || value > range.max) return
       const before = clone(this.state.draft)
       this.selectedPosition.opacity = value
       this.recordChange(before, this.state.profile + ":" + this.state.selected + ":opacity")
+    },
+    setWidgetBackground(event) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.backgroundToggle) return
+      this.finishColorEdit()
+      const before = clone(this.state.draft)
+      this.selectedPosition.background = event.target.checked
+      this.recordChange(before)
+      this.state.notice = ""
     },
     moveDrag(event) {
       const drag = this.state.drag
@@ -1225,11 +1243,15 @@ export const OnroadLayoutPage = {
                 <template v-if="selectedWidget.box">
                   <div class="gx-layout__coordinates"><label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editAvailable || !!state.drag" @change="boxInput('width', $event)"></label>
                     <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editAvailable || !!state.drag" @change="boxInput('height', $event)"></label></div>
-                  <label for="layout-map-opacity">Map opacity · {{ selectedPosition.opacity }}%</label>
-                  <input id="layout-map-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
-                    :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
                   <span class="gx-note">Lower values let more of the road show through. Drag the corner handle on the preview to resize.</span>
                 </template>
+                <template v-if="selectedWidget.opacity">
+                  <label for="layout-widget-opacity">{{ selectedWidget.box ? 'Map opacity' : 'Opacity' }} · {{ selectedPosition.opacity }}%</label>
+                  <input id="layout-widget-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
+                    :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
+                </template>
+                <label v-if="selectedWidget.backgroundToggle"><input type="checkbox" :checked="selectedPosition.background"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setWidgetBackground"> Show background</label>
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>

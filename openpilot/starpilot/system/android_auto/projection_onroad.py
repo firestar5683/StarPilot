@@ -1,4 +1,4 @@
-"""Large onroad projection with navigation-only favorite actions."""
+"""Large onroad projection with navigation and drive-bookmark actions."""
 
 from contextlib import ExitStack
 from dataclasses import replace
@@ -91,7 +91,7 @@ def native_dependencies():
 
 
 class ProjectionOnroad:
-  """Separate renderer with Home/Work navigation; native UIState stays read-only."""
+  """Separate renderer with projected actions; native UIState stays read-only."""
 
   def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
@@ -102,6 +102,7 @@ class ProjectionOnroad:
     self._base_customization = None
     self._projection_customization = None
     self.native_focus = native_focus or (lambda: None)
+    self.bookmark = lambda: False
     self.camera_stream = None  # the camera stream the last frame drew, or None
     self.native = dependencies or native_dependencies()
     native = self.native
@@ -141,6 +142,7 @@ class ProjectionOnroad:
       self.favorites = None
       if getattr(native, 'favorites', None) is not None:
         self.favorites = native.favorites(lambda: native.ui_state.started)
+        self.favorites.bookmark = lambda: self.bookmark()
         self.favorites.card_bounds = getattr(getattr(self.onroad, 'navigation', None), 'bounds', None)
         self._resources.callback(self.favorites.close)
     except BaseException:

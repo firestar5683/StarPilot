@@ -19,14 +19,17 @@ DOCUMENT_PATH = DATA_DIR / 'layouts/document.json'
 NAV_CARD, NAV_MAP = 'nav_card', 'nav_map'
 NAV_HOME, NAV_WORK = 'nav_home', 'nav_work'
 FAVORITE_WIDGETS = (NAV_HOME, NAV_WORK)
+BOOKMARK_WIDGET = 'bookmark'
+DISPLAY_WIDGETS = (*FAVORITE_WIDGETS, BOOKMARK_WIDGET)
 CAR_EXIT = 'car_exit'
+ACTION_WIDGETS = (*DISPLAY_WIDGETS, CAR_EXIT)
 FAVORITE_SIZE = (320, 110)
 FAVORITE_ICON_SIZE = 110
 CAR_EXIT_SIZE = (96, 96)
-PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *FAVORITE_WIDGETS, CAR_EXIT)
+PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *DISPLAY_WIDGETS, CAR_EXIT)
 NAV_CARD_SIZE = (560, 195)
 MAP_MIN_SIZE = (280, 200)
-MAP_OPACITY = (15, 100, 70)  # percent: min, max, default
+MAP_OPACITY = (15, 100, 50)  # percent: min, max, default
 
 
 class ProjectionLayoutSource:
@@ -90,12 +93,20 @@ def layout_metadata_for_viewport(viewport):
                     'note': f'Navigate to your saved {label} favorite. Tap again to end navigation. Set the address in The Galaxy.',
                     'default': {'x': width - 30 - 2 * FAVORITE_SIZE[0] - 15 + index * (FAVORITE_SIZE[0] + 15),
                                 'y': 280, 'enabled': False, 'display': 'words'}}
+  widgets[BOOKMARK_WIDGET] = {'label': 'Bookmark', 'kind': BOOKMARK_WIDGET,
+                              'width': FAVORITE_SIZE[0], 'height': FAVORITE_SIZE[1], 'colors': {},
+                              'iconSize': FAVORITE_ICON_SIZE,
+                              'note': 'Save a bookmark in the current drive recording.',
+                              'default': {'x': width - 30 - FAVORITE_SIZE[0], 'y': 155, 'enabled': False, 'display': 'words'}}
   exit_w, exit_h = CAR_EXIT_SIZE
   widgets[CAR_EXIT] = {'label': 'Exit to car', 'kind': CAR_EXIT, 'width': exit_w, 'height': exit_h, 'colors': {},
                        'required': True, 'frontmost': True,
                        'note': "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
                        'default': {'x': 30, 'y': height - 30 - exit_h, 'enabled': True}}
-  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *FAVORITE_WIDGETS, CAR_EXIT]
+  for key in ACTION_WIDGETS:
+    widgets[key].update(opacity={'min': 0, 'max': 100, 'default': 100}, backgroundToggle=True)
+    widgets[key]['default'].update(opacity=100, background=True)
+  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *DISPLAY_WIDGETS, CAR_EXIT]
   return profile
 
 
@@ -112,7 +123,7 @@ def default_layout_for_viewport(viewport):
 
 
 def placement_size(key, widget, placement):
-  if key in FAVORITE_WIDGETS and placement.get('display') == 'icons':
+  if key in DISPLAY_WIDGETS and placement.get('display') == 'icons':
     return FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE
   if key == 'steering_wheel':
     return placement.get('size', 192), placement.get('size', 192)
@@ -168,17 +179,24 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   bounds = metadata['bounds']
   for key, widget in metadata['widgets'].items():
     placement = result['widgets'][key]
-    if key in FAVORITE_WIDGETS and type(placement) is dict:
+    if key in DISPLAY_WIDGETS and type(placement) is dict:
       placement.setdefault('display', 'words')
+    if key in ACTION_WIDGETS and type(placement) is dict:
+      placement.setdefault('opacity', 100)
+      placement.setdefault('background', True)
     fields = ({'x', 'y', 'enabled'} | ({'size'} if key == 'steering_wheel' else set()) |
-              ({'display'} if key in FAVORITE_WIDGETS else set()) |
+              ({'display'} if key in DISPLAY_WIDGETS else set()) |
+              ({'opacity', 'background'} if key in ACTION_WIDGETS else set()) |
               ({'width', 'height', 'opacity'} if key == NAV_MAP else set()))
     if type(placement) is not dict or set(placement) != fields or type(placement['enabled']) is not bool:
       raise ValueError('Invalid projection widget')
     if widget.get('required') is True and placement['enabled'] is not True:
       raise ValueError('Required projection widget is disabled')
-    if key in FAVORITE_WIDGETS and placement['display'] not in ('words', 'icons'):
-      raise ValueError('Invalid favorite widget display')
+    if key in DISPLAY_WIDGETS and placement['display'] not in ('words', 'icons'):
+      raise ValueError('Invalid action widget display')
+    if key in ACTION_WIDGETS and (type(placement['opacity']) is not int or not 0 <= placement['opacity'] <= 100 or
+                                  type(placement['background']) is not bool):
+      raise ValueError('Invalid action widget appearance')
     size = placement.get('size', 192)
     if key == 'steering_wheel' and (type(size) is not int or not WHEEL_SIZES['large'][0] <= size <= WHEEL_SIZES['large'][2]):
       raise ValueError('Invalid steering wheel size')
