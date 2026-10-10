@@ -1,11 +1,14 @@
 import random
 import re
+from types import SimpleNamespace
 
 import pytest
 
 from opendbc.can.packer import CANPacker
 from opendbc.car import Bus
-from opendbc.car.structs import CarParams
+from opendbc.car.structs import CarControl, CarParams
+from opendbc.car.volkswagen import mqbcan
+from opendbc.car.volkswagen.carcontroller import CarController
 from opendbc.car.volkswagen.interface import CarInterface
 from opendbc.car.volkswagen.fingerprints import FW_VERSIONS
 from opendbc.car.volkswagen.mqbcan import volkswagen_meb_alt_crc_checksum, volkswagen_mqb_meb_checksum
@@ -166,3 +169,36 @@ class TestVolkswagenPlatformConfigs:
 
                 expected_matches = {platform} if should_match else set()
                 assert expected_matches == matches, "Bad match"
+
+
+class TestVolkswagenMqbGasOverride:
+  @staticmethod
+  def _acc_status_sequence(frames):
+    CP = CarInterface.get_params(CAR.VOLKSWAGEN_GOLF_MK7, {bus: {} for bus in range(8)}, [], True, False, False, None)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    statuses = []
+    for enabled, long_active, gas_pressed in frames:
+      CC = CarControl(enabled=enabled, longActive=long_active)
+      controller.update_gas_override(SimpleNamespace(out=SimpleNamespace(gasPressed=gas_pressed)), CC)
+      statuses.append(mqbcan.acc_control_value(True, False, CC.longActive, controller.gas_override))
+    return statuses
+
+  def test_gas_release_has_no_standby_frame(self):
+    # longActive lags gasPressed by a frame on both press and release. A single ACC_STANDBY (2) frame between
+    # ACC_OVERRIDE (4) and ACC_ACTIVE (3) makes TSK_06 drop to standby and then fault (routes 0000003c, 0000003d)
+    frames = [
+      (True, True, False),   # engaged
+      (True, True, True),    # gas pressed, longActive not yet updated
+      (True, False, True),   # override
+      (True, False, True),
+      (True, False, False),  # gas released, longActive not yet updated
+      (True, True, False),   # engaged again
+    ]
+    assert self._acc_status_sequence(frames) == [3, 3, 4, 4, 4, 3]
+
+  def test_override_requires_gas(self):
+    # Long paused for reasons other than the gas pedal (e.g. pauseLongitudinal) is not an override
+    assert self._acc_status_sequence([(True, True, False), (True, False, False), (True, True, False)]) == [3, 2, 3]
+
+  def test_override_ends_on_disengage(self):
+    assert self._acc_status_sequence([(True, False, True), (False, False, False), (False, False, True)]) == [4, 2, 2]

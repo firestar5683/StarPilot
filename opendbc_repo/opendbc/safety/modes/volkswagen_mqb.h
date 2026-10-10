@@ -160,7 +160,11 @@ static bool volkswagen_mqb_tx_hook(const CANPacket_t *msg) {
       desired_accel = (((msg->data[7] << 3) | ((msg->data[6] & 0xE0U) >> 5)) * 5U) - 7220U;
     }
 
-    violation |= longitudinal_accel_checks(desired_accel, VOLKSWAGEN_MQB_LONG_LIMITS);
+    // During driver gas override, openpilot mirrors the stock radar's ACC_OVERRIDE frame, which must carry a real
+    // acceleration request rather than the inactive value or the drivetrain coordinator latches a fault. The driver
+    // has priority during override; still, allow exactly zero and nothing else.
+    bool gas_override_zero_accel = controls_allowed && gas_pressed_prev && (desired_accel == 0);
+    violation |= longitudinal_accel_checks(desired_accel, VOLKSWAGEN_MQB_LONG_LIMITS) && !gas_override_zero_accel;
 
     if (violation) {
       tx = false;
