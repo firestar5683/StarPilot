@@ -140,6 +140,14 @@ class GMFlags(IntFlag):
   VOLT_CAMERA_NO_ACCEL_POS = NO_ACCELERATOR_POS_MSG
 
 
+_GM_CONTROL_FLAGS_MASK = ~int(GMFlags.HAS_BSM)
+_GM_PEDAL_LONG_FLAG = int(GMFlags.PEDAL_LONG)
+_GM_NO_CAMERA_FLAG = int(GMFlags.NO_CAMERA)
+_GM_NO_ACCELERATOR_POS_FLAG = int(GMFlags.NO_ACCELERATOR_POS_MSG)
+_BOLT_REMOVED_CONTROL_FLAGS = _GM_PEDAL_LONG_FLAG | _GM_NO_CAMERA_FLAG
+_CC_PEDAL_ALLOWED_FLAGS = _BOLT_REMOVED_CONTROL_FLAGS | _GM_NO_ACCELERATOR_POS_FLAG
+
+
 VOLT_ONE_PEDAL_BASE_WORDS = (0x4084, 0xC084, 0x4287, 0x4687, 0x4A87, 0x4E87, 0x4087, 0x5087, 0x5487, 0xC1D1, 0xC1D3)
 VOLT_ONE_PEDAL_WORDS = {start + index: word for start in (0xD100, 0xD110)
                         for index, word in enumerate(VOLT_ONE_PEDAL_BASE_WORDS)}
@@ -159,7 +167,7 @@ def gm_control_word(cp: CarParams) -> int:
   hybrid = malibu_hybrid_profile(cp)
   if hybrid is not None:
     return 5 | (8 if hybrid.pedal and hybrid.longitudinal else 0)
-  if is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True):
+  if word in _BOLT_REMOVED_SAFETY_WORDS and (is_bolt_pedal_removed_profile(cp) or is_bolt_pedal_removed_profile(cp, stock_only=True)):
     return int(BOLT_PEDAL_STOCK_WORDS[cp.carFingerprint] if not cp.openpilotLongitudinalControl else BOLT_PEDAL_WORDS[cp.carFingerprint])
   if word in VOLT_CC_PEDAL_PROFILES and volt_cc_pedal_profile(cp) is not None:
     return 5
@@ -217,7 +225,7 @@ def apply_volt_one_pedal(cp: CarParams, enabled: bool, auto_hold_enabled: bool) 
 
 def control_flags(cp: CarParams) -> int:
   """Exclude only the informational BSM bit from exact control-profile admission."""
-  flags = int(cp.flags) & ~int(GMFlags.HAS_BSM)
+  flags = int(cp.flags) & _GM_CONTROL_FLAGS_MASK
   profile = camera_acc_pedal_profile(cp)
   if profile is not None and profile.volt:
     flags &= ~int(GMFlags.PEDAL_LONG)
@@ -846,16 +854,18 @@ BOLT_PEDAL_REMOVED_CARS = (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_201
                            CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
 BOLT_PEDAL_REMOVED_WORDS = MappingProxyType({candidate: 0xE700 + index for index, candidate in enumerate(BOLT_PEDAL_REMOVED_CARS)})
 BOLT_PEDAL_REMOVED_STOCK_WORDS = MappingProxyType({candidate: 0xE710 + index for index, candidate in enumerate(BOLT_PEDAL_REMOVED_CARS)})
+_BOLT_REMOVED_SAFETY_WORDS = frozenset((*BOLT_PEDAL_REMOVED_WORDS.values(), *BOLT_PEDAL_REMOVED_STOCK_WORDS.values()))
 
 
 def is_bolt_pedal_removed_profile(cp, *, stock_only=False):
   words = BOLT_PEDAL_REMOVED_STOCK_WORDS if stock_only else BOLT_PEDAL_REMOVED_WORDS
   try:
-    return (cp.brand == 'gm' and cp.carFingerprint in words and cp.transmissionType == CarParams.TransmissionType.direct and
+    return (cp.brand == 'gm' and cp.carFingerprint in words and
+            int(cp.flags) & _GM_CONTROL_FLAGS_MASK == _BOLT_REMOVED_CONTROL_FLAGS and
+            cp.transmissionType == CarParams.TransmissionType.direct and
             cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.radarUnavailable and
             not (cp.passive or cp.dashcamOnly or cp.notCar or cp.alphaLongitudinalAvailable) and
             bool(cp.openpilotLongitudinalControl) is not stock_only and bool(cp.pcmCruise) is stock_only and
-            int(cp.flags) & ~int(GMFlags.HAS_BSM) == int(GMFlags.PEDAL_LONG | GMFlags.NO_CAMERA) and
             len(cp.safetyConfigs) == 1 and cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
             int(cp.safetyConfigs[0].safetyParam) == words[cp.carFingerprint])
   except (AttributeError, IndexError, TypeError, ValueError):
@@ -871,7 +881,7 @@ def is_bolt_pedal_profile(cp, *, stock_only=False):
           cp.networkLocation == CarParams.NetworkLocation.fwdCamera and
           not (cp.passive or cp.dashcamOnly or cp.notCar or cp.alphaLongitudinalAvailable) and
           bool(cp.openpilotLongitudinalControl) is not stock_only and bool(cp.pcmCruise) is stock_only and
-          control_flags(cp) == GMFlags.PEDAL_LONG.value and len(cp.safetyConfigs) == 1 and
+          int(cp.flags) & _GM_CONTROL_FLAGS_MASK == _GM_PEDAL_LONG_FLAG and len(cp.safetyConfigs) == 1 and
           cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
           cp.safetyConfigs[0].safetyParam == words[cp.carFingerprint])
 
@@ -1071,13 +1081,15 @@ def volt_camera_pedal_word(profile, auto_hold: bool, one_pedal: bool) -> int:
 
 def camera_acc_pedal_profile(cp):
   try:
+    if cp.brand != 'gm' or cp.carFingerprint not in CAMERA_ACC_PEDAL_CAR:
+      return None
     if len(cp.safetyConfigs) != 1:
       return None
     profile = CAMERA_ACC_PEDAL_PROFILES.get(int(cp.safetyConfigs[0].safetyParam))
     if profile is None:
       return None
-    flags = int(GMFlags.PEDAL_LONG | (GMFlags.NO_CAMERA if profile.removed else 0) |
-                (GMFlags.NO_ACCELERATOR_POS_MSG if profile.brake_source == BrakeSource.F1 else 0))
+    flags = (_GM_PEDAL_LONG_FLAG | (_GM_NO_CAMERA_FLAG if profile.removed else 0) |
+             (_GM_NO_ACCELERATOR_POS_FLAG if profile.brake_source == BrakeSource.F1 else 0))
     identity = (CAR.CHEVROLET_VOLT if profile.topology == "gateway" else
                 CAR.CHEVROLET_VOLT_ASCM if profile.topology == "ascm" else
                 CAR.CHEVROLET_VOLT_2019 if profile.topology == "sdgm" else CAR.CHEVROLET_VOLT_CAMERA)
@@ -1086,7 +1098,7 @@ def camera_acc_pedal_profile(cp):
         cp.networkLocation == CarParams.NetworkLocation.fwdCamera and (profile.volt or cp.radarUnavailable) and
         (profile.topology != "gateway" or not cp.radarUnavailable) and
         (profile.topology not in ("ascm", "sdgm") or profile.radar != cp.radarUnavailable) and
-        not cp.passive and not cp.dashcamOnly and not cp.notCar and int(cp.flags) & ~int(GMFlags.HAS_BSM) == flags and
+        not cp.passive and not cp.dashcamOnly and not cp.notCar and int(cp.flags) & _GM_CONTROL_FLAGS_MASK == flags and
         cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
         bool(cp.openpilotLongitudinalControl) == profile.longitudinal and
         bool(cp.pcmCruise) == (not profile.longitudinal and profile.topology == "camera") and
@@ -1127,12 +1139,14 @@ def is_conventional_cc_pedal_profile(cp):
   if is_silverado_cc_pedal_profile(cp):
     return True
   try:
+    if cp.brand != 'gm' or cp.carFingerprint not in ORDINARY_CC_CAR:
+      return False
     flags = control_flags(cp)
     removed = bool(flags & GMFlags.NO_CAMERA)
     return (cp.brand == 'gm' and cp.carFingerprint in ORDINARY_CC_CAR and
             cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.radarUnavailable and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and
-            bool(flags & GMFlags.PEDAL_LONG) and not flags & ~int(GMFlags.PEDAL_LONG | GMFlags.NO_CAMERA | GMFlags.NO_ACCELERATOR_POS_MSG) and
+            bool(flags & _GM_PEDAL_LONG_FLAG) and not flags & ~_CC_PEDAL_ALLOWED_FLAGS and
             not cp.pcmCruise and len(cp.safetyConfigs) == 1 and
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
             int(cp.safetyConfigs[0].safetyParam) ==
@@ -1147,13 +1161,15 @@ SILVERADO_CC_PEDAL_WORDS = ((0xC182, 0xC183), (0xC184, 0xC185))
 def is_silverado_cc_pedal_profile(cp):
   """Exact Silverado interceptor owner, including its distinct stock cancellation."""
   try:
+    if cp.brand != 'gm' or cp.carFingerprint != CAR.CHEVROLET_SILVERADO_CC:
+      return False
     flags = control_flags(cp)
     removed = bool(flags & GMFlags.NO_CAMERA)
     word = SILVERADO_CC_PEDAL_WORDS[not cp.openpilotLongitudinalControl][removed]
     return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_SILVERADO_CC and
             cp.networkLocation == CarParams.NetworkLocation.fwdCamera and cp.radarUnavailable and
             not cp.passive and not cp.dashcamOnly and not cp.notCar and
-            bool(flags & GMFlags.PEDAL_LONG) and not flags & ~int(GMFlags.PEDAL_LONG | GMFlags.NO_CAMERA | GMFlags.NO_ACCELERATOR_POS_MSG) and
+            bool(flags & _GM_PEDAL_LONG_FLAG) and not flags & ~_CC_PEDAL_ALLOWED_FLAGS and
             not cp.pcmCruise and not cp.alphaLongitudinalAvailable and len(cp.safetyConfigs) == 1 and
             cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and int(cp.safetyConfigs[0].safetyParam) == word)
   except (AttributeError, IndexError, TypeError, ValueError):
