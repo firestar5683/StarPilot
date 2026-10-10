@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "openpilot/cereal/messaging/messaging.h"
+#include "common/hardware/hw.h"
 #include "common/swaglog.h"
 #include "common/util.h"
 
@@ -43,6 +44,8 @@ std::string Panda::hw_serial() {
 
 std::vector<std::string> Panda::list() {
   auto serials = PandaUsbHandle::list();
+  // C3's internal Panda uses USB; its SPI device node has no Panda.
+  if (Hardware::get_device_type() == cereal::InitData::DeviceType::TICI) return serials;
   for (const auto &serial : PandaSpiHandle::list()) {
     if (std::find(serials.begin(), serials.end(), serial) == serials.end()) serials.push_back(serial);
   }
