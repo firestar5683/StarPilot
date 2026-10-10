@@ -35,8 +35,10 @@ class TestNewPortCurvature(unittest.TestCase):
         self.assertTrue(qualified(cp))
         self.assertIsNotNone(create_controller(cp))
         original = cp.to_bytes()
+        cp.clear_write_flag()
         create_controller(cp)
         self.assertEqual(cp.to_bytes(), original)
+        cp.clear_write_flag()
         for field, value in (("passive", True), ("dashcamOnly", True), ("notCar", True), ("alternativeExperience", 64),
                              ("pcmCruise", False), ("openpilotLongitudinalControl", not expected_long)):
           with structs.CarParams.from_bytes(original) as prior:
