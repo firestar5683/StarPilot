@@ -1,0 +1,152 @@
+.testingGroundPage {
+  max-width: var(--width-xxl);
+}
+
+.testingGroundCard {
+  background-color: var(--secondary-bg);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  max-width: 90%;
+  padding: var(--border-radius-xl);
+}
+
+.testingGroundIntro {
+  margin-top: 0;
+}
+
+.testingGroundTopList {
+  margin-top: var(--margin-base);
+}
+
+.testingGroundTopList ol {
+  margin: var(--margin-xs) 0 0;
+  padding-left: 1.4rem;
+}
+
+.testingGroundTopList li {
+  font-size: var(--font-size-sm);
+  margin-bottom: 0.25rem;
+}
+
+.testingGroundStatusGrid {
+  display: grid;
+  gap: 0.5em 1em;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: var(--margin-base);
+}
+
+.testingGroundStatusGrid p {
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.testingGroundSelectionRow {
+  align-items: center;
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--margin-base);
+}
+
+.testingGroundSelect {
+  background-color: var(--main-bg);
+  border: 1px solid var(--track-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  flex: 1;
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  padding: var(--padding-sm);
+}
+
+.testingGroundModeButton:hover {
+  transform: var(--hover-scale-sm);
+  transition: transform var(--transition-fast), background-color var(--transition-fast);
+}
+
+.testingGroundDetails {
+  margin-top: var(--margin-base);
+}
+
+.testingGroundDetails h3 {
+  margin-bottom: var(--margin-xs);
+}
+
+.testingGroundDetails p {
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--margin-xs);
+}
+
+.testingGroundMuted {
+  color: var(--text-muted);
+}
+
+.testingGroundActionGrid {
+  display: grid;
+  gap: var(--gap-sm);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  margin-top: var(--margin-base);
+}
+
+.testingGroundModeButton {
+  align-items: center;
+  background: #2a2752;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-height: 120px;
+  padding: var(--padding-base);
+}
+
+.testingGroundModeButtonB {
+  background: #27434b;
+}
+
+.testingGroundModeButtonC {
+  background: #413029;
+}
+
+.testingGroundModeButton.active {
+  box-shadow: 0 0 0 2px var(--main-fg) inset;
+}
+
+.testingGroundModeLetter {
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+}
+
+.testingGroundModeLabel {
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.testingGroundError {
+  color: var(--danger-fg);
+  margin-top: var(--margin-base);
+}
+
+.testingGroundActiveSummary {
+  margin-top: var(--margin-base);
+}
+
+@media only screen and (max-width: 768px) and (orientation: portrait) {
+  .testingGroundCard {
+    max-width: 100%;
+  }
+
+  .testingGroundStatusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .testingGroundSelectionRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .testingGroundActionGrid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,205 @@
+.navkeys-btn {
+  all: unset;
+  background-color: var(--main-fg);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-on-primary);
+  cursor: pointer;
+  padding: var(--padding-xs) var(--padding-xs);
+  transition: background-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.navkeys-btn.delete {
+  background-color: var(--danger-bg);
+}
+
+.navkeys-btn.delete:hover {
+  background-color: var(--danger-hover-bg);
+  transform: var(--hover-scale-base);
+}
+
+.navkeys-btn:hover:not(:disabled) {
+  background-color: var(--success-hover-bg);
+  transform: var(--hover-scale-base);
+}
+
+.navkeys-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.navkeys-container {
+  background-color: var(--secondary-bg);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  flex: 1 1 400px;
+  max-width: var(--width-lg);
+  padding: var(--padding-sm) var(--font-size-lg);
+  transform-origin: top center;
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.navkeys-container:hover {
+  transform: var(--hover-scale-sm);
+}
+
+.navkeys-app-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--margin-base);
+}
+
+.navkeys-app-container {
+  flex-basis: min(100%, calc((var(--width-lg) * 2) + var(--gap-lg)));
+  max-width: calc((var(--width-lg) * 2) + var(--gap-lg));
+}
+
+.navkeys-copy-btn,
+.navkeys-link-btn {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--gap-xs);
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.navkeys-copy-btn {
+  min-width: 5.5rem;
+}
+
+.navkeys-icon-btn {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 2.25rem;
+}
+
+.navkeys-error {
+  color: var(--danger-bg);
+  font-size: var(--font-size-sm);
+  transition: opacity 0.5s ease;
+}
+
+.navkeys-group>.navkeys-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.navkeys-help-icon {
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  margin-left: var(--gap-xxs);
+  position: relative;
+  top: -1px;
+}
+
+.navkeys-help-img img {
+  max-width: 100%;
+}
+
+.navkeys-input {
+  background-color: var(--input-bg);
+  border: var(--border-width-thin) solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-sm);
+  box-sizing: border-box;
+  color: var(--text-color);
+  cursor: text;
+  flex: 1;
+  font-size: var(--font-size-base);
+  min-width: 0;
+  padding: var(--padding-xs) var(--padding-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.navkeys-input:hover,
+.navkeys-input:focus {
+  border-color: var(--thumb-color);
+  box-shadow: var(--glow-primary);
+  transform: var(--hover-scale-sm);
+}
+
+.navkeys-input::placeholder {
+  color: var(--text-muted);
+}
+
+.navkeys-token-input {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.navkeys-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  margin-bottom: var(--margin-xs);
+}
+
+.navkeys-link-btn {
+  text-decoration: none;
+}
+
+.navkeys-message {
+  color: var(--success-bg);
+  font-size: var(--font-size-sm);
+  transition: opacity 0.5s ease;
+}
+
+.navkeys-offset-top {
+  margin-top: var(--margin-xl);
+}
+
+.navkeys-row {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-bottom: var(--margin-base);
+  transition: transform var(--transition-fast);
+}
+
+.navkeys-row:hover {
+  transform: var(--hover-scale-sm);
+}
+
+.navkeys-status {
+  margin-top: var(--padding-xs);
+  min-height: var(--gap-lg);
+}
+
+.navkeys-title {
+  background-color: var(--sidebar-active-bg);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-color);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  margin-bottom: var(--font-size-base);
+  padding: var(--padding-sm);
+  text-align: center;
+}
+
+.navkeys-subtitle {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin: calc(var(--margin-base) * -1) 0 var(--margin-base);
+  text-align: center;
+}
+
+.navkeys-wrapper {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-lg);
+  justify-content: center;
+}
+
+@media only screen and (max-width: 768px) and (orientation: portrait) {
+  .navkeys-btn {
+    font-size: var(--font-size-sm);
+  }
+
+  .navkeys-container {
+    padding: var(--padding-sm);
+    width: 90%;
+  }
+
+  .navkeys-input {
+    font-size: var(--font-size-sm);
+  }
+}

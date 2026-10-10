@@ -1,0 +1,881 @@
+{
+  "schema": 1,
+  "nativeBridge": 1,
+  "files": [
+    {
+      "path": "assets/components/home/home.css",
+      "sha256": "163d43e6f59c4779831b13f7cd27ab17a175b8e5f152019dc980ba8f3c48dc2c",
+      "size": 14769
+    },
+    {
+      "path": "assets/components/home/home.js",
+      "sha256": "1a269dfdd9e777d4c8cc0bab71b29b3a51aabfa3cae7819f25ef7afdbb67bff1",
+      "size": 23761
+    },
+    {
+      "path": "assets/components/main.css",
+      "sha256": "90d55a82462914d55c2e876f9c5bb2b25db306241e973aada07a2aada29f25e9",
+      "size": 9288
+    },
+    {
+      "path": "assets/components/modal.css",
+      "sha256": "92dfa7365bbfa84169541e28cdbf3134e50cb2a4e1daebcd5bb19cdc299cf3cb",
+      "size": 2659
+    },
+    {
+      "path": "assets/components/modal.js",
+      "sha256": "8c90c42ed94960812da1e50679305b70643dedecf28885cec32a831486e31d5c",
+      "size": 1163
+    },
+    {
+      "path": "assets/components/navigation/navigation_destination.css",
+      "sha256": "e537f111f84a7a258ee91cb9225237902775303d15ef113ea706668ab225bc5b",
+      "size": 13803
+    },
+    {
+      "path": "assets/components/navigation/navigation_destination.js",
+      "sha256": "02e591752664e435858e39e5b8201ab173c6aad18ab2061dd354d61d70756598",
+      "size": 35965
+    },
+    {
+      "path": "assets/components/navigation/navigation_keys.css",
+      "sha256": "03a9b77086f59f1ba925a8492851df829696b019501575af3ac73463ae1083d3",
+      "size": 4408
+    },
+    {
+      "path": "assets/components/navigation/navigation_keys.js",
+      "sha256": "e0b7c29d6bb3e6fb562901859d716d7bea2373e501e1a69286dac5faa4eb66a8",
+      "size": 14162
+    },
+    {
+      "path": "assets/components/navigation/navigation_utilities.js",
+      "sha256": "1e00403988522cbf28ada402109df548c107521dc1eae8242507a349119ca0e1",
+      "size": 10017
+    },
+    {
+      "path": "assets/components/recordings/dashcam_routes.css",
+      "sha256": "00587acd955d3e34de7eb28cac198b7861d805a63cd6aef30276a13280f5a4d2",
+      "size": 34123
+    },
+    {
+      "path": "assets/components/recordings/dashcam_routes.js",
+      "sha256": "4be13ced0d1c04f361e47971bbeec914c2d0b9a55facf07bfde1625f8b6d3d35",
+      "size": 45865
+    },
+    {
+      "path": "assets/components/recordings/dashcam_routes_helpers.js",
+      "sha256": "796ee8f64ef2774f0a53a4274eec1691903193b35291ed89976c36e5a8ba5915",
+      "size": 11650
+    },
+    {
+      "path": "assets/components/recordings/screen_recordings.css",
+      "sha256": "f6558ae0823d52890f39049670a7b533ad9fc9812a1bb034e3d0e65021994e2c",
+      "size": 6649
+    },
+    {
+      "path": "assets/components/recordings/screen_recordings.js",
+      "sha256": "28ad4f6a02a81cd04d130c65fd9ecd639285311d132fb3683fec996c61e45e28",
+      "size": 9829
+    },
+    {
+      "path": "assets/components/router.js",
+      "sha256": "cc754378bd4ed74dc7d12670ab5ed10f9c94d3ccb3fc62eb8181a8d6878fe8cc",
+      "size": 7747
+    },
+    {
+      "path": "assets/components/sentry_notifications.js",
+      "sha256": "69ecba919d1cdd22661722fbf48c5149f923407fd3c1a029d40dc7db06ee6f4b",
+      "size": 5246
+    },
+    {
+      "path": "assets/components/settings.css",
+      "sha256": "f4a348b8baed3cb1f5d3df09864bad869a122f7ff97f052b13a3dcdbeb35bfde",
+      "size": 6970
+    },
+    {
+      "path": "assets/components/settings.js",
+      "sha256": "1d934bf5fbaa83c7b1d3397164b3d7ee535fc31c1ea877c4df7400474046da08",
+      "size": 1944
+    },
+    {
+      "path": "assets/components/sidebar.css",
+      "sha256": "776d7397270556712be9bd8d063c996d84e7189a36c02791135433bdb528a1f0",
+      "size": 5945
+    },
+    {
+      "path": "assets/components/sidebar.js",
+      "sha256": "0be3eb4ebc6b78e051422ac80d8d332f68731dc89fbbb2586973e1e86cd87788",
+      "size": 8219
+    },
+    {
+      "path": "assets/components/tailscale/tailscale.css",
+      "sha256": "c8be9a2789d3fd8ebace77c891f33ebd9b3d8365aa67114628f739765721ec7a",
+      "size": 2006
+    },
+    {
+      "path": "assets/components/tailscale/tailscale.js",
+      "sha256": "5ca40fa7792952ce0e02cde7952531a944238a60e8b445cd9757386cacdeff5a",
+      "size": 3134
+    },
+    {
+      "path": "assets/components/tools/bluetooth.css",
+      "sha256": "8bfc942f919bc05342d14140fd0383ef7232cad827c6ed44a50eb733fb8e9644",
+      "size": 8418
+    },
+    {
+      "path": "assets/components/tools/bluetooth.js",
+      "sha256": "eec921f654d5835aa3460b4af0c2d964a81ed63d839dd34453ea8cd852848913",
+      "size": 19673
+    },
+    {
+      "path": "assets/components/tools/controller_action_picker.css",
+      "sha256": "f94cef2c7a7b48e72f215918a5b6a6d16ca141cbe1db3a7b72554c87cdb54ad1",
+      "size": 4762
+    },
+    {
+      "path": "assets/components/tools/controller_action_picker.js",
+      "sha256": "b757be00df6150e98eac81e941bb6fee03a7b9cdc3d451b1991dc266def188de",
+      "size": 12339
+    },
+    {
+      "path": "assets/components/tools/device_settings.css",
+      "sha256": "edd0588b540889eb07180ca28f82c0af0c45076729f694b1abe47f4b65bd1c3e",
+      "size": 29627
+    },
+    {
+      "path": "assets/components/tools/device_settings.js",
+      "sha256": "454dce4a4035141d71fe64cadededfd1e909bda5c450c01690bb42f7f0fa3e44",
+      "size": 121527
+    },
+    {
+      "path": "assets/components/tools/device_settings_layout.json",
+      "sha256": "ead70dc1cd550249ab5318160b88c246620de5f35e0a411a006b6ef7adff7517",
+      "size": 190072
+    },
+    {
+      "path": "assets/components/tools/doors.css",
+      "sha256": "af54c91954a03b41d58552e5cc739e28c097b11d69c7d16d6f1ccc901f8ceaba",
+      "size": 1683
+    },
+    {
+      "path": "assets/components/tools/doors.js",
+      "sha256": "5c983cbdd2a78b29798bcc74dd16f27962b0d5f9718584706c342e9dbdee16a3",
+      "size": 1003
+    },
+    {
+      "path": "assets/components/tools/error_logs.css",
+      "sha256": "0bfdc1609dada46b1b69cca37834000da0bb66f86964d3d74eacc6046cebdb9c",
+      "size": 4116
+    },
+    {
+      "path": "assets/components/tools/error_logs.js",
+      "sha256": "05568de381d1e570a4c94ca037d0a8f75e71ff0ea7046de846d1929a9309e244",
+      "size": 5497
+    },
+    {
+      "path": "assets/components/tools/galaxy.css",
+      "sha256": "e0ec84e8a00d7e72de8cde5350c9d0ea52ff24821741731bcfba0b652d746cfc",
+      "size": 3291
+    },
+    {
+      "path": "assets/components/tools/galaxy.js",
+      "sha256": "07257238a1706b7bfdcbe116d730e5698c2de2febb0883a5a566393d585e1532",
+      "size": 5075
+    },
+    {
+      "path": "assets/components/tools/lateral_maneuvers.js",
+      "sha256": "0b07fd06b1f23e92975f4537f20051ee39449e731aa33b5fccccc3d0449dd86c",
+      "size": 5975
+    },
+    {
+      "path": "assets/components/tools/longitudinal_maneuvers.css",
+      "sha256": "808a1073fb21ea35291456df08fd3687d8cc42589dc82dd54c84caf2f34fa467",
+      "size": 2220
+    },
+    {
+      "path": "assets/components/tools/longitudinal_maneuvers.js",
+      "sha256": "9569f2cd85ed704d02ba567237021876121e510370f37af001295b38500fc38d",
+      "size": 8106
+    },
+    {
+      "path": "assets/components/tools/longitudinal_mode.mjs",
+      "sha256": "659e39536dae03d588564428554d5b2f4b223cfa0a31ce1f3713c88b163ef8ad",
+      "size": 2291
+    },
+    {
+      "path": "assets/components/tools/maps.css",
+      "sha256": "cdbc7449737cca388ad3e308f0672a03a73a28a43135e2b9b485f084491f1a76",
+      "size": 5875
+    },
+    {
+      "path": "assets/components/tools/maps.js",
+      "sha256": "302291d677ec5f198216b27332d3c469d5581ed9b71c570a1c88f0be4381f0c1",
+      "size": 22022
+    },
+    {
+      "path": "assets/components/tools/model_hardware.js",
+      "sha256": "814d4408dbf60430904a5996544a8ffc65f97f247b49d59d06a3f083d333eedc",
+      "size": 1703
+    },
+    {
+      "path": "assets/components/tools/model_laboratory.css",
+      "sha256": "6877d3985a1ba5d5fe2bb06dfea8f629c786e189840a1c1bcbd1fc384199c48c",
+      "size": 4561
+    },
+    {
+      "path": "assets/components/tools/model_laboratory.js",
+      "sha256": "0e9a49b5b3e5f810f61c7f37d0de9b70d295071e3a047c8785d5979ef413b0d7",
+      "size": 15575
+    },
+    {
+      "path": "assets/components/tools/model_manager.css",
+      "sha256": "fa0b624747e8cf7fae95b26a1654e887c24cfd4d674b77c8b2e2929804d1b540",
+      "size": 5344
+    },
+    {
+      "path": "assets/components/tools/model_manager.js",
+      "sha256": "0e692db8ee0deb0eda1efcbd85678108819558467c79b9d749b4ecb29c239224",
+      "size": 29315
+    },
+    {
+      "path": "assets/components/tools/personality_profiles.mjs",
+      "sha256": "53c9b531a4507e6580e3eae7399c162ac1389d8441ce771145fc10bc61c19771",
+      "size": 1501
+    },
+    {
+      "path": "assets/components/tools/pip_sidecam.css",
+      "sha256": "225487f371ec4060a00f5ca358a6c71498b5c0a0c8bddb6d6014742eb03a79ac",
+      "size": 874
+    },
+    {
+      "path": "assets/components/tools/pip_sidecam.js",
+      "sha256": "274772308acbfbd52c7f05eec1d61a895718a2596f3190a4c18be204b92aeee1",
+      "size": 18856
+    },
+    {
+      "path": "assets/components/tools/plots.css",
+      "sha256": "314287cfd11436585363911c4e5c29b601a0ba785764cf078f04d7f66f3ffdd1",
+      "size": 4817
+    },
+    {
+      "path": "assets/components/tools/plots.js",
+      "sha256": "a33960cc0e0958a27b999a58acc265b22bacf1a88cbdbd9811d75efaf3971822",
+      "size": 24981
+    },
+    {
+      "path": "assets/components/tools/sentry.css",
+      "sha256": "7aa461bb3f70e308473f75b657847f7b0a37eea3203f39c496773c64c282557a",
+      "size": 4854
+    },
+    {
+      "path": "assets/components/tools/sentry.js",
+      "sha256": "9343856f385cef2877c92046673a238499a1091d6dffc820d1364bfb0646f54d",
+      "size": 17027
+    },
+    {
+      "path": "assets/components/tools/speed_limits.css",
+      "sha256": "0b693d7d632169f579411788b9e0c40ffe374854e9c5d7e7cd165d10beb440e4",
+      "size": 2397
+    },
+    {
+      "path": "assets/components/tools/speed_limits.js",
+      "sha256": "1aefa905563cf97a7e07297394c332124cf60c8371c121038d93fcaae6e05b88",
+      "size": 5618
+    },
+    {
+      "path": "assets/components/tools/testing_ground.css",
+      "sha256": "8ea34eff459ca92f05977188986f6295605ddd6fb61c257a73287ddf9e7f8678",
+      "size": 2926
+    },
+    {
+      "path": "assets/components/tools/testing_ground.js",
+      "sha256": "83ed063eed177a1e634927e21358743dcfd5573bc3d4f1bd7938cdea6adc8757",
+      "size": 11238
+    },
+    {
+      "path": "assets/components/tools/theme_maker.css",
+      "sha256": "b14c0b9b5cce40ea6c56b0d37964fa9621eda5369d20ce2ad7f1e2091a77339b",
+      "size": 17152
+    },
+    {
+      "path": "assets/components/tools/theme_maker.js",
+      "sha256": "5329ee93a2d6f6d709f21109fa0cf747800ec619a78b843cb22ac4e48fa1745d",
+      "size": 64683
+    },
+    {
+      "path": "assets/components/tools/tmux.css",
+      "sha256": "bb9d05b8cecbee7bb34067d8881bdc7d6b814eda351d344861ddcf886392126c",
+      "size": 5045
+    },
+    {
+      "path": "assets/components/tools/tmux.js",
+      "sha256": "1bfc821ed2c43e9fdcf89d0dcfe3fc38a614b2a4dc7e9d46a5f4e036dc57e061",
+      "size": 12468
+    },
+    {
+      "path": "assets/components/tools/toggles.css",
+      "sha256": "2213160d3195d8fdc2e79249fe39b8894cd323433cc6f9867bd68418d95cd413",
+      "size": 4962
+    },
+    {
+      "path": "assets/components/tools/toggles.js",
+      "sha256": "fb8e8365ac489bdd8879c3d18204fab17d7b00532a5a93d18221146e2f83c9b4",
+      "size": 16622
+    },
+    {
+      "path": "assets/components/tools/troubleshoot.css",
+      "sha256": "3aa734530f4a26f325a588d8dd20dc5ee4c7530fdcd42be9e5a70c787a97223a",
+      "size": 4470
+    },
+    {
+      "path": "assets/components/tools/troubleshoot.js",
+      "sha256": "becb9bf2a13dabc54ed5c8b800811d2079d945209750ef13a9851c29477553fe",
+      "size": 12102
+    },
+    {
+      "path": "assets/components/tools/tsk_manager.css",
+      "sha256": "4fee93c1539887f4b3fdb9679331dddbd84da76cc08b49ec7d7f063610a208d8",
+      "size": 4751
+    },
+    {
+      "path": "assets/components/tools/tsk_manager.js",
+      "sha256": "2af5d679dfcf3368dc504c1ca5cdec0c416402b088b99dd6a911998fbe8a9808",
+      "size": 8013
+    },
+    {
+      "path": "assets/components/tools/tuning.css",
+      "sha256": "6fbb4ef058cd13afa4d42bfa826ea307e05cb074634f7683e79f8099f79b52a2",
+      "size": 7637
+    },
+    {
+      "path": "assets/components/tools/tuning.js",
+      "sha256": "7822846765f0f988bc7e30095b70cb3665e32c1af6095678014ac59d57647e5f",
+      "size": 57378
+    },
+    {
+      "path": "assets/components/tools/update_manager.css",
+      "sha256": "8a95369575ff3a024f88faaac3482e26540c1df954e6d1c6bb1aded1b4e20c81",
+      "size": 4854
+    },
+    {
+      "path": "assets/components/tools/update_manager.js",
+      "sha256": "fe8fa936b3ffb0ec457135965aaa018691ab9b51e489d73ce847bc2efeb35975",
+      "size": 35673
+    },
+    {
+      "path": "assets/components/tools/v_asm.css",
+      "sha256": "bb91e41a468dde4021bffb0eeb744203e67692466142ef09f4291d7b0bbecf7f",
+      "size": 8085
+    },
+    {
+      "path": "assets/components/tools/v_asm.js",
+      "sha256": "8f43ddd907f4d21ee0f44b242348cb1d5467e1910cc36f48424bf43ed7f5df6f",
+      "size": 22396
+    },
+    {
+      "path": "assets/components/tools/vehicle_features.js",
+      "sha256": "673bba9e31f8a4b2304f0ea860fa346697ede0fc4014092735c475bd890c67ab",
+      "size": 5221
+    },
+    {
+      "path": "assets/components/tools/wheel_controls.css",
+      "sha256": "635a1bdcecc46eb89272fb432ed7b333ebeb4b6282dc3936257c4316e8094726",
+      "size": 4940
+    },
+    {
+      "path": "assets/components/tools/wheel_controls.js",
+      "sha256": "f7f280522746f72e547b524b8ae7a01912516d57a25e9e5a9942361f4ef4a24b",
+      "size": 13444
+    },
+    {
+      "path": "assets/images/about.txt",
+      "sha256": "a670bd8b63283ae43145dff766ace78fa2aec55d488f3f89230f64d280d955df",
+      "size": 378
+    },
+    {
+      "path": "assets/images/app-icon-192x192.png",
+      "sha256": "c446c434d055dee7ffb97ca0159aeb808ffef76875d9da510c869c10ea36008c",
+      "size": 21101
+    },
+    {
+      "path": "assets/images/app-icon-512x512.png",
+      "sha256": "60e390abc1f844556e88a4790ae3e622b297cbd2342ec9dff05dfe458773bdfc",
+      "size": 104448
+    },
+    {
+      "path": "assets/images/apple-touch-icon.png",
+      "sha256": "49a90ff88b35958dcbad57ac5a68f7674f38cc5f8545c68469d1e3a5c6ca693d",
+      "size": 11165
+    },
+    {
+      "path": "assets/images/favicon-16x16.png",
+      "sha256": "5257368c26517d2dbb15296b4f850a34de355ec905ad726a4983a412d799b8f8",
+      "size": 975
+    },
+    {
+      "path": "assets/images/favicon-32x32.png",
+      "sha256": "69a738b47e776ac67e3617adf3cde65bbef016b903942fee3cddad65bf827347",
+      "size": 3084
+    },
+    {
+      "path": "assets/images/favicon.ico",
+      "sha256": "fcf01e3789d2c30b67767295dbaf6118960eb2d2d1cc4d2fa434eac3ff3a60d7",
+      "size": 9662
+    },
+    {
+      "path": "assets/images/favicon.svg",
+      "sha256": "d44a7926e697f6eee2789abd5a5c6044cafea97b92e773e2ee71bf436f0fe27b",
+      "size": 1083
+    },
+    {
+      "path": "assets/images/main_logo.png",
+      "sha256": "0301ad3b9eafd0ce55909e35f493f350ad81cfafd2ada7480a093eefc92744a2",
+      "size": 339879
+    },
+    {
+      "path": "assets/images/safari-pinned-tab.svg",
+      "sha256": "a0077ec05eefecb6d29c6f5049fe45da142a73de1b24bfa5f9604c9101990206",
+      "size": 4790
+    },
+    {
+      "path": "assets/images/site.webmanifest",
+      "sha256": "83b9e0eeee3bb43df34c6c619c1cd2ef9a824c2661d885e3d2ffc9b3dd2bfd1b",
+      "size": 279
+    },
+    {
+      "path": "assets/js/snackbar.js",
+      "sha256": "c8f73d3e09f7f6c6c308ed135a1fc6350f4eda25c88507b6bd19aedfef322495",
+      "size": 1901
+    },
+    {
+      "path": "assets/js/utils.js",
+      "sha256": "08b67ee9f96a2dee041b06370867075c925e3f64f542f11b8fd71eef7c4477c6",
+      "size": 3140
+    },
+    {
+      "path": "assets/manifest.json",
+      "sha256": "6877a13becb02d65e08680e2ba919a886a92a94b5055dbea088edbf8de1f2b0b",
+      "size": 403
+    },
+    {
+      "path": "assets/mobile/css/home.css",
+      "sha256": "1229106764d7c95f7e76109ad19de70e2fe1f35d0949b5439e422a9d988249af",
+      "size": 8467
+    },
+    {
+      "path": "assets/mobile/css/material.css",
+      "sha256": "e488a749b126fa03ed7196dae9fe530742505bd75b37e17a7d57b2fcf31dea85",
+      "size": 63973
+    },
+    {
+      "path": "assets/mobile/index.html",
+      "sha256": "60036e5bdf2406f6668db706bfdc94f132dbf44b2b653c409739314b91cc1d2d",
+      "size": 1537
+    },
+    {
+      "path": "assets/mobile/js/api.js",
+      "sha256": "526e3091d7c4a340933ee230ef5c0788d52732c009fff3496468aade5291251f",
+      "size": 23909
+    },
+    {
+      "path": "assets/mobile/js/app.js",
+      "sha256": "02da375434b4fa1af5ce27288800ca02acd2f549243936719217d7cac710370a",
+      "size": 5571
+    },
+    {
+      "path": "assets/mobile/js/components/AppShell.js",
+      "sha256": "4f55eb636c9b1005891f4fcb6e3a43c5578fae9a13a54f3a01b29df365962759",
+      "size": 9344
+    },
+    {
+      "path": "assets/mobile/js/components/BluetoothPanel.js",
+      "sha256": "9f12fec91587ea1447432d98efc82b7f4afc3d9f4469aef330bbbd431f81055c",
+      "size": 7901
+    },
+    {
+      "path": "assets/mobile/js/components/DevModeBanner.js",
+      "sha256": "0a5120b52d01e690d4b265093ad50ac03bccc7341957b6000959dd2157fb85bc",
+      "size": 894
+    },
+    {
+      "path": "assets/mobile/js/components/DevicePicker.js",
+      "sha256": "0ccef8d765194911459a2d2c299ad4731e89f24f07810deaa8d6acff07b26b42",
+      "size": 4672
+    },
+    {
+      "path": "assets/mobile/js/components/FavoritesEditor.js",
+      "sha256": "84af5b1de9e723b62633b1adceede1c030b4f487d34e591194e524b2f7865425",
+      "size": 8943
+    },
+    {
+      "path": "assets/mobile/js/components/FeatureHelp.js",
+      "sha256": "753a2c32b580c8457c3a51401082bb1f71b8dd0edbf11cd298014d8efcaf3692",
+      "size": 4835
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxyEmbed.js",
+      "sha256": "8e03ccd8cb447859edd50b43bc0475fde71b2044780003ba294fb2261a9f1d02",
+      "size": 2796
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxyModal.js",
+      "sha256": "113ef7156fe273a442c7fde3ac4d770a9526162b22f1f6119104eaa794657e12",
+      "size": 4128
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxySection.js",
+      "sha256": "4497b941d9a80fd3c8ce6c778dc6d1433dc1059024255582be79d0305aa355f3",
+      "size": 1282
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxySelect.js",
+      "sha256": "ac6abf4a16a54c7678386021cd97e4dc549544c8f7713ff511184cd5e4c777c1",
+      "size": 7954
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxySheet.js",
+      "sha256": "659c224a9588da864a67cfe71fb567afc75803e66540c9d975a16aaefd39cbbb",
+      "size": 1180
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxyTabs.js",
+      "sha256": "95a07fe85e7cae2dbf113a10477ffe7fe3c5c5b3ea553ed443bc922b533b556d",
+      "size": 532
+    },
+    {
+      "path": "assets/mobile/js/components/GalaxyToggleCard.js",
+      "sha256": "cf417ce4515ae4fcac02605b88709b6e5eb9ade520d64c344018aeb2044f52c7",
+      "size": 15824
+    },
+    {
+      "path": "assets/mobile/js/components/GxNotice.js",
+      "sha256": "ae794417be4a64bd84c17502abf2abc1b0d8fed68467ceaa4b013e9efb893a94",
+      "size": 706
+    },
+    {
+      "path": "assets/mobile/js/components/LanguageSelector.js",
+      "sha256": "7ace27de083269db22159722a684336579aef02e09625cb93e488b1d6f1e8ae9",
+      "size": 2456
+    },
+    {
+      "path": "assets/mobile/js/components/LateralTuningPanel.js",
+      "sha256": "fc4004b1888a4c7ea45bb7cb3e68274e89304da0faf3bc2ef3bbaf58e582a8c6",
+      "size": 44188
+    },
+    {
+      "path": "assets/mobile/js/components/LongitudinalManeuvers.js",
+      "sha256": "4e13b6bedbc51d867c341495d86bd486d3335d6a96cc4b6105efa52c2e3ae8b8",
+      "size": 7983
+    },
+    {
+      "path": "assets/mobile/js/components/LongitudinalMode.js",
+      "sha256": "1863d84e47a88d2c28479eff7d7118e0105ffed47e2076ecb5d17943740247bd",
+      "size": 4915
+    },
+    {
+      "path": "assets/mobile/js/components/ManeuverCard.js",
+      "sha256": "221cc3ed14f80e3a3e192156306015fb33fb29f19d223fc9bebf4dfe1fee1339",
+      "size": 3963
+    },
+    {
+      "path": "assets/mobile/js/components/MapsPanel.js",
+      "sha256": "6a41de1162e4ccf758490e06642072da90d5e438404031a494295666c1488a25",
+      "size": 21030
+    },
+    {
+      "path": "assets/mobile/js/components/NavigationDestinationPanel.js",
+      "sha256": "805f023389c8ec3441a5bf7a407cfb8332d7b0956133a9bac812bef4ac0ed8da",
+      "size": 22179
+    },
+    {
+      "path": "assets/mobile/js/components/NavigationKeysPanel.js",
+      "sha256": "d2d198b68ccfb03a438e48acfdc87a6ee0b47e4f533d9965c4fbdad89961efed",
+      "size": 9752
+    },
+    {
+      "path": "assets/mobile/js/components/ParamSections.js",
+      "sha256": "cb92c97fdc323e3076f1ceb8c813c1b432f61e0ac43403df649361d31d441c6e",
+      "size": 2480
+    },
+    {
+      "path": "assets/mobile/js/components/PersonalityProfiles.js",
+      "sha256": "6ab16d51189247163ce7f7d6062f8d2462a579a23e47362d27a11001f37ef3f1",
+      "size": 27927
+    },
+    {
+      "path": "assets/mobile/js/components/PwaInstallSection.js",
+      "sha256": "38f5b07b77e5c0295eddd5a515dac0e9f3e816116e36baee2006e5c4c909dd3e",
+      "size": 4985
+    },
+    {
+      "path": "assets/mobile/js/components/ScreenBrightnessControl.js",
+      "sha256": "35acca0e87fb4df5f390f9961809d350b9adc77eb48093d0f86db21739ca9379",
+      "size": 7010
+    },
+    {
+      "path": "assets/mobile/js/components/SettingTree.js",
+      "sha256": "ccfc209e75454c552b696e7f37db3f2b6f535e872fef135fbca489349fcbc685",
+      "size": 2373
+    },
+    {
+      "path": "assets/mobile/js/components/SpeedLimitsPanel.js",
+      "sha256": "e771e8dc33ccf9f9da39f65f9da579242e441b472c9b1da34fd27d7ffda591db",
+      "size": 5077
+    },
+    {
+      "path": "assets/mobile/js/components/SystemMonitor.js",
+      "sha256": "55afe16ec9ac2475769199aa5e2eea80bb323b3f482d091b8bf3f4d241b6b62f",
+      "size": 13511
+    },
+    {
+      "path": "assets/mobile/js/components/TroubleshootPanel.js",
+      "sha256": "0409c48471f16b844de088e502d960d345ebe2414e359a62de15e508cf24f16e",
+      "size": 12917
+    },
+    {
+      "path": "assets/mobile/js/components/VersionHistoryPicker.js",
+      "sha256": "9b8f459bcc0c2063cfc9cf4e6ae8c90d9a987d3c60820a808656e8bf2735def0",
+      "size": 12514
+    },
+    {
+      "path": "assets/mobile/js/components/WheelControls.js",
+      "sha256": "4d196ecd35fed91f2ef485459fd4ae3478f904cec34555495c9f641795ebfdf7",
+      "size": 12055
+    },
+    {
+      "path": "assets/mobile/js/composables.js",
+      "sha256": "2de57b84399956013776c545c20f466b7e084def827fe2d988cb0c1a902e8fc8",
+      "size": 3424
+    },
+    {
+      "path": "assets/mobile/js/i18n.js",
+      "sha256": "20e8790d94d655f5b266c49da31eff2ff838af41a11eaf96f023411da1e77920",
+      "size": 29970
+    },
+    {
+      "path": "assets/mobile/js/install.js",
+      "sha256": "903a968445648ff01af6fb90222e2b8cf86b5b60d6f596e164f74ae88414d409",
+      "size": 789
+    },
+    {
+      "path": "assets/mobile/js/params.js",
+      "sha256": "4f8b0c96aab4f32667a51b64774b6ecc45fd0288ee997d771940b18848de0e13",
+      "size": 12423
+    },
+    {
+      "path": "assets/mobile/js/store.js",
+      "sha256": "a2f3d9949db72f8e5069b8f92fa2d12f8c8afe75b7eb0888a4b30a224684ab8d",
+      "size": 3883
+    },
+    {
+      "path": "assets/mobile/js/views/Bluetooth.js",
+      "sha256": "15189b5e97b576ef493558a861430facba2b2ef92db546498c242e838abcdc33",
+      "size": 1090
+    },
+    {
+      "path": "assets/mobile/js/views/Cameras.js",
+      "sha256": "c904adef58d0aba021e4bb9cb9fcde2c2fbef27397625e5adc40b6a7dde0ba8a",
+      "size": 970
+    },
+    {
+      "path": "assets/mobile/js/views/Doors.js",
+      "sha256": "1b81b7adf168e8313f052797d01eb6c7bb622407ef52d1a849d02f1e23ffa1f3",
+      "size": 1459
+    },
+    {
+      "path": "assets/mobile/js/views/Galaxy.js",
+      "sha256": "350d33943013f69b76c7f6ce6a39118a3adde1079c6d62fd409f6e331601ddbe",
+      "size": 5297
+    },
+    {
+      "path": "assets/mobile/js/views/Home.js",
+      "sha256": "31a70ecc55c3793bffb119d324bb03411275a2940195b14ded4649f70df05097",
+      "size": 24500
+    },
+    {
+      "path": "assets/mobile/js/views/Logs.js",
+      "sha256": "fc1ab8f65236071e1663c8a27b6c3527fdb4b352c0816d86ef4a3d1688ce23a2",
+      "size": 10859
+    },
+    {
+      "path": "assets/mobile/js/views/ModelLaboratory.js",
+      "sha256": "ec6c116e4d85890f2c74effe5821538965b410971f4d0352946de02a860f9187",
+      "size": 14270
+    },
+    {
+      "path": "assets/mobile/js/views/ModelManager.js",
+      "sha256": "b97e84344094b9dc5abc1a2270aa8d39fc1f60dd0c5d64fe11d35c7e29cdf9a5",
+      "size": 19042
+    },
+    {
+      "path": "assets/mobile/js/views/Navigation.js",
+      "sha256": "59c5c3a0c863004a6e6d71fcbcbe78a1d294a50687a36b0e0a1f63845283359a",
+      "size": 1482
+    },
+    {
+      "path": "assets/mobile/js/views/Pip.js",
+      "sha256": "60ee76ebf09cff688ed511b7d0ec5aca13c98fc371ec9c38822b9f8c4a0ae19f",
+      "size": 19726
+    },
+    {
+      "path": "assets/mobile/js/views/Plots.js",
+      "sha256": "430bfda6622f00632c5e6ccb0f84c1c74d112a3ca297e231b1849eef9a693985",
+      "size": 25446
+    },
+    {
+      "path": "assets/mobile/js/views/Recordings.js",
+      "sha256": "2d926be569195da43904b682882b928013055795689dc9d1a00420587fb141ca",
+      "size": 23345
+    },
+    {
+      "path": "assets/mobile/js/views/Sentry.js",
+      "sha256": "21da1bff88d0b1c64d5a3843e3bbe61d9fd75db0b7601c8567038fc84cdb9f0e",
+      "size": 19540
+    },
+    {
+      "path": "assets/mobile/js/views/Settings.js",
+      "sha256": "71b006d7eda1074ad75d6da1a90ee197471ad610079a1db59908e9fc2f389c99",
+      "size": 10965
+    },
+    {
+      "path": "assets/mobile/js/views/SystemTools.js",
+      "sha256": "57fd82644dc7441fa56aa31a2a91711b7d56e11cb4af0f764d5d4cc6d033fc26",
+      "size": 47505
+    },
+    {
+      "path": "assets/mobile/js/views/TestingGround.js",
+      "sha256": "bb1ef388aa78357797ef48ebec3e13d29cb4a360906694594133bae00d420fde",
+      "size": 11932
+    },
+    {
+      "path": "assets/mobile/js/views/ThemeMaker.js",
+      "sha256": "3af701fac6c1e4c3e326007b305527c00e16a371721e6bac930530c61c1ee179",
+      "size": 28531
+    },
+    {
+      "path": "assets/mobile/js/views/ToolEmbed.js",
+      "sha256": "68d37ae3f3d44e548b007f495515bf39d4bfdb47aedadc841f93b8eb2a561078",
+      "size": 1539
+    },
+    {
+      "path": "assets/mobile/js/views/Tools.js",
+      "sha256": "7d901c2f4702a8510808c32ffa4f4e8812f221e65cb711b81d290e43b9a6655b",
+      "size": 1919
+    },
+    {
+      "path": "assets/mobile/js/views/Tsk.js",
+      "sha256": "cc50481c9701438de2bd16b8b9e29612d2f31ee01b36c521af211aec4d316026",
+      "size": 4823
+    },
+    {
+      "path": "assets/mobile/js/views/Tuning.js",
+      "sha256": "c2df749c8b7722c341445bf20a6cec3750626db772a97647e990d03e3442613f",
+      "size": 1084
+    },
+    {
+      "path": "assets/mobile/js/views/Vasm.js",
+      "sha256": "faeba6deb8264408c1b7d230ddc677a9ade66f3d8dfb21e34a88eabeaa0c04a7",
+      "size": 19902
+    },
+    {
+      "path": "assets/mobile/js/views/Vehicle.js",
+      "sha256": "a6f6ab28dda8e93f7e5d79e5fc6a6d1832fd66967e6b21ed0f628c2449d9b9c8",
+      "size": 2999
+    },
+    {
+      "path": "assets/mobile/manifest.json",
+      "sha256": "d68a9e0d0ef77c61424718e640033f56f1583e87458124c8cbcd2b0091852874",
+      "size": 713
+    },
+    {
+      "path": "assets/service-worker.js",
+      "sha256": "b9f10a66c44efc5fc0e169ac4de8d5f0ef2d8233277cd6dd8ea6978753d16edb",
+      "size": 1717
+    },
+    {
+      "path": "assets/vendor/arrow-core.js",
+      "sha256": "2ed85a25add4004e5020241e3b804476162ae52fff456db1a919e09e2a212feb",
+      "size": 6823
+    },
+    {
+      "path": "assets/vendor/bootstrap-icons/bootstrap-icons.min.css",
+      "sha256": "f643d6fe7e679f9de3e16311600c5ef5cd6b098f7a3a8828fcc29255d2b33e62",
+      "size": 85875
+    },
+    {
+      "path": "assets/vendor/bootstrap-icons/fonts/bootstrap-icons.woff",
+      "sha256": "bb1de989b83970f6f4e54de1cd974c5cba55b73582da5e1b225a6d0edf029483",
+      "size": 176032
+    },
+    {
+      "path": "assets/vendor/bootstrap-icons/fonts/bootstrap-icons.woff2",
+      "sha256": "476adf42b40325098fcfa8b36ab3e769186bb4f6ce6a249753e2e1a9c22bf99e",
+      "size": 130396
+    },
+    {
+      "path": "assets/vendor/font-awesome/css/font-awesome.min.css",
+      "sha256": "799aeb25cc0373fdee0e1b1db7ad6c2f6a0e058dfadaa3379689f583213190bd",
+      "size": 31000
+    },
+    {
+      "path": "assets/vendor/font-awesome/fonts/fontawesome-webfont.eot",
+      "sha256": "7bfcab6db99d5cfbf1705ca0536ddc78585432cc5fa41bbd7ad0f009033b2979",
+      "size": 165742
+    },
+    {
+      "path": "assets/vendor/font-awesome/fonts/fontawesome-webfont.svg",
+      "sha256": "ad6157926c1622ba4e1d03d478f1541368524bfc46f51e42fe0d945f7ef323e4",
+      "size": 444379
+    },
+    {
+      "path": "assets/vendor/font-awesome/fonts/fontawesome-webfont.ttf",
+      "sha256": "aa58f33f239a0fb02f5c7a6c45c043d7a9ac9a093335806694ecd6d4edc0d6a8",
+      "size": 165548
+    },
+    {
+      "path": "assets/vendor/font-awesome/fonts/fontawesome-webfont.woff",
+      "sha256": "ba0c59deb5450f5cb41b3f93609ee2d0d995415877ddfa223e8a8a7533474f07",
+      "size": 98024
+    },
+    {
+      "path": "assets/vendor/font-awesome/fonts/fontawesome-webfont.woff2",
+      "sha256": "2adefcbc041e7d18fcf2d417879dc5a09997aa64d675b7a3c4b6ce33da13f3fe",
+      "size": 77160
+    },
+    {
+      "path": "assets/vendor/fonts/Inter-Bold.ttf",
+      "sha256": "d597e753e78d8bf9db34c13343146545fb3be5a1c99a175bc381fe3f6f787f31",
+      "size": 293448
+    },
+    {
+      "path": "assets/vendor/fonts/Inter-Regular.ttf",
+      "sha256": "1041a8cf17dab7579acef0cc46b21f6497ec1ae01918ddc3495416efb81a4780",
+      "size": 287928
+    },
+    {
+      "path": "assets/vendor/fonts/fonts.css",
+      "sha256": "10c8f52c15443c98c69ebfe58a69f25e65a1777a1772c090ed6870936698a9d4",
+      "size": 306
+    },
+    {
+      "path": "assets/vendor/fonts/password.ttf",
+      "sha256": "5585d482c2eee6acbeca5fe3d9ffaad32b15c5b26995ee345b0208f557571155",
+      "size": 127740
+    },
+    {
+      "path": "assets/vendor/remix-router-1.3.1.js",
+      "sha256": "85e58f18c25e14c67623e0a0828597a709f60aa47c65baf8beb7017bb60762e7",
+      "size": 42346
+    },
+    {
+      "path": "assets/vendor/vue/vue.esm-browser.js",
+      "sha256": "461e48309d25caa3cda10081c76fe30e228c18e2d1504b6b79ae6e2c7d681070",
+      "size": 494167
+    },
+    {
+      "path": "classic.html",
+      "sha256": "86cad87d03a9ab81220be792a1a649920bf881e907f4a8d94add8cc926c207e3",
+      "size": 4660
+    }
+  ]
+}

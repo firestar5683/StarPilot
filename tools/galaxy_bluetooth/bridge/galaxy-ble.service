@@ -1,0 +1,17 @@
+[Unit]
+Description=Galaxy Bluetooth request bridge
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+User=comma
+WorkingDirectory=/data/galaxy-ble/app/bridge
+ExecStart=/data/galaxy-ble/venv/bin/python /data/galaxy-ble/app/bridge/server.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

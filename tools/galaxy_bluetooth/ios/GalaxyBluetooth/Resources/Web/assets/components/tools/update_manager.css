@@ -1,0 +1,253 @@
+.updateManager {
+  max-width: var(--width-xxl);
+}
+
+.updateActions {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--margin-base);
+}
+
+.updateButton {
+  background: var(--main-fg);
+  border: none;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-demi-bold);
+  padding: var(--padding-sm) var(--padding-base);
+}
+
+.updateButton.danger {
+  background: var(--danger-bg);
+}
+
+.updateButton.danger:hover {
+  background: var(--danger-hover-bg);
+}
+
+.updateButton:hover {
+  transform: var(--hover-scale-sm);
+  transition: transform var(--transition-fast), background-color var(--transition-fast);
+}
+
+.updateButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.updateCard {
+  background-color: var(--secondary-bg);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  max-width: 80%;
+  padding: var(--border-radius-xl);
+}
+
+.updateError {
+  color: var(--danger-fg);
+  margin-top: var(--margin-sm);
+}
+
+.updateGrid {
+  display: grid;
+  gap: 0.5em 1em;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.updateGrid p {
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.updateLink {
+  color: var(--main-fg);
+  display: inline-block;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.updateMessage {
+  margin-top: var(--margin-sm);
+}
+
+.updateProgressCard {
+  margin-top: var(--margin-base);
+}
+
+.updateProgressDetail {
+  font-size: var(--font-size-sm);
+  margin-top: var(--margin-sm);
+}
+
+.updateProgressDetail.error {
+  color: var(--danger-fg);
+}
+
+.updateProgressFill {
+  background: linear-gradient(90deg, #5ec8c8 0%, #8b6cc5 100%);
+  border-radius: var(--border-radius-sm);
+  height: 100%;
+  transition: width var(--transition-base);
+}
+
+.updateProgressFill.error {
+  background: linear-gradient(90deg, #b43a3a 0%, #de5656 100%);
+}
+
+.updateProgressHeader {
+  display: flex;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-demi-bold);
+  justify-content: space-between;
+  margin-bottom: var(--margin-xs);
+}
+
+.updateProgressTrack {
+  background: var(--track-color);
+  border-radius: var(--border-radius-sm);
+  height: 12px;
+  overflow: hidden;
+}
+
+.updateProgressTrack.error {
+  border: 1px solid var(--danger-bg);
+}
+
+.updateToggleRow {
+  align-items: center;
+  display: flex;
+  gap: var(--gap-sm);
+  justify-content: space-between;
+  margin-top: var(--margin-base);
+}
+
+.updateWarning {
+  margin-top: var(--margin-base);
+}
+
+.updateAgnosWarning {
+  background: rgba(212, 160, 96, 0.12);
+  border-left: 3px solid var(--warning-bg);
+  border-radius: var(--border-radius-sm);
+  margin-top: var(--margin-base);
+  padding: var(--padding-sm) var(--padding-base);
+}
+
+.updateAgnosWarning p {
+  font-size: var(--font-size-sm);
+  margin: var(--margin-xs) 0;
+}
+
+.updateAgnosWarning ul {
+  font-size: var(--font-size-sm);
+  margin: var(--margin-sm) 0;
+  padding-left: 1.2rem;
+}
+
+.updateAgnosWarning li {
+  margin-bottom: var(--margin-xs);
+}
+
+.updateHint {
+  font-size: var(--font-size-sm);
+  margin-top: var(--margin-sm);
+}
+
+.updateRebootNotice {
+  font-weight: var(--font-weight-bold);
+}
+
+.updateRecovery {
+  border-left: 3px solid var(--main-fg);
+  margin-top: var(--margin-base);
+  padding-left: var(--padding-base);
+}
+
+.updateRecovery p {
+  font-size: var(--font-size-sm);
+  margin: var(--margin-xs) 0 var(--margin-sm);
+}
+
+.updateFooter {
+  border-top: 1px solid var(--track-color);
+  margin-top: var(--margin-base);
+  padding-top: var(--margin-sm);
+}
+
+.updateBranchSection {
+  margin-top: var(--margin-base);
+}
+
+.updateRollbackSection {
+  margin-top: var(--margin-base);
+}
+
+.updateAdvancedNote {
+  font-size: var(--font-size-sm);
+  margin-top: var(--margin-sm);
+}
+
+.updateBranchHeader {
+  align-items: center;
+  display: flex;
+  font-size: var(--font-size-sm);
+  justify-content: space-between;
+}
+
+.updateBranchRow {
+  align-items: center;
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--margin-sm);
+}
+
+.updateRollbackMeta {
+  margin-top: var(--margin-sm);
+}
+
+.updateRollbackMeta p {
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--margin-xs) 0;
+}
+
+.updateSelect {
+  background-color: var(--main-bg);
+  border: 1px solid var(--track-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  flex: 1;
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  padding: var(--padding-sm);
+}
+
+.updateSelect:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.updateToggleRow input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media only screen and (max-width: 768px) and (orientation: portrait) {
+  .updateActions {
+    flex-direction: column;
+  }
+
+  .updateBranchRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .updateCard {
+    max-width: 100%;
+  }
+
+  .updateGrid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}

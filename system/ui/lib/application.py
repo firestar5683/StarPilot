@@ -1161,6 +1161,8 @@ class GuiApplication:
         if self._grid_size > 0:
           self._draw_grid()
 
+        from openpilot.tools.galaxy_bluetooth.companion import capture_frame
+        capture_frame()
         self._mark_progress("gui_app.before_end_drawing")
         rl.end_drawing()
         self._mark_progress("gui_app.after_end_drawing")
@@ -1411,3 +1413,4 @@ class GuiApplication:
 
 
 gui_app = GuiApplication()
+

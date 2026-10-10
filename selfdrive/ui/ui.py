@@ -9,6 +9,8 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.stall_monitor import UIStallMonitor
 from openpilot.selfdrive.ui.ui_state import ui_state
 
+from openpilot.tools.galaxy_bluetooth.companion import publish_telemetry
+
 BIG_UI = gui_app.big_ui()
 
 
@@ -76,6 +78,7 @@ def main():
       stall_monitor.progress("ui.after_watchdog")
       ui_state.update(progress_hook=stall_monitor.progress)
       stall_monitor.progress("ui.after_state_update")
+      publish_telemetry(ui_state, gui_app)
       now = time.monotonic()
       if now - context_update_time >= 1.0:
         stall_monitor.set_context(_stall_context())
@@ -96,3 +99,4 @@ def main():
 
 if __name__ == "__main__":
   main()
+

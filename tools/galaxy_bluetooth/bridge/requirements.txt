@@ -1,0 +1,2 @@
+dbus-next==0.2.3
+pycryptodome==3.23.0

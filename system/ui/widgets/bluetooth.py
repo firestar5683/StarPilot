@@ -177,8 +177,9 @@ class BluetoothAudioTestDialog(Widget):
 
 class BluetoothManagerUI(Widget):
   """Big UI Bluetooth settings panel backed by the existing Bluetooth manager daemon."""
-  def __init__(self, manager: BluetoothManager):
+  def __init__(self, manager: BluetoothManager, phone_pairing: Widget | None = None):
     super().__init__()
+    self._phone_pairing = phone_pairing
     self._manager = manager
     self._scroll_panel = GuiScrollPanel()
     self._power_toggle = Toggle(initial_state=False, callback=self._toggle_power)
@@ -378,7 +379,11 @@ class BluetoothManagerUI(Widget):
     header_rect = rl.Rectangle(rect.x, rect.y, rect.width, HEADER_HEIGHT)
     self._render_header(header_rect, status)
 
-    content_rect = rl.Rectangle(rect.x, rect.y + HEADER_HEIGHT, rect.width, rect.height - HEADER_HEIGHT)
+    content_y = rect.y + HEADER_HEIGHT
+    if self._phone_pairing is not None:
+      self._phone_pairing.render(rl.Rectangle(rect.x + HEADER_PADDING, content_y, rect.width - 2 * HEADER_PADDING, ITEM_HEIGHT))
+      content_y += ITEM_HEIGHT
+    content_rect = rl.Rectangle(rect.x, content_y, rect.width, rect.y + rect.height - content_y)
     if not status.available:
       gui_label(content_rect, tr("Bluetooth is not available on this device."), font_size=62,
                 color=TEXT_SECONDARY, alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)

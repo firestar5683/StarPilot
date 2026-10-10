@@ -1,0 +1,137 @@
+/* ――― Galaxy Pairing Widget ――― */
+.galaxy-wrapper {
+  max-width: var(--width-xxxl);
+  padding: var(--padding-base) var(--padding-lg) var(--padding-xxl);
+}
+
+.galaxy-loading {
+  color: var(--text-muted);
+  padding: var(--padding-xl);
+  text-align: center;
+}
+
+.galaxy-widget {
+  align-items: center;
+  background-color: var(--secondary-bg);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+  max-width: var(--width-lg);
+  padding: var(--padding-xl);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.galaxy-widget:hover {
+  box-shadow: var(--shadow-md);
+  transform: var(--hover-scale-sm);
+}
+
+/* ――― Status Badge ――― */
+.galaxy-status-badge {
+  align-items: center;
+  border-radius: 2rem;
+  display: inline-flex;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  gap: var(--gap-xs);
+  padding: 0.3rem 1rem;
+}
+
+.galaxy-paired {
+  background-color: rgba(94, 200, 200, 0.15);
+  color: var(--success-fg);
+}
+
+.galaxy-unpaired {
+  background-color: rgba(224, 85, 119, 0.15);
+  color: var(--danger-fg);
+}
+
+/* ――― Text ――― */
+.galaxy-text {
+  color: var(--text-color);
+  line-height: var(--line-height-base);
+  text-align: center;
+}
+
+/* ――― URL Link ――― */
+.galaxy-url {
+  color: var(--main-fg);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-demi-bold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--transition-fast);
+  word-break: break-all;
+}
+
+.galaxy-url:hover {
+  color: var(--accent-hover-bg);
+}
+
+/* ――― Input Group ――― */
+.galaxy-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  width: 100%;
+}
+
+.galaxy-input {
+  background-color: var(--input-bg);
+  border: var(--border-style-input);
+  border-radius: var(--border-radius-lg);
+  box-sizing: border-box;
+  color: var(--text-color);
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  outline: none;
+  padding: var(--padding-sm) var(--padding-base);
+  transition: box-shadow var(--transition-fast);
+  width: 100%;
+}
+
+.galaxy-input:focus {
+  box-shadow: 0 0 0 2px var(--main-fg);
+}
+
+/* ――― Buttons ――― */
+.galaxy-button {
+  background-color: var(--input-bg);
+  border: none;
+  border-radius: var(--border-radius-lg);
+  color: var(--text-color);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-demi-bold);
+  padding: var(--padding-sm) var(--padding-base);
+  text-align: center;
+  transition: background-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+  width: 100%;
+}
+
+.galaxy-button:hover:not(:disabled) {
+  box-shadow: var(--shadow-md);
+  transform: var(--hover-scale-sm);
+}
+
+.galaxy-button:disabled {
+  opacity: var(--disabled-opacity);
+}
+
+.galaxy-button-danger {
+  background-color: rgba(224, 85, 119, 0.2);
+  color: var(--danger-fg);
+}
+
+.galaxy-button-danger:hover:not(:disabled) {
+  background-color: rgba(224, 85, 119, 0.35);
+}
+
+/* ――― Mobile ――― */
+@media only screen and (max-width: 768px) and (orientation: portrait) {
+  .galaxy-wrapper {
+    padding: var(--padding-sm) var(--padding-base) var(--padding-xl);
+  }
+}
