@@ -300,6 +300,41 @@ class SelfdriveD:
     if getattr(self, 'steering_authority_unavailable', False):
       self.events.add(EventName.controlsMismatch)
 
+  def _update_car_event_sample(self, CS, previous):
+    # Block resume if cruise never previously enabled
+    resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
+    if not self.CP.pcmCruise and CS.vCruise > 250 and resume_pressed:
+      self.events.add(EventName.resumeBlocked)
+
+    # Add car events, ignore if CAN isn't valid
+    if CS.canValid:
+      car_events = self.car_events.update(CS, previous, self.sm['carControl']).to_msg()
+      device = self.sm['deviceState']
+      drive_id = (int(device.startedMonoTime) if self.sm.seen['deviceState'] and self.sm.alive['deviceState'] and
+                  self.sm.valid['deviceState'] and device.started else 0)
+      show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed), drive_id=drive_id)
+      self.events.add_from_msg([event for event in car_events if event.name != EventName.belowSteerSpeed])
+      if show_low_speed:
+        self.events.add(EventName.belowSteerSpeed)
+      paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)
+      self.nostalgia_paddle_cancel |= bool(paddle_pressed and EventName.buttonCancel not in self.events.names and
+                                         not physical_cancel(CS))
+      if paddle_pressed:
+        self.events.add(EventName.buttonCancel)
+
+      if self.CP.notCar:
+        # wait for everything to init first
+        if self.sm.frame > int(2. / DT_CTRL) and self.initialized:
+          # body always wants to enable
+          self.events.add(EventName.pcmEnable)
+
+      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
+      if (CS.gasPressed and not previous.gasPressed and self.disengage_on_accelerator) or \
+        (CS.brakePressed and (not previous.brakePressed or not CS.standstill)) or \
+        (CS.regenBraking and (not previous.regenBraking or not CS.standstill)):
+        self.events.add(EventName.pedalPressed)
+
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
@@ -358,11 +393,6 @@ class SelfdriveD:
     if self.CP.passive:
       return
 
-    # Block resume if cruise never previously enabled
-    resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
-    if not self.CP.pcmCruise and CS.vCruise > 250 and resume_pressed:
-      self.events.add(EventName.resumeBlocked)
-
     # Handle DM
     if not self.CP.notCar:
       # Block engaging until lockout times out or ignition reset
@@ -388,16 +418,19 @@ class SelfdriveD:
         set_offroad_alert("Offroad_DriverMonitoringUncertain", True)
         self.dm_uncertain_alerted = True
 
-    # Add car events, ignore if CAN isn't valid
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+    previous = self.CS_prev
+    for sample, envelope_valid in samples:
+      self._update_car_event_sample(sample, previous)
+      if len(samples) > 1:
+        if sample.canTimeout:
+          self.events.add(EventName.canBusMissing)
+        elif not envelope_valid or not sample.canValid:
+          self.events.add(EventName.canError)
+      previous = sample
+    if any(physical_cancel(sample) for sample, _ in samples):
+      self.nostalgia_paddle_cancel = False
     if CS.canValid:
-      car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
-      device = self.sm['deviceState']
-      drive_id = (int(device.startedMonoTime) if self.sm.seen['deviceState'] and self.sm.alive['deviceState'] and
-                  self.sm.valid['deviceState'] and device.started else 0)
-      show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed), drive_id=drive_id)
-      self.events.add_from_msg([event for event in car_events if event.name != EventName.belowSteerSpeed])
-      if show_low_speed:
-        self.events.add(EventName.belowSteerSpeed)
       if self.tesla_stock_consumer.binding is not None:
         intent_companion = getattr(self, 'aol_intent_companion', None)
         drained = intent_companion is None or intent_companion.drain()
@@ -406,24 +439,6 @@ class SelfdriveD:
                                    previous=self.aol_last_intent, companion=intent_companion, drain=False) if drained else None
         session = companion.producerSessionId if companion is not None else None
         self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
-
-      paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)
-      self.nostalgia_paddle_cancel = bool(paddle_pressed and EventName.buttonCancel not in self.events.names and
-                                         not physical_cancel(CS))
-      if paddle_pressed:
-        self.events.add(EventName.buttonCancel)
-
-      if self.CP.notCar:
-        # wait for everything to init first
-        if self.sm.frame > int(2. / DT_CTRL) and self.initialized:
-          # body always wants to enable
-          self.events.add(EventName.pcmEnable)
-
-      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
-      if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
-        (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
-        (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
-        self.events.add(EventName.pedalPressed)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
@@ -623,18 +638,39 @@ class SelfdriveD:
 
     # Decrement personality on distance button press
     if self.CP.openpilotLongitudinalControl:
-      if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
-        self.personality = (self.personality - 1) % 3
-        self.params.put('LongitudinalPersonality', self.personality)
-        self.events.add(EventName.personalityChanged)
+      for sample, _ in samples:
+        if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in sample.buttonEvents):
+          self.personality = (self.personality - 1) % 3
+          self.params.put('LongitudinalPersonality', self.personality)
+          self.events.add(EventName.personalityChanged)
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
+    samples = []
+    queue_invalid = False
+    if _car_state is not None:
+      samples.append(_car_state)
+      if (getattr(self, 'aol_replay', False) and getattr(self, 'axis_transport_required', False) and
+          not REPLAY and str(self.CP.carFingerprint) == 'HYUNDAI_IONIQ_6'):
+        # Preserve every consumed transition; only the authority source advances.
+        for _ in range(31):
+          following = messaging.recv_one_or_none(self.car_state_sock)
+          if following is None:
+            break
+          queue_invalid |= int(following.logMonoTime) <= int(samples[-1].logMonoTime)
+          samples.append(following)
+        else:
+          # A full bounded batch cannot establish that the receiver caught up.
+          queue_invalid = True
+        _car_state = samples[-1]
+    self.car_state_samples = tuple((sample.carState, bool(sample.valid)) for sample in samples)
     CS = _car_state.carState if _car_state else self.CS_prev
     self.aol_expired_healthy_source = False
     if _car_state is not None:
       self.aol_car_state_log_ns = int(_car_state.logMonoTime)
-      self.conditional_car_state_valid = bool(_car_state.valid)
+      self.conditional_car_state_valid = bool(_car_state.valid) and not queue_invalid
+      if queue_invalid:
+        self.aol_car_state_log_ns = 0
     else:
       # The 20 ms socket wait can expire between healthy CAN frames. Reusing
       # CS_prev must also keep its original timestamp, never create a new one.
@@ -910,7 +946,8 @@ class SelfdriveD:
 
   def _decide_aol_axes(self, CS, intent, native):
     return decide_axes(
-      standard_lateral=self.active, standard_longitudinal=self.enabled and self.CP.openpilotLongitudinalControl,
+      standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
+        not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
       intent=intent, native=native, car_state=CS, initialized=self.initialized,
       model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                        self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
@@ -925,7 +962,10 @@ class SelfdriveD:
                       self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
                       self.sm['driverMonitoringState'].alertLevel == AlertLevel.three),
       pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
-      lateral_inhibit=self.aol_dm_lateral_inhibit)
+      lateral_inhibit=self.aol_dm_lateral_inhibit or any(
+        sample.steerFaultTemporary or sample.brakePressed and not sample.standstill and
+        sample.vEgo < (self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0)
+        for sample, _ in getattr(self, 'car_state_samples', ())))
 
   def record_aol_authority_loss(self, *, now_ns, companion, drained, native, source_current,
                                 lost_active, lost_companion, lost_permission, upgraded):
@@ -951,6 +991,10 @@ class SelfdriveD:
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     CS = self.data_sample()
     self.update_events(CS)
+    if len(getattr(self, 'car_state_samples', ())) > 1 and any(self.events.contains(kind) for kind in (
+        ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
+      # A queued enable cannot override a cancellation or pedal edge in this batch.
+      self.events.events = [event for event in self.events.names if ET.ENABLE not in self.events.event_rules.get(event, {})]
     native = None
     lost_active_aol = bool(self.aol_replay and getattr(self, 'steering_authority_unavailable', False) and
                            (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active))

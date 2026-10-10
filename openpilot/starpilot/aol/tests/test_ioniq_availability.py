@@ -75,6 +75,12 @@ class IoniqAvailabilityTests(unittest.TestCase):
     sd.personality, sd.is_metric = 1, False
     sd.CS_prev = car_state()
     sd.car_state_sock = object()
+    original_optional_receive = messaging.recv_one_or_none
+
+    def optional_receive(sock):
+      return None if sock is sd.car_state_sock else original_optional_receive(sock)
+
+    self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one_or_none', side_effect=optional_receive))
     sd.update_conditional_mode = mock.Mock()
     if not genuine_events:
       self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (sd.events.clear(), sd._update_steering_authority(cs))))
