@@ -28,7 +28,8 @@ def test_numeric_subset_is_pinned_and_has_real_tabular_glyphs():
   one = glyphs[ord('1')]
   x, y, w, h = (int(one[key]) for key in ('x', 'y', 'width', 'height'))
   with Image.open(path.with_suffix('.png')) as atlas:
-    assert atlas.crop((x, y, x + w, y + h)).getchannel('A').getbbox()[0] > 0
+    bounds = atlas.crop((x, y, x + w, y + h)).getchannel('A').getbbox()
+    assert bounds is not None and bounds[0] > 0
 
 
 def test_three_digit_values_units_and_long_status_fit_actual_fonts():
