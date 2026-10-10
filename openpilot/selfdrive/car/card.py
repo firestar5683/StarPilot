@@ -1064,13 +1064,20 @@ class Car:
     pandas = sm['pandaStates']
     owner = getattr(self.vehicle_startup, 'owner', None)
     count = 2 if isinstance(owner, CapturedADRVStartup) and hyundai_canfd_config_index(owner.cp) == 1 else 1
+    ignition_pandas = pandas
+    if (count == 2 and len(pandas) == 2 and
+        pandas[0].pandaType == log.PandaState.PandaType.dos and
+        pandas[1].pandaType == log.PandaState.PandaType.redPanda):
+      # pandad clears the internal DOS ignition line in this exact topology.
+      # The external captured-ADRV owner must still observe vehicle ignition.
+      ignition_pandas = (pandas[1],)
     return bool(not self.params.get_bool('IsOffroad') and not self.params.get_bool('ControlsReady') and
                 sm.seen['pandaStates'] and sm.valid['pandaStates'] and sm.alive['pandaStates'] and
                 0 < stamp <= boot and boot - stamp <= 300_000_000 and
                 0 < receipt <= now and now - receipt <= 300_000_000 and len(pandas) == count and
                 all(ps.safetyModel == structs.CarParams.SafetyModel.elm327 and ps.safetyParam == 1 and
-                    not ps.controlsAllowed and not ps.safetyRxChecksInvalid and
-                    (ps.ignitionLine or ps.ignitionCan) for ps in pandas))
+                    not ps.controlsAllowed and not ps.safetyRxChecksInvalid for ps in pandas) and
+                all(ps.ignitionLine or ps.ignitionCan for ps in ignition_pandas))
 
   def startup_panda_configured(self, *, inactive_keepalive=False):
     # Inactive keepalives carry no axis authority during the first native RX health tick.
