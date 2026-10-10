@@ -102,3 +102,96 @@ def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard
       case.assertEqual(sd.aol_authority_lost, hard_guard != 'critical_event')
       case.assertTrue(feedback(failed_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
       case.assertFalse(card.aol_card_intent.allowed_latch)
+
+
+@pytest.mark.parametrize('guard', ['healthy', 'latest_deny', 'latest_pause', 'future',
+                                 'native_invalid', 'native_deny', 'source_expired', 'overrun'])
+def test_actual_hkg_drain_precedes_shared_decision_clock(guard):
+  from unittest.mock import patch
+  from openpilot.selfdrive.selfdrived import selfdrived as sd_module
+  from openpilot.starpilot.aol.intent_companion import MAX_DRAIN
+  from openpilot.starpilot.aol.tests.test_runtime import IpcAxisContractTests
+
+  case = IpcAxisContractTests(methodName='runTest')
+  a = 10_000_000_000
+  before, after = a + 25_000_000, a + 28_000_000
+  original = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=a)
+  original.aolIntentWire = encode_intent(IntentState('authority-card', 1, a, a,
+    a + 200_000_000, True, False, False, True, True))
+  b = after + 1 if guard == 'future' else a + 26_000_000
+  latest_value = IntentState('authority-card', 2, b, b, b + 200_000_000,
+                            guard != 'latest_deny', guard == 'latest_pause', False, True, True)
+  latest = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=b)
+  latest.aolIntentWire = encode_intent(latest_value)
+  with ExitStack() as cleanup:
+    cleanup.callback(case.doCleanups)
+    with OpenpilotPrefix():
+      sd, _, step, card, feedback = case._transport_callers()
+      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+        axis, _, command = step(0, intent_message=original)
+      assert axis.lateralActive and command.latActive
+      assert not feedback(a, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      calls = []
+      def receive(_sock):
+        calls.append(1)
+        # The actual SD decision clock changes while its queued read executes.
+        sd_module.time.monotonic_ns.return_value = a + 30_000_001 if guard == 'source_expired' else after
+        return latest.as_reader() if len(calls) == 1 or guard == 'overrun' else None
+      kwargs = {'native_valid': False} if guard == 'native_invalid' else {'allowed': False} if guard == 'native_deny' else {}
+      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=receive):
+        axis, state, command = step(1, state_stamp=a, intent_message=original,
+                                    offset_ns=before - 10_010_000_000, **kwargs)
+      assert len(calls) == (MAX_DRAIN if guard == 'overrun' else 2)
+      if guard == 'healthy':
+        assert axis.sourceCarStateMonoTime == a
+        assert sd.aol_last_intent.observedMonoTime == a
+        assert sd.aol_last_intent.validUntilMonoTime == a + 200_000_000
+        assert axis.nativeAcknowledged and axis.lateralActive and command.latActive
+        assert not sd.aol_authority_lost
+        assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names
+        assert state.alertText1 != 'TAKE CONTROL IMMEDIATELY'
+        assert not feedback(after, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+        assert card.aol_card_intent.allowed_latch
+      elif guard == 'latest_deny':
+        # Ordinary enabled control remains valid; the persistent AOL latch veto is folded.
+        assert sd.aol_last_intent.allowedLatch is False
+        assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names
+      else:
+        assert not axis.lateralActive and not command.latActive
+        if guard in ('future', 'native_invalid', 'native_deny', 'source_expired', 'overrun'):
+          assert str(axis.faultReason) == 'critical'
+          assert log.OnroadEvent.EventName.controlsMismatch in sd.events.names
+          assert feedback(after, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+          assert not card.aol_card_intent.allowed_latch
+
+
+def test_authority_loss_diagnostic_is_bounded_and_logged_by_params_worker():
+  from types import SimpleNamespace
+  from openpilot.common.params import Params
+  from unittest.mock import Mock, patch
+  from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
+
+  with OpenpilotPrefix():
+    sd = SelfdriveD.__new__(SelfdriveD)
+    sd.sm = messaging.SubMaster(['aolSafetyWire'])
+    sd.sm.logMonoTime['aolSafetyWire'] = 100
+    sd.aol_car_state_log_ns = 90
+    arguments = {'companion': None, 'drained': False, 'native': None, 'source_current': False,
+                 'lost_active': True, 'lost_companion': True, 'lost_permission': False, 'upgraded': False}
+    for now in (6_000_000_000, 6_000_000_001, 12_000_000_000, 18_000_000_000):
+      sd.record_aol_authority_loss(now_ns=now, **arguments)
+    assert len(sd.aol_authority_reports) == 2
+    assert [row['decision_ns'] for row in sd.aol_authority_reports] == [12_000_000_000, 18_000_000_000]
+    sd.aol_replay = False
+    sd.params = Params()
+    sd.refresh_saved_driving_mode = Mock()
+    evt = SimpleNamespace(is_set=Mock(side_effect=[False, True]))
+    with (patch('openpilot.selfdrive.selfdrived.selfdrived.cloudlog.event') as report,
+          patch('openpilot.selfdrive.selfdrived.selfdrived.time.sleep')):
+      sd.params_thread(evt)
+    report.assert_called_once_with('selfdrived.authority_lost', decision_ns=12_000_000_000, source_ns=90,
+      intent_snapshot={}, intent_rejection='no_companion', drain_ok=False, drain_count=0,
+      source_current=False, source_expired=False, native_present=False, native_message_ns=100,
+      native_requested_lateral=False, native_allowed_lateral=False, lost_active=True,
+      lost_companion=True, lost_permission=False, pause_upgraded=False)
+    assert len(sd.aol_authority_reports) == 1

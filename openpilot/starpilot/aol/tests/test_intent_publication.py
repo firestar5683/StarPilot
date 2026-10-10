@@ -559,3 +559,48 @@ def test_verified_stale_sm_identity_cannot_override_new_latest_raw_restrictions(
   for key, value in changes.items():
     assert getattr(result, key) == value
   assert result.carStateLogMonoTime == pair.carStateLogMonoTime and result.validUntilMonoTime == pair.validUntilMonoTime
+
+
+@pytest.mark.parametrize('at,accepted', [(28_000_000, True), (30_000_000, True), (30_000_001, False)])
+def test_drain_then_decision_clock_keeps_original_card_source_lease(at, accepted):
+  # Real Card publisher, SelfdriveD retained source and queued intent sockets.
+  with OpenpilotPrefix():
+    messaging.reset_context()
+    card, sd, stamp = _queued_publication()
+    _publish_card(card, sd.CS_prev, stamp)
+    sd.CS_prev = sd.data_sample()
+    assert _paired(sd, stamp, stamp + 1_000_000) is not None
+    assert sd.aol_car_state_log_ns == stamp
+    pre_read_clock = stamp + 25_000_000
+    _publish_card(card, sd.CS_prev, stamp + 26_000_000)
+    # Keep original carState A while raw intent B arrives after pre-read time.
+    assert sd.aol_intent_companion.drain()
+    with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none',
+               side_effect=AssertionError('Decision validation must not read after clock sampling')):
+      result = current_intent(sd.sm, car_state_ns=stamp, now_ns=stamp + at,
+                              companion=sd.aol_intent_companion, drain=False)
+    assert pre_read_clock < stamp + 26_000_000
+    assert (result is not None) == accepted
+    if accepted:
+      assert result.carStateLogMonoTime == result.observedMonoTime == stamp
+      assert result.validUntilMonoTime == stamp + 200_000_000
+
+
+def test_split_drain_preserves_overrun_fail_closed():
+  from dataclasses import replace
+  from openpilot.starpilot.aol.intent_companion import MAX_DRAIN
+  companion, sm, pair, latest, now = _known_older_sm_pair()
+  message = SimpleNamespace(logMonoTime=latest.carStateLogMonoTime, valid=True,
+                            aolIntentWire=encode_intent(latest))
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=message) as recv:
+    assert companion.drain() is False
+    assert recv.call_count == MAX_DRAIN
+  assert current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=now,
+                        companion=companion, drain=False) is None
+
+  newer = replace(latest, sequence=latest.sequence + 1, carStateLogMonoTime=now,
+                  observedMonoTime=now, validUntilMonoTime=now + 200_000_000)
+  sm['aolIntentWire'] = encode_intent(newer)
+  sm.logMonoTime['aolIntentWire'] = now
+  assert current_intent(sm, car_state_ns=now, now_ns=now, companion=companion, drain=False) is None
+  assert companion.last_rejection == 'drain_overrun'

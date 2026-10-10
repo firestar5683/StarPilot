@@ -36,9 +36,9 @@ class AxisDecision:
     return 'off'
 
 
-def current_intent(sm, *, car_state_ns: int, now_ns: int, previous: IntentState | None = None, companion=None):
+def current_intent(sm, *, car_state_ns: int, now_ns: int, previous: IntentState | None = None, companion=None, drain=True):
   if companion is not None:
-    return companion.current(sm, source_ns=car_state_ns, now_ns=now_ns)
+    return companion.current(sm, source_ns=car_state_ns, now_ns=now_ns, drain=drain)
   if not (sm.valid[INTENT_SERVICE] and sm.alive[INTENT_SERVICE] and sm.seen[INTENT_SERVICE]):
     return None
   intent = decode_intent(sm[INTENT_SERVICE])

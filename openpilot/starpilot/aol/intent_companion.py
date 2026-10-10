@@ -19,6 +19,10 @@ class IntentCompanion:
     self.sequence_stamp = 0
     self.integrity_epoch = 0
     self.verified_sm_projection = None
+    self.last_rejection = None
+    self.last_drain_count = 0
+    self.last_drain_ok = True
+    self.last_snapshot = {}
 
   def _observe(self, stamp, valid, raw):
     stamp = int(stamp)
@@ -67,11 +71,15 @@ class IntentCompanion:
                 intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
                 now_ns - intent.observedMonoTime <= INTENT_MAX_AGE_NS)
 
-  def current(self, sm, *, source_ns, now_ns):
+  def drain(self):
+    """Read bounded transport before sampling the decision clock."""
+    self.last_drain_count = 0
+    self.last_drain_ok = False
     for _ in range(MAX_DRAIN):
       message = messaging.recv_one_or_none(self.sock)
       if message is None:
         break
+      self.last_drain_count += 1
       self._observe(message.logMonoTime, message.valid, message.aolIntentWire)
     else:
       self.integrity_epoch += 1
@@ -80,7 +88,27 @@ class IntentCompanion:
       if self.latest is not None:
         self.latest = (self.latest[0], False, self.latest[2])
         self.samples[self.latest[0]] = self.latest
-      return None
+      self.last_rejection = 'drain_overrun'
+      return False
+    self.last_drain_ok = True
+    return True
+
+  def _reject(self, reason):
+    self.last_rejection = reason
+    return None
+
+  def current(self, sm, *, source_ns, now_ns, drain=True):
+    self.last_rejection = None
+    self.last_snapshot = {'source_ns': int(source_ns), 'now_ns': int(now_ns),
+                          'sm_ns': int(sm.logMonoTime.get(INTENT_SERVICE, 0)),
+                          'latest_ns': self.latest[0] if self.latest is not None else 0,
+                          'integrity_epoch': self.integrity_epoch}
+    if drain and not self.drain():
+      return self._reject('drain_overrun')
+    if not self.last_drain_ok:
+      return self._reject('drain_overrun')
+    self.last_snapshot['latest_ns'] = self.latest[0] if self.latest is not None else 0
+    self.last_snapshot['integrity_epoch'] = self.integrity_epoch
     projection = None
     if sm.seen.get(INTENT_SERVICE, False):
       stamp = int(sm.logMonoTime[INTENT_SERVICE])
@@ -94,26 +122,39 @@ class IntentCompanion:
         projection = (stamp, True, verified[1])
       else:
         self._observe(stamp, sm.valid.get(INTENT_SERVICE, False), sm[INTENT_SERVICE])
+    self.last_snapshot.update(
+      latest_ns=self.latest[0] if self.latest is not None else 0,
+      latest_valid=self.latest[1] if self.latest is not None else False,
+      pair_present=source_ns in self.samples,
+      pair_fresh=self._fresh(self.samples[source_ns], now_ns) if source_ns in self.samples else False,
+      sm_projection=projection is not None, integrity_epoch=self.integrity_epoch)
     for stamp in tuple(self.samples):
       if not 0 < stamp <= now_ns or now_ns - stamp > INTENT_MAX_AGE_NS:
         del self.samples[stamp]
     if not (sm.seen.get(INTENT_SERVICE, False) and sm.valid.get(INTENT_SERVICE, False) and
             sm.alive.get(INTENT_SERVICE, False)):
-      return None
+      return self._reject('sm_unavailable')
     pair = self.samples.get(source_ns)
     sm_sample = projection if projection is not None else self.samples.get(int(sm.logMonoTime[INTENT_SERVICE]))
     if pair is None or self.latest is None or sm_sample is None:
-      return None
+      return self._reject('missing_pair_latest_or_sm')
     fresh_samples = (pair, self.latest) if projection is not None else (pair, self.latest, sm_sample)
-    if not all(self._fresh(sample, now_ns) for sample in fresh_samples):
-      return None
+    for label, sample in zip(('pair', 'latest', 'sm'), fresh_samples, strict=False):
+      if not self._fresh(sample, now_ns):
+        stamp, valid, value = sample
+        reason = ('invalid' if not valid or value is None else
+                  'settings_or_session' if not value.settingsQualified or not value.producerSessionId else
+                  'future' if stamp > now_ns or value.observedMonoTime > now_ns else
+                  'nonpositive_stamp' if stamp <= 0 else
+                  'expired')
+        return self._reject(label + '_' + reason)
     if self.latest[0] < source_ns:
-      return None
+      return self._reject('latest_older_than_source')
     intent = pair[2]
     for sample in (self.latest, sm_sample):
       _, _, latest = sample
       if latest.producerSessionId != intent.producerSessionId:
-        return None
+        return self._reject('producer_session_mismatch')
       intent = replace(intent, allowedLatch=intent.allowedLatch and latest.allowedLatch,
                        pauseLateral=intent.pauseLateral or latest.pauseLateral,
                        pauseLongitudinal=intent.pauseLongitudinal or latest.pauseLongitudinal,

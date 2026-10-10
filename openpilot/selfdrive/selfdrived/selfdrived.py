@@ -5,6 +5,7 @@ import time
 import threading
 import uuid
 from copy import copy
+from collections import deque
 
 import openpilot.cereal.messaging as messaging
 
@@ -102,6 +103,8 @@ class SelfdriveD:
     self.aol_authority_lost = False
     self.aol_transport_pause = TransportPause(self.CP, self.aol_session_id)
     self.aol_fault_reason = 'none'
+    self.aol_authority_reports = deque(maxlen=2)
+    self.aol_last_authority_report_ns = 0
     self.steering_authority_unavailable = False
     self.steering_companion = (SteeringCompanion(messaging.sub_sock('starpilotCarState', conflate=False))
                                if monitored_profile(self.CP) else None)
@@ -396,9 +399,11 @@ class SelfdriveD:
       if show_low_speed:
         self.events.add(EventName.belowSteerSpeed)
       if self.tesla_stock_consumer.binding is not None:
+        intent_companion = getattr(self, 'aol_intent_companion', None)
+        drained = intent_companion is None or intent_companion.drain()
         now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
         companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
-                                   previous=self.aol_last_intent, companion=getattr(self, 'aol_intent_companion', None))
+                                   previous=self.aol_last_intent, companion=intent_companion, drain=False) if drained else None
         session = companion.producerSessionId if companion is not None else None
         self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
 
@@ -911,12 +916,35 @@ class SelfdriveD:
       pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
       lateral_inhibit=self.aol_dm_lateral_inhibit)
 
+  def record_aol_authority_loss(self, *, now_ns, companion, drained, native, source_current,
+                                lost_active, lost_companion, lost_permission, upgraded):
+    if now_ns - getattr(self, 'aol_last_authority_report_ns', 0) < 5_000_000_000:
+      return
+    if not hasattr(self, 'aol_authority_reports'):
+      self.aol_authority_reports = deque(maxlen=2)
+    self.aol_authority_reports.append({
+      'decision_ns': now_ns, 'source_ns': self.aol_car_state_log_ns,
+      'intent_snapshot': dict(companion.last_snapshot) if companion is not None and drained else {},
+      'intent_rejection': companion.last_rejection if companion is not None else 'no_companion',
+      'drain_ok': drained, 'drain_count': companion.last_drain_count if companion is not None else 0,
+      'source_current': source_current, 'source_expired': getattr(self, 'aol_expired_healthy_source', False),
+      'native_present': native is not None, 'native_message_ns': int(getattr(self.sm, 'logMonoTime', {}).get('aolSafetyWire', 0)),
+      'native_requested_lateral': bool(native is not None and native.requestedLateral),
+      'native_allowed_lateral': bool(native is not None and native.lateralAllowed),
+      'lost_active': lost_active, 'lost_companion': lost_companion,
+      'lost_permission': lost_permission, 'pause_upgraded': upgraded,
+    })
+    self.aol_last_authority_report_ns = now_ns
+
   def step(self):
+    previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     CS = self.data_sample()
     self.update_events(CS)
     native = None
     lost_active_aol = bool(self.aol_replay and getattr(self, 'steering_authority_unavailable', False) and
                            (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active))
+    intent_companion = getattr(self, 'aol_intent_companion', None)
+    intent_drained = not self.aol_replay or intent_companion is None or intent_companion.drain()
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
@@ -927,7 +955,7 @@ class SelfdriveD:
       previous_intent = getattr(self, 'aol_last_intent', None)
       intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
                               previous=getattr(self, 'aol_last_intent', None),
-                              companion=getattr(self, 'aol_intent_companion', None))
+                              companion=intent_companion, drain=False) if intent_drained else None
       self.aol_last_intent = intent
       if self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or self.sm['driverMonitoringState'].lockout:
         self.aol_dm_lateral_inhibit = True
@@ -971,6 +999,10 @@ class SelfdriveD:
         self.aol_authority_lost = False
       self.aol_fault_reason = ('critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
                                self.events.contains(ET.SOFT_DISABLE) else 'transportPause' if pause else 'none')
+      if self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
+        self.record_aol_authority_loss(now_ns=now_ns, companion=intent_companion, drained=intent_drained, native=native,
+          source_current=source_current, lost_active=lost_active_aol, lost_companion=lost_companion,
+          lost_permission=lost_permission, upgraded=upgraded)
       if self.aol_authority_lost or pause:
         self.events.add(EventName.controlsMismatch)
         lost_active_aol |= pause
@@ -1015,6 +1047,12 @@ class SelfdriveD:
 
   def params_thread(self, evt):
     while not evt.is_set():
+      reports = getattr(self, 'aol_authority_reports', None)
+      if reports:
+        try:
+          cloudlog.event('selfdrived.authority_lost', **reports.popleft())
+        except IndexError:
+          pass
       self.is_metric = self.params.get_bool("IsMetric")
       if self.aol_replay:
         self.aol_settings = read_settings(self.params)
