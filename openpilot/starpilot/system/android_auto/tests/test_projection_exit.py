@@ -1,5 +1,4 @@
 import uuid
-from types import SimpleNamespace as NS
 
 from openpilot.starpilot.system.android_auto.projection_control import NATIVE_FOCUS, ProjectionControlReceiver, ProjectionControlSender
 from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
@@ -28,20 +27,14 @@ class Graphics:
   def draw_line_ex(cls, *values): cls.lines.append(values)
 
 
-class Fonts:
-  def __init__(self): self.drawn = []
-  def measure(self, text, *_): return NS(width=len(text) * 10)
-  def draw(self, *values): self.drawn.append(values)
-
 
 def test_car_widget_tap_requests_native_focus_and_drag_does_not():
   calls = []
   Graphics.lines = []
-  control = ProjectionExit(Graphics, Fonts(), NS(SEMI_BOLD='bold', NORMAL='normal'), lambda: calls.append(NATIVE_FOCUS))
+  control = ProjectionExit(Graphics, lambda: calls.append(NATIVE_FOCUS))
   placed = default_layout_for_viewport((2880, 1080))['widgets'][CAR_EXIT]
   x, y = placed['x'] + 48, placed['y'] + 48
   control.draw(placed)
-  assert control.fonts.drawn == []
   assert len(Graphics.lines) == 6
   assert control.touch('down', x, y, placed)
   assert control.touch('up', x, y, placed)

@@ -116,7 +116,7 @@ class ProjectionOnroad:
       self._resources.callback(self._close_camera)
       self.onroad = self.create_view(native.onroad, self.fonts, camera_layer=self._camera_layer, viewport=viewport)
       self._resources.callback(self._close_onroad)
-      self.exit = ProjectionExit(native.rl, self.fonts, native.font_role, lambda: self.native_focus())
+      self.exit = ProjectionExit(native.rl, lambda: self.native_focus())
       self.onroad.projection_exit_layer = self.exit.render
       self.monitor = native.monitor(native.profile.LARGE)
       self._monitor_pair = None

@@ -6,10 +6,8 @@ from openpilot.starpilot.system.android_auto.projection_layout import CAR_EXIT, 
 
 
 class ProjectionExit:
-  def __init__(self, rl, fonts, font_role, activate=None):
+  def __init__(self, rl, activate=None):
     self.rl = rl
-    self.fonts = fonts
-    self.font_role = font_role
     self.activate = activate or (lambda: None)
     self._press: tuple[float, float] | None = None
 
