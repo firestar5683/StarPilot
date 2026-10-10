@@ -4,7 +4,7 @@ from types import SimpleNamespace as NS
 from dataclasses import replace
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from openpilot.cereal import messaging
 from openpilot.starpilot.conditional_mode.consumer import ConsumerResult, ModeConsumer
@@ -27,6 +27,7 @@ def proposal() -> ModeObservation:
 class TestEffectiveStatus(unittest.TestCase):
   def test_actual_selfdrived_publish_joins_emitted_state_and_clears_fallback(self):
     from openpilot.selfdrive.selfdrived.alertmanager import AlertManager
+    from openpilot.selfdrive.selfdrived.events import Events
     from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD, State
 
     sent = {}
@@ -34,8 +35,7 @@ class TestEffectiveStatus(unittest.TestCase):
     daemon.enabled = daemon.active = daemon.experimental_mode = True
     daemon.personality = 'standard'
     self.enterContext(patch.object(daemon, "state_machine", NS(state=State.enabled), create=True))
-    daemon.events = Mock(names=[])
-    daemon.events.contains.return_value = False
+    daemon.events = Events()
     daemon.events_prev = []
     daemon.AM = AlertManager()
     daemon.aol_replay = False
