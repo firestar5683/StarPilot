@@ -811,9 +811,14 @@ class MapFeed:
       if now_ns > self._route_valid_until:
         self._route = ()
       route, active = self._route, self._navigation_active
+    acquisition_elapsed = 0.0
+    if not fresh:
+      acquisition_since = self._acquisition.since
+      assert acquisition_since is not None  # update() starts the acquisition clock.
+      acquisition_elapsed = now - acquisition_since
     return MapInput(self._fix, route, active if navigation_requested is None else navigation_requested,
                     None if fresh else self._acquisition.satellites(now),
-                    0 if fresh else now - self._acquisition.since)
+                    acquisition_elapsed)
 
 
 # ---------------------------------------------------------------- parked preview

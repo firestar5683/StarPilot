@@ -271,7 +271,7 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
           return
         async_failures = 0
         producer.publish(request, pixels, in_flight_ns, pixel_format, advance=False)
-        if pipeline_summary is not None:
+        if pipeline_summary is not None and sampler is not None:
           report = pipeline_summary.published(in_flight_ns, submitted_ns, time.monotonic_ns(), in_flight_camera)
           if report is not None:
             sampler.summary = {**(sampler.summary or {}), **report}

@@ -5,7 +5,6 @@ import hashlib
 from contextlib import nullcontext
 from http.cookies import SimpleCookie
 import json
-import os
 import re
 import secrets
 import select
@@ -27,9 +26,8 @@ from openpilot.starpilot.galaxy.device_state import DeviceStateSource
 from openpilot.starpilot.galaxy.recording_library import RecordingLibrary
 from openpilot.starpilot.galaxy.drive_history import DriveHistory, DriveHistoryUnavailable, SegmentInUse, SegmentMissing, recording_details
 from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
-from openpilot.starpilot.galaxy.recording_media import (RecordingMedia, RecordingMediaBusy, RecordingMediaChanged,
-                                                       RecordingMediaMissing, RecordingMediaUnavailable,
-                                                       RecordingMediaNotPrepared, RecordingMediaUnsupported, byte_range)
+from openpilot.starpilot.galaxy.recording_media import RecordingMedia, RecordingMediaUnavailable
+from openpilot.starpilot.galaxy.recording_http import camera_video, send_recording
 from openpilot.starpilot.galaxy.segment_summary import SegmentSummary, SegmentSummaryChanged, SegmentSummaryUnavailable
 from openpilot.starpilot.galaxy.flm_operations import FlmOperations, FlmOperationError, error_status, validate_action as validate_flm_action
 from openpilot.starpilot.galaxy.sentry_events import SentryEvents, SentryEventsUnavailable
@@ -453,79 +451,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
 
   class Handler(_LocalHTTPHandler):
     def camera_video(self, encoded_name: str, *, combined=False):
-      if not self.require_session():
-        return
-      name, separator, camera = unquote(encoded_name).partition('/')
-      camera = camera if separator else "qcamera"
-      if not name or '/' in camera or '?' in name or camera not in {"qcamera", "fcamera", "dcamera", "ecamera"}:
-        self.json(400, {'error': 'Invalid recording identity'})
-        return
-      try:
-        lease = local_media().open_route(name, camera=camera, prepare=self.command != 'HEAD') if combined else \
-          local_media().open(name, prepare=self.command != 'HEAD', **({'camera': camera} if camera != 'qcamera' else {}))
-      except ValueError:
-        if self.require_session():
-          self.json(400, {'error': 'Invalid recording identity'})
-        return
-      except RecordingMediaMissing:
-        if self.require_session():
-          self.json(404, {'error': 'Closed camera recording unavailable'})
-        return
-      except RecordingMediaNotPrepared:
-        if self.require_session():
-          self.json(202, {'status': 'Camera video not prepared; use GET to prepare it'})
-        return
-      except RecordingMediaChanged:
-        if self.require_session():
-          self.json(409, {'error': 'Recording changed; refresh the inventory'})
-        return
-      except RecordingMediaUnsupported:
-        if self.require_session():
-          self.json(415, {'error': 'Camera recording format is unsupported'})
-        return
-      except (RecordingMediaBusy, RecordingMediaUnavailable, OSError):
-        if self.require_session():
-          self.json(503, {'error': 'Camera video unavailable'})
-        return
-      self.send_recording(lease)
+      camera_video(self, encoded_name, media=local_media, combined=combined)
 
     def send_recording(self, lease, content_type='video/mp4'):
-      try:
-        if not self.require_session():
-          return
-        if not lease.source.current():
-          self.json(409, {'error': 'Recording changed; refresh the inventory'})
-          return
-        selected = byte_range(self.headers.get('Range'), lease.size)
-        if selected is None:
-          self.send_response(416)
-          self.send_header('Content-Range', f'bytes */{lease.size}')
-          self.send_header('Content-Length', '0')
-          self.send_header('Cache-Control', 'no-store')
-          self.end_headers()
-          return
-        start, end = selected
-        self.send_response(206 if self.headers.get('Range') is not None else 200)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(end - start + 1))
-        self.send_header('Accept-Ranges', 'bytes')
-        if self.headers.get('Range') is not None:
-          self.send_header('Content-Range', f'bytes {start}-{end}/{lease.size}')
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Referrer-Policy', 'no-referrer')
-        self.end_headers()
-        if self.command == 'HEAD':
-          return
-        cursor = start
-        while cursor <= end and self.authenticated() and lease.source.current():
-          chunk = os.pread(lease.video_fd, min(64 * 1024, end - cursor + 1), cursor)
-          if not chunk:
-            break
-          self.wfile.write(chunk)
-          cursor += len(chunk)
-      finally:
-        lease.close()
+      send_recording(self, lease, content_type)
 
     def local_request(self, *, mutation=False):
       host = self.headers.get('Host', '')

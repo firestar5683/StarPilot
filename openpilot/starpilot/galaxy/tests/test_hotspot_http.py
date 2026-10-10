@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.hotspot import HotspotSettings
@@ -86,7 +86,7 @@ class TestHotspotHttp(unittest.TestCase):
     def revoked(payload, permitted):
       self.parked = False
       return original(payload, permitted)
-    self.settings.save = revoked
-    payload['config']['enabled'] = True
-    self.assertEqual(self.request(payload=payload, cookie=cookie)[0], 409)
-    self.assertFalse(self.settings.path.exists())
+    with patch.object(self.settings, 'save', side_effect=revoked):
+      payload['config']['enabled'] = True
+      self.assertEqual(self.request(payload=payload, cookie=cookie)[0], 409)
+      self.assertFalse(self.settings.path.exists())

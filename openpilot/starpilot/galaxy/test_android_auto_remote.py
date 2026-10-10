@@ -7,7 +7,7 @@ import threading
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup
-from openpilot.starpilot.galaxy.remote import RemotePairing
+from openpilot.starpilot.galaxy.remote import RemotePairing, gateway_cookie_valid
 from openpilot.starpilot.galaxy.server import make_remote_server, make_server
 from openpilot.starpilot.galaxy.test_android_auto_http import FakeImport
 from openpilot.starpilot.system.android_auto.source_verifier import GalaxySourceVerifier
@@ -24,8 +24,11 @@ def test_remote_binary_upload_and_pairing_use_existing_gateway_session(tmp_path)
   cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session']}).encode()).decode().rstrip('=')
   state = {'parked': True}
   job = FakeImport(tmp_path / 'imports')
+  def session_valid(identity: tuple) -> bool:
+    current = pairing.read()
+    return bool(identity) and current is not None and gateway_cookie_valid(identity[0], current)
   setup = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: True,
-    session_valid=lambda _identity: True, import_job=Mock(wraps=job, work_dir=job.work_dir), identity_status=lambda: {'installed': True},
+    session_valid=session_valid, import_job=Mock(wraps=job, work_dir=job.work_dir), identity_status=lambda: {'installed': True},
     bluetooth_enabled=lambda: True, install_ready=lambda: True, service_ready=lambda: True)
   class Client:
     source = None
@@ -67,13 +70,18 @@ def test_remote_binary_upload_and_pairing_use_existing_gateway_session(tmp_path)
     # Pairing material is daemon-only even through the authenticated remote listener.
     assert request('/api/android-auto/source/' + client.source)[0] == 403
     state['parked'] = False
-    assert request('/api/android-auto/upload', b'retry')[0] == 409
-    assert job.calls[0][1]() is False
+    # Package admission is session-only in either road state; pairing remains parked-only.
+    assert job.calls[0][1]() is True
+    assert request('/api/android-auto/pairing', b'{}', content_type='application/json')[0] == 403
+    assert request('/api/android-auto/upload', b'retry')[0] == 202
+    assert len(job.calls) == 2 and job.calls[1][0] == b'retry'
+    assert job.calls[1][1]() is True
     state['parked'] = True
     pairing.unpair()
     assert not verifier.valid(client.source)
     assert request('/api/android-auto/upload', b'retry')[0] in (401, 403)
-    assert len(job.calls) == 1
+    assert len(job.calls) == 2
+    assert all(admission() is False for _, admission in job.calls)
   finally:
     for server, worker in zip((remote, local), reversed(threads), strict=True):
       server.shutdown()

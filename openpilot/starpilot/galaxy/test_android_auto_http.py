@@ -1,3 +1,4 @@
+from typing import NotRequired, TypedDict
 from unittest.mock import Mock
 import http.client
 import json
@@ -10,6 +11,16 @@ from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.system.android_auto.source_verifier import GalaxySourceVerifier
 from openpilot.starpilot.bluetooth.owner import BluetoothUnavailable
+
+
+class ApiState(TypedDict):
+  parked: bool
+  identity_installed: bool
+  bluetooth_enabled: bool
+  enabled: bool
+  install_ready: bool
+  enable_events: list[str]
+  bluetooth_failure: NotRequired[str]
 
 
 class FakeImport:
@@ -28,8 +39,8 @@ class FakeImport:
 def api(tmp_path):
   access = GalaxyAccessOwner(tmp_path / 'access')
   assert access.configure('password123', lambda: True)
-  state = {'parked': True, 'identity_installed': True, 'bluetooth_enabled': True, 'enabled': True, 'install_ready': True}
-  state['enable_events'] = []
+  state: ApiState = {'parked': True, 'identity_installed': True, 'bluetooth_enabled': True, 'enabled': True,
+                     'install_ready': True, 'enable_events': []}
   def set_enabled(value):
     state['enable_events'].append('android_auto')
     state['enabled'] = value

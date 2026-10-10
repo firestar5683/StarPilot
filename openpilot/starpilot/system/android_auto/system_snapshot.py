@@ -106,7 +106,11 @@ def collect(since: float, deadline: float = DEADLINE_SECONDS, *, run: Callable |
   files: dict[str, bytes] = {}
   buffers = {name: bytearray() for name in running}
   received = dict.fromkeys(running, 0)
-  pending = {process.stdout: name for name, process in running.items()}
+  pending = {}
+  for name, process in running.items():
+    pipe = process.stdout
+    assert pipe is not None  # Every command was spawned with stdout=PIPE.
+    pending[pipe] = name
   expires = started + deadline
   try:
     while pending and time.monotonic() < expires:

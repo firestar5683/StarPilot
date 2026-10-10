@@ -50,8 +50,11 @@ def main():
             raise RuntimeError('Worker exited')
           child.stdin.write(json.dumps(config).encode() + b'\n')
           child.stdin.flush()
-          if select.select([child.stdout], [], [], 1)[0]:
-            data = os.read(child.stdout.fileno(), 4097)
+          stdout = child.stdout
+          if stdout is None:
+            raise RuntimeError('Worker output pipe unavailable')
+          if select.select([stdout], [], [], 1)[0]:
+            data = os.read(stdout.fileno(), 4097)
             if not data:
               raise RuntimeError('Worker disconnected')
             buffer += data

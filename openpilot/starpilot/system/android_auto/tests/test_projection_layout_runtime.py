@@ -33,8 +33,8 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
           self.assertIs(view.camera.large_ui_gamma_trial, enabled)
           # Pacing follows the stream selected during rendering, not before it.
           view.camera.stream_type = 0
-          def render(*args, **kwargs):
-            view.camera.stream_type = 2
+          def render(*args, camera=view.camera, **kwargs):
+            camera.stream_type = 2
           view.camera.render_camera_model_layer = render
           view._camera_layer(None, SimpleNamespace(customization=default_document()))
           self.assertEqual(view.camera_stream, 2)

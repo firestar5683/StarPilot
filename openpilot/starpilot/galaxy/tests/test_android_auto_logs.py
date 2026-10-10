@@ -13,6 +13,7 @@ import zipfile
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.android_auto_logs import AndroidAutoLogs, LogMissing
 from openpilot.starpilot.galaxy.server import make_server
+from openpilot.starpilot.system.android_auto import system_snapshot
 
 SESSION = "\n".join(json.dumps(event) for event in (
   {"t": "2026-10-05T16:45:51.000+00:00", "event": "session_start", "receiver": "Honda CIVIC", "trigger": "auto"},
@@ -97,7 +98,9 @@ class AndroidAutoLogsHTTPTest(unittest.TestCase):
     self.server.server_close()
 
   def request(self, path, *, method="GET", body=None, headers=None):
-    connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
+    # Bundles include the real bounded system report; allow cleanup and ZIP/HTTP delivery.
+    timeout = system_snapshot.DEADLINE_SECONDS + 3 if path == "/api/android-auto/logs/bundle" else 2
+    connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=timeout)
     try:
       connection.request(method, path, body=body, headers={"Forwarded": "for=203.0.113.8", **(headers or {})})
       response = connection.getresponse()

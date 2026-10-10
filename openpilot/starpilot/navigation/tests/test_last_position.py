@@ -207,6 +207,6 @@ def test_online_route_from_saved_location_needs_no_offline_map_downloads(tmp_pat
   assert preview['route'] == [{'longitude': -88., 'latitude': 42.}, {'longitude': -87.99, 'latitude': 42.}]
   assert preview['status'] == 'waitingForLocation' and not preview['controlValid']
   assert preview['locationMonoTime'] == 0 and preview['instruction'] == {}
-  owner.runtime_source.snapshot = lambda: dict(preview, instruction=None)
+  source.snapshot = lambda: dict(preview, instruction=None)
   snapshot = owner.snapshot()
   assert snapshot['network'] == 'online' and snapshot['location']['lastKnown'] and snapshot['route']
