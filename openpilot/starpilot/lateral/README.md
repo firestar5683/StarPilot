@@ -53,8 +53,11 @@ is required; cruise control and Always On Lateral preferences do not enable it.
 DesireHelper owns the transition, blindspot check and signal latch. Auto uses
 same-frame model evidence, current calibration, fresh carState/carControl,
 engaged lateral control and a recognized vehicle. Camera EOF age uses
-CLOCK_BOOTTIME; message and calibration timestamps use CLOCK_MONOTONIC. The
-adjacent-lane confidence thresholds remain experimental.
+CLOCK_BOOTTIME; message and calibration timestamps use CLOCK_MONOTONIC.
+
+Adjacent width is the median distance between the inner and outer lane lines.
+A nearer road edge returns zero width. A saved minimum of zero skips the width
+requirement. Malformed geometry is rejected.
 
 The typed status in Event Data @126 supplies pre-change alert wording only when
 its model frame, camera EOF, direction and lifetime match. Missing or stale
