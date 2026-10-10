@@ -2,6 +2,7 @@
 
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/ford_aol.h"
+#include "opendbc/bluepilot_lateral/safety/ford_bp.h"
 
 // StarPilot's extended Ford curvature enforcement below is substantially adapted from
 // BluePilot bp-7.0 panda work, principally Alan Polk's 8f8d6d15f0a590f42b78de964ffb0d0af7f5d63d
@@ -115,7 +116,6 @@ static const CurvatureSteeringLimits FORD_LKA_STEERING_LIMITS = {
   .max_steer_power = 0,
 };
 
-static bool ford_stock_switch = false;
 static bool ford_cancel_resume_button = false;
 
 static bool ford_generic_canfd_extended = false;
@@ -148,8 +148,6 @@ static bool ford_lka_curvature_checks(int desired_curvature, bool active) {
   curvature_state = previous;
   return violation;
 }
-
-#include "opendbc/bluepilot_lateral/safety/ford_bp.h"
 
 static void ford_rx_hook(const CANPacket_t *msg) {
   ford_aol_rx(msg);

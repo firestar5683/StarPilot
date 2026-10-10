@@ -4,6 +4,8 @@
 #include "opendbc/bluepilot_lateral/params/protocol.h"
 #include "opendbc/bluepilot_lateral/params/limits.h"
 
+// Shared Ford stock-switch state is declared before the angle hooks below.
+static bool ford_stock_switch = false;
 static bool ford_bp_enabled = false;
 static bool ford_bp_canfd = false;
 static bool ford_bp_shadow_seen = false;
@@ -90,7 +92,7 @@ static bool ford_bp_health(uint32_t now) {
   }
   const unsigned int count = ford_stock_switch ? 7U : 6U;
   for (unsigned int i = 0U; i < count; i++) {
-    const uint32_t age = (i == 3U || i == 6U) ? (2U * FORD_BP_RX_AGE_US) : FORD_BP_RX_AGE_US;
+    const uint32_t age = ((i == 3U) || (i == 6U)) ? (2U * FORD_BP_RX_AGE_US) : FORD_BP_RX_AGE_US;
     valid &= ford_bp_rx_seen[i] && (safety_get_ts_elapsed(now, ford_bp_rx_us[i]) <= age);
   }
   return valid;
@@ -118,7 +120,7 @@ static bool ford_bp_lka(const CANPacket_t *msg) {
   }
   valid &= SAFETY_ABS(shadow) <= 20000;
   if (valid) {
-    ford_bp_lka_counter = counter;
+    ford_bp_lka_counter = (uint8_t)counter;
     ford_bp_lka_counter_seen = true;
     ford_bp_shadow_raw = shadow;
     ford_bp_shadow_seen = !resync;
@@ -160,7 +162,7 @@ static bool ford_bp_lateral(const CANPacket_t *msg) {
     valid &= ((msg->data[6] & 0xFU) == 0U) && (msg->data[7] == 0U);
   }
   const float speed_for_equivalent = SAFETY_MAX(vehicle_speed.min / VEHICLE_SPEED_FACTOR, 0.1F);
-  const float equivalent = path / (2000.0F * speed_for_equivalent);
+  const float equivalent = (float)path / (2000.0F * speed_for_equivalent);
   // Time-window expiration is independent of packet acceptance: denied floods
   // cannot latch the old count forever or erase accepted actuator history.
   const uint32_t rt_elapsed = safety_get_ts_elapsed(now, ford_bp_rt_us);
@@ -172,6 +174,8 @@ static bool ford_bp_lateral(const CANPacket_t *msg) {
     ford_bp_rt_msgs_prev = ford_bp_rt_msgs;
     ford_bp_rt_msgs = 0U;
     ford_bp_rt_us = now;
+  } else {
+    // Keep the current history while neither expiration boundary has elapsed.
   }
   const unsigned int rt_count = ford_bp_rt_msgs + ford_bp_rt_msgs_prev;
   valid &= rt_count <= 7U;  // Current20Hz curvature RT allowance; accepted frames own this count.
@@ -179,8 +183,9 @@ static bool ford_bp_lateral(const CANPacket_t *msg) {
     static const struct lookup_t roc = {{10.0F, 15.0F, 25.0F}, {0.0561F, 0.04335F, 0.00918F}};
     const float speed_min = SAFETY_MAX(vehicle_speed.min / VEHICLE_SPEED_FACTOR, 0.1F);
     const float speed_max = SAFETY_MAX(vehicle_speed.max / VEHICLE_SPEED_FACTOR, 0.1F);
-    const int delta = (int)(safety_interpolate(roc, speed_min - 1.0F) * 2000.0F) + 1;
-    const float shadow = ford_bp_shadow_raw * 0.000001F;
+    const float delta_float = safety_interpolate(roc, speed_min - 1.0F) * 2000.0F;
+    const int delta = (int)delta_float + 1;
+    const float shadow = (float)ford_bp_shadow_raw * 0.000001F;
     const float shadow_can = shadow * 50000.0F;
     const float path_abs = SAFETY_ABS(path) / 2000.0F;
     const float path_curvature_low = path_abs / (speed_max * FORD_BP_GAIN_MAX);
@@ -195,12 +200,16 @@ static bool ford_bp_lateral(const CANPacket_t *msg) {
              (SAFETY_ABS(path) >= (relation_low - 2.0F)) && (SAFETY_ABS(path) <= (relation_high + 2.0F)) &&
              (SAFETY_ABS(shadow) <= (physical_cap + FORD_BP_SHADOW_ROUNDING_MARGIN)) && (path_curvature_high <= (physical_cap + FORD_BP_SHADOW_ROUNDING_MARGIN));
     if (speed_max > 10.0F) {
-      valid &= (shadow_can >= (curvature_state.meas.min - 100)) && (shadow_can <= (curvature_state.meas.max + 100));
+      const int measured_min = curvature_state.meas.min - 100;
+      const int measured_max = curvature_state.meas.max + 100;
+      const float measured_min_float = (float)measured_min;
+      const float measured_max_float = (float)measured_max;
+      valid &= (shadow_can >= measured_min_float) && (shadow_can <= measured_max_float);
       // Independent actual-actuator check; an invented shadow cannot launder path angle.
-      const float signed_low = path < 0 ? -path_curvature_high : path_curvature_low;
-      const float signed_high = path < 0 ? -path_curvature_low : path_curvature_high;
-      valid &= (signed_low * 50000.0F >= (curvature_state.meas.min - 100)) &&
-               (signed_high * 50000.0F <= (curvature_state.meas.max + 100));
+      const float signed_low = (path < 0) ? (-path_curvature_high) : path_curvature_low;
+      const float signed_high = (path < 0) ? (-path_curvature_low) : path_curvature_high;
+      valid &= ((signed_low * 50000.0F) >= measured_min_float) &&
+               ((signed_high * 50000.0F) <= measured_max_float);
     }
     const uint32_t elapsed = ford_bp_control_seen ? safety_get_ts_elapsed(now, ford_bp_control_us) : FORD_BP_STEER_PERIOD_US;
     const float jerk_speed = SAFETY_MAX(speed_min - 1.0F, 1.0F);
@@ -215,7 +224,7 @@ static bool ford_bp_lateral(const CANPacket_t *msg) {
     ford_bp_rt_msgs += 1U;
     ford_bp_equivalent_last = active ? equivalent : 0.0F;
     ford_bp_path_last = active ? path : 0;
-    ford_bp_control_counter = counter;
+    ford_bp_control_counter = (uint8_t)counter;
     ford_bp_control_counter_seen = true;
     ford_bp_control_seen = true;
     ford_bp_control_us = now;

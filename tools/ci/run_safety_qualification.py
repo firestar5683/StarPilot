@@ -22,6 +22,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 SAFETY_TESTS = ROOT / "opendbc_repo/opendbc/safety/tests"
+SAFETY_SOURCE_ROOTS = (SAFETY_TESTS.parent, ROOT / "opendbc_repo/opendbc/bluepilot_lateral/safety")
 MAX_MUTATION_ARTIFACT_BYTES = 256 * 1024 * 1024
 SOURCE_PREFIXES = (
   "opendbc_repo/", "panda/", "openpilot/", "msgq_repo/", "rednose_repo/",
@@ -185,10 +186,10 @@ def complete_mutation_artifact(path, summary, *, digest_out=None):
         any(type(item) is not list or not item or any(type(target) is not str or not target for target in item)
             for item in target_sets)):
       return False
-    safety_root = (ROOT / "opendbc_repo/opendbc/safety").resolve()
+    safety_roots = tuple(source_root.resolve() for source_root in SAFETY_SOURCE_ROOTS)
     for source, claimed_hash in sources.items():
       source_path = (ROOT / "opendbc_repo" / source).resolve()
-      if not source_path.is_relative_to(safety_root) or not source_path.is_file() or \
+      if not any(source_path.is_relative_to(source_root) for source_root in safety_roots) or not source_path.is_file() or \
          hashlib.sha256(source_path.read_bytes()).hexdigest() != claimed_hash:
         return False
     ids = [item["site_id"] for item in results]
@@ -445,6 +446,7 @@ class Gate:
 from opendbc.safety.tests.libsafety import libsafety_py
 libsafety_py.load(sys.argv[1])
 suite = unittest.TestLoader().discover('.', pattern='test_*.py')
+suite.addTests(unittest.TestLoader().loadTestsFromName('opendbc.bluepilot_lateral.tests.test_angle_native'))
 """ + UNITTEST_ACCOUNTING
       code, text = self.run("unittest", [self.python, "-c", suite_script, str(native)], cwd=SAFETY_TESTS)
       summary = parse_unittest_summary(text)
@@ -456,8 +458,11 @@ suite = unittest.TestLoader().discover('.', pattern='test_*.py')
         gcov_tool = llvm_cov.strip() + " gcov"
       else:
         gcov_tool = "gcov"
-      gcovr, _ = self.run("coverage", ["gcovr", "-r", str(SAFETY_TESTS.parent), "--gcov-executable", gcov_tool,
-                                         "-d", "--fail-under-line=100", "-e", "^libsafety"], cwd=SAFETY_TESTS)
+      coverage_argv = ["gcovr", "-r", str(SAFETY_TESTS.parent), "--gcov-executable", gcov_tool,
+                       "-d", "--fail-under-line=100", "-e", "^libsafety"]
+      for source_root in SAFETY_SOURCE_ROOTS:
+        coverage_argv += ["--filter", re.escape(source_root.resolve().as_posix() + "/")]
+      gcovr, _ = self.run("coverage", coverage_argv, cwd=SAFETY_TESTS)
       return code == 0 and complete_unittest(summary) and gcovr == 0
     if self.name in ("opendbc-misra", "panda-misra"):
       if self.name == "panda-misra":

@@ -24,6 +24,8 @@ import tree_sitter as ts
 
 ROOT = Path(__file__).resolve().parents[3]
 SAFETY_DIR = ROOT / "opendbc" / "safety"
+BLUEPILOT_SAFETY_DIR = ROOT / "opendbc" / "bluepilot_lateral" / "safety"
+SAFETY_SOURCE_DIRS = (SAFETY_DIR, BLUEPILOT_SAFETY_DIR)
 SAFETY_TESTS_DIR = ROOT / "opendbc" / "safety" / "tests"
 SAFETY_C_REL = Path("opendbc/safety/tests/libsafety/safety.c")
 
@@ -274,7 +276,7 @@ def enumerate_sites(input_source, preprocessed_file):
     if mapped is None:
       continue
     origin_file, origin_line = mapped
-    if SAFETY_DIR not in origin_file.parents and origin_file != SAFETY_DIR:
+    if not any(origin_file.is_relative_to(source_dir) for source_dir in SAFETY_SOURCE_DIRS):
       continue
     site_id = len(out)
     site = MutationSite(
@@ -460,11 +462,12 @@ def build_priority_tests(site, catalog, core_tests):
   """
   src = site.origin_file
   rel_parts = src.relative_to(ROOT).parts
-  is_mode = len(rel_parts) >= 4 and rel_parts[:3] == ("opendbc", "safety", "modes")
+  is_mode = (len(rel_parts) >= 4 and rel_parts[:3] == ("opendbc", "safety", "modes")) or src.parent == BLUEPILOT_SAFETY_DIR
 
   if is_mode:
     family = src.stem.split("_", 1)[0]
-    family_modules = [name for name in sorted(catalog) if name == f"test_{family}.py" or name.startswith(f"test_{family}_")]
+    family_modules = [name for name in sorted(catalog) if name == f"test_{family}.py" or name.startswith(f"test_{family}_") or
+                      (family == "ford" and name == "test_angle_native.py")]
     if family_modules:
       return [test_id for name in family_modules for test_id in catalog[name]]
     # Unmapped mode files still exercise the full safety suite rather than receive zero targets.
@@ -526,7 +529,9 @@ def print_live_status(text, *, final=False):
 def _discover_test_catalog():
   loader = unittest.TestLoader()
   catalog = {}
-  for test_file in sorted(SAFETY_TESTS_DIR.glob("test_*.py")):
+  test_files = [*sorted(SAFETY_TESTS_DIR.glob("test_*.py")),
+                ROOT / "opendbc" / "bluepilot_lateral" / "tests" / "test_angle_native.py"]
+  for test_file in test_files:
     module_name = ".".join(test_file.relative_to(ROOT).with_suffix("").parts)
     suite = loader.loadTestsFromName(module_name)
     catalog[test_file.name] = [t.id() for group in suite for t in group]
