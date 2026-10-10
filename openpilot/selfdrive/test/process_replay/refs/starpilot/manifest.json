@@ -27,8 +27,8 @@
       "segment": "regenAFB9780D823|2025-04-08--23-00-34--0",
       "process": "card",
       "file": "regenAFB9780D823_2025-04-08--23-00-34--0_card.zst",
-      "bytes": 281299,
-      "sha256": "d390722e3e5d8bc77571c89f5859d0cf023f8889686756b44a4b4bbdb6764b46",
+      "bytes": 281385,
+      "sha256": "7b5959f415943ba3bcf977734f0a55385173206ce6c295fe0243658f9f17d84a",
       "input_sha256": "4cc51a77bf8d128d5720fd692e5a0994c887ee35fdd949cc0ce54d4215e2b7a2",
       "input_bytes": 12527194,
       "official_baseline_commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912",
@@ -38,8 +38,8 @@
       "official_baseline_sha256": "e3ac4fc1ce239d1bb864e32d1acf6b33ad134a1bf898ef739a0cc3faf3b18d58",
       "config_sha256": "560c1060f4d2e43810e7bbd55d5f361a828bdb027d60f308b2e1d614222a2078",
       "car_fingerprint": "KIA_EV6",
-      "contract": "CAN-FD torque cap 409 with speed-dependent slew limits; torque, normalized torque output and dependent LKAS checksum reflect that contract. Counters, enables and remaining compared fields are unchanged.",
-      "producing_source_snapshot": "9d4655882372ad61177626eedce71125800bc809"
+      "contract": "CAN-FD torque cap 409 with speed-dependent slew limits; torque, normalized torque output and dependent LKAS checksum reflect that contract. Counters, enables and remaining compared fields are unchanged. Initial CarState consumes the first recorded CAN batch; its speed-filter seed and subsequent acceleration transient follow that batch.",
+      "producing_source_snapshot": "fff1f5baa746c1c7978c2308d9cd9efa8c3cb660+source-sha256:0048bb8b3899a47a59e79e728f8426244949583ae53e27bbdb3363c33199e7ca"
     },
     {
       "segment": "regen1455E3B4BDF|2025-04-09--03-26-06--0",
