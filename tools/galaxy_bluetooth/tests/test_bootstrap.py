@@ -60,6 +60,29 @@ class BootstrapTests(unittest.TestCase):
     self.params.put_bool.assert_not_called()
     self.params.clear_all.assert_not_called()
 
+  def test_discovery_start_failure_does_not_block_bluetooth(self):
+    self.installed()
+    def run(args, **kwargs):
+      if boot.LAN_UNIT in args:
+        raise subprocess.CalledProcessError(1, args)
+      return SimpleNamespace(stdout='123\n')
+    self.run.side_effect = run
+    boot.write_json(self.data / 'bridge-ready.json', {'pid': 123})
+    self.worker.step()
+    self.assertEqual(boot.setup_status(self.data), 'Ready to pair')
+    self.assertTrue(any(call.args[0] == ['sudo', '-n', 'systemctl', 'start', boot.UNIT]
+                        for call in self.run.call_args_list))
+    self.assertEqual(self.key.read_text(), 'existing private key')
+
+  def test_discovery_unit_is_linked_once_and_started_independently(self):
+    self.installed()
+    self.worker.step()
+    self.worker.step()
+    calls = [call.args[0] for call in self.run.call_args_list]
+    links = [args for args in calls if 'link' in args and args[-1].endswith(boot.LAN_UNIT)]
+    self.assertEqual(len(links), 1)
+    self.assertEqual(calls.count(['sudo', '-n', 'systemctl', 'start', boot.LAN_UNIT]), 2)
+
   def test_dependency_change_waits_until_parked(self):
     self.installed()
     (self.bridge / 'requirements.txt').write_text('new version')
@@ -115,3 +138,4 @@ class BootstrapTests(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+

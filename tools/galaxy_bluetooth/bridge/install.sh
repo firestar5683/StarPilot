@@ -34,7 +34,7 @@ else
   printf 'No packages were installed into StarPilot or the system Python.\n' >&2
   exit 1
 fi
-"$data_dir/venv/bin/python" -c 'import dbus_next; from Crypto.Cipher import AES'
+"$data_dir/venv/bin/python" -c 'import dbus_next; import zeroconf; from Crypto.Cipher import AES'
 "$data_dir/venv/bin/python" - "$bridge_dir" "$data_dir/pairing.json" <<'KEY'
 import sys
 from pathlib import Path
@@ -45,3 +45,4 @@ KEY
 if [ "${GALAXY_BLE_QUIET:-0}" != "1" ]; then
   printf '\nBridge installed. Pair this phone from Settings → Bluetooth → Pair phone.\n'
 fi
+

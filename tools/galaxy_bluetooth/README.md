@@ -35,3 +35,26 @@ installed while parked. Bluetooth settings show setup status and Retry setup.
 `settings_backup.py` saves one private parameter/cache snapshot before existing
 launch migrations. Setup never resets StarPilot parameters or pairing keys.
 Do not share the backup; it contains credentials. See INSTALL-ON-COMMA.md.
+
+
+## Find comma on Wi-Fi
+
+The iPhone app's **Settings → Find comma on Wi-Fi** searches for up to 12 seconds
+without needing a Bluetooth connection. Allow the app's Local Network permission,
+put iPhone and comma on the same Wi-Fi or hotspot, then select the named result.
+The app verifies Galaxy's response and any previously paired device identity before
+using the discovered address. Discovery does not create or replace pairing credentials.
+Manual IP entry and Bluetooth discovery remain available.
+
+This requires the `galaxy-lan-discovery.service` included in this branch. On the
+first update, park and give comma internet access so its bootstrap can install the
+additional dependency in `/data/galaxy-ble/venv`. Existing settings and pairing keys
+are preserved. The discovery service starts independently of Bluetooth and publishes
+`_starpilot-galaxy._tcp.local.` on port 8082 only on private IPv4 Wi-Fi/Ethernet
+interfaces while Galaxy is listening. TXT records contain a protocol version, never
+pairing keys or Galaxy session tokens. It checks interface changes every 30 seconds;
+there is no subnet scan, camera capture, or extra telemetry polling.
+
+Some hotspots and guest networks block multicast discovery or communication between
+clients. If no result appears, enter comma's local IP manually. For troubleshooting,
+inspect `journalctl -u galaxy-lan-discovery.service --no-pager -n 50` on comma.
