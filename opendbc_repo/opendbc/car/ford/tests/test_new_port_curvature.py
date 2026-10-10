@@ -133,10 +133,12 @@ class TestNewPortCurvature(unittest.TestCase):
               with patch("openpilot.starpilot.controller_extensions.time.monotonic_ns", return_value=now), \
                    patch("openpilot.selfdrive.car.card.time.monotonic", return_value=now / 1e9), \
                    patch.object(inputs.sm, "update", return_value=None):
-                lane.feed(controls, now, tick, speed=15.)
+                feed_events = []
+                with patch.object(controls.sm, "update_msgs", side_effect=lambda _, events, collector=feed_events: collector.extend(events)):
+                  lane.feed(controls, now, tick, speed=15.)
                 car_state = messaging.new_message("carState", valid=True, logMonoTime=now)
                 car_state.carState = state
-                controls.sm.update_msgs(now / 1e9, [car_state.as_reader()])
+
                 preview = messaging.new_message("modelV2", valid=True, logMonoTime=now)
                 preview.modelV2 = lane.model()
                 preview.modelV2.action.desiredCurvature = direction * .0002
@@ -144,7 +146,9 @@ class TestNewPortCurvature(unittest.TestCase):
                 preview.modelV2.orientationRate.z = [direction * predicted * 15.] * 33
                 delay = messaging.new_message("lateralDelay", valid=True, logMonoTime=now)
                 delay.lateralDelay.lateralDelay = .38
-                controls.sm.update_msgs(now / 1e9, [preview.as_reader(), delay.as_reader()])
+                replacements = {"carState": car_state.as_reader(), "modelV2": preview.as_reader(), "lateralDelay": delay.as_reader()}
+                controls.sm.update_msgs(now / 1e9, [event for event in feed_events
+                                                  if event.which() not in replacements] + list(replacements.values()))
                 if tick < 490:
                   inputs.sm.update_msgs(now / 1e9, [preview.as_reader(), delay.as_reader()])
                 command, _ = controls.state_control()
