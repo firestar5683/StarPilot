@@ -151,11 +151,19 @@ class TestNewPortCurvature(unittest.TestCase):
                                                   if event.which() not in replacements] + list(replacements.values()))
                 if tick < 490:
                   inputs.sm.update_msgs(now / 1e9, [preview.as_reader(), delay.as_reader()])
-                command, _ = controls.state_control()
+                command, controller_log = controls.state_control()
                 self.assertTrue(command.enabled)
-                control_event = messaging.new_message("carControl", valid=True, logMonoTime=now)
-                control_event.carControl = command
-                host.sm.update_msgs(now / 1e9, [control_event.as_reader()])
+                control_events = []
+                def capture_control(service, event, collector=control_events):
+                  if service == "carControl":
+                    collector.append(messaging.log_from_bytes(event.to_bytes()))
+                with patch.object(controls.pm, "send", side_effect=capture_control):
+                  controls.publish(command, controller_log)
+                self.assertEqual(len(control_events), 1)
+                self.assertEqual(control_events[0].carControl.to_dict(), command.to_dict())
+                self.assertEqual(control_events[0].valid, state.canValid)
+                host.sm.update_msgs(now / 1e9, control_events)
+                command = host.sm["carControl"]
                 host.can_log_mono_time = now
                 sent.clear()
                 host.controls_update(state, command)
