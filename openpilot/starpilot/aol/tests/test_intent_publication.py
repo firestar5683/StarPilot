@@ -451,3 +451,111 @@ def test_older_sm_pair_still_rejects_unknown_corrupt_restart_and_expired_samples
       carStateLogMonoTime=at, observedMonoTime=at, validUntilMonoTime=at + 200_000_000))
   with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
     assert current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=now, companion=companion) is None
+
+
+def _verified_stale_sm_projection(*, restrictions=None, verified=True, latest_changes=None):
+  from dataclasses import replace
+  from openpilot.starpilot.aol.intent_companion import IntentCompanion
+
+  c, a, b, before, now = 341_047_855_007, 341_055_154_287, 341_083_039_471, 341_059_508_728, 341_084_947_345
+  original = IntentState('card', 1, c, c, c + 200_000_000, True, False, False, True, True, True)
+  projection = replace(original, **(restrictions or {}))
+  pair = replace(original, sequence=2, carStateLogMonoTime=a, observedMonoTime=a, validUntilMonoTime=a + 200_000_000)
+  latest = replace(original, sequence=3, carStateLogMonoTime=b, observedMonoTime=b, validUntilMonoTime=b + 200_000_000)
+  latest = replace(latest, **(latest_changes or {}))
+  companion = IntentCompanion(object())
+  for intent in (projection, pair):
+    companion._observe(intent.carStateLogMonoTime, True, encode_intent(intent))
+  class SM(dict):
+    pass
+  sm = SM(aolIntentWire=encode_intent(projection))
+  sm.seen, sm.valid, sm.alive = ({'aolIntentWire': True} for _ in range(3))
+  sm.logMonoTime = {'aolIntentWire': c}
+  if verified:
+    with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+      assert current_intent(sm, car_state_ns=a, now_ns=before, companion=companion) is not None
+  companion._observe(b, True, encode_intent(latest))
+  return companion, sm, projection, pair, latest, now
+
+
+@pytest.mark.parametrize('restrictions', [{}, {'allowedLatch': False}, {'pauseLateral': True},
+                                        {'pauseLongitudinal': True}, {'lateralArmed': False}, {'optionalSetRelease': False}])
+def test_verified_stale_sm_identity_only_folds_restrictions_without_renewing_raw_lease(restrictions):
+  companion, sm, projection, pair, latest, now = _verified_stale_sm_projection(restrictions=restrictions)
+  epoch, verified = companion.integrity_epoch, companion.verified_sm_projection
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+    for at in (now, now + 1, pair.carStateLogMonoTime + 30_000_000):
+      result = current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=at, companion=companion)
+      assert result is not None
+      assert result.carStateLogMonoTime == result.observedMonoTime == pair.carStateLogMonoTime
+      assert result.validUntilMonoTime == pair.validUntilMonoTime
+      assert result.allowedLatch == (pair.allowedLatch and latest.allowedLatch and projection.allowedLatch)
+      assert result.lateralArmed == (pair.lateralArmed and latest.lateralArmed and projection.lateralArmed)
+      assert result.pauseLateral == (pair.pauseLateral or latest.pauseLateral or projection.pauseLateral)
+      assert result.pauseLongitudinal == (pair.pauseLongitudinal or latest.pauseLongitudinal or projection.pauseLongitudinal)
+      assert result.optionalSetRelease == (pair.optionalSetRelease and latest.optionalSetRelease and projection.optionalSetRelease)
+      assert companion.integrity_epoch == epoch and companion.verified_sm_projection == verified
+      assert projection.carStateLogMonoTime not in companion.samples
+    assert current_intent(sm, car_state_ns=pair.carStateLogMonoTime,
+      now_ns=pair.carStateLogMonoTime + 30_000_001, companion=companion) is None
+
+
+@pytest.mark.parametrize('fault', ['unverified', 'invalid', 'dead', 'missing', 'malformed', 'changed', 'settings', 'session',
+                                  'unknown-old', 'newer-invalid', 'future', 'restart', 'epoch', 'sequence',
+                                  'source-expired', 'latest-expired', 'latest-invalid', 'overflow'])
+def test_verified_stale_sm_identity_never_admits_unverified_or_corrupt_current_inputs(fault):
+  from dataclasses import replace
+  from types import SimpleNamespace
+  from openpilot.starpilot.aol.intent_companion import MAX_DRAIN
+
+  companion, sm, projection, pair, latest, now = _verified_stale_sm_projection(verified=fault != 'unverified',
+    latest_changes={'validUntilMonoTime': 341_084_947_344} if fault == 'latest-expired' else None)
+  messages = None
+  if fault == 'invalid':
+    sm.valid['aolIntentWire'] = False
+  elif fault == 'dead':
+    sm.alive['aolIntentWire'] = False
+  elif fault == 'missing':
+    sm.seen['aolIntentWire'] = False
+  elif fault == 'malformed':
+    sm['aolIntentWire'] = b'invalid'
+  elif fault in ('changed', 'settings', 'session'):
+    changes = {'pauseLateral': True} if fault == 'changed' else {'settingsQualified': False} if fault == 'settings' else {'producerSessionId': 'other-card'}
+    sm['aolIntentWire'] = encode_intent(replace(projection, **changes))
+  elif fault in ('unknown-old', 'newer-invalid', 'future'):
+    at = projection.carStateLogMonoTime - 1 if fault == 'unknown-old' else now + 1 if fault == 'future' else latest.carStateLogMonoTime
+    sm.logMonoTime['aolIntentWire'] = at
+    sm['aolIntentWire'] = encode_intent(replace(projection, sequence=4, carStateLogMonoTime=at,
+      observedMonoTime=at, validUntilMonoTime=at + 200_000_000))
+    if fault == 'newer-invalid':
+      sm.valid['aolIntentWire'] = False
+  elif fault == 'restart':
+    companion._observe(latest.carStateLogMonoTime + 1, True, encode_intent(replace(latest,
+      producerSessionId='restarted-card', sequence=1, carStateLogMonoTime=latest.carStateLogMonoTime + 1)))
+  elif fault == 'epoch':
+    companion._observe(projection.carStateLogMonoTime - 1, False, b'invalid')
+  elif fault == 'sequence':
+    companion._observe(latest.carStateLogMonoTime + 1, True, encode_intent(replace(latest,
+      sequence=1, carStateLogMonoTime=latest.carStateLogMonoTime + 1)))
+  elif fault == 'source-expired':
+    now = pair.carStateLogMonoTime + 30_000_001
+  elif fault == 'latest-invalid':
+    companion._observe(latest.carStateLogMonoTime, False, encode_intent(latest))
+  elif fault == 'overflow':
+    messages = [SimpleNamespace(logMonoTime=latest.carStateLogMonoTime, valid=True, aolIntentWire=encode_intent(latest))] * MAX_DRAIN
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=messages, return_value=None):
+    assert current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=now, companion=companion) is None
+  if fault in ('restart', 'epoch', 'sequence', 'overflow', 'latest-invalid'):
+    assert companion.verified_sm_projection is None
+
+
+@pytest.mark.parametrize('changes', [{'allowedLatch': False}, {'pauseLateral': True}, {'pauseLongitudinal': True},
+                                    {'lateralArmed': False}, {'optionalSetRelease': False}])
+def test_verified_stale_sm_identity_cannot_override_new_latest_raw_restrictions(changes):
+  companion, sm, _, pair, latest, now = _verified_stale_sm_projection(latest_changes=changes)
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+    result = current_intent(sm, car_state_ns=pair.carStateLogMonoTime, now_ns=now, companion=companion)
+  assert result is not None
+  for key, value in changes.items():
+    assert getattr(result, key) == value
+  assert result.carStateLogMonoTime == pair.carStateLogMonoTime and result.validUntilMonoTime == pair.validUntilMonoTime

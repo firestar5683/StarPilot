@@ -18,6 +18,7 @@ class IntentCompanion:
     self.sequence = -1
     self.sequence_stamp = 0
     self.integrity_epoch = 0
+    self.verified_sm_projection = None
 
   def _observe(self, stamp, valid, raw):
     stamp = int(stamp)
@@ -29,6 +30,7 @@ class IntentCompanion:
     if intent is not None and (self.latest is None or stamp >= self.latest[0]):
       if self.session is not None and intent.producerSessionId != self.session:
         self.integrity_epoch += 1
+        self.verified_sm_projection = None
         self.samples.clear()
         self.sequence = -1
         self.sequence_stamp = 0
@@ -49,6 +51,7 @@ class IntentCompanion:
       self.sequence_stamp = max(self.sequence_stamp, stamp)
     if not valid:
       self.integrity_epoch += 1
+      self.verified_sm_projection = None
     sample = (stamp, valid, intent)
     self.samples[stamp] = sample
     if self.latest is None or stamp >= self.latest[0]:
@@ -72,13 +75,25 @@ class IntentCompanion:
       self._observe(message.logMonoTime, message.valid, message.aolIntentWire)
     else:
       self.integrity_epoch += 1
+      self.verified_sm_projection = None
       self.samples.clear()
       if self.latest is not None:
         self.latest = (self.latest[0], False, self.latest[2])
         self.samples[self.latest[0]] = self.latest
       return None
+    projection = None
     if sm.seen.get(INTENT_SERVICE, False):
-      self._observe(sm.logMonoTime[INTENT_SERVICE], sm.valid.get(INTENT_SERVICE, False), sm[INTENT_SERVICE])
+      stamp = int(sm.logMonoTime[INTENT_SERVICE])
+      verified = self.verified_sm_projection
+      if (verified is not None and verified[0] == stamp and verified[2] == self.integrity_epoch and
+          verified[3] == self.session and sm.valid.get(INTENT_SERVICE, False) and
+          sm.alive.get(INTENT_SERVICE, False) and stamp < source_ns and
+          now_ns - stamp > INTENT_MAX_AGE_NS and decode_intent(sm[INTENT_SERVICE]) == verified[1]):
+        # This exact previously accepted SM identity contributes restrictions
+        # only; it never replaces the fresh raw source pair or latest sample.
+        projection = (stamp, True, verified[1])
+      else:
+        self._observe(stamp, sm.valid.get(INTENT_SERVICE, False), sm[INTENT_SERVICE])
     for stamp in tuple(self.samples):
       if not 0 < stamp <= now_ns or now_ns - stamp > INTENT_MAX_AGE_NS:
         del self.samples[stamp]
@@ -86,10 +101,11 @@ class IntentCompanion:
             sm.alive.get(INTENT_SERVICE, False)):
       return None
     pair = self.samples.get(source_ns)
-    sm_sample = self.samples.get(int(sm.logMonoTime[INTENT_SERVICE]))
+    sm_sample = projection if projection is not None else self.samples.get(int(sm.logMonoTime[INTENT_SERVICE]))
     if pair is None or self.latest is None or sm_sample is None:
       return None
-    if not all(self._fresh(sample, now_ns) for sample in (pair, self.latest, sm_sample)):
+    fresh_samples = (pair, self.latest) if projection is not None else (pair, self.latest, sm_sample)
+    if not all(self._fresh(sample, now_ns) for sample in fresh_samples):
       return None
     if self.latest[0] < source_ns:
       return None
@@ -103,4 +119,7 @@ class IntentCompanion:
                        pauseLongitudinal=intent.pauseLongitudinal or latest.pauseLongitudinal,
                        lateralArmed=intent.lateralArmed and latest.lateralArmed,
                        optionalSetRelease=intent.optionalSetRelease and latest.optionalSetRelease)
+    if projection is None:
+      # Save only after every ordinary fresh pair/latest/SM guard succeeded.
+      self.verified_sm_projection = (sm_sample[0], sm_sample[2], self.integrity_epoch, self.session)
     return intent
