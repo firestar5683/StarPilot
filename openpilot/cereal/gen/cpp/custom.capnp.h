@@ -562,7 +562,7 @@ struct SlcState {
   struct ConditionalModeState;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 12, 19)
+    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 15, 20)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -2595,6 +2595,25 @@ public:
   inline bool hasSourceReadings() const;
   inline  ::capnp::List< ::cereal::SlcState::SourceReading,  ::capnp::Kind::STRUCT>::Reader getSourceReadings() const;
 
+  inline float getAcceptedAdjustedLimit() const;
+
+  inline bool getHasAcceptedAdjustedLimit() const;
+
+  inline float getPendingAdjustedLimit() const;
+
+  inline bool getHasPendingAdjustedLimit() const;
+
+  inline float getPresentationAdjustedLimit() const;
+
+  inline bool getHasPresentationAdjustedLimit() const;
+
+  inline bool hasOverrideBasis() const;
+  inline  ::capnp::Text::Reader getOverrideBasis() const;
+
+  inline bool getRetainedOverride() const;
+
+  inline  ::uint64_t getCommandActionSequenceId() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2824,6 +2843,37 @@ public:
   inline  ::capnp::List< ::cereal::SlcState::SourceReading,  ::capnp::Kind::STRUCT>::Builder initSourceReadings(unsigned int size);
   inline void adoptSourceReadings(::capnp::Orphan< ::capnp::List< ::cereal::SlcState::SourceReading,  ::capnp::Kind::STRUCT>>&& value);
   inline ::capnp::Orphan< ::capnp::List< ::cereal::SlcState::SourceReading,  ::capnp::Kind::STRUCT>> disownSourceReadings();
+
+  inline float getAcceptedAdjustedLimit();
+  inline void setAcceptedAdjustedLimit(float value);
+
+  inline bool getHasAcceptedAdjustedLimit();
+  inline void setHasAcceptedAdjustedLimit(bool value);
+
+  inline float getPendingAdjustedLimit();
+  inline void setPendingAdjustedLimit(float value);
+
+  inline bool getHasPendingAdjustedLimit();
+  inline void setHasPendingAdjustedLimit(bool value);
+
+  inline float getPresentationAdjustedLimit();
+  inline void setPresentationAdjustedLimit(float value);
+
+  inline bool getHasPresentationAdjustedLimit();
+  inline void setHasPresentationAdjustedLimit(bool value);
+
+  inline bool hasOverrideBasis();
+  inline  ::capnp::Text::Builder getOverrideBasis();
+  inline void setOverrideBasis( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initOverrideBasis(unsigned int size);
+  inline void adoptOverrideBasis(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownOverrideBasis();
+
+  inline bool getRetainedOverride();
+  inline void setRetainedOverride(bool value);
+
+  inline  ::uint64_t getCommandActionSequenceId();
+  inline void setCommandActionSequenceId( ::uint64_t value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -10893,6 +10943,152 @@ inline void SlcState::Builder::adoptSourceReadings(
 inline ::capnp::Orphan< ::capnp::List< ::cereal::SlcState::SourceReading,  ::capnp::Kind::STRUCT>> SlcState::Builder::disownSourceReadings() {
   return ::capnp::_::PointerHelpers< ::capnp::List< ::cereal::SlcState::SourceReading,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
       ::capnp::bounded<18>() * ::capnp::POINTERS));
+}
+
+inline float SlcState::Reader::getAcceptedAdjustedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<24>() * ::capnp::ELEMENTS);
+}
+
+inline float SlcState::Builder::getAcceptedAdjustedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<24>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setAcceptedAdjustedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<24>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcState::Reader::getHasAcceptedAdjustedLimit() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<136>() * ::capnp::ELEMENTS);
+}
+
+inline bool SlcState::Builder::getHasAcceptedAdjustedLimit() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<136>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setHasAcceptedAdjustedLimit(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<136>() * ::capnp::ELEMENTS, value);
+}
+
+inline float SlcState::Reader::getPendingAdjustedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<25>() * ::capnp::ELEMENTS);
+}
+
+inline float SlcState::Builder::getPendingAdjustedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<25>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setPendingAdjustedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<25>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcState::Reader::getHasPendingAdjustedLimit() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<137>() * ::capnp::ELEMENTS);
+}
+
+inline bool SlcState::Builder::getHasPendingAdjustedLimit() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<137>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setHasPendingAdjustedLimit(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<137>() * ::capnp::ELEMENTS, value);
+}
+
+inline float SlcState::Reader::getPresentationAdjustedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<26>() * ::capnp::ELEMENTS);
+}
+
+inline float SlcState::Builder::getPresentationAdjustedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<26>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setPresentationAdjustedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<26>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcState::Reader::getHasPresentationAdjustedLimit() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<138>() * ::capnp::ELEMENTS);
+}
+
+inline bool SlcState::Builder::getHasPresentationAdjustedLimit() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<138>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setHasPresentationAdjustedLimit(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<138>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcState::Reader::hasOverrideBasis() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS).isNull();
+}
+inline bool SlcState::Builder::hasOverrideBasis() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader SlcState::Reader::getOverrideBasis() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder SlcState::Builder::getOverrideBasis() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS));
+}
+inline void SlcState::Builder::setOverrideBasis( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder SlcState::Builder::initOverrideBasis(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS), size);
+}
+inline void SlcState::Builder::adoptOverrideBasis(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> SlcState::Builder::disownOverrideBasis() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<19>() * ::capnp::POINTERS));
+}
+
+inline bool SlcState::Reader::getRetainedOverride() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<139>() * ::capnp::ELEMENTS);
+}
+
+inline bool SlcState::Builder::getRetainedOverride() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<139>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setRetainedOverride(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<139>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t SlcState::Reader::getCommandActionSequenceId() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t SlcState::Builder::getCommandActionSequenceId() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setCommandActionSequenceId( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool SlcState::SourceReading::Reader::hasSource() const {
