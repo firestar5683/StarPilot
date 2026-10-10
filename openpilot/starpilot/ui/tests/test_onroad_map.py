@@ -373,6 +373,42 @@ def test_gps_status_card_is_inside_bottom_of_map(tmp_path, active, satellites, s
     overlay.close()
 
 
+def test_starting_navigation_overlay_until_route_is_drawn(tmp_path):
+  import pyray as rl
+  fonts = Mock()
+  fonts.measure.side_effect = lambda text, _role, size: NS(width=len(text) * size * .65, height=size * 1.25)
+  overlay = MapOverlay(tmp_path, fonts=fonts)
+  try:
+    rect = rl.Rectangle(100, 200, 560, 420)
+    overlay._input = MapInput(MapFix(*CENTER, 0, 0, 100), navigation_active=True)
+    with patch('pyray.draw_rectangle_rounded'):
+      overlay._draw_starting_navigation(rect, 1.0)
+    assert [call.args[0] for call in fonts.draw.call_args_list] == ['Starting navigation', 'Finding your route…']
+  finally:
+    overlay.close()
+
+
+def test_lost_route_only_restores_starting_overlay_after_ten_seconds(tmp_path):
+  clock = [100.0]
+  overlay = MapOverlay(tmp_path, clock=lambda: clock[0])
+  try:
+    route = tuple((CENTER[0] + i * 1e-4, CENTER[1]) for i in range(4))
+    fix = MapFix(*CENTER, 0, 0, 100)
+    def step(data):
+      overlay._input = data
+      overlay._route(data.route)
+      overlay._track_route(data, clock[0])
+      return overlay._starting_navigation()
+    assert step(MapInput(fix, (), True))            # never had a route: show immediately
+    assert not step(MapInput(fix, route, True))
+    clock[0] += 5
+    assert not step(MapInput(fix, (), True))        # brief gap: no flash
+    clock[0] += 6
+    assert step(MapInput(fix, (), True))
+  finally:
+    overlay.close()
+
+
 def test_losing_gps_shows_waiting_even_with_a_cached_map_position(tmp_path):
   overlay = MapOverlay(tmp_path)
   try:

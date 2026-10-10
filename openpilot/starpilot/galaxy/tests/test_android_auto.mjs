@@ -422,7 +422,7 @@ assert(googleInstallChecks({ state: 'done', stage: 'done' }).every(c => c.status
 assert.match(AndroidAutoPage.template, /Upload a file/)
 assert.match(AndroidAutoPage.template, /Turn off automatic renewal/)
 assert.match(AndroidAutoPage.template, /Remove Android Auto support/)
-assert.match(AndroidAutoPage.template, /will just sit and spin/)
+assert.match(AndroidAutoPage.template, /page will keep loading/)
 assert.equal(AndroidAutoPage.computed.renewLabel.call({ setup: { googlePlay: { remembered: true } } }), 'Auto-renew on')
 assert.equal(AndroidAutoPage.computed.renewLabel.call({ setup: { googlePlay: { remembered: false } } }), 'Auto-renew off')
 assert.match(AndroidAutoPage.template, /Manage package/)
@@ -456,5 +456,21 @@ assert.deepEqual(renewCall, ['user@example.com', 'oauth2_4/renew', true])
 renewal.closeInstall()
 assert.equal(renewal.renewing, false)
 assert.match(AndroidAutoPage.template, /Turn on automatic renewal/)
-assert.match(AndroidAutoPage.template, /Use a computer for this/)
+assert.match(AndroidAutoPage.template, /Use a computer for automatic download setup/)
+assert.equal(await AndroidAutoPage.methods.googleImport.call({ onPhone: true }), false, 'mobile cannot start automatic downloads')
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+try {
+  for (const [browser, mobile] of [
+    [{ userAgent: 'Mozilla/5.0 (iPhone)' }, true],
+    [{ userAgent: 'Mozilla/5.0 (Linux; Android 14)', userAgentData: { mobile: false } }, true],
+    [{ userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 5 }, true],
+    [{ userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 0 }, false],
+  ]) {
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: browser })
+    assert.equal(AndroidAutoPage.computed.onPhone(), mobile, 'detect phones and tablets without blocking desktop browsers')
+  }
+} finally {
+  if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
+  else delete globalThis.navigator
+}
 console.log('Google Play import: credential clearing, progress, retry and manual fallback passed')
