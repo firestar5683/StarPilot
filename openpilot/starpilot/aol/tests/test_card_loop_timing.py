@@ -202,6 +202,8 @@ def test_actual_params_worker_emits_after_recorder_releases_frame(monkeypatch):
   monkeypatch.setattr(module.cloudlog, 'event', lambda name, **report: emitted.append((name, report)))
   monkeypatch.setattr(module, 'read_cruise_intervals', lambda *a, **k: 'intervals')
   monkeypatch.setattr(module.time, 'sleep', lambda _: None)
+  monkeypatch.setattr(module, 'drop_realtime', lambda: None)
+  monkeypatch.setattr(module, 'set_core_affinity', lambda _: None)
   daemon.params_thread(Once())
   assert len(emitted) == 1 and emitted[0][0] == 'card.loop_late'
   assert emitted[0][1]['frames'][0]['end_ns'] - emitted[0][1]['frames'][0]['start_ns'] == 80_877_165
@@ -255,3 +257,95 @@ def test_actual_recorder_cost_is_bounded_and_report_worker_formatting_is_measure
     (Path(output) / 'card-loop-overhead.json').write_text(json.dumps(metrics, indent=2) + '\n')
   assert added <= 500_000, metrics
   assert metrics['worker_payload_bytes'] <= 20_000, metrics
+
+
+def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monkeypatch):
+  import os
+  import sys
+  import threading
+  import time
+  from types import SimpleNamespace
+  from openpilot.selfdrive.car import card as module
+
+  main_tid = threading.get_native_id()
+  def scheduling():
+    if sys.platform != 'linux':
+      return None
+    return (os.sched_getscheduler(0), os.sched_getparam(0).sched_priority,
+            tuple(sorted(os.sched_getaffinity(0))))
+
+  main_before = scheduling()
+  trace = []
+  stopped = threading.Event()
+  errors = []
+  daemon: Any = module.Car.__new__(module.Car)
+  daemon.loop_timing = None
+  daemon.CP = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False)
+  cp_before = dict(vars(daemon.CP))
+  daemon.aol_card_intent = None
+  daemon.v_cruise_helper = SimpleNamespace(intervals=None)
+
+  def record(kind, value=None):
+    tid = threading.get_native_id()
+    assert tid != main_tid
+    trace.append((kind, tid, value))
+
+  def read_bool(key):
+    record('read_bool', key)
+    return True
+
+  daemon.params = SimpleNamespace(get_bool=read_bool)
+  def configuration():
+    record('configuration')
+    return 'configuration'
+  daemon.read_slc_configuration = configuration
+
+  original_drop = module.drop_realtime
+  original_affinity = module.set_core_affinity
+  def drop():
+    record('drop')
+    original_drop()
+  def affine(cores):
+    record('affinity', list(cores))
+    original_affinity(cores)
+  def intervals(params, *, pcm_cruise):
+    assert params is daemon.params and pcm_cruise is False
+    record('intervals')
+    return 'intervals'
+  def sleep(seconds):
+    assert seconds == .1
+    record('sleep')
+    stopped.set()
+
+  monkeypatch.setattr(module, 'drop_realtime', drop)
+  monkeypatch.setattr(module, 'set_core_affinity', affine)
+  monkeypatch.setattr(module, 'read_cruise_intervals', intervals)
+  # Only Card's time binding changes; other threads keep their genuine clocks.
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=time.monotonic, sleep=sleep))
+
+  def run():
+    try:
+      daemon.params_thread(stopped)
+    except BaseException as exc:
+      errors.append(exc)
+      stopped.set()
+
+  worker = threading.Thread(target=run)
+  worker.start()
+  try:
+    worker.join(2.)
+  finally:
+    stopped.set()
+    worker.join(2.)
+  assert not worker.is_alive() and not errors
+  worker_tid = trace[0][1]
+  assert worker_tid != main_tid and {row[1] for row in trace} == {worker_tid}
+  assert [(kind, value) for kind, _, value in trace] == [
+    ('drop', None), ('affinity', [0, 1, 2, 3]), ('read_bool', 'IsMetric'),
+    ('read_bool', 'ExperimentalMode'), ('configuration', None), ('intervals', None), ('sleep', None),
+  ]
+  assert scheduling() == main_before
+  assert vars(daemon.CP) == cp_before
+  assert daemon.is_metric is True and daemon.experimental_mode is True
+  assert daemon.slc_requested_configuration == 'configuration'
+  assert daemon.v_cruise_helper.intervals == 'intervals'

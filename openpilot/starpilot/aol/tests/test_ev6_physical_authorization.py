@@ -289,7 +289,9 @@ class TestEv6ConfiguredDesire(unittest.TestCase):
       cp_before = card.CP.as_reader().as_builder().to_bytes()
       def refresh():
         stop = threading.Event()
-        with patch('openpilot.selfdrive.car.card.time.sleep', side_effect=lambda _: stop.set()):
+        with patch('openpilot.selfdrive.car.card.time.sleep', side_effect=lambda _: stop.set()), \
+             patch('openpilot.selfdrive.car.card.drop_realtime'), \
+             patch('openpilot.selfdrive.car.card.set_core_affinity'):
           card.params_thread(stop)
       self.sample(owner, [(0, 0, Buttons.NONE)])
       params.put('LKASButtonControl', AOL_TOGGLE, block=True)

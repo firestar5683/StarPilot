@@ -13,7 +13,7 @@ from opendbc.car.structs import car
 
 from openpilot.common.params import Params
 from openpilot.starpilot.card_loop_timing import CardLoopTiming
-from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
+from openpilot.common.realtime import config_realtime_process, drop_realtime, set_core_affinity, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
 from opendbc.car import DT_CTRL, structs
@@ -1283,6 +1283,9 @@ class Car:
     self.CS_prev = CS
 
   def params_thread(self, evt):
+    # This worker inherits the control thread's FIFO policy and CPU affinity.
+    drop_realtime()
+    set_core_affinity([0, 1, 2, 3])
     next_cruise_read = 0.0
     while not evt.is_set():
       timing = getattr(self, 'loop_timing', None)

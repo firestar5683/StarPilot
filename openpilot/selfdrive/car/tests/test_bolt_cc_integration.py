@@ -70,7 +70,9 @@ class TestBoltCcControls(unittest.TestCase):
         settings.put_bool('IsMetric', not initial, block=True)
         event = Mock()
         event.is_set.side_effect = [False, True]
-        with patch('openpilot.selfdrive.car.card.time.sleep'):
+        with patch('openpilot.selfdrive.car.card.time.sleep'), \
+             patch('openpilot.selfdrive.car.card.drop_realtime'), \
+             patch('openpilot.selfdrive.car.card.set_core_affinity'):
           card.params_thread(event)
         self.assertEqual(card.is_metric, not initial)
         with patch('openpilot.selfdrive.car.card.time.monotonic', return_value=1.002):
