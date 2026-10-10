@@ -56,6 +56,7 @@ def api(tmp_path):
                                                                      'message': 'Package status'},
                            bluetooth_enabled=lambda: state['bluetooth_enabled'], install_ready=lambda: state['install_ready'],
                            service_ready=lambda: True, set_enabled=set_enabled, enable_bluetooth=enable_bluetooth)
+  state['setup_owner'] = setup
   class FakeClient:
     def __init__(self):
       self.calls = []
@@ -440,3 +441,32 @@ def test_outgoing_car_selection_requires_current_pairing_session_and_valid_addre
   state['parked'] = True
   assert request('POST', '/api/android-auto/pairing/cancel', '{}', cookie=cookie, content_type='application/json')[0] == 200
   assert select() == 409
+
+
+def test_google_import_is_authenticated_bounded_and_validated(api):
+  request, job, state, _ = api
+  job.start_google_import = Mock(side_effect=lambda **kwargs: setattr(job, 'running', True))
+  path = '/api/android-auto/google-import'
+  valid = {'email': 'a@example.com', 'token': 'oauth2_4/test', 'remember': False}
+  assert request('POST', path, json.dumps(valid), content_type='application/json')[0] == 401
+  _, _, headers = request('POST', '/api/auth/login', '{"password":"password123"}', content_type='application/json')
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  for payload in (None, [], {}, {'email': 1, 'token': 'oauth2_4/test'}, {**valid, 'remember': 1},
+                  {**valid, 'token': 'not-a-token'}, {**valid, 'url': 'http://elsewhere'}):
+    assert request('POST', path, json.dumps(payload), cookie=cookie, content_type='application/json')[0] == 400
+  assert request('POST', path, json.dumps({**valid, 'token': 'x' * 5000}), cookie=cookie, content_type='application/json')[0] == 413
+  state.update(parked=False, enabled=False)
+  code, status, _ = request('POST', path, json.dumps(valid), cookie=cookie, content_type='application/json')
+  assert code == 202 and status['import']['state'] == 'running'
+  assert 'oauth2_4/test' not in json.dumps(status)
+  assert request('POST', path, json.dumps(valid), cookie=cookie, content_type='application/json')[0] == 409
+  assert request('POST', '/api/android-auto/google-forget', '{}', cookie=cookie, content_type='application/json')[0] == 409
+  job.start_google_import.assert_called_once()
+
+
+def test_on_device_browser_api_is_gone(api):
+  request, _, _, _ = api
+  _, _, headers = request('POST', '/api/auth/login', '{"password":"password123"}', content_type='application/json')
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  start = {'operation': 'start', 'email': 'user@example.com', 'remember': False}
+  assert request('POST', '/api/android-auto/google-browser', json.dumps(start), cookie=cookie, content_type='application/json')[0] != 200

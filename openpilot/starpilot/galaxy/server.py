@@ -149,6 +149,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         evidence_source.close()
       raise
   configuration_allowed = pairing_authority.configuration_allowed if pairing_authority is not None else parked
+  from openpilot.starpilot.galaxy.play_install import PlayInstall
+  play_install = PlayInstall(ready=lambda: access.status().status == AccessStatus.CONFIGURED_LOCAL or pairing.read() is not None,
+                                   parked=configuration_allowed)
   def cloud_allowed():
     from openpilot.common.params import Params
     return bool(parked()) and bool(cloud_offroad() if cloud_offroad is not None else Params().get_bool('IsOffroad'))
@@ -332,6 +335,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         def enable_bluetooth(identity):
           bluetooth_owner().request('power', enabled=True, session=identity, power_on_for_android_auto=True)
         aa_setup_source = AndroidAutoSetup(parked=configuration_allowed, enabled=lambda: Params().get_bool('AndroidAutoEnabled'),
+                                          play_install=play_install,
                                           session_valid=bluetooth_session_valid, bluetooth_enabled=bluetooth_ready,
                                           install_ready=install_ready, service_ready=service_ready,
                                           set_enabled=lambda value: Params().put_bool('AndroidAutoEnabled', value),
@@ -578,6 +582,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path == '/api/auth/session':
         if self.direct_local():
+          try:
+            play_install.mark_setup_complete()
+          except OSError:
+            pass  # Optional package provisioning must not prevent Galaxy access.
           with session_lock:
             token = self.session_token()
             if not sessions.valid(token, local_generation):
@@ -1313,6 +1321,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/galaxy/hotspot', '/api/cameras/snapshot',
+                      '/api/android-auto/google-import', '/api/android-auto/google-forget',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
@@ -1942,6 +1951,33 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             aa_registry_source.revoke(identity)
         self.respond(200, b'{"authenticated":false}', cookie='galaxy_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
         return
+      if path in ('/api/android-auto/google-import', '/api/android-auto/google-forget'):
+        from openpilot.starpilot.galaxy.android_auto_setup import SetupRejected
+        from openpilot.starpilot.system.android_auto.play_resolver import PlayError
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        forgetting = path.endswith('google-forget')
+        if not isinstance(payload, dict) or (forgetting and payload) or (not forgetting and
+            (set(payload) - {'email', 'token', 'remember'} or not {'email', 'token'} <= set(payload) or
+             type(payload.get('remember', False)) is not bool)):
+          self.json(400, {'error': 'Google account email, token and optional remember boolean required'})
+          return
+        try:
+          result = aa_setup_owner().forget_google(identity) if forgetting else aa_setup_owner().start_google_import(identity, **payload)
+        except PlayError as error:
+          self.json(400, {'error': str(error)})
+        except SetupRejected as error:
+          self.json(409, {'error': str(error)})
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Google Play import is unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200 if forgetting else 202, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
+        return
       if path == '/api/android-auto/enable':
         if type(payload) is not dict or set(payload) not in ({'enabled'}, {'enabled', 'enableBluetooth'}) or \
            type(payload['enabled']) is not bool or type(payload.get('enableBluetooth', False)) is not bool or \
@@ -2494,6 +2530,15 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.software_operations_source = software_operations_source
   if drive_stats_source is not None:
     server.drive_stats_source = drive_stats_source
+  def maintain_android_auto():
+    play_install.maintain()
+    from openpilot.starpilot.system.android_auto.play_resolver import TOKEN_PATH
+    if aa_setup_source is not None or TOKEN_PATH.is_file():
+      maintain = getattr(aa_setup_owner(), 'maintain', None)
+      if callable(maintain):
+        maintain()
+  server.maintain_android_auto = maintain_android_auto
+  server.play_install_source = play_install
   server.start_drive_history = lambda: statistics_owner().start()
   return server
 

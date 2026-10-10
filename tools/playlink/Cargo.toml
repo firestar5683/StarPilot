@@ -1,0 +1,18 @@
+[package]
+name = "starpilot-playlink"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "playlink"
+path = "src/main.rs"
+
+[dependencies]
+gpapi = "=6.1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+openssl = { version = "0.10", features = ["vendored"] }
+
+[profile.release]
+strip = true

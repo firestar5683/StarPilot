@@ -217,3 +217,58 @@ def test_session_loss_while_enabling_bluetooth_never_enables_android_auto(tmp_pa
   with pytest.raises(SetupRejected, match='session expired'):
     service.enable(session, True, enable_bluetooth=True)
   setter.assert_not_called()
+
+
+def google_setup(tmp_path):
+  from openpilot.starpilot.system.android_auto import apk_identity, play_resolver
+  state = {'enabled': True, 'parked': True, 'session': ('galaxy', '1')}
+  store = play_resolver.TokenStore(tmp_path / 'aa_token')
+  job = apk_identity.ImportJob(work_dir=tmp_path / 'imports', token_store=store)
+  job.start_google_import = Mock()
+  service = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: state['enabled'],
+                             session_valid=lambda session: session == state['session'], import_job=job,
+                             identity_status=lambda: {'installed': True, 'expires': '2020-01-01T00:00:00+00:00'})
+  return service, job, state, store
+
+
+def test_google_import_session_admission_and_exclusive_upload_lock(tmp_path):
+  service, job, state, _ = google_setup(tmp_path)
+  with pytest.raises(SetupRejected):
+    service.start_google_import(('old', '1'), email='a@example.com', token='oauth2_4/test')
+  with service._upload_lock, pytest.raises(SetupRejected):
+    service.start_google_import(state['session'], email='a@example.com', token='oauth2_4/test')
+  job.start_google_import.assert_not_called()
+  service.start_google_import(state['session'], email='a@example.com', token='oauth2_4/test', remember=True)
+  kwargs = job.start_google_import.call_args.kwargs
+  assert kwargs['save_token'] and kwargs['enabled']()
+  state['session'] = None
+  assert not kwargs['enabled']()
+
+
+def test_refresh_requires_opt_in_offroad_and_throttles_failed_attempts(tmp_path):
+  service, job, state, store = google_setup(tmp_path)
+  service.maintain(0)
+  job.start_google_import.assert_not_called()
+  store.save('a@example.com', 'aas_et/test')
+  state['parked'] = False
+  service.maintain(60)
+  job.start_google_import.assert_not_called()
+  state['parked'] = True
+  service.maintain(120)
+  job.start_google_import.assert_called_once()
+  kwargs = job.start_google_import.call_args.kwargs
+  assert kwargs['aas_token'] == 'aas_et/test' and kwargs['enabled']()
+  service.maintain(180)
+  job.start_google_import.assert_called_once()
+  state['enabled'] = False
+  assert not kwargs['enabled']()
+  service.forget_google(state['session'])
+  assert not store.exists()
+
+
+def test_refresh_skips_identity_not_due_for_renewal(tmp_path):
+  service, job, _, store = google_setup(tmp_path)
+  store.save('a@example.com', 'aas_et/test')
+  service.identity_status = lambda: {'installed': True, 'expires': '2099-01-01T00:00:00+00:00'}
+  service.maintain(0)
+  job.start_google_import.assert_not_called()

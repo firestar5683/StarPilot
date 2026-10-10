@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "resolver": {
+    "sha256": "f009b9c5964c6d49e41de9eb9d010f197d032ba81f148942a8143ad813d00ac1",
+    "bytes": 12171208,
+    "url": "https://github.com/dirwin31/openpilot/releases/download/google-browser-584069b7672b/playlink-arm64"
+  },
+  "id": "f009b9c5964c6d49e41de9eb9d010f197d032ba81f148942a8143ad813d00ac1"
+}

@@ -3,8 +3,8 @@
 The car accepts a projection source only when it presents Google's Android Auto
 phone certificate and proves it holds the matching key. Both are embedded in the
 Android Auto app, so each user supplies their own APK (or XAPK/APKM bundle) and
-the comma extracts the identity on device. Nothing is downloaded from or sent to
-anyone except the link the user provides.
+the comma extracts the identity on device. Packages can also be fetched directly
+from Google Play using the user's own account; no project broker is involved.
 
 Extraction needs no decompiler. The app's DEX files hold the phone certificate
 and the Google Automotive Link root as PEM string constants, and the key as an
@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from openpilot.starpilot.system.android_auto import identity as identity_store
+from openpilot.starpilot.system.android_auto import play_resolver
 
 # SHA-256 of the DER Google Automotive Link root certificate (valid until 2044).
 GOOGLE_ROOT_SHA256 = "49e52efc13ad2ed09f204c3b10698bd84bb7105f510558aa14b8119a5c4ad17f"
@@ -292,12 +293,17 @@ def identity_status(directory: Path | None = None) -> dict:
 
 # ------------------------------------------------------------------ background import
 
-def download(url: str, destination: Path, progress: Callable[[int, int], None] = lambda done, total: None) -> None:
+def download(url: str, destination: Path, progress: Callable[[int, int], None] = lambda done, total: None,
+             *, google_play: bool = False) -> None:
   if not url.lower().startswith(("https://", "http://")):
     raise IdentityImportError("Enter an http(s) link to the APK, XAPK, or APKM", "DOWNLOAD")
   request = urllib.request.Request(url, headers={"User-Agent": "StarPilot-AndroidAuto/1"})
   try:
-    with urllib.request.urlopen(request, timeout=30) as response, open(destination, "wb") as handle:
+    opener = urllib.request.build_opener(play_resolver.GoogleRedirect(), urllib.request.ProxyHandler({})) if google_play else None
+    if google_play:
+      play_resolver.validate_url(url)
+    open_url = opener.open if opener else urllib.request.urlopen
+    with open_url(request, timeout=30) as response, open(destination, "wb") as handle:
       total = int(response.headers.get("Content-Length") or 0)
       if total > MAX_FILE_BYTES:
         raise IdentityImportError("That file is too large to be the Android Auto app", "TOO_LARGE")
@@ -317,7 +323,9 @@ def download(url: str, destination: Path, progress: Callable[[int, int], None] =
 class ImportJob:
   """One identity import at a time, in a background thread, with pollable status."""
 
-  def __init__(self, work_dir: Path | None = None, identity_dir: Path | None = None, root_sha256: str = GOOGLE_ROOT_SHA256):
+  def __init__(self, work_dir: Path | None = None, identity_dir: Path | None = None, root_sha256: str = GOOGLE_ROOT_SHA256,
+               token_store: play_resolver.TokenStore | None = None):
+    self.token_store = token_store or play_resolver.TokenStore()
     self.work_dir = work_dir or IMPORT_DIR
     self.identity_dir = identity_dir
     self.root_sha256 = root_sha256
@@ -348,6 +356,74 @@ class ImportJob:
                     "downloaded": 0, "total": 0}
       self.thread = threading.Thread(target=self._run, args=(path, url, enabled), name="android_auto_identity_import", daemon=True)
       self.thread.start()
+
+  def start_google_import(self, *, email: str, oauth_token: str | None = None, aas_token: str | None = None,
+                          save_token: bool = False, enabled=None) -> None:
+    if bool(oauth_token) == bool(aas_token) or type(save_token) is not bool:
+      raise play_resolver.PlayError("Supply one Google sign-in token")
+    token = oauth_token or aas_token
+    play_resolver.validate_credentials(email, token)
+    with self.lock:
+      if self.busy():
+        raise IdentityImportError("An import is already running")
+      self.state = {"state": "running", "stage": "authenticating", "source": "google",
+                    "started": datetime.now(UTC).timestamp(), "downloaded": 0, "total": 0}
+      self.thread = threading.Thread(target=self._run_google, args=(email, token, save_token, enabled),
+                                     name="android_auto_google_import", daemon=True)
+      self.thread.start()
+
+  def _run_google(self, email: str, token: str, remember: bool, enabled) -> None:
+    source = None
+    result = None
+
+    def progress(stage=None, **values):
+      if enabled is not None and not enabled():
+        raise IdentityImportError("Import cancelled: authorization changed", "CANCELLED")
+      self._set(**({"stage": stage} if stage else {}), **values)
+
+    try:
+      progress("authenticating")
+      self.work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+      fd, name = tempfile.mkstemp(prefix="google-import-", suffix=".apk", dir=self.work_dir)
+      os.close(fd)
+      source = Path(name)
+      result = play_resolver.resolve(email, token, remember=remember, progress=progress)
+      token = ""
+      progress("downloading")
+      download(result['url'], source, lambda done, total: progress(downloaded=done, total=total), google_play=True)
+      result.pop('url', None)
+      progress("installing")
+      files, metadata = extract_identity(source, root_sha256=self.root_sha256, progress=lambda _stage: progress())
+      metadata['source'] = 'Google Play (user account)'
+      progress()
+      install_identity(files, metadata, self.identity_dir)
+      progress()
+      if remember:
+        self.token_store.save(email, result['aas_token'])
+      else:
+        self.token_store.forget()
+      self._set(state="done", stage="done", finished=datetime.now(UTC).timestamp(), expires=metadata['expires'],
+                message=f"Identity installed; valid until {metadata['expires'][:10]}")
+    except IdentityImportError as error:
+      # Download exceptions may contain signed URLs. Only extraction errors are
+      # safe to display; never pass through network or unexpected error text.
+      message = 'Google Play download failed; try again' if error.code == 'DOWNLOAD' else str(error)
+      self._set(state="failed", error=message, code=error.code, finished=datetime.now(UTC).timestamp(),
+                **({"expires": error.expires} if error.expires else {}))
+    except play_resolver.PlayError as error:
+      self._set(state="failed", error=str(error), code="GOOGLE_PLAY", finished=datetime.now(UTC).timestamp())
+    except Exception:
+      self._set(state="failed", error="Google Play import failed; try again or use manual upload",
+                code="GOOGLE_PLAY", finished=datetime.now(UTC).timestamp())
+    finally:
+      token = ""
+      if result is not None:
+        result.clear()
+      if source is not None:
+        try:
+          source.unlink(missing_ok=True)
+        except OSError:
+          pass
 
   def _run(self, path: Path | None, url: str, enabled=None) -> None:
     def progress(**values):

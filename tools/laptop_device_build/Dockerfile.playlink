@@ -1,0 +1,9 @@
+FROM openpilot-local-arm64-builder:latest
+USER root
+ENV CARGO_HOME=/opt/playlink-cargo RUSTUP_HOME=/opt/playlink-rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain 1.93.1 \
+    && rm /tmp/rustup-init.sh
+ENV PATH=/opt/playlink-cargo/bin:$PATH
+ENV RUSTFLAGS="-C target-feature=+crt-static"
+WORKDIR /work/tools/playlink

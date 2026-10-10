@@ -302,6 +302,30 @@ export class AndroidAutoFeed {
     return true
   }
 
+  async googleImport(email, token, remember) {
+    if (!this.active || this.busy || !this.setup || this.setup.import?.state === "running") return false
+    const result = await this.request("./api/android-auto/google-import", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, token, remember })
+    }, 12000)
+    token = ""
+    if (result === null) return false
+    if (validSetup(result)) this.setup = result
+    this.emit()
+    await this.refresh()
+    return true
+  }
+
+  async forgetGoogle() {
+    if (!this.active || this.busy || this.setup?.import?.state === "running") return false
+    const result = await this.request("./api/android-auto/google-forget", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+    })
+    if (result === null) return false
+    await this.refresh()
+    return true
+  }
+
   async removePackage() {
     if (!this.active || this.busy || !this.setup || this.setup.import?.state === "running") return false
     const result = await this.request("./api/android-auto/identity", { method: "DELETE" }, 30000)
@@ -377,7 +401,7 @@ export function importProblem(job, fileName = "", locale = undefined) {
     case "UNSUPPORTED_VERSION":
       return job.error || "This version stores its key differently. Choose another Android Auto release."
     case "TOO_LARGE": return "This file is too large to be the Android Auto app."
-    case "CANCELLED": return "Setup stopped because Android Auto was turned off. Try again."
+    case "CANCELLED": return "Setup authorization changed. Sign in to Galaxy and try again."
     default: return job.error || "Something went wrong. Try again."
   }
 }
@@ -399,6 +423,33 @@ export function installChecks(job, locale = undefined) {
   })
 }
 
+export function googleInstallChecks(job) {
+  const stages = ["authenticating", "resolving", "downloading", "installing", "done"]
+  const at = stages.indexOf(job?.stage)
+  const percent = job?.total > 0 ? ` (${Math.min(100, Math.round(100 * job.downloaded / job.total))}%)` : ""
+  return ["Google Play Authentication", "Play Store Delivery Link", `Downloading APK${percent}`, "Extracting Certificates & Keys"]
+    .map((label, index) => ({
+      label, status: job?.state === "done" || index < at ? "done" :
+        index === at ? (job?.state === "failed" ? "failed" : "active") : "pending"
+    }))
+}
+
+const TOKEN_BROWSERS = [{ id: "chrome", name: "Chrome or Edge" }, { id: "firefox", name: "Firefox" }, { id: "safari", name: "Safari" }]
+
+// Accepts what people actually copy: surrounding quotes or spaces, a "oauth_token=" prefix, or a URL-encoded value.
+export function cleanToken(value) {
+  let token = String(value || "").trim().replace(/^oauth_token\s*[=:]\s*/i, "").replace(/^["']|["';]$/g, "").trim()
+  if (/^oauth2_4%2F/i.test(token)) { try { token = decodeURIComponent(token) } catch { /* keep as typed */ } }
+  return token
+}
+
+export function tokenProblem(value) {
+  if (!String(value || "").trim()) return ""
+  const token = cleanToken(value)
+  if (/^(oauth2_4|aas_et)\//.test(token)) return /\s/.test(token) ? "The value contains spaces. Copy only the Value cell." : ""
+  return "That doesn’t look right. Copy the Value of the row named oauth_token; it starts with oauth2_4/."
+}
+
 export const AndroidAutoPage = {
   components: { GxState, GxIconButton, GxNotice, GxDialog, GalaxySettingRow },
   props: {
@@ -408,6 +459,8 @@ export const AndroidAutoPage = {
   data: () => ({
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
+    installMethod: "google", googleEmail: "", googleToken: "", googleRemember: true, tokenBrowser: "chrome", renewing: false,
+    tokenBrowsers: TOKEN_BROWSERS,
     installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false, enableOpen: false
   }),
   mounted() {
@@ -416,7 +469,7 @@ export const AndroidAutoPage = {
     document.addEventListener("visibilitychange", this.visibility)
     if (!document.hidden) this.begin()
   },
-  beforeUnmount() { this.finishEnable(false); document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
+  beforeUnmount() { this.googleToken = ""; this.finishEnable(false); document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
   watch: {
     mode() { if (!document.hidden) this.begin(); else this.feed?.stop(true) },
     localAccess() { if (!document.hidden) this.begin(); else this.feed?.stop(true) },
@@ -457,9 +510,26 @@ export const AndroidAutoPage = {
       if (job.state === "done" && this.setup.identity.installed) return "done"
       return job.state === "failed" ? "failed" : "choose"
     },
-    checks() { return installChecks(this.setup?.import) },
+    tokenProblem() { return tokenProblem(this.googleToken) },
+    googlePrep() {
+      const pkg = this.setup?.googlePlay?.package
+      if (!pkg || pkg.state === "ready") return null
+      const label = {
+        downloading: "Downloading",
+        installing: "Installing",
+        pending: "Preparing",
+        paused: "Paused until the car is in Park",
+        retrying: "Waiting for an internet connection",
+      }[pkg.state] || "Preparing…"
+      const progress = ["downloading", "installing"].includes(pkg.state)
+      return { state: pkg.state, label, detail: progress ? "Google Play support · about 12 MB" : "", percent: pkg.percent || 0, progress }
+    },
+    checks() { return this.setup?.import?.source === "google" ? googleInstallChecks(this.setup.import) : installChecks(this.setup?.import) },
     problem() { return importProblem(this.setup?.import, this.installFileName) },
     hasPackage() { return !!(this.setup?.identity.installed || this.setup?.identity.expired || this.setup?.identity.error) },
+    onPhone() { return typeof navigator !== "undefined" && (navigator.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")) },
+    galaxyAddress() { return typeof location !== "undefined" ? location.host : "this Galaxy address" },
+    renewLabel() { return this.setup?.googlePlay?.remembered ? "Auto-renew on" : "Auto-renew off" },
     removeReason() {
       if (!this.setup) return "Load setup status first."
       if (this.setup.import?.state === "running") return "Wait for the current package check to finish."
@@ -544,9 +614,18 @@ export const AndroidAutoPage = {
       return this.feed.action("./api/android-auto/pairing/response", { prompt_id: prompt.id, accepted, value })
     },
     openInstall() {
-      Object.assign(this, { installOpen: true, installAttempted: false, packageFile: null })
+      Object.assign(this, { installOpen: true, installAttempted: false, packageFile: null, renewing: false, googleRemember: true })
     },
-    closeInstall() { this.installOpen = false },
+    closeInstall() { this.installOpen = false; this.googleToken = ""; this.renewing = false },
+    // Auto-renew needs a fresh sign-in: the long-lived credential is only issued when a token is exchanged.
+    startRenewal() { Object.assign(this, { renewing: true, installMethod: "google", googleRemember: true, googleToken: "", installAttempted: false }) },
+    async googleImport() {
+      if (this.busy || !this.googleEmail.trim() || !this.googleToken.trim() || this.tokenProblem) return false
+      Object.assign(this, { installAttempted: true, installBaseline: this.setup.import?.started ?? null, installFileName: "" })
+      const token = cleanToken(this.googleToken)
+      this.googleToken = ""
+      return this.feed.googleImport(this.googleEmail.trim(), token, this.renewing || this.googleRemember)
+    },
     chooseAgain() { Object.assign(this, { installAttempted: false, packageFile: null }) },
     choosePackage(event) { this.packageFile = event.target.files?.[0] || null },
     async upload() {
@@ -590,12 +669,13 @@ export const AndroidAutoPage = {
             <p v-if="!setup.installReady" class="gx-aa-pill gx-aa-pill--expired" role="status">Not available on this build — the Android Auto display and encoder are missing.</p>
             <template v-else>
               <div class="gx-aa-status">
-                <span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level" role="status">{{ expiry.label }}<template v-if="hasPackage && !setup.enabled"> · Off</template></span>
+                <span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level" role="status">{{ expiry.label }}<template v-if="setup.identity.installed"> · {{ renewLabel }}</template><template v-if="hasPackage && !setup.enabled"> · Off</template></span>
                 <button v-if="hasPackage" type="button" class="gx-icon-btn gx-recordings__danger" aria-label="Delete Package" :disabled="!!removeReason" :title="removeReason || 'Delete Package'" @click="openRemove"><i class="bi bi-trash3"></i></button>
                 <span v-if="setup.enabled && !setup.serviceReady" class="gx-note" role="status">Starting…</span>
                 <div class="gx-actions gx-aa-status__actions">
                   <button v-if="!setup.identity.installed" class="gx-btn" @click="openInstall">{{ setup.identity.expired || setup.identity.error ? 'Reinstall' : 'Install support' }}</button>
                   <button v-else-if="expiry.level === 'soon'" class="gx-btn" @click="openInstall">Update</button>
+                  <button v-if="setup.identity.installed" class="gx-btn gx-btn--tonal" @click="openInstall">Manage package</button>
                   <button v-if="setup.identity.installed && !setup.enabled" class="gx-btn" @click="setEnabled(true)">Turn On</button>
                   <button v-if="setup.enabled" class="gx-btn gx-btn--tonal" @click="setEnabled(false)">Turn Off</button>
                 </div>
@@ -611,7 +691,7 @@ export const AndroidAutoPage = {
                 <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded.</li>
                 <li><strong>Upload is slow or stops:</strong> stay on this page and keep the comma awake and on the same Wi-Fi until it finishes.</li>
               </ul>
-              <p><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. Nothing is sent anywhere, and no Android app is installed on the comma.</p>
+              <p><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. Google Play sign-in contacts Google directly; your extracted identity stays on the comma. No Android app is installed on the comma.</p>
             </details>
           </div>
         </li>
@@ -811,7 +891,7 @@ export const AndroidAutoPage = {
           <p>Pair each car in step 2 with <strong>Pair another</strong>. All your paired cars appear in the list. Tap <strong>Use</strong> next to the one you’re driving. Disconnect first if Android Auto is running.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Is my information private?</summary>
-          <p>Yes. The Android Auto file you install stays on your comma and isn’t sent anywhere. Connection logs also stay on the comma until you download them yourself. They leave out Wi‑Fi passwords, Bluetooth addresses, and your vehicle ID.</p>
+          <p>Yes. Your extracted Android Auto identity stays on your comma. Google Play import sends your sign-in to Google, and automatic updates keep a private refresh credential on the comma until you forget it. The downloaded package is deleted after import. Connection logs also stay on the comma until you download them yourself. They leave out Wi‑Fi passwords, Bluetooth addresses, and your vehicle ID.</p>
         </details>
 
         <h4>Still stuck?</h4>
@@ -838,11 +918,11 @@ export const AndroidAutoPage = {
       </GxDialog>
 
       <GxDialog v-if="removeOpen && setup" :inert="busy" labelledby="gx-aa-remove-title" describedby="gx-aa-remove-body" alert @close="closeRemove">
-          <div><h3 id="gx-aa-remove-title">Remove the package?</h3>
-            <p id="gx-aa-remove-body">Are you sure you want to remove the package? Android Auto will disconnect first if connected. The device will not connect to your car until you re-add one.</p></div>
+          <div><h3 id="gx-aa-remove-title">Remove Android Auto support?</h3>
+            <p id="gx-aa-remove-body">This deletes the Android Auto certificate and key from this comma and forgets your saved Google sign-in, which turns off automatic renewal. Android Auto will disconnect first if connected. Your comma won’t connect to your car until you set it up again.</p></div>
           <div class="gx-settings__controls gx-actions">
             <button type="button" class="gx-btn gx-btn--tonal" @click="closeRemove">Cancel</button>
-            <button type="button" class="gx-btn gx-btn--danger" @click="removePackage">Confirm</button>
+            <button type="button" class="gx-btn gx-btn--danger" @click="removePackage">Remove</button>
           </div>
       </GxDialog>
 
@@ -851,15 +931,116 @@ export const AndroidAutoPage = {
           <div v-if="installState === 'done'" class="gx-aa-sheet__done">
             <i class="bi bi-check-circle-fill gx-aa-ok" aria-hidden="true"></i>
             <h3 id="gx-aa-install-title">You’re all set</h3>
-            <p>{{ expiry.label }}</p>
+            <p>{{ expiry.label }} · {{ renewLabel }}</p>
             <p v-if="!setup.enabled" class="gx-note">Turn on Android Auto in step 1 to connect to your car.</p>
             <ul class="gx-aa-checks"><li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li></ul>
             <button class="gx-btn gx-aa-cta" @click="closeInstall">Done</button>
           </div>
+          <div v-else-if="setup.identity.installed && !installAttempted && !renewing" class="gx-aa-manage">
+            <div class="gx-aa-sheet__head"><h3 id="gx-aa-install-title">Android Auto Support</h3>
+              <p class="gx-note">Support is set up on this comma. To set it up again, remove it first.</p></div>
+            <dl class="gx-aa-manage__facts">
+              <div><dt>Status</dt><dd><span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level">{{ expiry.label }}</span></dd></div>
+              <div><dt>Automatic renewal</dt><dd>
+                <template v-if="setup.googlePlay?.remembered"><strong>On.</strong> Renews with your saved Google sign-in before it expires.</template>
+                <template v-else><strong>Off.</strong> When it expires, you’ll need to set it up again. Turning it on takes one sign-in on a computer.</template>
+              </dd></div>
+            </dl>
+            <div class="gx-actions">
+              <button v-if="setup.googlePlay?.remembered" type="button" class="gx-btn gx-btn--tonal" :disabled="busy || setup.import?.state === 'running'" @click="feed.forgetGoogle()">Turn off automatic renewal</button>
+              <button v-else type="button" class="gx-btn" :disabled="busy || setup.import?.state === 'running' || !setup.googlePlay?.available" @click="startRenewal">Turn on automatic renewal</button>
+              <button type="button" class="gx-btn gx-btn--danger" :disabled="!!removeReason" :title="removeReason || undefined" @click="closeInstall(); openRemove()"><i class="bi bi-trash3" aria-hidden="true"></i> Remove Android Auto support</button>
+            </div>
+          </div>
           <template v-else>
-            <div class="gx-aa-sheet__head"><h3 id="gx-aa-install-title">Set Up Android Auto Support</h3>
-              <p class="gx-note">A quick one-time setup that enables wireless projection with your car.</p></div>
-            <ol class="gx-aa-sheet__steps">
+            <div v-if="renewing" class="gx-aa-sheet__head"><h3 id="gx-aa-install-title">Turn On Automatic Renewal</h3>
+              <p class="gx-note">Sign in once more on a computer. Your comma saves a private renewal credential and refreshes Android Auto now, then renews it by itself before it expires.</p>
+              <button type="button" class="gx-link" @click="renewing = false">Back</button></div>
+            <div v-else class="gx-aa-sheet__head"><h3 id="gx-aa-install-title">Set Up Android Auto Support</h3>
+              <p class="gx-note">One-time setup so your car accepts your comma. Pick how to get the Android Auto app.</p></div>
+            <GxNotice v-if="onPhone" tone="warn"><p><strong>Use a computer for this.</strong> Setup needs a desktop browser’s developer tools, which phones don’t have. On a computer, open <strong>{{ galaxyAddress }}</strong> and come back to this page.</p></GxNotice>
+            <div v-if="!renewing" class="gx-aa-methods" role="radiogroup" aria-label="Installation method">
+              <button type="button" role="radio" class="gx-aa-method" :aria-checked="installMethod === 'google'" :disabled="busy || setup.import?.state === 'running'" @click="installMethod = 'google'; chooseAgain()">
+                <i class="bi bi-cloud-arrow-down" aria-hidden="true"></i>
+                <span><strong>Download automatically</strong></span>
+                <span class="gx-aa-method__badge">Recommended</span>
+              </button>
+              <button type="button" role="radio" class="gx-aa-method" :aria-checked="installMethod === 'manual'" :disabled="busy || setup.import?.state === 'running'" @click="installMethod = 'manual'; googleToken = ''; chooseAgain()">
+                <i class="bi bi-file-earmark-arrow-up" aria-hidden="true"></i>
+                <span><strong>Upload a file</strong><small>Use an Android Auto APK you downloaded</small></span>
+              </button>
+            </div>
+            <div v-if="installMethod === 'google' && googlePrep" class="gx-aa-prep" :class="'gx-aa-prep--' + googlePrep.state" role="status" aria-live="polite">
+              <strong><i v-if="googlePrep.state === 'retrying'" class="bi bi-arrow-repeat" aria-hidden="true"></i>{{ googlePrep.label }}</strong>
+              <template v-if="googlePrep.progress">
+                <progress :value="googlePrep.percent" max="100"></progress>
+                <span class="gx-aa-prep__percent">{{ googlePrep.percent }}%<small v-if="googlePrep.detail">{{ googlePrep.detail }}</small></span>
+              </template>
+              <p>Leave your comma on and connected to the internet. This finishes in the background, so you can close this window.</p>
+              <p class="gx-note">Want to set up now? <button type="button" class="gx-link" @click="installMethod = 'manual'; googleToken = ''; chooseAgain()">Upload the Android Auto APK instead</button>.</p>
+            </div>
+            <div v-else-if="installMethod === 'google'" class="gx-aa-google gx-aa-token">
+              <p v-if="!renewing" class="gx-note">Sign in with your normal browser on a computer, copy one value Google gives you, and paste it here. Your comma then downloads Android Auto from Google Play. It takes about two minutes.</p>
+              <ol v-if="installState === 'choose'" class="gx-aa-sheet__steps gx-aa-token__steps">
+                <li>
+                  <p><strong>Enter your Google email</strong></p>
+                  <input class="gx-field gx-aa-google__email" type="email" maxlength="254" v-model="googleEmail" autocomplete="email" placeholder="you@gmail.com" aria-label="Google account email" :disabled="busy" />
+                  <label v-if="!renewing" class="gx-aa-google__remember"><input type="checkbox" v-model="googleRemember" :disabled="busy" />
+                    <span>Keep it up to date automatically<small>Renews before the certificate expires. Saves a private sign-in credential on this comma.</small></span></label>
+                </li>
+                <li>
+                  <p><strong>On a computer, open Google’s sign-in page.</strong> Use Chrome, Edge, Firefox or Safari, not a phone.</p>
+                  <a class="gx-btn gx-btn--tonal" href="https://accounts.google.com/EmbeddedSetup" target="_blank" rel="noopener noreferrer">Open sign-in page <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a>
+                  <small>Or type <code>accounts.google.com/EmbeddedSetup</code> into the address bar.</small>
+                </li>
+                <li>
+                  <p><strong>Sign in with the same account</strong> and finish any verification. When asked, click <strong>I agree</strong>.</p>
+                  <p class="gx-aa-token__warning" role="note">After you click “I agree” the page will just sit and spin. It will never finish. That’s normal. Don’t wait — go to step 4 and get the token anyway.</p>
+                </li>
+                <li>
+                  <p><strong>Open that tab’s cookies.</strong></p>
+                  <div class="gx-tabs gx-aa-token__browsers" role="group" aria-label="Your browser">
+                    <button v-for="b in tokenBrowsers" :key="b.id" type="button" class="gx-btn gx-btn--tonal" :aria-pressed="tokenBrowser === b.id" @click="tokenBrowser = b.id">{{ b.name }}</button>
+                  </div>
+                  <ul class="gx-aa-token__how">
+                    <template v-if="tokenBrowser === 'safari'">
+                      <li>First turn on developer tools: <strong>Safari → Settings → Advanced</strong>, then tick <strong>Show features for web developers</strong>.</li>
+                      <li>Press <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>I</kbd> to open Web Inspector.</li>
+                      <li>Click the <strong>Storage</strong> tab, then <strong>Cookies</strong> in the left column.</li>
+                    </template>
+                    <li v-if="tokenBrowser !== 'safari'">Press <kbd>F12</kbd> on Windows or Linux, or <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>I</kbd> on a Mac, to open developer tools.</li>
+                    <template v-if="tokenBrowser === 'chrome'">
+                      <li>Click the <strong>Application</strong> tab. If you can’t see it, click <strong>»</strong> to find it.</li>
+                      <li>In the left column, expand <strong>Cookies</strong> and click <strong>https://accounts.google.com</strong>.</li>
+                    </template>
+                    <template v-if="tokenBrowser === 'firefox'">
+                      <li>Click the <strong>Storage</strong> tab.</li>
+                      <li>In the left column, expand <strong>Cookies</strong> and click <strong>https://accounts.google.com</strong>.</li>
+                    </template>
+                  </ul>
+                </li>
+                <li>
+                  <p><strong>Copy the <code>oauth_token</code> value.</strong> Find the row named <code>oauth_token</code>, double-click its <strong>Value</strong> and copy it. It starts with <code>oauth2_4/</code>.</p>
+                </li>
+                <li>
+                  <p><strong>Paste it here right away.</strong> It only works once and expires after a few minutes.</p>
+                  <form @submit.prevent="googleImport" autocomplete="off" class="gx-aa-google__form">
+                    <label>oauth_token value <input class="gx-field" type="password" v-model="googleToken" autocomplete="off" spellcheck="false" maxlength="3072" placeholder="oauth2_4/…" required /></label>
+                    <small v-if="tokenProblem" class="gx-aa-bad" role="alert">{{ tokenProblem }}</small>
+                    <button type="submit" class="gx-btn" :disabled="busy || !googleEmail.trim() || !googleToken.trim() || !!tokenProblem || !setup.googlePlay?.available">Download and Install</button>
+                    <small v-if="!googleEmail.trim()" class="gx-note">Enter your Google email in step 1 first.</small>
+                  </form>
+                </li>
+              </ol>
+              <p v-if="installState === 'uploading'" role="status">Starting Google Play import…</p>
+              <ul v-if="['checking', 'failed'].includes(installState)" class="gx-aa-checks" aria-live="polite">
+                <li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li>
+              </ul>
+              <GxNotice v-if="installState === 'failed'" tone="danger"><p>{{ problem }}</p><button class="gx-btn gx-btn--tonal" @click="chooseAgain">Try Again</button></GxNotice>
+              <p v-if="error && installState === 'choose' && installAttempted" class="gx-aa-bad" role="alert">{{ error }}</p>
+              <p v-if="setup.googlePlay?.available === false" class="gx-note">Google Play isn’t available on this device yet. Use <strong>Upload a file</strong> instead.</p>
+            </div>
+            <ol v-else class="gx-aa-sheet__steps">
               <li :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
                 <strong>Download Android Auto</strong>
                 <a class="gx-btn gx-btn--tonal" :href="apkmirror" target="_blank" rel="noopener noreferrer">Open APKMirror <i class="bi bi-box-arrow-up-right"></i></a>
@@ -898,7 +1079,8 @@ export const AndroidAutoPage = {
                 <p v-if="error && installState === 'choose' && installAttempted" class="gx-aa-bad" role="alert">{{ error }}</p>
               </li>
             </ol>
-            <small class="gx-note">Your package stays on this comma. Maximum size {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</small>
+            <small class="gx-note gx-aa-trademark">Google, Google Play and Android Auto are trademarks of Google LLC. StarPilot is not affiliated with or endorsed by Google.</small>
+            <small v-if="installMethod !== 'google'" class="gx-note">The uploaded file is deleted after import. Maximum size {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</small>
           </template>
       </GxDialog>
     </section>`,
