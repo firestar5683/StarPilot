@@ -20,7 +20,7 @@ PROFILES = {
 def qualified(cp):
   profile = PROFILES.get(cp.carFingerprint)
   if (profile is None or cp.brand != "ford" or cp.passive or cp.dashcamOnly or cp.notCar or
-      cp.alternativeExperience not in (0, 32) or cp.pcmCruise == cp.openpilotLongitudinalControl or
+      cp.alternativeExperience not in (0, 32) or not cp.pcmCruise or
       cp.steerControlType != structs.CarParams.SteerControlType.angle or
       len(cp.safetyConfigs) not in (1, 2) or (cp.alternativeExperience == 32 and len(cp.safetyConfigs) != 1)):
     return False

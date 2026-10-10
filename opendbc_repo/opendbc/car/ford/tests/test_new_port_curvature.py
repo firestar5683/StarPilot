@@ -28,12 +28,17 @@ class TestNewPortCurvature(unittest.TestCase):
     for identity in PROFILES:
       for alpha, release in ((False, False), (True, False), (False, True), (True, True)):
         cp = factory(identity, alpha, release)
+        expected_long = bool(alpha and (identity == CAR.FORD_EDGE_MK2 or not release))
+        self.assertTrue(cp.pcmCruise)
+        self.assertEqual(cp.openpilotLongitudinalControl, expected_long)
+        self.assertEqual(cp.safetyConfigs[-1].safetyParam, (8 if identity == CAR.FORD_EDGE_MK2 else 10) + int(expected_long))
         self.assertTrue(qualified(cp))
         self.assertIsNotNone(create_controller(cp))
         original = cp.to_bytes()
         create_controller(cp)
         self.assertEqual(cp.to_bytes(), original)
-        for field, value in (("passive", True), ("dashcamOnly", True), ("notCar", True), ("alternativeExperience", 64)):
+        for field, value in (("passive", True), ("dashcamOnly", True), ("notCar", True), ("alternativeExperience", 64),
+                             ("pcmCruise", False), ("openpilotLongitudinalControl", not expected_long)):
           with structs.CarParams.from_bytes(original) as prior:
             changed = prior.as_builder()
           setattr(changed, field, value)
