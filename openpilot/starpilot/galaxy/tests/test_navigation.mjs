@@ -35,6 +35,7 @@ assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), s
   for (const network of ['unknown', undefined]) {
     state.data.network = network
     assert.equal(NavigationPage.computed.offline.call(state), false)
+    assert.equal(NavigationPage.computed.usingSavedLocation.call(state), true)
   }
   state.data.network = 'offline'
   state.stale = true

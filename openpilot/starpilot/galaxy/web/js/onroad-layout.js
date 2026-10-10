@@ -7,6 +7,7 @@ import { editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
 import { GxDialog } from "./dialog.js"
+import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 const PROFILES = ["large", "compact"]
 const COLORS = ["cardFill", "cardBorder", "text"]
@@ -455,7 +456,7 @@ export const LayoutWidgetPreview = {
 }
 
 export const OnroadLayoutPage = {
-  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog },
+  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog, GalaxySettingRow },
   props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close", "target"],
   setup(props) {
@@ -581,25 +582,10 @@ export const OnroadLayoutPage = {
   mounted() {
     if (this.mode === "local") this.feed.start()
     this._stopUnloadGuard = guardUnload(() => this.dirty || this.state.status === "saving")
-    this._leaveAttention = (event) => {
-      if (!this.inlineLeavePrompt || this.busy || event.target.closest?.('.gx-layout__savebar')) return
-      if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return
-      this.flashLeavePrompt()
-      if (event.target.closest?.('.gx-layout')) {
-        event.preventDefault()
-        event.stopPropagation()
-      }
-    }
-    document.addEventListener('pointerdown', this._leaveAttention, true)
-    document.addEventListener('keydown', this._leaveAttention, true)
   },
-  beforeUnmount() {
-    document.removeEventListener('pointerdown', this._leaveAttention, true)
-    document.removeEventListener('keydown', this._leaveAttention, true)
-    this._leaveAnimation?.cancel()
-    this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard()
-  },
+  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
   methods: {
+    switchRow,
     selectWidget(id) {
       this.state.selected = id
       this.state.inspectorPanel = "edit"
@@ -783,10 +769,10 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = ""
     },
-    setLargeUiGammaTrial(event) {
+    setLargeUiGammaTrial(value) {
       if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag) return
       const before = clone(this.state.draft)
-      this.state.draft.largeUiGammaTrial = event.target.checked
+      this.state.draft.largeUiGammaTrial = value === "On"
       this.recordChange(before)
       this.state.notice = "Save and reconnect Android Auto to apply the camera effect."
     },
@@ -1016,14 +1002,8 @@ export const OnroadLayoutPage = {
       const bar = this.$refs.leaveBar
       if (!bar) return
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      this._leaveAnimation?.cancel()
       bar.scrollIntoView({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' })
-      if (reduced) return
-      this._leaveAnimation = bar.animate([
-        { boxShadow: '0 0 8px #f4cc5360' },
-        { boxShadow: '0 0 24px 5px #f4cc53b0', outlineColor: '#fff0ac' },
-        { boxShadow: '0 0 8px #f4cc5360' },
-      ], { duration: 750, easing: 'ease-in-out' })
+      bar.querySelector('button')?.focus({ preventScroll: true })
     },
     requestLeave(action, presentation = "inline") {
       if (this.inlineLeavePrompt) { this.flashLeavePrompt(); return }
@@ -1094,7 +1074,8 @@ export const OnroadLayoutPage = {
         </div>
         <template v-if="state.data && state.draft">
           <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect">
-            <label><input type="checkbox" :checked="!!state.draft.largeUiGammaTrial" :disabled="!editable || !!state.drag || !!state.layerDrag" @change="setLargeUiGammaTrial"> Large UI Gamma Effect Trial</label>
+            <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
+              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
             <p class="gx-note">Try the large comma UI's road-camera effect on Android Auto: reduced color and increased contrast while engaged, dimming while disengaged. Off keeps the current full-color appearance. Save and reconnect Android Auto to apply. The layout preview does not simulate camera color.</p>
           </section>
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
@@ -1105,7 +1086,7 @@ export const OnroadLayoutPage = {
           <div class="gx-layout__workspace">
             <section class="gx-card gx-layout__preview-card" aria-label="Driving screen preview">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
-              <nav class="gx-layout__switcher" aria-label="Preview type">
+              <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')">Arrange widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'device'" :disabled="!!state.drag" @click="selectPreview('device')">Device preview</button>
               </nav>
@@ -1188,7 +1169,7 @@ export const OnroadLayoutPage = {
               <p v-if="state.placementError" class="gx-note" role="status">{{ state.placementError }}</p>
             </section>
             <section class="gx-card gx-layout__inspector" aria-label="Widget placement">
-              <nav class="gx-layout__switcher" aria-label="Editor sections">
+              <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Editor sections">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'widgets'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'widgets'">Widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'">Edit widget</button>
                 <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'">Road colors</button>

@@ -48,12 +48,12 @@ const gammaChanges = []
 const gammaVm = { projection: true, editable: true,
   state: { draft: { largeUiGammaTrial: false }, drag: null, layerDrag: null, notice: '' },
   recordChange: before => gammaChanges.push(before) }
-OnroadLayoutPage.methods.setLargeUiGammaTrial.call(gammaVm, { target: { checked: true } })
+OnroadLayoutPage.methods.setLargeUiGammaTrial.call(gammaVm, "On")
 assert.equal(gammaVm.state.draft.largeUiGammaTrial, true)
 assert.deepEqual(gammaChanges, [{ largeUiGammaTrial: false }])
 assert.match(gammaVm.state.notice, /Save and reconnect/)
 for (const blocked of [{ projection: false }, { editable: false }]) {
-  OnroadLayoutPage.methods.setLargeUiGammaTrial.call({ ...gammaVm, ...blocked }, { target: { checked: false } })
+  OnroadLayoutPage.methods.setLargeUiGammaTrial.call({ ...gammaVm, ...blocked }, "Off")
   assert.equal(gammaVm.state.draft.largeUiGammaTrial, true)
 }
 assert.throws(() => editorSnapshot({ version: 1, screen: null, reason: "Connect Android Auto once" }), /Connect Android Auto once/)

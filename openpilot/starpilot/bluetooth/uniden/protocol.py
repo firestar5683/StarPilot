@@ -1,7 +1,7 @@
 """Parse Uniden R4/R8/R9 radar detector BLE notifications.
 
-Pure parsing with no Bluetooth or StarPilot dependencies; see README.md in
-this directory for the planned connection and how it shares the adapter.
+Pure parsing with no Bluetooth or StarPilot dependencies. Detector connections,
+onroad alerts, sounds, and speed-control integration are not implemented.
 """
 from __future__ import annotations
 

@@ -250,8 +250,8 @@ def test_map_position_lease_uses_oldest_envelope_or_receipt_and_expires(source):
   assert reader.map_position() is None
 
 
-@pytest.mark.parametrize('kind,expected', [('none', 'offline'), ('wifi', 'online'), ('ethernet', 'online'),
-                                          ('cell2G', 'online'), ('cell3G', 'online'), ('cell4G', 'online'), ('cell5G', 'online'),
+@pytest.mark.parametrize('kind,expected', [('none', 'offline'), ('wifi', 'unknown'), ('ethernet', 'unknown'),
+                                          ('cell2G', 'unknown'), ('cell3G', 'unknown'), ('cell4G', 'unknown'), ('cell5G', 'unknown'),
                                           ('unexpected', 'unknown')])
 def test_network_status_uses_the_comma_device_state(source, kind, expected):
   reader, sm, clock = source

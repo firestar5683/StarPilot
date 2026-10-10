@@ -47,7 +47,7 @@ class NavigationStatusSource:
       if not self.sm.valid['deviceState'] or not 0 < stamp <= now <= stamp + 5_000_000_000:
         return 'unknown'
       kind = str(self.sm['deviceState'].networkType)
-      return 'offline' if kind == 'none' else 'online' if kind in ('wifi', 'ethernet', 'cell2G', 'cell3G', 'cell4G', 'cell5G') else 'unknown'
+      return 'offline' if kind == 'none' else 'unknown'
     except (AttributeError, KeyError, TypeError, ValueError, RuntimeError):
       return 'unknown'
 

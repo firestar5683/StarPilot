@@ -2,10 +2,12 @@
 
 import io
 import json
+import threading
 import time
 import zipfile
 
 from openpilot.starpilot.system.android_auto import compat_report, system_snapshot
+from openpilot.starpilot.system.android_auto.network import NetworkError, NetworkLease
 from openpilot.starpilot.system.android_auto.supervisor import LinkWatch, _where
 
 
@@ -69,6 +71,35 @@ def test_a_definite_disconnect_is_still_reported():
   assert log.named("link_lost")
 
 
+def test_real_lease_preserves_unknown_dbus_state_and_serializes_release(monkeypatch):
+  lease = NetworkLease(Recorder())
+  lease.active_path = "/active/test"
+  entered, resume = threading.Event(), threading.Event()
+
+  def failing_get(*_):
+    entered.set()
+    assert resume.wait(2)
+    raise NetworkError("NetworkManager unavailable")
+
+  monkeypatch.setattr(lease, "_get", failing_get)
+  log = Recorder()
+  watch = LinkWatch(lease, log).start()
+  try:
+    assert entered.wait(2)
+    # Cleanup cannot close the router underneath an in-flight check.
+    acquired = lease._lock.acquire(blocking=False)
+    if acquired:
+      lease._lock.release()
+    assert not acquired
+    resume.set()
+    assert wait_until(lambda: log.named("link_check_failed"))
+    assert watch.lost == ""
+  finally:
+    resume.set()
+    watch.stop()
+    watch._thread.join(2)
+
+
 def test_where_names_the_innermost_frames():
   def inner():
     raise TimeoutError()
@@ -114,16 +145,29 @@ def test_collect_runs_commands_together_under_one_deadline():
   assert "proc.txt" in files
 
 
+def test_collect_keeps_only_a_bounded_tail_while_draining(monkeypatch):
+  monkeypatch.setattr(system_snapshot, "OUTPUT_LIMIT", 1024)
+  files = system_snapshot.collect(0.0, deadline=2.0, command_set={
+    "large.log": ["sh", "-c", "head -c 1048576 /dev/zero; printf tail"],
+  })
+  assert len(files["large.log"]) == 1024
+  assert files["large.log"].endswith(b"tail")
+  manifest = json.loads(files["manifest.json"])["commands"]["large.log"]
+  assert manifest["truncated_bytes"] == 1048576 + 4 - 1024
+  assert manifest["exit"] == 0
+
+
 def test_bundle_adds_the_snapshot_and_masks_addresses_in_session_logs(tmp_path):
   logs = tmp_path / "logs"
   logs.mkdir()
   (logs / "session-000001-20261008-122756.jsonl").write_text("".join(json.dumps(event) + "\n" for event in (
     {"t": "2026-10-08T16:27:56.158+00:00", "event": "session_start", "receiver": "Boobli", "trigger": "onroad"},
     {"t": "2026-10-08T16:27:56.414+00:00", "event": "hfp_connected", "device": "dev_B0_D8_88_7D_AD_EC"},
-    {"t": "2026-10-08T16:28:18.521+00:00", "event": "attempt_failed", "stage": "streaming", "error": "projecting: TimeoutError",
+    {"t": "2026-10-08T16:28:18.521+00:00", "event": "attempt_failed", "stage": "streaming", "error": "peer B0:D8:88:7D:AD:EC failed",
      "kind": "TimeoutError", "where": ["supervisor.py:1067 _stream", "network.py:112 _get"]},
     {"t": "2026-10-08T16:28:18.600+00:00", "event": "stream_stall", "ms": 8000, "focused": False, "pending": 0},
   )))
+  (logs / "car_ui.log").write_text("peer B0:D8:88:7D:AD:EC failed")
   windows = []
 
   def snapshot(since):
@@ -134,6 +178,7 @@ def test_bundle_adds_the_snapshot_and_masks_addresses_in_session_logs(tmp_path):
     assert archive.read("system/journal_network.log") == b"wlan0: associated\n"
     session = archive.read("logs/session-000001-20261008-122756.jsonl").decode()
     report = archive.read("REPORT.txt").decode()
+    assert all(b"B0:D8:88:7D:AD:EC" not in archive.read(name) for name in archive.namelist())
   assert "B0_D8" not in session and "dev_xx_xx_xx_xx_xx_EC" in session
   assert "[at network.py:112 _get]" in report and "stream stall x1 (max 8000 ms)" in report
   from datetime import datetime

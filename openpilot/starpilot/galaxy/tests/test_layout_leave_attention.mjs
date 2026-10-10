@@ -13,28 +13,22 @@ assert.equal(pending.state.discard, pendingAction)
 
 const originalWindow = globalThis.window
 try {
-  let reduced = false, canceled = 0, animations = 0
+  let reduced = false, focuses = 0
   const scrolls = []
   globalThis.window = { matchMedia: () => ({ matches: reduced }) }
   const vm = { $refs: { leaveBar: {
     scrollIntoView(options) { scrolls.push(options) },
-    animate(frames, options) {
-      animations++
-      assert.equal(options.duration, 750)
-      assert.equal(frames.length, 3)
-      return { cancel() { canceled++ } }
-    },
+    querySelector() { return { focus(options) { assert.equal(options.preventScroll, true); focuses++ } } },
   } } }
   OnroadLayoutPage.methods.flashLeavePrompt.call(vm)
-  OnroadLayoutPage.methods.flashLeavePrompt.call(vm)
-  assert.equal(animations, 2)
-  assert.equal(canceled, 1)
+  assert.equal(scrolls.at(-1).behavior, "smooth")
   reduced = true
   OnroadLayoutPage.methods.flashLeavePrompt.call(vm)
-  assert.equal(animations, 2, "reduced motion does not animate")
   assert.equal(scrolls.at(-1).behavior, "instant")
+  assert.equal(focuses, 2)
+
 } finally {
   if (originalWindow === undefined) delete globalThis.window
   else globalThis.window = originalWindow
 }
-console.log("Layout leave attention: both targets, repeated navigation, restarted pulse, reduced motion passed")
+console.log("Layout leave attention: both targets, repeated navigation, focus restoration, reduced motion passed")

@@ -276,7 +276,7 @@ export const FavoriteChoices = {
   emits: ["choose"],
   template: `<div class="gx-navigation__favorite-choices" role="group" aria-label="Save place as">
     <button v-for="choice in [{label:'home',name:'Home',icon:'bi-house'}, {label:'work',name:'Work',icon:'bi-briefcase'}, {label:null,name:'Other',icon:'bi-star'}]"
-      :key="choice.name" type="button" class="gx-btn gx-btn--tonal" :disabled="!controlsAvailable" @click="$emit('choose', choice.label)"><i class="bi" :class="choice.icon" aria-hidden="true"></i>{{ choice.name }}</button>
+      :key="choice.name" type="button" class="gx-btn gx-btn--tonal" :disabled="!available" @click="$emit('choose', choice.label)"><i class="bi" :class="choice.icon" aria-hidden="true"></i>{{ choice.name }}</button>
   </div>`,
 }
 
@@ -286,14 +286,14 @@ export const NavigationPage = {
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, default: null }, initialTab: { type: String, default: "route" } },
   data() { return { data: null, results: [], busy: false, error: "", stale: false, tab: this.initialTab, query: "", token: "", searched: false,
-    suggestions: [], suggestOpen: false, savedSearchIds: [], savedSuggestionPlaces: {}, favoritePicker: null, searchPending: false } },
+    suggestions: [], suggestOpen: false, savedSuggestionPlaces: {}, favoritePicker: null, searchPending: false } },
   watch: { initialTab(value) { this.tab = value } },
   computed: {
     controlsAvailable() { return this.mode === "local" && !!this.data && !this.stale },
     available() { return this.controlsAvailable && !this.busy && !this.searchPending },
     ready() { return !!this.data?.enabled && !!this.data?.hasKey },
     offline() { return this.mode === "local" && this.ready && !this.stale && this.data?.network === "offline" },
-    usingSavedLocation() { return this.mode === "local" && this.ready && !this.stale && this.data?.network === "online" &&
+    usingSavedLocation() { return this.mode === "local" && this.ready && !this.stale && this.data?.network !== "offline" &&
       this.data?.location?.lastKnown === true },
     favorites() { return this.data?.favorites || [] },
     savedIds() { return new Set(this.favorites.map((place) => place.id)) },
@@ -349,7 +349,6 @@ export const NavigationPage = {
       if (this.searchPending) return
       clearTimeout(this.suggestTimer)
       this.suggestOpen = false
-      this.savedSearchIds = []
       this.savedSuggestionPlaces = {}
       this.favoritePicker = null
       this.searchPending = true
@@ -369,7 +368,6 @@ export const NavigationPage = {
     closeSuggestions() { this.suggestOpen = false; clearTimeout(this.suggestTimer) },
     clearQuery() {
       this.query = ""
-      this.savedSearchIds = []
       this.savedSuggestionPlaces = {}
       this.favoritePicker = null
       this.results = []
@@ -386,9 +384,6 @@ export const NavigationPage = {
     },
     // Search suggestions get their saved id from the comma, so the ones saved here are remembered by suggestion id.
     isFavorite(place) { return this.savedIds.has(this.savedSuggestionPlaces[place.id] || place.id) },
-    async save(place) {
-      if (await this.client.save(place) && place.searchId) this.savedSearchIds = [...this.savedSearchIds, place.id]
-    },
     favoriteKey(place) { return `${place.searchId || ''}:${place.id}` },
     openFavorite(place) {
       const key = this.favoriteKey(place)
@@ -399,7 +394,6 @@ export const NavigationPage = {
       const result = saved ? await this.client.action("labelFavorite", { id: saved.id, label }) : await this.client.save(place, label)
       if (!result) return
       if (place.searchId) {
-        this.savedSearchIds = [...new Set([...this.savedSearchIds, place.id])]
         const row = result.favorites.find(row => row.name === place.name && (!place.description || row.address === place.description))
           || result.favorites.find(row => row.name === place.name)
         if (row) this.savedSuggestionPlaces[place.id] = row.id
@@ -415,7 +409,6 @@ export const NavigationPage = {
       for (const [suggestionId, savedId] of Object.entries(this.savedSuggestionPlaces)) {
         if (savedId === id) {
           delete this.savedSuggestionPlaces[suggestionId]
-          this.savedSearchIds = this.savedSearchIds.filter(value => value !== suggestionId)
         }
       }
       return result
@@ -479,9 +472,9 @@ export const NavigationPage = {
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
           <p v-if="stale && data" class="gx-card gx-navigation__section gx-note">Showing the last received route. Reconnecting before accepting changes.</p>
           <GxNotice v-if="offline" tone="warn">Your comma has no network connection. You can
-            <a href="#/navigation/maps" @click.prevent="selectTab('maps')">download maps for offline navigation views</a>
+            <a class="gx-navigation__link" href="#/navigation/maps" @click.prevent="selectTab('maps')">download maps for offline navigation views</a>
             when you're back online. New routes need internet.</GxNotice>
-          <GxNotice v-else-if="usingSavedLocation">Using your last saved location to plan routes online. Offline map downloads aren't required.
+          <GxNotice v-else-if="usingSavedLocation">Using your last saved location to plan routes. Route planning requires Internet; offline map downloads aren't required.
             Live guidance starts when GPS is available.</GxNotice>
           <form v-if="ready" @submit.prevent="search" class="gx-navigation__search" role="search" @focusout="onSearchFocusOut">
             <div class="gx-navigation__field">

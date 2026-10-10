@@ -294,7 +294,7 @@ def bundle(log_dir: Path | None = None, config_path: Path | None = None, *,
       total += len(data)
       if total > MAX_BUNDLE_BYTES:
         raise OSError("Android Auto bundle exceeds the size limit")
-      archive.writestr(name, data)
+      archive.writestr(name, system_snapshot.redact(data))
 
     summaries, starts = [], []
     for path in logs:
@@ -305,8 +305,8 @@ def bundle(log_dir: Path | None = None, config_path: Path | None = None, *,
       report = summarize(events_from_bytes(data))
       starts.append(report.get("started") or "")
       summaries.append(render_text(report, path.name))
-      add(f"logs/{path.name}", system_snapshot.redact(data))
-      add(f"reports/{path.stem}.json", system_snapshot.redact(json.dumps(report, indent=2, default=str).encode()))
+      add(f"logs/{path.name}", data)
+      add(f"reports/{path.stem}.json", json.dumps(report, indent=2, default=str).encode())
     add("REPORT.txt", ("\n".join(summaries) or "No Android Auto sessions have been logged yet.\n").encode())
     config = identity_store.load_config(config_path)
     add("config.json", json.dumps(shareable_config(config), indent=2, default=str).encode())

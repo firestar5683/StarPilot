@@ -10,6 +10,14 @@ const suggestion = (id, searchId) => ({ id, name: "Coffee " + id, description: "
 
 assert.equal(validDestination(home), true)
 
+// Exercise the picker template as well as its parent methods: each choice must
+// follow the declared available prop, including after connectivity is lost.
+const renderChoices = compile(FavoriteChoices.template)
+for (const available of [true, false]) {
+  const picker = renderChoices({ available, $emit() {} }, [])
+  assert.deepEqual(picker.children[0].children.map(button => button.props.disabled), Array(3).fill(!available))
+}
+
 // Suggestions share one search session while typing and never cancel status polling.
 const requests = []
 const client = new NavigationClient({ publish() {}, later: () => 1, cancelTimer() {},
@@ -116,7 +124,7 @@ assert.deepEqual(computed.usageRows.call({ data: { mapboxUsage: usage } }).map((
 
 compile(NavigationPage.template, { decodeEntities: (value) => value.replaceAll("&amp;", "&") })
 compile(FavoriteChoices.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
-const favoriteActions = [], favoritePage = { favorites: [], savedSearchIds: [], savedSuggestionPlaces: {}, favoritePicker: "selected",
+const favoriteActions = [], favoritePage = { favorites: [], savedSuggestionPlaces: {}, favoritePicker: "selected",
   client: { save: async (place, label) => { favoriteActions.push([place, label]); return {favorites:[{...home,label}]} } } }
 await methods.saveAs.call(favoritePage, home, "home")
 assert.deepEqual(favoriteActions[0], [home, "home"])
@@ -136,8 +144,7 @@ console.log("Navigation autocomplete: one session per typing burst, parallel pol
 {
   const suggestion = { id: 'search-result', searchId: 'search-session', name: 'Cafe' }
   const saved = { id: 'saved-cafe', name: 'Cafe', latitude: 36, longitude: -115 }
-  const page = { favorites: [saved], savedSearchIds: [suggestion.id],
-    savedSuggestionPlaces: { [suggestion.id]: saved.id }, favoritePicker: 'old-picker' }
+  const page = { favorites: [saved], savedSuggestionPlaces: { [suggestion.id]: saved.id }, favoritePicker: 'old-picker' }
   Object.defineProperty(page, 'savedIds', { get: () => new Set(page.favorites.map(place => place.id)) })
   for (const name of ['isFavorite', 'favoriteKey', 'openFavorite', 'removeFavorite', 'saveAs']) page[name] = methods[name].bind(page)
   const removed = [], savedPlaces = []
@@ -152,7 +159,6 @@ console.log("Navigation autocomplete: one session per typing burst, parallel pol
   await page.removeFavorite(suggestion)
   assert.deepEqual(removed, [['removeFavorite', { id: saved.id }]])
   assert.equal(page.isFavorite(suggestion), false)
-  assert.deepEqual(page.savedSearchIds, [])
   assert.deepEqual(page.savedSuggestionPlaces, {})
   assert.equal(page.favoritePicker, null)
   const other = { ...saved, id: 'another-place', name: 'Park' }
@@ -162,7 +168,6 @@ console.log("Navigation autocomplete: one session per typing burst, parallel pol
   assert.deepEqual(savedPlaces, [[other, null]], 'another Other favorite can be saved after removing one')
 
   page.savedSuggestionPlaces[suggestion.id] = saved.id
-  page.savedSearchIds = [suggestion.id]
   assert.equal(page.isFavorite(suggestion), false, 'a stale suggestion marker cannot override a refreshed saved list')
   page.favorites = [saved]
   page.client.action = async () => null

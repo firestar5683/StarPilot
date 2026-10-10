@@ -235,12 +235,10 @@ class NetworkLease:
         continue
 
   def still_connected(self) -> bool:
-    if not self.active_path:
-      return False
-    try:
+    with self._lock:
+      if not self.active_path:
+        return False
       return self._get(self.active_path, NM_ACTIVE_IFACE, "State") == ACTIVE_STATE_ACTIVATED
-    except NetworkError:
-      return False
 
   def release(self, restore: bool = True) -> None:
     """Undo only what this lease owns. Safe to call repeatedly.

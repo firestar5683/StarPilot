@@ -577,7 +577,7 @@ export const AndroidAutoPage = {
         <h2>Android Auto</h2>
         <p>Show the StarPilot driving view on your car’s screen. Set up support, pair your car, then connect.</p>
       </header>
-      <p class="gx-note gx-note--danger"><strong>Wi-Fi warning:</strong> Android Auto uses the comma’s Wi-Fi to project to your car and disconnects it from your current Wi-Fi network. Without cell service on the comma, Galaxy will be unavailable while Android Auto is connected.</p>
+      <GxNotice tone="warn">Android Auto uses the comma’s Wi-Fi to project to your car and disconnects it from your current Wi-Fi network. Use the Galaxy hotspot for local access during projection. Remote Galaxy access requires Internet on the comma.</GxNotice>
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking Android Auto setup… Reconnecting automatically…" }}</GxNotice>
       <ol v-else class="gx-aa__steps">
@@ -799,7 +799,7 @@ export const AndroidAutoPage = {
         </details>
         <details class="gx-aa-wiki"><summary>Why did this page or my comma’s Wi‑Fi drop when it connected?</summary>
           <p>Android Auto talks to the car over the car’s own private Wi‑Fi. While it’s connected, the comma uses its Wi‑Fi for the car instead of your home or hotspot Wi‑Fi, disconnecting Galaxy over that network.</p>
-          <p>Without cell service on the comma, Galaxy will be unavailable until Android Auto disconnects and your usual Wi‑Fi reconnects. The comma’s cell connection is not affected by Android Auto.</p>
+          <p>Use the Galaxy hotspot for local access while Android Auto is connected. Without another Internet connection, remote Galaxy access is unavailable until your usual Wi‑Fi reconnects. The comma’s cell connection is not affected by Android Auto.</p>
         </details>
 
         <h4>Setup and upkeep</h4>

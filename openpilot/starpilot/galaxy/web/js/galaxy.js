@@ -2,12 +2,11 @@ import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { requestJson } from "./startup.js"
 import { InstallApp } from "./install-app.js"
-import { LocalAccess } from "./local-access.js"
 import { GalaxyHotspot } from "./hotspot.js"
 
 export const GalaxyPage = {
   name: "GalaxyPage",
-  components: { GxState, GxNotice, LocalAccess, InstallApp, GalaxyHotspot },
+  components: { GxState, GxNotice, InstallApp, GalaxyHotspot },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ loading: true, paired: false, url: "", tunnelClientAvailable: false, legacyPassword: false,
     legacyPairingAvailable: false, password: "", busy: false, error: "" }),
@@ -59,37 +58,36 @@ export const GalaxyPage = {
     },
   },
   template: `
-    <div class="gx-settings gx-tunnel" :inert="busy" :aria-busy="busy || undefined"><header class="gx-settings__header gx-page-header"><div><h2>Install Galaxy / Tunnel</h2>
-      <p>Pair your device for secure remote Galaxy access.</p></div></header>
-      <GxState v-if="mode !== 'local'">Pairing is available on your comma.</GxState>
+    <div class="gx-settings gx-tunnel" :inert="busy" :aria-busy="busy || undefined"><header class="gx-settings__header gx-page-header"><div><h2>Galaxy Access & Install</h2>
+      <p>Pair for remote access, install Galaxy, or set up a Wi-Fi hotspot.</p></div></header>
+      <GxState v-if="mode !== 'local'">Connect to your comma to set up remote access.</GxState>
       <GxState v-else-if="loading" loading>Checking pairing status…</GxState>
       <section v-else class="gx-card gx-panel">
+        <h3>Remote pairing</h3>
+        <p>Pair your comma to get a secure Galaxy link and QR code. Remote access requires Internet on your phone and comma, plus an active tunnel.</p>
         <template v-if="paired">
-          <span class="gx-chip"><i class="bi bi-check-circle-fill"></i> Paired</span>
-          <p>Pairing saved. Scan this code or open the link when the Galaxy tunnel is connected.</p>
+          <GxNotice tone="success" title="Paired">Scan this code or open the link when the Galaxy tunnel is connected.</GxNotice>
           <p v-if="!tunnelClientAvailable" class="gx-note gx-note--danger">The remote tunnel client is not installed on this device yet. The link will work after Galaxy's tunnel client is available.</p>
           <img src="./api/galaxy/qr.svg" alt="QR code for your Galaxy link" class="gx-tunnel__qr" />
           <p><a :href="url" target="_blank" rel="noopener" class="gx-wrap">{{ url }}</a></p>
           <button type="button" class="gx-btn gx-btn--danger" @click="unpair">{{ busy ? 'Unpairing…' : 'Unpair' }}</button>
         </template>
         <template v-else>
-          <span class="gx-chip gx-chip--lock">Not Paired</span>
-          <p v-if="legacyPassword">Enter your existing Galaxy password to keep its saved link and QR code.</p>
-          <p v-else-if="legacyPairingAvailable">An earlier Galaxy pairing is available. Enter its password to keep the saved link, or choose a new password (at least 8 characters) for a new link.</p>
-          <p v-else>First choose a password, then pair your comma. Open Galaxy remotely using the link and QR code when the tunnel is connected.</p>
+          <GxNotice v-if="legacyPassword">Enter your existing Galaxy password to keep its saved link and QR code.</GxNotice>
+          <GxNotice v-else-if="legacyPairingAvailable">An earlier Galaxy pairing is available. Enter its password to keep the saved link, or choose a new password (at least 8 characters) for a new link.</GxNotice>
+          <GxNotice v-else>First choose a password, then pair your comma. Open Galaxy remotely using the link and QR code when the tunnel is connected.</GxNotice>
           <div class="gx-actions"><input class="gx-field gx-filter-field" type="password" v-model="password" :minlength="legacyPassword || legacyPairingAvailable ? 6 : 8" maxlength="255" :autocomplete="legacyPassword ? 'current-password' : 'new-password'" :placeholder="legacyPassword ? 'Existing Galaxy password' : legacyPairingAvailable ? 'Existing or new Galaxy password' : 'New password (at least 8 characters)'" @keydown.enter="pair" />
           <button type="button" class="gx-btn" :disabled="password.trim().length < (legacyPassword || legacyPairingAvailable ? 6 : 8)" @click="pair">{{ busy ? 'Pairing…' : 'Pair' }}</button></div>
         </template>
         <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
       </section>
       <section class="gx-card gx-info-card">
-        <h3><i class="bi bi-phone" aria-hidden="true"></i> Install Galaxy</h3><InstallApp />
-        <p>Open your paired link and select Install Galaxy. Supported browsers show an installation prompt; otherwise, instructions appear here.</p>
+        <h3>Install Galaxy</h3><InstallApp />
+        <p>Install Galaxy to launch it from your home screen or desktop. Use your remote Galaxy link for app installation; the button shows installation instructions when your browser needs them.</p>
         <ul class="gx-install-benefits"><li><i class="bi bi-window" aria-hidden="true"></i> Your own full-screen window</li><li><i class="bi bi-lightning-charge" aria-hidden="true"></i> Launch from your home screen</li><li><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Automatic updates, no app store</li></ul>
-        <p class="gx-note">The public Galaxy link requires Internet and an active tunnel. For local use without Internet, bookmark the comma's hotspot or Wi-Fi address below.</p>
+        <p class="gx-note">The public Galaxy link requires Internet and an active tunnel. Installing the app does not provide an offline connection to your comma. For local access without Internet, bookmark the hotspot address or a local address from Home.</p>
       </section>
       <GalaxyHotspot :mode="mode" :unauthorized="unauthorized" />
-      <LocalAccess :mode="mode" :on-unauthorized="unauthorized" />
     </div>
   `,
 }

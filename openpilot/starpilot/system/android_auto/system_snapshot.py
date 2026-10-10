@@ -13,8 +13,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import select
+import signal
 import subprocess
-import threading
 import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -97,50 +98,50 @@ def collect(since: float, deadline: float = DEADLINE_SECONDS, *, run: Callable |
   for name, argv in (command_set if command_set is not None else commands(since)).items():
     try:
       running[name] = spawn(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            env={**os.environ, "LC_ALL": "C", "SYSTEMD_PAGER": ""})
+                            start_new_session=True, env={**os.environ, "LC_ALL": "C", "SYSTEMD_PAGER": ""})
       manifest[name] = {"command": " ".join(argv)}
     except OSError as error:
       manifest[name] = {"command": " ".join(argv), "error": error.strerror or str(error)}
 
-  outputs: dict[str, bytes] = {}
-
-  def drain(name: str, process) -> None:
-    # Each pipe is read on its own thread so one chatty command cannot stall another behind a full pipe.
-    entry = manifest[name]
-    try:
-      output, _ = process.communicate(timeout=deadline)
-      entry["exit"] = process.returncode
-    except subprocess.TimeoutExpired:
-      process.kill()
-      try:
-        output, _ = process.communicate(timeout=1.0)
-      except subprocess.TimeoutExpired:
-        output = b""
-      entry["error"] = f"timed out after {deadline:.0f} s"
-    except Exception as error:  # reported in the manifest; never fails the bundle
-      output = b""
-      entry["error"] = str(error) or type(error).__name__
-    entry["seconds"] = round(time.monotonic() - started, 2)
-    outputs[name] = output or b""
-
-  readers = [threading.Thread(target=drain, args=item, name=f"aa_snapshot_{item[0]}", daemon=True) for item in running.items()]
-  for reader in readers:
-    reader.start()
-  for reader in readers:
-    reader.join(timeout=max(0.0, deadline + 2.0 - (time.monotonic() - started)))
-
   files: dict[str, bytes] = {}
-  for name in running:
-    entry = manifest[name]
-    if name not in outputs:
-      entry["error"] = "did not finish"
-      continue
-    output = outputs[name]
-    if len(output) > OUTPUT_LIMIT:
-      entry["truncated_bytes"] = len(output) - OUTPUT_LIMIT
-      output = output[-OUTPUT_LIMIT:]
-    if output:
-      files[name] = redact(output)
+  buffers = {name: bytearray() for name in running}
+  received = dict.fromkeys(running, 0)
+  pending = {process.stdout: name for name, process in running.items()}
+  expires = started + deadline
+  try:
+    while pending and time.monotonic() < expires:
+      readable, _, _ = select.select(list(pending), [], [], max(0.0, expires - time.monotonic()))
+      for pipe in readable:
+        name = pending[pipe]
+        chunk = os.read(pipe.fileno(), 64 << 10)
+        if not chunk:
+          del pending[pipe]
+          continue
+        received[name] += len(chunk)
+        buffers[name].extend(chunk)
+        if len(buffers[name]) > OUTPUT_LIMIT:
+          del buffers[name][:-OUTPUT_LIMIT]
+  finally:
+    for name, process in running.items():
+      entry = manifest[name]
+      try:
+        process.wait(timeout=max(0.0, expires - time.monotonic()))
+      except subprocess.TimeoutExpired:
+        entry["error"] = f"timed out after {deadline:.0f} s"
+      if process.stdout in pending or process.poll() is None:
+        entry["error"] = f"timed out after {deadline:.0f} s"
+        try:
+          os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+          pass
+        process.wait(timeout=1.0)
+      process.stdout.close()
+      entry["exit"] = process.returncode
+      entry["seconds"] = round(time.monotonic() - started, 2)
+      if received[name] > OUTPUT_LIMIT:
+        entry["truncated_bytes"] = received[name] - OUTPUT_LIMIT
+      if buffers[name]:
+        files[name] = redact(bytes(buffers[name]))
 
   files["proc.txt"] = redact(_proc_snapshot())
   files["manifest.json"] = json.dumps({

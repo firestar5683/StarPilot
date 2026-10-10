@@ -73,7 +73,7 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
     assert.equal(actions.at(-1).label, null)
     Object.assign(status, { network: 'online', location: { latitude: 40, longitude: -90, validForMs: 0, lastKnown: true } })
     await page.evaluate(() => window.navigation.client.load())
-    await page.getByText('Using your last saved location to plan routes online.', { exact: false }).waitFor()
+    await page.getByText('Using your last saved location to plan routes.', { exact: false }).waitFor()
     assert.equal(await search.isEnabled(), true, 'a saved location works online without downloaded maps')
     assert.equal(await page.getByRole('link', { name: 'download maps for offline navigation views' }).count(), 0)
     status.network = 'offline'

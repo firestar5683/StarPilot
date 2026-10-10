@@ -1,4 +1,7 @@
 import { requestJson } from "./startup.js"
+import { GxNotice } from "./notice.js"
+import { GxState } from "./state.js"
+import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 export function validHotspot(value) {
   return value?.version === 1 && /^[a-f0-9]{64}$/.test(value.revision) &&
@@ -11,6 +14,7 @@ export function validHotspot(value) {
 }
 
 export const GalaxyHotspot = {
+  components: { GxNotice, GxState, GalaxySettingRow },
   props: { mode: String, unauthorized: Function },
   data: () => ({ snapshot: null, draft: null, revision: '', busy: false, error: '', notice: '',
     showPassword: false, timer: null, controller: null, generation: 0, active: false }),
@@ -19,6 +23,7 @@ export const GalaxyHotspot = {
   beforeUnmount() { this.stop() },
   watch: { mode() { this.stop(); this.start() } },
   methods: {
+    switchRow,
     start() { if (this.mode === 'local') { this.active = true; this.refresh() } },
     stop() {
       this.active = false; this.generation++; clearTimeout(this.timer); this.controller?.abort()
@@ -69,24 +74,31 @@ export const GalaxyHotspot = {
       }
     },
   },
-  template: `<section class="gx-card gx-panel"><h3>Galaxy Wi-Fi Hotspot</h3>
-    <p>Local browser access for iPhone and Android while Android Auto projects. No Bluetooth browser API or cellular connection is required for Galaxy.</p>
-    <p v-if="mode !== 'local'">Configure this on your comma.</p>
+  template: `<section class="gx-card gx-panel gx-stack"><h3>Galaxy Wi-Fi Hotspot</h3>
+    <p>Local Galaxy access for iPhone and Android. No Android Auto, Bluetooth browser support, or cellular connection needed.</p>
+    <GxState v-if="mode !== 'local'">Connect to your comma to configure the hotspot.</GxState>
+    <GxState v-else-if="!snapshot && !error" loading>Loading hotspot settings…</GxState>
     <template v-if="snapshot && draft">
-      <p role="status">Status: {{ snapshot.state }} {{ snapshot.reason }}</p>
-      <fieldset class="gx-hotspot__controls" :disabled="busy || !snapshot.editable">
-        <label><input type="checkbox" v-model="draft.enabled" /> Broadcast hotspot automatically</label>
+      <GxNotice :busy="snapshot.state === 'starting'" :tone="['error', 'unavailable'].includes(snapshot.state) ? 'warn' : 'info'">Status: {{ snapshot.state }} {{ snapshot.reason }}</GxNotice>
+      <GalaxySettingRow :row="switchRow('Broadcast hotspot automatically', draft.enabled)" :index="0"
+        :busy="busy" :disabled="!snapshot.editable" :save-value="(index, value) => { draft.enabled = value === 'On' }" />
+      <div class="gx-stack">
         <p>Network name: <strong>{{ snapshot.config.ssid }}</strong></p>
         <p class="gx-note">Fixed to TheGalaxy- plus the last four characters of your comma dongle ID. Once saved, the switch and password survive restarts.</p>
-        <p><label>Password <input class="gx-field" :type="showPassword ? 'text' : 'password'" v-model="draft.password" maxlength="63" autocomplete="new-password" placeholder="Blank generates a password" /></label></p>
-        <label><input type="checkbox" v-model="showPassword" /> Show password</label>
-        <p><button class="gx-btn" type="button" :disabled="!dirty" @click="save">{{ busy ? 'Saving…' : 'Save hotspot' }}</button></p>
-      </fieldset>
-      <p v-if="!snapshot.editable">Park before changing hotspot settings.</p>
-      <p>Join this Wi-Fi network in your phone's settings, stay connected if warned that it has no Internet, then open <a :href="snapshot.url">{{ snapshot.url }}</a>.</p>
+        <label class="gx-field-group">Password <input class="gx-field" :type="showPassword ? 'text' : 'password'" v-model="draft.password" :disabled="busy || !snapshot.editable" maxlength="63" autocomplete="new-password" placeholder="Blank generates a password" /></label>
+        <label><input type="checkbox" v-model="showPassword" :disabled="busy || !snapshot.editable" /> Show password</label>
+        <div class="gx-settings__controls gx-actions"><button class="gx-btn" type="button" :disabled="!dirty || busy || !snapshot.editable" @click="save">{{ busy ? 'Saving…' : 'Save hotspot' }}</button></div>
+      </div>
+      <GxNotice v-if="!snapshot.editable">Park before changing hotspot settings.</GxNotice>
+      <p>Join the network, stay connected if warned of no Internet, then open and bookmark <a :href="snapshot.url">{{ snapshot.url }}</a>.</p>
     </template>
-    <p class="gx-note">When enabled, the hotspot starts automatically while the comma is running, even without another Wi-Fi connection. It uses a standalone channel or follows Android Auto/Wi-Fi's channel when connected. Joining a network or switching channels may briefly interrupt phone access. The Wi-Fi radio must be available. This hotspot provides no Internet gateway. Changing its password or disabling it disconnects hotspot clients.</p>
-    <p class="gx-note">Bookmark the full local address. The public galaxy.firestar.link address still requires Internet and its tunnel.</p>
-    <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
+    <ul class="gx-install-benefits">
+      <li><i class="bi bi-power" aria-hidden="true"></i><span>Starts automatically when enabled. Needs the comma on and Wi-Fi available.</span></li>
+      <li><i class="bi bi-wifi" aria-hidden="true"></i><span>Works standalone, or shares the channel of connected Wi-Fi or Android Auto.</span></li>
+      <li><i class="bi bi-phone" aria-hidden="true"></i><span>Local access without Internet; no Internet sharing.</span></li>
+      <li><i class="bi bi-arrow-repeat" aria-hidden="true"></i><span>Network or channel changes may interrupt access. Changing the password or disabling the hotspot disconnects phones.</span></li>
+      <li><i class="bi bi-globe" aria-hidden="true"></i><span>The public galaxy.firestar.link address still needs Internet and its tunnel.</span></li>
+    </ul>
+    <GxNotice v-if="error" tone="danger">{{ error }}</GxNotice><GxNotice v-if="notice" tone="success">{{ notice }}</GxNotice>
   </section>`,
 }
