@@ -34,7 +34,7 @@ from openpilot.starpilot.ui.vasm_owner import ANNOTATION as VASM_ANNOTATION, RES
 
 
 PAGES = frozenset(("hub", "vehicle", "slc", "lane", "lane_change", "profiles", "traffic", "aggressive", "standard", "relaxed",
-                   "curve", "torque", "aol", "wheel", "appearance", "display", "data", "sounds", "pip", "sentry", "vasm",
+                   "curve", "torque", "highway_smoothing", "aol", "wheel", "appearance", "display", "data", "sounds", "pip", "sentry", "vasm",
                    "conditional", "conditional/cem", "conditional/ccm",
                    *(f"{name}/{category}" for name in ("traffic", "aggressive", "standard", "relaxed")
                      for category in ("acceleration", "braking", "following"))))
@@ -438,7 +438,7 @@ class SettingsGateway:
     with self.lock:
       ctx = self.context.sample()
       sections = []
-      for page in ("torque", "lane", "lane_change", "aol", "conditional", "profiles", "slc", "curve"):
+      for page in ("torque", "highway_smoothing", "lane", "lane_change", "aol", "conditional", "profiles", "slc", "curve"):
         state = self._state(page, ctx)
         sections.append({"title": state.title,
                          "rows": [{"label": row.label, "value": row.value} for row in state.rows[:64]]})
