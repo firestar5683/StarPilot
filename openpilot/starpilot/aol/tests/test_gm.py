@@ -1154,6 +1154,10 @@ class TestGmAol(unittest.TestCase):
       with self.subTest(identity=identity):
         self.exercise_bolt_cancel_recovery(identity, False, pedal_scene=True)
 
+  def test_bolt_pedal_current_inventory_and_published_control_join(self):
+    exercise_bolt_cancel_recovery(self, CAR.CHEVROLET_BOLT_CC_2018_2021, False,
+                                 pedal_scene=True, inventory_publish=True)
+
   def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, communications: str | None = None, pedal_scene=False):
     exercise_bolt_cancel_recovery(self, identity, removed, critical=critical,
                                  communications=communications, pedal_scene=pedal_scene)

@@ -1,9 +1,10 @@
 """Shared GM Bolt parser, caller and native recovery trajectory fixture."""
 import os
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 from opendbc.can import CANPacker
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.tests.test_bolt_cc import feed as feed_car, native
 from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.car.gm.values import CAR, DBC
@@ -11,13 +12,14 @@ from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
-from openpilot.starpilot.aol.runtime import decide_axes
+from openpilot.starpilot.aol.runtime import current_native, decide_axes
 from openpilot.starpilot.aol.transport_pause import TransportPause
-from openpilot.starpilot.aol.wire import IntentState, SafetyState, encode_safety
+from openpilot.starpilot.aol.wire import IntentState, PandaSlot, SafetyState, decode_safety, encode_safety
 from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
 
 
-def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, communications: str | None = None, pedal_scene=False):
+def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, communications: str | None = None,
+                                  pedal_scene=False, inventory_publish=False):
   from openpilot.cereal import log
   from openpilot.selfdrive.car.car_events import CarEvents
   from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
@@ -41,7 +43,16 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
       settings.put_bool(key, True, block=True)
     if communications is not None:
       settings.put('AolBrakePauseSpeedMps', 25., block=True)
-    factory = pedal_params(identity, pedal=True, camera=not removed, removed=removed)
+    if inventory_publish:
+      from opendbc.car.gm.interface import CarInterface
+      self.assertEqual(identity, CAR.CHEVROLET_BOLT_CC_2018_2021, msg=ctx)
+      self.assertTrue(pedal_scene and not removed and critical is None and communications is None, msg=ctx)
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0].update({0x201: 6, 0x142: 7})
+      fingerprint[2].update({0x320: 8, 0x180: 4})
+      factory = CarInterface.get_params(identity, fingerprint, [], False, False, False)
+    else:
+      factory = pedal_params(identity, pedal=True, camera=not removed, removed=removed)
     selected = self.card(factory, settings)
     cp, ci = selected.CP, selected.CI
     word = cp.safetyConfigs[0].safetyParam
@@ -51,9 +62,16 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
     self.assertTrue(cp.openpilotLongitudinalControl, msg=ctx)
     self.assertFalse(cp.pcmCruise, msg=ctx)
     self.assertTrue(cp.flags & GMFlags.PEDAL_LONG, msg=ctx)
+    if inventory_publish:
+      self.assertEqual(len(cp.safetyConfigs), 1, msg=ctx)
+      self.assertEqual(cp.safetyConfigs[0].safetyModel, structs.CarParams.SafetyModel.gm, msg=ctx)
+      self.assertEqual(word, 157, msg=ctx)
+      self.assertEqual(cp.flags, 17, msg=ctx)
     controls = Controls()
     self.assertEqual(controls.CP.to_dict(), cp.to_dict(), msg=ctx)
     sd = SelfdriveD(CP=cp.as_reader()) if communications is not None or pedal_scene else SelfdriveD.__new__(SelfdriveD)
+    if inventory_publish:
+      self.assertEqual(sd.CP.to_dict(), cp.to_dict(), msg=ctx)
     sd.CP, sd.initialized, sd.aol_replay = cp, True, True
     sd.enabled = sd.active = False
     sd.aol_session_id, sd.aol_axis_decision = 'bolt-cancel', AxisDecision()
@@ -75,6 +93,11 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
     safety.set_alternative_experience(32)
     self.assertEqual(safety.set_safety_hooks(structs.CarParams.SafetyModel.gm, word), 0, msg=ctx)
     safety.init_tests()
+    if inventory_publish:
+      # init_tests resets this configuration scalar; restore the actual selected CP value.
+      safety.set_alternative_experience(int(cp.alternativeExperience))
+      self.assertEqual(safety.get_current_safety_mode(), int(cp.safetyConfigs[0].safetyModel.raw), msg=ctx)
+      self.assertEqual(safety.get_current_safety_param(), word, msg=ctx)
     status_owner = word in (0xBD, 0x9D, 0x19D, 0xE700, 0xE701, 0xE702)
     queued_status = None
     last_status_emission_us = None
@@ -142,6 +165,8 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
         _, prime_packets = feed_car(SimpleNamespace(update=lambda _: None), packer, prime_now,
                                     counter=counter, active=True, speed=20., camera=not removed)
         prime_packets = [packet for packet in prime_packets if packet[0] not in (0x1C4, 0x1E1)]
+        if inventory_publish:
+          prime_packets.append(packer.make_can_msg('BCMBlindSpotMonitor', 0, {}))
         prime_packets += [packer.make_can_msg('AcceleratorPedal2', 0, {'CruiseState': AccState.ACTIVE})]
         sensor = bytearray(packer.make_can_msg('GAS_SENSOR', 0,
                            {'INTERCEPTOR_GAS': 0., 'INTERCEPTOR_GAS2': 0., 'STATE': 0, 'COUNTER_PEDAL': pedal_counter})[1])
@@ -178,6 +203,8 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
         _, packets = feed_car(SimpleNamespace(update=lambda _: None), packer, now,
                               counter=tick % 4, active=stock_active, speed=20., regen=physical_regen, camera=not removed)
         packets = [packet for packet in packets if packet[0] not in (0x1C4, 0x1E1, 0x184)]
+        if inventory_publish:
+          packets.append(packer.make_can_msg('BCMBlindSpotMonitor', 0, {}))
         if pedal_scene:
           # The reported neutral mode0 wheel bytes; preserve emitted ACC-form Cancel.
           counter = tick % 4
@@ -332,10 +359,20 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
                                    int(structs.CarParams.SafetyModel.gm), word,
                                    bool(mask & 1), bool(mask & 2), desired.desired_lateral,
                                    desired.desired_longitudinal, 'panda', 'bolt-cancel')
+        if inventory_publish:
+          slot = PandaSlot(0, receipt_state.pandaSerial, safety.get_current_safety_mode(), safety.get_current_safety_param(),
+                           int(cp.alternativeExperience), bool(safety.get_controls_allowed()),
+                           not bool(safety.safety_config_valid()))
+          # Source PandaStates/CAN use the synthetic BOOTTIME tick; the lease is MONOTONIC.
+          receipt_state = replace(receipt_state, sourcePandaStatesMonoTime=now, pandaInventory=(slot,))
         intent = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=now)
         intent.aolIntentWire = encode_intent(intent_state)
         receipt = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=now)
         receipt.aolSafetyWire = encode_safety(receipt_state)
+        if inventory_publish:
+          self.assertEqual(decode_safety(receipt.aolSafetyWire), receipt_state, msg=ctx)
+          self.assertEqual(receipt_state.pandaInventory[0].controlsAllowed,
+                           bool(safety.get_controls_allowed()), msg=ctx)
         model = messaging.new_message('modelV2', valid=True, logMonoTime=now)
         calibration = messaging.new_message('extrinsicsCalibration', valid=True, logMonoTime=now)
         calibration.extrinsicsCalibration.calStatus = 'calibrated'
@@ -444,20 +481,35 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
         state = messaging.new_message('carState', valid=True, logMonoTime=now)
         state.carState = cs
         controls.sm.update_msgs((now + 1_000) / 1e9, [axis.as_reader(), receipt.as_reader(), state.as_reader()])
-        command, _ = controls.state_control()
+        command, controller_log = controls.state_control()
         ctx.update(command_lat=command.latActive, command_long=command.longActive)
         self.assertEqual(command.latActive, expected_lat and tick != stale_axis_tick, ((tick, critical), ctx))
         self.assertEqual(command.longActive, ordinary, ((tick, critical), ctx))
         command.actuators.torque = .02 if command.latActive else 0.
         if pedal_scene:
-          control_message = messaging.new_message('carControl', valid=True, logMonoTime=now)
-          control_message.carControl = command
-          previous_command = command.as_reader()
-          selected.sm.update_msgs(now / 1e9, [control_message.as_reader()])
+          if inventory_publish:
+            published = []
+            def capture_control(service, event):
+              if service == 'carControl':
+                published.append(messaging.log_from_bytes(event.to_bytes()))
+            with patch.object(controls.pm, 'send', side_effect=capture_control), \
+                 patch('openpilot.cereal.messaging.time.monotonic', return_value=now / 1e9):
+              controls.publish(command, controller_log)
+            self.assertEqual(len(published), 1, msg=ctx)
+            self.assertEqual(published[0].carControl.to_dict(), command.to_dict(), msg=ctx)
+            self.assertEqual(published[0].valid, cs.canValid, msg=ctx)
+            self.assertEqual(published[0].logMonoTime, now, msg=ctx)
+            selected.sm.update_msgs(now / 1e9, published)
+            previous_command = selected.sm['carControl']
+          else:
+            control_message = messaging.new_message('carControl', valid=True, logMonoTime=now)
+            control_message.carControl = command
+            previous_command = command.as_reader()
+            selected.sm.update_msgs(now / 1e9, [control_message.as_reader()])
           selected.can_log_mono_time = now + 2
           with patch('openpilot.selfdrive.car.card.time.monotonic_ns', return_value=now + 2), \
                patch('openpilot.selfdrive.car.card.time.monotonic', return_value=(now + 2) / 1e9):
-            selected.controls_update(cs, command.as_reader())
+            selected.controls_update(cs, selected.sm['carControl'] if inventory_publish else command.as_reader())
           self.assertTrue(sent, msg=ctx)
           messages = sent.pop()
           ctx['command_accel'] = command.actuators.accel
@@ -530,6 +582,35 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
                          'native_apply_0xbd', 'native_apply_0x1f5', 'native_release_0xbd', 'native_release_0x1f5',
                          'physical_regen', 'physical_release_lateral_recovered',
                          'six_second_event_recovery'} <= trajectory, (trajectory, ctx))
+        if inventory_publish:
+          healthy = current_native(sd.sm, cp, now_ns=now, axis_session_id='bolt-cancel')
+          self.assertEqual(healthy, receipt_state, msg=ctx)
+          self.assertTrue(sd._decide_aol_axes(cs, intent_state, healthy).lateral_active, msg=ctx)
+          native_mask = safety.aol_get_permission_mask()
+          mutations = {
+            'borrowed_serial': replace(receipt_state, pandaSerial='borrowed-panda'),
+            'wrong_slot_word': replace(receipt_state, pandaInventory=(replace(slot, safetyParam=word ^ 1),)),
+            'expired_lease': replace(receipt_state, observedMonoTime=now - 200_000_001, validUntilMonoTime=now - 1),
+          }
+          for failure, bad in mutations.items():
+            with self.subTest(inventory_failure=failure):
+              rejected = messaging.new_message('aolSafetyWire', 0, valid=True, logMonoTime=bad.observedMonoTime)
+              rejected.aolSafetyWire = encode_safety(bad)
+              for caller in (sd, controls):
+                caller.sm.update_msgs((now + 1_000) / 1e9, [rejected.as_reader()])
+                self.assertIsNone(current_native(caller.sm, cp, now_ns=now, axis_session_id='bolt-cancel'), msg=ctx)
+              denied_axes = sd._decide_aol_axes(cs, intent_state, current_native(sd.sm, cp, now_ns=now,
+                                                                               axis_session_id='bolt-cancel'))
+              self.assertFalse(denied_axes.lateral_active or denied_axes.longitudinal_active, msg=ctx)
+              denied_command, _ = controls.state_control()
+              self.assertFalse(denied_command.latActive or denied_command.longActive, msg=ctx)
+              self.assertEqual(safety.aol_get_permission_mask(), native_mask, msg=ctx)
+          for caller in (sd, controls):
+            caller.sm.update_msgs((now + 1_000) / 1e9, [receipt.as_reader()])
+          self.assertEqual(current_native(sd.sm, cp, now_ns=now, axis_session_id='bolt-cancel'), receipt_state, msg=ctx)
+          recovered, _ = controls.state_control()
+          self.assertTrue(recovered.latActive, msg=ctx)
+          self.assertFalse(recovered.longActive, msg=ctx)
         # Explicit synthetic mismatch input proves the real watchdog runs and keeps its alert.
         # This control is never sent to Card/native and is not a route observation.
         mismatch = cs.as_reader().as_builder()
