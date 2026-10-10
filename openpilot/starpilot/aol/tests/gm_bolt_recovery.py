@@ -489,9 +489,9 @@ def exercise_bolt_cancel_recovery(self, identity, removed, *, critical=None, com
         if pedal_scene:
           if inventory_publish:
             published = []
-            def capture_control(service, event):
+            def capture_control(service, event, collector=published):
               if service == 'carControl':
-                published.append(messaging.log_from_bytes(event.to_bytes()))
+                collector.append(messaging.log_from_bytes(event.to_bytes()))
             with patch.object(controls.pm, 'send', side_effect=capture_control), \
                  patch('openpilot.cereal.messaging.time.monotonic', return_value=now / 1e9):
               controls.publish(command, controller_log)
