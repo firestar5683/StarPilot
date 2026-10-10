@@ -29,6 +29,8 @@ class ShellActionTests(unittest.TestCase):
     from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
 
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+
+    session.slc_actions = None
     session.profile = Profile.LARGE
     session.favorites = Mock()
     session.view = ShellView.__new__(ShellView)
@@ -88,6 +90,8 @@ class ShellActionTests(unittest.TestCase):
     from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsState
 
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+
+    session.slc_actions = None
     session.profile = Profile.LARGE
     session.favorites, session.pip_warning = Mock(), Mock()
     session.notice = ""

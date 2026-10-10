@@ -22,6 +22,7 @@ def lifecycle(monkeypatch):
   adapter = RuntimeSnapshotAdapter(ui)
   adapter.build = Mock(wraps=adapter.build)
   session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+  session.slc_actions = None
   monkeypatch.setattr(session, 'drive_state', SimpleNamespace(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
                                                   "effective": None, "overrideAllowed": False}), raising=False)
   session.adapter = adapter

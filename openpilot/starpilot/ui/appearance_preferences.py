@@ -70,7 +70,7 @@ DEFAULTS = {
   "LeadInfo": False,
   "BlindSpotMetrics": True,
   "SignalMetrics": False,
-  "ShowSpeedLimits": False,
+  "ShowSpeedLimits": True,
   "UseVienna": False,
 }
 MAX_RAW_BYTES = 16
@@ -141,7 +141,7 @@ class OnroadAppearance:
   show_torque_bar: bool = True
   show_blindspot_border: bool = True
   show_signal_border: bool = False
-  show_speed_limit_sign: bool = False
+  show_speed_limit_sign: bool = True
   use_vienna_sign: bool = False
   show_stopped_timer: bool = False
   show_stock_confidence_ball: bool = False

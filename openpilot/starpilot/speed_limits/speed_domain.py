@@ -129,6 +129,24 @@ def _schedule_valid(schedule: object) -> bool:
   return True
 
 
+def offset_for_limit(speed_mps: float, schedule: OffsetSchedule) -> float | None:
+  if not _number(speed_mps, positive=True) or not _schedule_valid(schedule):
+    return None
+  for band in schedule.bands:
+    if band.lower_mps <= speed_mps and (band.upper_mps is None or speed_mps < band.upper_mps):
+      return band.offset_mps
+  return None
+
+
+def adjusted_limit(speed_mps: float, schedule: OffsetSchedule) -> float | None:
+  """Informational cluster limit using the same validated bands as control."""
+  offset = offset_for_limit(speed_mps, schedule)
+  if offset is None:
+    return None
+  value = speed_mps + offset
+  return value if _number(value, positive=True) else None
+
+
 def resolve(decision: acc.Decision, schedule: OffsetSchedule, selected: SpeedPair, ego: SpeedPair) -> DomainResolution:
   """Bind an explicit offset and contemporaneous speed pairs to an acceptance output."""
   if (not isinstance(decision, acc.Decision) or not isinstance(decision.state, acc.State) or decision.errors or
@@ -168,16 +186,16 @@ def resolve(decision: acc.Decision, schedule: OffsetSchedule, selected: SpeedPai
     return DomainResolution(DomainStatus.INVALID, reason="accepted target mismatch")
   assert selected.raw_mps is not None and selected.cluster_mps is not None
   assert ego.raw_mps is not None and ego.cluster_mps is not None
-  for band in schedule.bands:
-    if band.lower_mps <= target and (band.upper_mps is None or target < band.upper_mps):
-      effective = target + band.offset_mps
-      if not _number(effective, positive=True):
-        return DomainResolution(DomainStatus.INVALID, reason="nonpositive effective target")
-      return DomainResolution(DomainStatus.VALID, DomainContext(
-        decision.state.session_id, decision.state.last_timestamp_ns, target, band.offset_mps, effective,
-        selected.raw_mps, max(0.0, selected.cluster_mps - selected.raw_mps),
-        ego.raw_mps, max(0.0, ego.cluster_mps - ego.raw_mps)))
-  return DomainResolution(DomainStatus.UNAVAILABLE, reason="no configured offset band")
+  offset = offset_for_limit(target, schedule)
+  if offset is None:
+    return DomainResolution(DomainStatus.UNAVAILABLE, reason="no configured offset band")
+  effective = target + offset
+  if not _number(effective, positive=True):
+    return DomainResolution(DomainStatus.INVALID, reason="nonpositive effective target")
+  return DomainResolution(DomainStatus.VALID, DomainContext(
+    decision.state.session_id, decision.state.last_timestamp_ns, target, offset, effective,
+    selected.raw_mps, max(0.0, selected.cluster_mps - selected.raw_mps),
+    ego.raw_mps, max(0.0, ego.cluster_mps - ego.raw_mps)))
 
 
 def to_planner_coordinate(context: DomainContext, contribution_raw_mps: float | None, basis: str) -> PlannerCoordinate:

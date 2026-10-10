@@ -209,6 +209,15 @@ struct SlcState @0xa1680744031fdb2d {
   # Presentation only. Qualified source observations from this publisher cycle;
   # consumers use the outer session and frame freshness, never these rows for control.
   sourceReadings @41 :List(SourceReading);
+  acceptedAdjustedLimit @42 :Float32;
+  hasAcceptedAdjustedLimit @43 :Bool;
+  pendingAdjustedLimit @44 :Float32;
+  hasPendingAdjustedLimit @45 :Bool;
+  presentationAdjustedLimit @46 :Float32;
+  hasPresentationAdjustedLimit @47 :Bool;
+  overrideBasis @48 :Text; # none/pedal/persistent; qualified contribution only
+  retainedOverride @49 :Bool;
+  commandActionSequenceId @50 :UInt64; # UI sequence that issued this command
   struct SourceReading {
     source @0 :Text;
     enabled @1 :Bool;

@@ -106,7 +106,7 @@ def default_layout(screen):
 
 def default_layout_for_viewport(viewport):
   metadata = layout_metadata_for_viewport(viewport)
-  return {'version': 1, 'clock24Hour': False, 'largeUiGammaTrial': False, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 
@@ -126,13 +126,24 @@ def validate_layout(value, screen):
   return validate_layout_for_viewport(value, (geometry.logical_width, geometry.logical_height))
 
 
-def validate_layout_for_viewport(value, viewport):
+def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   metadata = layout_metadata_for_viewport(viewport)
+  if type(value) is dict and type(value.get('version')) is int and value['version'] == 1 and not _legacy_geometry:
+    result = validate_layout_for_viewport(value, viewport, _legacy_geometry=True)
+    card, actions = result['widgets']['cruise_limits'], result['widgets']['speed_limit_actions']
+    if actions['x'] == card['x'] and actions['y'] - card['y'] in (372, 425):
+      actions['y'] = card['y'] + 492
+    for key in ('cruise_limits', 'speed_limit_actions'):
+      widget, saved = metadata['widgets'][key], result['widgets'][key]
+      for axis, extent in (('x', 'width'), ('y', 'height')):
+        saved[axis] = min(saved[axis], metadata['bounds'][axis] + metadata['bounds'][extent] - widget[extent])
+    result['version'] = 2
+    return validate_layout_for_viewport(result, viewport)
   fields = {'version', 'canvas', 'widgets'}
   if type(value) is dict:
     fields |= {field for field in ('widgetOrder', 'clock24Hour', 'largeUiGammaTrial') if field in value}
   if (type(value) is not dict or set(value) != fields or
-      type(value['version']) is not int or value['version'] != 1 or
+      type(value['version']) is not int or value['version'] not in (1, 2) or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
       not set(metadata['widgets']) - set(value['widgets']) <= {MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
@@ -178,6 +189,13 @@ def validate_layout_for_viewport(value, viewport):
           type(placement['opacity']) is not int or not opacity['min'] <= placement['opacity'] <= opacity['max']):
         raise ValueError('Invalid map overlay size or opacity')
     dimensions = placement_size(key, widget, placement)
+    if _legacy_geometry and key in ('cruise_limits', 'speed_limit_actions'):
+      historic = {'cruise_limits': ((176, 483), (280, 412)), 'speed_limit_actions': ((176, 58), (280, 96))}
+      # Both shapes were published as v1; validate the whole footprint before migrating.
+      dimensions = next((pair for pair in historic[key] if all(
+        type(placement[axis]) in (int, float) and math.isfinite(placement[axis]) and
+        bounds[axis] <= placement[axis] <= bounds[axis] + bounds[extent] - dimension
+        for (axis, extent), dimension in zip((('x', 'width'), ('y', 'height')), pair, strict=True))), dimensions)
     for (axis, extent), dimension in zip((('x', 'width'), ('y', 'height')), dimensions, strict=True):
       number = placement[axis]
       if (type(number) not in (int, float) or not math.isfinite(number) or

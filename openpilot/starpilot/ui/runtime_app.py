@@ -224,7 +224,8 @@ class StarShellSession:
     self.input = ShellInput(profile, self._emit,
                             native_panels=NATIVE_SETTINGS_PANELS if profile == Profile.LARGE and settings_layer is not None else ())
     if profile == Profile.LARGE:
-      self.input.onroad.drawer_bounds = self.view.onroad.unified_speed.source_bounds
+      self.view.onroad.pressed_action = lambda: self.input.onroad.pressed_action
+      self.view.onroad.unified_speed.source_pressed = lambda: self.input.onroad.source_pressed
     self.selected = Destination.STAR
     self.sidebar_expanded = True
     self._onroad_width = 1860.0
@@ -1238,6 +1239,12 @@ class StarShellSession:
         self._snapshot_cache = None
     snapshot = self.snapshot(mode)
     self._mode = mode
+    if mode == ShellMode.ONROAD and self.slc_actions is not None:
+      observation = snapshot.onroad.speed_limit
+      snapshot = replace(snapshot, onroad=replace(snapshot.onroad, speed_limit=replace(
+        observation, action_feedback=self.slc_actions.feedback(observation))))
+    elif mode != ShellMode.ONROAD and self.slc_actions is not None:
+      self.slc_actions.clear_feedback()
     rendered = getattr(self, "_rendered_settings", None)
     if mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and (rendered is None or rendered[1].selected != snapshot.selected):
       if pane := _FEATURE_SETTINGS_PANES.get(snapshot.selected):

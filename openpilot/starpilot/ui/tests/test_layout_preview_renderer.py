@@ -37,8 +37,9 @@ class LayoutPreviewRendererTests(unittest.TestCase):
     from openpilot.starpilot.ui.onroad_state import slc_controls
     pending = sample_state("slc_pending", document)
     for profile in (Profile.LARGE, Profile.COMPACT):
-      self.assertEqual([item.label for item in slc_controls(profile, pending)], ["ACCEPT", "REJECT"])
-      self.assertFalse(slc_controls(profile, sample_state("engaged", document)))
+      self.assertEqual([item.label for item in slc_controls(profile, pending)],
+                       ["Apply 54", "Keep"] if profile == Profile.LARGE else ["ACCEPT", "REJECT"])
+      self.assertEqual(len(slc_controls(profile, sample_state("engaged", document))), 1 if profile == Profile.LARGE else 0)
     manual = sample_state("experimental", document)
     self.assertTrue(manual.experimental_enabled)
     self.assertIsNone(manual.visual_preview)

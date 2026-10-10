@@ -261,6 +261,7 @@ class NetworkPanelTests(unittest.TestCase):
 
   def test_shell_selection_cancels_press_and_renders_native_pane_in_screen_coordinates(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.slc_actions = None
     session.pip_warning = Mock()
     session.favorites = Mock()
     session.selected = Destination.STAR
@@ -296,6 +297,7 @@ class NetworkPanelTests(unittest.TestCase):
 
   def test_shell_render_failure_returns_to_star_without_retrying_deactivated_bridge(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.slc_actions = None
     session.pip_warning = Mock()
     session.favorites = Mock()
     session.selected = Destination.NETWORK

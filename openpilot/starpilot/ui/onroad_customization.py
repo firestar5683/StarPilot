@@ -9,6 +9,7 @@ from typing import Any, NotRequired, TypedDict
 
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
+from openpilot.starpilot.ui.large_speed_geometry import WIDTH, CARD_HEIGHT, ACTION_HEIGHT, ACTION_X, ACTION_Y
 
 PARAM_KEY = "OnroadCustomizations"
 MAX_BYTES = 16384
@@ -70,8 +71,8 @@ PROFILES: dict[str, LayoutProfile] = {
             "reservedZones": [],
             "widgets": {
               "current_speed": _widget("Current speed", "current_speed", 580, 300, 640, 30),
-              "cruise_limits": _widget("Cruise and speed limit", "cruise_limits", 176, 483, 88, 75),
-              "speed_limit_actions": _widget("Speed limit actions", "speed_limit_actions", 176, 58, 88, 500),
+              "cruise_limits": _widget("Cruise and speed limit", "cruise_limits", WIDTH, CARD_HEIGHT + 52, 88, 75),
+              "speed_limit_actions": _widget("Speed limit actions", "speed_limit_actions", WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y),
               "steering_wheel": _widget("Steering wheel", "steering_wheel", 192, 192, 1588, 75),
               "driver_monitor": _widget("Driver monitoring", "driver_monitor", 192, 192, 88, 808)}},
   "compact": {"label": "Small UI", "width": 536, "height": 240,
@@ -139,8 +140,8 @@ WIDGET_COLORS = {
     MODE_WIDGET: {"text": "#FFFFFFFF"},
     CLOCK_WIDGET: {"text": "#FFFFFFFF"},
     "current_speed": {"text": None},
-    "cruise_limits": {"cardFill": None, "cardBorder": None, "text": None},
-    "speed_limit_actions": _ACTION_COLORS,
+    "cruise_limits": {"cardFill": "#10191FFF", "cardBorder": "#35434DFF", "text": None},
+    "speed_limit_actions": {"cardFill": "#10191FFF", "cardBorder": "#35434DFF", "text": "#FFFFFFFF"},
     "steering_wheel": {"cardFill": None, "cardBorder": "#00000000"},
     "driver_monitor": _FRAME_COLORS,
   },
@@ -206,24 +207,41 @@ def customization_metadata():
 
 
 def default_document():
-  return {"version": 4, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
+  return {"version": 6, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
     profile: {key: {**widget["default"], **({"size": WHEEL_SIZES[profile][1]} if key == "steering_wheel" else {})}
               for key, widget in data["widgets"].items()}
     for profile, data in PROFILES.items()}}
 
 
-def validate_document(value):
-  if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in (1, 2, 3, 4):
+def validate_document(value, *, _legacy_geometry=False):
+  if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in (1, 2, 3, 4, 5, 6):
     raise ValueError("Invalid customization version")
+  if value['version'] < 6 and not _legacy_geometry:
+    result = validate_document(value, _legacy_geometry=True)
+    if value['version'] < 5 and value['palette'] != PALETTE:
+      colors = result['widgetColors']['large'].setdefault('cruise_limits', {})
+      for key in ('cardFill', 'cardBorder'):
+        colors.setdefault(key, value['palette'][key])
+    layouts = result['layouts']['large']
+    card, actions = layouts['cruise_limits'], layouts['speed_limit_actions']
+    # Follow the card only when actions kept their old relative placement.
+    if actions['x'] == card['x'] and actions['y'] - card['y'] == (425 if value['version'] < 5 else 372):
+      actions['y'] = card['y'] + CARD_HEIGHT + 22
+    for key in ('cruise_limits', 'speed_limit_actions'):
+      widget, saved = PROFILES['large']['widgets'][key], layouts[key]
+      bounds = widget_bounds('large', key)
+      for axis, extent in (('x', 'width'), ('y', 'height')):
+        saved[axis] = min(saved[axis], bounds[axis] + bounds[extent] - widget[extent])
+    return validate_document(result)
   fields = {"version", "palette", "layouts"} | ({"widgetColors"} if value["version"] >= 2 else set())
   if value["version"] >= 3:
     fields.add("roadColors")
-  if value['version'] == 4 and 'speedSources' in value:
+  if value['version'] >= 4 and 'speedSources' in value:
     fields.add('speedSources')
     if type(value['speedSources']) is not bool:
       raise ValueError('Invalid speed source drawer preference')
-  if value['version'] == 4 and 'widgetOrder' in value:
+  if value['version'] >= 4 and 'widgetOrder' in value:
     fields.add('widgetOrder')
   if 'clock24Hour' in value:
     fields.add('clock24Hour')
@@ -249,7 +267,8 @@ def validate_document(value):
     except OverflowError as exc:
       raise ValueError("Invalid widget placement") from exc
     cruise_default = PROFILES["large"]["widgets"]["cruise_limits"]["default"]
-    actions_default = PROFILES["large"]["widgets"]["speed_limit_actions"]["default"]
+    actions_default = ({'x': 88, 'y': 500} if _legacy_geometry else
+                       PROFILES["large"]["widgets"]["speed_limit_actions"]["default"])
     layouts["large"]["speed_limit_actions"] = {
       "x": actions_default["x"] + cruise["x"] - cruise_default["x"],
       "y": actions_default["y"] + cruise["y"] - cruise_default["y"],
@@ -329,18 +348,22 @@ def validate_document(value):
     for key, widget in data["widgets"].items():
       placement = layout[key]
       bounds = widget_bounds(profile, key)
-      expected = {"x", "y", "enabled"} | ({"size"} if key == "steering_wheel" and value["version"] == 4 else set())
+      expected = {"x", "y", "enabled"} | ({"size"} if key == "steering_wheel" and value["version"] >= 4 else set())
       if type(placement) is not dict or set(placement) != expected or type(placement["enabled"]) is not bool:
         raise ValueError("Invalid widget placement")
       size = WHEEL_SIZES[profile][1]
-      if key == "steering_wheel" and value["version"] == 4:
+      if key == "steering_wheel" and value["version"] >= 4:
         size = placement["size"]
         minimum, _, maximum = WHEEL_SIZES[profile]
         if type(size) is not int or not minimum <= size <= maximum:
           raise ValueError("Invalid steering wheel size")
       for axis, extent in (("x", "width"), ("y", "height")):
         number = placement[axis]
-        dimension = size if key == "steering_wheel" else widget[extent]
+        legacy = ({'cruise_limits': (176, 483), 'speed_limit_actions': (176, 58)} if value['version'] < 5 else
+                  {'cruise_limits': (280, 412), 'speed_limit_actions': (280, 96)})
+        dimensions = legacy.get(key) if _legacy_geometry and profile == 'large' else None
+        dimension = (dimensions[0 if axis == 'x' else 1] if dimensions else
+                     size if key == 'steering_wheel' else widget[extent])
         if type(number) not in (int, float) or not math.isfinite(number) or not bounds[axis] <= number <= bounds[axis] + bounds[extent] - dimension:
           raise ValueError("Widget outside profile bounds")
       result["layouts"][profile][key] = {**placement, **({"size": size} if key == "steering_wheel" else {})}

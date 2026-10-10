@@ -20,9 +20,11 @@ function fixture() {
 }
 
 assert.deepEqual(PREVIEW_SCENES.map(({ id }) => id), ["engaged", "aol", "long_only", "experimental", "braking",
-  "cem_stop_light", "cem_lead", "cem_curve", "slc_pending"])
+  "cem_stop_light", "cem_lead", "cem_curve", "slc_pending", "slc_max", "slc_equal",
+  "slc_pedal", "slc_retained", "slc_disengaged", "slc_unavailable", "slc_display"])
 assert.equal(PREVIEW_SCENES.find(({ id }) => id === "experimental").label, "Manual experimental")
-for (const scene of ["cem_stop_light", "cem_lead", "cem_curve", "slc_pending"]) {
+for (const scene of ["cem_stop_light", "cem_lead", "cem_curve", "slc_pending", "slc_max", "slc_equal",
+  "slc_pedal", "slc_retained", "slc_disengaged", "slc_unavailable", "slc_display"]) {
   const cem = fixture()
   cem.feed.start(); cem.feed.update(document, "compact", scene); cem.tick()
   assert.equal(JSON.parse(cem.requests[0].options.body).scene, scene)

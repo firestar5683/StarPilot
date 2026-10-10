@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "source": {
+    "file": "DINish-Medium.ttf",
+    "bytes": 70068,
+    "sha256": "38f559a314c89acf900e390a57c653e079b9e50fb0b184aa819c478fd26652dc",
+    "url": "https://github.com/playbeing/dinish/blob/main/fonts/ttf/DINish/DINish-Medium.ttf"
+  },
+  "generation": {
+    "font_pixels": 177,
+    "bitmap_base": 200,
+    "baseline": 160,
+    "glyphs": " 0123456789+-.?\u2013\u2212",
+    "features": [
+      "tnum"
+    ],
+    "atlas": [
+      512,
+      512
+    ],
+    "notice": "fonts/notices/DINish-OFL-1.1.txt"
+  },
+  "files": [
+    {
+      "file": "DINish-Speed.fnt",
+      "bytes": 1829,
+      "sha256": "79b1d188aabf0663eea466f06057b5f5b075aa1c9b442b34dd9335566c723c44"
+    },
+    {
+      "file": "DINish-Speed.png",
+      "bytes": 19416,
+      "sha256": "1cef72f18e0a55019b5642e405c36b8f19c537e67feaadb1c0cc99ffdcb31cda"
+    }
+  ]
+}

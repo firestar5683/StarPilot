@@ -7,12 +7,15 @@ from openpilot.common.filter_simple import FirstOrderFilter
 import zlib
 
 import numpy as np
+from dataclasses import replace
+
 import pyray as rl
 
+from openpilot.starpilot.ui.layout_preview_transport import SCENES
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
 from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, PROFILES, placement, validate_document
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
-from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SpeedLimitObservation
+from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SourceReading, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
 from openpilot.starpilot.ui.onroad_dm import monitor_visible
 from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH, render_sidebar
@@ -25,7 +28,6 @@ from openpilot.system.ui.lib.shader_polygon import Gradient, draw_polygon
 
 
 CEM_SCENE_REASONS = {"cem_stop_light": "STOP LIGHT", "cem_lead": "LEAD", "cem_curve": "CURVE"}
-SCENES = ("engaged", "aol", "long_only", "experimental", "braking", "slc_pending", *CEM_SCENE_REASONS)
 IDLE_SECONDS = 30.0
 ASSET_DIRECTORY = Path(__file__).parents[2] / "selfdrive/assets"
 
@@ -62,12 +64,21 @@ def sample_state(scene: str, document: dict) -> OnroadState:
     raise ValueError("Unknown layout preview scene")
   lateral = scene in ("engaged", "aol", "experimental", "braking", "slc_pending") or scene in CEM_SCENE_REASONS
   longitudinal = scene in ("engaged", "long_only", "experimental", "braking", "slc_pending") or scene in CEM_SCENE_REASONS
-  return OnroadState(engaged=lateral or longitudinal, camera_available=False,
+  longitudinal = longitudinal or scene in ('slc_max', 'slc_equal', 'slc_pedal', 'slc_retained')
+  state = OnroadState(engaged=lateral or longitudinal, camera_available=False,
                      speed_mps=0.0 if scene == "cem_lead" else 22.0, cruise_kph=88.0,
-                     speed_limit=SpeedLimitObservation(kind=ObservationKind.VALID, source="sample", speed_limit_mps=24.6,
-                                                       pending_speed_limit_mps=20.0 if scene == "slc_pending" else None,
-                                                       session_id="preview" if scene == "slc_pending" else None,
-                                                       decision_id=1, presentation_id=1, action_enabled=scene == "slc_pending"),
+                     speed_limit=SpeedLimitObservation(kind=ObservationKind.VALID, source="dashboard", speed_limit_mps=20.0,
+                                                       accepted_speed_limit_mps=20.0, accepted_source='dashboard',
+                                                       accepted_adjusted_limit_mps=22.0, effective_cluster_target_mps=22.0,
+                                                       offset_mps=2.0, limiting_max_set=True,
+                                                       pending_adjusted_limit_mps=24.0 if scene == 'slc_pending' else None,
+                                                       presentation_adjusted_limit_mps=24.0 if scene == 'slc_pending' else 22.0,
+                                                       pending_speed_limit_mps=22.0 if scene == "slc_pending" else None,
+                                                       session_id="preview",
+                                                       source_readings=(SourceReading('dashboard', True, 'valid', 20),
+                                                                        SourceReading('map', True, 'valid', 20),
+                                                                        SourceReading('vision', True, 'unknown')),
+                                                       decision_id=1, presentation_id=1, action_enabled=longitudinal),
                      alert=OnroadAlert(), appearance=OnroadAppearance(wheel_pedal_feedback=True,
                                                                       show_speed_limit_sign=True),
                      wheel_feedback=WheelFeedback(brake_pressed=scene == "braking"),
@@ -77,6 +88,24 @@ def sample_state(scene: str, document: dict) -> OnroadState:
                      slc_system_long_available=longitudinal, torque_utilization=0.78 if lateral else 0.0,
                      customization=document,
                      visual_preview=OnroadVisualPreview(cem_reason=CEM_SCENE_REASONS[scene]) if scene in CEM_SCENE_REASONS else None)
+
+  observation = state.speed_limit
+  if scene == 'slc_max':
+    state = replace(state, cruise_kph=65)
+    observation = replace(observation, limiting_max_set=False)
+  elif scene == 'slc_equal':
+    state = replace(state, cruise_kph=79.2)
+  elif scene in ('slc_pedal', 'slc_retained'):
+    observation = replace(observation, driver_override_active=True,
+                          override_basis='pedal' if scene == 'slc_pedal' else 'persistent',
+                          retained_override=scene == 'slc_retained')
+  elif scene == 'slc_unavailable':
+    observation = SpeedLimitObservation(kind=ObservationKind.STALE)
+  elif scene == 'slc_disengaged':
+    observation = replace(observation, action_enabled=True, effective_cluster_target_mps=None)
+  elif scene == 'slc_display':
+    observation = replace(observation, action_enabled=False, effective_cluster_target_mps=None)
+  return replace(state, speed_limit=observation)
 
 
 def _chunk(kind: bytes, data: bytes) -> bytes:
@@ -332,7 +361,6 @@ class LayoutPreviewRenderer:
     scene = payload["scene"]
     state = sample_state(scene, document)
     if viewport:
-      from dataclasses import replace
       from openpilot.starpilot.ui.navigation_state import NavigationDisplay
       state = replace(state, navigation=NavigationDisplay(("preview", 1), "Turn left onto Desert Inn Road", "turn", "left",
                                                           152.0, 6800.0, 540.0))

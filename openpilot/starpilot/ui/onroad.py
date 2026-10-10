@@ -151,7 +151,9 @@ class OnroadView:
 
   def _slc_actions(self, state: OnroadState) -> None:
     controls = slc_controls(self.fonts.profile, state)
-    if not controls:
+    if not placement(state.customization, self.fonts.profile, 'speed_limit_actions')['enabled']:
+      return
+    if not controls and not (self.fonts.profile == Profile.LARGE and state.speed_limit.action_feedback and state.alert.size == AlertSize.NONE):
       return
     if self.fonts.profile == Profile.COMPACT:
       pending = state.speed_limit.pending_speed_limit_mps
@@ -161,14 +163,32 @@ class OnroadView:
         button_y = 180 + dy
         header_y = button_y - 32 if button_y >= 32 else button_y + 62
         self.fonts.draw(f'NEW LIMIT {value}', FontRole.SEMI_BOLD, 20, 180 + dx, header_y)
+    if self.fonts.profile == Profile.LARGE:
+      from openpilot.starpilot.ui.large_speed_geometry import ACTION_X, ACTION_Y
+      dx, dy = offset(state.customization, 'large', 'speed_limit_actions')
+      pending = state.speed_limit.pending_speed_limit_mps
+      heading = state.speed_limit.action_feedback or (
+        f'New road limit {round(pending * (3.6 if state.metric else 2.2369362921))}' if pending is not None else '')
+      if heading:
+        ink_top, _ = self.fonts.vertical_ink(heading, FontRole.MEDIUM, 30)
+        self.fonts.draw(heading, FontRole.MEDIUM, 30, ACTION_X + dx + 32, ACTION_Y + dy - ink_top)
     for control in controls:
       left, top, right, bottom = control.bounds
       rect = rl.Rectangle(left, top, right - left, bottom - top)
-      rl.draw_rectangle_rounded(rect, 0.22, 8, rl.Color(*rgba(state.customization, "cardFill", self.fonts.profile, "speed_limit_actions")))
-      rl.draw_rectangle_rounded_lines_ex(rect, 0.22, 8, 2, rl.Color(*rgba(state.customization, "cardBorder", self.fonts.profile, "speed_limit_actions")))
-      size = 25 if self.fonts.profile == Profile.LARGE else 20
-      measured = self.fonts.measure(control.label, FontRole.SEMI_BOLD, size)
-      self.fonts.draw(control.label, FontRole.SEMI_BOLD, size,
+      rounding = .15 if self.fonts.profile == Profile.LARGE else .22
+      border_width = 1 if self.fonts.profile == Profile.LARGE else 2
+      rl.draw_rectangle_rounded(rect, rounding, 8, rl.Color(*rgba(state.customization, "cardFill", self.fonts.profile, "speed_limit_actions")))
+      rl.draw_rectangle_rounded_lines_ex(rect, rounding, 8, border_width,
+                                       rl.Color(*rgba(state.customization, "cardBorder", self.fonts.profile, "speed_limit_actions")))
+      pressed = getattr(self, 'pressed_action', lambda: None)() == control.request
+      if pressed:
+        rl.draw_rectangle_rounded(rect, .22, 8, rl.Color(197, 163, 255, 55))
+      size = 32 if self.fonts.profile == Profile.LARGE else 20
+      role = FontRole.MEDIUM if self.fonts.profile == Profile.LARGE else FontRole.SEMI_BOLD
+      while size > 12 and self.fonts.measure(control.label, role, size).width > rect.width - 20:
+        size -= 1
+      measured = self.fonts.measure(control.label, role, size)
+      self.fonts.draw(control.label, role, size,
                       rect.x + (rect.width - measured.width) / 2,
                       rect.y + (rect.height - measured.height) / 2,
                       rl.Color(*rgba(state.customization, "text", self.fonts.profile, "speed_limit_actions")))

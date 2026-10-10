@@ -24,7 +24,8 @@ MIN_INTERVAL = 0.5
 ERROR_LOG_INTERVAL = 10.0
 PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
 SCENES = frozenset(('engaged', 'aol', 'long_only', 'experimental', 'braking',
-                    'cem_stop_light', 'cem_lead', 'cem_curve', 'slc_pending'))
+                    'cem_stop_light', 'cem_lead', 'cem_curve', 'slc_pending', 'slc_max', 'slc_equal',
+                    'slc_pedal', 'slc_retained', 'slc_disengaged', 'slc_unavailable', 'slc_display'))
 PROFILES = frozenset(('large', 'compact'))
 RENDER_PROFILES = PROFILES | {'projection'}
 LOGGER = logging.getLogger(__name__)

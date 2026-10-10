@@ -39,19 +39,19 @@ class TestSlcTouch(unittest.TestCase):
     emitted: list[ShellRequest] = []
     shell = ShellInput(Profile.LARGE, emitted.append)
     snapshot = ShellSnapshot(ShellMode.ONROAD, reference_state(), reference_settings_state(), state())
-    shell.press(120, 360, 0.0, snapshot)
-    shell.release(120, 360, 0.1, snapshot)
+    shell.press(120, 630, 0.0, snapshot)
+    shell.release(120, 630, 0.1, snapshot)
     self.assertEqual(emitted[0].source, "slc")
     self.assertIsInstance(emitted[0].action, SlcUiRequest)
 
   def test_pending_card_accept_and_visible_reject_in_both_profiles(self):
     emitted: list[OnroadRequest | SlcUiRequest] = []
     large = OnroadInput(emitted.append, Profile.LARGE)
-    large.press(120, 360, state())  # established speed-limit card tap
-    large.release(120, 360, state())
+    large.press(120, 630, state())  # explicit Apply button
+    large.release(120, 630, state())
     self.assertEqual(emitted[-1].kind, SlcActionKind.ACCEPT)
-    large.press(210, 530, state())
-    large.release(210, 530, state())
+    large.press(400, 630, state())
+    large.release(400, 630, state())
     self.assertEqual(emitted[-1].kind, SlcActionKind.REJECT)
     compact = OnroadInput(emitted.append, Profile.COMPACT)
     compact.press(240, 205, state())
@@ -62,16 +62,16 @@ class TestSlcTouch(unittest.TestCase):
   def test_old_press_cannot_act_on_new_decision_or_presentation(self):
     emitted: list[OnroadRequest | SlcUiRequest] = []
     touch = OnroadInput(emitted.append, Profile.LARGE)
-    touch.press(120, 360, state())
-    touch.release(120, 360, state(decision=8))
-    touch.press(210, 530, state())
-    touch.release(210, 530, state(presentation=10))
+    touch.press(120, 630, state())
+    touch.release(120, 630, state(decision=8))
+    touch.press(400, 630, state())
+    touch.release(400, 630, state(presentation=10))
     self.assertEqual(emitted, [])
 
   def test_adopt_same_accepted_limit_and_rejected_limit_remain_visible(self):
     emitted: list[OnroadRequest | SlcUiRequest] = []
     adoptable = state(pending=False)
-    for profile, xy in ((Profile.LARGE, (150, 530)),):
+    for profile, xy in ((Profile.LARGE, (150, 590)),):
       touch = OnroadInput(emitted.append, profile)
       touch.press(*xy, adoptable)
       touch.release(*xy, adoptable)

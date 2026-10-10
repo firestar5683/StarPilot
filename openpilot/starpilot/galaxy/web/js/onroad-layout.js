@@ -97,7 +97,7 @@ export function previewPoint(event, rect, profile) {
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 4 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 6 ||
       (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
       (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
       (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
@@ -303,8 +303,8 @@ export const LayoutWidgetPreview = {
         x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" :rx="Math.min(widget.width, widget.height) * .1"
         :fill="palette.cardFill" :stroke="palette.cardBorder" :stroke-width="profile === 'large' ? 4 : 2" />
       <template v-if="widget.kind === 'current_speed'">
-        <text x="290" y="200" text-anchor="middle" font-size="176" font-weight="700">65</text>
-        <text x="290" y="285" text-anchor="middle" font-size="66" :fill="withAlpha(palette.text, 200 / 255)">mph</text>
+        <text x="290" y="205" text-anchor="middle" font-size="176" font-weight="500">65</text>
+        <text x="290" y="265" text-anchor="middle" font-size="44" font-weight="400" :fill="withAlpha(palette.text, 200 / 255)">mph</text>
       </template>
       <template v-else-if="widget.kind === 'driving_mode_descriptions'">
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
@@ -319,11 +319,16 @@ export const LayoutWidgetPreview = {
           style="filter: drop-shadow(2px 2px 1px #000000aa)">{{ clock24Hour ? '18:00' : '12:00 PM' }}</text>
       </template>
       <template v-else-if="widget.kind === 'cruise_limits'">
-        <g v-for="(label, index) in ['MAX', 'LIMIT']" :key="label" :transform="'translate(0 ' + index * 211 + ')'">
-          <rect x="2" y="2" width="172" height="192" rx="30" :fill="palette.cardFill" :stroke="palette.cardBorder" stroke-width="4" />
-          <text x="88" y="65" text-anchor="middle" font-size="40" font-weight="600" fill="#80d8a6">{{ label }}</text>
-          <text x="88" y="155" text-anchor="middle" font-size="90" font-weight="700">65</text>
+        <rect x="1" y="1" :width="widget.width - 2" height="468" rx="18" fill="#10191f" stroke="#35434d" />
+        <line x1="1" :x2="widget.width - 1" y1="210" y2="210" stroke="#35434d" />
+        <g v-for="(label, index) in ['MAX SET', 'SLC LIMIT']" :key="label" :transform="'translate(24 ' + (index ? 210 : 0) + ')'">
+          <text y="50" font-size="40" font-weight="500" :fill="index ? '#c5a3ff' : '#acbecb'">{{ label }}</text>
+          <text y="160" font-size="138" font-weight="500">{{ index ? '49' : '65' }}</text>
+          <text x="190" y="160" font-size="35" font-weight="400" fill="#acbecb">mph</text>
+          <text v-if="index" y="208" font-size="37" font-weight="400" fill="#c5a3ff">Using speed limit</text>
+          <text :y="index ? 249 : 198" font-size="37" font-weight="400" fill="#acbecb">{{ index ? 'Road limit 45 +4' : 'Your ceiling' }}</text>
         </g>
+        <text x="24" y="518" font-size="37" font-weight="400" fill="#acbecb">View sources</text>
       </template>
       <template v-else-if="widget.kind === 'max_speed'">
         <defs><radialGradient id="gx-layout-speed-shadow"><stop offset="0" stop-color="#00000080" /><stop offset="1" stop-color="#00000000" /></radialGradient></defs>
@@ -339,9 +344,10 @@ export const LayoutWidgetPreview = {
       </template>
       <template v-else-if="widget.kind === 'speed_limit_actions'">
         <text v-if="profile === 'compact'" x="6" :y="widget.visualHeaderY ?? -32" dominant-baseline="text-before-edge" font-size="20" font-weight="600" fill="white">NEW LIMIT 55</text>
-        <g v-for="(label, index) in ['ACCEPT', 'REJECT']" :key="label" :transform="'translate(' + index * (widget.width / 2 + 4) + ' 0)'">
-          <rect :width="widget.width / 2 - 4" :height="widget.height" rx="12" :fill="palette.cardFill" :stroke="palette.cardBorder" stroke-width="2" />
-          <text :x="widget.width / 4 - 2" :y="widget.height / 2 + 7" text-anchor="middle" :font-size="profile === 'large' ? 25 : 20" font-weight="600" :fill="palette.text">{{ label }}</text>
+        <text v-if="profile === 'large'" x="0" y="28" font-size="37" fill="white">New road limit 35</text>
+        <g v-for="(label, index) in (profile === 'large' ? ['Apply 39', 'Keep'] : ['ACCEPT', 'REJECT'])" :key="label" :transform="'translate(' + index * (widget.width / 2 + 4) + ' ' + (profile === 'large' ? 44 : 0) + ')'">
+          <rect :width="widget.width / 2 - 4" :height="profile === 'large' ? widget.height - 44 : widget.height" rx="12" :fill="palette.cardFill" :stroke="palette.cardBorder" stroke-width="2" />
+          <text :x="widget.width / 4 - 2" :y="(profile === 'large' ? widget.height - 44 : widget.height) / 2 + 7" text-anchor="middle" :font-size="profile === 'large' ? 40 : 20" :font-weight="profile === 'large' ? 500 : 600" :fill="palette.text">{{ label }}</text>
         </g>
       </template>
       <g v-else-if="widget.kind === 'model_confidence'">

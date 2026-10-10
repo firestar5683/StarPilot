@@ -189,7 +189,7 @@ def test_valid_vision_limit_has_persistent_sign_without_action_receipt():
     outline.reset_mock()
     renderer._speed_limit_sign(replace(shown, speed_limit=SpeedLimitObservation(kind=ObservationKind.STALE)))
     outline.assert_not_called()
-    renderer._speed_limit_sign(road(speed_limit=valid))
+    renderer._speed_limit_sign(replace(road(speed_limit=valid), appearance=replace(shown.appearance, show_speed_limit_sign=False)))
     outline.assert_not_called()
   with patch.object(rl, 'draw_circle') as circle, patch.object(rl, 'draw_ring'):
     renderer._speed_limit_sign(replace(shown, appearance=replace(shown.appearance, use_vienna_sign=True)))

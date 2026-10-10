@@ -28,7 +28,7 @@ metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96,
 metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work", "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 1, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 2, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-map", editable: true, valid: true,

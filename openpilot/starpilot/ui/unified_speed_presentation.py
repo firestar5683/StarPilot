@@ -1,9 +1,4 @@
-"""Pure large-card presentation over qualified modern SLC observations.
-
-The accepted/pending number owns its source. A selected source may belong to a
-new decision and must never relabel the still-accepted sign. UI equality is only
-for merging displayed numerals; control activity comes from publisher evidence.
-"""
+"""Stable large speed roles over publisher-qualified SLC evidence."""
 
 from dataclasses import dataclass
 import math
@@ -19,62 +14,100 @@ class UnifiedSpeedPresentation:
   source: str
   pending: bool
   active_side: str
+  limit_text: str
+  status: str
+  proposal_text: str
+
+  @property
+  def max_status(self) -> str:
+    if self.max_text == '–':
+      return 'Not set'
+    return {'max': 'Using set speed', 'shared': 'Matches speed limit'}.get(self.active_side, 'Your ceiling')
+
+  @property
+  def limit_status(self) -> str:
+    if self.status == 'Set-speed override':
+      return 'Overridden'
+    if self.mode == 'split' and self.active_side == 'max' and self.status == 'Using set speed':
+      # Describe the displayed relationship without changing source selection.
+      if self.max_text != '–' and self.limit_text != '–':
+        if int(self.limit_text) > int(self.max_text):
+          return 'Above set speed'
+        if self.limit_text == self.max_text:
+          return 'Matches set speed'
+    return self.status
+
+
+def positive(value):
+  return value is not None and math.isfinite(value) and value > 0
 
 
 def displayed_limit_mps(observation):
-  """The sign and pulse share one qualified, positive candidate selection."""
-  if str(observation.kind) != "valid":
+  """A proposal never replaces the accepted sign."""
+  if str(observation.kind) != 'valid':
     return None
-  for value in (observation.pending_speed_limit_mps, observation.accepted_speed_limit_mps,
-                observation.speed_limit_mps):
-    if value is not None and math.isfinite(value) and value > 0:
+  for value in (observation.accepted_speed_limit_mps, observation.speed_limit_mps):
+    if positive(value):
       return value
   return None
 
 
 def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
-  observation = state.speed_limit
+  obs = state.speed_limit
   factor = 3.6 if state.metric else 2.2369362921
-  def positive(value):
-    return value is not None and math.isfinite(value) and value > 0
   def speed(value):
-    return str(round(value * factor)) if positive(value) else "–"
+    return str(round(value * factor)) if positive(value) else '–'
+  valid = str(obs.kind) == 'valid'
+  pending = valid and positive(obs.pending_speed_limit_mps)
+  accepted = valid and positive(obs.accepted_speed_limit_mps)
+  posted = displayed_limit_mps(obs)
+  source = (obs.accepted_source if accepted else obs.source) if valid else 'none'
+  if source in ('', 'none'):
+    source = 'unknown' if positive(posted) else 'none'
   show_max = not state.appearance.hide_max_speed
-  max_text = (str(round(state.cruise_kph if state.metric else state.cruise_kph * 0.621371))
-              if positive(state.cruise_kph) else "–")
-  # A stale/missing publisher cannot keep an accepted sign or a pending prompt.
-  valid = str(observation.kind) == "valid"
-  pending = valid and positive(observation.pending_speed_limit_mps)
-  accepted = valid and positive(observation.accepted_speed_limit_mps)
-  posted = displayed_limit_mps(observation)
-  source = observation.pending_source if pending else observation.accepted_source if accepted else observation.source
-  if source in ("", "none") and positive(posted):
-    source = "unknown"
-  has_limit = positive(posted)
-  effective = observation.effective_cluster_target_mps
-  effective_text = speed(effective)
-  mode = "split" if show_max and has_limit else "limit_only" if has_limit else "max_only" if show_max else "hidden"
-  if (mode == "split" and not pending and observation.action_enabled and
-      positive(effective) and positive(state.cruise_kph) and max_text == effective_text):
-    mode = "merged"
-  active = "none"
-  if state.cruise_active and not observation.driver_override_active and not state.longitudinal_overridden:
-    if observation.action_enabled and observation.limiting_max_set and has_limit:
-      active = "shared" if mode == "merged" else "slc"
-    elif show_max:
-      active = "shared" if mode == "merged" else "max"
-  adjustment = observation.offset_mps
+  has_slc = valid or str(obs.kind) == 'stale'
+  mode = 'split' if show_max and has_slc else 'limit_only' if has_slc else 'max_only' if show_max else 'hidden'
+  target = None
+  if valid:
+    candidates = (getattr(obs, 'accepted_adjusted_limit_mps', None), obs.effective_cluster_target_mps)
+    if not accepted and not pending:
+      candidates += (getattr(obs, 'presentation_adjusted_limit_mps', None),)
+    target = next((value for value in candidates if positive(value)), None)
   offset = None
-  if state.show_slc_offset and not pending and has_limit and adjustment is not None and math.isfinite(adjustment):
-    rounded = round(adjustment * factor)
-    if rounded:
-      offset = f"{rounded:+d}"
-  return UnifiedSpeedPresentation(mode, max_text, speed(posted), offset,
-                                  "km/h" if state.metric else "mph", source if has_limit else "none", pending, active)
-
-
-def large_limit_bounds(state) -> tuple[int, int, int, int]:
-  """Logical sign hit bounds; customization offsets are applied by the caller."""
-  mode = resolve_unified_speed(state).mode
-  top = 75 if mode == "limit_only" else 271
-  return (88, top, 264, top + 215)
+  if state.show_slc_offset and positive(target) and positive(posted):
+    adjustment = round((target - posted) * factor)
+    if adjustment:
+      offset = f'{adjustment:+d}'
+  active = 'none'
+  status = 'Unavailable'
+  if valid:
+    status = 'Override saved' if getattr(obs, 'retained_override', False) else 'Cruise off'
+    if getattr(obs, 'status', '') == 'display_hold':
+      status = 'Unavailable'
+    elif not obs.action_enabled:
+      status = 'Display only'
+    elif state.longitudinal_overridden:
+      status = 'Using accelerator'
+    elif obs.driver_override_active:
+      status = {'pedal': 'Using accelerator', 'persistent': 'Set-speed override'}.get(getattr(obs, 'override_basis', ''), 'Override')
+      if (getattr(obs, 'override_basis', '') == 'persistent' and state.cruise_active and
+          positive(state.cruise_kph) and positive(obs.effective_cluster_target_mps)):
+        # A qualified set-speed override selects MAX; pedal control does not.
+        active = 'max'
+    elif state.cruise_active and positive(obs.effective_cluster_target_mps):
+      active = 'slc' if obs.limiting_max_set else 'max'
+      if target is not None and positive(target) and positive(state.cruise_kph):
+        max_mps = state.cruise_kph / 3.6
+        # Compare cluster ceilings before display rounding. 1 mm/s allows for
+        # Float32 transport noise without treating visibly rounded ties as shared.
+        if math.isclose(target, max_mps, rel_tol=0, abs_tol=0.001):
+          active = 'shared'
+        else:
+          active = 'slc' if target < max_mps else 'max'
+      status = {'slc': 'Using speed limit', 'max': 'Using set speed', 'shared': 'Matches set speed'}[active]
+    elif state.cruise_active:
+      status = 'Unavailable'
+  max_text = str(round(state.cruise_kph * (1 if state.metric else .621371))) if positive(state.cruise_kph) else '–'
+  return UnifiedSpeedPresentation(mode, max_text, speed(posted), offset, 'km/h' if state.metric else 'mph',
+                                  source, pending, active, speed(target), status,
+                                  speed(obs.pending_speed_limit_mps) if pending else '–')

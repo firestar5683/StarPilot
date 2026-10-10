@@ -168,6 +168,7 @@ class NativeSettingsTests(unittest.TestCase):
 
   def test_session_mounts_native_panels_inside_shared_rail(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.slc_actions = None
     session.profile = Profile.LARGE
     session.view = Mock()
     session.favorites = Mock()

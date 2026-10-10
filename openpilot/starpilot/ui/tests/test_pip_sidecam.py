@@ -132,6 +132,7 @@ def test_native_pip_passes_only_qualified_visual_sides_without_replacing_oem_bsm
   from openpilot.starpilot.ui import runtime_app
   from openpilot.starpilot.ui.presentation import Profile
   shell = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+  shell.slc_actions = None
   shell._pip_read_ns = None
   shell._pip_saved = None
   shell._vasm_saved = None
@@ -212,6 +213,7 @@ def test_native_pip_onroad_exit_closes_warning_and_invalidates_saved_snapshot():
   from openpilot.starpilot.ui.settings_state import Destination
   from openpilot.starpilot.ui.shell import ShellMode
   shell = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+  shell.slc_actions = None
   shell._pip_read_ns = 42
   shell._pip_saved = SavedPiP((), False, None, False, False, False)
   shell._vasm_saved = SavedPreferences(None, True, True)
