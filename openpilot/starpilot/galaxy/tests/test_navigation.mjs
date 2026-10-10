@@ -11,6 +11,8 @@ assert(validNavigation(snapshot()))
 assert(!validNavigation({ ...snapshot(), route: [{ latitude: 90, longitude: Infinity }] }))
 assert(!validNavigation({ ...snapshot(), destination: { ...place, latitude: 120 } }))
 assert(!validNavigation({ ...snapshot(), instruction: { text: "Turn left" } }))
+for (const network of ['online', 'offline', 'unknown']) assert(validNavigation({ ...snapshot(), network }))
+assert(!validNavigation({ ...snapshot(), network: 'bad' }))
 assert.equal(routePath([]), "")
 assert.equal(routePath([place]), "")
 assert.match(routePath([place, { latitude: 41.1, longitude: -88.1 }]), /^M[\d.,]+ L[\d.,]+$/)
@@ -21,6 +23,34 @@ assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), s
 assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), status: "waitingForLocation" } }), "Waiting for GPS")
 assert.equal(NavigationPage.computed.statusLabel.call({ data: { ...snapshot(), status: "routing", location: { ...place, lastKnown: true } } }),
   "Finding a route from last saved location…")
+
+{
+  const state = { mode: 'local', ready: true, stale: false, data: { ...snapshot(), network: 'online',
+    location: { ...place, validForMs: 0, lastKnown: true } } }
+  assert.equal(NavigationPage.computed.usingSavedLocation.call(state), true)
+  assert.equal(NavigationPage.computed.offline.call(state), false)
+  state.data.network = 'offline'
+  assert.equal(NavigationPage.computed.usingSavedLocation.call(state), false)
+  assert.equal(NavigationPage.computed.offline.call(state), true)
+  for (const network of ['unknown', undefined]) {
+    state.data.network = network
+    assert.equal(NavigationPage.computed.offline.call(state), false)
+    assert.equal(NavigationPage.computed.usingSavedLocation.call(state), true)
+  }
+  state.data.network = 'offline'
+  state.stale = true
+  assert.equal(NavigationPage.computed.offline.call(state), false)
+  const paths = [], page = { tab: 'route', go: path => paths.push(path) }
+  NavigationPage.methods.selectTab.call(page, 'maps')
+  assert.equal(page.tab, 'maps')
+  assert.deepEqual(paths, ['/navigation/maps'])
+  NavigationPage.methods.selectTab.call(page, 'route')
+  assert.equal(page.tab, 'route')
+  assert.equal(paths.at(-1), '/navigation')
+  assert.equal(NavigationPage.data.call({initialTab:'maps'}).tab, 'maps')
+  NavigationPage.watch.initialTab.call(page, 'maps')
+  assert.equal(page.tab, 'maps')
+}
 
 function setup() {
   const requests = [], states = [], timers = new Map()
@@ -213,7 +243,7 @@ console.log("Local HTTP search UUID fallback passed")
   assert.deepEqual(actions[0], ['configure', { patch: { token: 'pk.example', enabled: true } }])
   page.token = 'pk.replacement'; await NavigationPage.methods.saveKey.call(page, false)
   assert.deepEqual(actions[1], ['configure', { patch: { token: 'pk.replacement' } }])
-  assert.ok(NavigationPage.template.includes("tab='setup'"))
+  assert.ok(NavigationPage.template.includes("selectTab('setup')"))
   assert.ok(NavigationPage.template.includes('Save key'))
   assert.ok(NavigationPage.template.includes('<NavigationMap v-if="ready"'))
 }

@@ -9,7 +9,8 @@ from openpilot.starpilot.ui.onroad_customization import (
   CLOCK_WIDGET, DEFAULT_WIDGET_ORDER, MODE_WIDGET, PROFILES, customization_metadata, decode_document, default_document, validate_document,
 )
 from openpilot.starpilot.system.android_auto.projection_layout import (
-  default_layout_for_viewport, decode_layout_for_viewport, layout_metadata_for_viewport, projection_customization, validate_layout_for_viewport,
+  CAR_EXIT, default_layout_for_viewport, decode_layout_for_viewport, layout_metadata_for_viewport, projection_customization,
+  validate_layout_for_viewport,
 )
 
 
@@ -44,7 +45,8 @@ def test_projection_order_is_independent_from_native_and_survives_decode():
   projection = default_layout_for_viewport((2880, 1080))
   # Legacy AA layouts must not inherit native large ordering.
   assert 'large' not in projection_customization(projection, native)['widgetOrder']
-  projection['widgetOrder'] = list(reversed(layout_metadata_for_viewport((2880, 1080))['widgetOrder']))
+  default_order = layout_metadata_for_viewport((2880, 1080))['widgetOrder']
+  projection['widgetOrder'] = [*reversed([key for key in default_order if key != CAR_EXIT]), CAR_EXIT]
   decoded = decode_layout_for_viewport(json.dumps(projection).encode(), (2880, 1080))
   assert decoded == projection
   converted = projection_customization(decoded, native)
@@ -59,12 +61,38 @@ def test_legacy_projection_order_adds_upstream_mode_widget():
   projection['widgetOrder'] = [key for key in DEFAULT_WIDGET_ORDER['large'] if key != MODE_WIDGET]
   migrated = validate_layout_for_viewport(projection, (2880, 1080))
   assert migrated['widgets'][MODE_WIDGET]['enabled'] is False
-  assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work']
+  assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work', CAR_EXIT]
 
 
 def test_old_documents_keep_their_original_shape():
   assert validate_document(default_document()) == default_document()
   assert validate_layout_for_viewport(default_layout_for_viewport((1860, 1080)), (1860, 1080)) == default_layout_for_viewport((1860, 1080))
+
+
+def test_projection_escape_replaces_native_corner_hint():
+  # Inspect the real render guard without importing native UI/IPC libraries on CPU-only hosts.
+  import ast
+  from pathlib import Path
+  from types import SimpleNamespace as NS
+
+  source = Path(__file__).parents[1] / 'onroad.py'
+  tree = ast.parse(source.read_text())
+  method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_large')
+  parents = {child: parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)}
+  call = next(node for node in ast.walk(method) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id == 'render_corner_hint')
+  guard = parents[call]
+  while not isinstance(guard, ast.If):
+    guard = parents[guard]
+  condition = compile(ast.Expression(guard.test), str(source), 'eval')
+
+  def visible(viewport, alert_size):
+    return eval(condition, {'AlertSize': NS(FULL='full')},
+                {'self': NS(projection_viewport=viewport), 'state': NS(alert=NS(size=alert_size))})
+
+  assert visible(None, 'none')
+  assert not visible((2880, 1080), 'none')
+  assert not visible(None, 'full')
 
 
 @pytest.mark.parametrize('profile,viewport', [('large', None), ('compact', None), ('large', (2880, 1080))])
@@ -104,12 +132,14 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   order = list(reversed(DEFAULT_WIDGET_ORDER[profile]))
   if viewport:
     projection = default_layout_for_viewport(viewport)
-    order = list(reversed(layout_metadata_for_viewport(viewport)['widgetOrder']))
+    default_order = layout_metadata_for_viewport(viewport)['widgetOrder']
+    order = [*reversed([key for key in default_order if key != CAR_EXIT]), CAR_EXIT]
     projection['widgetOrder'] = order
     document = projection_customization(projection, document)
     view.map_layer = lambda *args: seen.append('nav_map')
     view.navigation = NS(render=lambda *args: seen.append('nav_card'))
     view.navigation_favorites = NS(render=lambda key, state: seen.append(key))
+    view.projection_exit_layer = lambda state: seen.append(CAR_EXIT)
   document['widgetOrder'] = {profile: order}
   state = NS(customization=document, camera_available=True, viewport_width=1860, alert=NS(size='none'),
              appearance=NS(camera_view='road', hide_speed=False, hide_steering_wheel=False, show_torque_bar=True))

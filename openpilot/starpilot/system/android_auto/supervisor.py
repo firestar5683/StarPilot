@@ -23,6 +23,7 @@ import queue
 import socket
 import threading
 import time
+import traceback
 from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ from openpilot.starpilot.system.android_auto.auto_connect import AutoConnectPoli
 from openpilot.starpilot.system.android_auto.bootstrap import NAMES, BootstrapError, WirelessBootstrap
 from openpilot.starpilot.system.android_auto.frame_source import (DEFAULT_PATH as DEFAULT_FRAME_PATH, FLAG_ASYNC_READBACK, FLAG_NV12,
                                                                   FORMAT_NV12, FrameRequest)
+from openpilot.starpilot.system.android_auto.projection_control import DEFAULT_CONTROL_SOCKET, NATIVE_FOCUS
 from openpilot.starpilot.system.android_auto.touch import DEFAULT_TOUCH_SOCKET
 from openpilot.starpilot.system.android_auto.view import CAR_FRAME_PATH, ViewSource, renderer_available
 from openpilot.starpilot.system.android_auto.session import AuthenticationRejected, PeerRequestedStop, ProjectionSession
@@ -54,6 +56,9 @@ ENCODER_RECOVERY_WINDOW = 10.0
 CAR_LINK_HOLD = 10.0         # a hands-free connection from the car counts as "car present" this long
 HFP_FRESH = 3.0              # a hands-free link from the car this recent still means "the car is reaching out now"
 WIRED_USB_VERIFIED = False   # configfs gadget/vehicle CAN USB isolation has not been proven on target
+LINK_CHECK_INTERVAL = 1.0    # how often the link watcher asks whether the car's Wi-Fi is still up
+LINK_CHECK_SLOW = 1.0        # a link check slower than this is logged (NetworkManager answers over D-Bus)
+STREAM_STALL_LOG = 1.0       # a streaming loop pass slower than this is logged
 
 
 def encoder_preference(configured: str) -> str:
@@ -101,6 +106,72 @@ class UsbLease:
 
   def still_connected(self) -> bool:
     return not self.bridge.closed.is_set()
+
+
+def _wifi_dbm(interface: str = "wlan0") -> int | None:
+  """Signal level of the joined network from /proc/net/wireless (a plain file read, never D-Bus)."""
+  try:
+    with open("/proc/net/wireless") as handle:
+      for line in handle:
+        name, _, rest = line.partition(":")
+        if name.strip() == interface:
+          return int(float(rest.split()[2].rstrip(".")))
+  except (OSError, ValueError, IndexError):
+    pass
+  return None
+
+
+def _where(error: BaseException, depth: int = 4) -> list[str]:
+  """The innermost frames of a failure, so a bare exception still says which call raised it."""
+  frames = traceback.extract_tb(error.__traceback__)[-depth:]
+  return [f"{os.path.basename(frame.filename)}:{frame.lineno} {frame.name}" for frame in frames]
+
+
+class LinkWatch:
+  """Checks the lease off the streaming thread.
+
+  NetworkManager can take seconds to answer over D-Bus (a 5 s timeout ended three Toyota sessions on
+  2026-10-08 before the car granted focus). A slow or failed check must neither stall video nor end the
+  session; only a definite "not connected" does. The socket itself still fails fast on a real loss.
+  """
+
+  def __init__(self, lease, log: Callable[..., None], interval: float = LINK_CHECK_INTERVAL):
+    self.lease, self.log, self.interval = lease, log, interval
+    self.lost = ""
+    self.wifi_dbm: int | None = None
+    self._stop = threading.Event()
+    self._thread = threading.Thread(target=self._run, name="aa_link_watch", daemon=True)
+
+  def start(self) -> LinkWatch:
+    self._thread.start()
+    return self
+
+  def stop(self) -> None:
+    self._stop.set()  # a check stuck in D-Bus finishes on its own timeout; nothing waits for it
+
+  def _run(self) -> None:
+    check = getattr(self.lease, "still_connected", None)
+    wireless = not isinstance(self.lease, (NoLease, UsbLease))
+    while not self._stop.is_set():
+      if wireless:
+        self.wifi_dbm = _wifi_dbm()
+      if check is not None:
+        started = time.monotonic()
+        try:
+          connected = check()
+        except Exception as error:
+          connected = True  # unknown is not lost
+          self.log("link_check_failed", error=str(error) or type(error).__name__, kind=type(error).__name__,
+                   ms=round((time.monotonic() - started) * 1000), where=_where(error))
+        else:
+          spent = time.monotonic() - started
+          if spent > LINK_CHECK_SLOW:
+            self.log("link_check_slow", ms=round(spent * 1000), connected=connected)
+        if not connected and not self._stop.is_set():
+          self.lost = getattr(self.lease, "lost", "Lost the car's Wi-Fi network")
+          self.log("link_lost", reason=self.lost, wifi_dbm=self.wifi_dbm)
+          return
+      self._stop.wait(self.interval)
 
 
 class EventLog:
@@ -187,12 +258,13 @@ class EventLog:
 class Supervisor:
   def __init__(self, bluez_factory=None, lease_factory=None, bluetooth_client=None, frame_path: str | None = None,
                synthetic: bool = False, car_frame_path: str = CAR_FRAME_PATH, touch_path: str = DEFAULT_TOUCH_SOCKET,
-               renderer_command: list[str] | None = None, onroad=_is_onroad,
+               control_path: str = DEFAULT_CONTROL_SOCKET, renderer_command: list[str] | None = None, onroad=_is_onroad,
                shared_bluetooth_owner=None, source_session: tuple | None = None,
                projection_enabled: Callable[[], bool] = lambda: True):
     self._synthetic = synthetic
     self._onroad = onroad
-    self._car_frame_path, self._touch_path, self._renderer_command = car_frame_path, touch_path, renderer_command
+    self._car_frame_path, self._touch_path, self._control_path = car_frame_path, touch_path, control_path
+    self._renderer_command = renderer_command
     self._bluez_factory = bluez_factory
     self._shared_bluetooth_owner = shared_bluetooth_owner
     self._source_session = source_session
@@ -781,7 +853,7 @@ class Supervisor:
           stage = error.stage if isinstance(error, BootstrapError) else self._status["last_stage"]
           message = self._describe_error(stage, error)
           self._set(error=message)
-          self.log("attempt_failed", stage=stage, error=message, kind=type(error).__name__)
+          self.log("attempt_failed", stage=stage, error=message, kind=type(error).__name__, where=_where(error))
         finally:
           self._close_sockets()
           try:
@@ -987,12 +1059,14 @@ class Supervisor:
       view = "unavailable"
     source = ViewSource(view, request, self.log, synthetic=self._synthetic,
                         mirror_path=self._frame_path or DEFAULT_FRAME_PATH, car_path=self._car_frame_path,
-                        touch_path=self._touch_path, renderer_command=self._renderer_command,
+                        touch_path=self._touch_path, control_path=self._control_path, renderer_command=self._renderer_command,
                         renderer_log=identity_store.LOG_DIR / "car_ui.log")
     self._set(view=source.label, encoder=getattr(encoder, "backend", "libx264"), target_fps=fps)
+    watch = LinkWatch(lease, self.log).start()
     try:
-      self._stream(session, encoder, source, lease, interval)
+      self._stream(session, encoder, source, watch, interval)
     finally:
+      watch.stop()
       source.close()
       encoder.close()
       if self._stop.is_set():
@@ -1004,7 +1078,7 @@ class Supervisor:
   # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: The bounded ACK/input drain and conditional waits keep video and touches responsive.
   # Altering this can degrade video smoothness or introduce lag on Android Auto.
   # Do not change it autonomously; require an explicit user request specifically for this video optimization.
-  def _stream(self, session: ProjectionSession, encoder, source: ViewSource, lease, interval: float) -> None:
+  def _stream(self, session: ProjectionSession, encoder, source: ViewSource, watch: LinkWatch, interval: float) -> None:
     started = time.monotonic()
     last_fresh = time.monotonic()
     last_unavailable = 0.0
@@ -1017,6 +1091,7 @@ class Supervisor:
     wait_for_frame = False
     self._stage("streaming")
     while not self._stop.is_set():
+      pass_started = time.monotonic()
       # Wait only when there was no frame or the receiver's window is full.
       # select wakes immediately for touches/ACKs; sleeping after every encode
       # used to add dead time even when the next frame was already available.
@@ -1038,6 +1113,9 @@ class Supervisor:
       if session.touch_events:
         source.send_touches(list(session.touch_events))
         session.touch_events.clear()
+      for action in source.drain_controls():
+        if action == NATIVE_FOCUS:
+          session.request_native()
       state = "streaming" if session.focused else "suspended"
       if self._status["state"] != state:
         self._set(state=state)
@@ -1071,8 +1149,8 @@ class Supervisor:
       now = time.monotonic()
       if now >= next_check:
         next_check = now + 1.0
-        if not lease.still_connected():
-          raise RuntimeError(getattr(lease, "lost", "Lost the car's Wi-Fi network"))
+        if watch.lost:
+          raise RuntimeError(watch.lost)
         label = source.label
         source.check(now, focused=session.focused)
         if source.label != label:
@@ -1082,11 +1160,15 @@ class Supervisor:
         stats = {**session.stats(), "fps": round(len(window) / 5.0, 1), "encode_ms": round(encoder.last_encode_ms, 1),
                  "encode_peak_ms": round(encode_peak, 1), "encoder_recoveries": len(recoveries),
                  "frame_age_p95_ms": round(ordered[int(len(ordered) * 0.95) - 1] * 1000) if ordered else None,
-                 "uptime_s": round(now - started), "frames_from_view": source.frames}
+                 "uptime_s": round(now - started), "frames_from_view": source.frames, "wifi_dbm": watch.wifi_dbm}
         self._set(stats=stats)
         if int(now - started) % 30 == 0:
           self.log("stats", **stats)
           encode_peak = 0.0  # the peak covers each logged 30 s window
+      spent = time.monotonic() - pass_started
+      if spent > STREAM_STALL_LOG:
+        # Nothing was read from the car meanwhile: pings, focus and ACKs all waited on this pass.
+        self.log("stream_stall", ms=round(spent * 1000), focused=session.focused, pending=session.unacked)
 
   def _encode(self, encoder, encode, data: bytes, keyframe: bool, recoveries: list[float]) -> tuple[bytes, bool] | None:
     """Encode one frame. When the hardware encoder fails (the shared VPU stalled past the

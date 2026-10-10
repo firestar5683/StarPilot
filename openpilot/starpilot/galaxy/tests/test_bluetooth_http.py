@@ -33,6 +33,17 @@ class FakeBluetooth:
 
 
 class BluetoothHttpTest(unittest.TestCase):
+  def test_retired_pan_actions_are_rejected(self):
+    payload = {'operation': 'pan_connect', 'address': 'AA:BB:CC:DD:EE:FF'}
+    self.assertEqual(self.request('/api/bluetooth/action', payload)[0], 401)
+    _, _, headers = self.request('/api/auth/login', {'password': 'password123'})
+    cookie = headers['Set-Cookie'].split(';', 1)[0]
+    for operation in ('pan_connect', 'pan_disconnect'):
+      payload['operation'] = operation
+      self.assertEqual(self.request('/api/bluetooth/action', payload, cookie)[0], 400)
+      self.assertEqual(self.request('/api/bluetooth/action', {'operation': operation}, cookie)[0], 400)
+    self.assertEqual(self.bluetooth.calls, [])
+
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
@@ -40,7 +51,10 @@ class BluetoothHttpTest(unittest.TestCase):
     self.assertTrue(access.configure('password123', lambda: True))
     self.access = access
     self.bluetooth = FakeBluetooth()
-    self.server = make_server(port=0, owner=access, bluetooth=self.bluetooth)
+    # Never inherit the host's AA setting or delegate into a live supervisor.
+    aa_setup = mock.Mock()
+    aa_setup.enabled.return_value = False
+    self.server = make_server(port=0, owner=access, bluetooth=self.bluetooth, android_auto_setup=aa_setup)
     self.worker = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
     self.worker.start()
     self.addCleanup(self.stop)

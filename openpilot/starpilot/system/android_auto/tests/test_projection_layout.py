@@ -8,7 +8,7 @@ import unittest
 from openpilot.starpilot.system.android_auto.display_profile import record_screen, read_screen
 from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
-  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, placement_size,
+  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, CAR_EXIT, placement_size,
 )
 from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
@@ -18,6 +18,17 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_gamma_trial_is_opt_in_and_strictly_boolean(self):
+    document = default_layout(SCREEN)
+    self.assertFalse(document['largeUiGammaTrial'])
+    document['largeUiGammaTrial'] = True
+    self.assertTrue(validate_layout(document, SCREEN)['largeUiGammaTrial'])
+    document.pop('largeUiGammaTrial')
+    self.assertFalse(validate_layout(document, SCREEN)['largeUiGammaTrial'])
+    for value in (1, 0, 'true', None, [], {}):
+      with self.subTest(value=value), self.assertRaises(ValueError):
+        validate_layout({**document, 'largeUiGammaTrial': value}, SCREEN)
+
   def test_screen_roundtrip_omits_identity(self):
     with tempfile.TemporaryDirectory() as directory:
       path = Path(directory) / 'screen.json'
@@ -141,10 +152,29 @@ class TestProjectionLayout(unittest.TestCase):
     self.assertEqual(upgraded['widgets']['current_speed']['x'], document['widgets']['current_speed']['x'] + 20)
     self.assertFalse(upgraded['widgets'][NAV_MAP]['enabled'], 'the map is something you add')
     self.assertTrue(upgraded['widgets'][NAV_CARD]['enabled'], 'the turn card keeps showing where it always did')
+    self.assertTrue(upgraded['widgets'][CAR_EXIT]['enabled'], 'the escape control is added and always available')
     missing_native = copy.deepcopy(document)
     del missing_native['widgets']['current_speed']
     with self.assertRaises(ValueError):
       validate_layout(missing_native, SCREEN)
+
+  def test_car_exit_is_required_movable_and_frontmost(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    self.assertEqual(metadata['widgets'][CAR_EXIT]['label'], 'Exit to car')
+    self.assertTrue(metadata['widgets'][CAR_EXIT]['required'])
+    self.assertTrue(metadata['widgets'][CAR_EXIT]['frontmost'])
+    self.assertEqual((metadata['widgets'][CAR_EXIT]['width'], metadata['widgets'][CAR_EXIT]['height']), (96, 96))
+    self.assertTrue(document['widgets'][CAR_EXIT]['enabled'])
+    self.assertEqual((document['widgets'][CAR_EXIT]['x'], document['widgets'][CAR_EXIT]['y']), (30, 954))
+    document['widgets'][CAR_EXIT].update(x=30, y=30)
+    self.assertEqual(validate_layout(document, SCREEN)['widgets'][CAR_EXIT]['x'], 30)
+    order = metadata['widgetOrder']
+    document['widgetOrder'] = [CAR_EXIT, *(key for key in order if key != CAR_EXIT)]
+    self.assertEqual(validate_layout(document, SCREEN)['widgetOrder'][-1], CAR_EXIT)
+    document['widgets'][CAR_EXIT]['enabled'] = False
+    with self.assertRaisesRegex(ValueError, 'Required'):
+      validate_layout(document, SCREEN)
 
   def test_map_overlay_size_opacity_and_edges(self):
     document = default_layout(SCREEN)

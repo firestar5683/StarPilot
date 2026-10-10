@@ -90,6 +90,7 @@ class FakeHeadUnit:
     self.require_client_cert = require_client_cert
     self.frames: list[tuple[int, bytes]] = []
     self.start_indications: list[int] = []
+    self.focus_requests: list[tuple[int, int]] = []
     self.device_name = ""
     self.shutdown_received = threading.Event()
     self.hold_acks = threading.Event()  # set: receive video frames but stop acknowledging them
@@ -208,9 +209,15 @@ class FakeHeadUnit:
           focused = True
           self._send(3, 0x8008, field(1, 1) + field(2, 1))
       elif channel == 3 and kind == 0x8007:
-        if one(fields, 2) == 1 and not focused:
+        requested = int(one(fields, 2, 0) or 0)
+        reason = int(one(fields, 3, 0) or 0)
+        self.focus_requests.append((requested, reason))
+        if requested == 1 and not focused:
           focused = True
           self._send(3, 0x8008, field(1, 1) + field(2, 0))
+        elif requested == 2 and focused:
+          focused = False
+          self._send(3, 0x8008, field(1, 2) + field(2, 0))
       elif channel == 3 and kind == 0x8001:
         session_id = one(fields, 1)
         assert isinstance(session_id, int)

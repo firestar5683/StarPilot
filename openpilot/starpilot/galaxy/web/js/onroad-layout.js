@@ -7,6 +7,7 @@ import { editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
 import { GxDialog } from "./dialog.js"
+import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 const PROFILES = ["large", "compact"]
 const COLORS = ["cardFill", "cardBorder", "text"]
@@ -18,6 +19,10 @@ const keysEqual = (value, keys) => value && typeof value === "object" && !Array.
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key))
 const positive = (value) => Number.isFinite(value) && value > 0 && value <= 8192
 const object = (value) => value && typeof value === "object" && !Array.isArray(value)
+const frontmostOrder = (order, profile) => {
+  const pinned = Object.entries(profile.widgets || {}).filter(([, widget]) => widget.frontmost === true).map(([id]) => id)
+  return pinned.length <= 1 && (!pinned.length || order.at(-1) === pinned[0])
+}
 
 export function orderedWidgetIds(document, metadata, profile) {
   return document.widgetOrder?.[profile] || metadata.profiles[profile].widgetOrder || Object.keys(metadata.profiles[profile].widgets)
@@ -92,15 +97,17 @@ export function previewPoint(event, rect, profile) {
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : [])]) || document.version !== 4 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 4 ||
       (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
       (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
+      (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
       !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
       !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
       !Object.entries(document.widgetOrder).every(([name, order]) => profiles.includes(name) && Array.isArray(order) &&
         order.length === Object.keys(metadata.profiles[name].widgets).length && new Set(order).size === order.length &&
-        order.every(id => typeof id === "string" && Object.hasOwn(metadata.profiles[name].widgets, id))))) return false
+        order.every(id => typeof id === "string" && Object.hasOwn(metadata.profiles[name].widgets, id)) &&
+        frontmostOrder(order, metadata.profiles[name])))) return false
   return profiles.every((name) => {
     const profile = metadata.profiles[name], layout = document.layouts[name]
     const road = document.roadColors[name]
@@ -121,7 +128,7 @@ export function validDocument(document, metadata) {
         (!box || (Number.isInteger(position.width) && position.width >= box.minWidth && position.width <= box.maxWidth &&
           Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight &&
           Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
-        typeof position.enabled === "boolean" &&
+        typeof position.enabled === "boolean" && (!widget.required || position.enabled === true) &&
         Number.isFinite(position.x) && Number.isFinite(position.y) &&
         position.x >= limits.minX && position.x <= limits.maxX && position.y >= limits.minY && position.y <= limits.maxY &&
         ((id === "driving_mode_descriptions" && !position.enabled) || !overlapsReserved(profile, id, position.x, position.y, layout))
@@ -146,8 +153,10 @@ export function validSnapshot(data) {
     if (profile.widgetOrder != null && (!Array.isArray(profile.widgetOrder) ||
         profile.widgetOrder.length !== Object.keys(profile.widgets || {}).length ||
         new Set(profile.widgetOrder).size !== profile.widgetOrder.length ||
-        !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)))) return false
+        !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)) ||
+        !frontmostOrder(profile.widgetOrder, profile))) return false
     const bounds = profile.bounds
+    if (projection && (profile.widgets?.car_exit?.kind !== "car_exit" || profile.widgets.car_exit.required !== true)) return false
     if (profile.protectedWidget != null && (profile.protectedWidget !== "speed_limit_actions" ||
         profile.widgets?.[profile.protectedWidget]?.kind !== "speed_limit_actions")) return false
     if (!positive(profile.width) || !positive(profile.height) || typeof profile.label !== "string" ||
@@ -183,6 +192,9 @@ export function validSnapshot(data) {
           widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
       if (widget.iconSize != null && (!projection || !["nav_home", "nav_work"].includes(widget.kind) ||
           !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
+      if (widget.required != null && (!projection || widget.kind !== "car_exit" || widget.required !== true)) return false
+      if (widget.frontmost != null && (!projection || widget.kind !== "car_exit" || widget.frontmost !== true)) return false
+      if (widget.kind === "car_exit" && (widget.required !== true || widget.frontmost !== true)) return false
     }
   }
   return validDocument(data.document, data.metadata) && validDocument(data.defaults, data.metadata)
@@ -397,6 +409,13 @@ export const LayoutWidgetPreview = {
         <text :x="widget.width / 2" y="89" text-anchor="middle" font-size="25" fill="#c7aef7">Navigate</text>
         </template>
       </g>
+      <g v-else-if="widget.kind === 'car_exit'">
+        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="15" fill="#0f0d17a6" stroke="#c7aef7c8" stroke-width="3" />
+        <g data-preview-icon="door-exit" fill="none" stroke="#c7aef7e6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M54 20 H24 V76 H54" />
+          <path d="M38 48 H78 M67 37 L78 48 L67 59" />
+        </g>
+      </g>
       <g v-else-if="widget.kind === 'nav_card'">
         <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="39" fill="#0f0d17f5" stroke="#a07edcbe" stroke-width="2" />
         <g transform="translate(24 47) scale(1.7)" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
@@ -437,7 +456,7 @@ export const LayoutWidgetPreview = {
 }
 
 export const OnroadLayoutPage = {
-  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog },
+  components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog, GalaxySettingRow },
   props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close", "target"],
   setup(props) {
@@ -514,7 +533,7 @@ export const OnroadLayoutPage = {
     canUndo() { return this.state.history.undo.length > 0 },
     canRedo() { return this.state.history.redo.length > 0 },
     pendingLeave() { return typeof this.state.discard === "function" || ["back", "device", "projection"].includes(this.state.discard) },
-    inlineLeavePrompt() { return this.projection && this.pendingLeave && this.state.leavePresentation !== "modal" },
+    inlineLeavePrompt() { return this.pendingLeave && this.state.leavePresentation !== "modal" },
     modalLeavePrompt() { return this.pendingLeave && this.state.leavePresentation === "modal" },
     saveAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     canSavePending() { return this.saveAvailable && !this.busy },
@@ -566,6 +585,7 @@ export const OnroadLayoutPage = {
   },
   beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
   methods: {
+    switchRow,
     selectWidget(id) {
       this.state.selected = id
       this.state.inspectorPanel = "edit"
@@ -576,7 +596,8 @@ export const OnroadLayoutPage = {
       if (mode === "device") this.showDevicePreview()
     },
     reorderLayer(id, target) {
-      if (!this.editable || this.state.drag || id === target) return
+      if (!this.editable || this.state.drag || id === target ||
+          this.profile.widgets[id]?.frontmost || this.profile.widgets[target]?.frontmost) return
       const order = [...orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)]
       const from = order.indexOf(id), to = order.indexOf(target)
       if (from < 0 || to < 0) return
@@ -589,7 +610,7 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
     },
     startLayerDrag(event, id) {
-      if (!this.editable || this.state.drag || this.state.layerDrag || event.button !== 0) return
+      if (!this.editable || this.state.drag || this.state.layerDrag || event.button !== 0 || this.profile.widgets[id]?.frontmost) return
       this._suppressLayerClick = false
       event.currentTarget.setPointerCapture(event.pointerId)
       const rect = event.currentTarget.closest("[data-layer-id]").getBoundingClientRect()
@@ -608,7 +629,7 @@ export const OnroadLayoutPage = {
       drag.y = event.clientY - drag.offsetY
       const row = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-layer-id]')
       const target = row?.dataset.layerId
-      if (target && target !== drag.target) {
+      if (target && target !== drag.target && !this.profile.widgets[target]?.frontmost) {
         drag.target = target
         const order = [...orderedWidgetIds(drag.before, this.state.data.metadata, this.state.profile)]
         const from = order.indexOf(drag.id), to = order.indexOf(target)
@@ -723,14 +744,15 @@ export const OnroadLayoutPage = {
       this.state.notice = ""
     },
     remove(id = this.state.selected) {
-      if (!this.editable || this.state.drag || !Object.hasOwn(this.profile.widgets, id)) return
+      if (!this.editable || this.state.drag || !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].required) return
       const before = clone(this.state.draft)
       this.layout[id].enabled = false
       this.recordChange(before)
       this.state.notice = ""
     },
     requestRemove(id = this.state.selected) {
-      if (!this.editable || this.state.drag || this.state.layerDrag || !this.layout?.[id]?.enabled || !Object.hasOwn(this.profile.widgets, id)) return
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.layout?.[id]?.enabled ||
+          !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].required) return
       this.state.selected = id
       this.state.removeConfirm = id
     },
@@ -746,6 +768,13 @@ export const OnroadLayoutPage = {
       this.state.draft.clock24Hour = event.target.checked
       this.recordChange(before)
       this.state.notice = ""
+    },
+    setLargeUiGammaTrial(value) {
+      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag) return
+      const before = clone(this.state.draft)
+      this.state.draft.largeUiGammaTrial = value === "On"
+      this.recordChange(before)
+      this.state.notice = "Save and reconnect Android Auto to apply the camera effect."
     },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
@@ -791,7 +820,7 @@ export const OnroadLayoutPage = {
         event.preventDefault()
         const step = event.shiftKey ? 10 : 1, position = this.layout[id]
         this.changePosition(id, position.x + movement[0] * step, position.y + movement[1] * step)
-      } else if (["Delete", "Backspace"].includes(event.key)) { event.preventDefault(); this.requestRemove(id) }
+      } else if (["Delete", "Backspace"].includes(event.key) && !this.profile.widgets[id]?.required) { event.preventDefault(); this.requestRemove(id) }
       else if (["Enter", " "].includes(event.key)) { event.preventDefault(); this.state.selected = id }
     },
     startDrag(id, event, fromTray = false) {
@@ -969,7 +998,15 @@ export const OnroadLayoutPage = {
         this.color(id, this.selectedColors[id].slice(0, 7) + value.toString(16).padStart(2, "0"), "alpha:" + id)
     },
     alpha(color) { return parseInt(color.slice(7), 16) },
+    flashLeavePrompt() {
+      const bar = this.$refs.leaveBar
+      if (!bar) return
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      bar.scrollIntoView({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' })
+      bar.querySelector('button')?.focus({ preventScroll: true })
+    },
     requestLeave(action, presentation = "inline") {
+      if (this.inlineLeavePrompt) { this.flashLeavePrompt(); return }
       if (this.busy || this.state.drag || this.state.layerDrag) return
       this.state.removeConfirm = null
       if (this.dirty) {
@@ -1014,7 +1051,7 @@ export const OnroadLayoutPage = {
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
-        <div class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}">
+        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}">
           <span role="status">{{ inlineLeavePrompt ? 'Leave without saving your changes?' : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
@@ -1036,6 +1073,11 @@ export const OnroadLayoutPage = {
             <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
         </div>
         <template v-if="state.data && state.draft">
+          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect">
+            <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
+              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
+            <p class="gx-note">Try the large comma UI's road-camera effect on Android Auto: reduced color and increased contrast while engaged, dimming while disengaged. Off keeps the current full-color appearance. Save and reconnect Android Auto to apply. The layout preview does not simulate camera color.</p>
+          </section>
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
           <div v-if="!projection && availableProfiles.length" class="gx-layout__tabs gx-tabs" aria-label="Layout size">
             <button v-if="!projection" v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
@@ -1044,7 +1086,7 @@ export const OnroadLayoutPage = {
           <div class="gx-layout__workspace">
             <section class="gx-card gx-layout__preview-card" aria-label="Driving screen preview">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
-              <nav class="gx-layout__switcher" aria-label="Preview type">
+              <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')">Arrange widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'device'" :disabled="!!state.drag" @click="selectPreview('device')">Device preview</button>
               </nav>
@@ -1088,7 +1130,9 @@ export const OnroadLayoutPage = {
                 </g>
                 <g v-for="widget in renderWidgets" :key="widget.id" class="gx-layout__widget" :class="{'is-selected': state.drag?.id === widget.id}"
                   :transform="'translate(' + layout[widget.id].x + ' ' + layout[widget.id].y + ')'" tabindex="0" role="button"
-                  :aria-label="widget.label + ', x ' + layout[widget.id].x + ', y ' + layout[widget.id].y + '. Arrow keys move; Shift moves ten pixels; Delete removes.'"
+                  :aria-label="widget.label + ', x ' + layout[widget.id].x + ', y ' + layout[widget.id].y +
+                    (widget.frontmost ? '. Arrow keys move; Shift moves ten pixels; required and always frontmost widget.' :
+                      widget.required ? '. Arrow keys move; Shift moves ten pixels; required widget.' : '. Arrow keys move; Shift moves ten pixels; Delete removes.')"
                   :aria-pressed="state.selected === widget.id" @focus="state.selected = widget.id" @keydown="onKey(widget.id, $event)"
                   @pointerdown="startDrag(widget.id, $event)">
                   <rect class="gx-layout__hit" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="transparent" />
@@ -1125,7 +1169,7 @@ export const OnroadLayoutPage = {
               <p v-if="state.placementError" class="gx-note" role="status">{{ state.placementError }}</p>
             </section>
             <section class="gx-card gx-layout__inspector" aria-label="Widget placement">
-              <nav class="gx-layout__switcher" aria-label="Editor sections">
+              <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Editor sections">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'widgets'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'widgets'">Widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'">Edit widget</button>
                 <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'">Road colors</button>
@@ -1135,15 +1179,18 @@ export const OnroadLayoutPage = {
               <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets.</p>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
                 :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
-                <button class="gx-layout__row-grip gx-icon-btn" type="button" :aria-label="'Reorder ' + widget.label" :disabled="!editAvailable || !!state.drag"
-                  title="Drag to reorder. Up and down keys reorder."
+                <button class="gx-layout__row-grip gx-icon-btn" type="button"
+                  :aria-label="widget.frontmost ? widget.label + ' is pinned above all widgets' : 'Reorder ' + widget.label"
+                  :disabled="!editAvailable || !!state.drag || widget.frontmost"
+                  :title="widget.frontmost ? 'Always above other widgets' : 'Drag to reorder. Up and down keys reorder.'"
                   @pointerdown="startLayerDrag($event, widget.id)" @pointermove="moveLayerDrag($event)"
                   @pointerup="endLayerDrag($event)" @pointercancel="endLayerDrag($event, true)" @lostpointercapture="endLayerDrag($event, true)"
-                  @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">⠿</span></button>
+                  @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">{{ widget.frontmost ? '↑' : '⠿' }}</span></button>
                 <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
                   @click="selectWidget(widget.id)">{{ widget.label }}</button>
-                <button class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
+                <button v-if="!widget.required" class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
                   @click="requestRemove(widget.id)"><span aria-hidden="true">−</span></button>
+                <span v-else class="gx-note" title="This control cannot be removed or placed below another widget.">Top · Required</span>
               </div></div>
               <Teleport to="body"><div v-if="state.layerDrag?.moved" class="gx-layout__drag-ghost" aria-hidden="true"
                 :style="{left: state.layerDrag.x + 'px', top: state.layerDrag.y + 'px', width: state.layerDrag.width + 'px'}">

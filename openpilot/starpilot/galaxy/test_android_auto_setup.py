@@ -39,8 +39,10 @@ def test_status_explains_phone_role_and_hides_key(tmp_path):
   assert result['wiredAvailable'] is False and result['maxUploadBytes'] == MAX_FILE_BYTES
 
 
-def test_upload_is_bounded_private_and_session_bound(tmp_path):
-  state = {'parked': True, 'enabled': True, 'session': ('galaxy', '1')}
+@pytest.mark.parametrize('parked', [True, False])
+@pytest.mark.parametrize('enabled', [True, False])
+def test_upload_is_bounded_private_and_session_bound(tmp_path, parked, enabled):
+  state = {'parked': parked, 'enabled': enabled, 'session': ('galaxy', '1')}
   service, job = setup(tmp_path, state)
   result = service.upload(state['session'], io.BytesIO(b'not-a-real-apk'), 14)
   assert result['import']['state'] == 'running'
@@ -61,15 +63,29 @@ def test_invalid_or_truncated_upload_never_starts_job(tmp_path):
   assert job.started == [] and not list(job.work_dir.glob('*'))
 
 
-def test_park_loss_during_upload_cleans_staging(tmp_path):
+def test_road_state_and_enable_changes_do_not_cancel_upload_or_import(tmp_path):
   state = {'parked': True, 'enabled': True, 'session': ('galaxy', '1')}
   service, job = setup(tmp_path, state)
   class Revoking(io.BytesIO):
     def read(self, size=-1):
       data = super().read(size)
       state['parked'] = False
+      state['enabled'] = False
       return data
-  with pytest.raises(SetupRejected, match='offroad mode or Park'):
+  assert service.upload(state['session'], Revoking(b'package'), 7)['import']['state'] == 'running'
+  assert job.started[0][1] == b'package'
+  assert job.started[0][2]()
+
+
+def test_session_loss_during_upload_cleans_staging(tmp_path):
+  state = {'parked': False, 'enabled': False, 'session': ('galaxy', '1')}
+  service, job = setup(tmp_path, state)
+  class Revoking(io.BytesIO):
+    def read(self, size=-1):
+      data = super().read(size)
+      state['session'] = None
+      return data
+  with pytest.raises(SetupRejected, match='session expired'):
     service.upload(state['session'], Revoking(b'package'), 7)
   assert job.started == [] and not list(job.work_dir.glob('*'))
 
@@ -89,8 +105,22 @@ def test_busy_import_and_upload_lock_refuse_overlap(tmp_path):
     service._upload_lock.release()
 
 
+def test_session_loss_during_disconnect_preserves_package(tmp_path, monkeypatch):
+  from openpilot.starpilot.system.android_auto import apk_identity
+  state = {'parked': False, 'enabled': False, 'session': ('galaxy', '1')}
+  service, _ = setup(tmp_path, state)
+  remove = Mock()
+  monkeypatch.setattr(apk_identity, 'remove_identity', remove)
+  def disconnect():
+    assert service._upload_lock.locked()
+    state['session'] = None
+  with pytest.raises(SetupRejected, match='session expired'):
+    service.remove(state['session'], disconnect=disconnect)
+  remove.assert_not_called()
+
+
 @pytest.mark.parametrize('ignition_field', ['ignitionLine', 'ignitionCan'])
-def test_forced_offroad_with_powered_car_admits_setup_and_rechecks_authority(tmp_path, ignition_field):
+def test_forced_offroad_with_powered_car_admits_setup_and_upload_survives_authority_loss(tmp_path, ignition_field):
   from openpilot.common.params import Params
   from openpilot.starpilot.galaxy.settings import LiveContextSource
   from openpilot.starpilot.galaxy.tests.test_borrowed_authority import Messages
@@ -122,10 +152,45 @@ def test_forced_offroad_with_powered_car_admits_setup_and_rechecks_authority(tmp
   admitted = job.started[0][2]
   assert admitted()
   params.put_bool('IsOffroad', False, block=True)
-  assert not admitted()  # No onroad physical Park publishers are available.
+  assert admitted()  # Package imports do not need onroad physical Park publishers.
+  enabled = service.enable(state['session'], True)
+  assert enabled['enabled'] is True and enabled['parked'] is False
+  with pytest.raises(SetupRejected, match='import is running'):
+    service.remove(state['session'])
   params.put_bool('IsOffroad', True, block=True)
   now[0] += 2_000_000_000
-  assert not admitted()  # A saved offroad flag cannot extend stale publisher authority.
+  assert admitted()  # Package imports do not depend on vehicle publisher authority.
+  enabled = service.enable(state['session'], True)
+  assert enabled['enabled'] is True and enabled['parked'] is False
   messages.update.assert_not_called()
   authority.close()
   messages.sock['carState'].close.assert_not_called()
+
+
+def test_session_loss_while_checking_enable_readiness_never_changes_setting(tmp_path):
+  session = ('galaxy', '1')
+  state = {'session': session}
+  setter = Mock()
+  def ready():
+    state['session'] = None
+    return True
+  service = AndroidAutoSetup(parked=lambda: False, enabled=lambda: False, session_valid=lambda token: token == state['session'],
+                            import_job=Mock(work_dir=tmp_path), identity_status=lambda: {'installed': False},
+                            install_ready=ready, set_enabled=setter)
+  with pytest.raises(SetupRejected, match='session or setup state changed'):
+    service.enable(session, True)
+  setter.assert_not_called()
+
+
+def test_session_loss_while_enabling_bluetooth_never_enables_android_auto(tmp_path):
+  session = ('galaxy', '1')
+  state = {'session': session, 'bluetooth': False}
+  setter = Mock()
+  def enable_bluetooth(_session):
+    state.update(session=None, bluetooth=True)
+  service = AndroidAutoSetup(parked=lambda: False, enabled=lambda: False, session_valid=lambda token: token == state['session'],
+                            import_job=Mock(work_dir=tmp_path), identity_status=lambda: {'installed': False}, install_ready=lambda: True,
+                            bluetooth_enabled=lambda: state['bluetooth'], set_enabled=setter, enable_bluetooth=enable_bluetooth)
+  with pytest.raises(SetupRejected, match='session expired'):
+    service.enable(session, True, enable_bluetooth=True)
+  setter.assert_not_called()

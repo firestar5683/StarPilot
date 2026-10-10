@@ -41,6 +41,7 @@ from openpilot.starpilot.conditional_mode.policy import ModeChoice
 CameraLayer = Callable[[rl.Rectangle, OnroadState], None]
 OverlayLayer = Callable[[rl.Rectangle, OnroadState], None]
 PipLayer = Callable[[rl.Rectangle, OnroadState], None]
+ProjectionControlLayer = Callable[[OnroadState], None]
 
 
 def driving_mode_description(state: OnroadState) -> str:
@@ -106,6 +107,7 @@ class OnroadView:
     self.extra_overlays = extra_overlays
     self.driver_monitor_layer: OverlayLayer | None = None
     self.map_layer: OverlayLayer | None = None  # Android Auto map overlay, under the HUD widgets
+    self.projection_exit_layer: ProjectionControlLayer | None = None
     self.pip_layer = pip_layer
     self.stock_confidence_layer: OverlayLayer | None = None
     self.stock_confidence_reset: Callable[[], None] | None = None
@@ -266,6 +268,9 @@ class OnroadView:
       for key in ("nav_home", "nav_work"):
         if key in state.customization["layouts"]["large"]:
           submit(key, lambda key=key: self.navigation_favorites.render(key, state))
+      if "car_exit" in state.customization["layouts"]["large"]:
+        if exit_layer := getattr(self, "projection_exit_layer", None):
+          submit("car_exit", lambda: exit_layer(state))
       if state.alert.size != AlertSize.FULL:
         if placement(state.customization, profile, "cruise_limits")["enabled"]:
           submit("cruise_limits", lambda: self.unified_speed.render(content, state))
@@ -360,12 +365,16 @@ class OnroadView:
           self.navigation_favorites.render(key, state)
         self._driving_mode(state, right_shift / 2)
         self._clock(state, right_shift / 2)
+        if exit_layer := getattr(self, "projection_exit_layer", None):
+          exit_layer(state)
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
     if not self.projection_viewport:
       render_live_sidebar(self.fonts, rl.Rectangle(width, 0, 300, height), state.developer_metrics)
-    if state.alert.size != AlertSize.FULL:
+    # Projection has its own permanent escape control in this corner; the native
+    # favorite-menu hint would overlap it and does not control projected input.
+    if not self.projection_viewport and state.alert.size != AlertSize.FULL:
       render_corner_hint(content, cache=self._corner_cache)
     label = status_label(state)
     if label is not None:

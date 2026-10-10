@@ -213,6 +213,38 @@ class BluetoothOwnerTest(unittest.TestCase):
     with self.assertRaises(BluetoothUnavailable):
       self.owner.request('power', enabled=True)
 
+  def test_android_auto_can_power_on_onroad_with_a_valid_session(self):
+    self.parked[0] = False
+    session = ('android-auto-session',)
+    self.owner.session_valid = lambda identity: identity == session
+    result = self.owner.request('power', enabled=True, session=session, power_on_for_android_auto=True)
+    self.assertTrue(result['powered'])
+    self.assertFalse(result['parked'])
+    self.assertEqual(self.preference.path.read_bytes(), b'1')
+    with self.assertRaises(BluetoothRejected):
+      self.owner.request('power', enabled=False, session=session)
+    for operation, enabled, identity in [('power', False, session), ('power', True, None), ('scan', None, session)]:
+      with self.subTest(operation=operation, enabled=enabled), self.assertRaises(ValueError):
+        self.owner.request(operation, enabled=enabled, session=identity, power_on_for_android_auto=True)
+
+  def test_android_auto_power_on_rechecks_session_and_rolls_back(self):
+    self.parked[0] = False
+    valid = [True]
+    self.owner.session_valid = lambda _identity: valid[0]
+    def revoke_start(command, **kwargs):
+      result = self.systemctl(command, **kwargs)
+      if command[-2] == 'start':
+        valid[0] = False
+      return result
+    self.owner.systemctl = revoke_start
+    with self.assertRaises(BluetoothRejected) as rejected:
+      self.owner.request('power', enabled=True, session=('android-auto-session',), power_on_for_android_auto=True)
+    self.assertEqual(rejected.exception.code, 'session_expired')
+    self.assertFalse(FakeBlueZ.powered)
+    self.assertFalse(self.preference.path.exists())
+    self.assertIsNone(self.owner.admission_file)
+    self.assertEqual(self.commands[-1][0], ['sudo', '-n', 'systemctl', 'stop', 'starpilot-bluetooth-radio.service'])
+
   def test_missing_adapter_and_service_failure_are_distinct_and_read_only(self):
     with patch.object(FakeBlueZ, 'snapshot', return_value={'adapter': False, 'powered': False, 'discovering': False, 'devices': []}):
       self.assertEqual(self.owner.snapshot()['errorCode'], 'adapter_unavailable')

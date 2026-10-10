@@ -45,6 +45,12 @@ class TestCurrentDisplaySource(unittest.TestCase):
     self.assertIn("pixels = readback.finish()", source)
     self.assertIn("producer.publish(request, pixels, in_flight_ns, pixel_format, advance=False)", source)
 
+  def test_waiting_publishes_only_finished_frames(self):
+    # Blocking on the LOW-priority GPU before the camera wait stacked ~30 ms on every frame.
+    source = (SOURCE / "current_car_ui.py").read_text()
+    self.assertEqual(source.count("if readback.pending and readback.ready():"), 2)
+    self.assertIn("camera_pacer.wait(layout.camera_stream, now, step)", source)
+
   def test_nv12_path_fuses_scale_margins_and_conversion_without_an_output_texture(self):
     source = (SOURCE / "current_car_ui.py").read_text()
     self.assertIn("content = rl.load_render_texture(geometry.width, geometry.height)", source)

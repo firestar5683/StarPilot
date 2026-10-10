@@ -28,6 +28,8 @@ from pathlib import Path
 import numpy as np
 import pyray as rl
 
+from openpilot.starpilot.gps.acquisition import GpsAcquisition, acquisition_progress
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS
 from openpilot.starpilot.navigation.road_tiles import (
   DATA_ZOOM, EXTENT, LINK, MAJOR, MINOR, MOTORWAY, STREET, RoadTile, TileFormatError, TileKey, decode_road_tile,
   encode_road_tile, meters_per_tile, world_xy,
@@ -43,6 +45,7 @@ CAR_ANCHOR = 0.68            # the car sits below center so more road ahead is v
 ZOOM_SLOW_M_PER_PX = 0.9     # parking-lot and city detail
 ZOOM_FAST_M_PER_PX = 3.4     # highway overview
 MIN_HEADING_SPEED = 1.5      # m/s; GPS heading is noise below this
+GUIDANCE_SLACK_PX = 4.0      # screen pixels of driven route left under the puck before guidance is trimmed again
 
 
 @dataclass(frozen=True)
@@ -212,12 +215,33 @@ def route_guidance(route, request: CanvasRequest, latitude: float):
   points = ((route - request.center) * scale + request.side / 2).astype(np.float32)
   width_scale = SUPERSAMPLE * min(1.35, max(0.7, math.sqrt(REFERENCE_M_PER_PX / request.m_per_px)))
   bounds = (-8.0, -8.0, request.side + 8.0, request.side + 8.0)
+  # Every frame draws these strips: keep only the stretches that can reach the canvas, widest line included.
+  reach = 8.0 + 17.0 * width_scale / 2
+  points, offsets = visible_runs(points, (-reach, -reach, request.side + reach, request.side + reach))
   layers = []
   for color, width in ((ROUTE_GLOW, 17.0), (ROUTE_CORE, 7.0)):
-    strip = line_strip(points, np.array([0, len(points)], np.int32), width * width_scale / 2, bounds)
+    strip = line_strip(points, offsets, width * width_scale / 2, bounds)
     if len(strip):
       layers.append((premultiplied(color), strip))
   return layers
+
+
+def visible_runs(points: np.ndarray, bounds: tuple[float, float, float, float]) -> tuple[np.ndarray, np.ndarray]:
+  """The polyline's stretches whose segments can touch ``bounds``, as (points, offsets) for line_strip.
+
+  A stretch is broken only where a whole segment lies outside, so seams never show inside the bounds.
+  """
+  x0, y0, x1, y1 = bounds
+  a, b = points[:-1], points[1:]
+  lo, hi = np.minimum(a, b), np.maximum(a, b)
+  keep = (hi[:, 0] >= x0) & (lo[:, 0] <= x1) & (hi[:, 1] >= y0) & (lo[:, 1] <= y1)
+  if keep.all():
+    return points, np.array([0, len(points)], np.int32)
+  edges = np.diff(np.concatenate(([0], keep.astype(np.int8), [0])))
+  runs = [points[start:end + 1] for start, end in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True)]
+  if not runs:
+    return points[:0], np.zeros(1, np.int32)
+  return np.concatenate(runs), np.concatenate(([0], np.cumsum([len(run) for run in runs]))).astype(np.int32)
 
 
 def split_route(route: np.ndarray | None, position: tuple[float, float]) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -248,6 +272,9 @@ class MapFix:
 class MapInput:
   fix: MapFix | None
   route: tuple[tuple[float, float], ...] = ()      # (latitude, longitude)
+  navigation_active: bool = False
+  satellites: int | None = None
+  gps_wait_seconds: float = 0.0
 
 
 class TileReader:
@@ -386,6 +413,7 @@ class MapOverlay:
     self._guidance: rl.RenderTexture | None = None
     self._route_layers: list[tuple[rl.Color, np.ndarray]] = []
     self._guidance_key = None
+    self._guidance_at: tuple[float, float] | None = None
     self._widget_size: tuple[int, int] | None = None
     self._shader: rl.Shader | None = None
     self._uniforms: dict[str, int] = {}
@@ -403,15 +431,17 @@ class MapOverlay:
     self._m_per_px = ZOOM_SLOW_M_PER_PX
     self._last_prepare: float | None = None
     self.status = "waiting"
+    self._input = MapInput(None)
 
   # ---- state
 
   def _advance(self, data: MapInput, now: float) -> None:
+    self._input = data
+    self.status = "live" if data.fix is not None and 0 <= now - data.fix.monotonic <= GPS_MAX_AGE_NS / 1e9 else "waiting"
     fix = data.fix
     dt = 0.0 if self._last_prepare is None else min(0.2, max(0.0, now - self._last_prepare))
     self._last_prepare = now
     if fix is None:
-      self.status = "waiting"
       return
     target_world = world_xy(fix.latitude, fix.longitude)
     age = min(DEAD_RECKON_S, max(0.0, now - fix.monotonic))
@@ -431,13 +461,14 @@ class MapOverlay:
     self._latitude = fix.latitude
     target_zoom = zoom_for_speed(fix.speed)
     self._m_per_px += (target_zoom - self._m_per_px) * min(1.0, dt * 0.8)
-    self.status = "live"
 
   def _route(self, route: tuple[tuple[float, float], ...]) -> None:
-    key = route
-    if key != self._route_key:
-      self._route_key = key
+    if route is self._route_key:
+      return                                                   # MapFeed hands back the same tuple until the route changes
+    if route != self._route_key:
+      self._guidance_key = None
       self._route_world = np.array([world_xy(lat, lon) for lat, lon in route], np.float64) if len(route) >= 2 else None
+    self._route_key = route
 
   # ---- canvas planning
 
@@ -576,13 +607,18 @@ class MapOverlay:
         car_y = (self._world[1] - request.center[1]) * px_per_unit * SUPERSAMPLE + side / 2
         anchor = rl.Vector2(width / 2, height * CAR_ANCHOR)
         if guidance:
-          # Road geometry is cached across many frames. Trim guidance at the
-          # current interpolated position, not the position that built that cache.
-          key = (id(request), self._world, self._route_key)
-          if key != self._guidance_key:
+          # Road geometry is cached across many frames. Guidance is trimmed at the
+          # interpolated car, but only again once the car has moved a few screen
+          # pixels: the driven bit in between stays under the puck. Re-trimming
+          # every frame halved the car view's frame rate on long routes.
+          moved = math.inf if self._guidance_at is None else math.hypot(self._world[0] - self._guidance_at[0],
+                                                                         self._world[1] - self._guidance_at[1])
+          slack = GUIDANCE_SLACK_PX * self._m_per_px / meters_per_tile(self._latitude)
+          if self._guidance_key != id(request) or moved > slack:
             _, ahead = split_route(self._route_world, self._world)
             self._route_layers = route_guidance(ahead, request, self._latitude)
-            self._guidance_key = key
+            self._guidance_key = id(request)
+            self._guidance_at = self._world
           rl.rl_push_matrix()
           try:
             rl.rl_translatef(anchor.x, anchor.y, 0)
@@ -653,12 +689,46 @@ class MapOverlay:
     finally:
       rl.end_shader_mode()
       rl.end_blend_mode()
-    text = "Waiting for GPS" if self.status == "waiting" else "" if self.has_roads or self._canvas_request is None else "No map data here yet"
+    if self.status == "waiting":
+      self._draw_gps_status(rect)
+      return
+    text = "" if self.has_roads or self._canvas_request is None else "No map data here yet"
     if text and self.fonts is not None:
       from openpilot.starpilot.ui.presentation import FontRole
       measured = self.fonts.measure(text, FontRole.MEDIUM, 26)
       self.fonts.draw(text, FontRole.MEDIUM, 26, rect.x + (rect.width - measured.width) / 2,
                       rect.y + rect.height * CAR_ANCHOR + 40, rl.Color(225, 228, 238, round(200 * opacity)))
+
+  def _draw_gps_status(self, rect: rl.Rectangle) -> None:
+    """AAComma's acquisition overlay, fitted to the bottom of the projected map."""
+    if self.fonts is None:
+      return
+    from openpilot.starpilot.ui.presentation import FontRole
+    data = self._input
+    elapsed = max(0, int(data.gps_wait_seconds))
+    satellites = ('Searching for satellites' if data.satellites is None else
+                  f"{data.satellites} satellite{'s' if data.satellites != 1 else ''} locked")
+    rows = [('Navigation active', FontRole.SEMI_BOLD, 22)] if data.navigation_active else []
+    rows += [('Waiting for GPS', FontRole.MEDIUM, 22), (f'{satellites}  •  {elapsed // 60}:{elapsed % 60:02d}', FontRole.NORMAL, 18)]
+    scale = max(.7, min(1.0, rect.width / 560, rect.height / 420))
+    inset, padding = 20 * scale, 14 * scale
+    width = rect.width - 2 * inset
+    # Keep every line inside even the smallest allowed map widget.
+    scale = min(scale, *(max(1, width - 2 * padding) / self.fonts.measure(text, role, size).width
+                         for text, role, size in rows))
+    height = (len(rows) * 29 + 32) * scale
+    card = rl.Rectangle(rect.x + inset, rect.y + rect.height - inset - height, width, height)
+    rl.draw_rectangle_rounded(card, .2, 8, rl.Color(15, 13, 23, 235))
+    y = card.y + 10 * scale
+    for text, role, size in rows:
+      measured = self.fonts.measure(text, role, size * scale)
+      self.fonts.draw(text, role, size * scale, card.x + (card.width - measured.width) / 2, y,
+                      rl.Color(225, 228, 238, 255))
+      y += 29 * scale
+    track = rl.Rectangle(card.x + padding, y + 2 * scale, card.width - 2 * padding, 6 * scale)
+    rl.draw_rectangle_rounded(track, 1, 8, rl.Color(66, 58, 82, 255))
+    fill = rl.Rectangle(track.x, track.y, max(track.height, track.width * acquisition_progress(data.satellites)), track.height)
+    rl.draw_rectangle_rounded(fill, 1, 8, rl.Color(199, 174, 247, 255))
 
   def close(self) -> None:
     self.reader.close()
@@ -678,15 +748,21 @@ class MapOverlay:
 class MapFeed:
   """The same GPS choice as navigation (either receiver, then the car's own), and the active route."""
 
-  def __init__(self, sm=None):
+  def __init__(self, sm=None, *, acquisition=None):
     from openpilot.starpilot.gps.source import GPS_SOURCES
     if sm is None:
       from openpilot.cereal import messaging
       sm = messaging.SubMaster(list(GPS_SOURCES))
     self.sm = sm
     self._fix: MapFix | None = None
+    self._route_stamp = None
+    self._route_valid_until = 0
+    self._route: tuple[tuple[float, float], ...] = ()
+    self._navigation_active = False
+    self._acquisition = acquisition if acquisition is not None else GpsAcquisition()
+    self._acquisition_polled = -math.inf
 
-  def read(self, navigation_sm=None) -> MapInput:
+  def read(self, navigation_sm=None, *, navigation_requested=None) -> MapInput:
     from openpilot.starpilot.gps.source import bearing, select_location
     self.sm.update(0)
     now = time.monotonic()
@@ -700,17 +776,44 @@ class MapFeed:
         self._fix = MapFix(gps.latitude, gps.longitude, bearing(gps), max(0.0, speed), stamp / 1e9)
     if self._fix is not None and now - self._fix.monotonic > 5.0:
       self._fix = None
+    fresh = self._fix is not None and 0 <= now - self._fix.monotonic <= GPS_MAX_AGE_NS / 1e9
+    if fresh:
+      self._acquisition.reset()
+      self._acquisition_polled = -math.inf
+    elif now - self._acquisition_polled >= .5:
+      self._acquisition_polled = now
+      self._acquisition.update(now)
     route: tuple[tuple[float, float], ...] = ()
+    active = False
     if navigation_sm is not None:
+      # Decode only new navigation messages and retain the same route tuple
+      # while its points are unchanged. GPS acquisition still advances each read.
       try:
-        from openpilot.starpilot.navigation.wire import navigation_state
-        nav = navigation_state(navigation_sm["starpilotNavigation"]) if navigation_sm.valid["starpilotNavigation"] else None
-        if (nav is not None and nav.enabled and nav.status in ("guiding", "arrived") and
-            0 < nav.frameMonoTime <= now_ns <= nav.frameMonoTime + 3_000_000_000):
-          route = tuple((point.latitude, point.longitude) for point in nav.route)
+        stamp = (navigation_sm.logMonoTime["starpilotNavigation"], navigation_sm.valid["starpilotNavigation"])
       except Exception:
-        route = ()
-    return MapInput(self._fix, route)
+        stamp = None
+      if stamp is None or stamp != self._route_stamp:
+        self._route_stamp = stamp
+        try:
+          from openpilot.starpilot.navigation.wire import navigation_state
+          nav = navigation_state(navigation_sm["starpilotNavigation"]) if navigation_sm.valid["starpilotNavigation"] else None
+          active = bool(nav is not None and nav.enabled and nav.destinationName)
+          self._route_valid_until = 0
+          if (nav is not None and nav.enabled and nav.status in ("guiding", "arrived") and
+              0 < nav.frameMonoTime <= now_ns <= nav.frameMonoTime + 3_000_000_000):
+            self._route_valid_until = nav.frameMonoTime + 3_000_000_000
+            route = tuple((point.latitude, point.longitude) for point in nav.route)
+        except Exception:
+          route = ()
+        if route != self._route:
+          self._route = route
+        self._navigation_active = active
+      if now_ns > self._route_valid_until:
+        self._route = ()
+      route, active = self._route, self._navigation_active
+    return MapInput(self._fix, route, active if navigation_requested is None else navigation_requested,
+                    None if fresh else self._acquisition.satellites(now),
+                    0 if fresh else now - self._acquisition.since)
 
 
 # ---------------------------------------------------------------- parked preview

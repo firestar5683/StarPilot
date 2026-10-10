@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { NotificationClient, SentryNotifications, validNotifications, channels } from '../web/js/sentry-notifications.js'
 const fixture = () => ({ schemaVersion: 1, queueFull: false, subscriptionCount: 0, subscriptions: [],
   deliverySemantics: 'Retries may repeat delivery after an interrupted remote response.',
@@ -37,5 +38,21 @@ assert.match(states.findLast(state => state.notificationError)?.notificationErro
 const worker = readFileSync(new URL('../web/sentry-push-worker.js', import.meta.url), 'utf8')
 assert.match(worker, /\.\/\#\/cameras\/events/)
 assert.match(worker, /tag: id/)
-assert.doesNotMatch(worker, /fetch\(/)
+// Push stays registered, but stale offline app code must no longer intercept navigation.
+assert.doesNotMatch(worker, /addEventListener\("fetch"/)
+assert.match(worker, /galaxy-offline-v1/)
+const handlers = new Map(), removed = []
+let claims = 0, activation
+runInNewContext(worker, {
+  self: { addEventListener: (name, fn) => handlers.set(name, fn),
+    clients: { claim: async () => { claims++ } }, skipWaiting() {} },
+  caches: { delete: async name => { removed.push(name); return true } },
+})
+handlers.get('activate')({ waitUntil: promise => { activation = promise } })
+await activation
+assert.deepEqual(removed, ['galaxy-offline-v1'])
+assert.equal(claims, 1)
+assert.equal(handlers.has('fetch'), false)
+assert.equal(handlers.has('push'), true)
+assert.equal(handlers.has('notificationclick'), true)
 console.log('Sentry notification browser client and worker checks passed')

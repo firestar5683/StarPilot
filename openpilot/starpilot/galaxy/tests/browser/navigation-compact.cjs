@@ -71,6 +71,33 @@ const status = { enabled: true, hasKey: true, isMetric: true, status: 'noDestina
     await page.waitForFunction(() => window.navigation.data.favorites[0] && !window.navigation.data.favorites[0].label)
     assert.equal(actions.at(-1).action, 'labelFavorite')
     assert.equal(actions.at(-1).label, null)
+    Object.assign(status, { network: 'online', location: { latitude: 40, longitude: -90, validForMs: 0, lastKnown: true } })
+    await page.evaluate(() => window.navigation.client.load())
+    await page.getByText('Using your last saved location to plan routes.', { exact: false }).waitFor()
+    assert.equal(await search.isEnabled(), true, 'a saved location works online without downloaded maps')
+    assert.equal(await page.getByRole('link', { name: 'download maps for offline navigation views' }).count(), 0)
+    status.network = 'offline'
+    await page.evaluate(() => window.navigation.client.load())
+    const offlineLink = page.getByRole('link', { name: 'download maps for offline navigation views' })
+    await offlineLink.waitFor()
+    assert.equal(await offlineLink.getAttribute('href'), '#/navigation/maps')
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 844 })
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      await page.screenshot({ path: `/private/tmp/navigation-offline-${width}.png`, fullPage: true })
+    }
+    await offlineLink.click()
+    await page.getByText('Map Overlay Roads', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('button', { name: 'Offline Maps', exact: true }).getAttribute('aria-pressed'), 'true')
+    await page.getByRole('button', { name: 'Destination', exact: true }).click()
+    status.network = 'unknown'
+    await page.evaluate(() => window.navigation.client.load())
+    assert.equal(await offlineLink.count(), 0, 'unknown device state must not be presented as offline')
+    await page.goto('http://navigation.test/?shell=1#/navigation/maps')
+    await page.getByText('Map Overlay Roads', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('button', { name: 'Offline Maps', exact: true }).getAttribute('aria-pressed'), 'true')
+    await page.getByRole('button', { name: 'Destination', exact: true }).click()
+    await page.waitForURL('**#/navigation')
     await page.goto('http://navigation.test/?shell=1#/navigation')
     await page.getByRole('searchbox', { name: 'Search destinations' }).waitFor()
     for (const theme of ['dark', 'light']) {

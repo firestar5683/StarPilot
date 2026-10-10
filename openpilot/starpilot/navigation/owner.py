@@ -329,11 +329,18 @@ class NavigationOwner:
     result['mapboxUsage'] = read_usage(self.root / 'mapbox-usage')
     result['alternatives'] = [dict(row, geometry=rounded(row['geometry'])) for row in self.route_options(document['revision'])]
     result['selectedRoute'] = document.get('routeChoice', 0)
-    result.update(hasKey=bool(document['token']), status=status, instruction=None, route=[], isMetric=self._is_metric(), location=None)
+    result.update(hasKey=bool(document['token']), status=status, instruction=None, route=[], isMetric=self._is_metric(), location=None,
+                  network='unknown')
     if document['enabled'] and document['token']:
       if self.runtime_source is None:
         from openpilot.starpilot.navigation.status import NavigationStatusSource
         self.runtime_source = NavigationStatusSource()
+      if hasattr(self.runtime_source, 'network_status'):
+        try:
+          network = self.runtime_source.network_status()
+          result['network'] = network if network in ('online', 'offline', 'unknown') else 'unknown'
+        except (OSError, ValueError, RuntimeError):
+          pass
       if hasattr(self.runtime_source, 'map_position'):
         try:
           result['location'] = self.runtime_source.map_position()

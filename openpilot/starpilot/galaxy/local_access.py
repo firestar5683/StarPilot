@@ -26,7 +26,7 @@ class LocalAccess:
       if self.cached is not None and self.clock() < self.expiry:
         return self.cached
       addresses = []
-      reason = 'Connect the comma to Wi-Fi or Ethernet to get a local address.'
+      reason = 'Connect to the Galaxy hotspot, or put the comma and phone on the same Wi-Fi or Ethernet network.'
       try:
         result = self.run(['ip', '-j', '-4', 'address', 'show', 'up'], capture_output=True, timeout=1, check=True)
         if len(result.stdout) > 65536:

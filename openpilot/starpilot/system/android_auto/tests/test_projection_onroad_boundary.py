@@ -70,6 +70,21 @@ class TestProjectionOnroad(unittest.TestCase):
     owner.cancel.assert_called_once()
     self.assertEqual(owner.touch.call_count, 1)
 
+  def test_car_escape_control_remains_active_on_standby(self):
+    from openpilot.starpilot.system.android_auto.projection_layout import CAR_EXIT, default_layout_for_viewport
+    native, _ = self.dependencies()
+    requested = Mock()
+    layout = default_layout_for_viewport((2880, 1080))
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout,
+                                       native_focus=requested)
+    self.addCleanup(view.close)
+    placed = layout['widgets'][CAR_EXIT]
+    x, y = placed['x'] + 48, placed['y'] + 48
+    events = [SimpleNamespace(kind='down', x=x / 2880, y=y / 1080),
+              SimpleNamespace(kind='up', x=x / 2880, y=y / 1080)]
+    view.handle_touches(events)
+    requested.assert_called_once_with()
+
   def dependencies(self, *, fail_view=False, fail_camera=False):
     events = []
     ui = SimpleNamespace(projection_read_only=True, started=False, _offroad_transition_callbacks=[],

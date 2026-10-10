@@ -1,4 +1,7 @@
+import uuid
+
 from unittest.mock import Mock
+
 from openpilot.starpilot.system.android_auto.frame_source import FrameRequest
 from openpilot.starpilot.system.android_auto.view import ViewSource
 
@@ -42,6 +45,7 @@ def crashing_view(tmp_path, events, script="import sys; print('Traceback: boom',
   import sys
   return ViewSource('car', request(), lambda event, **fields: events.append((event, fields)),
                     car_path=str(tmp_path / 'frame'), touch_path=str(tmp_path / 'touch'),
+                    control_path=f"/tmp/aa-control-{uuid.uuid4().hex}.sock",
                     renderer_command=[sys.executable, '-c', script], renderer_log=tmp_path / 'car_ui.log')
 
 

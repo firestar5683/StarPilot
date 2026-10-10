@@ -4,6 +4,7 @@ import time
 from openpilot.starpilot.navigation.owner import NavigationOwner
 from openpilot.starpilot.system.android_auto.projection_layout import FAVORITE_WIDGETS, FAVORITE_SIZE, FAVORITE_ICON_SIZE
 from openpilot.starpilot.ui.onroad_customization import widget_order
+from openpilot.starpilot.ui.navigation_favorites_state import favorite_visible
 
 
 class ProjectionFavorites:
@@ -40,11 +41,13 @@ class ProjectionFavorites:
       return None
     return ('end' if active else 'start', doc['revision'], place)
 
-  @staticmethod
-  def bounds(key, state):
+  def bounds(self, key, state):
     if state.alert.size != 'none':
       return None
-    placed = state.customization['layouts']['large'].get(key)
+    placements = state.customization['layouts']['large']
+    if not favorite_visible(key, self.document, placements):
+      return None
+    placed = placements.get(key)
     return placed if placed is not None and placed['enabled'] else None
 
   def hit(self, x, y, state):

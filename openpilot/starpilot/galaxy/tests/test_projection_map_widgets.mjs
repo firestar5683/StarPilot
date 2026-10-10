@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { compile } from "../web/vendor/vue/vue.esm-browser.js"
 import { snapshot } from "./test_onroad_layout.mjs"
 import { editorSnapshot, projectionPayload } from "../web/js/projection-layout.js"
-import { OnroadLayoutPage, clampBox, clampPlacement, orderedWidgetIds, placementLimits, validDocument, validSnapshot, widgetSize } from "../web/js/onroad-layout.js"
+import { LayoutWidgetPreview, OnroadLayoutPage, clampBox, clampPlacement, orderedWidgetIds, placementLimits, validDocument, validSnapshot, widgetSize } from "../web/js/onroad-layout.js"
 
 const copy = (v) => JSON.parse(JSON.stringify(v))
 const native = snapshot()
@@ -22,7 +22,10 @@ for (const [index, label] of ["Home", "Work"].entries()) {
   metadata.widgets[key] = { label, kind: key, width: 320, height: 110, iconSize: 110, colors: {},
     default: { x: 2195 + index * 335, y: 280, enabled: false, display: 'words' } }
 }
-metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work"]
+metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
+  note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
+  default: { x: 30, y: 954, enabled: true } }
+metadata.widgetOrder = ["nav_map", ...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "nav_card", "nav_home", "nav_work", "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
 const doc = { version: 1, clock24Hour: false, canvas: { width: 2880, height: 1080 }, widgets }
@@ -93,7 +96,7 @@ Object.defineProperties(vm, {
   selectedWidget: { get: () => profile.widgets[vm.state.selected] },
   selectedPosition: { get: () => vm.state.draft.layouts.large[vm.state.selected] },
 })
-for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "reorderLayer", "setFavoriteDisplay"])
+for (const name of ["recordChange", "resizeBox", "boxInput", "opacityInput", "startResize", "moveDrag", "endDrag", "releaseDrag", "changePosition", "add", "remove", "requestRemove", "reorderLayer", "startLayerDrag", "setFavoriteDisplay"])
   vm[name] = OnroadLayoutPage.methods[name].bind(vm)
 const pointer = (x, y) => ({ clientX: x, clientY: y, pointerId: 7, button: 0, preventDefault() {}, stopPropagation() {} })
 vm.startResize("nav_map", pointer(1950 + 860, 625 + 410))
@@ -152,6 +155,35 @@ for (const display of ['emoji', null, true, 1]) {
   invalid.layouts.large.nav_home.display = display
   assert.equal(validDocument(invalid, data.metadata), false)
 }
+
+// The escape control moves normally but cannot be disabled, removed, or placed below another widget.
+vm.state.selected = 'car_exit'
+assert.equal(profile.widgets.car_exit.label, 'Exit to car')
+assert.deepEqual(widgetSize(profile.widgets.car_exit, vm.layout.car_exit), [96, 96])
+assert.deepEqual([vm.layout.car_exit.x, vm.layout.car_exit.y], [30, 954])
+assert.equal(vm.layout.car_exit.enabled, true)
+vm.changePosition('car_exit', 200, 800)
+assert.deepEqual([vm.layout.car_exit.x, vm.layout.car_exit.y], [200, 800])
+vm.remove('car_exit')
+assert.equal(vm.layout.car_exit.enabled, true)
+vm.requestRemove('car_exit')
+assert.equal(vm.state.removeConfirm, undefined)
+const pinnedOrder = [...orderedWidgetIds(vm.state.draft, data.metadata, 'large')]
+vm.startLayerDrag({ button: 0 }, 'car_exit')
+assert.equal(vm.state.layerDrag, undefined)
+vm.reorderLayer('car_exit', 'nav_map')
+vm.reorderLayer('nav_map', 'car_exit')
+assert.deepEqual(orderedWidgetIds(vm.state.draft, data.metadata, 'large'), pinnedOrder)
+const disabledExit = copy(vm.state.draft)
+disabledExit.layouts.large.car_exit.enabled = false
+assert.equal(validDocument(disabledExit, data.metadata), false)
+const buriedExit = copy(vm.state.draft)
+buriedExit.widgetOrder ||= {}
+buriedExit.widgetOrder.large = ['car_exit', ...pinnedOrder.filter(id => id !== 'car_exit')]
+assert.equal(validDocument(buriedExit, data.metadata), false)
+assert.match(OnroadLayoutPage.template, /v-if="!widget.required"/)
+assert.match(OnroadLayoutPage.template, />Top · Required</)
+assert.match(LayoutWidgetPreview.template, /data-preview-icon="door-exit"/)
 
 compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })
 console.log("Projection widgets: map resizing/opacity, Home/Work add/move/order/remove, strict documents and payload passed")

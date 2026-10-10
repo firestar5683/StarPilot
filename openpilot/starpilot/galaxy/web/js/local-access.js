@@ -59,12 +59,12 @@ export const LocalAccess = {
   watch: { mode(value) { this.feed.start(value) } },
   beforeUnmount() { this.feed.stop() },
   template: `<section class="gx-card gx-local-access gx-panel" aria-label="Local comma access">
-    <div class="gx-settings__subhead"><h3>Local Comma Access</h3></div>
+    <div class="gx-settings__subhead"><h3>Local access</h3></div>
     <p v-if="state.error" class="gx-note" role="status">{{ state.error }}</p>
     <template v-else-if="state.data?.available">
-      <p>On the same network, open one of these comma addresses:</p>
+      <p>Connect your phone to the Galaxy hotspot, or put your phone and comma on the same Wi-Fi or Ethernet network, then open a local address:</p>
       <ul><li v-for="address in state.data.addresses" :key="address.interface + address.url"><a :href="address.url" target="_blank" rel="noopener" class="gx-wrap">{{ address.label }} · {{ address.url }}</a></li></ul>
-      <p class="gx-note">These addresses come from the comma; your browser must be able to reach its network.</p>
+      <p class="gx-note">For local access, type or paste the full http:// address into a new browser tab and bookmark it. The public Galaxy link uses the Internet tunnel, independently of hotspot access. If your browser or phone asks for local-network permission, allow access to this comma.</p>
     </template>
     <p v-else-if="state.data" class="gx-note" role="status">{{ state.data.reason || 'The comma has no local network address available.' }}</p>
   </section>`,

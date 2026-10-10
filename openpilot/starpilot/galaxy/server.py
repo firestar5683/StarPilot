@@ -67,8 +67,18 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None, android_auto_logs=None):
+                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None):
   cloud = cloud_provider
+  hotspot_source = hotspot
+  hotspot_source_lock = threading.Lock()
+
+  def hotspot_owner():
+    nonlocal hotspot_source
+    with hotspot_source_lock:
+      if hotspot_source is None:
+        from openpilot.starpilot.galaxy.hotspot import HotspotSettings
+        hotspot_source = HotspotSettings()
+    return hotspot_source
 
   def cloud_status():
     from openpilot.starpilot.connect.provider import status
@@ -321,10 +331,13 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             return bool(aa_client().call('status')['status'])
           except (OSError, RuntimeError, KeyError, TypeError):
             return False
+        def enable_bluetooth(identity):
+          bluetooth_owner().request('power', enabled=True, session=identity, power_on_for_android_auto=True)
         aa_setup_source = AndroidAutoSetup(parked=configuration_allowed, enabled=lambda: Params().get_bool('AndroidAutoEnabled'),
                                           session_valid=bluetooth_session_valid, bluetooth_enabled=bluetooth_ready,
                                           install_ready=install_ready, service_ready=service_ready,
-                                          set_enabled=lambda value: Params().put_bool('AndroidAutoEnabled', value))
+                                          set_enabled=lambda value: Params().put_bool('AndroidAutoEnabled', value),
+                                          enable_bluetooth=enable_bluetooth)
         server.android_auto_setup_source = aa_setup_source
     return aa_setup_source
 
@@ -660,6 +673,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           result = {'name': device_name.read()}
         except (OSError, ValueError, UnicodeError):
           self.json(503, {'error': 'The saved comma name could not be read'})
+        else:
+          if self.require_session():
+            self.json(200, result)
+      elif path == '/api/galaxy/hotspot':
+        if not self.require_session():
+          return
+        try:
+          result = hotspot_owner().snapshot(parked())
+        except (OSError, ValueError):
+          self.json(503, {'error': 'Hotspot settings are unavailable.'})
         else:
           if self.require_session():
             self.json(200, result)
@@ -1355,7 +1378,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
-                      '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/cameras/snapshot',
+                      '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/galaxy/hotspot', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
                       '/api/ui/layout', '/api/ui/layout/preview', '/api/favorites/slots',
@@ -1401,6 +1424,28 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         payload = json.loads(self.rfile.read(size), object_pairs_hook=unique_object)
       except (ValueError, UnicodeError, RecursionError):
         self.json(400, {'error': 'Invalid request'})
+        return
+      if path == '/api/galaxy/hotspot':
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          with effect_lock:
+            result = hotspot_owner().save(payload, lambda: self.settings_session() == identity and parked())
+        except PermissionError:
+          self.json(409, {'error': 'Park before changing the Galaxy hotspot.'})
+        except FileExistsError as error:
+          self.json(409, {'error': str(error)})
+        except ValueError as error:
+          self.json(400, {'error': str(error)})
+        except OSError:
+          self.json(503, {'error': 'Hotspot settings could not be saved.'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
         return
       if path == '/api/recordings/action':
         identity = self.settings_session()
@@ -1964,7 +2009,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         self.respond(200, b'{"authenticated":false}', cookie='galaxy_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
         return
       if path == '/api/android-auto/enable':
-        if type(payload) is not dict or set(payload) != {'enabled'} or type(payload['enabled']) is not bool:
+        if type(payload) is not dict or set(payload) not in ({'enabled'}, {'enabled', 'enableBluetooth'}) or \
+           type(payload['enabled']) is not bool or type(payload.get('enableBluetooth', False)) is not bool or \
+           payload.get('enableBluetooth', False) and not payload['enabled']:
           self.json(400, {'error': 'Invalid Android Auto enable request'})
           return
         identity = self.settings_session()
@@ -1973,9 +2020,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           return
         from openpilot.starpilot.galaxy.android_auto_setup import SetupRejected
         try:
-          result = aa_setup_owner().enable(identity, payload['enabled'])
+          result = aa_setup_owner().enable(identity, payload['enabled'], enable_bluetooth=payload.get('enableBluetooth', False))
         except SetupRejected as error:
           self.json(409, {'error': str(error)})
+        except (BluetoothRejected, BluetoothUnavailable) as error:
+          self.json(409 if isinstance(error, BluetoothRejected) else 503,
+                    {'error': 'Bluetooth could not be enabled; Android Auto was not turned on', 'code': error.code})
         except (OSError, RuntimeError):
           self.json(503, {'error': 'Android Auto setting is unavailable'})
         else:
@@ -2435,12 +2485,30 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         self.json(401, {'error': 'Sign in to Galaxy'})
         return
       from openpilot.starpilot.galaxy.android_auto_setup import SetupRejected
+      def disconnect():
+        if self.settings_session() != identity:
+          raise SetupRejected('Galaxy session expired; sign in again')
+        client = aa_client()
+        if client.available:
+          runtime = client.call('status')['status']
+          if not isinstance(runtime, dict) or type(runtime.get('running')) is not bool:
+            raise RuntimeError('Android Auto connection status is unavailable')
+          if runtime['running']:
+            if self.settings_session() != identity:
+              raise SetupRejected('Galaxy session expired; sign in again')
+            # Stop is permitted with Android Auto off; this DELETE already authenticated the caller.
+            client.call('stop')
+            current = client.call('status')['status']
+            if not isinstance(current, dict) or current.get('running') is not False:
+              raise SetupRejected('Android Auto is still disconnecting; try deleting the package again')
+        if self.settings_session() != identity:
+          raise SetupRejected('Galaxy session expired; sign in again')
       try:
-        result = aa_setup_owner().remove(identity)
+        result = aa_setup_owner().remove(identity, disconnect=disconnect)
       except SetupRejected as error:
         self.json(409, {'error': str(error)})
-      except OSError:
-        self.json(503, {'error': 'Android Auto identity could not be removed'})
+      except (OSError, RuntimeError, KeyError, TypeError):
+        self.json(503, {'error': 'Android Auto could not be disconnected or its package removed'})
       else:
         if self.settings_session() == identity:
           self.json(200, result)

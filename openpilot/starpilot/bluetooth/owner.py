@@ -622,7 +622,11 @@ class BluetoothOwner:
 
   def request(self, operation: str, *, address: str | None = None, enabled: bool | None = None,
               session: tuple | None = None, prompt_id: str | None = None, accepted: bool | None = None,
-              value: str = '') -> dict:
+              value: str = '', power_on_for_android_auto: bool = False) -> dict:
+    # Only the confirmed Android Auto enable flow may power the radio on in either road state.
+    if type(power_on_for_android_auto) is not bool or power_on_for_android_auto and \
+       (operation != 'power' or enabled is not True or session is None):
+      raise ValueError('Android Auto Bluetooth startup requires an authenticated power-on request')
     if operation not in self.OPERATIONS:
       raise ValueError('Unsupported Bluetooth operation')
     if operation == 'power':
@@ -640,6 +644,13 @@ class BluetoothOwner:
       raise ValueError('Pairing requires a session')
     if address is not None:
       address = normalized_address(address)
+    def check_power_authority():
+      if operation != 'power':
+        return
+      if session is not None and not self.session_valid(session):
+        raise BluetoothRejected('Bluetooth session expired', code='session_expired')
+      if not power_on_for_android_auto and not self.parked():
+        raise BluetoothRejected('Bluetooth radio restart requires Park', code='park_required')
     if not self.lock.acquire(blocking=False):
       raise BluetoothRejected('Bluetooth is busy', code='busy')
     radio_change = None
@@ -647,15 +658,13 @@ class BluetoothOwner:
     radio_start_owned = False
     radio_start_attempted = False
     try:
-      if operation == 'power' and not self.parked():
-        raise BluetoothRejected('Bluetooth radio restart requires Park', code='park_required')
+      check_power_authority()
       if not self.radio_helper.is_file():
         raise BluetoothUnavailable('Bluetooth radio is unavailable', code='radio_unavailable')
       if session is not None and not self.session_valid(session):
         raise BluetoothRejected('Pairing session expired', code='session_expired')
       self._admission_enter()
-      if operation == 'power' and not self.parked():
-        raise BluetoothRejected('Vehicle state changed', code='park_required')
+      check_power_authority()
       if operation == 'pairing_response':
         assert session is not None and prompt_id is not None and accepted is not None
         if self.pairing is None or not self.pairing.respond(session, prompt_id, accepted, value):
@@ -682,13 +691,11 @@ class BluetoothOwner:
           radio_change.apply()
         except OSError as exc:
           raise BluetoothUnavailable('Bluetooth power setting is unavailable', code='radio_preference_unavailable') from exc
-        if not self.parked():
-          raise BluetoothRejected('Vehicle state changed', code='park_required')
+        check_power_authority()
       if operation == 'power' and enabled:
         radio_start_attempted = True
         self.systemctl(['sudo', '-n', 'systemctl', 'start', RADIO_UNIT], check=True, timeout=30)
-        if not self.parked():
-          raise BluetoothRejected('Vehicle state changed', code='park_required')
+        check_power_authority()
       if operation == 'power':
         assert enabled is not None
         if not enabled:
@@ -722,8 +729,7 @@ class BluetoothOwner:
       if operation == 'power' and not enabled:
         self.systemctl(['sudo', '-n', 'systemctl', 'stop', RADIO_UNIT], check=True, timeout=15)
         self.close()
-      if operation == 'power' and not self.parked():
-        raise BluetoothRejected('Vehicle state changed', code='park_required')
+      check_power_authority()
       result = self.snapshot(session=session)
       if radio_change is not None:
         try:

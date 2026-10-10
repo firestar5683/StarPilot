@@ -9,6 +9,7 @@ from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.system.android_auto.source_verifier import GalaxySourceVerifier
+from openpilot.starpilot.bluetooth.owner import BluetoothUnavailable
 
 
 class FakeImport:
@@ -27,13 +28,23 @@ class FakeImport:
 def api(tmp_path):
   access = GalaxyAccessOwner(tmp_path / 'access')
   assert access.configure('password123', lambda: True)
-  state = {'parked': True, 'identity_installed': True, 'bluetooth_enabled': True, 'enabled': True}
+  state = {'parked': True, 'identity_installed': True, 'bluetooth_enabled': True, 'enabled': True, 'install_ready': True}
+  state['enable_events'] = []
+  def set_enabled(value):
+    state['enable_events'].append('android_auto')
+    state['enabled'] = value
+  def enable_bluetooth(_session):
+    state['enable_events'].append('bluetooth')
+    if state.get('bluetooth_failure') == 'unavailable':
+      raise BluetoothUnavailable('Radio unavailable')
+    if state.get('bluetooth_failure') != 'unverified':
+      state['bluetooth_enabled'] = True
   job = FakeImport(tmp_path / 'imports')
   setup = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: state['enabled'], session_valid=lambda _identity: True,
                            import_job=Mock(wraps=job, work_dir=job.work_dir), identity_status=lambda: {'installed': state['identity_installed'],
                                                                      'message': 'Package status'},
-                           bluetooth_enabled=lambda: state['bluetooth_enabled'], install_ready=lambda: True,
-                           service_ready=lambda: True, set_enabled=lambda value: state.update(enabled=value))
+                           bluetooth_enabled=lambda: state['bluetooth_enabled'], install_ready=lambda: state['install_ready'],
+                           service_ready=lambda: True, set_enabled=set_enabled, enable_bluetooth=enable_bluetooth)
   class FakeClient:
     def __init__(self):
       self.calls = []
@@ -41,8 +52,11 @@ def api(tmp_path):
       self.receiver = ''
       self.running = False
       self.auto_connect = False
+      self.available = True
+      self.stop_error = False
+      self.stop_completes = True
     def call(self, command, **kwargs):
-      assert command == 'status' or self.verifier.valid(kwargs['source'])
+      assert command in ('status', 'stop') or self.verifier.valid(kwargs['source'])
       self.calls.append((command, dict(kwargs)))
       if command == 'status':
         return {'status': {'receiver_address': self.receiver, 'receiver_name': 'My car', 'state': 'streaming' if self.running else 'idle',
@@ -56,7 +70,10 @@ def api(tmp_path):
       if command == 'start':
         self.running = True
       if command == 'stop':
-        self.running = False
+        if self.stop_error:
+          raise RuntimeError('Disconnect failed')
+        if self.stop_completes:
+          self.running = False
       return {'pairing': {'active': True, 'receiver': {'address': 'AA:BB:CC:DD:EE:FF', 'name': 'Car'},
                           'prompt': {'id': 'a' * 32, 'kind': 'confirmation', 'value': '123456'},
                           'approved': False}} if command == 'pairing_status' else {}
@@ -100,8 +117,24 @@ def test_galaxy_upload_requires_session_and_exact_binary_body(api):
   assert request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie)[0] == 202
   assert job.calls[0][0] == b'fake-apk'
   state['parked'] = False
-  assert job.calls[0][1]() is False
+  assert job.calls[0][1]() is True
   assert request('POST', '/api/android-auto/upload', b'other', cookie=cookie)[0] == 409
+
+
+@pytest.mark.parametrize('parked', [True, False])
+@pytest.mark.parametrize('enabled', [True, False])
+def test_galaxy_upload_works_in_either_road_state_without_enabling(api, parked, enabled):
+  request, job, state, _ = api
+  state.update(parked=parked, enabled=enabled)
+  code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}),
+                             content_type='application/json')
+  assert code == 200
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  code, uploaded, _ = request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie)
+  assert code == 202 and uploaded['import']['state'] == 'running'
+  assert uploaded['parked'] is parked and uploaded['enabled'] is enabled
+  assert job.calls[0][0] == b'fake-apk' and job.calls[0][1]()
+  assert state['enabled'] is enabled
 
 
 def test_galaxy_rejects_upload_after_logout(api):
@@ -115,8 +148,10 @@ def test_galaxy_rejects_upload_after_logout(api):
   assert job.calls == []
 
 
-def test_enable_requires_session_and_park_but_disable_revokes_without_park(api):
+@pytest.mark.parametrize('parked', [True, False])
+def test_enable_in_either_road_state_requires_session_and_hardware(api, parked):
   request, _, state, _ = api
+  state.update(parked=parked, enabled=False)
   def body(enabled):
     return json.dumps({'enabled': enabled})
   assert request('POST', '/api/android-auto/enable', body(True), content_type='application/json')[0] == 401
@@ -126,21 +161,74 @@ def test_enable_requires_session_and_park_but_disable_revokes_without_park(api):
   cookie = headers['Set-Cookie'].split(';', 1)[0]
   assert request('POST', '/api/android-auto/enable', '{"enabled":1}', cookie=cookie,
                  content_type='application/json')[0] == 400
-  state['parked'] = False
+  code, result, _ = request('POST', '/api/android-auto/enable', body(True), cookie=cookie, content_type='application/json')
+  assert code == 200 and result['enabled'] is True and result['parked'] is parked
+  assert state['enabled'] is True
+  state['install_ready'] = False
   assert request('POST', '/api/android-auto/enable', body(True), cookie=cookie,
                  content_type='application/json')[0] == 409
   assert request('POST', '/api/android-auto/enable', body(False), cookie=cookie,
                  content_type='application/json')[1]['enabled'] is False
-  state['parked'] = True
+  state['install_ready'] = True
   assert request('POST', '/api/android-auto/enable', body(True), cookie=cookie,
                  content_type='application/json')[1]['enabled'] is True
+  assert request('POST', '/api/auth/logout', '{}', cookie=cookie, content_type='application/json')[0] == 200
+  assert request('POST', '/api/android-auto/enable', body(False), cookie=cookie, content_type='application/json')[0] == 401
+  assert state['enabled'] is True
 
 
-def test_identity_removal_is_authenticated_and_refuses_active_import(api, monkeypatch):
+@pytest.mark.parametrize('parked', [True, False])
+def test_confirmed_enable_powers_bluetooth_first_in_either_road_state(api, parked):
+  request, _, state, _ = api
+  state.update(parked=parked, enabled=False, bluetooth_enabled=False)
+  confirmed = json.dumps({'enabled': True, 'enableBluetooth': True})
+  assert request('POST', '/api/android-auto/enable', confirmed, content_type='application/json')[0] == 401
+  code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}), content_type='application/json')
+  assert code == 200
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  assert request('POST', '/api/android-auto/enable', '{"enabled":true}', cookie=cookie, content_type='application/json')[0] == 409
+  for payload in ({'enabled': True, 'enableBluetooth': 1}, {'enabled': False, 'enableBluetooth': True}):
+    assert request('POST', '/api/android-auto/enable', json.dumps(payload), cookie=cookie, content_type='application/json')[0] == 400
+  assert state['enable_events'] == [] and not state['enabled'] and not state['bluetooth_enabled']
+  state['install_ready'] = False
+  assert request('POST', '/api/android-auto/enable', confirmed, cookie=cookie, content_type='application/json')[0] == 409
+  assert state['enable_events'] == []
+  state['install_ready'] = True
+  code, result, _ = request('POST', '/api/android-auto/enable', confirmed, cookie=cookie, content_type='application/json')
+  assert code == 200 and result['enabled'] and result['bluetoothEnabled']
+  assert result['parked'] is parked and state['enable_events'] == ['bluetooth', 'android_auto']
+
+
+@pytest.mark.parametrize('failure', ['unavailable', 'unverified'])
+def test_confirmed_enable_does_not_turn_on_android_auto_when_bluetooth_fails(api, failure):
+  request, _, state, _ = api
+  state.update(parked=False, enabled=False, bluetooth_enabled=False, bluetooth_failure=failure)
+  code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}), content_type='application/json')
+  assert code == 200
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  code, result, _ = request('POST', '/api/android-auto/enable', '{"enabled":true,"enableBluetooth":true}',
+                           cookie=cookie, content_type='application/json')
+  assert code == (503 if failure == 'unavailable' else 409)
+  assert 'Bluetooth' in result['error']
+  assert state['enable_events'] == ['bluetooth'] and not state['enabled']
+
+
+@pytest.mark.parametrize('parked', [True, False])
+@pytest.mark.parametrize('enabled', [True, False])
+@pytest.mark.parametrize('connection', ['connected', 'idle', 'unavailable'])
+def test_identity_removal_disconnects_first_in_either_road_state(api, monkeypatch, parked, enabled, connection):
   from openpilot.starpilot.system.android_auto import apk_identity
-  request, job, _, _ = api
+  request, job, state, client = api
+  state.update(parked=parked, enabled=enabled)
+  client.running = connection == 'connected'
+  client.available = connection != 'unavailable'
   removed = []
-  monkeypatch.setattr(apk_identity, 'remove_identity', lambda: removed.append(True))
+  def remove():
+    assert not client.running
+    commands = [command for command, _kwargs in client.calls]
+    assert commands == {'connected': ['status', 'stop', 'status'], 'idle': ['status'], 'unavailable': []}[connection]
+    removed.append(True)
+  monkeypatch.setattr(apk_identity, 'remove_identity', remove)
   assert request('DELETE', '/api/android-auto/identity')[0] == 401
   code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}),
                               content_type='application/json')
@@ -148,10 +236,42 @@ def test_identity_removal_is_authenticated_and_refuses_active_import(api, monkey
   cookie = headers['Set-Cookie'].split(';', 1)[0]
   job.running = True
   assert request('DELETE', '/api/android-auto/identity', cookie=cookie)[0] == 409
-  assert removed == []
+  assert removed == [] and client.calls == []
   job.running = False
   assert request('DELETE', '/api/android-auto/identity', cookie=cookie)[0] == 200
   assert removed == [True]
+  assert state['enabled'] is enabled
+  assert request('POST', '/api/auth/logout', '{}', cookie=cookie, content_type='application/json')[0] == 200
+  assert request('DELETE', '/api/android-auto/identity', cookie=cookie)[0] == 401
+  assert removed == [True]
+
+
+@pytest.mark.parametrize('failure', ['stop_error', 'still_running', 'status_error', 'invalid_status'])
+def test_identity_removal_preserves_package_when_disconnect_cannot_be_confirmed(api, monkeypatch, failure):
+  from openpilot.starpilot.system.android_auto import apk_identity
+  request, _, state, client = api
+  state.update(parked=False, enabled=False)
+  client.running = True
+  client.stop_error = failure == 'stop_error'
+  client.stop_completes = failure != 'still_running'
+  original_call = client.call
+  def call(command, **kwargs):
+    if command == 'status' and failure == 'status_error':
+      raise RuntimeError('Status unavailable')
+    if command == 'status' and failure == 'invalid_status':
+      return {'status': {}}
+    return original_call(command, **kwargs)
+  monkeypatch.setattr(client, 'call', call)
+  remove = Mock()
+  monkeypatch.setattr(apk_identity, 'remove_identity', remove)
+  code, _, headers = request('POST', '/api/auth/login', json.dumps({'password': 'password123'}),
+                             content_type='application/json')
+  assert code == 200
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  code, result, _ = request('DELETE', '/api/android-auto/identity', cookie=cookie)
+  assert code == (409 if failure == 'still_running' else 503)
+  assert 'disconnect' in result['error']
+  remove.assert_not_called()
 
 
 def test_pairing_source_is_minted_only_for_authenticated_parked_session_and_revoked_on_logout(api):

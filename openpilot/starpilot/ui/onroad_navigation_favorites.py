@@ -4,6 +4,7 @@ from itertools import pairwise
 import pyray as rl
 
 from openpilot.starpilot.ui.presentation import FontRole
+from openpilot.starpilot.ui.navigation_favorites_state import favorite_visible
 
 
 class NavigationFavorites:
@@ -16,12 +17,14 @@ class NavigationFavorites:
     placed = state.customization['layouts']['large'].get(key)
     if placed is None or not placed['enabled'] or state.alert.size != 'none':
       return
+    if not favorite_visible(key, self.document, state.customization['layouts']['large']):
+      return
     label = key.removeprefix('nav_').title()
     doc = self.document
     place = next((row for row in doc['favorites'] if row.get('label') == label.lower()), None) if doc else None
     active = bool(place and doc and doc['destination'] and doc['destination']['id'] == place['id'])
     available = bool(active or place and doc and doc['enabled'] and doc['token'])
-    title = 'End navigation' if active else label
+    title = 'End route' if active else label
     detail = self.error or (label if active else 'Navigate' if available else 'Set in Galaxy' if place is None else 'Enable navigation')
     icons = placed.get('display') == 'icons'
     rect = rl.Rectangle(placed['x'], placed['y'], 110 if icons else 320, 110)
@@ -30,10 +33,13 @@ class NavigationFavorites:
     rl.draw_rectangle_rounded_lines_ex(rect, .3, 8, 3, tint if available else rl.Color(140, 140, 150, 170))
     ink = tint if available else rl.Color(160, 157, 167, 255)
     if icons:
-      self.draw_icon(key, rect, ink)
-      # A small status badge keeps the icon recognizable while indicating
-      # stop, setup or failure. Navigation actions remain the same as the card.
-      badge = '!' if self.error else 'x' if active else '+' if place is None else '!' if not available else ''
+      if active:
+        for start, end in (((35, 35), (75, 75)), ((35, 75), (75, 35))):
+          rl.draw_line_ex(rl.Vector2(rect.x + start[0], rect.y + start[1]),
+                          rl.Vector2(rect.x + end[0], rect.y + end[1]), 6, ink)
+      else:
+        self.draw_icon(key, rect, ink)
+      badge = '!' if self.error else '+' if place is None else '!' if not available else ''
       if badge:
         rl.draw_circle(int(rect.x + 91), int(rect.y + 19), 14, rl.Color(15, 13, 23, 255))
         measured = self.fonts.measure(badge, FontRole.SEMI_BOLD, 23)

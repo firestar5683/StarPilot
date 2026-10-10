@@ -25,9 +25,10 @@ def process_health(processes):
   return drive
 
 
+@pytest.mark.parametrize('name', ['android_autod', 'galaxy_hotspot'])
 @pytest.mark.parametrize('running,requested', [(False, False), (False, True), (True, True)])
-def test_android_auto_lifecycle_does_not_block_engagement(running, requested):
-  drive = process_health([('android_autod', running, requested)])
+def test_optional_lifecycle_does_not_block_engagement(name, running, requested):
+  drive = process_health([(name, running, requested)])
   assert not drive.update_process_health()
   assert not drive.events.contains(ET.NO_ENTRY)
   drive.events.add(EventName.buttonEnable)

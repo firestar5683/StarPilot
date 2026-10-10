@@ -46,15 +46,30 @@ it labels its sample System Monitor data and cannot edit a device.
 | Maps | Local map status and a parked catalog-region download, progress, or cancellation. A completed selection takes effect at the next map service start. |
 | Cameras and Sentry | Saved PiP and V-ASM settings and bounded Sentry event metadata. The crop editor uses a browser-local still image; it does not upload that image. |
 | Sound packs | Catalog status, verified download and cancellation through the local sound owner. |
+| Galaxy Access & Install | Remote link pairing, Galaxy installation, and an opt-in Wi-Fi hotspot. Local addresses are on Home. |
 
 The Vue router in `web/js/app.js` and the route handlers in `server.py` are the
 current route map. API groups include `/api/auth`, `/api/system/monitor`,
 `/api/software/status`, `/api/settings`, `/api/models`, `/api/maps`,
 `/api/sounds`, `/api/bluetooth`, `/api/vehicle-selection`, `/api/recordings`,
 `/api/sentry/events`, and `/api/flm`. An unknown API route returns an error;
-there is no arbitrary Params or shell-command endpoint.
+there is no arbitrary Params or shell-command endpoint. The retired
+`POST /api/companion` cross-origin bridge is no longer supported. Local hotspot
+access uses the same authenticated, same-origin HTTP API as local Wi-Fi.
 
 ## Access and operation rules
+
+The hotspot is off by default. While parked, open **Galaxy Access &
+Install → Galaxy Wi-Fi Hotspot**, enable automatic broadcast, and save a password
+(12–63 printable ASCII characters without spaces). Join `TheGalaxy-<last four
+characters of dongle ID>` and bookmark `http://172.31.254.1:8082/`; stay connected
+if your phone warns of no Internet. Saved settings survive restarts. It runs
+without Android Auto or another Wi-Fi connection, requires an available Wi-Fi
+radio, and follows connected Wi-Fi/Android Auto's channel. Network changes may
+interrupt access; changing the password or disabling it disconnects clients.
+It provides no Internet gateway; the public Galaxy link still needs Internet
+and its tunnel. Sustained projection and standalone reconnects still need
+hardware validation.
 
 The server requires the actual peer and socket destination to be local for
 passwordless access. Proxy headers select the password-backed path. The Host

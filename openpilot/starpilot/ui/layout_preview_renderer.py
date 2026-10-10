@@ -168,6 +168,8 @@ class _Canvas:
       else:
         from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
         self.view = ProjectionOnroad.create_view(OnroadView, self.fonts, viewport=viewport, **layers)
+        from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
+        self.view.projection_exit_layer = ProjectionExit(rl).render
         from openpilot.starpilot.ui.onroad_map import MapOverlay, SampleTileReader
         self.map = MapOverlay(reader=SampleTileReader(), fonts=self.fonts)
         self.view.map_layer = self._render_map

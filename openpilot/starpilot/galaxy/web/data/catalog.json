@@ -23,10 +23,10 @@
       "availability": "local-only"
     },
     {
-      "name": "Install Galaxy / Tunnel",
+      "name": "Galaxy Access & Install",
       "path": "/galaxy",
       "icon": "bi-globe2",
-      "description": "Remote access and device pairing",
+      "description": "Pair for remote access, install Galaxy, or set up a Wi-Fi hotspot",
       "availability": "local-only"
     },
     {
