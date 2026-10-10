@@ -247,6 +247,7 @@ enum class FaultReason_da4149b4426ee957: uint16_t {
   NONE,
   TRANSPORT_PAUSE,
   CRITICAL,
+  AVAILABILITY_PAUSE,
 };
 CAPNP_DECLARE_ENUM(FaultReason, da4149b4426ee957);
 CAPNP_DECLARE_SCHEMA(b63a8514b8adccf9);
@@ -1085,7 +1086,7 @@ struct AolAxisState {
   struct LaneChangeStatusWire;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(fc6241ed8877b611, 6, 2)
+    CAPNP_DECLARE_STRUCT_HEADER(fc6241ed8877b611, 7, 3)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -7049,6 +7050,11 @@ public:
   inline bool hasFaultSessionId() const;
   inline  ::capnp::Text::Reader getFaultSessionId() const;
 
+  inline bool hasIntentProducerSessionId() const;
+  inline  ::capnp::Text::Reader getIntentProducerSessionId() const;
+
+  inline  ::uint64_t getIntentIntegrityEpoch() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -7132,6 +7138,16 @@ public:
   inline  ::capnp::Text::Builder initFaultSessionId(unsigned int size);
   inline void adoptFaultSessionId(::capnp::Orphan< ::capnp::Text>&& value);
   inline ::capnp::Orphan< ::capnp::Text> disownFaultSessionId();
+
+  inline bool hasIntentProducerSessionId();
+  inline  ::capnp::Text::Builder getIntentProducerSessionId();
+  inline void setIntentProducerSessionId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initIntentProducerSessionId(unsigned int size);
+  inline void adoptIntentProducerSessionId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownIntentProducerSessionId();
+
+  inline  ::uint64_t getIntentIntegrityEpoch();
+  inline void setIntentIntegrityEpoch( ::uint64_t value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -17420,6 +17436,54 @@ inline void AolAxisState::Builder::adoptFaultSessionId(
 inline ::capnp::Orphan< ::capnp::Text> AolAxisState::Builder::disownFaultSessionId() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool AolAxisState::Reader::hasIntentProducerSessionId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool AolAxisState::Builder::hasIntentProducerSessionId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AolAxisState::Reader::getIntentProducerSessionId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AolAxisState::Builder::getIntentProducerSessionId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void AolAxisState::Builder::setIntentProducerSessionId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AolAxisState::Builder::initIntentProducerSessionId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void AolAxisState::Builder::adoptIntentProducerSessionId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AolAxisState::Builder::disownIntentProducerSessionId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t AolAxisState::Reader::getIntentIntegrityEpoch() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AolAxisState::Builder::getIntentIntegrityEpoch() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void AolAxisState::Builder::setIntentIntegrityEpoch( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint8_t AolAxisState::SafetyWire::Reader::getKind() const {
