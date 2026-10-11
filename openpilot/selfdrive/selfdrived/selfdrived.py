@@ -888,7 +888,9 @@ class SelfdriveD:
         self.aol_publication_retained_intent = intent
         self.aol_fault_reason = 'availabilityPause'
         self.aol_availability_long_inhibit = True
-        self.aol_availability_ordinary_warning = was_enabled or getattr(self, 'aol_availability_ordinary_warning', False)
+        self.aol_availability_ordinary_warning = bool(was_enabled or (
+          getattr(self, 'aol_published_fault_reason', 'none') == 'availabilityPause' and
+          getattr(self, 'aol_availability_ordinary_warning', False)))
         if getattr(self, 'aol_published_fault_reason', 'none') != 'availabilityPause':
           self.aol_availability_chime_until_ns = now_ns + 400_000_000
         self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
