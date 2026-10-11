@@ -25,10 +25,9 @@ class NavigationFavorites:
     place = next((row for row in doc['favorites'] if row.get('label') == label.lower()), None) if doc else None
     active = not bookmark and bool(place and doc and doc['destination'] and doc['destination']['id'] == place['id'])
     available = bool(bookmark or active or place and doc and doc['enabled'] and doc['token'])
-    title = 'End route' if active else label
-    detail = self.error or (label if active else 'Navigate' if available else 'Set in Galaxy' if place is None else 'Enable navigation')
-    if bookmark:
-      detail = 'Save event'
+    action = self.error or ('End route' if active else 'Navigate' if available else 'Set in Galaxy' if place is None else 'Enable navigation')
+    title = label if bookmark else action
+    detail = 'Save event' if bookmark else label
     icons = placed.get('display') == 'icons'
     rect = rl.Rectangle(placed['x'], placed['y'], 110 if icons else 320, 110)
     opacity = placed.get('opacity', 100) / 100
@@ -53,7 +52,9 @@ class NavigationFavorites:
         measured = self.fonts.measure(badge, FontRole.SEMI_BOLD, 23)
         self.fonts.draw(badge, FontRole.SEMI_BOLD, 23, rect.x + 91 - measured.width / 2, rect.y + 4, ink)
       return
-    for text, role, size, offset in ((title, FontRole.SEMI_BOLD, 34, 18), (detail, FontRole.NORMAL, 25, 64)):
+    rows = ((title, FontRole.SEMI_BOLD, 34, 18), (detail, FontRole.NORMAL, 25, 64)) if bookmark else (
+      (title, FontRole.NORMAL, 25, 18), (detail, FontRole.SEMI_BOLD, 34, 58))
+    for text, role, size, offset in rows:
       measured = self.fonts.measure(text, role, size)
       self.fonts.draw(text, role, size, rect.x + (rect.width - measured.width) / 2, rect.y + offset,
                       ink)

@@ -443,8 +443,8 @@ export const LayoutWidgetPreview = {
           <path v-else d="M8 7 V4 H16 V7 M3 7 H21 V21 H3 Z M3 12 L10 15 H14 L21 12 M10 13 V17 H14 V13" />
         </g>
         <template v-else>
-        <text :x="widget.width / 2" y="48" text-anchor="middle" font-size="34" font-weight="600" fill="#c7aef7">{{ widget.label }}</text>
-        <text :x="widget.width / 2" y="89" text-anchor="middle" font-size="25" fill="#c7aef7">{{ widget.kind === 'bookmark' ? 'Save event' : 'Navigate' }}</text>
+        <text :x="widget.width / 2" :y="widget.kind === 'bookmark' ? 48 : 43" text-anchor="middle" :font-size="widget.kind === 'bookmark' ? 34 : 25" :font-weight="widget.kind === 'bookmark' ? 600 : 400" fill="#c7aef7">{{ widget.kind === 'bookmark' ? widget.label : 'Navigate' }}</text>
+        <text :x="widget.width / 2" :y="widget.kind === 'bookmark' ? 89 : 88" text-anchor="middle" :font-size="widget.kind === 'bookmark' ? 25 : 34" :font-weight="widget.kind === 'bookmark' ? 400 : 600" fill="#c7aef7">{{ widget.kind === 'bookmark' ? 'Save event' : widget.label }}</text>
         </template>
       </g>
       <g v-else-if="widget.kind === 'car_exit'" :opacity="(widget.opacity ?? 100) / 100">
@@ -636,9 +636,9 @@ export const OnroadLayoutPage = {
   beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
   methods: {
     switchRow,
-    previewHidden(id) { return this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
+    previewHidden(id) { return !(this.projection && id === "car_exit") && this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
     togglePreviewVisibility(id) {
-      if (this.state.drag || this.state.layerDrag) return
+      if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit")) return
       const hidden = this.state.hiddenPreviewWidgets[this.state.profile] ||= {}
       hidden[id] = !hidden[id]
     },
@@ -860,7 +860,12 @@ export const OnroadLayoutPage = {
           !["words", "icons"].includes(display)) return
       this.finishColorEdit()
       const before = clone(this.state.draft)
+      const [oldWidth] = widgetSize(this.selectedWidget, this.selectedPosition)
       this.selectedPosition.display = display
+      if (["nav_home", "nav_work"].includes(this.selectedWidget.kind)) {
+        const [newWidth] = widgetSize(this.selectedWidget, this.selectedPosition)
+        this.selectedPosition.x += (oldWidth - newWidth) / 2
+      }
       Object.assign(this.selectedPosition, clampPlacement(this.profile, this.state.selected,
         this.selectedPosition.x, this.selectedPosition.y, this.layout))
       this.recordChange(before)
@@ -1274,7 +1279,7 @@ export const OnroadLayoutPage = {
                   @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">{{ widget.frontmost ? '↑' : '⠿' }}</span></button>
                 <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
                   @click="selectWidget(widget.id)">{{ widget.label }}</button>
-                <button class="gx-layout__visibility gx-icon-btn" type="button" :disabled="!!state.drag || !!state.layerDrag"
+                <button v-if="!projection || widget.id !== 'car_exit'" class="gx-layout__visibility gx-icon-btn" type="button" :disabled="!!state.drag || !!state.layerDrag"
                   :aria-label="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview'"
                   :title="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview only'"
                   :aria-pressed="!previewHidden(widget.id)" @click="togglePreviewVisibility(widget.id)">
@@ -1282,7 +1287,7 @@ export const OnroadLayoutPage = {
                 </button>
                 <button v-if="!widget.required" class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
                   @click="requestRemove(widget.id)"><span aria-hidden="true">−</span></button>
-                <span v-else class="gx-note" title="This control cannot be removed or placed below another widget.">Top · Required</span>
+                <span v-else class="gx-note gx-layout__required" title="This control cannot be removed or placed below another widget.">Required</span>
               </div></div>
               <Teleport to="body"><div v-if="state.layerDrag?.moved" class="gx-layout__drag-ghost" aria-hidden="true"
                 :style="{left: state.layerDrag.x + 'px', top: state.layerDrag.y + 'px', width: state.layerDrag.width + 'px'}">

@@ -359,6 +359,7 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__remove { flex: none; color: var(--error); font-size: 1.6rem; touch-action: pan-y; }
 .gx-layout__remove:disabled { opacity: .45; cursor: default; }
 .gx-layout__visibility { flex: none; touch-action: pan-y; }
+.gx-layout__required { flex: none; padding: 6px 12px; white-space: nowrap; }
 .gx-layout__visibility[aria-pressed="false"] { color: var(--on-surface-variant); }
 
 .gx-layout__clock-format { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--on-surface); }

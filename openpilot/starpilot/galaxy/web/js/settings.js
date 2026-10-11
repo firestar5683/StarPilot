@@ -32,7 +32,7 @@ export const isPipCropRow = (row) => ["Visual camera crop editor", "Camera crop 
 
 const SECTION_LINKS = {
   device: [{ label: "Display", page: "display", value: "Adjust screen brightness and display timing" }, { label: "Data Uploads", page: "data", value: "Choose mobile-data uploads and usage-statistics sharing" }],
-  visual: [{ label: "Driving Screen Widgets", page: "appearance" }, { label: "Colors & Layout", page: "ui_layout" }, { label: "Quick Select", page: "favorites" }, { label: "Blind Spot Camera and Preview", page: "pip" }],
+  visual: [{ label: "Driving Screen Widgets, Colors & Layout", page: "ui_layout" }, { label: "Quick Select", page: "favorites" }, { label: "Blind Spot Camera and Preview", page: "pip" }],
 }
 
 const activeSettings = new Set()
@@ -40,8 +40,8 @@ const activeSettings = new Set()
 export const settingsBusy = state => ["updating", "saving"].includes(state.status) || !!state.pending || !!state.reviewing
 
 export class SettingsFeed {
-  constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
-                later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
+  constructor({ publish, unauthorized = () => { }, fetcher = (...args) => fetch(...args),
+    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
     Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer })
     this.active = false
     this.generation = 0
@@ -130,8 +130,10 @@ export class SettingsFeed {
         this.pending = null
         this.expireMonitorStatus()
         if (error?.stale) this.data = null
-        this.publish({ status: this.data ? "ready" : "unavailable", data: this.data, pending: null,
-          error: this.error = connectionError(error) })
+        this.publish({
+          status: this.data ? "ready" : "unavailable", data: this.data, pending: null,
+          error: this.error = connectionError(error)
+        })
       }
       return null
     } finally {
@@ -190,7 +192,7 @@ export class SettingsFeed {
 
   async resetDefault(row) {
     if (!this.active || !this.data?.view || !this.data.rows?.[row]?.resetAvailable ||
-        this.pending || (this.request && !this.polling)) return
+      this.pending || (this.request && !this.polling)) return
     this.publish({ status: "updating", data: this.data, pending: null, error: "" })
     const data = await this.run((signal) => post(this.fetcher, "./api/settings/reset-default",
       { view: this.data.view, row }, signal))
@@ -236,8 +238,10 @@ export class SettingsFeed {
       const reload = this.load(page, { keepData: true, quiet: false })
       const refreshed = this.generation
       await reload
-      if (result?.saved !== true && this.active && this.generation === refreshed && this.data) this.publish({ status: "ready", data: this.data, pending: null,
-        error: "Save could not be confirmed. Current saved values are shown; review them before trying again." })
+      if (result?.saved !== true && this.active && this.generation === refreshed && this.data) this.publish({
+        status: "ready", data: this.data, pending: null,
+        error: "Save could not be confirmed. Current saved values are shown; review them before trying again."
+      })
     }
   }
 }
@@ -245,9 +249,11 @@ export class SettingsFeed {
 export const SettingsPage = {
   emits: ["nested"],
   components: { GxDialog, GxState, GalaxySettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage, GxNotice },
-  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
+  props: {
+    mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     initialPage: { type: String, default: "hub" }, title: { type: String, default: "Toggles" },
-    initialSection: { type: String, default: null }, returnTo: { type: Function, default: null } },
+    initialSection: { type: String, default: null }, returnTo: { type: Function, default: null }
+  },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", searchOpen: false, section: "lateral", layoutOpen: false, layoutPanel: "widgets", favoritesOpen: false, soundChoicesDirty: false, parents: [], developerOpen: props.initialSection === "developer", panelDirection: 1 })
     const feed = new SettingsFeed({ publish: (update) => Object.assign(state, update), unauthorized: props.unauthorized })

@@ -246,6 +246,21 @@ class TestProjectionLayout(unittest.TestCase):
     with self.assertRaisesRegex(ValueError, 'Required'):
       validate_layout(document, SCREEN)
 
+  def test_car_exit_opacity_minimum_and_saved_layout_migration(self):
+    document = default_layout(SCREEN)
+    self.assertEqual(layout_metadata(SCREEN)['widgets'][CAR_EXIT]['opacity']['min'], 25)
+    document['widgets'][CAR_EXIT]['opacity'] = 25
+    self.assertEqual(validate_layout(document, SCREEN), document)
+    for opacity in (0, 24):
+      document['widgets'][CAR_EXIT]['opacity'] = opacity
+      with self.subTest(opacity=opacity):
+        with self.assertRaisesRegex(ValueError, 'at least 25%'):
+          validate_layout(document, SCREEN)
+        migrated = decode_layout(json.dumps(document).encode(), SCREEN)
+        self.assertEqual(migrated['widgets'][CAR_EXIT]['opacity'], 25)
+        migrated['widgets'][CAR_EXIT]['opacity'] = opacity
+        self.assertEqual(migrated, document, 'all other layout settings are preserved')
+
   def test_map_overlay_size_opacity_and_edges(self):
     document = default_layout(SCREEN)
     metadata = layout_metadata(SCREEN)

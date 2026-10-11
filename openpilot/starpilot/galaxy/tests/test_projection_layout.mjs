@@ -12,8 +12,9 @@ metadata.bounds.width = 2820
 metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
 metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
+  opacity: { min: 25, max: 100, default: 100 }, backgroundToggle: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
-  default: { x: 30, y: 954, enabled: true } }
+  default: { x: 30, y: 954, enabled: true, opacity: 100, background: true } }
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
@@ -25,6 +26,15 @@ const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
 const data = editorSnapshot(raw)
 assert.equal(validSnapshot(data), true)
 assert.equal(validDocument(data.document, data.metadata), true)
+const exitOpacity = copy(data.document)
+exitOpacity.layouts.large.car_exit.opacity = 24
+assert.equal(validDocument(exitOpacity, data.metadata), false)
+exitOpacity.layouts.large.car_exit.opacity = 25
+assert.equal(validDocument(exitOpacity, data.metadata), true)
+const visibilityVm = { projection: true, state: { profile: "large", hiddenPreviewWidgets: { large: { car_exit: true } } } }
+assert.equal(OnroadLayoutPage.methods.previewHidden.call(visibilityVm, "car_exit"), false)
+OnroadLayoutPage.methods.togglePreviewVisibility.call(visibilityVm, "car_exit")
+assert.equal(visibilityVm.state.hiddenPreviewWidgets.large.car_exit, true)
 const missingFrontmost = copy(data)
 delete missingFrontmost.metadata.profiles.large.widgets.car_exit.frontmost
 assert.equal(validSnapshot(missingFrontmost), false)

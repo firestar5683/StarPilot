@@ -145,6 +145,17 @@ assert.equal(validDocument(vm.state.draft, data.metadata), true)
 
 // Independent icon choices shrink the preview footprint and survive saving.
 vm.state.selected = 'nav_home'
+for (const key of ['nav_home', 'nav_work']) {
+  vm.state.selected = key
+  const center = vm.layout[key].x + 160
+  vm.setFavoriteDisplay('icons')
+  assert.equal(vm.layout[key].x + 55, center, key + ' keeps its center when changing to an icon')
+  vm.setFavoriteDisplay('words')
+  assert.equal(vm.layout[key].x + 160, center, key + ' keeps its center when changing back to words')
+  vm.undo()
+  vm.undo()
+}
+vm.state.selected = 'nav_home'
 const undoBeforeDisplay = vm.state.history.undo.length
 vm.setFavoriteDisplay('icons')
 assert.deepEqual(widgetSize(profile.widgets.nav_home, vm.layout.nav_home), [110, 110])
@@ -183,7 +194,8 @@ for (const [index, key] of ['nav_home', 'nav_work', 'bookmark', 'car_exit'].entr
   const payload = projectionPayload({revision: 'appearance', document: vm.state.draft}, data.metadata)
   assert.equal(payload.document.widgets[key].opacity, 25 + index * 10)
   assert.equal(payload.document.widgets[key].background, false)
-  const preview = OnroadLayoutPage.computed.renderWidgets.call({layerWidgets: [{id: key, ...profile.widgets[key]}], layout: vm.layout})[0]
+  const preview = OnroadLayoutPage.computed.renderWidgets.call({layerWidgets: [{id: key, ...profile.widgets[key]}], layout: vm.layout,
+    previewHidden: () => false})[0]
   assert.equal(preview.opacity, 25 + index * 10)
   assert.equal(preview.background, false)
   assert.equal(validDocument(vm.state.draft, data.metadata), true)
@@ -240,7 +252,7 @@ buriedExit.widgetOrder ||= {}
 buriedExit.widgetOrder.large = ['car_exit', ...pinnedOrder.filter(id => id !== 'car_exit')]
 assert.equal(validDocument(buriedExit, data.metadata), false)
 assert.match(OnroadLayoutPage.template, /v-if="!widget.required"/)
-assert.match(OnroadLayoutPage.template, />Top · Required</)
+assert.match(OnroadLayoutPage.template, />Required</)
 assert.match(LayoutWidgetPreview.template, /data-preview-icon="door-exit"/)
 
 compile(OnroadLayoutPage.template, { decodeEntities: value => value.replaceAll("&amp;", "&") })

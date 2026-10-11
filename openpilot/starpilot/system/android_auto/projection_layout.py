@@ -27,6 +27,7 @@ ACTION_WIDGETS = (*DISPLAY_WIDGETS, CAR_EXIT)
 FAVORITE_SIZE = (320, 110)
 FAVORITE_ICON_SIZE = 110
 CAR_EXIT_SIZE = (96, 96)
+CAR_EXIT_MIN_OPACITY = 25
 PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *DISPLAY_WIDGETS, STOPPED_TIMER_WIDGET, CAR_EXIT)
 NAV_CARD_SIZE = (560, 195)
 MAP_MIN_SIZE = (280, 200)
@@ -110,7 +111,7 @@ def layout_metadata_for_viewport(viewport):
                        'note': "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
                        'default': {'x': 30, 'y': height - 30 - exit_h, 'enabled': True}}
   for key in ACTION_WIDGETS:
-    widgets[key].update(opacity={'min': 0, 'max': 100, 'default': 100}, backgroundToggle=True)
+    widgets[key].update(opacity={'min': CAR_EXIT_MIN_OPACITY if key == CAR_EXIT else 0, 'max': 100, 'default': 100}, backgroundToggle=True)
     widgets[key]['default'].update(opacity=100, background=True)
   profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], STOPPED_TIMER_WIDGET, NAV_CARD, *DISPLAY_WIDGETS, CAR_EXIT]
   return profile
@@ -203,6 +204,8 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     if key in ACTION_WIDGETS and (type(placement['opacity']) is not int or not 0 <= placement['opacity'] <= 100 or
                                   type(placement['background']) is not bool):
       raise ValueError('Invalid action widget appearance')
+    if key == CAR_EXIT and placement['opacity'] < CAR_EXIT_MIN_OPACITY:
+      raise ValueError('Exit to car opacity must be at least 25%')
     size = placement.get('size', 192)
     if key == 'steering_wheel' and (type(size) is not int or not WHEEL_SIZES['large'][0] <= size <= WHEEL_SIZES['large'][2]):
       raise ValueError('Invalid steering wheel size')
@@ -245,7 +248,13 @@ def decode_layout_for_viewport(raw, viewport):
     return result
   if len(raw) > MAX_BYTES:
     raise ValueError('Projection layout too large')
-  return validate_layout_for_viewport(json.loads(raw, object_pairs_hook=unique), viewport)
+  value = json.loads(raw, object_pairs_hook=unique)
+  # Lift older saved escape controls to the new minimum without losing the layout.
+  widgets = value.get('widgets') if type(value) is dict else None
+  exit_placement = widgets.get(CAR_EXIT) if type(widgets) is dict else None
+  if type(exit_placement) is dict and type(exit_placement.get('opacity')) is int and 0 <= exit_placement['opacity'] < CAR_EXIT_MIN_OPACITY:
+    exit_placement['opacity'] = CAR_EXIT_MIN_OPACITY
+  return validate_layout_for_viewport(value, viewport)
 
 
 def projection_customization(document, base_customization):

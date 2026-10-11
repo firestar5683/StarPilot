@@ -68,7 +68,8 @@ def test_card_changes_to_end_navigation_only_for_its_destination(key):
   card.document = {'favorites': [place], 'destination': None, 'enabled': True, 'token': 'key'}
   with patch('pyray.draw_rectangle_rounded'), patch('pyray.draw_rectangle_rounded_lines_ex'):
     card.render(key, state)
-    assert [call.args[0] for call in fonts.draw.call_args_list] == [label.title(), 'Navigate']
+    assert [call.args[0] for call in fonts.draw.call_args_list] == ['Navigate', label.title()]
+    assert fonts.draw.call_args_list[0].args[4] < fonts.draw.call_args_list[1].args[4]
     fonts.draw.reset_mock()
     card.document['destination'] = place
     card.render(key, state)
@@ -76,7 +77,7 @@ def test_card_changes_to_end_navigation_only_for_its_destination(key):
     fonts.draw.reset_mock()
     card.document['destination'] = {'id': 'another-place'}
     card.render(key, state)
-    assert fonts.draw.call_args_list[0].args[0] == label.title()
+    assert [call.args[0] for call in fonts.draw.call_args_list] == ['Navigate', label.title()]
     for change in ['alert', 'removed']:
       fonts.draw.reset_mock()
       state.alert.size = 'full' if change == 'alert' else 'none'
@@ -92,7 +93,7 @@ def test_missing_favorite_shows_setup_hint():
   state = NS(customization={'layouts': {'large': {'nav_home': {'x': 100, 'y': 200, 'enabled': True}}}}, alert=NS(size='none'))
   with patch('pyray.draw_rectangle_rounded'), patch('pyray.draw_rectangle_rounded_lines_ex'):
     card.render('nav_home', state)
-  assert [call.args[0] for call in fonts.draw.call_args_list] == ['Home', 'Set in Galaxy']
+  assert [call.args[0] for call in fonts.draw.call_args_list] == ['Set in Galaxy', 'Home']
 
 
 @pytest.mark.parametrize('key', ['nav_home', 'nav_work'])
