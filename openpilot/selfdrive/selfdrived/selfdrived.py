@@ -5,6 +5,7 @@ import time
 import threading
 import uuid
 from copy import copy
+from dataclasses import replace
 from collections import deque
 
 import openpilot.cereal.messaging as messaging
@@ -33,6 +34,7 @@ from openpilot.selfdrive.selfdrived.state import StateMachine
 from opendbc.car.gm.aol import native_bootstrap_supported
 from opendbc.car.gm.steering_authority import monitored_profile
 from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
+from openpilot.starpilot.car.hyundai.aol import qualified_ioniq6
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
@@ -341,6 +343,8 @@ class SelfdriveD:
     """Compute onroadEvents from carState"""
 
     self.events.clear()
+    self.car_event_sample_count = 0
+    self.aol_reconciled_sources = ()
     self.tesla_stock_alerts = []
     self.nostalgia_paddle_cancel = False
     action_owner = getattr(self, 'controller_action_owner', None)
@@ -508,18 +512,51 @@ class SelfdriveD:
     hardware_events_added = len(self.events) - num_events
 
     CS = self.refresh_event_car_state(CS)
-    self.event_car_state = CS
-    self._update_steering_authority(CS)
-    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+    input_proof = getattr(self, 'aol_step_input_proof', None)
+    reconcile_input = bool(input_proof is not None and not REPLAY and self.aol_replay and self.axis_transport_required and
+                           self.CP.openpilotLongitudinalControl and qualified_ioniq6(self.CP) and
+                           input_proof[0] == self.aol_session_id and
+                           (input_proof[8] or input_proof[9]) and time.monotonic_ns() <= input_proof[3])
+    if not reconcile_input:
+      # Other vehicle owners retain their original ordering. In particular,
+      # GM's exact steering companion must not lose an earlier source's fault
+      # when a newer carState arrives during car-event processing.
+      self._update_steering_authority(CS)
     previous = self.CS_prev
-    for sample, envelope_valid in samples:
-      self._update_car_event_sample(sample, previous)
-      if len(samples) > 1:
+    retained_source = (getattr(self, 'car_state_retained_source_ns', 0)
+                       if not getattr(self, 'car_state_samples', ()) else 0)
+    consumed = 0
+    envelope_errors = []
+    while True:
+      received = getattr(self, 'car_state_samples', ())
+      samples = received[consumed:] if received else ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+      for sample, envelope_valid in samples:
+        self._update_car_event_sample(sample, previous)
+        self.car_event_sample_count += 1
         if sample.canTimeout:
-          self.events.add(EventName.canBusMissing)
-        elif not envelope_valid or not sample.canValid:
-          self.events.add(EventName.canError)
-      previous = sample
+          envelope_errors.append(EventName.canBusMissing)
+        elif (received and not envelope_valid) or not sample.canValid:
+          envelope_errors.append(EventName.canError)
+        previous = sample
+      consumed = len(received)
+      if not reconcile_input:
+        break
+      # Input can arrive while car-event owners run. Reconcile it before the
+      # selected-source owners and authority/state-machine decisions. The drain
+      # retains one total 32-envelope bound and the original output deadline;
+      # the cursor ensures no stateful car-event owner sees a sample twice.
+      CS = self.refresh_event_car_state(CS)
+      if len(getattr(self, 'car_state_samples', ())) <= consumed:
+        break
+      self.aol_reconciled_sources = ((retained_source,) if retained_source else ()) + tuple(
+        int(sample.logMonoTime) for sample in self.car_state_envelopes)
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+    if self.car_event_sample_count > 1:
+      for event in envelope_errors:
+        self.events.add(event)
+    self.event_car_state = CS
+    if reconcile_input:
+      self._update_steering_authority(CS)
     if any(physical_cancel(sample) for sample, _ in samples):
       self.nostalgia_paddle_cancel = False
     if CS.canValid:
@@ -863,6 +900,38 @@ class SelfdriveD:
       self.aol_expired_healthy_source = False
       CS = latest.carState
     return CS
+
+  def reconciled_intent(self, intent, previous, pairs, epoch, now_ns):
+    sources = getattr(self, 'aol_reconciled_sources', ())
+    if not sources or intent is None:
+      return intent
+    companion = self.aol_intent_companion
+    proof = getattr(self, 'aol_step_input_proof', None)
+    if (proof is None or proof[0] != self.aol_session_id or companion is None or
+        epoch != proof[5] or companion.integrity_epoch != epoch or
+        intent.producerSessionId != proof[4]):
+      return None
+    for source_ns in sources:
+      pair = pairs.get(source_ns)
+      if (pair is None and previous is not None and source_ns == proof[1] and
+          previous.carStateLogMonoTime == source_ns and previous.producerSessionId == proof[4]):
+        pair = (source_ns, True, previous)
+      if pair is None or not pair[1] or pair[2] is None:
+        return None
+      restriction = pair[2]
+      if (pair[0] != source_ns or restriction.carStateLogMonoTime != source_ns or
+          not restriction.settingsQualified or restriction.producerSessionId != intent.producerSessionId or
+          not 0 < source_ns <= now_ns or not 0 < restriction.observedMonoTime <= now_ns <= restriction.validUntilMonoTime or
+          not 0 < restriction.validUntilMonoTime - restriction.observedMonoTime <= SAFETY_MAX_AGE_NS):
+        return None
+      # Earlier exact companions only veto the normally validated fresh pair.
+      # Their clocks never renew a source or supply an output lease.
+      intent = replace(intent, allowedLatch=intent.allowedLatch and restriction.allowedLatch,
+        lateralArmed=intent.lateralArmed and restriction.lateralArmed,
+        pauseLateral=intent.pauseLateral or restriction.pauseLateral,
+        pauseLongitudinal=intent.pauseLongitudinal or restriction.pauseLongitudinal,
+        optionalSetRelease=intent.optionalSetRelease and restriction.optionalSetRelease)
+    return intent
 
   def update_alerts(self, CS):
     clear_event_types = set()
@@ -1340,6 +1409,8 @@ class SelfdriveD:
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
+    self.car_event_sample_count = 0
+    self.aol_reconciled_sources = ()
     self.event_car_state = CS
     self.event_input_refresh_pending = True
     try:
@@ -1347,7 +1418,7 @@ class SelfdriveD:
     finally:
       self.event_input_refresh_pending = False
     CS = self.event_car_state
-    if len(getattr(self, 'car_state_samples', ())) > 1 and any(self.events.contains(kind) for kind in (
+    if max(self.car_event_sample_count, len(getattr(self, 'car_state_samples', ()))) > 1 and any(self.events.contains(kind) for kind in (
         ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
       # A queued enable cannot override a cancellation or pedal edge in this batch.
       self.events.events = [event for event in self.events.names if ET.ENABLE not in self.events.event_rules.get(event, {})]
@@ -1365,6 +1436,8 @@ class SelfdriveD:
     self.aol_decision_native = native
     if self.aol_replay:
       previous_intent = getattr(self, 'aol_last_intent', None)
+      reconciled_pairs = dict(intent_companion.samples) if intent_companion is not None and self.aol_reconciled_sources else {}
+      reconciled_epoch = intent_companion.integrity_epoch if intent_companion is not None else -1
       source_pair = intent_companion.samples.get(self.aol_car_state_log_ns) if intent_companion is not None else None
       verified = intent_companion.verified_sm_projection if intent_companion is not None else None
       if (intent_companion is not None and source_pair is None and verified is not None and
@@ -1384,6 +1457,7 @@ class SelfdriveD:
       intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
                               previous=getattr(self, 'aol_last_intent', None),
                               companion=intent_companion, drain=False) if intent_drained else None
+      intent = self.reconciled_intent(intent, previous_intent, reconciled_pairs, reconciled_epoch, now_ns)
       self.aol_last_intent = intent
       if self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or self.sm['driverMonitoringState'].lockout:
         self.aol_dm_lateral_inhibit = True

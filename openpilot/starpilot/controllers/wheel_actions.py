@@ -78,15 +78,42 @@ class WheelPublisher:
     self.mapping = None
     self.last_heartbeat = 0
     self.checked_ns = 0
+    self.media_sample_state = None
     self.suppress_distance_release = False
     initial = capture(params) if params is not None else None
     self.axis_keys = {key for key, action in (initial or {}).items() if action in (3, 4, 9)}
     self.initial_axis_read = initial is not None
 
+  def media_audit_needed(self, media):
+    if media is None:
+      return False
+    if not media.valid:
+      self.media_sample_state = None
+      return bool(media.samples)
+    if not media.samples:
+      return False
+    previous = self.media_sample_state
+    changed = previous is None or previous[0] != media.source_epoch
+    for sample in media.samples:
+      current = (media.source_epoch, sample.mode_held, sample.custom_held)
+      # Keep auditing a held gesture: an assignment can change and return to
+      # its original value before release, which must still cancel that press.
+      changed |= current != previous or sample.mode_held or sample.custom_held
+      previous = current
+    self.media_sample_state = previous
+    # Neutral media packets also used to audit assignments during conventional
+    # button holds. Preserve those revocations until every gesture is idle.
+    held = any(tracker.distance_held or tracker.media_held is not None
+               for tracker in (self.tracker, self.cancel_tracker, self.main_tracker))
+    return changed or bool(media.samples and held)
+
   def observe(self, params, cp, state, *, now_ns, drive_id, media=None, blocked_keys=frozenset()):
     self.suppress_distance_release = any(event.type == structs.CarState.ButtonEvent.Type.gapAdjustCruise and not event.pressed
                                          for event in state.buttonEvents)
-    edge = bool(state.buttonEvents) or bool(media is not None and media.samples)
+    # Repeated neutral packets are not button edges. Keep held-input audits,
+    # the periodic audit, and the final read before emitted commands below.
+    media_edge = self.media_audit_needed(media)
+    edge = bool(state.buttonEvents) or media_edge
     audit = self.mapping is None or drive_id != self.drive or edge or now_ns - self.checked_ns >= 1_000_000_000
     mapping = capture(params) if audit else self.mapping
     if audit:
