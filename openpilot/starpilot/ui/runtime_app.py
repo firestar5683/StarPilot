@@ -1270,16 +1270,11 @@ class StarShellSession:
       pane = _FEATURE_SETTINGS_PANES.get(snapshot.selected)
       drag_x = getattr(self.input, pane[2]).drag_x if pane else 0.0
       self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot, drag_x=drag_x)
-      if external:
-        self.view.settings.render_rail(snapshot.settings, selected=snapshot.selected)
       if mode == ShellMode.ONROAD:
         self.favorites.render(time.monotonic())
-      if self.notice and time.monotonic() < self.notice_until:
-        rl.draw_rectangle(0, self.profile.size[1] - 42, self.profile.size[0], 42, rl.Color(0, 0, 0, 220))
-        self.fonts.draw(self.notice[:65], FontRole.MEDIUM, 23 if self.profile == Profile.COMPACT else 27,
-                        12, self.profile.size[1] - 37)
-    if (mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and snapshot.selected == Destination.NETWORK and
-        snapshot.settings.destination(Destination.NETWORK).available and self.network_layer is not None):
+    network = (mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and snapshot.selected == Destination.NETWORK and
+               snapshot.settings.destination(Destination.NETWORK).available and self.network_layer is not None)
+    if network:
       rail_width = 500 if snapshot.settings.sidebar_expanded else 0
       content = rl.Rectangle(rect.x + rail_width + 50, rect.y + 25,
                              rect.width - rail_width - 100, rect.height - 50)
@@ -1291,11 +1286,19 @@ class StarShellSession:
           self._on_destination_change(Destination.STAR)
         self._unavailable("network panel is unavailable")
 
-    if (mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and
-        snapshot.selected in NATIVE_SETTINGS_PANELS and self.settings_layer is not None):
+    if external:
       rail_width = 500 if snapshot.settings.sidebar_expanded else 0
       content = rl.Rectangle(rect.x + rail_width + 50, rect.y + 25, rect.width - rail_width - 100, rect.height - 50)
       self.settings_layer(snapshot.selected, content)
+
+    if external or network or self.notice:
+      with placed_at(rect, parent_clip):
+        if external or network:
+          self.view.settings.render_rail(snapshot.settings, selected=snapshot.selected)
+        if self.notice and time.monotonic() < self.notice_until:
+          rl.draw_rectangle(0, self.profile.size[1] - 42, self.profile.size[0], 42, rl.Color(0, 0, 0, 220))
+          self.fonts.draw(self.notice[:65], FontRole.MEDIUM, 23 if self.profile == Profile.COMPACT else 27,
+                          12, self.profile.size[1] - 37)
 
   def _unavailable(self, label: str) -> None:
     self.notice = f"Unavailable: {label}"

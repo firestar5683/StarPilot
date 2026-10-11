@@ -272,6 +272,9 @@ class FeatureVisualTests(unittest.TestCase):
           rl.draw_line_ex.reset_mock()
           for transform in (rl.rl_push_matrix, rl.rl_translatef, rl.rl_pop_matrix):
             transform.reset_mock()
+          draws = Mock()
+          for name in ("draw_rectangle_gradient_ex", "draw_line_ex", "begin_scissor_mode", "draw_rectangle_rec"):
+            draws.attach_mock(getattr(rl, name), name)
           fonts = fake_fonts()
           with patch.object(view, "feature_scroll", wraps=feature_scroll) as paging, patch.object(view, "draw_settings_header"):
             view.FeatureSettingsView(fonts).render(FeatureSettingsState(rows=rows, scroll=scroll, sidebar_expanded=expanded), drag)
@@ -300,11 +303,19 @@ class FeatureVisualTests(unittest.TestCase):
             gradient = rl.draw_rectangle_gradient_ex.call_args
             gap = abs(view.feature_pull(drag, can_page))
             bounds = gradient.args[0]
+            gap_x = 2125 - gap if drag < 0 else left - 20
+            gap_right = 2160 if drag < 0 else left + 25 + gap
             self.assertEqual((bounds.x, bounds.y, bounds.width, bounds.height),
-                             (2125 - gap if drag < 0 else left + 25, FEATURE_ROW_TOP, gap, 5 * FEATURE_ROW_HEIGHT))
+                             (gap_x, FEATURE_ROW_TOP, gap_right - gap_x, 5 * FEATURE_ROW_HEIGHT))
             color_left, color_right = (geometry.PANEL_BG, view.EDGE_ACCENT) if drag < 0 else (view.EDGE_ACCENT, geometry.PANEL_BG)
             self.assertEqual(gradient.args[1:], (color_left, color_left, color_right, color_right))
             self.assertEqual(rl.draw_line_ex.call_args.args[0].x, (2095 if drag < 0 else left + 55) + (8 if drag < 0 else -8))
+            order = [call[0] for call in draws.mock_calls]
+            self.assertLess(order.index("draw_rectangle_gradient_ex"), order.index("draw_line_ex"))
+            self.assertLess(max(index for index, name in enumerate(order) if name == "draw_line_ex"),
+                            max(index for index, name in enumerate(order) if name == "begin_scissor_mode"))
+            self.assertLess(max(index for index, name in enumerate(order) if name == "begin_scissor_mode"),
+                            order.index("draw_rectangle_rec"))
           footer = [call for call in fonts.draw.call_args_list if call.args[0] in ("Previous", "Next")]
           self.assertEqual(len(footer), 2)
 

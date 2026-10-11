@@ -161,6 +161,47 @@ class ShellActionTests(unittest.TestCase):
         self.assertEqual(shell_render.call_args.kwargs["drag_x"], 0)
       feature_render.assert_not_called()
 
+  def test_adapted_panels_draw_before_placed_navigation_and_notices(self):
+    import pyray as rl
+    from openpilot.starpilot.ui import clip, runtime_app
+    from openpilot.starpilot.ui.settings_state import DestinationAvailability
+
+    rect = rl.Rectangle(20, 30, 2160, 1080)
+    parent = rl.Rectangle(25, 35, 2140, 1060)
+    for destination in (*runtime_app.NATIVE_SETTINGS_PANELS, Destination.NETWORK):
+      for expanded in (True, False):
+        with self.subTest(destination=destination, expanded=expanded):
+          session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+          session.profile, session.slc_actions = Profile.LARGE, None
+          session.favorites, session.pip_warning = Mock(), Mock()
+          session.input, session.view, session.fonts = Mock(), Mock(), Mock()
+          session.settings_layer, session.network_layer = Mock(), Mock(return_value=True)
+          session.notice, session.notice_until = "Test notice", float("inf")
+          settings = SettingsState(sidebar_expanded=expanded, availability=(DestinationAvailability(Destination.NETWORK, True),))
+          snapshot = ShellSnapshot(ShellMode.SETTINGS, reference_state(), settings,
+                                   OnroadState(False, False, None, None, SpeedLimitObservation()), selected=destination)
+          session.snapshot = Mock(return_value=snapshot)
+          def rail(*_args, **_kwargs):
+            ox, oy, viewport, parent_clip = clip._placement.get()
+            self.assertEqual((ox, oy, viewport.x, viewport.y, viewport.width, viewport.height), (20, 30, 25, 35, 2140, 1060))
+            self.assertIs(parent_clip, parent)
+          session.view.settings.render_rail.side_effect = rail
+          order = Mock()
+          order.attach_mock(session.view.render, "view")
+          panel = session.network_layer if destination == Destination.NETWORK else session.settings_layer
+          order.attach_mock(panel, "panel")
+          order.attach_mock(session.view.settings.render_rail, "rail")
+          order.attach_mock(session.fonts.draw, "notice")
+          with patch.object(rl, "rl_push_matrix"), patch.object(rl, "rl_pop_matrix"), patch.object(rl, "rl_translatef"), \
+               patch.object(rl, "begin_scissor_mode"), patch.object(rl, "end_scissor_mode"), patch.object(rl, "draw_rectangle"):
+            session.render(ShellMode.SETTINGS, rect, parent)
+          self.assertEqual([call[0] for call in order.mock_calls], ["view", "panel", "rail", "notice"])
+          session.view.settings.render_rail.assert_called_once_with(settings, selected=destination)
+          content = panel.call_args.args[-1]
+          self.assertEqual((content.x, content.y, content.width, content.height),
+                           (570 if expanded else 70, 55, 1560 if expanded else 2060, 1030))
+          self.assertIsNone(clip._placement.get())
+
   def test_toggle_request_needs_same_displayed_value_on_release(self) -> None:
     requests = []
     touch = TogglesInput(requests.append)

@@ -114,21 +114,22 @@ class FeatureSettingsView:
       self._value_row(state, state.rows[0], rl.Rectangle(*value_editor_rect(state)), buttons)
       self._value_done(state)
       return
+    can_page = drag_x != 0 and feature_scroll(state.scroll, 1 if drag_x < 0 else -1, len(state.rows)) != state.scroll
+    rows_state, pull_x, cover = self._page_frame(state, feature_pull(drag_x, can_page), drag_x != 0)
+    if pull_x and can_page:
+      edge_x = 2125 - FEATURE_FLICK_DISTANCE if pull_x < 0 else left + 25
+      gap_x = 2125 + pull_x if pull_x < 0 else left - 20
+      gap_right = 2160 if pull_x < 0 else left + 25 + pull_x
+      color_left, color_right = (PANEL_BG, EDGE_ACCENT) if pull_x < 0 else (EDGE_ACCENT, PANEL_BG)
+      rl.draw_rectangle_gradient_ex(rl.Rectangle(gap_x, row_top, gap_right - gap_x, FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT),
+                                    color_left, color_left, color_right, color_right)
+      cx, cy = edge_x + FEATURE_FLICK_DISTANCE / 2, row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT / 2
+      direction = 1 if pull_x < 0 else -1
+      tip = rl.Vector2(cx + direction * 8, cy)
+      rl.draw_line_ex(rl.Vector2(cx - direction * 8, cy - 16), tip, 4, TEXT_PRIMARY)
+      rl.draw_line_ex(tip, rl.Vector2(cx - direction * 8, cy + 16), 4, TEXT_PRIMARY)
     clip.begin_scissor_mode(left + 25, row_top, 2100 - left, FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT)
     try:
-      can_page = drag_x != 0 and feature_scroll(state.scroll, 1 if drag_x < 0 else -1, len(state.rows)) != state.scroll
-      rows_state, pull_x, cover = self._page_frame(state, feature_pull(drag_x, can_page), drag_x != 0)
-      if pull_x and can_page:
-        edge_x = 2125 - FEATURE_FLICK_DISTANCE if pull_x < 0 else left + 25
-        gap_x = 2125 + pull_x if pull_x < 0 else left + 25
-        color_left, color_right = (PANEL_BG, EDGE_ACCENT) if pull_x < 0 else (EDGE_ACCENT, PANEL_BG)
-        rl.draw_rectangle_gradient_ex(rl.Rectangle(gap_x, row_top, abs(pull_x), FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT),
-                                      color_left, color_left, color_right, color_right)
-        cx, cy = edge_x + FEATURE_FLICK_DISTANCE / 2, row_top + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT / 2
-        direction = 1 if pull_x < 0 else -1
-        tip = rl.Vector2(cx + direction * 8, cy)
-        rl.draw_line_ex(rl.Vector2(cx - direction * 8, cy - 16), tip, 4, TEXT_PRIMARY)
-        rl.draw_line_ex(tip, rl.Vector2(cx - direction * 8, cy + 16), 4, TEXT_PRIMARY)
       if pull_x:
         rl.rl_push_matrix()
       try:
