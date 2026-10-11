@@ -26,6 +26,7 @@ class CustomSchemaEvolutionTest(unittest.TestCase):
       'MapdOut', 'MapdExtendedOut', 'MapdIn',
       'AolAxisState.LaneChangeStatusWire', 'StarPilotModelDataV2', 'StarPilotRadarState',
       'StarPilotSelfdriveState', 'SpotMonitorState', 'StarPilotLateralState', 'StarPilotCarState',
+      'StarPilotCarParams',
     })
     self.assertEqual(self.baseline['roots']['MapdExtendedOut'], str(0xa30662f84033036c))
     self.assertEqual(self.baseline['roots']['MapdIn'], str(0xc86a3d38d13eb3ef))

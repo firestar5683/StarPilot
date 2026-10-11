@@ -20,6 +20,8 @@ from openpilot.starpilot.galaxy.settings import (
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.saved_source import read_saved
+from openpilot.starpilot.lateral.controller_selection import learning_allowed
+from openpilot.starpilot.lateral.learning_preferences import KEY as LEARNING_KEY, read_preference, replace_preference
 from openpilot.starpilot import saved_document
 
 
@@ -895,6 +897,8 @@ class SettingsGatewayTest(unittest.TestCase):
     from opendbc.car.honda.values import CAR as HONDA
     from openpilot.starpilot.lateral.tests.test_lane_runtime import ioniq_candidate
     _, torque_vehicle = ioniq_candidate()
+    self.params.put(LEARNING_KEY, replace_preference(None, self.context.value.cp, False), block=True)
+    legacy = read_saved(self.params, "ForceAutoTuneOff", 1)[0]
     self.context.value = AuthorityContext(True, torque_vehicle, torque_vehicle.as_reader().as_builder().to_bytes())
     page = self.page("torque")
     factor = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Lat Accel")
@@ -910,17 +914,39 @@ class SettingsGatewayTest(unittest.TestCase):
     self.context.value = AuthorityContext(True, ioniq, b"ioniq6-model-config")
     page = self.page("torque")
     learning = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Automatic Steering Learning")
-    self.assertFalse(page["rows"][learning]["action"])
+    self.assertTrue(page["rows"][learning]["action"])
+    self.assertIn("StarPilot Controller uses its vehicle tune", page["rows"][learning]["reason"])
+    self.assertIn("automatic learning is currently unavailable", page["rows"][learning]["reason"])
+    self.assertFalse(learning_allowed(self.params, ioniq))
+    before_cp = ioniq.as_reader().as_builder().to_bytes()
+    before_tune = read_saved(self.params, "TorqueOverrideDocument", 65536)[0]
+    intent = self.gateway.preview(page["view"], learning, 0, self.session, self.generation, value="Off")
+    self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
+    self.assertFalse(read_preference(self.params, ioniq).enabled)
+    self.assertEqual(read_preference(self.params, ioniq).source, "scope")
+    self.assertEqual(read_saved(self.params, "ForceAutoTuneOff", 1)[0], legacy)
+    page = self.page("torque")
     controller = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Steering Controller")
     intent = self.gateway.preview(page["view"], controller, 0, self.session, self.generation, value="Stock Controller")
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
-    self.assertTrue(self.params.get_bool("ForceAutoTuneOff"))
+    self.assertEqual(read_saved(self.params, "ForceAutoTuneOff", 1)[0], legacy)
+    self.assertFalse(read_preference(self.params, ioniq).enabled)
     page = self.page("torque")
     learning = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Automatic Steering Learning")
     self.assertTrue(page["rows"][learning]["action"])
     intent = self.gateway.preview(page["view"], learning, 0, self.session, self.generation, value="On")
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
-    self.assertFalse(self.params.get_bool("ForceAutoTuneOff"))
+    self.assertTrue(read_preference(self.params, ioniq).enabled)
+    self.assertEqual(read_preference(self.params, ioniq).source, "scope")
+    self.assertEqual(read_saved(self.params, "ForceAutoTuneOff", 1)[0], legacy)
+    scoped, readable = read_saved(self.params, LEARNING_KEY, 4096)
+    assert scoped is not None
+    self.assertTrue(readable)
+    self.assertEqual(json.loads(scoped)["vehicles"], {
+      "toyota": {"TOYOTA_COROLLA_TSS2": False}, "hyundai": {"HYUNDAI_IONIQ_6": True},
+    })
+    self.assertEqual(read_saved(self.params, "TorqueOverrideDocument", 65536)[0], before_tune)
+    self.assertEqual(ioniq.as_reader().as_builder().to_bytes(), before_cp)
     honda = CarInterface.get_params(HONDA.HONDA_CIVIC_BOSCH, gen_empty_fingerprint(), [], True, False, False)
     self.context.value = AuthorityContext(True, honda, b"honda-model-config")
     page = self.page("aol")

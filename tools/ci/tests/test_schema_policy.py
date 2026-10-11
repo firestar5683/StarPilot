@@ -112,11 +112,70 @@ class SchemaPolicyTest(unittest.TestCase):
   def test_historical_slot_comments_do_not_count_as_fields(self):
     path = 'openpilot/cereal/custom.capnp'
     schemas = self.schemas.copy()
-    original = b'struct CustomReserved1 @0xaedffd8f31e7b55d {'
+    original = b'struct CustomReserved5 @0xa5cd762cd951a455 {'
     self.assertIn(original, schemas[path])
     schemas[path] = schemas[path].replace(
       original, original + b'\n  # Past wire use is reserved.\n')
     self.assertEqual(validate(schemas, self.policy, self.sync), [])
+
+  def test_automatic_learning_keeps_reserved_identity_and_allows_append(self):
+    self.assertNotIn(1, self.policy['historical_empty_slots'])
+    slot = self.policy['reserved'][1]
+    self.assertEqual(slot, {'struct': 'CustomReserved1', 'type_id': '0xaedffd8f31e7b55d',
+                            'field': 'customReserved1', 'ordinal': 108})
+    prefix = self.policy['historical_prefixes']['1']
+    self.assertEqual((prefix['name'], prefix['type_id']), ('StarPilotCarParams', slot['type_id']))
+    self.assertIn(b'struct StarPilotCarParams @0xaedffd8f31e7b55d {', self.schemas['openpilot/cereal/custom.capnp'])
+    self.assertIn(b'autoSteeringLearning @108 :Custom.StarPilotCarParams;', self.schemas['openpilot/cereal/log.capnp'])
+    self.assertIn(b'learning @9 :AutoSteeringLearning;', self.schemas['openpilot/cereal/custom.capnp'])
+    self.assertIn(b'pcmCruiseSpeed @7 :Bool = true;', self.schemas['openpilot/cereal/custom.capnp'])
+    schemas = self.schemas.copy()
+    original = b'      controllerRevision @11 :Text;\n    }\n  }\n}'
+    self.assertIn(original, schemas['openpilot/cereal/custom.capnp'])
+    schemas['openpilot/cereal/custom.capnp'] = schemas['openpilot/cereal/custom.capnp'].replace(
+      original, b'      controllerRevision @11 :Text;\n    }\n  }\n  futureStatus @10 :UInt32;\n}')
+    self.assertEqual(validate(schemas, self.policy, self.sync), [])
+
+  def test_automatic_learning_payload_and_event_cannot_be_reinterpreted(self):
+    path = 'openpilot/cereal/custom.capnp'
+    for before, after in (
+      (b'struct StarPilotCarParams @0xaedffd8f31e7b55d {', b'struct UnrelatedFit @0xaedffd8f31e7b55d {'),
+      (b'0xaedffd8f31e7b55d', b'0xaedffd8f31e7b55e'),
+      (b'alternativeExperience @0 :Int16;', b'alternativeExperience @0 :UInt16;'),
+      (b'canUsePedal @1 :Bool;', b'canUsePedal @2 :Bool;'),
+      (b'flags @3 :UInt32;', b'flags @3 :Bool;'),
+      (b'pcmCruiseSpeed @7 :Bool = true;', b'pcmCruiseSpeed @7 :Bool = false;'),
+      (b'redneckCruiseAvailable @8 :Bool;', b''),
+      (b'safetyParam @0 :UInt16;', b'safetyParam @0 :UInt32;'),
+      (b'learning @9 :AutoSteeringLearning;', b'learning @10 :AutoSteeringLearning;'),
+      (b'version @0 :UInt16;', b'version @0 :UInt32;'),
+      (b'latAccelFactor @11 :Float64;', b'latAccelFactor @11 :Float32;'),
+      (b'latAccelFactor @11 :Float64;', b'unrelatedFactor @11 :Float64;'),
+      (b'heldoutCandidateLoss @18 :Float64;', b'heldoutCandidateLoss @19 :Float64;'),
+      (b'acceptancePolicyId @12 :Text;', b''),
+      (b'qualifiedFit @4;', b'qualifiedFit @5;'),
+      (b'linearFactor @1;', b'linearFactor @2;'),
+      (b'vehicle @0 :Text;', b'vehicle @0 :UInt64;'),
+      (b'controllerRevision @11 :Text;', b'controllerRevision @11 :Text = "changed";'),
+    ):
+      with self.subTest(after=after):
+        schemas = self.schemas.copy()
+        head, marker, tail = schemas[path].partition(b'struct StarPilotCarParams @0xaedffd8f31e7b55d {')
+        body, following, remainder = tail.partition(b'\nstruct StarPilotCarState')
+        self.assertTrue(marker and following)
+        occupied = marker + body
+        self.assertIn(before, occupied)
+        schemas[path] = head + occupied.replace(before, after) + following + remainder
+        self.assertTrue(validate(schemas, self.policy, self.sync))
+    path = 'openpilot/cereal/log.capnp'
+    original = b'autoSteeringLearning @108 :Custom.StarPilotCarParams;'
+    for replacement in (b'autoSteeringLearning @109 :Custom.StarPilotCarParams;',
+                        b'autoSteeringLearning @108 :Custom.CustomReserved5;'):
+      with self.subTest(replacement=replacement):
+        schemas = self.schemas.copy()
+        self.assertIn(original, schemas[path])
+        schemas[path] = schemas[path].replace(original, replacement)
+        self.assertTrue(any('event @108' in error for error in validate(schemas, self.policy, self.sync)))
 
   def test_restored_lateral_field_keeps_original_wire_meaning(self):
     self.assertNotIn(10, self.policy['historical_empty_slots'])

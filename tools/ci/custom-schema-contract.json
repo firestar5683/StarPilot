@@ -17,7 +17,8 @@
     "StarPilotSelfdriveState": "17588504919375977753",
     "SpotMonitorState": "14672680772714322234",
     "StarPilotLateralState": "13989372750770471812",
-    "StarPilotCarState": "17536106922917195458"
+    "StarPilotCarState": "17536106922917195458",
+    "StarPilotCarParams": "12601069073865356637"
   },
   "nodes": {
     "14441422469354927087": {
@@ -7085,6 +7086,753 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 12
+          }
+        }
+      }
+    },
+    "12601069073865356637": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 2,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "int16": null
+            },
+            "defaultValue": {
+              "int16": 0
+            }
+          },
+          "name": "alternativeExperience",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 16,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "canUsePedal",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 17,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "canUseSDSU",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint32": null
+            },
+            "defaultValue": {
+              "uint32": 0
+            }
+          },
+          "name": "flags",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 18,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "isHDA2",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "openpilotLongitudinalControlDisabled",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "list": {
+                "elementType": {
+                  "struct": {
+                    "typeId": 12722176879328636782
+                  }
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "safetyConfigs",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 20,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": true
+            }
+          },
+          "name": "pcmCruiseSpeed",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 21,
+            "type": {
+              "bool": null
+            },
+            "defaultValue": {
+              "bool": false
+            }
+          },
+          "name": "redneckCruiseAvailable",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "struct": {
+                "typeId": 10160747652947227057
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "learning",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        }
+      }
+    },
+    "10160747652947227057": {
+      "kind": "struct",
+      "data_words": 12,
+      "pointers": 4,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "version",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "enum": {
+                "typeId": 9933317225960138188
+              }
+            },
+            "defaultValue": {
+              "enum": 0
+            }
+          },
+          "name": "status",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "reason",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "struct": {
+                "typeId": 12625580964527765198
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "identity",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "session",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sequence",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "observedMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "validUntilMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceWindowStartMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "uint64": null
+            },
+            "defaultValue": {
+              "uint64": 0
+            }
+          },
+          "name": "sourceWindowEndMonoTime",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "enum": {
+                "typeId": 12699017317405201274
+              }
+            },
+            "defaultValue": {
+              "enum": 0
+            }
+          },
+          "name": "family",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "latAccelFactor",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        },
+        "12": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "acceptancePolicyId",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 12
+          }
+        },
+        "13": {
+          "slot": {
+            "offset": 14,
+            "type": {
+              "uint32": null
+            },
+            "defaultValue": {
+              "uint32": 0
+            }
+          },
+          "name": "trainWindows",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 13
+          }
+        },
+        "14": {
+          "slot": {
+            "offset": 15,
+            "type": {
+              "uint32": null
+            },
+            "defaultValue": {
+              "uint32": 0
+            }
+          },
+          "name": "heldoutWindows",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 14
+          }
+        },
+        "15": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "trainBaselineLoss",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
+          }
+        },
+        "16": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "trainCandidateLoss",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 16
+          }
+        },
+        "17": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "heldoutBaselineLoss",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 17
+          }
+        },
+        "18": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "float64": null
+            },
+            "defaultValue": {
+              "float64": 0.0
+            }
+          },
+          "name": "heldoutCandidateLoss",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 18
+          }
+        }
+      }
+    },
+    "12699017317405201274": {
+      "kind": "enum",
+      "values": [
+        "none",
+        "linearFactor"
+      ]
+    },
+    "12625580964527765198": {
+      "kind": "struct",
+      "data_words": 0,
+      "pointers": 12,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "vehicle",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
+          }
+        },
+        "1": {
+          "slot": {
+            "offset": 1,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "brand",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 1
+          }
+        },
+        "2": {
+          "slot": {
+            "offset": 2,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controller",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 2
+          }
+        },
+        "3": {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "policy",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 3
+          }
+        },
+        "4": {
+          "slot": {
+            "offset": 4,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "profile",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 4
+          }
+        },
+        "5": {
+          "slot": {
+            "offset": 5,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "conversionVersion",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 5
+          }
+        },
+        "6": {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "firmwareSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 6
+          }
+        },
+        "7": {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "list": {
+                "elementType": {
+                  "float64": null
+                }
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "000000000400000000000000020001000e0000000000000000000000000000000000000000000000"
+            }
+          },
+          "name": "basis",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 7
+          }
+        },
+        "8": {
+          "slot": {
+            "offset": 8,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "baselineSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 8
+          }
+        },
+        "9": {
+          "slot": {
+            "offset": 9,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "preferenceSha256",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 9
+          }
+        },
+        "10": {
+          "slot": {
+            "offset": 10,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "resetGeneration",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 10
+          }
+        },
+        "11": {
+          "slot": {
+            "offset": 11,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            }
+          },
+          "name": "controllerRevision",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 11
+          }
+        }
+      }
+    },
+    "9933317225960138188": {
+      "kind": "enum",
+      "values": [
+        "unavailable",
+        "collecting",
+        "candidate",
+        "rejected",
+        "qualifiedFit"
+      ]
+    },
+    "12722176879328636782": {
+      "kind": "struct",
+      "data_words": 1,
+      "pointers": 0,
+      "is_group": false,
+      "union_count": 0,
+      "union_offset": 0,
+      "fields": {
+        "0": {
+          "slot": {
+            "offset": 0,
+            "type": {
+              "uint16": null
+            },
+            "defaultValue": {
+              "uint16": 0
+            }
+          },
+          "name": "safetyParam",
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 0
           }
         }
       }

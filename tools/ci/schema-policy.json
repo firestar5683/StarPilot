@@ -12,7 +12,6 @@
   "log_sha256": "bf39b822e577afdd6caacabde77261ac5c0929767c2f0e4ff7d5e5429e3d4c14",
   "custom_header": "using Cxx = import \"/include/c++.capnp\";\n$Cxx.namespace(\"cereal\");\nusing Car = import \"/car.capnp\";\n\n@0xb526ba661d550a59;\n\n# custom.capnp: a home for empty structs reserved for custom forks\n# These structs are guaranteed to remain reserved and empty in mainline\n# cereal, so use these if you want custom events in your fork.\n\n# DO rename the structs\n# DON'T change the identifier (e.g. @0x81c2f05a394cf4af)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
   "historical_empty_slots": [
-    1,
     5
   ],
   "historical_restored": {
@@ -180,6 +179,16 @@
       "body": "\naccelerationJerk @0 :Float32; cscControllingSpeed @1 :Bool; cscSpeed @2 :Float32;\ncscTraining @3 :Bool; dangerFactor @4 :Float32; dangerJerk @5 :Float32;\ndesiredFollowDistance @6 :Int64; experimentalMode @7 :Bool; forcingStop @8 :Bool;\nforcingStopLength @9 :Float32; starpilotEvents @10 :AnyPointer; starpilotToggles @11 :Text;\nincreasedStoppedDistance @12 :Float32; lateralCheck @13 :Bool; laneWidthLeft @14 :Float32;\nlaneWidthRight @15 :Float32; maxAcceleration @16 :Float32; minAcceleration @17 :Float32;\nredLight @18 :Bool; roadCurvature @19 :Float32;\nslcMapSpeedLimit @20 :Float32;\nslcMapboxSpeedLimit @21 :Float32; slcNextSpeedLimit @22 :Float32; slcOverriddenSpeed @23 :Float32;\nslcSpeedLimit @24 :Float32; slcSpeedLimitOffset @25 :Float32; slcSpeedLimitSource @26 :Text;\n",
       "source_commit": "77b44257a0a2a6e574d8e375ab61004be21b7a6e",
       "source_path": "openpilot/cereal/custom.capnp"
+    },
+    "1": {
+      "type_id": "0xaedffd8f31e7b55d",
+      "name": "StarPilotCarParams",
+      "body": "\n  alternativeExperience @0 :Int16;\n  canUsePedal @1 :Bool;\n  canUseSDSU @2 :Bool;\n  flags @3 :UInt32;\n  isHDA2 @4 :Bool;\n  openpilotLongitudinalControlDisabled @5 :Bool;\n  safetyConfigs @6 :List(SafetyConfig);\n  pcmCruiseSpeed @7 :Bool = true;\n  redneckCruiseAvailable @8 :Bool;\n\n  struct SafetyConfig {\n    safetyParam @0 :UInt16;\n  }\n\n  learning @9 :AutoSteeringLearning;\n\n  struct AutoSteeringLearning {\n    version @0 :UInt16;\n    status @1 :Status;\n    reason @2 :Text;\n    identity @3 :Identity;\n    session @4 :Text;\n    sequence @5 :UInt64;\n    observedMonoTime @6 :UInt64;  # MONOTONIC, separate from Event BOOTTIME.\n    validUntilMonoTime @7 :UInt64;\n    sourceWindowStartMonoTime @8 :UInt64;\n    sourceWindowEndMonoTime @9 :UInt64;\n    family @10 :Family;\n    latAccelFactor @11 :Float64;\n    acceptancePolicyId @12 :Text;\n    trainWindows @13 :UInt32;\n    heldoutWindows @14 :UInt32;\n    trainBaselineLoss @15 :Float64;\n    trainCandidateLoss @16 :Float64;\n    heldoutBaselineLoss @17 :Float64;\n    heldoutCandidateLoss @18 :Float64;\n\n    enum Status { unavailable @0; collecting @1; candidate @2; rejected @3; qualifiedFit @4; }\n    enum Family { none @0; linearFactor @1; }\n    struct Identity {\n      vehicle @0 :Text;\n      brand @1 :Text;\n      controller @2 :Text;\n      policy @3 :Text;\n      profile @4 :Text;\n      conversionVersion @5 :Text;\n      firmwareSha256 @6 :Text;\n      basis @7 :List(Float64);\n      baselineSha256 @8 :Text;\n      preferenceSha256 @9 :Text;\n      resetGeneration @10 :Text;\n      controllerRevision @11 :Text;\n    }\n  }\n",
+      "historical_source_commit": "61fd19556f985ef462bda9c103396108ea69ad14",
+      "historical_source_path": "cereal/custom.capnp",
+      "historical_body_sha256": "d95c3b15a6e51608a8157bc3adc965d3914d4ae94364f9ea605c757cc7924ec8",
+      "learning_source_commit": "c204f0b165db7769bd795768e4e25019748ee12c",
+      "learning_source_path": "openpilot/cereal/custom.capnp"
     }
   },
   "reviewed_enum_additions": {

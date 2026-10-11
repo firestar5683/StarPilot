@@ -23207,7 +23207,7 @@ public:
 
   inline bool isAutoSteeringLearning() const;
   inline bool hasAutoSteeringLearning() const;
-  inline  ::cereal::AutoSteeringLearning::Reader getAutoSteeringLearning() const;
+  inline  ::cereal::StarPilotCarParams::Reader getAutoSteeringLearning() const;
 
   inline bool isStarpilotCarState() const;
   inline bool hasStarpilotCarState() const;
@@ -24274,11 +24274,11 @@ public:
 
   inline bool isAutoSteeringLearning();
   inline bool hasAutoSteeringLearning();
-  inline  ::cereal::AutoSteeringLearning::Builder getAutoSteeringLearning();
-  inline void setAutoSteeringLearning( ::cereal::AutoSteeringLearning::Reader value);
-  inline  ::cereal::AutoSteeringLearning::Builder initAutoSteeringLearning();
-  inline void adoptAutoSteeringLearning(::capnp::Orphan< ::cereal::AutoSteeringLearning>&& value);
-  inline ::capnp::Orphan< ::cereal::AutoSteeringLearning> disownAutoSteeringLearning();
+  inline  ::cereal::StarPilotCarParams::Builder getAutoSteeringLearning();
+  inline void setAutoSteeringLearning( ::cereal::StarPilotCarParams::Reader value);
+  inline  ::cereal::StarPilotCarParams::Builder initAutoSteeringLearning();
+  inline void adoptAutoSteeringLearning(::capnp::Orphan< ::cereal::StarPilotCarParams>&& value);
+  inline ::capnp::Orphan< ::cereal::StarPilotCarParams> disownAutoSteeringLearning();
 
   inline bool isStarpilotCarState();
   inline bool hasStarpilotCarState();
@@ -57527,41 +57527,41 @@ inline bool Event::Builder::hasAutoSteeringLearning() {
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::AutoSteeringLearning::Reader Event::Reader::getAutoSteeringLearning() const {
+inline  ::cereal::StarPilotCarParams::Reader Event::Reader::getAutoSteeringLearning() const {
   KJ_IREQUIRE((which() == Event::AUTO_STEERING_LEARNING),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarParams>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::AutoSteeringLearning::Builder Event::Builder::getAutoSteeringLearning() {
+inline  ::cereal::StarPilotCarParams::Builder Event::Builder::getAutoSteeringLearning() {
   KJ_IREQUIRE((which() == Event::AUTO_STEERING_LEARNING),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarParams>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::setAutoSteeringLearning( ::cereal::AutoSteeringLearning::Reader value) {
+inline void Event::Builder::setAutoSteeringLearning( ::cereal::StarPilotCarParams::Reader value) {
   _builder.setDataField<Event::Which>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::AUTO_STEERING_LEARNING);
-  ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::set(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarParams>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::AutoSteeringLearning::Builder Event::Builder::initAutoSteeringLearning() {
+inline  ::cereal::StarPilotCarParams::Builder Event::Builder::initAutoSteeringLearning() {
   _builder.setDataField<Event::Which>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::AUTO_STEERING_LEARNING);
-  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::init(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarParams>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 inline void Event::Builder::adoptAutoSteeringLearning(
-    ::capnp::Orphan< ::cereal::AutoSteeringLearning>&& value) {
+    ::capnp::Orphan< ::cereal::StarPilotCarParams>&& value) {
   _builder.setDataField<Event::Which>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::AUTO_STEERING_LEARNING);
-  ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::adopt(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarParams>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::AutoSteeringLearning> Event::Builder::disownAutoSteeringLearning() {
+inline ::capnp::Orphan< ::cereal::StarPilotCarParams> Event::Builder::disownAutoSteeringLearning() {
   KJ_IREQUIRE((which() == Event::AUTO_STEERING_LEARNING),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarParams>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 

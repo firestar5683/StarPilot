@@ -6,6 +6,9 @@ from threading import Barrier
 import unittest
 from unittest.mock import patch
 
+from opendbc.car.car_helpers import interfaces
+from opendbc.car.honda.values import CAR as HONDA
+from openpilot.starpilot.lateral.learning_preferences import KEY as LEARNING_KEY, replace_preference
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest
 
@@ -35,12 +38,32 @@ class FeatureSnapshotReadTests(unittest.TestCase):
 
   def test_duplicate_torque_sources_are_read_once_per_assembly(self):
     first = self.snapshot()
-    self.assertEqual(set(self.params.reads), {"ForceAutoTuneOff", "TorqueOverrideDocument"})
+    self.assertEqual(set(self.params.reads), {"TorqueOverrideDocument"})
     self.assertEqual(len(self.params.reads), len(set(self.params.reads)))
     self.params.reads.clear()
     self.assertEqual(self.snapshot(), first)
-    self.assertEqual(set(self.params.reads), {"ForceAutoTuneOff", "TorqueOverrideDocument"})
+    self.assertEqual(set(self.params.reads), {"TorqueOverrideDocument"})
     self.assertEqual(len(self.params.reads), len(set(self.params.reads)))
+
+  def test_learning_row_reads_scoped_and_legacy_sources_once(self):
+    cp = interfaces[HONDA.HONDA_FIT_4G].get_non_essential_params(HONDA.HONDA_FIT_4G)
+    self.owner.vehicle_params = lambda: cp
+    expected = {"LateralControllerSelection", "ForceAutoTuneOff", LEARNING_KEY}
+    (self.params.directory / "ForceAutoTuneOff").write_bytes(b"0")
+    scoped = self.params.directory / LEARNING_KEY
+    scoped.write_bytes(replace_preference(None, cp, False))
+    row = self.owner.controller.learning_row()
+    assert row is not None
+    self.assertEqual(row.value, "Off")
+    self.assertEqual(set(self.params.reads), expected)
+    self.assertEqual(len(self.params.reads), len(expected))
+    self.params.reads.clear()
+    scoped.unlink()
+    legacy = self.owner.controller.learning_row()
+    assert legacy is not None
+    self.assertEqual(legacy.value, "On")
+    self.assertEqual(set(self.params.reads), expected)
+    self.assertEqual(len(self.params.reads), len(expected))
 
   def test_next_assembly_observes_replacement_and_unreadable_source(self):
     source = self.params.directory / "AlwaysOnLateral"

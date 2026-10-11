@@ -81,10 +81,17 @@ upstream. Every `.capnp` file under `openpilot/cereal` and
 `opendbc_repo/opendbc/car` requires explicit policy coverage; new schemas fail
 until reviewed. This guard prevents upstream schema collisions; it does not replace
 append-only evolution and compatibility testing of already shipped custom fields.
-Slots 1–3, 5–8 and 10–11 in `custom.capnp` were used by older fork logs and remain
-empty under their original names until a reviewed, append-compatible layout is
-restored. Keeping a type ID alone does not preserve the meaning of its fields;
-reusing one of these slots for a different event could misread older recordings.
+Slot5 remains empty under its original name. Slot1 restores the full historical
+`StarPilotCarParams` fields0–8, nested `SafetyConfig`, and `pcmCruiseSpeed=true`
+default at type ID `0xaedffd8f31e7b55d` and Event ordinal108. The optional
+`autoSteeringLearning` Event alias still refers to that outer type; its versioned
+`learning` child is appended at9 with a separately generated nested type ID.
+Historical messages have a default version0 child and cannot advertise a fit.
+The occupied-prefix guard protects both the historical and appended fields,
+identity and enum meanings. The transient direct learner layout in commit
+`c204f0b165` requires that exact schema for replay; this repair does not claim
+compatibility with those incompatible development records. Keeping a type ID
+alone does not preserve field meanings in the other restored historical slots.
 Slot0 preserves the historical car-control HUD and steering-limit prefix and
 appends versioned nested navigation fields. Navigation readers require version2;
 old car-control records do not become navigation commands.

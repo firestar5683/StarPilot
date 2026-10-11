@@ -15,7 +15,7 @@ from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.starpilot.flm.learning_source import (
-  AdmittedPolicy, AutomaticLearningConsumer, MAX_AGE_NS, RESET_KEY, SERVICE, conversion_identity, identity_for,
+  AdmittedPolicy, AutomaticLearningConsumer, MAX_AGE_NS, RESET_KEY, SERVICE, conversion_identity, identity_for, learning_payload,
 )
 from openpilot.starpilot.lateral.controller_selection import ControllerMode, DOCUMENT_KEY, policy_for, replace_mode
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost
@@ -45,7 +45,7 @@ def wire(cp, params, *, now=NOW, sequence=1, **changes):
   identity, enabled, manual = identity_for(cp, ControllerMode.STANDARD, params, 'opendbc.linear_inverse_v1')
   assert identity is not None and enabled and not manual
   event = messaging.new_message(SERVICE, valid=True)
-  state = getattr(event, SERVICE)
+  state = learning_payload(getattr(event, SERVICE))
   state.version, state.status, state.family = 1, 'qualifiedFit', 'linearFactor'
   state.identity = identity
   state.session, state.sequence = 'consumer-test', sequence
@@ -154,7 +154,7 @@ class TestAutomaticLearningSource(unittest.TestCase):
       cp, _, params, source = context(HKG.HYUNDAI_IONIQ_6)
       sm = input_state(cp, params)
       self.assertIsNotNone(source.sample(sm, now_ns=NOW, lat_active=True))
-      wrong = sm[SERVICE].identity.to_dict()
+      wrong = learning_payload(sm[SERVICE]).identity.to_dict()
       wrong['vehicle'] = 'different-vehicle'
       for sequence, overrides in enumerate(({'identity': wrong}, {'version': 2}, {'latAccelFactor': float('nan')}, {'latAccelFactor': 100.},
                         {'acceptancePolicyId': 'unqualified'}, {'trainWindows': 7}, {'heldoutWindows': 7},
@@ -172,7 +172,7 @@ class TestAutomaticLearningSource(unittest.TestCase):
         self.assertIsNotNone(source.sample(sm, now_ns=NOW, lat_active=True))
         Path(params.get_param_path(changed_key)).write_bytes(raw)
         self.assertIsNone(source.sample(sm, now_ns=NOW + 1_000_000_000, lat_active=True))
-        self.assertNotEqual(source.identity, sm[SERVICE].identity.to_dict())
+        self.assertNotEqual(source.identity, learning_payload(sm[SERVICE]).identity.to_dict())
 
   def test_saved_manual_factor_overrides_automatic_overlay_after_adoption(self):
     with OpenpilotPrefix():

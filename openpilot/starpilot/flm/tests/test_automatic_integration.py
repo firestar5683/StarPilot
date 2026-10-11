@@ -19,7 +19,9 @@ from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.starpilot.flm.automatic import identity_digest
 from openpilot.starpilot.flm.learning_producer import AutomaticLearningProducer
-from openpilot.starpilot.flm.learning_source import AutomaticLearningConsumer, MAX_AGE_NS, RESET_KEY, SERVICE
+from openpilot.starpilot.flm.learning_source import (
+  AutomaticLearningConsumer, MAX_AGE_NS, RESET_KEY, SERVICE, learning_payload,
+)
 from openpilot.starpilot.flm.tests import test_automatic as evidence
 from openpilot.starpilot.lateral.controller_selection import ControllerMode, DOCUMENT_KEY as CONTROLLER_KEY, policy_for, replace_mode
 from openpilot.starpilot.lateral.learning_preferences import KEY as PREFERENCE_KEY, replace_preference
@@ -84,7 +86,7 @@ class JoinedLearning:
       self.test.assertIsNotNone(event)
       self.test.assertTrue(event.valid, 'The real producer must mark its usable wire valid')
       if change is not None:
-        change(event.autoSteeringLearning)
+        change(learning_payload(event.autoSteeringLearning))
       reader = messaging.log_from_bytes(event.to_bytes())
       self.wire_readers.append(reader)
       controls.sm.update_msgs(self.now / 1e9, [reader])

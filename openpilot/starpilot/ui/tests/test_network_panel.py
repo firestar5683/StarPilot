@@ -271,7 +271,7 @@ class NetworkPanelTests(unittest.TestCase):
     session._on_destination_change = Mock()
     session._snapshot_cache = None
     session.sidebar_expanded = True
-    object.__setattr__(session, "view", NS(render=Mock()))
+    object.__setattr__(session, "view", NS(render=Mock(), settings=NS(render_rail=Mock())))
     session.notice = ""
     session.network_layer = Mock(return_value=True)
     session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.REQUEST_DESTINATION,
@@ -283,6 +283,7 @@ class NetworkPanelTests(unittest.TestCase):
     session.snapshot = Mock(return_value=state)
     with patch.object(runtime_app, "placed_at", return_value=nullcontext()):
       session.render(ShellMode.SETTINGS, rl.Rectangle(10, 20, 2160, 1080))
+    session.view.settings.render_rail.assert_called_once_with(state.settings, selected=Destination.NETWORK)
     rect = session.network_layer.call_args.args[0]
     self.assertEqual((rect.x, rect.y, rect.width, rect.height), (560, 45, 1560, 1030))
     def back_from_network(_rect):
@@ -294,6 +295,9 @@ class NetworkPanelTests(unittest.TestCase):
     self.assertEqual(session.notice, "")
     self.assertEqual(session.selected, Destination.STAR)
     self.assertEqual(session._on_destination_change.call_args.args[0], Destination.STAR)
+    self.assertEqual(session.view.settings.render_rail.call_args_list, [
+      call(state.settings, selected=Destination.NETWORK), call(state.settings, selected=Destination.NETWORK),
+    ])
 
   def test_shell_render_failure_returns_to_star_without_retrying_deactivated_bridge(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
@@ -304,7 +308,7 @@ class NetworkPanelTests(unittest.TestCase):
     session._mode = ShellMode.SETTINGS
     session.profile = runtime_app.Profile.LARGE
     object.__setattr__(session, "input", NS(cancel=Mock()))
-    object.__setattr__(session, "view", NS(render=Mock()))
+    object.__setattr__(session, "view", NS(render=Mock(), settings=NS(render_rail=Mock())))
     object.__setattr__(session, "fonts", NS(draw=Mock()))
     session._on_destination_change = Mock()
     session.notice = ""
@@ -320,10 +324,12 @@ class NetworkPanelTests(unittest.TestCase):
       self.assertEqual(session.selected, Destination.STAR)
       self.assertIsNone(session._snapshot_cache)
       self.assertIn("network panel is unavailable", session.notice)
+      session.view.settings.render_rail.assert_called_once_with(network_state.settings, selected=Destination.NETWORK)
       session.input.cancel.assert_called_once()
       session._on_destination_change.assert_called_once_with(Destination.STAR)
       session.render(ShellMode.SETTINGS, rl.Rectangle(0, 0, 2160, 1080))
     session.network_layer.assert_called_once()
+    session.view.settings.render_rail.assert_called_once_with(network_state.settings, selected=Destination.NETWORK)
 
   @staticmethod
   def _parked_ui():

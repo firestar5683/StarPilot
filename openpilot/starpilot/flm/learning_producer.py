@@ -11,7 +11,7 @@ from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.selfdrive.locationd.helpers import Pose, PoseCalibrator
 from openpilot.starpilot.flm.automatic import EvidenceWindow, PhysicalPoint, evaluate_linear_factor, identity_digest, linear_policy
 from openpilot.starpilot.flm.gm_evidence import FLMSample
-from openpilot.starpilot.flm.learning_source import VERSION, conversion_identity, identity_for
+from openpilot.starpilot.flm.learning_source import VERSION, conversion_identity, identity_for, learning_payload
 from openpilot.starpilot.lateral.controller_selection import read_selection
 
 
@@ -257,7 +257,7 @@ class AutomaticLearningProducer:
   def _get_msg(self):
     now = time.monotonic_ns()
     msg = messaging.new_message('autoSteeringLearning')
-    value = msg.autoSteeringLearning
+    value = learning_payload(msg.autoSteeringLearning)
     value.version, value.session, value.sequence = VERSION, self.session, self.sequence
     self.sequence += 1
     value.observedMonoTime, value.validUntilMonoTime = now, now + 500_000_000

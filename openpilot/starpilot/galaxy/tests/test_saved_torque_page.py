@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from openpilot.common.params import Params
 from openpilot.starpilot.galaxy.settings import LiveContextSource, SettingsChanged, SettingsGateway
+from openpilot.starpilot.lateral.controller_selection import learning_allowed
+from openpilot.starpilot.lateral.learning_preferences import read_preference
 
 
 class TestSavedTorquePage(unittest.TestCase):
@@ -44,7 +46,24 @@ class TestSavedTorquePage(unittest.TestCase):
     self.assertFalse(any(row['page'] for row in page['rows']))
     for label in ('Steering Controller', 'Turn Assist', 'Prep My Vehicle for Tuning', 'Lat Accel', 'Friction'):
       self.assertTrue(rows[label]['available'], label)
-    self.assertFalse(rows['Automatic Steering Learning']['available'])
+    learning = rows['Automatic Steering Learning']
+    self.assertTrue(learning['available'])
+    self.assertEqual(learning['value'], 'Off')
+    self.assertIn('StarPilot Controller uses its vehicle tune', learning['reason'])
+    self.assertIn('automatic learning is currently unavailable', learning['reason'])
+    cp = self.context.sample().cp
+    assert cp is not None
+    self.assertFalse(learning_allowed(self.params, cp))
+    learning_index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Automatic Steering Learning')
+    learning_intent = self.gateway.preview(page['view'], learning_index, 0, 'session', b'generation', value='On')
+    self.assertTrue(self.gateway.confirm(learning_intent['intent'], 'session', b'generation'))
+    preference = read_preference(self.params, cp)
+    self.assertTrue(preference.enabled)
+    self.assertEqual(preference.source, 'scope')
+    self.assertTrue(self.params.get_bool('ForceAutoTuneOff'))
+    self.assertFalse(learning_allowed(self.params, cp), 'Saving On does not admit the selected nonlinear controller')
+    page = self.page()
+
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Friction')
     intent = self.gateway.preview(page['view'], index, 1, 'session', b'generation')
     self.assertTrue(self.gateway.confirm(intent['intent'], 'session', b'generation'))

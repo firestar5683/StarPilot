@@ -25,6 +25,11 @@ RESET_KEY = 'AutoSteeringLearningReset'
 REFRESH_NS = 1_000_000_000
 
 
+def learning_payload(envelope):
+  """The appended learner child; historical CarParams defaults cannot become a fit."""
+  return envelope.learning
+
+
 def _digest(value):
   return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
@@ -174,7 +179,7 @@ class AutomaticLearningConsumer:
       received_ns = int(sm.recv_time[SERVICE] * 1e9)
       if not 0 <= now_ns - received_ns <= MAX_AGE_NS:
         return None
-      state = sm[SERVICE]
+      state = learning_payload(sm[SERVICE])
       observed, until = int(state.observedMonoTime), int(state.validUntilMonoTime)
       if not (int(state.version) == VERSION and 0 < observed <= now_ns <= until <= observed + MAX_AGE_NS):
         return None

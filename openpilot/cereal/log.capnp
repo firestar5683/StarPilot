@@ -2639,7 +2639,7 @@ struct Event {
     # DON'T change the ID (e.g. @107)
     # DON'T change which struct it points to
     starpilotNavigation @107 :Custom.StarPilotCarControl;
-    autoSteeringLearning @108 :Custom.AutoSteeringLearning;
+    autoSteeringLearning @108 :Custom.StarPilotCarParams;
     starpilotCarState @109 :Custom.StarPilotCarState;
     starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
     slcVisionObservation @111 :Custom.StarPilotModelDataV2;
