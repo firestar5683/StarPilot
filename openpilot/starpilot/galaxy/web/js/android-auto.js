@@ -1081,9 +1081,10 @@ export const AndroidAutoPage = {
                     <div class="gx-aa-token__callout" role="note">
                       <i class="bi bi-info-circle-fill" aria-hidden="true"></i>
                       <div class="gx-aa-token__signin-copy">
-                        <p><strong>Sign in and click “I agree.”</strong></p>
-                        <p class="gx-aa-token__signin-note">The page will keep loading after you click “I agree.” <strong>This is expected.</strong> You don’t need to wait for it to finish.</p>
-                        <p>Copy your token using the instructions below, then paste it in <strong>step 3</strong>.</p>
+                        <p class="gx-aa-token__signin-note">The page will keep loading after you click “I agree.”</p>
+                        <p><strong class="gx-aa-bad">This is expected.</strong></p>
+                        <p>Copy your token using the instructions below</p>
+                        <p>Paste it in step 3.</p>
                       </div>
                     </div>
                     <div class="gx-aa-browser-help">
