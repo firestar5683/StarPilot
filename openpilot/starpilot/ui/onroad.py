@@ -30,7 +30,7 @@ from openpilot.starpilot.ui.onroad_corner import CornerHintCache, render_corner_
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
 from openpilot.starpilot.ui.live_developer_sidebar import render_sidebar as render_live_sidebar
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, slc_controls
-from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text
+from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text, timer_size
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
 from openpilot.starpilot.ui.onroad_navigation import NavigationCard
 from openpilot.starpilot.ui.onroad_navigation_favorites import NavigationFavorites
@@ -303,6 +303,8 @@ class OnroadView:
           submit("steering_wheel", lambda: self.steering_wheel.render(content, state))
         if placement(state.customization, profile, "torque_bar")["enabled"]:
           submit("torque_bar", lambda: self.torque_bar.render(content, state, width if self.projection_viewport else 2160))
+        if state.stopped_duration_s is not None:
+          submit(STOPPED_TIMER_WIDGET, lambda: self._stopped_timer(state, state.stopped_duration_s))
     else:
       if state.alert.size == AlertSize.NONE and not driver_camera:
         submit("speed_limit", lambda: self.compact_hud._speed_limit_sign(state))
@@ -369,6 +371,8 @@ class OnroadView:
             self.steering_wheel.render(content, state)
           if placement(state.customization, "large", "torque_bar")["enabled"]:
             self.torque_bar.render(content, state, width if self.projection_viewport else 2160)
+          if state.stopped_duration_s is not None:
+            self._stopped_timer(state, state.stopped_duration_s)
         if self.extra_overlays is not None:
           self.extra_overlays(content, state)
         if monitor_layer := getattr(self, "driver_monitor_layer", None):
@@ -507,8 +511,12 @@ class OnroadView:
     render_compact_half_borders(state, rl.get_time())
 
   def _stopped_timer(self, state: OnroadState, seconds: int) -> None:
-    position = placement(state.customization, "compact", STOPPED_TIMER_WIDGET)
-    width, _ = widget_size(state.customization, "compact", STOPPED_TIMER_WIDGET)
+    profile = str(self.fonts.profile)
+    position = state.customization["layouts"][profile].get(STOPPED_TIMER_WIDGET)
+    if position is None or not position["enabled"]:
+      return
+    width, height = timer_size(profile)
+    scale = height / 112
     minutes, remainder = duration_text(seconds)
     color = rl.Color(*duration_color(seconds), 255)
     # Line centers sit 53 and 101 px into the widget box.
@@ -516,12 +524,12 @@ class OnroadView:
       (minutes, FontRole.BOLD, 78, 28, 53, color),
       (remainder, FontRole.MEDIUM, 35, 16, 101, rl.Color(255, 255, 255, 242)),
     ):
-      size = initial_size
-      while size > minimum_size and self.fonts.measure(text, role, size).width > width:
+      size = round(initial_size * scale)
+      while size > round(minimum_size * scale) and self.fonts.measure(text, role, size).width > width:
         size -= 2
       measured = self.fonts.measure(text, role, size)
       x = position["x"] + (width - measured.width) / 2
-      y = position["y"] + center_y - measured.height / 2
+      y = position["y"] + center_y * scale - measured.height / 2
       self.fonts.draw(text, role, size, x + 2, y + 2, rl.Color(0, 0, 0, 170))
       self.fonts.draw(text, role, size, x, y, tint)
 

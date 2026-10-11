@@ -61,7 +61,8 @@ def test_legacy_projection_order_adds_upstream_mode_widget():
   projection['widgetOrder'] = [key for key in DEFAULT_WIDGET_ORDER['large'] if key != MODE_WIDGET]
   migrated = validate_layout_for_viewport(projection, (2880, 1080))
   assert migrated['widgets'][MODE_WIDGET]['enabled'] is False
-  assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work', 'bookmark', CAR_EXIT]
+  assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work',
+                                     'bookmark', 'stopped_timer', CAR_EXIT]
 
 
 def test_old_documents_keep_their_original_shape():
@@ -153,6 +154,7 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   assert 'steering_wheel' not in seen
   assert 'speed_limit_actions' not in seen
   assert 'torque_bar' not in seen
+  assert STOPPED_TIMER_WIDGET not in seen
   if profile == 'compact':
     seen.clear()
     state.alert.size = 'none'

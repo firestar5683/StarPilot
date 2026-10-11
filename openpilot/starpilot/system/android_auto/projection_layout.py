@@ -6,8 +6,9 @@ from pathlib import Path
 
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
-from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, WHEEL_SIZES,
+from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
                                                          customization_metadata, validate_widget_order)
+from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
 MAX_BYTES = 16384
@@ -26,7 +27,7 @@ ACTION_WIDGETS = (*DISPLAY_WIDGETS, CAR_EXIT)
 FAVORITE_SIZE = (320, 110)
 FAVORITE_ICON_SIZE = 110
 CAR_EXIT_SIZE = (96, 96)
-PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *DISPLAY_WIDGETS, CAR_EXIT)
+PROJECTION_WIDGETS = (NAV_CARD, NAV_MAP, *DISPLAY_WIDGETS, STOPPED_TIMER_WIDGET, CAR_EXIT)
 NAV_CARD_SIZE = (560, 195)
 MAP_MIN_SIZE = (280, 200)
 MAP_OPACITY = (15, 100, 50)  # percent: min, max, default
@@ -69,6 +70,11 @@ def layout_metadata_for_viewport(viewport):
   x, y, w, h = maximum_footprint(30, 30, width - 60, height - 60, width)
   widgets['torque_bar'].update(width=w, height=h)
   widgets['torque_bar']['default'].update(x=x, y=y)
+  timer_w, timer_h = timer_size('large')
+  widgets[STOPPED_TIMER_WIDGET] = {'label': 'Stopped timer', 'kind': STOPPED_TIMER_WIDGET,
+                                  'width': timer_w, 'height': timer_h, 'colors': {},
+                                  'note': 'Counts how long you have been stopped, after the first minute of the drive',
+                                  'default': {'x': (width - timer_w) / 2, 'y': 520, 'enabled': False}}
   # The turn card keeps the comma's large-UI spot, following the right edge.
   card_w, card_h = NAV_CARD_SIZE
   widgets[NAV_CARD] = {'label': 'Turn-by-turn', 'kind': NAV_CARD, 'width': card_w, 'height': card_h, 'colors': {},
@@ -106,7 +112,7 @@ def layout_metadata_for_viewport(viewport):
   for key in ACTION_WIDGETS:
     widgets[key].update(opacity={'min': 0, 'max': 100, 'default': 100}, backgroundToggle=True)
     widgets[key]['default'].update(opacity=100, background=True)
-  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], NAV_CARD, *DISPLAY_WIDGETS, CAR_EXIT]
+  profile["widgetOrder"] = [NAV_MAP, *profile["widgetOrder"], STOPPED_TIMER_WIDGET, NAV_CARD, *DISPLAY_WIDGETS, CAR_EXIT]
   return profile
 
 

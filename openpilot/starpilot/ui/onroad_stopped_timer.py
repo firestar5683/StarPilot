@@ -1,4 +1,4 @@
-"""Monotonic, drive-scoped C4 standstill duration for the saved Visuals choice."""
+"""Monotonic, drive-scoped standstill duration for native and Android Auto widgets."""
 
 from dataclasses import dataclass
 
@@ -8,6 +8,11 @@ SECOND_NS = 1_000_000_000
 ENGAGED = (22, 127, 64)
 EXPERIMENTAL = (218, 111, 37)
 TRAFFIC = (201, 34, 49)
+PREVIEW_DURATION_S = 134
+
+
+def timer_size(profile: str) -> tuple[int, int]:
+  return (660, 168) if profile == "large" else (440, 112)
 
 
 @dataclass

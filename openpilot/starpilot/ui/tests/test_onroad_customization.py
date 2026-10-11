@@ -745,8 +745,12 @@ def test_stopped_timer_draws_inside_its_moved_widget():
   document = default_document()
   view = onroad.OnroadView.__new__(onroad.OnroadView)
   view.fonts = Mock(spec=BitmapFonts)
+  view.fonts.profile = Profile.COMPACT
   view.fonts.measure.return_value = NS(width=100, height=20)
   state = NS(customization=document)
+  view._stopped_timer(state, 75)
+  view.fonts.draw.assert_not_called()
+  document["layouts"]["compact"][STOPPED_TIMER_WIDGET]["enabled"] = True
   view._stopped_timer(state, 75)
   default = [call.args[3:5] for call in view.fonts.draw.call_args_list[1::2]]
   assert default == [((476 - 100) / 2, 101 - 10), ((476 - 100) / 2, 149 - 10)]
@@ -754,3 +758,23 @@ def test_stopped_timer_draws_inside_its_moved_widget():
   view.fonts.draw.reset_mock()
   view._stopped_timer(state, 75)
   assert [call.args[3:5] for call in view.fonts.draw.call_args_list[1::2]] == [(170, 53 - 10), (170, 101 - 10)]
+
+
+def test_projection_timer_renders_at_saved_coordinates_without_native_timer_enabled():
+  from openpilot.starpilot.ui import onroad
+  from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, projection_customization
+  layout = default_layout_for_viewport((2880, 1080))
+  layout['widgets'][STOPPED_TIMER_WIDGET].update(enabled=True, x=450, y=600)
+  document = projection_customization(layout, default_document())
+  view = onroad.OnroadView.__new__(onroad.OnroadView)
+  view.fonts = Mock(spec=BitmapFonts)
+  view.fonts.profile = Profile.LARGE
+  view.fonts.measure.return_value = NS(width=100, height=20)
+  view._stopped_timer(NS(customization=document), 134)
+  text_calls = view.fonts.draw.call_args_list[1::2]
+  assert [call.args[0] for call in text_calls] == ['2 minutes', '14 seconds']
+  assert [call.args[3:5] for call in text_calls] == [(730, 669.5), (730, 741.5)]
+  view.fonts.draw.reset_mock()
+  document['layouts']['large'][STOPPED_TIMER_WIDGET]['enabled'] = False
+  view._stopped_timer(NS(customization=document), 134)
+  view.fonts.draw.assert_not_called()

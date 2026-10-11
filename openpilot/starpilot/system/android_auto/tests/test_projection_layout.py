@@ -10,7 +10,7 @@ from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
   PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, BOOKMARK_WIDGET, CAR_EXIT, ACTION_WIDGETS, placement_size,
 )
-from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, default_document, customization_metadata
+from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
 
 SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
@@ -18,6 +18,29 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_stopped_timer_migrates_and_keeps_independent_placement_and_order(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    expected = document['widgets'].pop(STOPPED_TIMER_WIDGET)
+    self.assertFalse(expected['enabled'])
+    self.assertEqual((metadata['widgets'][STOPPED_TIMER_WIDGET]['width'],
+                      metadata['widgets'][STOPPED_TIMER_WIDGET]['height']), (660, 168))
+    document['widgetOrder'] = [key for key in metadata['widgetOrder'] if key != STOPPED_TIMER_WIDGET]
+    document['widgets']['current_speed']['x'] += 20
+    before = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, before)
+    self.assertEqual(migrated['widgets'][STOPPED_TIMER_WIDGET], expected)
+    self.assertEqual(migrated['widgets']['current_speed'], document['widgets']['current_speed'])
+    self.assertEqual(migrated['widgetOrder'], [*document['widgetOrder'][:-1], STOPPED_TIMER_WIDGET, CAR_EXIT])
+    migrated['widgets'][STOPPED_TIMER_WIDGET].update(enabled=True, x=450, y=600)
+    decoded = decode_layout(json.dumps(migrated).encode(), SCREEN)
+    base = default_document()
+    converted = projection_customization(decoded, base)
+    self.assertEqual(converted['layouts']['large'][STOPPED_TIMER_WIDGET], {'enabled': True, 'x': 450, 'y': 600})
+    self.assertEqual(converted['layouts']['compact'], base['layouts']['compact'])
+    self.assertFalse(base['layouts']['compact'][STOPPED_TIMER_WIDGET]['enabled'])
+
   def test_bookmark_is_opt_in_and_upgrades_existing_layouts_without_changing_them(self):
     document = default_layout(SCREEN)
     metadata = layout_metadata(SCREEN)

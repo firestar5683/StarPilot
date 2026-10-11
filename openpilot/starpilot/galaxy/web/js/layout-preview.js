@@ -4,6 +4,7 @@ export const PREVIEW_SCENES = [
   { id: "long_only", label: "Longitudinal only" },
   { id: "experimental", label: "Manual experimental" },
   { id: "braking", label: "Braking" },
+  { id: "stopped", label: "Stopped timer" },
   { id: "cem_stop_light", label: "CEM · Traffic light" },
   { id: "cem_lead", label: "CEM · Stopped lead" },
   { id: "cem_curve", label: "CEM · Curve" },

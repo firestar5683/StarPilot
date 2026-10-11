@@ -21,6 +21,28 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayoutRuntime(unittest.TestCase):
+  def test_projection_passes_its_own_timer_visibility_to_runtime(self):
+    from unittest.mock import Mock
+    from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
+    for native_enabled, projection_enabled in ((False, True), (True, False)):
+      with self.subTest(native_enabled=native_enabled, projection_enabled=projection_enabled):
+        native, _ = boundary.TestProjectionOnroad().dependencies()
+        native.ui_state.started = True
+        base = default_document()
+        base['layouts']['compact']['stopped_timer']['enabled'] = native_enabled
+        state = OnroadState(False, False, None, None, SpeedLimitObservation(), customization=base)
+        build = Mock(return_value=SimpleNamespace(onroad=state))
+        native.adapter = lambda *_, build=build: SimpleNamespace(build=build)
+        layout = default_layout_for_viewport((2880, 1080))
+        layout['widgets']['stopped_timer']['enabled'] = projection_enabled
+        view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout)
+        try:
+          view.render()
+          self.assertEqual(build.call_args.kwargs['stopped_timer_enabled'], projection_enabled)
+          self.assertEqual(base['layouts']['compact']['stopped_timer']['enabled'], native_enabled)
+        finally:
+          view.close()
+
   def test_saved_gamma_trial_reaches_only_projection_camera(self):
     for enabled in (False, True):
       with self.subTest(enabled=enabled):

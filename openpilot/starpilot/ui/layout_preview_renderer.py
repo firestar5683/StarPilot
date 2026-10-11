@@ -18,6 +18,7 @@ from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind, OnroadAlert, OnroadState, SourceReading, SpeedLimitObservation
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
 from openpilot.starpilot.ui.onroad_dm import monitor_visible
+from openpilot.starpilot.ui.onroad_stopped_timer import PREVIEW_DURATION_S
 from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH, render_sidebar
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
 from openpilot.starpilot.ui.wheel_feedback import WheelFeedback
@@ -62,11 +63,12 @@ def render_sample_road(rect: rl.Rectangle, state: OnroadState, profile: Profile)
 def sample_state(scene: str, document: dict) -> OnroadState:
   if scene not in SCENES:
     raise ValueError("Unknown layout preview scene")
-  lateral = scene in ("engaged", "aol", "experimental", "braking", "slc_pending") or scene in CEM_SCENE_REASONS
-  longitudinal = scene in ("engaged", "long_only", "experimental", "braking", "slc_pending") or scene in CEM_SCENE_REASONS
+  lateral = scene in ("engaged", "aol", "experimental", "braking", "stopped", "slc_pending") or scene in CEM_SCENE_REASONS
+  longitudinal = scene in ("engaged", "long_only", "experimental", "braking", "stopped", "slc_pending") or scene in CEM_SCENE_REASONS
   longitudinal = longitudinal or scene in ('slc_max', 'slc_equal', 'slc_pedal', 'slc_retained')
   state = OnroadState(engaged=lateral or longitudinal, camera_available=False,
-                     speed_mps=0.0 if scene == "cem_lead" else 22.0, cruise_kph=88.0,
+                     speed_mps=0.0 if scene in ("cem_lead", "stopped") else 22.0, cruise_kph=88.0,
+                     stopped_duration_s=PREVIEW_DURATION_S,
                      speed_limit=SpeedLimitObservation(kind=ObservationKind.VALID, source="dashboard", speed_limit_mps=20.0,
                                                        accepted_speed_limit_mps=20.0, accepted_source='dashboard',
                                                        accepted_adjusted_limit_mps=22.0, effective_cluster_target_mps=22.0,

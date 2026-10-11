@@ -295,7 +295,8 @@ class ProjectionOnroad:
     self.camera_stream = None
     if ui.started:
       now_ns = time.monotonic_ns()
-      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=now_ns).onroad
+      timer_enabled = bool((self.customization or {}).get('widgets', {}).get('stopped_timer', {}).get('enabled', False))
+      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=now_ns, stopped_timer_enabled=timer_enabled).onroad
       if self.customization is not None:
         from openpilot.starpilot.system.android_auto.projection_layout import projection_customization
         if state.customization is not self._base_customization:

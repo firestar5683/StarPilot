@@ -339,9 +339,9 @@ export const LayoutWidgetPreview = {
         </text>
       </template>
       <template v-else-if="widget.kind === 'stopped_timer'">
-        <text :x="widget.width / 2" y="53" text-anchor="middle" dominant-baseline="middle" font-size="64" font-weight="700" fill="#33c2a0"
+        <text :x="widget.width / 2" :y="widget.height * 53 / 112" text-anchor="middle" dominant-baseline="middle" :font-size="widget.height * 64 / 112" font-weight="700" fill="#b67129"
           style="filter: drop-shadow(2px 2px 1px #000000aa)">2 minutes</text>
-        <text :x="widget.width / 2" y="101" text-anchor="middle" dominant-baseline="middle" font-size="30" font-weight="500"
+        <text :x="widget.width / 2" :y="widget.height * 101 / 112" text-anchor="middle" dominant-baseline="middle" :font-size="widget.height * 30 / 112" font-weight="500" fill="#fffffff2"
           style="filter: drop-shadow(2px 2px 1px #000000aa)">14 seconds</text>
       </template>
       <template v-else-if="widget.kind === 'clock'">
@@ -1244,6 +1244,7 @@ export const OnroadLayoutPage = {
               </section>
               <details class="gx-layout__help"><summary>Preview tips &amp; display behavior</summary><div>
                 <p class="gx-note">Drag widgets in Arrange widgets to place them. Readings are samples.</p>
+                <p class="gx-note">Add Stopped timer to preview its minutes and seconds. Device preview renders the same widget as the driving screen; choose Stopped timer for a sample at rest.</p>
               <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
               <p v-if="!projection && state.showFavoriteZones" class="gx-note">Favorite tap areas apply to enabled slots. Speed-limit controls and the steering wheel take priority when the drawer is closed.</p>
