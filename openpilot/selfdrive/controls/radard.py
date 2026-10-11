@@ -12,7 +12,7 @@ from openpilot.cereal import messaging, log
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
-from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
+from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process, set_core_affinity
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.simple_kalman import KF1D
 from openpilot.starpilot.conditional_mode.adjacent import (
@@ -409,6 +409,7 @@ def main() -> None:
   honda_bosch_a = CP.brand == "honda" and CP.carFingerprint in VERIFIED_BOSCH_A_CARS and not CP.radarUnavailable
   RD = RadarD(CP.radarDelay, adjacent_enabled=adjacent_enabled, radar_available=not CP.radarUnavailable,
               honda_bosch_a_radar=honda_bosch_a)
+  set_core_affinity([4, 5])
 
   while 1:
     sm.update()
