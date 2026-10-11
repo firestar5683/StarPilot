@@ -789,7 +789,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if self.settings_session() == identity:
             self.json(200, result)
           else:
-            self.json(401, {'error': 'Sign in to Galaxy'})
+            if self.require_session():
+              self.json(401, {'error': 'Sign in to Galaxy'})
       elif path == '/api/bluetooth/status':
         if not self.require_session():
           return

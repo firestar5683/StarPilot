@@ -21,6 +21,7 @@ from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsChanged, SettingsGateway
 from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY, ControllerMode, read_selection, replace_mode
+from openpilot.starpilot.lateral.learning_preferences import KEY as LEARNING_KEY, read_preference, replace_preference
 from openpilot.starpilot.lateral.lane_change_preferences import KEY as LANE_KEY, LaneChangePolicy, read_saved, to_value
 from openpilot.starpilot.lateral.lane_runtime import read_settings as lane_settings
 from openpilot.starpilot.lateral.lane_centering import LaneCenteringSettings
@@ -75,6 +76,40 @@ class TestLateralSetup(unittest.TestCase):
     Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(replace_mode(None, self.cp, ControllerMode.STANDARD))
     lane = LaneChangePolicy(False, 1.0, True, True, 3.0, 3.0, True, 0.9)
     self.params.put(LANE_KEY, to_value(lane), block=True)
+
+  def test_preparation_journals_scoped_choice_and_restores_other_vehicles_exactly(self):
+    self.seed()
+    other = cp_for(TOYOTA.TOYOTA_COROLLA_TSS2)
+    raw = replace_preference(replace_preference(None, other, False), self.cp, True)
+    self.params.put(LEARNING_KEY, raw, block=True)
+    self.assertTrue(self.owner.apply(self.request()))
+    self.assertFalse(read_preference(self.params, self.cp).enabled)
+    self.assertFalse(read_preference(self.params, other).enabled)
+    journal = preparation.decode(Path(self.params.get_param_path(preparation.KEY)).read_bytes(), controller_keys())
+    assert isinstance(journal, dict)
+    self.assertEqual(journal['prior'][LEARNING_KEY], raw)
+    self.assertTrue(self.owner.apply(self.request('Off')))
+    self.assertEqual(self.params.get(LEARNING_KEY), raw)
+    self.assertTrue(read_preference(self.params, self.cp).enabled)
+
+  def test_existing_legacy_preparation_restores_its_original_keys(self):
+    self.seed()
+    scoped = replace_preference(None, self.cp, True)
+    self.params.put(LEARNING_KEY, scoped, block=True)
+    limits = {key: limit for key, limit in controller_keys().items() if key != LEARNING_KEY}
+    sources = {key: Path(self.params.get_param_path(key)).read_bytes()
+               if Path(self.params.get_param_path(key)).exists() else None for key in limits}
+    desired = self.owner.controller._setup_values(self.cp, sources)
+    self.assertTrue(preparation.transition(self.params, str(self.cp.carFingerprint), sources, desired,
+                                           None, True, lambda: True))
+    self.assertTrue(self.row().available)
+    self.assertEqual(self.row().value, 'On')
+    self.assertTrue(self.owner.apply(self.request('Off')))
+    for key, raw in sources.items():
+      path = Path(self.params.get_param_path(key))
+      self.assertEqual(path.read_bytes() if path.exists() else None, raw)
+    self.assertEqual(self.params.get(LEARNING_KEY), scoped)
+    self.assertIsNone(self.params.get(preparation.KEY))
 
   def test_preparation_waits_for_brief_native_writer_contention(self):
     self.seed()

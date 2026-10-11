@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 from opendbc.car import structs
-from openpilot.starpilot.saved_source import read_saved
 
 
 DOCUMENT_KEY = 'LateralControllerSelection'
@@ -237,12 +236,13 @@ def learning_allowed(params, CP, *, selection: ControllerSelection | None = None
   An unrelated vehicle must not inherit another platform's learning preference.
   Callers that already chose their controller supply that same startup selection.
   """
+  from openpilot.starpilot.lateral.learning_preferences import read_preference
+  preference = read_preference(params, CP)
+  if not preference.valid or not preference.enabled:
+    return False
   if policy_for(CP) is None:
     return True
   selected = read_selection(params, CP) if selection is None else selection
-  raw, readable = read_saved(params, LEARNING_OFF_KEY, 1)
-  if not readable or raw not in (None, b'0'):
-    return False
   from openpilot.starpilot.lateral.gm_geometry_runtime import read_geometry
   geometry = read_geometry(params, CP)
   if geometry.force_off:

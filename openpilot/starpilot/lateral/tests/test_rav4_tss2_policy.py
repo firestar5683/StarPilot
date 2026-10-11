@@ -18,8 +18,9 @@ from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.starpilot.lateral.controller_selection import (
-  ControllerMode, DOCUMENT_KEY, LEARNING_OFF_KEY, default_selection, policy_for, replace_mode,
+  ControllerMode, DOCUMENT_KEY, LEARNING_OFF_KEY, default_selection, learning_allowed, policy_for, replace_mode,
 )
+from openpilot.starpilot.lateral.learning_preferences import KEY as LEARNING_KEY, read_preference, replace_preference
 from openpilot.starpilot.lateral.rav4_tss2_policy import (
   supported_cp, friction_threshold, center_output_scale,
 )
@@ -207,6 +208,9 @@ def test_actual_ui_controller_switch_preserves_learning_and_explicit_toggle(init
   with OpenpilotPrefix():
     cp = factory()
     saved = Params()
+    unrelated_cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+    unrelated_raw = replace_preference(None, unrelated_cp, False)
+    saved.put(LEARNING_KEY, unrelated_raw, block=True)
     saved.put(DOCUMENT_KEY, json.loads(replace_mode(None, cp, initial_mode)), block=True)
     owner = FeatureSettingsOwner(saved, lambda group: group == "preferences",
                                  vehicle_fingerprint=lambda: str(cp.carFingerprint), vehicle_params=lambda: cp)
@@ -226,10 +230,22 @@ def test_actual_ui_controller_switch_preserves_learning_and_explicit_toggle(init
     request = row_change(learning_row)
     assert request is not None
     assert owner.apply(request)
-    assert raw_saved(saved, LEARNING_OFF_KEY) == b"1"
+    assert raw_saved(saved, LEARNING_OFF_KEY) is None
+    assert raw_saved(saved, LEARNING_KEY) == replace_preference(unrelated_raw, cp, False)
+    preference = read_preference(saved, cp)
+    assert preference.valid and not preference.enabled and preference.source == "scope"
+    assert not learning_allowed(saved, cp)
+    unrelated = read_preference(saved, unrelated_cp)
+    assert unrelated.valid and not unrelated.enabled and unrelated.source == "scope"
     learning_row = row(LEARNING_OFF_KEY)
     assert learning_row.value == "Off" and learning_row.available
     request = row_change(learning_row)
     assert request is not None
     assert owner.apply(request)
-    assert raw_saved(saved, LEARNING_OFF_KEY) == b"0"
+    assert raw_saved(saved, LEARNING_OFF_KEY) is None
+    assert raw_saved(saved, LEARNING_KEY) == replace_preference(unrelated_raw, cp, True)
+    preference = read_preference(saved, cp)
+    assert preference.valid and preference.enabled and preference.source == "scope"
+    assert learning_allowed(saved, cp)
+    unrelated = read_preference(saved, unrelated_cp)
+    assert unrelated.valid and not unrelated.enabled and unrelated.source == "scope"

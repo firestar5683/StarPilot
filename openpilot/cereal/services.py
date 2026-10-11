@@ -50,6 +50,7 @@ _services: dict[str, tuple] = {
   "errorLogMessage": (True, 0., 1, QueueSize.BIG),
   "extrinsicsCalibration": (True, 4., 4),
   "lateralTorqueParameters": (True, 4., 1),
+  "autoSteeringLearning": (True, 4., 1),
   "lateralDelay": (True, 4., 1),
   "operatingSystemLog": (True, 0.),
   "carState": (True, 100., 10),

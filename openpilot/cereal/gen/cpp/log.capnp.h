@@ -3292,7 +3292,7 @@ struct Event {
     MAP_RENDER_STATE_D_E_P_R_E_C_A_T_E_D,
     UI_PLAN_D_E_P_R_E_C_A_T_E_D,
     STARPILOT_NAVIGATION,
-    CUSTOM_RESERVED1,
+    AUTO_STEERING_LEARNING,
     STARPILOT_CAR_STATE,
     STARPILOT_LONGITUDINAL_PLAN,
     SLC_VISION_OBSERVATION,
@@ -23205,9 +23205,9 @@ public:
   inline bool hasStarpilotNavigation() const;
   inline  ::cereal::StarPilotCarControl::Reader getStarpilotNavigation() const;
 
-  inline bool isCustomReserved1() const;
-  inline bool hasCustomReserved1() const;
-  inline  ::cereal::CustomReserved1::Reader getCustomReserved1() const;
+  inline bool isAutoSteeringLearning() const;
+  inline bool hasAutoSteeringLearning() const;
+  inline  ::cereal::AutoSteeringLearning::Reader getAutoSteeringLearning() const;
 
   inline bool isStarpilotCarState() const;
   inline bool hasStarpilotCarState() const;
@@ -24272,13 +24272,13 @@ public:
   inline void adoptStarpilotNavigation(::capnp::Orphan< ::cereal::StarPilotCarControl>&& value);
   inline ::capnp::Orphan< ::cereal::StarPilotCarControl> disownStarpilotNavigation();
 
-  inline bool isCustomReserved1();
-  inline bool hasCustomReserved1();
-  inline  ::cereal::CustomReserved1::Builder getCustomReserved1();
-  inline void setCustomReserved1( ::cereal::CustomReserved1::Reader value);
-  inline  ::cereal::CustomReserved1::Builder initCustomReserved1();
-  inline void adoptCustomReserved1(::capnp::Orphan< ::cereal::CustomReserved1>&& value);
-  inline ::capnp::Orphan< ::cereal::CustomReserved1> disownCustomReserved1();
+  inline bool isAutoSteeringLearning();
+  inline bool hasAutoSteeringLearning();
+  inline  ::cereal::AutoSteeringLearning::Builder getAutoSteeringLearning();
+  inline void setAutoSteeringLearning( ::cereal::AutoSteeringLearning::Reader value);
+  inline  ::cereal::AutoSteeringLearning::Builder initAutoSteeringLearning();
+  inline void adoptAutoSteeringLearning(::capnp::Orphan< ::cereal::AutoSteeringLearning>&& value);
+  inline ::capnp::Orphan< ::cereal::AutoSteeringLearning> disownAutoSteeringLearning();
 
   inline bool isStarpilotCarState();
   inline bool hasStarpilotCarState();
@@ -57511,57 +57511,57 @@ inline ::capnp::Orphan< ::cereal::StarPilotCarControl> Event::Builder::disownSta
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
-inline bool Event::Reader::isCustomReserved1() const {
-  return which() == Event::CUSTOM_RESERVED1;
+inline bool Event::Reader::isAutoSteeringLearning() const {
+  return which() == Event::AUTO_STEERING_LEARNING;
 }
-inline bool Event::Builder::isCustomReserved1() {
-  return which() == Event::CUSTOM_RESERVED1;
+inline bool Event::Builder::isAutoSteeringLearning() {
+  return which() == Event::AUTO_STEERING_LEARNING;
 }
-inline bool Event::Reader::hasCustomReserved1() const {
-  if (which() != Event::CUSTOM_RESERVED1) return false;
+inline bool Event::Reader::hasAutoSteeringLearning() const {
+  if (which() != Event::AUTO_STEERING_LEARNING) return false;
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool Event::Builder::hasCustomReserved1() {
-  if (which() != Event::CUSTOM_RESERVED1) return false;
+inline bool Event::Builder::hasAutoSteeringLearning() {
+  if (which() != Event::AUTO_STEERING_LEARNING) return false;
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::CustomReserved1::Reader Event::Reader::getCustomReserved1() const {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED1),
+inline  ::cereal::AutoSteeringLearning::Reader Event::Reader::getAutoSteeringLearning() const {
+  KJ_IREQUIRE((which() == Event::AUTO_STEERING_LEARNING),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved1>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::CustomReserved1::Builder Event::Builder::getCustomReserved1() {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED1),
+inline  ::cereal::AutoSteeringLearning::Builder Event::Builder::getAutoSteeringLearning() {
+  KJ_IREQUIRE((which() == Event::AUTO_STEERING_LEARNING),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved1>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::setCustomReserved1( ::cereal::CustomReserved1::Reader value) {
+inline void Event::Builder::setAutoSteeringLearning( ::cereal::AutoSteeringLearning::Reader value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED1);
-  ::capnp::_::PointerHelpers< ::cereal::CustomReserved1>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::AUTO_STEERING_LEARNING);
+  ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::CustomReserved1::Builder Event::Builder::initCustomReserved1() {
+inline  ::cereal::AutoSteeringLearning::Builder Event::Builder::initAutoSteeringLearning() {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED1);
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved1>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::AUTO_STEERING_LEARNING);
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::adoptCustomReserved1(
-    ::capnp::Orphan< ::cereal::CustomReserved1>&& value) {
+inline void Event::Builder::adoptAutoSteeringLearning(
+    ::capnp::Orphan< ::cereal::AutoSteeringLearning>&& value) {
   _builder.setDataField<Event::Which>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::CUSTOM_RESERVED1);
-  ::capnp::_::PointerHelpers< ::cereal::CustomReserved1>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::AUTO_STEERING_LEARNING);
+  ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::CustomReserved1> Event::Builder::disownCustomReserved1() {
-  KJ_IREQUIRE((which() == Event::CUSTOM_RESERVED1),
+inline ::capnp::Orphan< ::cereal::AutoSteeringLearning> Event::Builder::disownAutoSteeringLearning() {
+  KJ_IREQUIRE((which() == Event::AUTO_STEERING_LEARNING),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::CustomReserved1>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 

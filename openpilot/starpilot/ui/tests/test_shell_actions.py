@@ -182,7 +182,10 @@ class ShellActionTests(unittest.TestCase):
                                    OnroadState(False, False, None, None, SpeedLimitObservation()), selected=destination)
           session.snapshot = Mock(return_value=snapshot)
           def rail(*_args, **_kwargs):
-            ox, oy, viewport, parent_clip = clip._placement.get()
+            placement = clip._placement.get()
+            self.assertIsNotNone(placement)
+            assert placement is not None
+            ox, oy, viewport, parent_clip = placement
             self.assertEqual((ox, oy, viewport.x, viewport.y, viewport.width, viewport.height), (20, 30, 25, 35, 2140, 1060))
             self.assertIs(parent_clip, parent)
           session.view.settings.render_rail.side_effect = rail

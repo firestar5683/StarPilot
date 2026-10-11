@@ -53,6 +53,22 @@ CAPNP_DECLARE_SCHEMA(83e5f5472aa434b0);
 CAPNP_DECLARE_SCHEMA(837ff4be1f1a9263);
 CAPNP_DECLARE_SCHEMA(e4b42a95dcb60d90);
 CAPNP_DECLARE_SCHEMA(aedffd8f31e7b55d);
+CAPNP_DECLARE_SCHEMA(a0a50b4114f09029);
+enum class Status_a0a50b4114f09029: uint16_t {
+  UNAVAILABLE,
+  COLLECTING,
+  CANDIDATE,
+  REJECTED,
+  QUALIFIED_FIT,
+};
+CAPNP_DECLARE_ENUM(Status, a0a50b4114f09029);
+CAPNP_DECLARE_SCHEMA(c62ec59d45a8c901);
+enum class Family_c62ec59d45a8c901: uint16_t {
+  NONE,
+  LINEAR_FACTOR,
+};
+CAPNP_DECLARE_ENUM(Family, c62ec59d45a8c901);
+CAPNP_DECLARE_SCHEMA(a59fe7a6ab7c10af);
 CAPNP_DECLARE_SCHEMA(f35cc4560bbf6ec2);
 CAPNP_DECLARE_SCHEMA(918d19aa5875c92d);
 CAPNP_DECLARE_SCHEMA(da96579883444c35);
@@ -490,15 +506,35 @@ struct StarPilotCarControl::Navigation::Instruction {
   };
 };
 
-struct CustomReserved1 {
-  CustomReserved1() = delete;
+struct AutoSteeringLearning {
+  AutoSteeringLearning() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+  typedef ::capnp::schemas::Status_a0a50b4114f09029 Status;
+
+  typedef ::capnp::schemas::Family_c62ec59d45a8c901 Family;
+
+  struct Identity;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(aedffd8f31e7b55d, 12, 4)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct AutoSteeringLearning::Identity {
+  Identity() = delete;
 
   class Reader;
   class Builder;
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(aedffd8f31e7b55d, 0, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(a59fe7a6ab7c10af, 0, 12)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1937,9 +1973,9 @@ private:
 };
 #endif  // !CAPNP_LITE
 
-class CustomReserved1::Reader {
+class AutoSteeringLearning::Reader {
 public:
-  typedef CustomReserved1 Reads;
+  typedef AutoSteeringLearning Reads;
 
   Reader() = default;
   inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
@@ -1954,6 +1990,48 @@ public:
   }
 #endif  // !CAPNP_LITE
 
+  inline  ::uint16_t getVersion() const;
+
+  inline  ::cereal::AutoSteeringLearning::Status getStatus() const;
+
+  inline bool hasReason() const;
+  inline  ::capnp::Text::Reader getReason() const;
+
+  inline bool hasIdentity() const;
+  inline  ::cereal::AutoSteeringLearning::Identity::Reader getIdentity() const;
+
+  inline bool hasSession() const;
+  inline  ::capnp::Text::Reader getSession() const;
+
+  inline  ::uint64_t getSequence() const;
+
+  inline  ::uint64_t getObservedMonoTime() const;
+
+  inline  ::uint64_t getValidUntilMonoTime() const;
+
+  inline  ::uint64_t getSourceWindowStartMonoTime() const;
+
+  inline  ::uint64_t getSourceWindowEndMonoTime() const;
+
+  inline  ::cereal::AutoSteeringLearning::Family getFamily() const;
+
+  inline double getLatAccelFactor() const;
+
+  inline bool hasAcceptancePolicyId() const;
+  inline  ::capnp::Text::Reader getAcceptancePolicyId() const;
+
+  inline  ::uint32_t getTrainWindows() const;
+
+  inline  ::uint32_t getHeldoutWindows() const;
+
+  inline double getTrainBaselineLoss() const;
+
+  inline double getTrainCandidateLoss() const;
+
+  inline double getHeldoutBaselineLoss() const;
+
+  inline double getHeldoutCandidateLoss() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -1966,9 +2044,9 @@ private:
   friend class ::capnp::Orphanage;
 };
 
-class CustomReserved1::Builder {
+class AutoSteeringLearning::Builder {
 public:
-  typedef CustomReserved1 Builds;
+  typedef AutoSteeringLearning Builds;
 
   Builder() = delete;  // Deleted to discourage incorrect usage.
                        // You can explicitly initialize to nullptr instead.
@@ -1982,6 +2060,79 @@ public:
   inline ::kj::StringTree toString() const { return asReader().toString(); }
 #endif  // !CAPNP_LITE
 
+  inline  ::uint16_t getVersion();
+  inline void setVersion( ::uint16_t value);
+
+  inline  ::cereal::AutoSteeringLearning::Status getStatus();
+  inline void setStatus( ::cereal::AutoSteeringLearning::Status value);
+
+  inline bool hasReason();
+  inline  ::capnp::Text::Builder getReason();
+  inline void setReason( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initReason(unsigned int size);
+  inline void adoptReason(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownReason();
+
+  inline bool hasIdentity();
+  inline  ::cereal::AutoSteeringLearning::Identity::Builder getIdentity();
+  inline void setIdentity( ::cereal::AutoSteeringLearning::Identity::Reader value);
+  inline  ::cereal::AutoSteeringLearning::Identity::Builder initIdentity();
+  inline void adoptIdentity(::capnp::Orphan< ::cereal::AutoSteeringLearning::Identity>&& value);
+  inline ::capnp::Orphan< ::cereal::AutoSteeringLearning::Identity> disownIdentity();
+
+  inline bool hasSession();
+  inline  ::capnp::Text::Builder getSession();
+  inline void setSession( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initSession(unsigned int size);
+  inline void adoptSession(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownSession();
+
+  inline  ::uint64_t getSequence();
+  inline void setSequence( ::uint64_t value);
+
+  inline  ::uint64_t getObservedMonoTime();
+  inline void setObservedMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getValidUntilMonoTime();
+  inline void setValidUntilMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSourceWindowStartMonoTime();
+  inline void setSourceWindowStartMonoTime( ::uint64_t value);
+
+  inline  ::uint64_t getSourceWindowEndMonoTime();
+  inline void setSourceWindowEndMonoTime( ::uint64_t value);
+
+  inline  ::cereal::AutoSteeringLearning::Family getFamily();
+  inline void setFamily( ::cereal::AutoSteeringLearning::Family value);
+
+  inline double getLatAccelFactor();
+  inline void setLatAccelFactor(double value);
+
+  inline bool hasAcceptancePolicyId();
+  inline  ::capnp::Text::Builder getAcceptancePolicyId();
+  inline void setAcceptancePolicyId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initAcceptancePolicyId(unsigned int size);
+  inline void adoptAcceptancePolicyId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownAcceptancePolicyId();
+
+  inline  ::uint32_t getTrainWindows();
+  inline void setTrainWindows( ::uint32_t value);
+
+  inline  ::uint32_t getHeldoutWindows();
+  inline void setHeldoutWindows( ::uint32_t value);
+
+  inline double getTrainBaselineLoss();
+  inline void setTrainBaselineLoss(double value);
+
+  inline double getTrainCandidateLoss();
+  inline void setTrainCandidateLoss(double value);
+
+  inline double getHeldoutBaselineLoss();
+  inline void setHeldoutBaselineLoss(double value);
+
+  inline double getHeldoutCandidateLoss();
+  inline void setHeldoutCandidateLoss(double value);
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -1992,9 +2143,202 @@ private:
 };
 
 #if !CAPNP_LITE
-class CustomReserved1::Pipeline {
+class AutoSteeringLearning::Pipeline {
 public:
-  typedef CustomReserved1 Pipelines;
+  typedef AutoSteeringLearning Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::cereal::AutoSteeringLearning::Identity::Pipeline getIdentity();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class AutoSteeringLearning::Identity::Reader {
+public:
+  typedef Identity Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasVehicle() const;
+  inline  ::capnp::Text::Reader getVehicle() const;
+
+  inline bool hasBrand() const;
+  inline  ::capnp::Text::Reader getBrand() const;
+
+  inline bool hasController() const;
+  inline  ::capnp::Text::Reader getController() const;
+
+  inline bool hasPolicy() const;
+  inline  ::capnp::Text::Reader getPolicy() const;
+
+  inline bool hasProfile() const;
+  inline  ::capnp::Text::Reader getProfile() const;
+
+  inline bool hasConversionVersion() const;
+  inline  ::capnp::Text::Reader getConversionVersion() const;
+
+  inline bool hasFirmwareSha256() const;
+  inline  ::capnp::Text::Reader getFirmwareSha256() const;
+
+  inline bool hasBasis() const;
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader getBasis() const;
+
+  inline bool hasBaselineSha256() const;
+  inline  ::capnp::Text::Reader getBaselineSha256() const;
+
+  inline bool hasPreferenceSha256() const;
+  inline  ::capnp::Text::Reader getPreferenceSha256() const;
+
+  inline bool hasResetGeneration() const;
+  inline  ::capnp::Text::Reader getResetGeneration() const;
+
+  inline bool hasControllerRevision() const;
+  inline  ::capnp::Text::Reader getControllerRevision() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class AutoSteeringLearning::Identity::Builder {
+public:
+  typedef Identity Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasVehicle();
+  inline  ::capnp::Text::Builder getVehicle();
+  inline void setVehicle( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initVehicle(unsigned int size);
+  inline void adoptVehicle(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownVehicle();
+
+  inline bool hasBrand();
+  inline  ::capnp::Text::Builder getBrand();
+  inline void setBrand( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBrand(unsigned int size);
+  inline void adoptBrand(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBrand();
+
+  inline bool hasController();
+  inline  ::capnp::Text::Builder getController();
+  inline void setController( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initController(unsigned int size);
+  inline void adoptController(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownController();
+
+  inline bool hasPolicy();
+  inline  ::capnp::Text::Builder getPolicy();
+  inline void setPolicy( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPolicy(unsigned int size);
+  inline void adoptPolicy(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPolicy();
+
+  inline bool hasProfile();
+  inline  ::capnp::Text::Builder getProfile();
+  inline void setProfile( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initProfile(unsigned int size);
+  inline void adoptProfile(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownProfile();
+
+  inline bool hasConversionVersion();
+  inline  ::capnp::Text::Builder getConversionVersion();
+  inline void setConversionVersion( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initConversionVersion(unsigned int size);
+  inline void adoptConversionVersion(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownConversionVersion();
+
+  inline bool hasFirmwareSha256();
+  inline  ::capnp::Text::Builder getFirmwareSha256();
+  inline void setFirmwareSha256( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFirmwareSha256(unsigned int size);
+  inline void adoptFirmwareSha256(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFirmwareSha256();
+
+  inline bool hasBasis();
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder getBasis();
+  inline void setBasis( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value);
+  inline void setBasis(::kj::ArrayPtr<const double> value);
+  inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder initBasis(unsigned int size);
+  inline void adoptBasis(::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value);
+  inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> disownBasis();
+
+  inline bool hasBaselineSha256();
+  inline  ::capnp::Text::Builder getBaselineSha256();
+  inline void setBaselineSha256( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initBaselineSha256(unsigned int size);
+  inline void adoptBaselineSha256(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownBaselineSha256();
+
+  inline bool hasPreferenceSha256();
+  inline  ::capnp::Text::Builder getPreferenceSha256();
+  inline void setPreferenceSha256( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPreferenceSha256(unsigned int size);
+  inline void adoptPreferenceSha256(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPreferenceSha256();
+
+  inline bool hasResetGeneration();
+  inline  ::capnp::Text::Builder getResetGeneration();
+  inline void setResetGeneration( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initResetGeneration(unsigned int size);
+  inline void adoptResetGeneration(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownResetGeneration();
+
+  inline bool hasControllerRevision();
+  inline  ::capnp::Text::Builder getControllerRevision();
+  inline void setControllerRevision( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initControllerRevision(unsigned int size);
+  inline void adoptControllerRevision(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownControllerRevision();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class AutoSteeringLearning::Identity::Pipeline {
+public:
+  typedef Identity Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
@@ -9347,6 +9691,769 @@ inline float StarPilotCarControl::Navigation::Instruction::Builder::getRemaining
 inline void StarPilotCarControl::Navigation::Instruction::Builder::setRemainingDurationSeconds(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint16_t AutoSteeringLearning::Reader::getVersion() const {
+  return _reader.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint16_t AutoSteeringLearning::Builder::getVersion() {
+  return _builder.getDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setVersion( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::AutoSteeringLearning::Status AutoSteeringLearning::Reader::getStatus() const {
+  return _reader.getDataField< ::cereal::AutoSteeringLearning::Status>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::AutoSteeringLearning::Status AutoSteeringLearning::Builder::getStatus() {
+  return _builder.getDataField< ::cereal::AutoSteeringLearning::Status>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setStatus( ::cereal::AutoSteeringLearning::Status value) {
+  _builder.setDataField< ::cereal::AutoSteeringLearning::Status>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutoSteeringLearning::Reader::hasReason() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Builder::hasReason() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Reader::getReason() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Builder::getReason() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Builder::setReason( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Builder::initReason(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Builder::adoptReason(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Builder::disownReason() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Reader::hasIdentity() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Builder::hasIdentity() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::AutoSteeringLearning::Identity::Reader AutoSteeringLearning::Reader::getIdentity() const {
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning::Identity>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::cereal::AutoSteeringLearning::Identity::Builder AutoSteeringLearning::Builder::getIdentity() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning::Identity>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::AutoSteeringLearning::Identity::Pipeline AutoSteeringLearning::Pipeline::getIdentity() {
+  return  ::cereal::AutoSteeringLearning::Identity::Pipeline(_typeless.getPointerField(1));
+}
+#endif  // !CAPNP_LITE
+inline void AutoSteeringLearning::Builder::setIdentity( ::cereal::AutoSteeringLearning::Identity::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning::Identity>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::AutoSteeringLearning::Identity::Builder AutoSteeringLearning::Builder::initIdentity() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning::Identity>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Builder::adoptIdentity(
+    ::capnp::Orphan< ::cereal::AutoSteeringLearning::Identity>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning::Identity>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::AutoSteeringLearning::Identity> AutoSteeringLearning::Builder::disownIdentity() {
+  return ::capnp::_::PointerHelpers< ::cereal::AutoSteeringLearning::Identity>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Reader::hasSession() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Builder::hasSession() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Reader::getSession() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Builder::getSession() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Builder::setSession( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Builder::initSession(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Builder::adoptSession(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Builder::disownSession() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t AutoSteeringLearning::Reader::getSequence() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Builder::getSequence() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setSequence( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Reader::getObservedMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Builder::getObservedMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setObservedMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Reader::getValidUntilMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Builder::getValidUntilMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setValidUntilMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Reader::getSourceWindowStartMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Builder::getSourceWindowStartMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setSourceWindowStartMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Reader::getSourceWindowEndMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t AutoSteeringLearning::Builder::getSourceWindowEndMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setSourceWindowEndMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::cereal::AutoSteeringLearning::Family AutoSteeringLearning::Reader::getFamily() const {
+  return _reader.getDataField< ::cereal::AutoSteeringLearning::Family>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::cereal::AutoSteeringLearning::Family AutoSteeringLearning::Builder::getFamily() {
+  return _builder.getDataField< ::cereal::AutoSteeringLearning::Family>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setFamily( ::cereal::AutoSteeringLearning::Family value) {
+  _builder.setDataField< ::cereal::AutoSteeringLearning::Family>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutoSteeringLearning::Reader::getLatAccelFactor() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline double AutoSteeringLearning::Builder::getLatAccelFactor() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setLatAccelFactor(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutoSteeringLearning::Reader::hasAcceptancePolicyId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Builder::hasAcceptancePolicyId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Reader::getAcceptancePolicyId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Builder::getAcceptancePolicyId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Builder::setAcceptancePolicyId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Builder::initAcceptancePolicyId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Builder::adoptAcceptancePolicyId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Builder::disownAcceptancePolicyId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline  ::uint32_t AutoSteeringLearning::Reader::getTrainWindows() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t AutoSteeringLearning::Builder::getTrainWindows() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setTrainWindows( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<14>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint32_t AutoSteeringLearning::Reader::getHeldoutWindows() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t AutoSteeringLearning::Builder::getHeldoutWindows() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setHeldoutWindows( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutoSteeringLearning::Reader::getTrainBaselineLoss() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline double AutoSteeringLearning::Builder::getTrainBaselineLoss() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setTrainBaselineLoss(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutoSteeringLearning::Reader::getTrainCandidateLoss() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+
+inline double AutoSteeringLearning::Builder::getTrainCandidateLoss() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setTrainCandidateLoss(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<9>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutoSteeringLearning::Reader::getHeldoutBaselineLoss() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+
+inline double AutoSteeringLearning::Builder::getHeldoutBaselineLoss() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setHeldoutBaselineLoss(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<10>() * ::capnp::ELEMENTS, value);
+}
+
+inline double AutoSteeringLearning::Reader::getHeldoutCandidateLoss() const {
+  return _reader.getDataField<double>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+
+inline double AutoSteeringLearning::Builder::getHeldoutCandidateLoss() {
+  return _builder.getDataField<double>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS);
+}
+inline void AutoSteeringLearning::Builder::setHeldoutCandidateLoss(double value) {
+  _builder.setDataField<double>(
+      ::capnp::bounded<11>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasVehicle() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasVehicle() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getVehicle() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getVehicle() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setVehicle( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initVehicle(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptVehicle(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownVehicle() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasBrand() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasBrand() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getBrand() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getBrand() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setBrand( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initBrand(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptBrand(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownBrand() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasController() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasController() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getController() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getController() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setController( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initController(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptController(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownController() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasPolicy() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasPolicy() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getPolicy() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setPolicy( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initPolicy(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptPolicy(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownPolicy() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasProfile() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasProfile() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getProfile() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getProfile() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setProfile( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initProfile(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptProfile(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownProfile() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasConversionVersion() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasConversionVersion() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getConversionVersion() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getConversionVersion() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setConversionVersion( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initConversionVersion(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptConversionVersion(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownConversionVersion() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<5>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasFirmwareSha256() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasFirmwareSha256() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getFirmwareSha256() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getFirmwareSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setFirmwareSha256( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initFirmwareSha256(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptFirmwareSha256(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownFirmwareSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasBasis() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasBasis() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader AutoSteeringLearning::Identity::Reader::getBasis() const {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_reader.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder AutoSteeringLearning::Identity::Builder::getBasis() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::get(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setBasis( ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline void AutoSteeringLearning::Identity::Builder::setBasis(::kj::ArrayPtr<const double> value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::set(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>::Builder AutoSteeringLearning::Identity::Builder::initBasis(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::init(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptBasis(
+    ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::adopt(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>> AutoSteeringLearning::Identity::Builder::disownBasis() {
+  return ::capnp::_::PointerHelpers< ::capnp::List<double,  ::capnp::Kind::PRIMITIVE>>::disown(_builder.getPointerField(
+      ::capnp::bounded<7>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasBaselineSha256() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasBaselineSha256() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getBaselineSha256() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getBaselineSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setBaselineSha256( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initBaselineSha256(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptBaselineSha256(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownBaselineSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<8>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasPreferenceSha256() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasPreferenceSha256() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getPreferenceSha256() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getPreferenceSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setPreferenceSha256( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initPreferenceSha256(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptPreferenceSha256(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownPreferenceSha256() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<9>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasResetGeneration() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasResetGeneration() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getResetGeneration() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getResetGeneration() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setResetGeneration( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initResetGeneration(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptResetGeneration(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownResetGeneration() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<10>() * ::capnp::POINTERS));
+}
+
+inline bool AutoSteeringLearning::Identity::Reader::hasControllerRevision() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS).isNull();
+}
+inline bool AutoSteeringLearning::Identity::Builder::hasControllerRevision() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader AutoSteeringLearning::Identity::Reader::getControllerRevision() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::getControllerRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS));
+}
+inline void AutoSteeringLearning::Identity::Builder::setControllerRevision( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder AutoSteeringLearning::Identity::Builder::initControllerRevision(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS), size);
+}
+inline void AutoSteeringLearning::Identity::Builder::adoptControllerRevision(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> AutoSteeringLearning::Identity::Builder::disownControllerRevision() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<11>() * ::capnp::POINTERS));
 }
 
 inline bool StarPilotCarState::Reader::getAccelPressed() const {

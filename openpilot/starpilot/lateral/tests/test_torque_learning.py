@@ -17,6 +17,7 @@ from openpilot.selfdrive.locationd import torqued
 from openpilot.starpilot.lateral.controller_selection import (
   DOCUMENT_KEY, LEARNING_OFF_KEY, ControllerMode, learning_allowed, replace_mode,
 )
+from openpilot.starpilot.lateral.learning_preferences import KEY as LEARNING_KEY, read_preference, replace_preference
 from openpilot.starpilot.lateral.tests.test_lane_runtime import feed, publish_corolla_params
 from openpilot.starpilot.lateral.tests.test_torque_runtime import LearnedFrame
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, read_settings
@@ -68,6 +69,38 @@ class TestTorqueLearning(unittest.TestCase):
         self.assertFalse(learning_allowed(params, cp_for(vehicle)))
       self.assertFalse(learning_allowed(params, cp_for(TOYOTA.TOYOTA_RAV4_TSS2)))
 
+  def test_scoped_learning_choice_preserves_legacy_and_controller_compatibility(self):
+    with OpenpilotPrefix():
+      params, cp = Params(), cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
+      params.put_bool(LEARNING_OFF_KEY, True, block=True)
+      self.assertEqual(read_preference(params, cp).source, 'legacy')
+      params.put(LEARNING_KEY, replace_preference(None, cp, True), block=True)
+      self.assertTrue(read_preference(params, cp).enabled)
+      self.assertEqual(read_preference(params, cp).source, 'scope')
+      self.assertFalse(learning_allowed(params, cp))  # Vehicle tune remains incompatible.
+      select(params, cp, ControllerMode.STANDARD)
+      self.assertTrue(learning_allowed(params, cp))
+      other = cp_for(TOYOTA.TOYOTA_COROLLA_TSS2)
+      self.assertFalse(read_preference(params, other).enabled)
+      params.put(LEARNING_KEY, replace_preference(params.get(LEARNING_KEY), other, False), block=True)
+      self.assertTrue(read_preference(params, cp).enabled)
+      self.assertFalse(read_preference(params, other).enabled)
+      self.assertTrue(params.get_bool(LEARNING_OFF_KEY))
+
+  def test_scoped_learning_document_rejects_malformed_sources_without_rewriting(self):
+    with OpenpilotPrefix():
+      params, cp = Params(), cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
+      for raw in (b'{}', b'{"version":1,"version":1,"vehicles":{}}',
+                  b'{"version":true,"vehicles":{}}', b'{"version":1,"vehicles":{"hyundai":{"x":1}}}',
+                  b'[' * 2000 + b']' * 2000, b'x' * 4097):
+        with self.subTest(raw=raw[:32]):
+          params.put(LEARNING_KEY, raw, block=True)
+          self.assertFalse(read_preference(params, cp).valid)
+          self.assertFalse(learning_allowed(params, cp))
+          self.assertEqual(params.get(LEARNING_KEY), raw)
+          with self.assertRaises(ValueError):
+            replace_preference(raw, cp, True)
+
   def test_learner_does_not_restore_collect_estimate_or_overwrite_disabled_cache(self):
     for vehicle in VEHICLES:
       with self.subTest(vehicle=vehicle), OpenpilotPrefix(), mock.patch.dict(os.environ, ENV):
@@ -88,7 +121,8 @@ class TestTorqueLearning(unittest.TestCase):
         self.assertFalse(msg.valid)
         self.assertEqual(msg.totalBucketPoints, 0)
         self.assertEqual(msg.latAccelFactorFiltered, cp.lateralTuning.torque.latAccelFactor)
-        sm = mock.Mock(frame=240, updated={})
+        sm = mock.Mock(frame=240, updated=dict.fromkeys(
+          ('carControl', 'carOutput', 'carState', 'extrinsicsCalibration', 'deviceMotion', 'lateralDelay', 'controlsState'), False))
         sm.update.side_effect = [None, StopIteration]
         sm.all_checks.return_value = True
         with mock.patch.object(torqued, 'prewarm_cache_contracts'), mock.patch.object(torqued, 'config_realtime_process'), \

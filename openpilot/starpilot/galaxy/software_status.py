@@ -19,7 +19,8 @@ from openpilot.starpilot.ui.brand import DISPLAY_VERSION
 MAX_FIELD_BYTES = 256
 PARAMS_TARGET = re.compile(r"(?:\.tmp_[A-Za-z0-9]{1,128}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})\Z")
 FIELDS = ("Version", "GitBranch", "GitCommit", "UpdaterState", "UpdaterTargetBranch",
-          "LastUpdateTime", "UpdaterLastCheckTime", "UpdaterLastFetchTime", "UpdaterFetchAvailable", "UpdateAvailable", "UpdateFailedCount", "UpdaterFastState", "UpdaterOSUpdate")
+          "LastUpdateTime", "UpdaterLastCheckTime", "UpdaterLastFetchTime", "UpdaterFetchAvailable", "UpdateAvailable",
+          "UpdateFailedCount", "UpdaterFastState", "UpdaterOSUpdate")
 
 
 def _fast_state(raw):

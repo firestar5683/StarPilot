@@ -11,10 +11,12 @@ from unittest import mock
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.hyundai.values import CAR as HYUNDAI
 from opendbc.car.toyota.values import CAR as TOYOTA
+from opendbc.car.honda.values import CAR as HONDA
 from openpilot.common.params import Params
 from openpilot.starpilot.lateral.controller_selection import (
   DOCUMENT_KEY, ControllerMode, parse_document, read_selection,
 )
+from openpilot.starpilot.lateral.learning_preferences import KEY as LEARNING_KEY, read_preference
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change
 from openpilot.starpilot.galaxy.settings import (
@@ -69,6 +71,41 @@ class TestControllerFeature(unittest.TestCase):
     self.cp.notCar = True
     self.assertIsNone(self.row())
 
+  def test_registered_stock_torque_uses_scoped_learning_without_controller_choice(self):
+    self.cp = interfaces[HONDA.HONDA_FIT_4G].get_non_essential_params(HONDA.HONDA_FIT_4G)
+    self.assertEqual(self.cp.lateralTuning.which(), 'torque')
+    self.assertIsNone(self.row())
+    learning = self.require_row('ForceAutoTuneOff')
+    self.assertEqual(learning.label, 'Automatic Steering Learning')
+    self.assertEqual(learning.value, 'On')
+    self.assertIn('compatible, qualified learning results', learning.reason)
+    self.assertTrue(self.owner.apply(required_change(learning)))
+    self.assertFalse(read_preference(self.params, self.cp).enabled)
+    self.assertIsNone(self.params.get('ForceAutoTuneOff'))
+    self.assertIsNone(self.params.get(DOCUMENT_KEY))
+
+  def test_learning_capability_rejects_unknown_angle_and_passive_cp(self):
+    original = self.cp.as_reader().as_builder()
+    for failure in ('unknown', 'brand', 'angle', 'passive', 'dashcam', 'not_car', 'nonfinite'):
+      with self.subTest(failure=failure):
+        self.cp = original.as_reader().as_builder()
+        if failure == 'unknown':
+          self.cp.carFingerprint = 'UNREGISTERED_VEHICLE'
+        elif failure == 'brand':
+          self.cp.brand = 'toyota'
+        elif failure == 'angle':
+          self.cp.steerControlType = 'angle'
+          self.cp.lateralTuning.init('pid')
+        elif failure == 'nonfinite':
+          self.cp.lateralTuning.torque.latAccelFactor = float('nan')
+        else:
+          setattr(self.cp, {'passive': 'passive', 'dashcam': 'dashcamOnly', 'not_car': 'notCar'}[failure], True)
+        self.assertIsNone(self.owner.controller.learning_capability())
+        self.assertIsNone(self.row('ForceAutoTuneOff'))
+        self.assertFalse(self.owner.apply(FeatureSettingsRequest('ForceAutoTuneOff', None, 'Off')))
+    self.assertIsNone(self.params.get('ForceAutoTuneOff'))
+    self.assertIsNone(self.params.get(LEARNING_KEY))
+
   def test_write_preserves_other_vehicle_and_manual_preferences(self):
     self.params.put_bool('AdvancedLateralTune', True, block=True)
     self.params.put_bool('ForceAutoTuneOff', True, block=True)
@@ -109,28 +146,26 @@ class TestControllerFeature(unittest.TestCase):
     Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(b'{"version":1,"vehicles":{}}')
     self.assertFalse(self.owner.apply(request))
 
-  def test_starpilot_disables_learning_and_standard_requires_explicit_enable(self):
-    self.params.put('SteerLatAccel', 3.3, block=True)
-    self.params.put('SteerFriction', 0.12, block=True)
-    self.assertFalse(self.require_row('ForceAutoTuneOff').available)
-    self.assertEqual(self.require_row('ForceAutoTuneOff').value, 'Off')
-    self.assertIn('StarPilot Discord', self.require_row('ForceAutoTuneOff').reason)
-    self.assertTrue(self.owner.apply(required_change(self.require_row())))  # Standard
+  def test_learning_choice_survives_controller_and_vehicle_changes(self):
+    learning = self.require_row('ForceAutoTuneOff')
+    self.assertTrue(learning.available)
+    self.assertEqual(learning.value, 'On')
+    self.assertIn('currently unavailable', learning.reason)
+    self.assertTrue(self.owner.apply(required_change(learning)))  # Explicit Off for Ioniq.
+    self.assertFalse(read_preference(self.params, self.cp).enabled)
+    self.assertIsNone(self.params.get('ForceAutoTuneOff'))
+    for _ in range(2):
+      self.assertTrue(self.owner.apply(required_change(self.require_row())))
+      self.assertEqual(self.require_row('ForceAutoTuneOff').value, 'Off')
+    first_cp = self.cp
+    self.cp = interfaces[TOYOTA.TOYOTA_COROLLA_TSS2].get_non_essential_params(TOYOTA.TOYOTA_COROLLA_TSS2)
+    self.assertEqual(self.require_row('ForceAutoTuneOff').value, 'On')
+    self.assertTrue(self.owner.apply(required_change(self.require_row('ForceAutoTuneOff'))))
+    self.cp = first_cp
     self.assertEqual(self.require_row('ForceAutoTuneOff').value, 'Off')
     self.assertTrue(self.owner.apply(required_change(self.require_row('ForceAutoTuneOff'))))
     self.assertEqual(self.require_row('ForceAutoTuneOff').value, 'On')
-    self.assertTrue(self.owner.apply(required_change(self.require_row())))  # StarPilot
-    self.assertTrue(self.params.get_bool('ForceAutoTuneOff'))
-    self.assertFalse(self.params.get_bool('AdvancedLateralTune'))
-    self.assertEqual(self.params.get('SteerLatAccel'), 3.3)
-    self.assertEqual(self.params.get('SteerFriction'), 0.12)
-    self.assertFalse(self.require_row('ForceAutoTuneOff').available)
-    self.assertTrue(self.owner.apply(required_change(self.require_row())))  # Standard does not opt in to learning
-    learning = self.require_row('ForceAutoTuneOff')
-    self.assertTrue(learning.available)
-    self.assertEqual(learning.value, 'Off')
-    self.assertTrue(self.owner.apply(required_change(learning)))
-    self.assertFalse(self.params.get_bool('ForceAutoTuneOff'))
+    self.assertIsNone(self.params.get('ForceAutoTuneOff'))
 
   def test_learning_source_and_controller_changes_revoke_requests(self):
     self.assertTrue(self.owner.apply(required_change(self.require_row())))
@@ -141,27 +176,26 @@ class TestControllerFeature(unittest.TestCase):
     learning = required_change(self.require_row('ForceAutoTuneOff'))
     self.assertTrue(self.owner.apply(required_change(self.require_row())))
     self.assertFalse(self.owner.apply(learning))
-    Path(self.params.get_param_path('ForceAutoTuneOff')).write_bytes(b'invalid')
+    Path(self.params.get_param_path(LEARNING_KEY)).write_bytes(b'invalid')
     self.assertFalse(self.require_row().available)
     self.assertFalse(self.require_row('ForceAutoTuneOff').available)
 
-  def test_interrupted_starpilot_save_leaves_learning_off_without_changing_controller(self):
-    self.assertTrue(self.owner.apply(required_change(self.require_row())))
+  def test_controller_save_never_writes_learning_preference(self):
     self.assertTrue(self.owner.apply(required_change(self.require_row('ForceAutoTuneOff'))))
-    request = required_change(self.require_row())
+    saved = self.params.get(LEARNING_KEY)
     from openpilot.starpilot.ui import controller_feature
     commit = controller_feature.commit_exact
+    writes = []
 
-    def revoke_after_learning(**kwargs):
-      result = commit(self.params, **kwargs)
-      if kwargs['key'] == 'ForceAutoTuneOff':
-        self.permitted = False
-      return result
+    def recorded(params, **kwargs):
+      writes.append(kwargs['key'])
+      return commit(params, **kwargs)
 
-    with mock.patch.object(controller_feature, 'commit_exact', side_effect=lambda _params, **kwargs: revoke_after_learning(**kwargs)):
-      self.assertFalse(self.owner.apply(request))
-    self.assertTrue(self.params.get_bool('ForceAutoTuneOff'))
-    self.assertEqual(read_selection(self.params, self.cp).mode, ControllerMode.STANDARD)
+    with mock.patch.object(controller_feature, 'commit_exact', side_effect=recorded):
+      self.assertTrue(self.owner.apply(required_change(self.require_row())))
+    self.assertEqual(writes, [DOCUMENT_KEY])
+    self.assertEqual(self.params.get(LEARNING_KEY), saved)
+    self.assertIsNone(self.params.get('ForceAutoTuneOff'))
 
   def test_corrupt_or_unreadable_document_fails_closed_without_overwrite(self):
     path = Path(self.params.get_param_path(DOCUMENT_KEY))
@@ -226,7 +260,7 @@ class TestControllerFeature(unittest.TestCase):
         self.assertEqual(row.label, 'Automatic Steering Learning')
         self.assertTrue(row.available)
         self.assertEqual(row.value, 'On')
-        self.assertEqual(row.reason, 'Saved for the next drive. Turn on only if you want ' + label + ' to learn torque values.')
+        self.assertEqual(row.reason, f'Saved for this vehicle and next drive. {label} applies compatible, qualified learning results.')
         self.assertEqual(_projection(row, 'torque')['reason'], row.reason)
 
 if __name__ == '__main__':

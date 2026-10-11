@@ -11,7 +11,7 @@ import pyray as rl
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.layouts.settings import device
 from openpilot.selfdrive.ui.mici.layouts.settings.device import device_layout
-from openpilot.starpilot.ui.calibration_reset import CalibrationReset
+from openpilot.starpilot.ui.calibration_reset import CalibrationReset, RESET_KEY
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import DialogResult
 
@@ -73,6 +73,43 @@ class TestCalibrationReset(unittest.TestCase):
     self.assertFalse(self.params.get_bool("DoReboot"))
     self.assertFalse(self.params.get_bool("ShowSpeedLimits"))
     self.assertFalse(self.reset.request(self.params))
+
+  def test_reset_generation_precedes_deletion_and_preserves_learning_choice(self):
+    preference = b'{"version":1,"vehicles":{"hyundai":{"HYUNDAI_IONIQ_6":true}}}'
+    self.params.put("SteeringLearningPreferences", preference, block=True)
+    self.params.put(RESET_KEY, "old-generation", block=True)
+    self.params.put_bool("ForceAutoTuneOff", True, block=True)
+    self.params.put("SteerLatAccel", 3.3, block=True)
+    removed = []
+    remove = self.params.remove
+
+    def recorded_remove(key):
+      generation = self.params.get(RESET_KEY)
+      assert isinstance(generation, str)
+      self.assertEqual(len(generation), 32)
+      self.assertTrue(all(char in "0123456789abcdef" for char in generation))
+      removed.append((key, generation))
+      remove(key)
+
+    with patch.object(self.params, "remove", side_effect=recorded_remove):
+      self.reset._run(self.params)
+    self.assertIsNone(self.reset.take_error())
+    self.assertEqual(len(removed), 4)
+    self.assertEqual(len({generation for _, generation in removed}), 1)
+    self.assertEqual(self.params.get("SteeringLearningPreferences"), preference)
+    self.assertTrue(self.params.get_bool("ForceAutoTuneOff"))
+    self.assertEqual(self.params.get("SteerLatAccel"), 3.3)
+    self.assertTrue(self.params.get_bool("OnroadCycleRequested"))
+
+  def test_failed_reset_generation_preserves_caches_and_does_not_request_cycle(self):
+    self.params.put("CalibrationParams", b"saved", block=True)
+    with patch.object(self.params, "put", side_effect=RuntimeError("write failed")), \
+         patch.object(self.params, "remove") as remove:
+      self.reset._run(self.params)
+    remove.assert_not_called()
+    self.assertEqual(self.params.get("CalibrationParams"), b"saved")
+    self.assertFalse(self.params.get_bool("OnroadCycleRequested"))
+    self.assertIsNotNone(self.reset.take_error())
 
   def test_confirmation_rechecks_engagement(self):
     self.params.put("CalibrationParams", b"saved", block=True)

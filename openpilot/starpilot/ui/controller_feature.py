@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 import json
 
 from openpilot.starpilot.lateral.controller_selection import (
   DOCUMENT_KEY, LEARNING_OFF_KEY, MAX_DOCUMENT_BYTES, ControllerMode, policy_for, replace_mode, selection_from_bytes,
   controller_uses_native_learning,
+)
+from openpilot.starpilot.lateral.learning_preferences import (
+  KEY as LEARNING_PREFERENCES_KEY, MAX_BYTES as LEARNING_PREFERENCES_LIMIT, read_preference, replace_preference,
 )
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.saved_source import read_saved
@@ -25,7 +29,8 @@ SETUP_ACTION = 'torque_prepare_firestar'
 SETUP_QUESTION = 'Change tuning preparation? Turning it off restores your previous steering preferences.'
 SETUP_DEFAULTS = {'TurnAssist': b'0', LEARNING_OFF_KEY: b'1', 'LaneCentering': b'0',
                   'LaneCenterOffset': b'0.0', 'LaneCenteringE2EAuthority': b'1.0', 'LaneCenteringPauseOnSignal': b'1'}
-SETUP_LIMITS = {**dict.fromkeys(SETUP_DEFAULTS, 128), LANE_CHANGE_KEY: LANE_CHANGE_LIMIT, DOCUMENT_KEY: MAX_DOCUMENT_BYTES}
+SETUP_LIMITS = {**dict.fromkeys(SETUP_DEFAULTS, 128), LEARNING_PREFERENCES_KEY: LEARNING_PREFERENCES_LIMIT,
+                LANE_CHANGE_KEY: LANE_CHANGE_LIMIT, DOCUMENT_KEY: MAX_DOCUMENT_BYTES}
 
 
 class ControllerFeature:
@@ -53,9 +58,36 @@ class ControllerFeature:
     except (AttributeError, TypeError, ValueError, OverflowError):
       return None
 
+  def learning_capability(self, CP=None) -> tuple | None:
+    CP = self.vehicle_params() if CP is None else CP
+    try:
+      from opendbc.car.values import PLATFORMS
+      platform = PLATFORMS.get(str(CP.carFingerprint))
+      if (platform is None or platform.__class__.__module__.split('.')[-2] != str(CP.brand) or
+          CP.passive or CP.dashcamOnly or CP.notCar or str(CP.steerControlType) != 'torque' or
+          CP.lateralTuning.which() != 'torque'):
+        return None
+      tune = CP.lateralTuning.torque
+      basis = (float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction),
+               float(tune.steeringAngleDeadzoneDeg), float(CP.steerActuatorDelay), float(CP.steerLimitTimer))
+      if not all(math.isfinite(value) for value in basis) or basis[0] <= 0 or any(value < 0 for value in basis[2:]):
+        return None
+      firmware = tuple((str(fw.ecu), bytes(fw.fwVersion)) for fw in CP.carFw)
+      return (str(CP.brand), str(CP.carFingerprint), str(CP.steerControlType), str(CP.lateralTuning.which()),
+              int(CP.flags), int(CP.alternativeExperience), *basis, str(CP.carVin), firmware)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+      return None
+
   def _setup_sources(self) -> dict[str, bytes | None] | None:
+    from openpilot.starpilot.ui.tuning_preparation import KEY as JOURNAL_KEY, LIMIT, decode
+    limits = SETUP_LIMITS
+    journal_raw, readable = read_saved(self.params, JOURNAL_KEY, LIMIT)
+    legacy_limits = {key: limit for key, limit in limits.items() if key != LEARNING_PREFERENCES_KEY}
+    # Existing preparations restore the exact keys they originally journaled.
+    if readable and journal_raw is not None and isinstance(decode(journal_raw, legacy_limits), dict):
+      limits = legacy_limits
     sources = {}
-    for key, limit in SETUP_LIMITS.items():
+    for key, limit in limits.items():
       raw, readable = read_saved(self.params, key, limit)
       if not readable:
         return None
@@ -70,7 +102,9 @@ class ControllerFeature:
       raise ValueError('Invalid lane-change preferences')
     # Gap reduction is longitudinal; retain it while resetting lateral behavior.
     lane = replace(LaneChangePolicy(), close_gap=lane.close_gap, close_gap_seconds=lane.close_gap_seconds)
-    return {**SETUP_DEFAULTS, LANE_CHANGE_KEY: json.dumps(to_value(lane), sort_keys=True, separators=(',', ':')).encode(),
+    learning = ({LEARNING_PREFERENCES_KEY: replace_preference(sources[LEARNING_PREFERENCES_KEY], CP, False)}
+                if LEARNING_PREFERENCES_KEY in sources else {})
+    return {**SETUP_DEFAULTS, **learning, LANE_CHANGE_KEY: json.dumps(to_value(lane), sort_keys=True, separators=(',', ':')).encode(),
             DOCUMENT_KEY: replace_mode(sources[DOCUMENT_KEY], CP, ControllerMode.STARPILOT)}
 
   def setup_row(self) -> FeatureRow | None:
@@ -87,7 +121,7 @@ class ControllerFeature:
         valid = False
     from openpilot.starpilot.ui.tuning_preparation import KEY, LIMIT, decode
     journal_raw, readable = read_saved(self.params, KEY, LIMIT)
-    journal = decode(journal_raw, SETUP_LIMITS)
+    journal = decode(journal_raw, sources if sources is not None else SETUP_LIMITS)
     active = isinstance(journal, dict) and journal['vehicle'] == str(CP.carFingerprint)
     complete = active and sources == journal['prepared']
     conflict = isinstance(journal, dict) and (journal['vehicle'] != str(CP.carFingerprint) or
@@ -133,35 +167,43 @@ class ControllerFeature:
     value = CHOICES[0] if valid and selected.mode == ControllerMode.STANDARD else \
       CHOICES[1] if valid else 'Invalid saved controller choice'
     learning, learning_readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
-    learning_valid = learning_readable and learning in (None, b'0', b'1')
+    preference = read_preference(self.params, CP, legacy_snapshot=(learning, learning_readable))
+    learning_valid = learning_readable and preference.valid
     allowed = valid and learning_valid and self.authority('preferences')
     reason = ('Choose the steering controller for your next drive. ' + TUNING_GUIDANCE if valid and learning_valid else
               'Saved steering preferences are unreadable or invalid; no change was made.')
     return FeatureRow(DOCUMENT_KEY, 'Steering Controller', value, raw, CHOICES if valid else (),
-                      available=allowed, reason=reason, capability=capability, dependencies=((LEARNING_OFF_KEY, learning),),
+                      available=allowed, reason=reason, capability=capability,
+                      dependencies=((LEARNING_OFF_KEY, learning), (LEARNING_PREFERENCES_KEY, preference.raw)),
                       default_value=CHOICES[0] if selection_from_bytes(CP, None).mode == ControllerMode.STANDARD else CHOICES[1])
 
-  def learning_row(self) -> FeatureRow | None:
-    CP = self.vehicle_params()
-    capability = self.capability(CP)
+  def learning_row(self, CP=None) -> FeatureRow | None:
+    CP = self.vehicle_params() if CP is None else CP
+    capability = self.learning_capability(CP)
     if capability is None:
       return None
     controller, controller_readable = read_saved(self.params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES)
     selection = selection_from_bytes(CP, controller)
-    raw, readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
-    valid = readable and raw in (None, b'0', b'1') and controller_readable and selection.source != 'invalid'
-    fixed_vehicle_tune = not controller_uses_native_learning(selection)
-    value = ('Off' if fixed_vehicle_tune or raw == b'1' else 'On') if valid else 'Invalid saved preference'
-    reason = ('StarPilot uses the vehicle tune. ' + TUNING_GUIDANCE
-              if fixed_vehicle_tune else 'Saved for the next drive. Turn on only if you want ' +
-              CHOICES[selection.mode == ControllerMode.STARPILOT] + ' to learn torque values.')
-    return FeatureRow(LEARNING_OFF_KEY, 'Automatic Steering Learning', value, raw, ('Off', 'On') if valid else (),
-                      available=valid and not fixed_vehicle_tune and self.authority('preferences'),
+    legacy, legacy_readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
+    preference = read_preference(self.params, CP, legacy_snapshot=(legacy, legacy_readable))
+    valid = preference.valid and legacy_readable and controller_readable and selection.source != 'invalid'
+    compatible = controller_uses_native_learning(selection)
+    label = CHOICES[0] if selection.mode == ControllerMode.STANDARD else CHOICES[1]
+    value = ('On' if preference.enabled else 'Off') if valid else 'Invalid saved preference'
+    reason = (f'Saved for this vehicle and next drive. {label} applies compatible, qualified learning results.'
+              if compatible else f'Saved for this vehicle. {label} uses its vehicle tune; ' +
+              'automatic learning is currently unavailable. ' + TUNING_GUIDANCE)
+    return FeatureRow(LEARNING_OFF_KEY, 'Automatic Steering Learning', value, preference.raw, ('Off', 'On') if valid else (),
+                      available=valid and self.authority('preferences'),
                       reason=reason if valid else 'Saved controller or learning preference is unreadable or invalid.',
-                      capability=capability, dependencies=((DOCUMENT_KEY, controller),), default_value="On")
+                      capability=capability, dependencies=((DOCUMENT_KEY, controller), (LEARNING_OFF_KEY, legacy)),
+                      default_value="On")
 
   def apply_learning(self, request: FeatureSettingsRequest) -> bool:
-    row = self.learning_row()
+    CP = self.vehicle_params()
+    if CP is None:
+      return False
+    row = self.learning_row(CP)
     if (row is None or not row.available or request.key != LEARNING_OFF_KEY or request.value not in row.choices or
         request.capability != row.capability or request.expected != row.source or request.dependencies != row.dependencies or
         request.related_source is not None or request.display_unit or request.direction or
@@ -173,8 +215,12 @@ class ControllerFeature:
       return (self.vehicle_fingerprint() == request.vehicle_fingerprint and current is not None and current.available and
               current.capability == request.capability and current.dependencies == request.dependencies)
 
-    result = commit_exact(self.params, key=LEARNING_OFF_KEY, max_bytes=1,
-                          raw=b'0' if request.value == 'On' else b'1', expected=request.expected,
+    try:
+      encoded = replace_preference(request.expected, CP, request.value == 'On')
+    except (AttributeError, TypeError, ValueError, UnicodeError):
+      return False
+    result = commit_exact(self.params, key=LEARNING_PREFERENCES_KEY, max_bytes=LEARNING_PREFERENCES_LIMIT,
+                          raw=encoded, expected=request.expected,
                           authorized=authorized, temp_prefix='.torque-learning-')
     return result.verified
 
@@ -188,8 +234,10 @@ class ControllerFeature:
       return False
     raw, readable = read_saved(self.params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES)
     learning, learning_readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
+    preference = read_preference(self.params, CP, legacy_snapshot=(learning, learning_readable))
     if (not readable or raw != request.expected or not self.authority('preferences') or
-        not learning_readable or learning not in (None, b'0', b'1') or request.dependencies != ((LEARNING_OFF_KEY, learning),)):
+        not learning_readable or not preference.valid or
+        request.dependencies != ((LEARNING_OFF_KEY, learning), (LEARNING_PREFERENCES_KEY, preference.raw))):
       return False
     try:
       selected = selection_from_bytes(CP, raw)
@@ -202,22 +250,8 @@ class ControllerFeature:
     def authorized() -> bool:
       current, readable = read_saved(self.params, LEARNING_OFF_KEY, 1)
       return (self.authority('preferences') and self.vehicle_fingerprint() == request.vehicle_fingerprint and
-              self.capability() == request.capability and readable and current == learning)
-
-    if learning != b'1' and (not controller_uses_native_learning(replace(selected, mode=MODES[request.value])) or
-                             not controller_uses_native_learning(selected)):
-      def authorize_learning_off() -> bool:
-        current, readable = read_saved(self.params, DOCUMENT_KEY, MAX_DOCUMENT_BYTES)
-        return authorized() and readable and current == request.expected
-
-      # Persist the conservative side first, including a return from a default
-      # StarPilot choice. An interrupted save can leave learning off, but never
-      # enables it or saves StarPilot with an enabled learning preference.
-      result = commit_exact(self.params, key=LEARNING_OFF_KEY, max_bytes=1, raw=b'1', expected=learning,
-                            authorized=authorize_learning_off, temp_prefix='.torque-learning-')
-      if not result.verified:
-        return False
-      learning = b'1'
+              self.capability() == request.capability and readable and current == learning and
+              read_preference(self.params, CP, legacy_snapshot=(current, readable)).raw == preference.raw)
 
     result = commit_exact(self.params, key=DOCUMENT_KEY, max_bytes=MAX_DOCUMENT_BYTES,
                           raw=encoded, expected=request.expected, authorized=authorized,

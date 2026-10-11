@@ -97,6 +97,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AndroidAutoEnabled", {PERSISTENT | DONT_LOG, BOOL, "0"}},
     {"AdvancedLateralTune", {PERSISTENT, BOOL}},
     {"LateralControllerSelection", {PERSISTENT | DONT_LOG, JSON}},
+    {"SteeringLearningPreferences", {PERSISTENT, BYTES}},
+    {"AutoSteeringLearningReset", {PERSISTENT, STRING}},
     {"ForceAutoTuneOff", {PERSISTENT, BOOL, "0"}},
     {"SteerLatAccel", {PERSISTENT, FLOAT}},
     {"SteerLatAccelStock", {PERSISTENT, FLOAT}},

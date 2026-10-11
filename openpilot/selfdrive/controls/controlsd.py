@@ -40,6 +40,7 @@ from openpilot.starpilot.lateral.lane_runtime import LaneCenteringHost, runtime_
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, runtime_enabled as torque_runtime_enabled
 from openpilot.starpilot.lateral.controller_selection import learning_allowed, read_selection
 from openpilot.starpilot.lateral.gain_runtime import create_gain_owner
+from openpilot.starpilot.flm.learning_source import AutomaticLearningConsumer
 from openpilot.starpilot.longitudinal.inputs import LongitudinalInputs
 from openpilot.starpilot.longitudinal.output_max import final_output
 
@@ -71,7 +72,7 @@ class Controls:
                  'extrinsicsCalibration', 'deviceMotion', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
                  'driverMonitoringState', 'onroadEvents', 'driverAssistance'] +
                 (['aolAxisState', 'aolSafetyWire'] if self.aol_replay or self.ordinary_axis_ack_required else []))
-    optional = list(dict.fromkeys(self.longitudinal_inputs.optional_services + ['deviceState']))
+    optional = list(dict.fromkeys(self.longitudinal_inputs.optional_services + ['deviceState', 'autoSteeringLearning']))
     if optional:
       self.sm = messaging.SubMaster(services + optional, poll='selfdriveState',
                                     ignore_alive=optional, ignore_valid=optional, ignore_avg_freq=optional)
@@ -91,6 +92,8 @@ class Controls:
     self.torque_host = (TorqueHost(self.params, self.CP, allow_learning=(self.torque_learning_allowed
                         if self.lateral_controller_selection.policy is not None else None))
                         if torque_runtime_enabled(self.CP, self.params) else None)
+    self.automatic_learning = AutomaticLearningConsumer(
+      self.CP, self.CI, self.lateral_controller_selection.mode, self.params)
     self.last_lane_centering_result: LaneCenteringResult | None = None
     self.lane_centering_applied = 0.0
 
@@ -216,11 +219,28 @@ class Controls:
 
     CC.latActive = bool(CC.latActive and pause_allowed)
 
+    automatic_tune = None
+    automatic_learning = getattr(self, 'automatic_learning', None)
+    if automatic_learning is not None:
+      automatic_tune = automatic_learning.sample(self.sm, now_ns=time.monotonic_ns(),
+        lat_active=bool(CC.latActive and CS.canValid and not CS.canTimeout))
+      if automatic_tune is not None and self.torque_host is None:
+        # One host owns native/manual/automatic updates; admission occurs only
+        # after a qualified result, preserving untouched startup tuning.
+        try:
+          host = TorqueHost(self.params, self.CP, allow_learning=self.torque_learning_allowed,
+                            automatic_interface=self.CI, automatic_controller=self.lateral_controller_selection.mode)
+          host.adopt_linear_controller(self.LaC)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+          automatic_tune = None
+        else:
+          self.torque_host = host
+
     if self.torque_host is not None:
       # The optional source must not keep an active torque request through lost car state.
       CC.latActive = bool(CC.latActive and CS.canValid and not CS.canTimeout)
       now_ns = int(self.sm.logMonoTime['carState']) if os.getenv('REPLAY') == '1' else time.monotonic_ns()
-      tune = self.torque_host.sample(self.sm, now_ns=now_ns, lat_active=bool(CC.latActive))
+      tune = self.torque_host.sample(self.sm, now_ns=now_ns, lat_active=bool(CC.latActive), automatic=automatic_tune)
       self.torque_host.apply(self.LaC, tune)
       if not CC.latActive:
         self.LaC.pid.reset()

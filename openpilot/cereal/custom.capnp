@@ -91,7 +91,43 @@ struct StarPilotCarControl @0x81c2f05a394cf4af {
     version @12 :UInt16;
   }
 }
-struct CustomReserved1 @0xaedffd8f31e7b55d {
+struct AutoSteeringLearning @0xaedffd8f31e7b55d {
+  version @0 :UInt16;
+  status @1 :Status;
+  reason @2 :Text;
+  identity @3 :Identity;
+  session @4 :Text;
+  sequence @5 :UInt64;
+  observedMonoTime @6 :UInt64;  # MONOTONIC, separate from Event BOOTTIME.
+  validUntilMonoTime @7 :UInt64;
+  sourceWindowStartMonoTime @8 :UInt64;
+  sourceWindowEndMonoTime @9 :UInt64;
+  family @10 :Family;
+  latAccelFactor @11 :Float64;
+  acceptancePolicyId @12 :Text;
+  trainWindows @13 :UInt32;
+  heldoutWindows @14 :UInt32;
+  trainBaselineLoss @15 :Float64;
+  trainCandidateLoss @16 :Float64;
+  heldoutBaselineLoss @17 :Float64;
+  heldoutCandidateLoss @18 :Float64;
+
+  enum Status { unavailable @0; collecting @1; candidate @2; rejected @3; qualifiedFit @4; }
+  enum Family { none @0; linearFactor @1; }
+  struct Identity {
+    vehicle @0 :Text;
+    brand @1 :Text;
+    controller @2 :Text;
+    policy @3 :Text;
+    profile @4 :Text;
+    conversionVersion @5 :Text;
+    firmwareSha256 @6 :Text;
+    basis @7 :List(Float64);
+    baselineSha256 @8 :Text;
+    preferenceSha256 @9 :Text;
+    resetGeneration @10 :Text;
+    controllerRevision @11 :Text;
+  }
 }
 
 struct StarPilotCarState @0xf35cc4560bbf6ec2 {

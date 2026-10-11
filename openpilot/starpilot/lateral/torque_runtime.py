@@ -137,12 +137,12 @@ def _bool(raw: bytes | None, default: bool) -> bool:
   return raw == b'1'
 
 
-def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None = None, CP=None) -> TorqueSettings:
+def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None = None, CP=None, automatic_default: bool = False) -> TorqueSettings:
   try:
     force_off = _bool(_raw(params, 'ForceAutoTuneOff'), False) if allow_learning is None else not allow_learning
     basis = (vehicle.lat_accel_factor, vehicle.lat_accel_offset, vehicle.friction)
     document = _raw(params, DOCUMENT_KEY)
-    if vehicle.vehicle in GM_VEHICLES and document is None:
+    if vehicle.vehicle in GM_VEHICLES and document is None and not automatic_default:
       return TorqueSettings(valid=False)
     if document is None:
       legacy = interpret_legacy({key: _raw(params, key) for key in LEGACY_KEYS}, basis, fingerprint=vehicle.vehicle)
@@ -166,9 +166,18 @@ def read_settings(params, vehicle: TorqueTuning, *, allow_learning: bool | None 
 
 class TorqueHost:
   """Choose one complete source and rate-bound changes to the native controller."""
-  def __init__(self, params, CP, *, allow_learning: bool | None = None):
+  def __init__(self, params, CP, *, allow_learning: bool | None = None, automatic_interface=None, automatic_controller=None):
     if not supported_cp(CP):
-      raise ValueError('Unsupported torque host')
+      from openpilot.starpilot.flm.learning_source import conversion_identity
+      if automatic_interface is None or conversion_identity(CP, automatic_interface, automatic_controller) is None:
+        raise ValueError('Unsupported torque host')
+    self.automatic_default = False
+    if automatic_interface is not None:
+      from openpilot.starpilot.flm.learning_source import conversion_identity
+      self.automatic_default = conversion_identity(CP, automatic_interface, automatic_controller) is not None
+    self.automatic_interface = automatic_interface
+    self.automatic_controller = automatic_controller
+    self.native_base: TorqueTuning | None = None
     self.CP = CP
     tune = CP.lateralTuning.torque
     self.vehicle = TorqueTuning(TorqueSource.VEHICLE, str(CP.carFingerprint),
@@ -184,6 +193,59 @@ class TorqueHost:
     self.selected = self.vehicle
     self.applied_controller = None
     self.last_application = self.vehicle
+
+  def adopt_linear_controller(self, controller) -> None:
+    """Transfer the existing scalar owner without reapplying its startup tune."""
+    from openpilot.starpilot.flm.learning_source import conversion_identity
+    if (conversion_identity(self.CP, self.automatic_interface, self.automatic_controller) is None or
+        getattr(getattr(controller, 'starpilot_extension', None), 'parameter_factor', None) is not None):
+      raise ValueError('Automatic adoption requires the verified linear parameter domain')
+    params = controller.torque_params
+    tune = TorqueTuning(TorqueSource.LEARNED, self.vehicle.vehicle,
+                        float(params.latAccelFactor), float(params.latAccelOffset), float(params.friction))
+    if not self._valid_native(tune):
+      raise ValueError('Applied native tune is outside the vehicle envelope')
+    self.native_base = self.applied = self.selected = self.last_application = tune
+    self.applied_controller = controller
+
+  def _valid_native(self, tune: TorqueTuning) -> bool:
+    vehicle = self.vehicle
+    return (0.7 * vehicle.lat_accel_factor <= tune.lat_accel_factor <= 1.3 * vehicle.lat_accel_factor and
+            abs(tune.lat_accel_offset) <= min(0.5, 0.5 * vehicle.lat_accel_factor) and
+            0.5 * vehicle.friction <= tune.friction <= max(0.1, 1.5 * vehicle.friction))
+
+  def _sample_adopted(self, sm, now_ns: int, dt: float, lat_active: bool,
+                      automatic: TorqueTuning | None) -> TorqueTuning:
+    # The old direct TLS writer retains its last values when the stream is absent.
+    # This host becomes its sole writer after adoption; no CP reset is introduced.
+    assert self.native_base is not None
+    base = self.native_base
+    if self.allow_learning and not self.settings.force_auto_off and sm.all_checks(['lateralTorqueParameters']):
+      state = sm['lateralTorqueParameters']
+      if state.useParams:
+        try:
+          native = TorqueTuning(TorqueSource.LEARNED, self.vehicle.vehicle,
+                                float(state.latAccelFactorFiltered), float(state.latAccelOffsetFiltered),
+                                float(state.frictionCoefficientFiltered))
+          if self._valid_native(native):
+            self.native_base = base = native
+        except (AttributeError, TypeError, ValueError, OverflowError):
+          pass
+    if self.settings.valid and (self.settings.user_factor is not None or self.settings.user_friction is not None):
+      target = self._select(sm, now_ns)
+    elif automatic is not None and lat_active and self.settings.valid:
+      if (automatic.vehicle != base.vehicle or automatic.source != TorqueSource.LEARNED or not
+          0.7 * self.vehicle.lat_accel_factor <= automatic.lat_accel_factor <= 1.3 * self.vehicle.lat_accel_factor):
+        raise ValueError('Automatic source does not match torque host')
+      target = TorqueTuning(TorqueSource.LEARNED, base.vehicle, automatic.lat_accel_factor,
+                            base.lat_accel_offset, base.friction)
+    else:
+      target = base
+    self.selected = target
+    self.applied = TorqueTuning(target.source, target.vehicle,
+      _move(self.applied.lat_accel_factor, target.lat_accel_factor, 0.5 * self.vehicle.lat_accel_factor * dt),
+      target.lat_accel_offset, target.friction)
+    return self.applied
 
   def apply(self, controller, tune: TorqueTuning) -> bool:
     """Apply a complete source transition, preserving an untouched vehicle tune.
@@ -223,9 +285,20 @@ class TorqueHost:
       return None
     return TorqueTuning(TorqueSource.LEARNED, vehicle.vehicle, factor, offset, friction)
 
-  def _select(self, sm, now_ns: int) -> TorqueTuning:
+  def _select(self, sm, now_ns: int, automatic: TorqueTuning | None = None) -> TorqueTuning:
     vehicle = self.vehicle
     settings = self.settings
+    # The new consumer already enforces saved manual/trial precedence and exact
+    # source identity; unsupported scalar TLS remains independently disabled.
+    if automatic is not None and settings.valid:
+      if (automatic.vehicle != vehicle.vehicle or automatic.source != TorqueSource.LEARNED or not
+          0.7 * vehicle.lat_accel_factor <= automatic.lat_accel_factor <= 1.3 * vehicle.lat_accel_factor):
+        raise ValueError('Automatic source does not match torque host')
+      base = self._select(sm, now_ns)
+      if base.source == TorqueSource.USER:
+        return base
+      return TorqueTuning(TorqueSource.LEARNED, vehicle.vehicle, automatic.lat_accel_factor,
+                          base.lat_accel_offset, base.friction)
     if not settings.valid:
       return vehicle
     allow_learning = not settings.force_auto_off if self.allow_learning is None else self.allow_learning
@@ -238,7 +311,16 @@ class TorqueHost:
                         vehicle.lat_accel_offset if settings.user_factor is not None else base.lat_accel_offset,
                         settings.user_friction if settings.user_friction is not None else base.friction)
 
-  def sample(self, sm, *, now_ns: int, lat_active: bool) -> TorqueTuning:
+  def sample(self, sm, *, now_ns: int, lat_active: bool, automatic: TorqueTuning | None = None) -> TorqueTuning:
+    if self.native_base is not None:
+      valid_tick = now_ns > 0 and (self.last_tick_ns is None or 0 < now_ns - self.last_tick_ns <= 50_000_000)
+      dt = (now_ns - self.last_tick_ns) / 1e9 if valid_tick and self.last_tick_ns is not None else 0.01
+      self.last_tick_ns = now_ns
+      if self.last_refresh_ns is None or not valid_tick or now_ns - self.last_refresh_ns >= REFRESH_NS:
+        self.settings = read_settings(self.params, self.vehicle, allow_learning=self.allow_learning, CP=self.CP,
+                                    automatic_default=self.automatic_default)
+        self.last_refresh_ns = now_ns
+      return self._sample_adopted(sm, now_ns, dt, lat_active, automatic if valid_tick else None)
     if now_ns <= 0 or (self.last_tick_ns is not None and not 0 < now_ns - self.last_tick_ns <= 50_000_000):
       self.applied = self.vehicle
       self.last_refresh_ns = None
@@ -248,12 +330,13 @@ class TorqueHost:
     dt = 0.01 if self.last_tick_ns is None else (now_ns - self.last_tick_ns) / 1e9
     self.last_tick_ns = now_ns
     if self.last_refresh_ns is None or now_ns - self.last_refresh_ns >= REFRESH_NS:
-      self.settings = read_settings(self.params, self.vehicle, allow_learning=self.allow_learning, CP=self.CP)
+      self.settings = read_settings(self.params, self.vehicle, allow_learning=self.allow_learning, CP=self.CP,
+                                    automatic_default=self.automatic_default)
       self.last_refresh_ns = now_ns
     if not lat_active or not self.settings.valid:
       self.applied = self.selected = self.vehicle
       return self.vehicle
-    self.selected = self._select(sm, now_ns)
+    self.selected = self._select(sm, now_ns, automatic)
     prior, target = self.applied, self.selected
     factor_step = 0.5 * self.vehicle.lat_accel_factor * dt
     offset_step = 0.1 * dt

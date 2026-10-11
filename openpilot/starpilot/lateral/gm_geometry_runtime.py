@@ -34,10 +34,11 @@ def read_geometry(params, CP):
         profile.basis != (tune.latAccelFactor, tune.latAccelOffset, tune.friction) or
         profile.geometry.basis != geometry_basis(CP)):
       return GeometrySelection()
-    off, readable = read_saved(params, 'ForceAutoTuneOff', 1)
-    if not readable or off not in (None, b'0', b'1'):
+    from openpilot.starpilot.lateral.learning_preferences import read_preference
+    preference = read_preference(params, CP)
+    if not preference.valid:
       return GeometrySelection()
-    return GeometrySelection(profile.geometry, off == b'1' or profile.geometry.learning == 'force_off')
+    return GeometrySelection(profile.geometry, not preference.enabled or profile.geometry.learning == 'force_off')
   except (OSError, ValueError, TypeError, UnicodeError, OverflowError):
     return GeometrySelection()
 

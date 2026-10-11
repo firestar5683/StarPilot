@@ -814,14 +814,10 @@ class FeatureSettingsOwner:
         rows.append(setup_row)
       capability = self._capability("torque")
       allowed = configurable and self.authority("torque") and capability is not None
-      numeric_valid, numeric_rows = self.torque.rows(capability, allowed, repair_allowed=parked and allowed)
+      _, numeric_rows = self.torque.rows(capability, allowed, repair_allowed=parked and allowed)
       learning_row = self.controller.learning_row()
       if learning_row is not None:
         rows.append(learning_row)
-      else:
-        rows.append(replace(self._bool_row("ForceAutoTuneOff", "Ignore learned torque values", allowed and numeric_valid),
-                            capability=capability, dependencies=self._dependents(DOCUMENT_KEY),
-                            reason="Use the supplied vehicle tune and any values you customize below"))
       rows.extend(numeric_rows)
     elif page == FeaturePage.AOL:
       title = "Always On Lateral"
@@ -1130,7 +1126,7 @@ class FeatureSettingsOwner:
       return self.controller.apply(request)
     if key == SETUP_ACTION:
       return self.controller.apply_setup(request)
-    if key == 'ForceAutoTuneOff' and self.controller.capability() is not None:
+    if key == 'ForceAutoTuneOff':
       return self.controller.apply_learning(request)
     if key == "GMPedalLongitudinal":
       return self._apply_pedal_setup(request)

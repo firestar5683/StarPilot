@@ -1,8 +1,12 @@
 import os
 import threading
+import uuid
 
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.saved_source import read_saved
+
+RESET_KEY = "AutoSteeringLearningReset"
 
 
 class CalibrationReset:
@@ -27,6 +31,10 @@ class CalibrationReset:
 
   def _run(self, params: Params) -> None:
     try:
+      generation = uuid.uuid4().hex
+      params.put(RESET_KEY, generation, block=True)
+      if read_saved(params, RESET_KEY, 32) != (generation.encode(), True):
+        raise OSError("Could not invalidate automatic steering learning")
       for key in ("CalibrationParams", "LiveTorqueParameters", "LiveParametersV2", "LiveDelay"):
         params.remove(key)
         if os.path.lexists(params.get_param_path(key)):
