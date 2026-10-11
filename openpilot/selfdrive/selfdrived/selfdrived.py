@@ -159,7 +159,8 @@ class SelfdriveD:
     self.camera_packets = ["narrowRoadCameraState", "cabinCameraState", "wideRoadCameraState"]
 
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
-    self.car_state_sock = messaging.sub_sock('carState', timeout=20)
+    self.car_state_poller = messaging.Poller() if self.aol_replay and self.axis_transport_required else None
+    self.car_state_sock = messaging.sub_sock('carState', poller=self.car_state_poller, timeout=20)
 
     ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan']
     if self.aol_replay:
@@ -340,7 +341,6 @@ class SelfdriveD:
     """Compute onroadEvents from carState"""
 
     self.events.clear()
-    self._update_steering_authority(CS)
     self.tesla_stock_alerts = []
     self.nostalgia_paddle_cancel = False
     action_owner = getattr(self, 'controller_action_owner', None)
@@ -381,6 +381,7 @@ class SelfdriveD:
 
     # Don't add any more events if not initialized
     if not self.initialized:
+      self._update_steering_authority(CS)
       self.events.add(EventName.selfdriveInitializing)
       return
 
@@ -392,6 +393,7 @@ class SelfdriveD:
 
     # Don't add any more events while in dashcam mode
     if self.CP.passive:
+      self._update_steering_authority(CS)
       return
 
     # Handle DM
@@ -419,6 +421,9 @@ class SelfdriveD:
         set_offroad_alert("Offroad_DriverMonitoringUncertain", True)
         self.dm_uncertain_alerted = True
 
+    CS = self.refresh_event_car_state(CS)
+    self.event_car_state = CS
+    self._update_steering_authority(CS)
     samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
     previous = self.CS_prev
     for sample, envelope_valid in samples:
@@ -646,6 +651,8 @@ class SelfdriveD:
           self.events.add(EventName.personalityChanged)
 
   def data_sample(self):
+    self.car_state_retained_source_ns = self.aol_car_state_log_ns
+    self.car_state_retained_valid = getattr(self, 'conditional_car_state_valid', False)
     _car_state = messaging.recv_one(self.car_state_sock)
     samples = []
     queue_invalid = False
@@ -683,6 +690,10 @@ class SelfdriveD:
         _car_state = samples[-1]
       queue_invalid |= any(not sample.valid for sample in samples)
 
+    self.car_state_envelopes = tuple(samples)
+    self.car_state_queue_invalid = queue_invalid
+    if samples:
+      self.car_state_last_received_ns = max(int(sample.logMonoTime) for sample in samples)
     self.car_state_samples = tuple((sample.carState, bool(sample.valid)) for sample in samples)
     CS = _car_state.carState if _car_state else self.CS_prev
     self.aol_expired_healthy_source = False
@@ -746,6 +757,104 @@ class SelfdriveD:
            if ps.safetyModel not in IGNORED_SAFETY_MODES):
       self.mismatch_counter += 1
 
+    return CS
+
+  def event_input_wait_ns(self, CS, now_ns):
+    """Bound an input wait by an original published lease; grant no new output."""
+    proof = getattr(self, 'aol_published_input_proof', None)
+    companion = getattr(self, 'aol_intent_companion', None)
+    intent = getattr(self, 'aol_last_intent', None)
+    previous_native = getattr(self, 'aol_published_input_native', None)
+    if (proof is None or companion is None or intent is None or previous_native is None or
+        not self.enabled or not self.active or self.aol_authority_lost or
+        any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
+        not self.sm.all_checks() or self.rk.lagging or
+        self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated or
+        self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated or
+        self.sm['deviceState'].freeSpacePercent < 7 or self.sm['deviceState'].memoryUsagePercent > 90 or
+        self.sm['deviceMotion'].inputsOK is False or self.sm['deviceMotion'].posenetOK is False or
+        self.sm.seen['vehicleParameters'] and not self.sm['vehicleParameters'].valid or
+        any(self.sm['radarState'].radarErrors.to_dict().values()) or
+        driving_process_failures(self.sm['managerState'].processes)):
+      return 0
+    session, source, published, deadline, producer, epoch, lateral, longitudinal = proof
+    if (session != self.aol_session_id or not 0 < source <= published <= now_ns < deadline or
+        published - source > INTENT_MAX_AGE_NS or deadline != published + INTENT_MAX_AGE_NS or
+        intent.producerSessionId != producer or intent.carStateLogMonoTime != source or companion.integrity_epoch != epoch or
+        not companion.drain() or companion.integrity_epoch != epoch):
+      return 0
+    latest = companion.latest
+    if (latest is None or not latest[1] or latest[2] is None or
+        latest[2].producerSessionId != producer or not latest[2].settingsQualified or
+        latest[2].pauseLateral or latest[2].pauseLongitudinal or
+        latest[2].allowedLatch != intent.allowedLatch or latest[2].lateralArmed != intent.lateralArmed or
+        latest[0] != latest[2].carStateLogMonoTime or not 0 < latest[0] <= now_ns or
+        not 0 < latest[2].observedMonoTime <= now_ns <= latest[2].validUntilMonoTime or
+        not 0 < latest[2].validUntilMonoTime - latest[2].observedMonoTime <= SAFETY_MAX_AGE_NS):
+      return 0
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'car_state_retained_valid', False)),)
+    if any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultTemporary or
+           sample.steerFaultPermanent or sample.brakePressed or sample.regenBraking or sample.gasPressed or
+           sample.seatbeltUnlatched or sample.accFaulted or sample.doorOpen or physical_cancel(sample) or
+           sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
+                                     car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
+           for sample, valid in samples):
+      return 0
+    native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=session)
+    if (native is None or not healthy_transport(self.sm, self.CP, CS, session, now_ns, native) or
+        native.pandaSerial != previous_native.pandaSerial or native.pandaInventory != previous_native.pandaInventory or
+        native.observedMonoTime < previous_native.observedMonoTime or
+        bool(native.requestedLateral) != lateral or bool(native.requestedLongitudinal) != longitudinal):
+      return 0
+    return min(deadline - now_ns, int(DT_CTRL * 1e9))
+
+  def refresh_event_car_state(self, CS):
+    if REPLAY or not self.aol_replay or not self.axis_transport_required or not getattr(self, 'event_input_refresh_pending', False):
+      return CS
+    samples = list(getattr(self, 'car_state_envelopes', ()))
+    invalid = getattr(self, 'car_state_queue_invalid', False)
+    previous_stamp = int(samples[-1].logMonoTime) if samples else getattr(self, 'car_state_last_received_ns', 0)
+    initial_count = len(samples)
+    for _ in range(32 - len(samples)):
+      following = messaging.recv_one_or_none(self.car_state_sock)
+      if following is None:
+        break
+      invalid |= int(following.logMonoTime) <= previous_stamp or not following.valid
+      previous_stamp = max(previous_stamp, int(following.logMonoTime))
+      samples.append(following)
+    else:
+      invalid = True
+    # If a real producer gap straddles the source cutoff, only wait while the
+    # original published proof can independently remain valid at consumers.
+    now_ns = time.monotonic_ns()
+    selected_stamp = int(samples[-1].logMonoTime) if samples else getattr(self, 'car_state_retained_source_ns', 0)
+    if (not invalid and len(samples) == initial_count and selected_stamp > 0 and
+        now_ns - selected_stamp > INTENT_MAX_AGE_NS):
+      wait_until_ns = now_ns + self.event_input_wait_ns(CS, now_ns)
+      poller = getattr(self, 'car_state_poller', None)
+      # Validation itself can consume the remaining lease. Never poll from its
+      # earlier clock; the original absolute deadline still bounds this wait.
+      wait_ns = max(0, wait_until_ns - time.monotonic_ns())
+      if poller is not None and wait_ns >= 1_000_000 and poller.poll(wait_ns // 1_000_000):
+        for _ in range(32 - len(samples)):
+          following = messaging.recv_one_or_none(self.car_state_sock)
+          if following is None:
+            break
+          invalid |= int(following.logMonoTime) <= previous_stamp or not following.valid
+          previous_stamp = max(previous_stamp, int(following.logMonoTime))
+          samples.append(following)
+        else:
+          invalid = True
+    self.car_state_envelopes = tuple(samples)
+    self.car_state_queue_invalid = invalid
+    self.car_state_last_received_ns = previous_stamp
+    self.car_state_samples = tuple((sample.carState, bool(sample.valid)) for sample in samples)
+    if samples:
+      latest = samples[-1]
+      self.aol_car_state_log_ns = 0 if invalid else int(latest.logMonoTime)
+      self.conditional_car_state_valid = bool(latest.valid) and not invalid
+      self.aol_expired_healthy_source = False
+      CS = latest.carState
     return CS
 
   def update_alerts(self, CS):
@@ -965,6 +1074,16 @@ class SelfdriveD:
         (not source_clock_scoped or self.aol_car_state_log_ns > 0 or
          reason in ('transportPause', 'availabilityPause', 'critical')))
       self.pm.send('aolAxisState', axis_msg)
+      self.aol_published_input_proof = None
+      self.aol_published_input_native = None
+      if (source_clock_scoped and reason == 'none' and axis_msg.valid and axis.qualified and
+          axis.nativeAcknowledged and (axis.lateralActive or axis.longitudinalActive) and
+          0 < axis.sourceCarStateMonoTime <= now_ns and
+          now_ns - axis.sourceCarStateMonoTime <= INTENT_MAX_AGE_NS):
+        self.aol_published_input_proof = (str(axis.sessionId), int(axis.sourceCarStateMonoTime),
+          now_ns, int(axis.validUntilMonoTime), str(axis.intentProducerSessionId),
+          int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal))
+        self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
     if not defer_events:
       if ce_send is not None:
         self.pm.send('onroadEvents', ce_send)
@@ -1143,7 +1262,13 @@ class SelfdriveD:
   def step(self):
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     CS = self.data_sample()
-    self.update_events(CS)
+    self.event_car_state = CS
+    self.event_input_refresh_pending = True
+    try:
+      self.update_events(CS)
+    finally:
+      self.event_input_refresh_pending = False
+    CS = self.event_car_state
     if len(getattr(self, 'car_state_samples', ())) > 1 and any(self.events.contains(kind) for kind in (
         ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
       # A queued enable cannot override a cancellation or pedal edge in this batch.
@@ -1159,6 +1284,7 @@ class SelfdriveD:
       if native is None and self.initialized:
         lost_active_aol = self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active
         self.events.add(EventName.controlsMismatch)
+    self.aol_decision_native = native
     if self.aol_replay:
       previous_intent = getattr(self, 'aol_last_intent', None)
       source_pair = intent_companion.samples.get(self.aol_car_state_log_ns) if intent_companion is not None else None

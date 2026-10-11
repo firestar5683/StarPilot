@@ -477,6 +477,10 @@ class TransportPauseFeedback:
         self.sequence, self.signature = int(axis.sequence), signature
         return False
       if self.retention_started_ns:
+        # This unmatched episode terminates fail closed. Leave failure set;
+        # only the existing healthy, unlatched baseline may clear it later.
+        self.retention_started_ns = self.retention_event_ns = 0
+        self.retention_verified = False
         self.failed = True
         return True
       if reason != 'availabilityPause' and not availability_only(sm['onroadEvents']):
