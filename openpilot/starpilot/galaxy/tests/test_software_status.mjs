@@ -438,6 +438,7 @@ assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canRo
 
 // Real stage progress remains indeterminate until measured numeric progress exists.
 assert.equal(softwareProgress(updater), null)
+assert.equal(softwareProgress(updater, {progress: {stage: null, detail: "", percent: null}}), null)
 assert.deepEqual(softwareProgress({...updater, state: "finalizing update..."}),
   {active: true, failed: false, percent: null, label: "Finalizing update", detail: ""})
 assert.equal(softwareProgress({...updater, state: "downloading..."}, {progress: {stage: "Downloading", detail: "", percent: 37}}).percent, 37)

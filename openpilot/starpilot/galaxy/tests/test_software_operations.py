@@ -116,6 +116,11 @@ class SoftwareOperationsTest(unittest.TestCase):
         self.assertIsNone(view['request'])
         self.assertEqual(self.process.sent, [])
 
+  def test_idle_is_not_reported_as_update_progress(self):
+    view = self.owner.snapshot(include_history=False)
+    self.assertIsNone(view["progress"]["stage"])
+    self.assertEqual(view["progress"]["detail"], "")
+
   def test_normal_finalization_completes_only_after_idle_success(self):
     for failed in (False, True):
       with self.subTest(failed=failed):

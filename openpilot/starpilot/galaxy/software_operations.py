@@ -323,7 +323,9 @@ class SoftwareOperations:
       elif pending or not updater_idle:
         reason = "Updater is busy"
       fast = status["updater"].get("fast")
-      stage = fast["stage"] if fast and status["updater"]["state"] == "updating..." else status["updater"]["state"] or "unknown"
+      stage = fast["stage"] if fast and status["updater"]["state"] == "updating..." else status["updater"]["state"]
+      if stage == "idle":
+        stage = None
       detail = fast["detail"] if fast and status["updater"]["state"] == "updating..." else ""
       if not process and not updater_idle:
         stage = "unavailable"

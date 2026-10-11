@@ -777,15 +777,19 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if self.require_session():
             self.json(200, result)
       elif path == '/api/software/status':
-        if not self.require_session():
-          return
+        identity = self.settings_session()
+        if identity is None:
+          if not self.require_session():
+            return
         try:
           result = software_snapshot(include_history=parse_qs(urlsplit(self.path).query).get('history') != ['0'])
         except (SoftwareUnavailable, SoftwareOperationError, OSError):
           self.json(503, {'error': 'Software status is unavailable'})
         else:
-          if self.require_session():
+          if self.settings_session() == identity:
             self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
       elif path == '/api/bluetooth/status':
         if not self.require_session():
           return
