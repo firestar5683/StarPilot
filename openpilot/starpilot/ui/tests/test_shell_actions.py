@@ -153,12 +153,20 @@ class ShellActionTests(unittest.TestCase):
           session.render(ShellMode.SETTINGS, rl.Rectangle(0, 0, 2160, 1080))
           drag = getattr(session.input, input_name).drag_x
           self.assertEqual(shell_render.call_args.kwargs["drag_x"], drag)
+          self.assertEqual(getattr(session.view, state_name).pressed_action, getattr(session.input, input_name).pressed_action)
           feature_render.assert_called_with(getattr(session.view, state_name), getattr(snapshot, state_name), drag)
       feature_render.reset_mock()
       for destination in (Destination.STAR, Destination.DEVICE):
         session.snapshot = Mock(return_value=replace(base, selected=destination))
         session.render(ShellMode.SETTINGS, rl.Rectangle(0, 0, 2160, 1080))
         self.assertEqual(shell_render.call_args.kwargs["drag_x"], 0)
+      feature_render.assert_not_called()
+      session.profile = session.view.profile = Profile.COMPACT
+      for state_name, _, _ in panes.values():
+        setattr(session.view, state_name, None)
+      for destination in panes:
+        session.snapshot = Mock(return_value=replace(base, selected=destination))
+        session.render(ShellMode.SETTINGS, rl.Rectangle(0, 0, 536, 240))
       feature_render.assert_not_called()
 
   def test_adapted_panels_draw_before_placed_navigation_and_notices(self):

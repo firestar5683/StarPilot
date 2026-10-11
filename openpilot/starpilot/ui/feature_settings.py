@@ -1,13 +1,14 @@
 """Large saved-feature editor inside the established Settings right pane."""
 
 from math import copysign
+from collections.abc import Callable
 import time
 
 import pyray as rl
 
 from openpilot.starpilot.ui import clip
 from openpilot.starpilot.ui.feature_settings_state import (
-  FeatureRow, FeatureSettingsState, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, boolean_value as _boolean_value,
+  FeatureRow, FeatureSettingsState, FeatureUiAction, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, boolean_value as _boolean_value,
   FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
   FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN, FEATURE_HEADER_HEIGHT,
   FEATURE_TAP_SLOP, FEATURE_FLICK_DISTANCE, FEATURE_PAGE_COUNTER_WIDTH,
@@ -16,7 +17,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
 )
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.settings_geometry import (
-  ACCENT, ACTIVE_ROW_BG, ACTIVE_ROW_BORDER, CONTROL_BG, CONTROL_BORDER, DANGER,
+  ACCENT, ACTIVE_ROW_BG, ACTIVE_ROW_BORDER, CONTROL_BG, CONTROL_BORDER, CONTROL_PRESSED_BG, DANGER,
   PANEL_BG, PANEL_BORDER, PANEL_INNER_BORDER, ROW_SEPARATOR, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
   draw_aether_toggle, draw_rounded_fill, draw_rounded_stroke, draw_settings_header, elide_text,
 )
@@ -44,6 +45,7 @@ class FeatureSettingsView:
     if fonts.profile != Profile.LARGE:
       raise ValueError("Large profile only")
     self.fonts = fonts
+    self.pressed_action: Callable[[FeatureSettingsState], FeatureUiAction | None] = lambda _state: None
     self._last_state: FeatureSettingsState | None = None
     self._last_pull = 0.0
     self._awaiting_render = False
@@ -94,6 +96,7 @@ class FeatureSettingsView:
     return rows, pull_x, cover
 
   def render(self, state: FeatureSettingsState, drag_x: float = 0.0) -> None:
+    pressed = self.pressed_action(state)
     left = 520 if state.sidebar_expanded else 20
     row_top = feature_row_top(state)
     shell = rl.Rectangle(left - 10, 10, 2160 - left, 1060)
@@ -111,8 +114,8 @@ class FeatureSettingsView:
       self.fonts.draw(subtitle, FontRole.NORMAL, DETAIL_SIZE, left + 55, 116 - top, TEXT_SECONDARY)
     if len(state.rows) == 1 and (buttons := value_buttons(state, state.rows[0], row_top)):
       self._page_frame(state, 0, False)
-      self._value_row(state, state.rows[0], rl.Rectangle(*value_editor_rect(state)), buttons)
-      self._value_done(state)
+      self._value_row(state, state.rows[0], rl.Rectangle(*value_editor_rect(state)), buttons, pressed)
+      self._value_done(state, pressed)
       return
     can_page = drag_x != 0 and feature_scroll(state.scroll, 1 if drag_x < 0 else -1, len(state.rows)) != state.scroll
     rows_state, pull_x, cover = self._page_frame(state, feature_pull(drag_x, can_page), drag_x != 0)
@@ -174,8 +177,9 @@ class FeatureSettingsView:
           if row.actions:
             for index, (text, enabled) in enumerate(row.actions):
               button = rl.Rectangle(feature_action_left(row) + index * (action.width + 16), action.y, action.width, action.height)
-              draw_rounded_fill(button, CONTROL_BG)
-              draw_rounded_stroke(button, CONTROL_BORDER)
+              active = row.available and enabled and pressed == FeatureUiAction("action", row, index)
+              draw_rounded_fill(button, CONTROL_PRESSED_BG if active else CONTROL_BG)
+              draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
               self._center(self._elide(text, FontRole.MEDIUM, DETAIL_SIZE, button.width - 24), DETAIL_SIZE, button,
                            TEXT_PRIMARY if row.available and enabled else TEXT_MUTED)
           elif row.page:
@@ -193,8 +197,9 @@ class FeatureSettingsView:
               action = "Restore…" if row.key.startswith("long_repair:") else "Reset…"
             button = rl.Rectangle(FEATURE_CONTROL_LEFT, y + FEATURE_ACTION_MARGIN, FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT,
                                 FEATURE_ROW_HEIGHT - 2 * FEATURE_ACTION_MARGIN)
-            draw_rounded_fill(button, CONTROL_BG)
-            draw_rounded_stroke(button, CONTROL_BORDER)
+            active = row.available and pressed == FeatureUiAction("reset", row)
+            draw_rounded_fill(button, CONTROL_PRESSED_BG if active else CONTROL_BG)
+            draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
             self._center(action, DETAIL_SIZE, button, DANGER if row.available else TEXT_MUTED)
           elif value is not None:
             action = rl.Rectangle(FEATURE_CONTROL_LEFT, y + 18, FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT, FEATURE_ROW_HEIGHT - 36)
@@ -204,8 +209,9 @@ class FeatureSettingsView:
                                available=row.available, seed_id=f"{state.page}:{row.key}")
           elif row.available:
             if row.repair_value:
-              draw_rounded_fill(action, CONTROL_BG)
-              draw_rounded_stroke(action, CONTROL_BORDER)
+              active = pressed == FeatureUiAction("change", row)
+              draw_rounded_fill(action, CONTROL_PRESSED_BG if active else CONTROL_BG)
+              draw_rounded_stroke(action, ACCENT if active else CONTROL_BORDER)
               text = f"Set {row.repair_value}"
               if self.fonts.measure(text, FontRole.MEDIUM, DETAIL_SIZE).width <= action.width - 24:
                 self._center(text, DETAIL_SIZE, action)
@@ -219,8 +225,9 @@ class FeatureSettingsView:
                            rl.Rectangle(action.x, y + 12, action.width, FEATURE_BUTTON_TOP - 24), role=FontRole.NORMAL)
               for x, text in ((1760, "-"), (1940, "+")):
                 button = rl.Rectangle(x, y + FEATURE_BUTTON_TOP, 155, FEATURE_BUTTON_HEIGHT)
-                draw_rounded_fill(button, CONTROL_BG)
-                draw_rounded_stroke(button, CONTROL_BORDER)
+                active = pressed == FeatureUiAction("change", row, -1 if text == "-" else 1)
+                draw_rounded_fill(button, CONTROL_PRESSED_BG if active else CONTROL_BG)
+                draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
                 self._center(text, DETAIL_SIZE, button)
       finally:
         if pull_x:
@@ -231,14 +238,15 @@ class FeatureSettingsView:
     finally:
       clip.end_scissor_mode()
     if state.editor:
-      self._value_done(state)
+      self._value_done(state, pressed)
       return
     can_page = (state.scroll > 0, state.scroll + FEATURE_VISIBLE_ROWS < len(state.rows))
     for label, bounds, enabled in zip(("Previous", "Next"), feature_footer_buttons(state), can_page, strict=True):
       button = rl.Rectangle(*bounds)
+      active = enabled and pressed == FeatureUiAction("scroll", direction=-1 if label == "Previous" else 1)
       if enabled:
-        draw_rounded_fill(button, CONTROL_BG)
-      draw_rounded_stroke(button, CONTROL_BORDER)
+        draw_rounded_fill(button, CONTROL_PRESSED_BG if active else CONTROL_BG)
+      draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
       self._center(label, DETAIL_SIZE, button, TEXT_PRIMARY if enabled else TEXT_MUTED)
     current_page = state.scroll // FEATURE_VISIBLE_ROWS + 1
     total_pages = max(1, (len(state.rows) + FEATURE_VISIBLE_ROWS - 1) // FEATURE_VISIBLE_ROWS)
@@ -256,13 +264,14 @@ class FeatureSettingsView:
       top, bottom = self.fonts.vertical_ink(text, role, size)
       self.fonts.draw(text, role, size, x, y + (FEATURE_ROW_HEIGHT - top - bottom) / 2, color)
 
-  def _value_done(self, state) -> None:
+  def _value_done(self, state, pressed) -> None:
     button = rl.Rectangle(*value_done_rect(state))
-    draw_rounded_fill(button, VALUE_DONE_BG, radius_px=32)
-    draw_rounded_stroke(button, VALUE_SELECTED_BORDER, radius_px=32)
+    active = pressed == FeatureUiAction("back")
+    draw_rounded_fill(button, CONTROL_PRESSED_BG if active else VALUE_DONE_BG, radius_px=32)
+    draw_rounded_stroke(button, ACCENT if active else VALUE_SELECTED_BORDER, radius_px=32)
     self._center("Done", 44, button)
 
-  def _value_row(self, state, row, editor, buttons) -> None:
+  def _value_row(self, state, row, editor, buttons, pressed) -> None:
     value = value_text(row)
     self._center("Saved level" if row.unit == "%" else "Saved value", DETAIL_SIZE, rl.Rectangle(editor.x, editor.y, editor.width, 52),
                  TEXT_SECONDARY, role=FontRole.NORMAL)
@@ -270,13 +279,17 @@ class FeatureSettingsView:
                  ACCENT if row.available else TEXT_MUTED, role=FontRole.SEMI_BOLD)
     self._center(state.save_hint if row.available else "Editing unavailable", 32,
                  rl.Rectangle(editor.x, editor.y + 580, editor.width, 44), TEXT_SECONDARY, role=FontRole.NORMAL)
-    for value, bounds, enabled in buttons:
+    for index, (value, bounds, enabled) in enumerate(buttons):
       button = rl.Rectangle(*bounds)
       selected = value == row.value
       step = value in ("-", "+")
       text = value if step else dict(row.presets)[value]
-      draw_rounded_fill(button, ACTIVE_ROW_BG if selected and row.available else CONTROL_BG, radius_px=32)
-      draw_rounded_stroke(button, VALUE_SELECTED_BORDER if selected and row.available else CONTROL_BORDER, radius_px=32)
+      target = FeatureUiAction("change", row, -1 if value == "-" else 1) if step else FeatureUiAction("action", row, index)
+      active = enabled and pressed == target
+      background = ACTIVE_ROW_BG if selected and row.available else CONTROL_BG
+      border = VALUE_SELECTED_BORDER if selected and row.available else CONTROL_BORDER
+      draw_rounded_fill(button, CONTROL_PRESSED_BG if active else background, radius_px=32)
+      draw_rounded_stroke(button, ACCENT if active else border, radius_px=32)
       self._center(text, 64 if step else 44, button,
                    TEXT_PRIMARY if row.available and (enabled or selected) else TEXT_MUTED)
 

@@ -24,6 +24,7 @@ ACTIVE_ROW_BG = rl.Color(139, 92, 246, 18)
 ACTIVE_ROW_BORDER = rl.Color(139, 92, 246, 44)
 CONTROL_BG = rl.Color(255, 255, 255, 10)
 CONTROL_BORDER = rl.Color(255, 255, 255, 22)
+CONTROL_PRESSED_BG = rl.color_lerp(PANEL_BG, ACCENT, 0.3)
 DANGER = rl.Color(220, 125, 138, 255)
 
 _HUD_BG_ON = rl.Color(12, 10, 18, 230)

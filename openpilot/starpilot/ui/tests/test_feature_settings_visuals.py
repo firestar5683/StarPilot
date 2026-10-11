@@ -11,7 +11,8 @@ import pyray as rl
 from openpilot.starpilot.ui import clip, feature_settings as view, settings_geometry as geometry
 from openpilot.starpilot.ui.feature_settings_state import (
   FeatureInput, FeatureRow, FeatureSettingsState, FeatureUiAction, FEATURE_ROW_TOP, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
-  feature_scroll, feature_row_top, feature_page_counter_left, FEATURE_PAGE_COUNTER_WIDTH, value_buttons, value_editor_rect, value_done_rect,
+  feature_scroll, feature_row_top, feature_page_counter_left, FEATURE_PAGE_COUNTER_WIDTH, feature_footer_buttons,
+  value_buttons, value_editor_rect, value_done_rect,
 )
 from openpilot.starpilot.ui.presentation import FontRole, Profile
 from openpilot.starpilot.ui.runtime_app import SOUND_PRESETS
@@ -24,6 +25,62 @@ def fake_fonts():
 
 
 class FeatureVisualTests(unittest.TestCase):
+  def test_buttons_share_purple_feedback_without_changing_disabled_or_selected_controls(self):
+    self.drawing()
+    action = FeatureRow("wifi:test", "Network", "Available", available=True,
+                        actions=(("CONNECT", True), ("Forget", True), ("Disabled", False)))
+    number = FeatureRow("number", "Level", "50", available=True, step=5, minimum=0, maximum=100)
+    preset = replace(number, presets=(("25", "25%"), ("50", "50%")), unit="%")
+    for expanded in (True, False):
+      editor = FeatureSettingsState(rows=(preset,), editor=True, sidebar_expanded=expanded)
+      editor_buttons = value_buttons(editor, preset, feature_row_top(editor))
+      done = value_done_rect(editor)
+      cases = [(FeatureSettingsState(rows=(action,), sidebar_expanded=expanded), (1500, 189)),
+               (FeatureSettingsState(rows=(FeatureRow("pip:reset", "Reset", "", available=True),), sidebar_expanded=expanded), (1930, 189)),
+               (FeatureSettingsState(rows=(replace(number, repair_value="25"),), sidebar_expanded=expanded), (1930, 189)),
+               (FeatureSettingsState(rows=(number,), sidebar_expanded=expanded), (1800, 220)),
+               (FeatureSettingsState(rows=(number,), sidebar_expanded=expanded), (2000, 220)),
+               (editor, (done[0] + done[2] / 2, done[1] + done[3] / 2))]
+      cases.extend((editor, (x + width / 2, y + height / 2)) for _, (x, y, width, height), enabled in editor_buttons if enabled)
+      for scroll, direction in ((0, 1), (5, -1)):
+        state = FeatureSettingsState(rows=(number,) * 7, scroll=scroll, sidebar_expanded=expanded)
+        x, y, width, height = feature_footer_buttons(state)[0 if direction == -1 else 1]
+        cases.append((state, (x + width / 2, y + height / 2)))
+      for state, point in cases:
+        with self.subTest(expanded=expanded, point=point, row=state.rows[0]):
+          touch = FeatureInput(Mock())
+          touch.press(*point, state)
+          self.assertIsNotNone(touch.pressed_action(state), (state, point))
+          renderer = view.FeatureSettingsView(fake_fonts())
+          renderer.pressed_action = touch.pressed_action
+          rl.draw_rectangle_rounded.reset_mock()
+          rl.draw_rectangle_rounded_lines_ex.reset_mock()
+          renderer.render(state)
+          fills = [call for call in rl.draw_rectangle_rounded.call_args_list if call.args[-1] == geometry.CONTROL_PRESSED_BG]
+          borders = [call for call in rl.draw_rectangle_rounded_lines_ex.call_args_list if call.args[-1] == geometry.ACCENT]
+          self.assertEqual(len(fills), 1)
+          self.assertEqual(len(borders), 1)
+          bounds = fills[0].args[0]
+          self.assertTrue(bounds.x <= point[0] <= bounds.x + bounds.width and bounds.y <= point[1] <= bounds.y + bounds.height)
+          touch.cancel()
+          rl.draw_rectangle_rounded.reset_mock()
+          renderer.render(state)
+          self.assertFalse(any(call.args[-1] == geometry.CONTROL_PRESSED_BG for call in rl.draw_rectangle_rounded.call_args_list))
+      state = FeatureSettingsState(rows=(action,), sidebar_expanded=expanded)
+      renderer = view.FeatureSettingsView(fake_fonts())
+      renderer.pressed_action = Mock(return_value=FeatureUiAction("action", action, 2))
+      rl.draw_rectangle_rounded.reset_mock()
+      renderer.render(state)
+      self.assertFalse(any(call.args[-1] == geometry.CONTROL_PRESSED_BG for call in rl.draw_rectangle_rounded.call_args_list))
+      for state, point in ((FeatureSettingsState(rows=(action,), sidebar_expanded=expanded), (1500, 189)),
+                           (editor, (editor_buttons[1][1][0] + 20, editor_buttons[1][1][1] + 20))):
+        renderer = view.FeatureSettingsView(fake_fonts())
+        renderer.pressed_action = Mock(return_value=FeatureInput.target(*point, state))
+        disabled = replace(state, rows=(replace(state.rows[0], available=False),))
+        rl.draw_rectangle_rounded.reset_mock()
+        renderer.render(disabled)
+        self.assertFalse(any(call.args[-1] == geometry.CONTROL_PRESSED_BG for call in rl.draw_rectangle_rounded.call_args_list))
+
   def test_system_value_units_and_confirmation_hint_share_drawn_touch_bounds(self):
     from openpilot.starpilot.ui.runtime_app import SYSTEM_PRESETS
     from openpilot.starpilot.ui.power_owner import HOUR_CHOICES, VOLT_CHOICES

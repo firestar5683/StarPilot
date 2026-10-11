@@ -22,6 +22,7 @@ class StarPilotSettingsAdapterLarge(Widget):
     self.panel, self.title, self.on_back = panel, title, on_back
     self.view = FeatureSettingsView(fonts)
     self.input = FeatureInput(self._emit)
+    self.view.pressed_action = lambda state: self.input.pressed_action(state) if self.active and self.enabled else None
     self.scroll = 0
     self.active = False
     self.sidebar_expanded = True

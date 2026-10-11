@@ -58,6 +58,18 @@ class NativeSettingsPageTests(unittest.TestCase):
       pane._render(rl.Rectangle(0, 0, 2160, 1080))
       self.assertEqual(render.call_args.args[1], 0)
 
+  def test_native_panels_forward_feedback_and_clear_it_when_hidden_or_disabled(self):
+    pane = self.panel([item("Update", button_action())])
+    state = pane.snapshot()
+    pos = MousePos(1930, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT / 2)
+    pane._handle_mouse_press(pos)
+    self.assertEqual(pane.view.pressed_action(state), FeatureUiAction("action", state.rows[0], 0))
+    pane.set_enabled(False)
+    self.assertIsNone(pane.view.pressed_action(state))
+    pane.hide_event()
+    pane.show_event()
+    self.assertIsNone(pane.view.pressed_action(pane.snapshot()))
+
   def test_press_during_transition_finishes_it_without_activating_replaced_rows(self):
     rows = [item(str(index), button_action()) for index in range(7)]
     pane = self.panel(rows)

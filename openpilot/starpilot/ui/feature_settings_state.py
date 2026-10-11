@@ -244,8 +244,20 @@ class FeatureInput:
   def __init__(self, emit: Callable[[FeatureUiAction], None]):
     self.emit = emit
     self.held: tuple[float, float, FeatureUiAction | None, int, str, bool] | None = None
+    self._released: tuple[float, float, FeatureUiAction | None, int, str, bool] | None = None
     self._samples: deque[tuple[float, float]] = deque(maxlen=16)
     self._drag_x = 0.0
+
+  def pressed_action(self, state: FeatureSettingsState) -> FeatureUiAction | None:
+    """Keep taps completed between renders visible for one frame."""
+    held = self.held or self._released
+    self._released = None
+    if held is not None:
+      x, y, action, scroll, page, sidebar = held
+      if ((scroll, page, sidebar) == (state.scroll, state.page, state.sidebar_expanded) and
+          self.target(x, y, state) == action):
+        return action
+    return None
 
   @property
   def drag_x(self) -> float:
@@ -371,6 +383,7 @@ class FeatureInput:
 
   def release(self, x: float, y: float, state: FeatureSettingsState, now: float | None = None) -> None:
     self.move(x, y, state)
+    held = self.held
     action = None
     if self.held is not None:
       px, py, action, *_ = self.held
@@ -383,10 +396,12 @@ class FeatureInput:
         action = FeatureUiAction("scroll", direction=direction)
     self.cancel()
     if action is not None:
+      self._released = held
       self.emit(action)
 
   def cancel(self) -> None:
     self.held = None
+    self._released = None
     self._samples.clear()
     self._drag_x = 0.0
 

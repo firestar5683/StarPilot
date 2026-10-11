@@ -1268,6 +1268,8 @@ class StarShellSession:
       external = (self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and
                   snapshot.selected in NATIVE_SETTINGS_PANELS and self.settings_layer is not None)
       pane = _FEATURE_SETTINGS_PANES.get(snapshot.selected)
+      if pane and self.profile == Profile.LARGE:
+        getattr(self.view, pane[0]).pressed_action = getattr(self.input, pane[2]).pressed_action
       drag_x = getattr(self.input, pane[2]).drag_x if pane else 0.0
       self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot, drag_x=drag_x)
       if mode == ShellMode.ONROAD:
