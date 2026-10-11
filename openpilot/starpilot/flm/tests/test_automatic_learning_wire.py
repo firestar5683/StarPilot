@@ -126,13 +126,14 @@ class TestAutomaticLearningWire(unittest.TestCase):
       old = historical.StarPilotCarParams.new_message(
         alternativeExperience=123, flags=0xffffffff, canUsePedal=True,
         safetyConfigs=[{'safetyParam': 65535}], redneckCruiseAvailable=True)
+      old_bytes = old.to_bytes()
       readers = []
       for tick in range(100):
         now = integration.NOW + tick * 10_000_000
         integration.feed(controls, now, tick)
         if tick % 25 == 0:
           event = messaging.new_message(SERVICE, valid=True)
-          with custom.StarPilotCarParams.from_bytes(old.to_bytes()) as envelope:
+          with custom.StarPilotCarParams.from_bytes(old_bytes) as envelope:
             event.autoSteeringLearning = envelope
           reader = messaging.log_from_bytes(event.to_bytes())
           readers.append(reader)
@@ -168,13 +169,14 @@ class TestAutomaticLearningWire(unittest.TestCase):
       # Use the genuinely admitted policy, so only the changed wire layout denies the fit.
       self.assertEqual(str(old.status), 'qualifiedFit')
       self.assertEqual(old.identity.to_dict(), identity)
+      old_bytes = old.to_bytes()
       readers = []
       for tick in range(50):
         now = integration.NOW + tick * 10_000_000
         integration.feed(controls, now, tick)
         if tick % 25 == 0:
           event = messaging.new_message(SERVICE, valid=True)
-          with custom.StarPilotCarParams.from_bytes(old.to_bytes()) as envelope:
+          with custom.StarPilotCarParams.from_bytes(old_bytes) as envelope:
             self.assertEqual(envelope.learning.version, 0)
             event.autoSteeringLearning = envelope
           reader = messaging.log_from_bytes(event.to_bytes())
