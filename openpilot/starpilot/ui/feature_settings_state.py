@@ -239,7 +239,7 @@ class FeatureUiAction:
 
 
 class FeatureInput:
-  """One touch: movement cancels its tap; a horizontal body swipe pages on release."""
+  """One touch: movement cancels its tap; a horizontal swipe pages on release."""
 
   def __init__(self, emit: Callable[[FeatureUiAction], None]):
     self.emit = emit
@@ -252,9 +252,11 @@ class FeatureInput:
     return self._drag_x
 
   @staticmethod
-  def _in_body(x: float, y: float, state: FeatureSettingsState) -> bool:
-    left = 520 if state.sidebar_expanded else 20
-    return left + 25 <= x <= 2125 and feature_row_top(state) <= y < feature_row_top(state) + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT
+  def _in_body(x: float, y: float, state: FeatureSettingsState, *, include_sidebar: bool = False) -> bool:
+    left = (520 if state.sidebar_expanded else 20) + 25
+    if include_sidebar and state.sidebar_expanded:
+      left = 0
+    return left <= x <= 2125 and feature_row_top(state) <= y < feature_row_top(state) + FEATURE_VISIBLE_ROWS * FEATURE_ROW_HEIGHT
 
   @staticmethod
   def target(x: float, y: float, state: FeatureSettingsState) -> FeatureUiAction | None:
@@ -318,7 +320,8 @@ class FeatureInput:
   def press(self, x: float, y: float, state: FeatureSettingsState) -> None:
     self.cancel()
     target = self.target(x, y, state)
-    self.held = (x, y, target, state.scroll, state.page, state.sidebar_expanded) if target is not None or self._in_body(x, y, state) else None
+    self.held = ((x, y, target, state.scroll, state.page, state.sidebar_expanded)
+                 if target is not None or self._in_body(x, y, state, include_sidebar=True) else None)
 
   def cancel_tap(self) -> None:
     """Suppress the held control action while preserving the pagination gesture."""
@@ -334,15 +337,16 @@ class FeatureInput:
         return
       dx, dy = abs(x - px), abs(y - py)
       moved = max(dx, dy) > FEATURE_TAP_SLOP
-      body = self._in_body(px, py, state)
-      # Keep tracking horizontal swipes that started in the body.
-      if body and (not self._in_body(px, y, state) or (moved and dy > dx)):
+      body = self._in_body(px, py, state, include_sidebar=True)
+      # Keep horizontal tracking across the sidebar boundary.
+      if body and (not self._in_body(px, y, state, include_sidebar=True) or (moved and dy > dx)):
         self.cancel()
         return
       if action is not None and (moved or self.target(x, y, state) != action):
         self.held = (px, py, None, scroll, page, sidebar) if body else None
       signed_dx = x - px
-      self._drag_x = signed_dx if body and dx > FEATURE_TAP_SLOP and dx >= 2 * dy else 0.0
+      can_drag = body and (self._in_body(px, py, state) or self._in_body(x, y, state))
+      self._drag_x = signed_dx if can_drag and dx > FEATURE_TAP_SLOP and dx >= 2 * dy else 0.0
       if body and now is not None:
         if self._samples and now <= self._samples[-1][0]:
           self._samples.clear()
@@ -373,7 +377,8 @@ class FeatureInput:
       dx, dy = x - px, abs(y - py)
       direction = 1 if dx < 0 else -1
       swipe = abs(dx) >= FEATURE_SWIPE_DISTANCE or (abs(dx) >= FEATURE_FLICK_DISTANCE and self._is_flick(px, dx, now))
-      if (self._in_body(px, py, state) and swipe and abs(dx) >= 2 * dy and
+      if (self._in_body(px, py, state, include_sidebar=True) and
+          (self._in_body(px, py, state) or self._in_body(x, y, state)) and swipe and abs(dx) >= 2 * dy and
           feature_scroll(state.scroll, direction, len(state.rows)) != state.scroll):
         action = FeatureUiAction("scroll", direction=direction)
     self.cancel()

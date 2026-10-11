@@ -50,6 +50,13 @@ class StarPilotSettingsAdapterLarge(Widget):
       rect = rl.Rectangle(self.origin[0] + left, self.origin[1] + 10, 2140 - left, 1060)
     return super().render(rect)
 
+  @property
+  def _hit_rect(self):
+    rect = self.rect
+    if self.sidebar_expanded:
+      rect = rl.Rectangle(self.origin[0], rect.y, 2140, rect.height)
+    return rect if self._parent_rect is None else rl.get_collision_rec(rect, self._parent_rect)
+
   def _update_state(self):
     self.panel._update_state()
     if isinstance(self.panel, NetworkUI):
@@ -141,7 +148,8 @@ class StarPilotSettingsAdapterLarge(Widget):
     self._touch_time = None
     state = self.snapshot()
     x, y = self._position(pos)
-    block_tap = self.view.reset(state) and FeatureInput._in_body(x, y, state)
+    block_tap = (x >= (520 if state.sidebar_expanded else 20) and self.view.reset(state) and
+                 FeatureInput._in_body(x, y, state))
     self.input.press(x, y, state)
     if block_tap:
       self.input.cancel_tap()

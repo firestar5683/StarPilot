@@ -24,6 +24,40 @@ def make_feature_view(profile: Profile):
 
 
 class ShellActionTests(unittest.TestCase):
+  def test_sidebar_swipes_page_each_feature_pane_and_preserve_navigation_taps(self):
+    from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
+    from openpilot.starpilot.ui.settings_state import SettingsActionKind
+
+    rows = (FeatureRow("action", "Action", "", actions=(("OPEN", True),), available=True),) * 7
+    base = ShellSnapshot(ShellMode.SETTINGS, reference_state(), SettingsState(),
+                         OnroadState(False, False, None, None, SpeedLimitObservation()))
+    for destination, pane in ((Destination.DRIVING_CONTROLS, "features"), (Destination.SOUNDS, "sounds"),
+                               (Destination.APPEARANCE, "appearance"), (Destination.SYSTEM, "display"),
+                               (Destination.DRIVING_MODEL, "models")):
+      with self.subTest(destination=destination):
+        snapshot = replace(base, selected=destination, **{pane: FeatureSettingsState(rows=rows, scroll=5)})
+        requests = []
+        touch = ShellInput(Profile.LARGE, requests.append)
+        touch.press(200, 450, 1, snapshot)
+        touch.move(900, 450, 1.05, snapshot)
+        touch.release(900, 450, 1.1, snapshot)
+        touch.release(900, 450, 1.1, snapshot)
+        self.assertEqual([(r.source, r.action.kind, r.action.direction) for r in requests], [(pane, "scroll", -1)])
+        for end in ((220, 470), (350, 450)):
+          requests.clear()
+          touch.press(200, 450, 2, snapshot)
+          touch.move(*end, 2.05, snapshot)
+          self.assertEqual(getattr(touch, pane).drag_x, 0)
+          touch.release(*end, 2.1, snapshot)
+          self.assertEqual(len(requests), 1)
+          self.assertEqual(requests[0].action.kind, SettingsActionKind.REQUEST_DESTINATION)
+          self.assertEqual(requests[0].action.destination.destination, Destination.DEVICE)
+        requests.clear()
+        touch.press(200, 450, 3, snapshot)
+        touch.move(900, 450, 3.05, replace(snapshot, selected=Destination.STAR))
+        touch.release(900, 450, 3.1, snapshot)
+        self.assertFalse(requests)
+
   def test_runtime_transition_interruptions_preserve_row_bindings_for_every_feature_pane(self):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState

@@ -225,7 +225,12 @@ class NativeSettingsPageTests(unittest.TestCase):
                (900, (outside,), 600, 0, 5),  # reenter on release
                (1900, (2145,), 2145, 5, 0),
                (edge + 15, (edge - 35,), edge - 35, 0, 0),  # short drift
-               (outside, (900,), 900, 0, 0),  # starts outside
+               (outside, (900,), 900, 0, 0),  # first page
+               (outside, (600, 900), 900, 5, 0 if width == 1560 else 5),
+               (outside, (), 900, 5, 0 if width == 1560 else 5),  # enter on release
+               (outside, (900,), outside, 5, 5),  # finish in sidebar
+               (outside, (900,), 2145, 5, 5),  # finish beyond panel
+               (edge - 26, (edge + 15, edge + 54), edge + 54, 5, 0 if width == 1560 else 5),  # fast entry flick
                (edge + 60, (edge + 25, edge - 10, edge - 45), edge - 45, 0, 5))  # fast flick
       for start, moves, end, initial, expected in cases:
         with self.subTest(width=width, start=start, end=end, moves=moves):
@@ -234,7 +239,8 @@ class NativeSettingsPageTests(unittest.TestCase):
           pane.scroll = initial
           with (patch.object(pane, '_render'), patch.object(gui_app, '_show_touches', False),
                 patch('openpilot.system.ui.widgets.device', NS(awake=True)),
-                patch.object(gui_app, '_mouse_events', []), patch.object(gui_app, 'push_widget') as dialog):
+                patch.object(gui_app, '_mouse_events', []), patch.object(gui_app, 'push_widget') as dialog,
+                patch.object(pane.view, 'reset', wraps=pane.view.reset) as reset):
             pane.render(rl.Rectangle(left + 40, 55, width, 1030))
             positions = (start, *moves, end)
             for index, x in enumerate(positions):
@@ -245,9 +251,35 @@ class NativeSettingsPageTests(unittest.TestCase):
                 pane.render()
             self.assertEqual(pane.scroll, expected)
             self.assertIsNone(pane.input.held)
+            if start < (520 if width == 1560 else 20):
+              reset.assert_not_called()
             dialog.assert_not_called()
           for row in rows:
             row.callback.assert_not_called()
+
+  def test_sidebar_swipes_respect_parent_clipping_and_widget_input_gates(self):
+    for clipped, valid, enabled, awake, slot in ((True, True, True, True, 0), (False, False, True, True, 0),
+                                                (False, True, False, True, 0), (False, True, True, False, 0),
+                                                (False, True, True, True, 1)):
+      with self.subTest(clipped=clipped, valid=valid, enabled=enabled, awake=awake, slot=slot):
+        rows = [item(str(index), button_action()) for index in range(7)]
+        pane = self.panel(rows)
+        pane.scroll = 5
+        with (patch.object(pane, '_render'), patch.object(gui_app, '_show_touches', False),
+              patch('openpilot.system.ui.widgets.device', NS(awake=awake)), patch.object(gui_app, '_mouse_events', [])):
+          pane.render(rl.Rectangle(550, 25, 1560, 1030))
+          if clipped:
+            pane.set_parent_rect(pane.rect)
+          pane.set_enabled(enabled)
+          pane.set_touch_valid_callback(lambda valid=valid: valid)
+          events = [MouseEvent(MousePos(x, 200), slot, i == 0, i == 2, i != 2, 1 + i * .025)
+                    for i, x in enumerate((400, 900, 900))]
+          with patch.object(gui_app, '_mouse_events', events):
+            pane.render()
+          self.assertEqual(pane.scroll, 5)
+          self.assertIsNone(pane.input.held)
+        for row in rows:
+          row.callback.assert_not_called()
 
   def test_widget_release_does_not_restore_a_disabled_tap_or_repeat_an_action(self):
     row = item("Update", button_action())

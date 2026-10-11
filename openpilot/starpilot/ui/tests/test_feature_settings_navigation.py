@@ -388,6 +388,19 @@ class FeatureNavigationTests(unittest.TestCase):
         controller.release(end, 200, boundary)
         self.assertFalse(actions)
 
+  def test_canceled_footer_tap_cannot_become_a_body_swipe(self):
+    for expanded in (True, False):
+      with self.subTest(expanded=expanded):
+        state = FeatureSettingsState(rows=(FeatureRow("row", "Row", ""),) * 7, scroll=5, sidebar_expanded=expanded)
+        actions = []
+        controller = FeatureInput(actions.append)
+        controller.press(900, 1015, state)
+        self.assertIsNotNone(controller.held)
+        controller.cancel_tap()
+        controller.release(1800, 800, state)
+        self.assertFalse(actions)
+        self.assertIsNone(controller.held)
+
   def test_flicks_use_recent_movement_and_reject_noise_pauses_and_reversals(self):
     row = FeatureRow("", "Child", "", page="child", available=True)
     cases = (
@@ -404,7 +417,7 @@ class FeatureNavigationTests(unittest.TestCase):
       ("duplicate timestamps", ((0, 0), (0, 22), (0, 55), (0, 80)), (.01, 80), False),
       ("out of order timestamps", ((0, 0), (.02, 22), (.01, 55), (.04, 80)), (.05, 80), False),
     )
-    for scroll, start, direction in ((0, 2000, 1), (5, 1800, -1)):
+    for scroll, start, direction in ((0, 2000, 1), (5, 1800, -1), (5, 519, -1)):
       state = FeatureSettingsState(rows=(row,) * 13, scroll=scroll)
       for name, samples, release, accepted in cases:
         with self.subTest(direction=direction, gesture=name):
@@ -418,6 +431,44 @@ class FeatureNavigationTests(unittest.TestCase):
           controller.release(start - direction * distance, 200, state, now=timestamp)
           controller.release(start - direction * distance, 200, state, now=timestamp)
           self.assertEqual(actions, [FeatureUiAction("scroll", direction=direction)] if accepted else [])
+
+  def test_sidebar_swipes_require_horizontal_travel_and_a_release_in_the_body(self):
+    row = FeatureRow("action", "Action", "", actions=(("OPEN", True),), available=True)
+    for subtitle in ("", "Description"):
+      state = FeatureSettingsState(rows=(row,) * 7, scroll=5, subtitle=subtitle)
+      y = feature_row_top(state) + 80
+      cases = (((400, y), ((900, y),), True),
+               ((519, y), ((638, y),), False),  # below distance threshold
+               ((519, y), ((639, y),), True),
+               ((100, y), ((500, y),), False),  # remains in sidebar
+               ((400, y), ((900, y), (400, y)), False),
+               ((400, y), ((2145, y),), False),
+               ((400, y), ((900, y + 250),), True),  # horizontal ratio threshold
+               ((400, y), ((900, y + 251),), False),
+               ((400, y), ((400, y + 80), (900, y + 80)), False),
+               ((400, y), ((400, 80), (900, y)), False),
+               ((400, 50), ((900, y),), False),
+               ((400, 1015), ((900, y),), False),
+               ((-1, y), ((900, y),), False))
+      for start, moves, accepted in cases:
+        with self.subTest(subtitle=subtitle, start=start, moves=moves):
+          actions = []
+          controller = FeatureInput(actions.append)
+          controller.press(*start, state)
+          for position in moves:
+            controller.move(*position, state)
+          self.assertFalse(actions)
+          controller.release(*moves[-1], state)
+          controller.release(*moves[-1], state)
+          self.assertEqual(actions, [FeatureUiAction("scroll", direction=-1)] if accepted else [])
+          self.assertIsNone(controller.held)
+      for changed in (replace(state, page="child"), replace(state, scroll=0), replace(state, sidebar_expanded=False)):
+        actions = []
+        controller = FeatureInput(actions.append)
+        controller.press(400, y, state)
+        controller.move(900, y, changed)
+        controller.release(900, y, state)
+        self.assertFalse(actions)
 
   def test_flick_history_does_not_leak_into_a_new_press_or_canceled_touch(self):
     state = FeatureSettingsState(rows=(FeatureRow("", "Child", "", page="child", available=True),) * 7)
