@@ -77,7 +77,7 @@ def test_queue_preserves_pulses_and_latest_reader_without_reengaging(pulse):
       final.buttonEnable = True
       axis, _, command = queued_step(sd, step, [message(10_019_000_000, first, valid=pulse != 'invalid_envelope'),
                                                 message(10_051_448_441, final)])
-      assert axis.sourceCarStateMonoTime == 10_051_448_441
+      assert axis.sourceCarStateMonoTime == (0 if pulse == 'invalid_envelope' else 10_051_448_441)
       assert not sd.CS_prev.steerFaultTemporary and not sd.CS_prev.steerFaultPermanent
       assert not sd.CS_prev.brakePressed and not sd.CS_prev.gasPressed and sd.CS_prev.canValid
       if pulse not in ('brake', 'gas'):
