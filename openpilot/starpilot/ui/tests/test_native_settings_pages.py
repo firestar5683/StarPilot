@@ -216,6 +216,60 @@ class NativeSettingsPageTests(unittest.TestCase):
       for row in rows:
         row.callback.assert_not_called()
 
+  def test_widget_swipes_cross_panel_boundaries_without_activating_rows(self):
+    for width, left in ((1560, 550), (2060, 50)):
+      outside = 400 if width == 1560 else 10
+      edge = 545 if width == 1560 else 45
+      cases = ((900, (outside,), outside, 0, 5),
+               (900, (), outside, 0, 5),  # release outside without a move
+               (900, (outside,), 600, 0, 5),  # reenter on release
+               (1900, (2145,), 2145, 5, 0),
+               (edge + 15, (edge - 35,), edge - 35, 0, 0),  # short drift
+               (outside, (900,), 900, 0, 0),  # starts outside
+               (edge + 60, (edge + 25, edge - 10, edge - 45), edge - 45, 0, 5))  # fast flick
+      for start, moves, end, initial, expected in cases:
+        with self.subTest(width=width, start=start, end=end, moves=moves):
+          rows = [item(str(index), button_action()) for index in range(7)]
+          pane = self.panel(rows)
+          pane.scroll = initial
+          with (patch.object(pane, '_render'), patch.object(gui_app, '_show_touches', False),
+                patch('openpilot.system.ui.widgets.device', NS(awake=True)),
+                patch.object(gui_app, '_mouse_events', []), patch.object(gui_app, 'push_widget') as dialog):
+            pane.render(rl.Rectangle(left + 40, 55, width, 1030))
+            positions = (start, *moves, end)
+            for index, x in enumerate(positions):
+              released = index == len(positions) - 1
+              event = MouseEvent(MousePos(x + pane.origin[0], 200 + pane.origin[1]),
+                                 0, index == 0, released, not released, 1 + index * .025)
+              with patch.object(gui_app, '_mouse_events', [event]):
+                pane.render()
+            self.assertEqual(pane.scroll, expected)
+            self.assertIsNone(pane.input.held)
+            dialog.assert_not_called()
+          for row in rows:
+            row.callback.assert_not_called()
+
+  def test_widget_release_does_not_restore_a_disabled_tap_or_repeat_an_action(self):
+    row = item("Update", button_action())
+    pane = self.panel([row])
+    pos = MousePos(1930, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT / 2)
+    with (patch.object(pane, '_render'), patch.object(gui_app, '_show_touches', False),
+          patch('openpilot.system.ui.widgets.device', NS(awake=True)), patch.object(gui_app, '_mouse_events', [])):
+      pane.render(rl.Rectangle(550, 25, 1560, 1030))
+      with patch.object(gui_app, '_mouse_events', [MouseEvent(pos, 0, True, False, True, 1)]):
+        pane.render()
+      pane.set_enabled(False)
+      pane.render()
+      pane.set_enabled(True)
+      with patch.object(gui_app, '_mouse_events', [MouseEvent(pos, 0, False, True, False, 2)]):
+        pane.render()
+      row.callback.assert_not_called()
+      self.assertIsNone(pane.input.held)
+      for pressed, released in ((True, False), (False, True), (False, True)):
+        with patch.object(gui_app, '_mouse_events', [MouseEvent(pos, 0, pressed, released, pressed, 3)]):
+          pane.render()
+      row.callback.assert_called_once_with()
+
   def test_toggle_calls_its_native_callback_once_and_respects_displayed_value(self):
     action = ToggleAction(callback=Mock())
     row = item("Automatic updates", action)

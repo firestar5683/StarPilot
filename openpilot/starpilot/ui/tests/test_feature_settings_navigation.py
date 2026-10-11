@@ -94,7 +94,7 @@ class FeatureNavigationTests(unittest.TestCase):
     controller = FeatureInput(lambda _action: None)
     resets = (lambda: controller.cancel(), lambda: controller.press(1000, 200, state),
               lambda: controller.release(920, 200, state),
-              lambda: controller.move(10, 200, state),
+              lambda: controller.move(920, 80, state),
               lambda: controller.move(920, 200, replace(state, scroll=5)),
               lambda: controller.move(920, 200, replace(state, page="child")),
               lambda: controller.move(920, 200, replace(state, sidebar_expanded=False)))
@@ -366,7 +366,7 @@ class FeatureNavigationTests(unittest.TestCase):
                ((1500, 200), [(1620, 261)]),  # diagonal
                ((1500, 200), [(1500, 280), (1800, 280)]),  # vertical first
                ((1500, 200), [(1800, 200), (1500, 200)]),  # return to origin
-               ((1500, 200), [(10, 200), (1800, 200)]),  # leave and reenter
+               ((1500, 200), [(1500, 80), (1800, 200)]),  # leave vertically and reenter
                ((700, 50), [(1000, 50)]),  # header
                ((1000, 1015), [(1300, 1015)]),  # footer
                ((30, 580), [(330, 580)]),  # collapse handle

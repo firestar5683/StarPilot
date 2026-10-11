@@ -148,7 +148,13 @@ class StarPilotSettingsAdapterLarge(Widget):
 
   def _handle_mouse_event(self, mouse_event: MouseEvent):
     self._touch_time = mouse_event.t
-    self.input.move(*self._position(mouse_event.pos), self.snapshot(), mouse_event.t if mouse_event.left_down else None)
+    x, y = self._position(mouse_event.pos)
+    state = self.snapshot()
+    self.input.move(x, y, state, mouse_event.t if mouse_event.left_down else None)
+    if mouse_event.left_released and not (self.is_pressed and rl.check_collision_point_rec(mouse_event.pos, self._hit_rect)):
+      # Finish releases skipped by Widget without restoring canceled taps.
+      self.input.cancel_tap()
+      self.input.release(x, y, state, mouse_event.t)
 
   def _handle_mouse_release(self, pos):
     self.input.release(*self._position(pos), self.snapshot(), self._touch_time)

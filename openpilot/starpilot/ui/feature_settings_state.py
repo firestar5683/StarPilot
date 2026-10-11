@@ -335,7 +335,8 @@ class FeatureInput:
       dx, dy = abs(x - px), abs(y - py)
       moved = max(dx, dy) > FEATURE_TAP_SLOP
       body = self._in_body(px, py, state)
-      if body and (not self._in_body(x, y, state) or (moved and dy > dx)):
+      # Keep tracking horizontal swipes that started in the body.
+      if body and (not self._in_body(px, y, state) or (moved and dy > dx)):
         self.cancel()
         return
       if action is not None and (moved or self.target(x, y, state) != action):
