@@ -1151,6 +1151,7 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.enabled = sd.active = False
     sd.initialized = True
     sd.aol_replay = True
+    sd.axis_transport_required = sd.aol_replay
     sd.aol_car_state_log_ns = 0
     sd.conditional_car_state_valid = True
     sd.aol_session_id = 'drive-session'
@@ -1227,6 +1228,7 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.personality, sd.is_metric = 1, False
     sd.enabled = sd.active = False
     sd.initialized = sd.aol_replay = True
+    sd.axis_transport_required = sd.aol_replay
     sd.aol_car_state_log_ns = 0
     sd.conditional_car_state_valid = True
     sd.aol_session_id = 'drive-session'
@@ -1733,6 +1735,7 @@ class IpcAxisContractTests(unittest.TestCase):
       sd.enabled = sd.active = False
       sd.initialized = True
       sd.aol_replay = aol_enabled
+      sd.axis_transport_required = sd.aol_replay
       sd.aol_car_state_log_ns = 0
       sd.conditional_car_state_valid = True
       sd.aol_session_id = 'drive-session'
