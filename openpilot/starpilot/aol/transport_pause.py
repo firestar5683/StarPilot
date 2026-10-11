@@ -321,17 +321,24 @@ class TransportPauseFeedback:
     self.lateral_native_ns = native.observedMonoTime
     return True
 
-  def _source_availability_retention(self, sm, cp, cs, axis, stamp, now_ns, *, latched, continuity, producer):
+  def _source_availability_retention(self, sm, cp, cs, axis, stamp, now_ns, *, latched, continuity, producer, signature):
+    # Output freshness withdraws commands, not previously accepted driver intent.
+    # Missing/expired full-LONG output can retain only the exact held identity;
+    # the existing lateral-only source-retention path keeps its original guards.
+    held = bool(signature == self.signature and not self.retention_started_ns)
+    output_missing = not (sm.seen['aolAxisState'] and sm.valid['aolAxisState'] and sm.alive['aolAxisState'])
     if (not latched or self.failed or self.paused or self.pending_event or not self.session or
         cp_identity(cp) != self.cp or not continuity or
         str(axis.sessionId) != self.session or str(axis.faultSessionId) != self.session or
         str(axis.faultReason) != 'none' or not axis.qualified or not axis.nativeAcknowledged or
-        not axis.desiredLateral or not axis.lateralActive or axis.desiredLongitudinal or axis.longitudinalActive or
-        not sm.seen['aolAxisState'] or not sm.valid['aolAxisState'] or
+        not axis.desiredLateral or not axis.lateralActive or
+        (axis.desiredLongitudinal or axis.longitudinalActive) and not held or
+        (not sm.seen['aolAxisState'] or not sm.valid['aolAxisState']) and not held or
         int(axis.observedMonoTime) != stamp or not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
         not 0 <= axis.validUntilMonoTime - stamp <= AXIS_MAX_AGE_NS or
         now_ns - axis.sourceCarStateMonoTime > SAFETY_MAX_AGE_NS or
-        not (stamp - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or now_ns > axis.validUntilMonoTime) or
+        not (stamp - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or now_ns > axis.validUntilMonoTime or
+             held and output_missing) or
         not producer or getattr(axis, 'intentProducerSessionId', '') != producer or
         producer != self.availability_producer or
         int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch):
@@ -414,7 +421,7 @@ class TransportPauseFeedback:
       continuity = bool(not self.session or axis.sessionId == self.session and
                         (axis.sequence > self.sequence or axis.sequence == self.sequence and signature == self.signature))
       if self._source_availability_retention(sm, cp, cs, axis, stamp, now_ns,
-          latched=latched, continuity=continuity, producer=intent_producer_session):
+          latched=latched, continuity=continuity, producer=intent_producer_session, signature=signature):
         self.sequence, self.signature = int(axis.sequence), signature
         return False
       if not self.failed and self._availability_retention(sm, cp, cs, axis, stamp, now_ns,

@@ -231,3 +231,126 @@ def test_authority_loss_diagnostic_is_bounded_and_logged_by_params_worker():
       native_requested_lateral=False, native_allowed_lateral=False, lost_active=True,
       lost_companion=True, lost_permission=False, pause_upgraded=False)
     assert len(sd.aol_authority_reports) == 1
+
+
+@pytest.mark.parametrize('guard', [
+  'none', 'unknown', 'mutated', 'invalid', 'future', 'cache_expired', 'pair_expired', 'latest_invalid', 'future_observed',
+])
+def test_raw_observed_projection_restricts_without_renewing_authority(guard):
+  from types import SimpleNamespace
+  from openpilot.starpilot.aol.intent_companion import IntentCompanion
+
+  old_ns = 10_000_000_000
+  source_ns = old_ns + (201_000_000 if guard == 'cache_expired' else 50_000_000)
+  now_ns = source_ns + (31_000_000 if guard == 'pair_expired' else 1_000_000)
+
+  def message(stamp, sequence, *, paused=False, valid=True):
+    event = messaging.new_message('aolIntentWire', 0, valid=valid, logMonoTime=stamp)
+    event.aolIntentWire = encode_intent(IntentState('raw-card', sequence, stamp, stamp,
+      stamp + 200_000_000, True, paused, False, True, True))
+    return event
+
+  old = message(old_ns, 1, paused=True)
+  if guard == 'future_observed':
+    old.aolIntentWire = encode_intent(IntentState('raw-card', 1, old_ns, now_ns + 1,
+      now_ns + 200_000_000, True, True, False, True, True))
+  companion = IntentCompanion(object())
+  class ProjectionSource(SimpleNamespace):
+    def __getitem__(self, name):
+      return self.payload
+
+  sm = ProjectionSource(seen={'aolIntentWire': False}, valid={'aolIntentWire': True},
+    alive={'aolIntentWire': True}, logMonoTime={'aolIntentWire': old_ns})
+  sm.payload = old.aolIntentWire
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none',
+             side_effect=[None] if guard == 'unknown' else [old, None]):
+    assert companion.current(sm, source_ns=0, now_ns=old_ns + 1_000_000) is None
+  assert companion.verified_sm_projection is None
+  sm.seen['aolIntentWire'] = True
+  if guard == 'mutated':
+    sm.payload = message(old_ns, 1).aolIntentWire
+  elif guard == 'invalid':
+    sm.valid['aolIntentWire'] = False
+  elif guard == 'future':
+    future = message(now_ns + 1, 4)
+    sm.logMonoTime['aolIntentWire'], sm.payload = now_ns + 1, future.aolIntentWire
+  source = message(source_ns, 2)
+  latest = message(now_ns, 3, valid=guard != 'latest_invalid')
+  with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=[source, latest, None]):
+    result = companion.current(sm, source_ns=source_ns, now_ns=now_ns)
+  if guard == 'none':
+    assert result is not None and result.allowedLatch and result.pauseLateral
+    assert result.carStateLogMonoTime == source_ns
+    assert result.observedMonoTime == source_ns
+    assert result.validUntilMonoTime == source_ns + 200_000_000
+    assert companion.integrity_epoch == 0
+    assert companion.last_snapshot['sm_projection']
+    assert old_ns not in companion.samples
+  else:
+    assert result is None
+
+
+@pytest.mark.parametrize('fault', ['native_invalid', 'native_deny', 'critical_event'])
+def test_actual_hkg_raw_known_unaccepted_sm_projection_preserves_full_axes_then_denies_fault(fault):
+  from openpilot.starpilot.aol.runtime import current_axis
+  from openpilot.starpilot.aol.tests.test_runtime import IpcAxisContractTests
+
+  case = IpcAxisContractTests(methodName='runTest')
+  c = 10_030_000_000
+  a, b, now = c + 7_299_280, c + 35_184_464, c + 37_092_338
+
+  def message(stamp, sequence):
+    event = messaging.new_message('aolIntentWire', 0, valid=True, logMonoTime=stamp)
+    event.aolIntentWire = encode_intent(IntentState('authority-card', sequence, stamp, stamp,
+      stamp + 200_000_000, True, False, False, True, True))
+    return event
+
+  with ExitStack() as cleanup:
+    cleanup.callback(case.doCleanups)
+    with OpenpilotPrefix():
+      sd, controls, step, card, feedback = case._ioniq_availability_callers(full_op=True)
+      prior = c - 10_000_000
+      axis, _, command = step(2)
+      case.assertEqual(card.CP.to_dict(), sd.CP.to_dict())
+      from openpilot.starpilot.aol.wire import decode_safety
+      native = decode_safety(sd.sm['aolSafetyWire'])
+      assert native is not None
+      case.assertTrue(native.pandaInventory)
+      case.assertTrue(axis.lateralActive and axis.longitudinalActive and command.latActive and command.longActive)
+      feedback(prior, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      old, source, latest = message(c, 4), message(a, 5), message(b, 6)
+      with intent_receive(sd, side_effect=[old.as_reader(), None]):
+        case.assertTrue(sd.aol_intent_companion.drain())
+      # C was observed on the original socket, but never admitted as an SM triple.
+      case.assertNotEqual(sd.aol_intent_companion.verified_sm_projection[0], c)
+      epoch = sd.aol_intent_companion.integrity_epoch
+      with intent_receive(sd, side_effect=[source.as_reader(), latest.as_reader(), None]):
+        axis, state, command = step(3, state_stamp=a, intent_message=old, offset_ns=now - 10_030_000_000)
+      case.assertTrue(axis.nativeAcknowledged and axis.lateralActive and axis.longitudinalActive)
+      case.assertTrue(command.latActive and command.longActive and sd.enabled)
+      case.assertEqual(axis.sourceCarStateMonoTime, a)
+      case.assertEqual(sd.aol_last_intent.carStateLogMonoTime, a)
+      case.assertEqual(sd.aol_intent_companion.integrity_epoch, epoch)
+      case.assertNotIn(c, sd.aol_intent_companion.samples)
+      case.assertNotIn(log.OnroadEvent.EventName.controlsMismatch, sd.events.names)
+      case.assertNotEqual(state.alertText1, 'TAKE CONTROL IMMEDIATELY')
+      case.assertTrue(feedback(now, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+      case.assertTrue(card.aol_card_intent.allowed_latch)
+      expired = int(sd.pm.messages['aolAxisState'].aolAxisState.validUntilMonoTime) + 1
+      case.assertIsNone(current_axis(controls.sm, now_ns=expired))
+      with patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=expired):
+        expired_command, _ = controls.state_control()
+      case.assertFalse(expired_command.latActive or expired_command.longActive)
+      kwargs = ({'native_valid': False} if fault == 'native_invalid' else
+                {'allowed': False} if fault == 'native_deny' else
+                {'critical_event': log.OnroadEvent.EventName.controlsMismatch})
+      denied_at = expired + 1
+      fresh = message(denied_at, 7)
+      with intent_receive(sd, side_effect=[fresh.as_reader(), None]):
+        denied, _, denied_command = step(4, state_stamp=denied_at, intent_message=fresh,
+          offset_ns=denied_at - 10_040_000_000, **kwargs)
+      case.assertEqual(str(denied.faultReason), 'critical')
+      case.assertFalse(denied.lateralActive or denied.longitudinalActive or
+                       denied_command.latActive or denied_command.longActive)
+      case.assertFalse(feedback(denied_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+      case.assertFalse(card.aol_card_intent.allowed_latch)

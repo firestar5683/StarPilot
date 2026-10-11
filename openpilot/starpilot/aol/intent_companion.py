@@ -19,6 +19,7 @@ class IntentCompanion:
     self.sequence_stamp = 0
     self.integrity_epoch = 0
     self.verified_sm_projection = None
+    self.raw_projections = {}
     self.last_rejection = None
     self.last_drain_count = 0
     self.last_drain_ok = True
@@ -35,6 +36,7 @@ class IntentCompanion:
       if self.session is not None and intent.producerSessionId != self.session:
         self.integrity_epoch += 1
         self.verified_sm_projection = None
+        self.raw_projections.clear()
         self.samples.clear()
         self.sequence = -1
         self.sequence_stamp = 0
@@ -56,6 +58,7 @@ class IntentCompanion:
     if not valid:
       self.integrity_epoch += 1
       self.verified_sm_projection = None
+      self.raw_projections.clear()
     sample = (stamp, valid, intent)
     self.samples[stamp] = sample
     if self.latest is None or stamp >= self.latest[0]:
@@ -81,9 +84,15 @@ class IntentCompanion:
         break
       self.last_drain_count += 1
       self._observe(message.logMonoTime, message.valid, message.aolIntentWire)
+      sample = self.samples.get(int(message.logMonoTime))
+      if sample is not None and sample[1]:
+        self.raw_projections[sample[0]] = (sample[2], self.integrity_epoch, self.session)
+      while len(self.raw_projections) > MAX_COMPANIONS:
+        del self.raw_projections[min(self.raw_projections)]
     else:
       self.integrity_epoch += 1
       self.verified_sm_projection = None
+      self.raw_projections.clear()
       self.samples.clear()
       if self.latest is not None:
         self.latest = (self.latest[0], False, self.latest[2])
@@ -112,10 +121,14 @@ class IntentCompanion:
     projection = None
     if sm.seen.get(INTENT_SERVICE, False):
       stamp = int(sm.logMonoTime[INTENT_SERVICE])
-      verified = self.verified_sm_projection
+      raw_verified = self.raw_projections.get(stamp)
+      raw_current = bool(raw_verified is not None and raw_verified[0].settingsQualified and
+        raw_verified[0].producerSessionId and 0 < raw_verified[0].observedMonoTime <= now_ns <=
+        raw_verified[0].validUntilMonoTime)
+      verified = ((stamp, *raw_verified) if raw_current else self.verified_sm_projection)
       if (verified is not None and verified[0] == stamp and verified[2] == self.integrity_epoch and
           verified[3] == self.session and sm.valid.get(INTENT_SERVICE, False) and
-          sm.alive.get(INTENT_SERVICE, False) and
+          sm.alive.get(INTENT_SERVICE, False) and 0 < stamp <= now_ns <= stamp + SAFETY_MAX_AGE_NS and
           (stamp < source_ns or (source_ns == 0 or source_ns == stamp) and
            0 < stamp <= now_ns <= stamp + SAFETY_MAX_AGE_NS) and
           now_ns - stamp > INTENT_MAX_AGE_NS and decode_intent(sm[INTENT_SERVICE]) == verified[1]):
@@ -133,6 +146,9 @@ class IntentCompanion:
     for stamp in tuple(self.samples):
       if not 0 < stamp <= now_ns or now_ns - stamp > INTENT_MAX_AGE_NS:
         del self.samples[stamp]
+    for stamp in tuple(self.raw_projections):
+      if not 0 < stamp <= now_ns or now_ns - stamp > SAFETY_MAX_AGE_NS:
+        del self.raw_projections[stamp]
     if not (sm.seen.get(INTENT_SERVICE, False) and sm.valid.get(INTENT_SERVICE, False) and
             sm.alive.get(INTENT_SERVICE, False)):
       return self._reject('sm_unavailable')
