@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from opendbc.car.structs import car
-from openpilot.starpilot.aol.vehicle import native_matches_cp, native_profile_supported
+from openpilot.starpilot.aol.vehicle import native_admission_key, native_matches_cp, native_profile_supported
 from openpilot.starpilot.aol.wire import INTENT_SERVICE, SAFETY_SERVICE, IntentState, decode_intent, decode_safety
 
 INTENT_MAX_AGE_NS = 30_000_000
@@ -105,23 +105,57 @@ def native_inventory_matches_cp(state, CP) -> bool:
     return False
 
 
+def _clear_native_admission(sm):
+  try:
+    sm._aol_native_admission = None
+  except Exception:
+    # Custom/slotted owners may not support this optional optimization.
+    pass
+
+
+def _native_admission_matches(sm, CP, state, raw):
+  key = None
+  try:
+    cp_key = native_admission_key(CP) if state.pandaInventory else None
+    if cp_key is not None and isinstance(raw, bytes):
+      key = (raw, int(sm.logMonoTime[SAFETY_SERVICE]), cp_key)
+      if getattr(sm, '_aol_native_admission', None) == key:
+        return True
+  except Exception:
+    # Cache plumbing may never replace or prevent the original validation.
+    key = None
+  matches = (native_matches_cp(CP, int(state.safetyModel), int(state.safetyParam)) and
+             native_inventory_matches_cp(state, CP))
+  try:
+    # Re-read mutable CP on a miss before binding the successful result.
+    sm._aol_native_admission = key if matches and key is not None and native_admission_key(CP) == key[2] else None
+  except Exception:
+    _clear_native_admission(sm)
+  return matches
+
+
 def current_native(sm, CP, *, now_ns: int, axis_session_id: str | None = None):
   if not (sm.valid[SAFETY_SERVICE] and sm.alive[SAFETY_SERVICE] and sm.seen[SAFETY_SERVICE]):
+    _clear_native_admission(sm)
     return None
-  state = decode_safety(sm[SAFETY_SERVICE])
+  raw = sm[SAFETY_SERVICE]
+  raw = bytes(raw) if isinstance(raw, (bytes, bytearray, memoryview)) else raw
+  state = decode_safety(raw)
   if state is None:
+    _clear_native_admission(sm)
     return None
-  if (not native_matches_cp(CP, int(state.safetyModel), int(state.safetyParam)) or
-      not native_inventory_matches_cp(state, CP) or
+  if (not _native_admission_matches(sm, CP, state, raw) or
       not state.compatible or int(state.protocolVersion) != 1 or not state.pandaSerial or not state.axisSessionId or
       (axis_session_id is not None and str(state.axisSessionId) != axis_session_id) or
       int(sm.logMonoTime[SAFETY_SERVICE]) > now_ns or
       now_ns - int(sm.logMonoTime[SAFETY_SERVICE]) > SAFETY_MAX_AGE_NS or
       int(state.observedMonoTime) > now_ns or now_ns > int(state.validUntilMonoTime)):
+    _clear_native_admission(sm)
     return None
   if state.pandaInventory and (int(sm.logMonoTime[SAFETY_SERVICE]) != state.observedMonoTime or
                                state.observedMonoTime <= 0 or
                                state.validUntilMonoTime - state.observedMonoTime > SAFETY_MAX_AGE_NS):
+    _clear_native_admission(sm)
     return None
   return state
 

@@ -73,6 +73,20 @@ def qualified_ioniq6(CP) -> bool:
   return raw == (0x8895 if flags & int(HyundaiFlags.CANFD_LKA_STEER_MSG_ALT) else 0x8815)
 
 
+def native_admission_key(CP):
+  """Complete mutable CP inputs to exact one-slot Ioniq native admission.
+
+  Keep this in sync with qualified_ioniq6 and native inventory qualification.
+  This key is not an admission decision and never contains live authority.
+  """
+  if CP.brand != 'hyundai' or CP.carFingerprint != HyundaiCAR.HYUNDAI_IONIQ_6 or len(CP.safetyConfigs) != 1:
+    return None
+  return (str(CP.brand), str(CP.carFingerprint), int(CP.flags), bool(CP.radarUnavailable),
+          bool(CP.notCar), bool(CP.passive), bool(CP.dashcamOnly),
+          bool(CP.openpilotLongitudinalControl), bool(CP.pcmCruise), int(CP.alternativeExperience),
+          tuple((int(c.safetyModel.raw), int(c.safetyParam)) for c in CP.safetyConfigs))
+
+
 def ioniq6_settings_capable(CP) -> bool:
   # Stock ACC lateral settings are independent of the experimental LONG opt-in.
   return _stock_ioniq6(CP) or (IONIQ6_LONG_PREARM_ENABLED and ioniq6_long_eligible(CP))

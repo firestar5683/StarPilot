@@ -38,6 +38,14 @@ def native_matches_cp(CP, model: int, param: int) -> bool:
     return False
 
 
+def native_admission_key(CP):
+  """Observation reuse is scoped to the exact Ioniq single-Panda contract."""
+  try:
+    return hyundai.native_admission_key(CP) if CP.brand == 'hyundai' else None
+  except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
+    return None
+
+
 def native_latch_rejected(CP, native, *, state=None) -> bool:
   if native is None:
     return False
