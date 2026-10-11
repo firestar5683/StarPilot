@@ -10,6 +10,22 @@ import { GxDialog } from "./dialog.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 const PROFILES = ["large", "compact"]
+const previewVisibilityKey = projection => "gx-layout-preview-visibility-v1:" + (projection ? "android-auto" : "comma")
+function loadPreviewVisibility(projection) {
+  const hidden = { large: { stopped_timer: true }, compact: { stopped_timer: true } }
+  try {
+    const saved = JSON.parse(localStorage.getItem(previewVisibilityKey(projection)))
+    for (const profile of PROFILES) {
+      const widgets = saved?.[profile]
+      if (!widgets || typeof widgets !== "object" || Array.isArray(widgets)) continue
+      hidden[profile] = {
+        ...hidden[profile], ...Object.fromEntries(Object.entries(widgets)
+          .filter(([id, value]) => typeof value === "boolean" && !(projection && id === "car_exit")))
+      }
+    }
+  } catch { /* Preview controls still work when browser storage is unavailable. */ }
+  return hidden
+}
 const COLORS = ["cardFill", "cardBorder", "text"]
 const ROAD_COLORS = ["path", "pathEdge", "laneLines"]
 // "default" is a legacy saved value that now renders as acceleration colors.
@@ -33,7 +49,8 @@ export const layoutDocument = ({ display, ...document }) => document
 export const withDisplay = (data) => !object(data?.display) || !Array.isArray(data.display.rows) ? data : {
   ...data, display: data.display.rows,
   document: { ...data.document, display: { ...data.display.values } },
-  defaults: { ...data.defaults, display: { ...data.display.defaults } } }
+  defaults: { ...data.defaults, display: { ...data.display.defaults } }
+}
 
 export function orderedWidgetIds(document, metadata, profile) {
   return document.widgetOrder?.[profile] || metadata.profiles[profile].widgetOrder || Object.keys(metadata.profiles[profile].widgets)
@@ -41,8 +58,10 @@ export function orderedWidgetIds(document, metadata, profile) {
 
 export function widgetPalette(document, metadata, profile, id) {
   const colors = metadata.profiles[profile].widgets[id].colors
-  return { ...Object.fromEntries(Object.entries(colors).map(([key, value]) => [key, value ?? document.palette[key]])),
-    ...document.widgetColors[profile][id] }
+  return {
+    ...Object.fromEntries(Object.entries(colors).map(([key, value]) => [key, value ?? document.palette[key]])),
+    ...document.widgetColors[profile][id]
+  }
 }
 
 export const withAlpha = (color, factor) => color.slice(0, 7) + Math.floor(parseInt(color.slice(7), 16) * factor).toString(16).padStart(2, "0")
@@ -58,16 +77,20 @@ export function widgetSize(widget, position) {
 export function placementLimits(profile, id, layout = null) {
   const widget = profile.widgets[id], bounds = widget.bounds || profile.bounds
   const [width, height] = widgetSize(widget, layout?.[id])
-  return { minX: bounds.x, maxX: bounds.x + bounds.width - width,
-    minY: bounds.y, maxY: bounds.y + bounds.height - height }
+  return {
+    minX: bounds.x, maxX: bounds.x + bounds.width - width,
+    minY: bounds.y, maxY: bounds.y + bounds.height - height
+  }
 }
 
 // The largest box that still fits from the widget's current corner, within its own limits.
 export function clampBox(profile, id, position, width, height) {
   const widget = profile.widgets[id], box = widget.box, bounds = widget.bounds || profile.bounds
   if (!box || !Number.isFinite(width) || !Number.isFinite(height)) return null
-  return { width: Math.round(Math.max(box.minWidth, Math.min(box.maxWidth, bounds.x + bounds.width - position.x, width))),
-    height: Math.round(Math.max(box.minHeight, Math.min(box.maxHeight, bounds.y + bounds.height - position.y, height))) }
+  return {
+    width: Math.round(Math.max(box.minWidth, Math.min(box.maxWidth, bounds.x + bounds.width - position.x, width))),
+    height: Math.round(Math.max(box.minHeight, Math.min(box.maxHeight, bounds.y + bounds.height - position.y, height)))
+  }
 }
 
 export function clampPlacement(profile, id, x, y, layout = null) {
@@ -101,31 +124,33 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
 
 export function previewPoint(event, rect, profile) {
   if (!rect?.width || !rect?.height) return null
-  return { x: (event.clientX - rect.left) * profile.width / rect.width,
-    y: (event.clientY - rect.top) * profile.height / rect.height }
+  return {
+    x: (event.clientX - rect.left) * profile.width / rect.width,
+    y: (event.clientY - rect.top) * profile.height / rect.height
+  }
 }
 
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
   if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 6 ||
-      (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
-      (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
-      (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
-      (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
-      (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
-      !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
-      !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
+    (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
+    (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
+    (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
+    (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
+    (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
+    !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
+    !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
-      !Object.entries(document.widgetOrder).every(([name, order]) => profiles.includes(name) && Array.isArray(order) &&
-        order.length === Object.keys(metadata.profiles[name].widgets).length && new Set(order).size === order.length &&
-        order.every(id => typeof id === "string" && Object.hasOwn(metadata.profiles[name].widgets, id)) &&
-        frontmostOrder(order, metadata.profiles[name])))) return false
+    !Object.entries(document.widgetOrder).every(([name, order]) => profiles.includes(name) && Array.isArray(order) &&
+      order.length === Object.keys(metadata.profiles[name].widgets).length && new Set(order).size === order.length &&
+      order.every(id => typeof id === "string" && Object.hasOwn(metadata.profiles[name].widgets, id)) &&
+      frontmostOrder(order, metadata.profiles[name])))) return false
   return profiles.every((name) => {
     const profile = metadata.profiles[name], layout = document.layouts[name]
     const road = document.roadColors[name]
     if (!object(road) || !Object.entries(road).every(([key, value]) => key === "pathMode" ? PATH_MODES.includes(value) :
-        ROAD_COLORS.includes(key) && typeof value === "string" && HEX.test(value))) return false
+      ROAD_COLORS.includes(key) && typeof value === "string" && HEX.test(value))) return false
     const colors = document.widgetColors[name]
     if (!object(colors) || !Object.entries(colors).every(([id, overrides]) => {
       const fields = profile.widgets[id]?.colors
@@ -156,33 +181,33 @@ export function validSnapshot(data) {
   if ((data?.projection === true) !== (data?.metadata?.projection === true)) return false
   const profiles = projection ? ["large"] : PROFILES
   if (!data || typeof data.revision !== "string" || !data.revision || typeof data.editable !== "boolean" ||
-      typeof data.valid !== "boolean" || !keysEqual(data.metadata?.profiles, profiles) ||
-      !Array.isArray(data.metadata.paletteFields) || data.metadata.paletteFields.length !== COLORS.length ||
-      new Set(data.metadata.paletteFields.map((field) => field.id)).size !== COLORS.length ||
-      !data.metadata.paletteFields.every((field) => COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
-      !Array.isArray(data.metadata.roadColorFields) || data.metadata.roadColorFields.length !== ROAD_COLORS.length ||
-      new Set(data.metadata.roadColorFields.map((field) => field.id)).size !== ROAD_COLORS.length ||
-      !data.metadata.roadColorFields.every((field) => ROAD_COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
-      (data.activeProfile != null && !profiles.includes(data.activeProfile))) return false
+    typeof data.valid !== "boolean" || !keysEqual(data.metadata?.profiles, profiles) ||
+    !Array.isArray(data.metadata.paletteFields) || data.metadata.paletteFields.length !== COLORS.length ||
+    new Set(data.metadata.paletteFields.map((field) => field.id)).size !== COLORS.length ||
+    !data.metadata.paletteFields.every((field) => COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
+    !Array.isArray(data.metadata.roadColorFields) || data.metadata.roadColorFields.length !== ROAD_COLORS.length ||
+    new Set(data.metadata.roadColorFields.map((field) => field.id)).size !== ROAD_COLORS.length ||
+    !data.metadata.roadColorFields.every((field) => ROAD_COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
+    (data.activeProfile != null && !profiles.includes(data.activeProfile))) return false
   for (const profile of Object.values(data.metadata.profiles)) {
     if (profile.widgetOrder != null && (!Array.isArray(profile.widgetOrder) ||
-        profile.widgetOrder.length !== Object.keys(profile.widgets || {}).length ||
-        new Set(profile.widgetOrder).size !== profile.widgetOrder.length ||
-        !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)) ||
-        !frontmostOrder(profile.widgetOrder, profile))) return false
+      profile.widgetOrder.length !== Object.keys(profile.widgets || {}).length ||
+      new Set(profile.widgetOrder).size !== profile.widgetOrder.length ||
+      !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)) ||
+      !frontmostOrder(profile.widgetOrder, profile))) return false
     const bounds = profile.bounds
     if (projection && (profile.widgets?.car_exit?.kind !== "car_exit" || profile.widgets.car_exit.required !== true)) return false
     if (profile.protectedWidget != null && (profile.protectedWidget !== "speed_limit_actions" ||
-        profile.widgets?.[profile.protectedWidget]?.kind !== "speed_limit_actions")) return false
+      profile.widgets?.[profile.protectedWidget]?.kind !== "speed_limit_actions")) return false
     if (!positive(profile.width) || !positive(profile.height) || typeof profile.label !== "string" ||
-        !bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) || bounds.x < 0 || bounds.y < 0 ||
-        !positive(bounds.width) || !positive(bounds.height) || bounds.x + bounds.width > profile.width ||
-        bounds.y + bounds.height > profile.height || !profile.widgets || Array.isArray(profile.widgets) ||
-        Object.keys(profile.widgets).length > 32 || !Array.isArray(profile.reservedZones) || profile.reservedZones.length > 32) return false
+      !bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) || bounds.x < 0 || bounds.y < 0 ||
+      !positive(bounds.width) || !positive(bounds.height) || bounds.x + bounds.width > profile.width ||
+      bounds.y + bounds.height > profile.height || !profile.widgets || Array.isArray(profile.widgets) ||
+      Object.keys(profile.widgets).length > 32 || !Array.isArray(profile.reservedZones) || profile.reservedZones.length > 32) return false
     for (const zone of profile.reservedZones) {
       if (typeof zone.label !== "string" || !Number.isFinite(zone.x) || !Number.isFinite(zone.y) ||
-          !positive(zone.width) || !positive(zone.height) || zone.x < bounds.x || zone.y < bounds.y ||
-          zone.x + zone.width > bounds.x + bounds.width || zone.y + zone.height > bounds.y + bounds.height) return false
+        !positive(zone.width) || !positive(zone.height) || zone.x < bounds.x || zone.y < bounds.y ||
+        zone.x + zone.width > bounds.x + bounds.width || zone.y + zone.height > bounds.y + bounds.height) return false
     }
     for (const widget of Object.values(profile.widgets)) {
       const area = widget.bounds || bounds
@@ -190,29 +215,29 @@ export function validSnapshot(data) {
       if (!object(widget.colors) || !Object.entries(widget.colors).every(([key, value]) =>
         COLORS.includes(key) && (value === null || (typeof value === "string" && HEX.test(value))))) return false
       if (!Number.isFinite(area.x) || !Number.isFinite(area.y) || area.x < 0 || area.y < 0 ||
-          !positive(area.width) || !positive(area.height) || area.x + area.width > profile.width ||
-          area.y + area.height > profile.height || typeof widget.label !== "string" || typeof widget.kind !== "string" ||
-          !positive(widget.width) || !positive(widget.height) || widget.width > area.width || widget.height > area.height) return false
+        !positive(area.width) || !positive(area.height) || area.x + area.width > profile.width ||
+        area.y + area.height > profile.height || typeof widget.label !== "string" || typeof widget.kind !== "string" ||
+        !positive(widget.width) || !positive(widget.height) || widget.width > area.width || widget.height > area.height) return false
       if (widget.box && (data.metadata.projection !== true || widget.kind !== "nav_map" || !object(widget.opacity) ||
-          ![widget.box.minWidth, widget.box.maxWidth, widget.box.minHeight, widget.box.maxHeight].every(Number.isInteger) ||
-          widget.box.minWidth < 24 || widget.box.minHeight < 24 || widget.box.minWidth > widget.box.maxWidth ||
-          widget.box.minHeight > widget.box.maxHeight || widget.box.maxWidth > area.width || widget.box.maxHeight > area.height ||
-          ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
-          widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
-          widget.opacity.default > widget.opacity.max)) return false
+        ![widget.box.minWidth, widget.box.maxWidth, widget.box.minHeight, widget.box.maxHeight].every(Number.isInteger) ||
+        widget.box.minWidth < 24 || widget.box.minHeight < 24 || widget.box.minWidth > widget.box.maxWidth ||
+        widget.box.minHeight > widget.box.maxHeight || widget.box.maxWidth > area.width || widget.box.maxHeight > area.height ||
+        ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
+        widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
+        widget.opacity.default > widget.opacity.max)) return false
       if (widget.opacity && (!projection || !["nav_map", "nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
-          !object(widget.opacity) || ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
-          widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
-          widget.opacity.default > widget.opacity.max)) return false
+        !object(widget.opacity) || ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
+        widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
+        widget.opacity.default > widget.opacity.max)) return false
       if (widget.backgroundToggle != null && (!projection || !["nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
-          widget.backgroundToggle !== true || !widget.opacity)) return false
+        widget.backgroundToggle !== true || !widget.opacity)) return false
       if (widget.resizable && (widget.kind !== "steering_wheel" || !Number.isInteger(widget.resizable.min) ||
-          !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
-          widget.resizable.default !== widget.width || widget.width !== widget.height ||
-          widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||
-          widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
+        !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
+        widget.resizable.default !== widget.width || widget.width !== widget.height ||
+        widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||
+        widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
       if (widget.iconSize != null && (!projection || !["nav_home", "nav_work", "bookmark"].includes(widget.kind) ||
-          !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
+        !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
       if (widget.required != null && (!projection || widget.kind !== "car_exit" || widget.required !== true)) return false
       if (widget.frontmost != null && (!projection || widget.kind !== "car_exit" || widget.frontmost !== true)) return false
       if (widget.kind === "car_exit" && (widget.required !== true || widget.frontmost !== true)) return false
@@ -222,8 +247,8 @@ export function validSnapshot(data) {
 }
 
 export class OnroadLayoutFeed {
-  constructor({ publish, projection = false, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
-                later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
+  constructor({ publish, projection = false, unauthorized = () => { }, fetcher = (...args) => fetch(...args),
+    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
     Object.assign(this, { publish, projection, unauthorized, fetcher, later, cancelTimer })
     this.active = false
     this.generation = 0
@@ -275,8 +300,10 @@ export class OnroadLayoutFeed {
         "Reading colors and layouts timed out. Try reloading.")
     }, 5000)
     try {
-      const response = await this.fetcher(this.projection ? "./api/android-auto/layout" : "./api/ui/layout", { credentials: "same-origin", cache: "no-store", signal: request.signal,
-        ...(saving ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(this.projection ? projectionPayload(body, this.data.metadata) : body) } : {}) })
+      const response = await this.fetcher(this.projection ? "./api/android-auto/layout" : "./api/ui/layout", {
+        credentials: "same-origin", cache: "no-store", signal: request.signal,
+        ...(saving ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(this.projection ? projectionPayload(body, this.data.metadata) : body) } : {})
+      })
       if (!this.active || generation !== this.generation) return
       let data = await response.json().catch(() => null)
       if (!this.active || generation !== this.generation) return
@@ -292,11 +319,13 @@ export class OnroadLayoutFeed {
       this.data = data
       this.error = ""
       this.needsReload = false
-      this.publish({ status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
+      this.publish({
+        status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
         notice: saving ? (this.projection ? "Android Auto layout saved." : data.failed?.length ?
           "Layout saved, but these display options did not change: " + data.failed.join(", ") + ". Reload and try again." :
           "Colors and both layouts saved.") :
-          !background && !initial ? "Reloaded the saved layout." : "" })
+          !background && !initial ? "Reloaded the saved layout." : ""
+      })
       return true
     } catch (error) {
       if (this.active && generation === this.generation) fail(connectionError(error))
@@ -495,14 +524,18 @@ export const LayoutWidgetPreview = {
 
 export const OnroadLayoutPage = {
   components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog, GalaxySettingRow },
-  props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
-    initialPanel: { type: String, default: "widgets" } },
+  props: {
+    projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
+    initialPanel: { type: String, default: "widgets" }
+  },
   emits: ["close", "target"],
   setup(props) {
-    const state = reactive({ status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
+    const state = reactive({
+      status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
-      hiddenPreviewWidgets: {}, history: { undo: [], redo: [], group: null } })
+      hiddenPreviewWidgets: loadPreviewVisibility(props.projection), history: { undo: [], redo: [], group: null }
+    })
     let deferred = null
     const apply = (update) => {
       if (state.drag || state.layerDrag) { deferred = { ...deferred, ...update }; return }
@@ -545,8 +578,10 @@ export const OnroadLayoutPage = {
     }
     const feed = new OnroadLayoutFeed({ projection: props.projection, unauthorized: props.unauthorized, publish: apply })
     watch(() => !!state.drag || !!state.layerDrag, (dragging) => { if (!dragging && deferred) apply({}) }, { flush: "sync" })
-    const previewFeed = new LayoutPreviewFeed({ unauthorized: props.unauthorized,
-      publish: (update) => Object.assign(state.preview, update) })
+    const previewFeed = new LayoutPreviewFeed({
+      unauthorized: props.unauthorized,
+      publish: (update) => Object.assign(state.preview, update)
+    })
     watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag, state.data?.revision],
       () => {
         if (props.projection && state.draft && props.mode === 'local' && !state.devicePreviewOpen) {
@@ -554,7 +589,7 @@ export const OnroadLayoutPage = {
           previewFeed.start()
         }
         if (state.devicePreviewOpen && props.mode === "local") {
-          const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : layoutDocument(state.draft)
+          const document = props.projection ? projectionPayload({ document: state.draft }, state.data.metadata).document : layoutDocument(state.draft)
           previewFeed.update(document, props.projection ? 'projection' : state.profile, state.scene, !!state.drag)
         }
       }, { flush: "sync" })
@@ -579,43 +614,60 @@ export const OnroadLayoutPage = {
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
-    layerWidgets() { return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
-      .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled) },
+    layerWidgets() {
+      return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
+        .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled)
+    },
     listWidgets() { return this.state.layerDrag ? this.state.layerDrag.rows.map(id => this.widgets.find(widget => widget.id === id)) : this.layerWidgets },
     selectionBox() {
       if (!this.state.layerDrag) return null
       const widget = this.renderWidgets.find(widget => widget.id === this.state.selected)
       if (!widget) return null
-      return { x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
-        width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom }
+      return {
+        x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
+        width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom
+      }
     },
     activeWidgets() { return this.widgets.filter(({ id }) => this.layout[id].enabled) },
-    renderWidgets() { return this.layerWidgets.filter(item => !this.previewHidden(item.id)).reverse().map((item) => {
-      const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
-      const widget = { ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
-        visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0) }
-      const [width, height] = widgetSize(widget, this.layout[widget.id])
-      return { ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
-        ...(widget.opacity ? { opacity: this.layout[widget.id].opacity } : {}),
-        ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {}) } }) },
+    renderWidgets() {
+      return this.layerWidgets.filter(item => !this.previewHidden(item.id)).reverse().map((item) => {
+        const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
+        const widget = {
+          ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
+          visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0)
+        }
+        const [width, height] = widgetSize(widget, this.layout[widget.id])
+        return {
+          ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
+          ...(widget.opacity ? { opacity: this.layout[widget.id].opacity } : {}),
+          ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {})
+        }
+      })
+    },
     inactiveWidgets() { return this.widgets.filter(({ id }) => !this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id)) },
     availableProfiles() { return this.state.data?.supportedProfiles || (this.state.data?.activeProfile ? [this.state.data.activeProfile] : []) },
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
     selectedPosition() { return this.layout?.[this.state.selected] },
     selectedSize() { return this.selectedWidget ? widgetSize(this.selectedWidget, this.selectedPosition) : [0, 0] },
     selectedColors() { return this.selectedWidget ? this.widgetColors(this.state.selected) : {} },
-    colorFields() { return (this.state.data?.metadata.paletteFields || []).filter((field) =>
-      Object.hasOwn(this.selectedWidget?.colors || {}, field.id)) },
+    colorFields() {
+      return (this.state.data?.metadata.paletteFields || []).filter((field) =>
+        Object.hasOwn(this.selectedWidget?.colors || {}, field.id))
+    },
     roadStyle() { return this.state.draft?.roadColors[this.state.profile] || {} },
     roadMode() { const mode = this.roadStyle.pathMode || 'acceleration'; return mode === 'default' ? 'acceleration' : mode },
     roadColors() { return { ...Object.fromEntries((this.state.data?.metadata.roadColorFields || []).map(field => [field.id, field.default])), ...this.roadStyle } },
     roadGradient() {
-      if (this.roadMode === 'rainbow') return Array.from({ length: 12 }, (_, i) => ({ offset: i / 11,
-        color: 'hsl(' + i / 11 * 120 + ',100%,50%)', alpha: .5 - .4 * i / 11 }))
-      if (this.roadMode === 'color') return [1, .55, .10].map((factor, i) => ({ offset: 1 - i / 2,
-        color: this.roadColors.path.slice(0, 7), alpha: Math.floor(this.alpha(this.roadColors.path) * factor) / 255 }))
+      if (this.roadMode === 'rainbow') return Array.from({ length: 12 }, (_, i) => ({
+        offset: i / 11,
+        color: 'hsl(' + i / 11 * 120 + ',100%,50%)', alpha: .5 - .4 * i / 11
+      }))
+      if (this.roadMode === 'color') return [1, .55, .10].map((factor, i) => ({
+        offset: 1 - i / 2,
+        color: this.roadColors.path.slice(0, 7), alpha: Math.floor(this.alpha(this.roadColors.path) * factor) / 255
+      }))
       return [{ offset: 0, color: '#72ff5c', alpha: 0 }, { offset: .5, color: '#72ff5c', alpha: 89 / 255 },
-        { offset: 1, color: '#0df87a', alpha: 102 / 255 }]
+      { offset: 1, color: '#0df87a', alpha: 102 / 255 }]
     },
     limits() { return this.selectedWidget ? placementLimits(this.profile, this.state.selected, this.layout) : null },
     displayGroups() {
@@ -641,6 +693,7 @@ export const OnroadLayoutPage = {
       if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit")) return
       const hidden = this.state.hiddenPreviewWidgets[this.state.profile] ||= {}
       hidden[id] = !hidden[id]
+      try { localStorage.setItem(previewVisibilityKey(this.projection), JSON.stringify(this.state.hiddenPreviewWidgets)) } catch { }
     },
     selectWidget(id) {
       this.state.selected = id
@@ -653,7 +706,7 @@ export const OnroadLayoutPage = {
     },
     reorderLayer(id, target) {
       if (!this.editable || this.state.drag || id === target ||
-          this.profile.widgets[id]?.frontmost || this.profile.widgets[target]?.frontmost) return
+        this.profile.widgets[id]?.frontmost || this.profile.widgets[target]?.frontmost) return
       const order = [...orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)]
       const from = order.indexOf(id), to = order.indexOf(target)
       if (from < 0 || to < 0) return
@@ -671,9 +724,11 @@ export const OnroadLayoutPage = {
       event.currentTarget.setPointerCapture(event.pointerId)
       const rect = event.currentTarget.closest("[data-layer-id]").getBoundingClientRect()
       this.state.selected = id
-      this.state.layerDrag = { id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY,
+      this.state.layerDrag = {
+        id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY,
         x: rect.x, y: rect.y, width: rect.width, offsetX: event.clientX - rect.x, offsetY: event.clientY - rect.y,
-        rows: this.layerWidgets.map(widget => widget.id), before: clone(this.state.draft), moved: false }
+        rows: this.layerWidgets.map(widget => widget.id), before: clone(this.state.draft), moved: false
+      }
       this._layerTarget = event.currentTarget
     },
     moveLayerDrag(event) {
@@ -715,7 +770,7 @@ export const OnroadLayoutPage = {
     layerKey(event, id) {
       if (event.key === 'Escape' && this.state.layerDrag) {
         event.preventDefault()
-        this.endLayerDrag({pointerId: this.state.layerDrag.pointerId}, true)
+        this.endLayerDrag({ pointerId: this.state.layerDrag.pointerId }, true)
         return
       }
       if (this.state.layerDrag) return
@@ -765,7 +820,7 @@ export const OnroadLayoutPage = {
       if (this.mode !== "local" || !this.state.data || !this.state.draft || this.state.drag || this.state.devicePreviewOpen) return
       this.state.devicePreviewOpen = true
       this.previewFeed.start()
-      this.previewFeed.update(this.projection ? projectionPayload({document: this.state.draft}, this.state.data.metadata).document : layoutDocument(this.state.draft), this.projection ? 'projection' : this.state.profile, this.state.scene)
+      this.previewFeed.update(this.projection ? projectionPayload({ document: this.state.draft }, this.state.data.metadata).document : layoutDocument(this.state.draft), this.projection ? 'projection' : this.state.profile, this.state.scene)
     },
     hideDevicePreview() {
       this.state.previewMode = "layout"
@@ -808,7 +863,7 @@ export const OnroadLayoutPage = {
     },
     requestRemove(id = this.state.selected) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.layout?.[id]?.enabled ||
-          !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].required) return
+        !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].required) return
       this.state.selected = id
       this.state.removeConfirm = id
     },
@@ -830,8 +885,10 @@ export const OnroadLayoutPage = {
     displayAvailable(row) { return !!row?.available && (!row.requires || this.displayValue(row.requires) === "On") },
     displaySettingRow(row) {
       const blocked = row.requires && this.displayValue(row.requires) !== "On"
-      return { label: row.label, value: this.displayValue(row.key), choices: row.choices, available: this.displayAvailable(row),
-        reason: blocked ? "Turn on Lead Indicator first" : row.reason, action: true }
+      return {
+        label: row.label, value: this.displayValue(row.key), choices: row.choices, available: this.displayAvailable(row),
+        reason: blocked ? "Turn on Lead Indicator first" : row.reason, action: true
+      }
     },
     setDisplay(key, value) {
       const row = this.displayRow(key)
@@ -857,7 +914,7 @@ export const OnroadLayoutPage = {
     },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
-          !["words", "icons"].includes(display)) return
+        !["words", "icons"].includes(display)) return
       this.finishColorEdit()
       const before = clone(this.state.draft)
       const [oldWidth] = widgetSize(this.selectedWidget, this.selectedPosition)
@@ -915,9 +972,11 @@ export const OnroadLayoutPage = {
       const [width, height] = widgetSize(widget, position)
       this.state.selected = id
       this.finishColorEdit()
-      this.state.drag = { id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
+      this.state.drag = {
+        id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
         offsetX: fromTray ? width / 2 : point.x - position.x,
-        offsetY: fromTray ? height / 2 : point.y - position.y }
+        offsetY: fromTray ? height / 2 : point.y - position.y
+      }
       this._dragTarget = this.$refs.preview
       this._dragTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()
@@ -930,8 +989,10 @@ export const OnroadLayoutPage = {
       const position = this.layout[id]
       this.state.selected = id
       this.finishColorEdit()
-      this.state.drag = { id, pointerId: event.pointerId, resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
-        inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height }
+      this.state.drag = {
+        id, pointerId: event.pointerId, resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
+        inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height
+      }
       this._dragTarget = this.$refs.preview
       this._dragTarget.setPointerCapture?.(event.pointerId)
       event.stopPropagation()
@@ -998,7 +1059,7 @@ export const OnroadLayoutPage = {
       this._dragTarget = null
     },
     cancelDrag() {
-      if (this.state.layerDrag) this.endLayerDrag({pointerId: this.state.layerDrag.pointerId}, true)
+      if (this.state.layerDrag) this.endLayerDrag({ pointerId: this.state.layerDrag.pointerId }, true)
       const drag = this.state.drag
       if (drag) Object.assign(this.layout[drag.id], drag.before)
       this.releaseDrag()
@@ -1030,7 +1091,7 @@ export const OnroadLayoutPage = {
     },
     roadPoints(points) {
       const r = this.profile.bounds
-      return points.map(([x, y]) => (r.x + x*r.width) + ',' + (r.y + y*r.height)).join(' ')
+      return points.map(([x, y]) => (r.x + x * r.width) + ',' + (r.y + y * r.height)).join(' ')
     },
     roadLabel(id) {
       if (id === 'pathEdge') return this.state.profile === 'large' ? 'Path border' : 'Closest lane markings'
@@ -1267,7 +1328,7 @@ export const OnroadLayoutPage = {
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
-              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets. Use the eye to hide a widget only in Arrange widgets; it stays visible on the driving screen and in Device preview.</p>
+              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets. Use the eye to hide certain widgets while arranging; does not affect driving screen.</p>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
                 :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
                 <button class="gx-layout__row-grip gx-icon-btn" type="button"
