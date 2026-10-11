@@ -828,9 +828,12 @@ class SelfdriveD:
         not companion.drain() or companion.integrity_epoch != epoch):
       return 0
     latest = companion.latest
+    # An unchanged pause on an unrequested, inactive axis does not revoke the
+    # other axis's existing lease. New pauses and requested-axis pauses still veto.
     if (latest is None or not latest[1] or latest[2] is None or
         latest[2].producerSessionId != producer or not latest[2].settingsQualified or
-        latest[2].pauseLateral or latest[2].pauseLongitudinal or
+        latest[2].pauseLateral and (lateral or active_lateral or not intent.pauseLateral) or
+        latest[2].pauseLongitudinal and (longitudinal or active_longitudinal or not intent.pauseLongitudinal) or
         latest[2].allowedLatch != intent.allowedLatch or latest[2].lateralArmed != intent.lateralArmed or
         latest[0] != latest[2].carStateLogMonoTime or not 0 < latest[0] <= now_ns or
         not 0 < latest[2].observedMonoTime <= now_ns <= latest[2].validUntilMonoTime or
