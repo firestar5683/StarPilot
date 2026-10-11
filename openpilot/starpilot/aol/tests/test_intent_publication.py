@@ -625,10 +625,10 @@ def test_late_car_state_after_submaster_update_preserves_batch_and_source():
     queue = []
     def update(_, queue=queue, late=late, kind=kind):
       queue.extend([late] if kind != 'full' else [late] * 32)
-    sd.sm = SimpleNamespace(update=update)
     def receive(_, queue=queue):
       return queue.pop(0) if queue else None
-    with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False), \
+    with patch.object(sd, 'sm', SimpleNamespace(update=update), create=True), \
+         patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False), \
          patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=None if kind == 'timeout' else first), \
          patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one_or_none', side_effect=receive), \
          patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_025_000_000):
