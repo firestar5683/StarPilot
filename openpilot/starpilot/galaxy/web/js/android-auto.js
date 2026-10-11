@@ -1079,8 +1079,12 @@ export const AndroidAutoPage = {
                       <small class="gx-note">Or type <code>accounts.google.com/EmbeddedSetup</code></small>
                     </div>
                     <div class="gx-aa-token__callout" role="note">
-                      <i class="bi bi-info-circle-fill"></i>
-                      <div>Sign in and click <strong>I agree</strong>. After you click “I agree,” <strong class="gx-aa-bad">the page will keep loading. This is expected.</strong> Continue to step 3 to paste your token without waiting for the page to finish.</div>
+                      <i class="bi bi-info-circle-fill" aria-hidden="true"></i>
+                      <div class="gx-aa-token__signin-copy">
+                        <p><strong>Sign in and click “I agree.”</strong></p>
+                        <p class="gx-aa-token__signin-note">The page will keep loading after you click “I agree.” <strong>This is expected.</strong> You don’t need to wait for it to finish.</p>
+                        <p>Copy your token using the instructions below, then paste it in <strong>step 3</strong>.</p>
+                      </div>
                     </div>
                     <div class="gx-aa-browser-help">
                       <div class="gx-tabs gx-aa-token__browsers" role="group" aria-label="Your browser">
