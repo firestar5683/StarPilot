@@ -249,7 +249,7 @@ export const SettingsPage = {
     initialPage: { type: String, default: "hub" }, title: { type: String, default: "Toggles" },
     initialSection: { type: String, default: null }, returnTo: { type: Function, default: null } },
   setup(props) {
-    const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", searchOpen: false, section: "lateral", layoutOpen: false, favoritesOpen: false, soundChoicesDirty: false, parents: [], developerOpen: props.initialSection === "developer", panelDirection: 1 })
+    const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", searchOpen: false, section: "lateral", layoutOpen: false, layoutPanel: "widgets", favoritesOpen: false, soundChoicesDirty: false, parents: [], developerOpen: props.initialSection === "developer", panelDirection: 1 })
     const feed = new SettingsFeed({ publish: (update) => Object.assign(state, update), unauthorized: props.unauthorized })
     return { state, feed, sections: SETTINGS_SECTIONS }
   },
@@ -311,7 +311,11 @@ export const SettingsPage = {
       this.$emit?.("nested")
       this.state.query = ""
       this.state.panelDirection = 1
-      if (page === "ui_layout") { this.feed.stop(); this.state.layoutOpen = true }
+      if (page === "ui_layout" || page === "appearance") {
+        this.feed.stop()
+        this.state.layoutPanel = page === "appearance" ? "display" : "widgets"
+        this.state.layoutOpen = true
+      }
       else if (page === "favorites") { this.feed.stop(); this.state.favoritesOpen = true }
       else {
         if (this.state.data?.page && this.state.data.page !== page) (this.state.parents ||= []).push(this.state.data.page)
@@ -324,6 +328,8 @@ export const SettingsPage = {
       else this.state.query = ""
     },
     async openCropEditor() { (await import("./router.js")).navigate("/cameras/pip") },
+    // The embedded editor switches targets through the routed editor, which keeps the leave guard.
+    async openLayoutTarget(target) { (await import("./router.js")).navigate(target === "projection" ? "/theme_maker/android_auto" : "/theme_maker") },
     rowKey(row, index) { return `${this.state.data.page}:${row.key || row.page || index}` },
     closeLayout() { this.state.layoutOpen = false; this.state.section = "visual"; this.feed.start(this.initialPage) },
     closeFavorites() { this.state.favoritesOpen = false; this.state.section = "visual"; this.feed.start("hub") },
@@ -383,7 +389,7 @@ export const SettingsPage = {
     },
   },
   template: `
-    <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
+    <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" :initial-panel="state.layoutPanel" @target="openLayoutTarget" @close="closeLayout" />
     <FavoritesPage ref="favoritesEditor" v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
     <section v-else class="gx-settings" :aria-label="title" :inert="busy" :aria-busy="busy || undefined">
       <div v-if="title && (initialPage !== 'hub' || atSectionRoot)" class="gx-settings__header gx-page-header"><h2>{{ title }}</h2></div>
@@ -395,7 +401,6 @@ export const SettingsPage = {
       <p class="gx-page-description" v-else-if="initialPage === 'pip'">Choose when to show the camera and adjust its saved crop. Use the crop editor for a live preview.</p>
       <p class="gx-page-description" v-else-if="(state.data?.page || initialPage) === 'sounds'">Adjust alert and chime volumes. Immediate warnings keep their safety volume ramp.</p>
       <p class="gx-page-description" v-else-if="(state.data?.page || initialPage) === 'display'">Adjust brightness and screen timing when custom display settings are on.</p>
-      <p class="gx-page-description" v-else-if="initialPage === 'appearance'">Choose which driving information to show. Use Colors &amp; Layout to arrange widgets and change colors.</p>
       <p class="gx-page-description" v-else-if="initialPage === 'lane_change'">Close gap adjusts following distance during a lane change when StarPilot controls acceleration and braking. It is Off by default.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'conditional' || state.data?.page.startsWith('conditional/')">Choose when to switch between Chill and Experimental. Applies on supported vehicles when StarPilot controls acceleration and braking.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'profiles'">Braking response works without saved personality curves. A selected personality braking preset or Traffic takes priority.</p>
@@ -424,9 +429,8 @@ export const SettingsPage = {
         <div v-if="!state.developerOpen" class="gx-panel-stage" :style="{'--panel-direction': state.panelDirection}">
           <Transition name="gx-panel">
           <div v-if="state.data" :key="state.data.page + activeSection.id" class="gx-settings__body">
-            <div v-if="state.data.page === 'appearance' || state.data.page === 'pip'" class="gx-settings__actions gx-actions">
-              <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Colors &amp; Layout</button>
-              <button v-if="state.data.page === 'pip'" type="button" class="gx-btn gx-btn--tonal" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Crop editor</button>
+            <div v-if="state.data.page === 'pip'" class="gx-settings__actions gx-actions">
+              <button type="button" class="gx-btn gx-btn--tonal" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Crop editor</button>
             </div>
             <section class="gx-card gx-settings__section">
               <div class="gx-section__header"><i class="bi" :class="activeSection.icon" aria-hidden="true"></i><span class="gx-section__title">{{ state.data.page === 'hub' ? activeSection.label : state.data.title }}</span>

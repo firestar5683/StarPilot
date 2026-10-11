@@ -127,16 +127,26 @@ class TestFavoritesOwner(unittest.TestCase):
       return mapped_actions(empty, lambda _request: self.fail("No driving action expected"),
                             lambda: appearance.snapshot(Profile.LARGE), appearance.apply)
     owner = FavoritesOwner(self.params, provider, lambda: True)
-    self.assertTrue(owner.configure_index(0, "RainbowPath", owner.snapshot().revision))
+    self.assertTrue(owner.configure_index(0, "SignalMetrics", owner.snapshot().revision))
     blocked = owner.snapshot().slots[0]
     self.assertFalse(blocked.available)
     self.assertFalse(owner.invoke(blocked.request).success)
-    self.assertFalse(Path(self.params.get_param_path("RainbowPath")).exists())
+    self.assertFalse(Path(self.params.get_param_path("SignalMetrics")).exists())
     parked = True
     request = owner.snapshot().slots[0].request
     self.assertTrue(owner.invoke(request).success)
-    self.assertEqual(Path(self.params.get_param_path("RainbowPath")).read_bytes(), b"1")
+    self.assertEqual(Path(self.params.get_param_path("SignalMetrics")).read_bytes(), b"1")
     self.assertFalse(owner.invoke(request).success)
+
+    # A slot saved with a key this provider does not offer keeps its assignment but cannot act.
+    retired = FavoritesOwner(self.params, lambda: mapped_actions(empty, lambda _request: None,
+                                                                 lambda: appearance.snapshot(Profile.LARGE), appearance.apply),
+                             lambda: True)
+    self.assertFalse(retired.configure_index(1, "RainbowPath", retired.snapshot().revision))
+    self.path.write_bytes(self.path.read_bytes().replace(b'"SignalMetrics"', b'"RainbowPath"'))
+    slot = retired.snapshot().slots[0]
+    self.assertEqual((slot.key, slot.available, slot.request), ("RainbowPath", False, None))
+    self.assertEqual(slot.reason, "This saved control is not available in this build")
 
   def test_registry_excludes_arbitrary_repairs_and_reset_operations(self):
     rows = (FeatureRow("ArbitraryParam", "Other", "Off", choices=("Off", "On"), available=True),

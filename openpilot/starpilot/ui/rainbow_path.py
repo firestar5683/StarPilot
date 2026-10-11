@@ -5,7 +5,6 @@ import math
 
 import pyray as rl
 
-from openpilot.starpilot.ui.appearance_preferences import read_visibility
 from openpilot.system.ui.lib.shader_polygon import Gradient
 
 
@@ -14,7 +13,6 @@ SCROLL_DEG_PER_SEC_PER_MPS = 5.0
 NUM_STOPS = 12
 MAX_SAMPLE_AGE_NS = 500_000_000
 MAX_FRAME_GAP_NS = 250_000_000
-PREFERENCE_POLL_NS = 1_000_000_000
 
 
 class RainbowPath:
@@ -23,16 +21,6 @@ class RainbowPath:
     self.last_ns: int | None = None
     self.sample_ns: int | None = None
     self.speed_mps = 0.0
-    self.enabled = False
-    self.next_preference_ns = 0
-
-  def refresh_enabled(self, params, now_ns: int) -> bool:
-    if now_ns < self.next_preference_ns and now_ns >= 0:
-      return self.enabled
-    saved = read_visibility(params, "RainbowPath")
-    self.enabled = saved.value is True and saved.readable
-    self.next_preference_ns = now_ns + PREFERENCE_POLL_NS
-    return self.enabled
 
   def update(self, now_ns: int, speed_mps: float | None, *, source_alive: bool) -> None:
     if now_ns < 0 or self.last_ns is not None and now_ns < self.last_ns:

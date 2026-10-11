@@ -262,13 +262,15 @@ class SettingsGatewayTest(unittest.TestCase):
     page = self.page("appearance")
     rows = {row["label"]: (index, row) for index, row in enumerate(page["rows"])}
     self.assertEqual([rows[label][1]["value"] for label in
-                      ("Stopped Timer", "Show Torque Bar", "C4 amber signal border", "C4 red blind-spot border")],
-                     ["Off", "On", "Off", "On"])
+                      ("Hide Personality Alerts", "Wheel brake and acceleration colors", "C4 amber signal border", "C4 red blind-spot border")],
+                     ["Off", "Off", "Off", "On"])
+    # Widget visibility, the stopped timer and Rainbow Road are edited with the layout instead.
+    self.assertFalse({"Stopped Timer", "Show Torque Bar", "Rainbow Road", "Hide Driver Monitoring Icon"} & rows.keys())
     self.assertFalse(rows["C4 amber signal border"][1]["confirm"])
     intent = self.gateway.preview(page["view"], rows["C4 amber signal border"][0], 1, self.session, self.generation)
     self.assertEqual(intent["question"], "Save C4 amber signal border as On? This changes only the display.")
-    torque = self.gateway.preview(page["view"], rows["Show Torque Bar"][0], -1, self.session, self.generation)
-    self.assertEqual(torque["question"], "Save torque bar as Off? This changes only the display.")
+    alerts = self.gateway.preview(page["view"], rows["Hide Personality Alerts"][0], 1, self.session, self.generation)
+    self.assertEqual(alerts["question"], "Save Hide Personality Alerts as On? This changes only the display.")
     self.assertIsNone(read_visibility(self.params, "SignalMetrics").raw)
     self.context.value = AuthorityContext(False, None, None)
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
@@ -288,32 +290,20 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
     self.assertEqual(Path(self.params.get_param_path("BlindSpotMetrics")).read_bytes(), b"bad")
 
-  def test_rainbow_road_uses_shared_appearance_confirmation(self):
-    from openpilot.starpilot.ui.appearance_preferences import read_visibility
-
-    self.context.value = AuthorityContext(True, None, None)
-    page = self.page("appearance")
-    row = next(index for index, item in enumerate(page["rows"]) if item["label"] == "Rainbow Road")
-    self.assertEqual(page["rows"][row]["value"], "Off")
-    intent = self.gateway.preview(page["view"], row, 1, self.session, self.generation)
-    self.assertEqual(intent["proposed"], "On")
-    self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
-    self.assertIs(read_visibility(self.params, "RainbowPath").value, True)
-
   def test_onroad_visual_choice_rechecks_session_and_vehicle_source(self):
     self.context.value = AuthorityContext(False, None, b"car-a")
     page = self.page("appearance")
-    index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Rainbow Road")
+    index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "C4 amber signal border")
     intent = self.gateway.preview(page["view"], index, 1, self.session, self.generation)
     with self.assertRaises(SettingsChanged):
       self.gateway.confirm(intent["intent"], self.session, self.generation, session_valid=lambda: False)
-    self.assertIsNone(self.params.get("RainbowPath"))
+    self.assertIsNone(self.params.get("SignalMetrics"))
     page = self.page("appearance")
     intent = self.gateway.preview(page["view"], index, 1, self.session, self.generation)
     self.context.value = AuthorityContext(False, None, b"car-b")
     with self.assertRaises(SettingsChanged):
       self.gateway.confirm(intent["intent"], self.session, self.generation)
-    self.assertIsNone(self.params.get("RainbowPath"))
+    self.assertIsNone(self.params.get("SignalMetrics"))
 
   def test_installed_sound_pack_gateway_is_exact_source_and_session_bound(self):
     from openpilot.starpilot.ui.sounds_owner import SoundsOwner

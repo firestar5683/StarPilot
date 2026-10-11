@@ -64,7 +64,7 @@ def resolve_unified_speed(state) -> UnifiedSpeedPresentation:
   source = (obs.accepted_source if accepted else obs.source) if valid else 'none'
   if source in ('', 'none'):
     source = 'unknown' if positive(posted) else 'none'
-  show_max = not state.appearance.hide_max_speed
+  show_max = state.customization.get('showMaxSpeed', True)
   has_slc = valid or str(obs.kind) == 'stale'
   mode = 'split' if show_max and has_slc else 'limit_only' if has_slc else 'max_only' if show_max else 'hidden'
   target = None

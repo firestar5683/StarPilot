@@ -21,7 +21,7 @@ def state(**changes):
     driver_override_active=False,
   )
   st = N(
-    speed_limit=obs, metric=True, appearance=N(hide_max_speed=False), cruise_kph=100, cruise_active=True, longitudinal_overridden=False, show_slc_offset=True
+    speed_limit=obs, metric=True, customization={}, cruise_kph=100, cruise_active=True, longitudinal_overridden=False, show_slc_offset=True
   )
   for key, value in changes.items():
     if hasattr(st, key):
@@ -44,7 +44,7 @@ class PresentationTest(unittest.TestCase):
           s.speed_limit.accepted_adjusted_limit_mps = target
           p = m.resolve_unified_speed(s)
           self.assertEqual((p.active_side, p.max_status, p.limit_status), (active, max_status, limit_status))
-      s.appearance.hide_max_speed = True
+      s.customization["showMaxSpeed"] = False
       s.speed_limit.accepted_adjusted_limit_mps = 23
       self.assertEqual(m.resolve_unified_speed(s).limit_status, 'Using set speed')
 
@@ -70,7 +70,7 @@ class PresentationTest(unittest.TestCase):
     s = state(pending_speed_limit_mps=25, pending_source='map')
     p = m.resolve_unified_speed(s)
     self.assertEqual((p.posted_text, p.limit_text, p.source, p.pending, p.proposal_text), ('72', '79', 'dashboard', True, '90'))
-    s.appearance.hide_max_speed = True
+    s.customization["showMaxSpeed"] = False
 
   def test_equal_values_keep_both_roles(self):
     p = m.resolve_unified_speed(state(cruise_kph=79.2))
@@ -143,7 +143,7 @@ class PresentationTest(unittest.TestCase):
     p = m.resolve_unified_speed(state(metric=False, cruise_kph=None))
     self.assertEqual((p.max_text, p.posted_text, p.offset_text, p.unit), ('–', '45', '+4', 'mph'))
     s = state()
-    s.appearance.hide_max_speed = True
+    s.customization["showMaxSpeed"] = False
     self.assertEqual(m.resolve_unified_speed(s).mode, 'limit_only')
     s.speed_limit.kind = 'stale'
     self.assertEqual(m.resolve_unified_speed(s).mode, 'limit_only')

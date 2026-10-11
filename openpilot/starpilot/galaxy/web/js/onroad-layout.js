@@ -12,7 +12,10 @@ import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 const PROFILES = ["large", "compact"]
 const COLORS = ["cardFill", "cardBorder", "text"]
 const ROAD_COLORS = ["path", "pathEdge", "laneLines"]
+// "default" is a legacy saved value that now renders as acceleration colors.
 const PATH_MODES = ["default", "color", "rainbow", "acceleration"]
+// Optional widgets start off and never block placement while off.
+const OPTIONAL_WIDGETS = ["driving_mode_descriptions", "clock", "stopped_timer"]
 const HEX = /^#[0-9a-fA-F]{8}$/
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const keysEqual = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
@@ -23,6 +26,14 @@ const frontmostOrder = (order, profile) => {
   const pinned = Object.entries(profile.widgets || {}).filter(([, widget]) => widget.frontmost === true).map(([id]) => id)
   return pinned.length <= 1 && (!pinned.length || order.at(-1) === pinned[0])
 }
+
+// Display preferences ride along in the draft but are not part of the rendered layout.
+export const layoutDocument = ({ display, ...document }) => document
+// The device sends them beside the layout; the editor keeps them in its draft so Save, undo and reload cover them.
+export const withDisplay = (data) => !object(data?.display) || !Array.isArray(data.display.rows) ? data : {
+  ...data, display: data.display.rows,
+  document: { ...data.document, display: { ...data.display.values } },
+  defaults: { ...data.defaults, display: { ...data.display.defaults } } }
 
 export function orderedWidgetIds(document, metadata, profile) {
   return document.widgetOrder?.[profile] || metadata.profiles[profile].widgetOrder || Object.keys(metadata.profiles[profile].widgets)
@@ -79,7 +90,7 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
   if (id === "speed_limit_actions") return Object.entries(profile.widgets).some(([key, other]) => {
     const at = positions[key]
     return key !== id && key !== "speed_limit" && other.layer !== "underlay" && at &&
-      !(key === "driving_mode_descriptions" && !at.enabled) && Number.isFinite(at.x) && Number.isFinite(at.y) &&
+      !(OPTIONAL_WIDGETS.includes(key) && !at.enabled) && Number.isFinite(at.x) && Number.isFinite(at.y) &&
       intersects(at.x, at.y, ...widgetSize(other, at))
   })
   if (id === "speed_limit") return false
@@ -97,9 +108,11 @@ export function previewPoint(event, rect, profile) {
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 6 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 6 ||
       (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
       (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
+      (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
+      (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
       (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
       !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
       !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
@@ -133,7 +146,7 @@ export function validDocument(document, metadata) {
         typeof position.enabled === "boolean" && (!widget.required || position.enabled === true) &&
         Number.isFinite(position.x) && Number.isFinite(position.y) &&
         position.x >= limits.minX && position.x <= limits.maxX && position.y >= limits.minY && position.y <= limits.maxY &&
-        ((id === "driving_mode_descriptions" && !position.enabled) || !overlapsReserved(profile, id, position.x, position.y, layout))
+        ((OPTIONAL_WIDGETS.includes(id) && !position.enabled) || !overlapsReserved(profile, id, position.x, position.y, layout))
     })
   })
 }
@@ -239,14 +252,15 @@ export class OnroadLayoutFeed {
   async run(body = null, { background = false } = {}) {
     if (!this.active) return
     if (this.request) {
-      if (body === null || this.saving) return
+      // Polls yield to anything in flight; an explicit reload replaces a pending poll.
+      if (background || this.saving) return
       this.request.abort(); this.generation++; this.cancelTimer(this.timer)
       this.request = this.timer = null
     }
     const saving = body !== null, generation = ++this.generation, request = new AbortController()
     this.request = request
     this.saving = saving
-    if (saving || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
+    if (saving || !background || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
     const fail = (message) => {
       this.error = message
       this.needsReload ||= saving
@@ -272,14 +286,17 @@ export class OnroadLayoutFeed {
       if (response.status === 409) throw new Error("Saved values or parked status changed. Your edits are kept here. Reload before saving again.")
       if (!response.ok) throw new Error(saving ? "Colors and layout could not be saved. Your edits are kept here. Reload before trying again." :
         "Colors and layout are unavailable. Try reloading.")
-      if (this.projection) data = editorSnapshot(data)
+      data = this.projection ? editorSnapshot(data) : withDisplay(data)
       if (!validSnapshot(data)) throw new Error("The device returned an unsupported colors and layout document. Reload to try again.")
       const initial = !this.data
       this.data = data
       this.error = ""
       this.needsReload = false
       this.publish({ status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
-        notice: saving ? (this.projection ? "Android Auto layout saved." : "Colors and both layouts saved.") : "" })
+        notice: saving ? (this.projection ? "Android Auto layout saved." : data.failed?.length ?
+          "Layout saved, but these display options did not change: " + data.failed.join(", ") + ". Reload and try again." :
+          "Colors and both layouts saved.") :
+          !background && !initial ? "Reloaded the saved layout." : "" })
       return true
     } catch (error) {
       if (this.active && generation === this.generation) fail(connectionError(error))
@@ -320,6 +337,12 @@ export const LayoutWidgetPreview = {
           <tspan v-for="(line, index) in modeLines(scene, profile)" :key="index" :x="widget.width / 2"
             :y="widget.height / 2 + (index - (modeLines(scene, profile).length - 1) / 2) * 25">{{ line }}</tspan>
         </text>
+      </template>
+      <template v-else-if="widget.kind === 'stopped_timer'">
+        <text :x="widget.width / 2" y="53" text-anchor="middle" dominant-baseline="middle" font-size="64" font-weight="700" fill="#33c2a0"
+          style="filter: drop-shadow(2px 2px 1px #000000aa)">2 minutes</text>
+        <text :x="widget.width / 2" y="101" text-anchor="middle" dominant-baseline="middle" font-size="30" font-weight="500"
+          style="filter: drop-shadow(2px 2px 1px #000000aa)">14 seconds</text>
       </template>
       <template v-else-if="widget.kind === 'clock'">
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
@@ -472,12 +495,13 @@ export const LayoutWidgetPreview = {
 
 export const OnroadLayoutPage = {
   components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog, GalaxySettingRow },
-  props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
+  props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
+    initialPanel: { type: String, default: "widgets" } },
   emits: ["close", "target"],
   setup(props) {
     const state = reactive({ status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
-      inspectorPanel: "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
+      inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
       history: { undo: [], redo: [], group: null } })
     let deferred = null
     const apply = (update) => {
@@ -530,7 +554,7 @@ export const OnroadLayoutPage = {
           previewFeed.start()
         }
         if (state.devicePreviewOpen && props.mode === "local") {
-          const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : state.draft
+          const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : layoutDocument(state.draft)
           previewFeed.update(document, props.projection ? 'projection' : state.profile, state.scene, !!state.drag)
         }
       }, { flush: "sync" })
@@ -583,7 +607,7 @@ export const OnroadLayoutPage = {
     colorFields() { return (this.state.data?.metadata.paletteFields || []).filter((field) =>
       Object.hasOwn(this.selectedWidget?.colors || {}, field.id)) },
     roadStyle() { return this.state.draft?.roadColors[this.state.profile] || {} },
-    roadMode() { return this.roadStyle.pathMode || 'default' },
+    roadMode() { const mode = this.roadStyle.pathMode || 'acceleration'; return mode === 'default' ? 'acceleration' : mode },
     roadColors() { return { ...Object.fromEntries((this.state.data?.metadata.roadColorFields || []).map(field => [field.id, field.default])), ...this.roadStyle } },
     roadGradient() {
       if (this.roadMode === 'rainbow') return Array.from({ length: 12 }, (_, i) => ({ offset: i / 11,
@@ -594,6 +618,16 @@ export const OnroadLayoutPage = {
         { offset: 1, color: '#0df87a', alpha: 102 / 255 }]
     },
     limits() { return this.selectedWidget ? placementLimits(this.profile, this.state.selected, this.layout) : null },
+    displayGroups() {
+      const groups = []
+      for (const row of this.state.data?.display || []) {
+        if (row.group === "widget") continue
+        const group = groups.find(item => item.name === row.group) || groups[groups.push({ name: row.group, rows: [] }) - 1]
+        group.rows.push(row)
+      }
+      return groups
+    },
+    stockConfidence() { return this.displayValue("StockConfidenceBallWidget") === "Off" },
   },
   mounted() {
     if (this.mode === "local") this.feed.start()
@@ -725,7 +759,7 @@ export const OnroadLayoutPage = {
       if (this.mode !== "local" || !this.state.data || !this.state.draft || this.state.drag || this.state.devicePreviewOpen) return
       this.state.devicePreviewOpen = true
       this.previewFeed.start()
-      this.previewFeed.update(this.projection ? projectionPayload({document: this.state.draft}, this.state.data.metadata).document : this.state.draft, this.projection ? 'projection' : this.state.profile, this.state.scene)
+      this.previewFeed.update(this.projection ? projectionPayload({document: this.state.draft}, this.state.data.metadata).document : layoutDocument(this.state.draft), this.projection ? 'projection' : this.state.profile, this.state.scene)
     },
     hideDevicePreview() {
       this.state.previewMode = "layout"
@@ -782,6 +816,29 @@ export const OnroadLayoutPage = {
       if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "clock") return
       const before = clone(this.state.draft)
       this.state.draft.clock24Hour = event.target.checked
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    displayRow(key) { return this.state.data?.display?.find(row => row.key === key) },
+    displayValue(key) { return this.state.draft?.display?.[key] },
+    displayAvailable(row) { return !!row?.available && (!row.requires || this.displayValue(row.requires) === "On") },
+    displaySettingRow(row) {
+      const blocked = row.requires && this.displayValue(row.requires) !== "On"
+      return { label: row.label, value: this.displayValue(row.key), choices: row.choices, available: this.displayAvailable(row),
+        reason: blocked ? "Turn on Lead Indicator first" : row.reason, action: true }
+    },
+    setDisplay(key, value) {
+      const row = this.displayRow(key)
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.displayAvailable(row) || !row.choices.includes(value)) return
+      const before = clone(this.state.draft)
+      this.state.draft.display[key] = value
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    setShowMaxSpeed(event) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits") return
+      const before = clone(this.state.draft)
+      this.state.draft.showMaxSpeed = event.target.checked
       this.recordChange(before)
       this.state.notice = ""
     },
@@ -1031,7 +1088,9 @@ export const OnroadLayoutPage = {
     },
     requestLeave(action, presentation = "inline") {
       if (this.inlineLeavePrompt) { this.flashLeavePrompt(); return }
-      if (this.busy || this.state.drag || this.state.layerDrag) return
+      // Saving must finish first; a load or a stray drag must not swallow navigation.
+      if (this.state.status === "saving") return
+      if (this.state.drag || this.state.layerDrag) this.cancelDrag()
       this.state.removeConfirm = null
       if (this.dirty) {
         this.state.discard = action
@@ -1062,7 +1121,7 @@ export const OnroadLayoutPage = {
     },
   },
   template: `
-    <section class="gx-settings gx-layout" aria-label="Colors and layout" :inert="busy" :aria-busy="busy || undefined">
+    <section class="gx-settings gx-layout" aria-label="Colors and layout" :aria-busy="busy || undefined">
       <div class="gx-settings__header gx-page-header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
         <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
 
@@ -1075,7 +1134,7 @@ export const OnroadLayoutPage = {
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
-        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}">
+        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}" :inert="busy">
           <span role="status">{{ inlineLeavePrompt ? 'Leave without saving your changes?' : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
@@ -1091,13 +1150,13 @@ export const OnroadLayoutPage = {
           </template>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <div v-if="state.discard && !inlineLeavePrompt && !modalLeavePrompt" class="gx-card gx-layout__discard" role="alert">
+        <div v-if="state.discard && !inlineLeavePrompt && !modalLeavePrompt" class="gx-card gx-layout__discard" role="alert" :inert="busy">
           <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
           <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="cancelLeave">Keep editing</button>
             <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
         </div>
         <template v-if="state.data && state.draft">
-          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect">
+          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect" :inert="busy">
             <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
               :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
             <p class="gx-note">Try the large comma UI's road-camera effect on Android Auto: reduced color and increased contrast while engaged, dimming while disengaged. Off keeps the current full-color appearance. Save and reconnect Android Auto to apply. The layout preview does not simulate camera color.</p>
@@ -1107,7 +1166,7 @@ export const OnroadLayoutPage = {
             <button v-if="!projection" v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
               :aria-pressed="state.profile === tab.id" :disabled="!!state.drag" @click="selectProfile(tab.id)">{{ tab.label }}<span v-if="state.data.activeProfile === tab.id"> · Active UI</span></button>
           </div>
-          <div class="gx-layout__workspace">
+          <div class="gx-layout__workspace" :inert="busy">
             <section class="gx-card gx-layout__preview-card" aria-label="Driving screen preview">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
               <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
@@ -1197,6 +1256,7 @@ export const OnroadLayoutPage = {
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'widgets'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'widgets'">Widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'">Edit widget</button>
                 <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'">Road colors</button>
+                <button v-if="!projection && displayGroups.length" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'display'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'display'">Display</button>
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
@@ -1255,6 +1315,20 @@ export const OnroadLayoutPage = {
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
+                <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
+                <label v-if="!projection && selectedWidget.kind === 'steering_wheel' && displayRow('ShowBrakeStatus')" class="gx-layout__clock-format"><input type="checkbox" :checked="displayValue('ShowBrakeStatus') === 'On'"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('ShowBrakeStatus'))" @change="setDisplay('ShowBrakeStatus', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
+                <div v-if="!projection && selectedWidget.kind === 'model_confidence' && displayRow('StockConfidenceBallWidget')" class="gx-layout__favorite-display">
+                  <span>Style</span>
+                  <div class="gx-segment" role="group" aria-label="Model confidence style">
+                    <button v-for="choice in [['On', 'StarPilot widgets'], ['Off', 'Stock confidence ball']]" :key="choice[0]" class="gx-btn" type="button"
+                      :class="displayValue('StockConfidenceBallWidget') === choice[0] ? 'gx-btn--primary' : 'gx-btn--tonal'"
+                      :aria-pressed="displayValue('StockConfidenceBallWidget') === choice[0]"
+                      :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('StockConfidenceBallWidget'))"
+                      @click="setDisplay('StockConfidenceBallWidget', choice[0])">{{ choice[1] }}</button>
+                  </div>
+                </div>
+                <p v-if="!projection && stockConfidence && selectedWidget.kind === 'conditional_mode'" class="gx-note">Hidden while Model confidence uses the stock confidence ball.</p>
                 <div v-if="projection && selectedWidget.iconSize" class="gx-layout__favorite-display">
                   <span>Show as</span>
                   <div class="gx-segment" role="group" :aria-label="selectedWidget.label + ' display'">
@@ -1285,11 +1359,11 @@ export const OnroadLayoutPage = {
               <section v-if="!projection" v-show="state.inspectorPanel === 'road'" class="gx-layout__colors" aria-label="Path and lane colors">
                 <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="resetRoad">Reset road colors</button></div>
                 <label>Path style<GalaxySelect class="gx-field gx-field--full" :value="roadMode" :disabled="!editAvailable || !!state.drag" @change="setRoadMode($event.target.value)">
-                  <option value="default">Follow Appearance Settings</option><option value="acceleration">Acceleration colors</option>
+                  <option value="acceleration">Acceleration colors</option>
                   <option value="color">Custom color</option><option value="rainbow">Rainbow Road</option>
                 </GalaxySelect></label>
                 <details class="gx-layout__help"><summary>About path &amp; lane colors</summary><div>
-                <p class="gx-note">Choose how the path is colored. Follow Appearance Settings uses your existing Rainbow Road preference. Acceleration colors change with acceleration and braking. Custom color stays one color. Rainbow Road shows a moving rainbow.</p>
+                <p class="gx-note">Choose how the path is colored. Acceleration colors change with acceleration and braking. Custom color stays one color. Rainbow Road shows a moving rainbow.</p>
                 <p class="gx-note">{{ state.profile === 'large' ? 'Path border colors the strips along the path. Lane lines keep their own color.' : 'Lane marking colors apply to the lines beside your lane and the outer lines separately.' }} Blue lane-centering and orange steering-effort indicators stay blue and orange.</p>
                 </div></details>
                 <div class="gx-layout__palette"><div v-for="field in state.data.metadata.roadColorFields" :key="field.id" class="gx-layout__color">
@@ -1299,8 +1373,17 @@ export const OnroadLayoutPage = {
                   <label :for="'road-alpha-' + field.id">Opacity · {{ Math.round(alpha(roadColors[field.id]) / 255 * 100) }}%</label>
                   <input :id="'road-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(roadColors[field.id])" :disabled="!editAvailable || !!state.drag" @input="roadAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                 </div></div>
-                <p class="gx-note">These colors apply to this layout only. The preview uses a sample road. Follow Appearance Settings previews acceleration colors; your saved Rainbow Road preference still applies while driving.</p>
+                <p class="gx-note">These colors apply to this layout only. The preview uses a sample road.</p>
                 <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
+              </section>
+              <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Display options">
+                <div class="gx-layout__subhead"><h4>Display options</h4></div>
+                <p class="gx-note">These apply to the whole driving screen on both layouts. Save changes to apply them.</p>
+                <template v-for="group in displayGroups" :key="group.name">
+                  <h5 class="gx-layout__display-group">{{ group.name }}</h5>
+                  <GalaxySettingRow v-for="(row, index) in group.rows" :key="row.key" :row="displaySettingRow(row)" :index="index"
+                    :disabled="!editable || !!state.drag || !!state.layerDrag || !displayAvailable(row)" :save-value="(_, value) => setDisplay(row.key, value)" />
+                </template>
               </section>
             </section>
           </div>

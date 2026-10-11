@@ -135,12 +135,14 @@ assert.match(SettingsPage.template, /v-if="state.pending"/)
 assert.match(SettingsPage.template, /Turn the vehicle off to change these settings/)
 assert.match(SettingsPage.template, /Local settings are unavailable in preview/)
 assert.match(SettingsPage.template, /state.data\?\.subtitle/)
-assert.match(SettingsPage.template, /Use Colors &amp; Layout to arrange widgets and change colors/)
+// Driving Screen Widgets opens the layout editor on its Display tab; target switches go through the router.
+assert.match(SettingsPage.template, /:initial-panel="state\.layoutPanel" @target="openLayoutTarget"/)
+assert.doesNotMatch(SettingsPage.template, /Use Colors &amp; Layout to arrange widgets and change colors/)
 assert.match(SettingsPage.template, /Close gap adjusts following distance during a lane change when StarPilot controls acceleration and braking\. It is Off by default/)
 assert.match(SettingsPage.template, /Braking response works without saved personality curves\. A selected personality braking preset or Traffic takes priority\./)
 assert.match(SettingsPage.template, /Traffic follow and jerk blend toward saved Relaxed values at higher speeds/)
 const app = (await import('node:fs')).readFileSync(new URL('../web/js/app.js', import.meta.url), 'utf8')
-assert.match(app, /route\.path === '\/appearance'.*initial-page="appearance"/)
+assert.match(app, /:initial-panel="route\.path === '\/appearance' \? 'display' : 'widgets'"/)
 const filtered = SettingsPage.computed.visibleRows.call({ state: { query: "lane", data: { rows: [
   { label: "SLC", value: "Off", reason: "" }, { label: "Lane Centering", value: "On", reason: "" },
 ] } } })

@@ -76,6 +76,7 @@ from openpilot.starpilot.controllers.mode_actions import ModeActionPublisher, pr
 from openpilot.starpilot.favorites.actions import (BOOKMARK, CYCLE_PERSONALITY, EXPERIMENTAL, INCREASE_SPEED, DECREASE_SPEED, SET_SPEED,
                                                   FORCE_COAST, PULSE_GLIDE, DISENGAGE, TRAFFIC, SWITCHBACK, SCREEN_OFF, mapped_actions)
 from openpilot.starpilot.favorites.state import FavoriteAction
+from openpilot.starpilot.favorites.layout_actions import layout_actions
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.conditional_mode.preferences import PreferenceError, SavedPreferences, decode_preferences
@@ -298,7 +299,7 @@ class StarShellSession:
       self._driver_monitor_layer = DriverMonitorLayer(self.profile)
     top_icons = (self.profile == Profile.COMPACT and state.alert.size == AlertSize.NONE and
                  state.appearance.camera_view != CameraViewChoice.DRIVER and not state.reverse_driver_camera and
-                 not state.appearance.hide_max_speed and self.view.onroad.compact_hud._set_speed_alpha.x > 0.01 and
+                 self.view.onroad.compact_hud._set_speed_alpha.x > 0.01 and
                  state.customization["layouts"]["compact"]["max_speed"]["enabled"])
     self._driver_monitor_layer.render(state, monitor=monitor, driver=driver,
                                       fresh=monitor is not None and driver is not None,
@@ -313,6 +314,9 @@ class StarShellSession:
   def _favorite_actions(self):
     actions = mapped_actions(lambda page: self.feature_snapshot(page, favorite=True), self.feature_request,
                              lambda: self.appearance_owner.snapshot(self.profile), self.appearance_owner.apply)
+    actions.update(layout_actions(ui_state.params, str(self.profile),
+                                  lambda: self._settings_preference_authority() or self._favorite_authority(),
+                                  lambda: self.adapter.invalidate_appearance()))
     actions.update(self._native_favorite_actions())
     return actions
 

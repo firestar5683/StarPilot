@@ -10,7 +10,7 @@ import pyray as rl
 import pytest
 
 from openpilot.starpilot.ui.onroad_customization import (
-  CLOCK_WIDGET, DEFAULT_WIDGET_ORDER, MAX_BYTES, customization_metadata, default_document, offset, read_customization,
+  CLOCK_WIDGET, DEFAULT_WIDGET_ORDER, MAX_BYTES, STOPPED_TIMER_WIDGET, customization_metadata, default_document, offset, read_customization,
   validate_document, decode_document, widget_palette, rgba, widget_size)
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
@@ -415,7 +415,6 @@ def test_compact_drag_keeps_animation_state_and_separate_origins():
   hud = CompactHudRenderer(Mock(spec=BitmapFonts, **vars(fonts)), Mock())
   hud._wheel = Mock()
   state = road(document, lateral_active=True, longitudinal_active=True)
-  state = replace(state, appearance=replace(state.appearance, hide_max_speed=True, hide_steering_wheel=True))
   with patch.object(hud, "_speed_limit_sign"), patch.object(rl, "draw_circle_gradient"), patch.object(rl, "draw_texture_pro") as wheel:
     hud.render(state)
     hud.render(state)
@@ -712,3 +711,46 @@ def test_pip_circles_are_independent_widgets_and_migrate_old_camera_pair(profile
   for layout in legacy['layouts'].values():
     layout.pop('vasm')
   assert validate_document(legacy)['layouts'][profile]['pip_left']['enabled']
+
+
+def test_stopped_timer_widget_is_optional_off_and_protected_when_on():
+  older = default_document()
+  del older["layouts"]["compact"][STOPPED_TIMER_WIDGET]
+  older["widgetOrder"] = {"compact": [key for key in DEFAULT_WIDGET_ORDER["compact"] if key != STOPPED_TIMER_WIDGET]}
+  upgraded = validate_document(older)
+  assert upgraded["layouts"]["compact"][STOPPED_TIMER_WIDGET] == {"x": 18, "y": 48, "enabled": False}
+  assert upgraded["widgetOrder"]["compact"][-1] == STOPPED_TIMER_WIDGET
+  assert STOPPED_TIMER_WIDGET not in upgraded["layouts"]["large"]
+  # Off, it may sit anywhere; on, it must clear the speed-limit buttons like other widgets.
+  parked = default_document()
+  parked["layouts"]["compact"][STOPPED_TIMER_WIDGET].update(y=120)
+  validate_document(parked)
+  parked["layouts"]["compact"][STOPPED_TIMER_WIDGET]["enabled"] = True
+  with pytest.raises(ValueError):
+    validate_document(parked)
+
+
+def test_show_max_speed_is_an_optional_boolean():
+  document = default_document()
+  assert "showMaxSpeed" not in validate_document(document)
+  document["showMaxSpeed"] = False
+  assert validate_document(document)["showMaxSpeed"] is False
+  document["showMaxSpeed"] = 0
+  with pytest.raises(ValueError):
+    validate_document(document)
+
+
+def test_stopped_timer_draws_inside_its_moved_widget():
+  from openpilot.starpilot.ui import onroad
+  document = default_document()
+  view = onroad.OnroadView.__new__(onroad.OnroadView)
+  view.fonts = Mock(spec=BitmapFonts)
+  view.fonts.measure.return_value = NS(width=100, height=20)
+  state = NS(customization=document)
+  view._stopped_timer(state, 75)
+  default = [call.args[3:5] for call in view.fonts.draw.call_args_list[1::2]]
+  assert default == [((476 - 100) / 2, 101 - 10), ((476 - 100) / 2, 149 - 10)]
+  document["layouts"]["compact"][STOPPED_TIMER_WIDGET].update(x=0, y=0)
+  view.fonts.draw.reset_mock()
+  view._stopped_timer(state, 75)
+  assert [call.args[3:5] for call in view.fonts.draw.call_args_list[1::2]] == [(170, 53 - 10), (170, 101 - 10)]

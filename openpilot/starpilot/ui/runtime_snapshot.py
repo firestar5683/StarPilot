@@ -4,7 +4,7 @@ No message default, missing drive history, or old onroad message is presented as
 an observed value. This module has no transport construction or write path.
 """
 
-from openpilot.starpilot.ui.onroad_customization import default_document, read_customization
+from openpilot.starpilot.ui.onroad_customization import STOPPED_TIMER_WIDGET, default_document, placement, read_customization
 # Temporary old-route replay compatibility; remove with the marked hook below.
 from openpilot.starpilot.ui.old_starpilot_route_shim import speed_limit_fallback
 
@@ -459,7 +459,7 @@ class RuntimeSnapshotAdapter:
       now_ns=now_ns,
       drive_key=drive_key,
       car_fresh=timer_car_fresh, standstill=timer_standstill, reverse=timer_reverse,
-      enabled=self._appearance_value.show_stopped_timer,
+      enabled=placement(self._customization_value, "compact", STOPPED_TIMER_WIDGET)["enabled"],
     )
     border_signals = (BorderSignals(bool(getattr(display_car, 'leftBlinker', False)),
                                     bool(getattr(display_car, 'rightBlinker', False)),

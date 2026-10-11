@@ -1,4 +1,6 @@
+from openpilot.common.hardware import HARDWARE
 from openpilot.starpilot.favorites.actions import SET_SPEED, mapped_actions
+from openpilot.starpilot.favorites.layout_actions import layout_actions
 from openpilot.starpilot.favorites.owner import FavoritesOwner
 from openpilot.starpilot.galaxy.settings import SettingsGateway
 
@@ -13,8 +15,12 @@ class FavoritesGateway:
 
   def actions(self):
     context = self.settings.context.sample()
-    return mapped_actions(lambda page: self.settings._state(page, context), lambda _request: False,
-                          lambda: self.settings._state("appearance", context), lambda _request: False)
+    actions = mapped_actions(lambda page: self.settings._state(page, context), lambda _request: False,
+                             lambda: self.settings._state("appearance", context), lambda _request: False)
+    # Galaxy only assigns slots; the device's own profile decides which layout a toggle edits.
+    profile = "compact" if HARDWARE.get_device_type() == "mici" else "large"
+    actions.update(layout_actions(self.settings.params, profile, lambda: False))
+    return actions
 
   def snapshot(self):
     return project_snapshot(self.owner.snapshot())

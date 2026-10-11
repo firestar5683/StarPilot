@@ -381,6 +381,7 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout .gx-layout__reset { justify-self: start; flex: 0 0 auto; min-height: 36px; padding: 7px 12px; font-size: var(--fs-sm); }
 .gx-layout__inspector .gx-layout__palette { grid-template-columns: 1fr; gap: 18px; }
 .gx-layout__inspector .gx-layout__colors .gx-layout__subhead { flex-wrap: wrap; }
+.gx-layout__display-group { margin: 8px 0 -8px; font-size: .78rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--on-surface-variant); }
 .gx-layout__color > label:first-child { font-weight: var(--fw-bold); }
 .gx-layout__color-values { display: flex; gap: 10px; align-items: center; }
 .gx-layout__color-values input[type="color"] { width: 48px; height: 44px; flex: 0 0 48px; padding: 3px; background: var(--surface-container-high); border: 1px solid var(--glass-border); border-radius: 8px; cursor: pointer; }

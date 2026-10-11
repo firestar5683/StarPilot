@@ -27,8 +27,9 @@ FEATURE_KEYS = {
   "aol": ("AlwaysOnLateral", "NostalgiaMode"),
   "profiles": ("CustomPersonalities",),
 }
-APPEARANCE_KEYS = ("HideSpeed", "HideMaxSpeed", "HideSteeringWheel", "DriverCamera", "StoppedTimer", "StockConfidenceBallWidget",
-                   "EnableTorqueBarWidget", "RainbowPath", "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics", "CameraView")
+# Slots saved with a retired visibility key stay assigned and read as unavailable.
+APPEARANCE_KEYS = ("DriverCamera", "StockConfidenceBallWidget", "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics",
+                   "CameraView")
 
 
 def _row_action(row, apply, section):

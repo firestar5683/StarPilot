@@ -16,7 +16,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui import clip
 from openpilot.system.ui.lib.application import gui_app
-from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, RAIL_WIDGETS, offset, placement, rgba,
+from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDGET, RAIL_WIDGETS, STOPPED_TIMER_WIDGET, offset, placement, rgba,
                                                          widget_order, widget_size)
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 
@@ -295,13 +295,13 @@ class OnroadView:
         if placement(state.customization, profile, "cruise_limits")["enabled"]:
           submit("cruise_limits", lambda: self.unified_speed.render(content, state))
         submit("speed_limit_actions", lambda: self._slc_actions(state))
-      if not state.appearance.hide_speed and placement(state.customization, profile, "current_speed")["enabled"]:
+      if placement(state.customization, profile, "current_speed")["enabled"]:
         speed_content = rl.Rectangle(content.x + (width - 1860) / 2, content.y, content.width, content.height)
         submit("current_speed", lambda: self.current_speed.render(speed_content, state))
       if state.alert.size == AlertSize.NONE:
-        if not state.appearance.hide_steering_wheel and placement(state.customization, profile, "steering_wheel")["enabled"]:
+        if placement(state.customization, profile, "steering_wheel")["enabled"]:
           submit("steering_wheel", lambda: self.steering_wheel.render(content, state))
-        if state.appearance.show_torque_bar:
+        if placement(state.customization, profile, "torque_bar")["enabled"]:
           submit("torque_bar", lambda: self.torque_bar.render(content, state, width if self.projection_viewport else 2160))
     else:
       if state.alert.size == AlertSize.NONE and not driver_camera:
@@ -309,8 +309,10 @@ class OnroadView:
         submit("max_speed", lambda: self.compact_hud.render_max_speed(state))
         submit("steering_wheel", lambda: self.compact_hud.render_steering_wheel(state))
         submit("speed_limit_actions", lambda: self._slc_actions(state))
-        if state.appearance.show_torque_bar:
+        if placement(state.customization, profile, "torque_bar")["enabled"]:
           submit("torque_bar", lambda: self.torque_bar.render(content, state, 536))
+        if state.stopped_duration_s is not None:
+          submit(STOPPED_TIMER_WIDGET, lambda: self._stopped_timer(state, state.stopped_duration_s))
       if not driver_camera:
         if stock_layer is not None:
           submit("model_confidence", lambda: stock_layer(rl.Rectangle(0, 0, 536, 240), state))
@@ -359,13 +361,13 @@ class OnroadView:
           if placement(state.customization, "large", "cruise_limits")["enabled"]:
             self.unified_speed.render(content, state)
           self._slc_actions(state)
-        if not state.appearance.hide_speed and placement(state.customization, "large", "current_speed")["enabled"]:
+        if placement(state.customization, "large", "current_speed")["enabled"]:
           speed_content = rl.Rectangle(content.x + right_shift / 2, content.y, content.width, content.height)
           self.current_speed.render(speed_content, state)
         if state.alert.size == AlertSize.NONE:
-          if not state.appearance.hide_steering_wheel and placement(state.customization, "large", "steering_wheel")["enabled"]:
+          if placement(state.customization, "large", "steering_wheel")["enabled"]:
             self.steering_wheel.render(content, state)
-          if state.appearance.show_torque_bar:
+          if placement(state.customization, "large", "torque_bar")["enabled"]:
             self.torque_bar.render(content, state, width if self.projection_viewport else 2160)
         if self.extra_overlays is not None:
           self.extra_overlays(content, state)
@@ -460,8 +462,6 @@ class OnroadView:
         self._ordered_widgets(frame, state, driver_camera=driver_camera, stock_layer=stock_layer if use_stock else None)
         clip.end_scissor_mode()
         clip.begin_scissor_mode(0, 0, 476, 240)
-        if state.alert.size == AlertSize.NONE and not driver_camera and state.stopped_duration_s is not None:
-          self._stopped_timer(state.stopped_duration_s)
         if self.extra_overlays is not None:
           self.extra_overlays(frame, state)
       else:
@@ -473,11 +473,11 @@ class OnroadView:
         rl.draw_texture_ex(self._fade, rl.Vector2(0, 0), 0, 1, rl.WHITE)
         if state.alert.size == AlertSize.NONE and not driver_camera:
           self.compact_hud.render(state)
-          if state.appearance.show_torque_bar:
+          if placement(state.customization, "compact", "torque_bar")["enabled"]:
             self.torque_bar.render(frame, state, 536)
           self._slc_actions(state)
           if state.stopped_duration_s is not None:
-            self._stopped_timer(state.stopped_duration_s)
+            self._stopped_timer(state, state.stopped_duration_s)
         if self.extra_overlays is not None:
           self.extra_overlays(frame, state)
         if monitor_layer := getattr(self, "driver_monitor_layer", None):
@@ -506,19 +506,22 @@ class OnroadView:
       clip.end_scissor_mode()
     render_compact_half_borders(state, rl.get_time())
 
-  def _stopped_timer(self, seconds: int) -> None:
+  def _stopped_timer(self, state: OnroadState, seconds: int) -> None:
+    position = placement(state.customization, "compact", STOPPED_TIMER_WIDGET)
+    width, _ = widget_size(state.customization, "compact", STOPPED_TIMER_WIDGET)
     minutes, remainder = duration_text(seconds)
     color = rl.Color(*duration_color(seconds), 255)
+    # Line centers sit 53 and 101 px into the widget box.
     for text, role, initial_size, minimum_size, center_y, tint in (
-      (minutes, FontRole.BOLD, 78, 28, 101, color),
-      (remainder, FontRole.MEDIUM, 35, 16, 149, rl.Color(255, 255, 255, 242)),
+      (minutes, FontRole.BOLD, 78, 28, 53, color),
+      (remainder, FontRole.MEDIUM, 35, 16, 101, rl.Color(255, 255, 255, 242)),
     ):
       size = initial_size
-      while size > minimum_size and self.fonts.measure(text, role, size).width > 440:
+      while size > minimum_size and self.fonts.measure(text, role, size).width > width:
         size -= 2
       measured = self.fonts.measure(text, role, size)
-      x = (476 - measured.width) / 2
-      y = center_y - measured.height / 2
+      x = position["x"] + (width - measured.width) / 2
+      y = position["y"] + center_y - measured.height / 2
       self.fonts.draw(text, role, size, x + 2, y + 2, rl.Color(0, 0, 0, 170))
       self.fonts.draw(text, role, size, x, y, tint)
 

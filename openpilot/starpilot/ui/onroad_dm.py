@@ -42,7 +42,6 @@ def monitor_visible(profile, state, *, fresh, onroad, top_icons):
     occluded = rl.check_collision_recs(monitor, rl.Rectangle(speed['x'], speed['y'], widget['width'], widget['height']))
   return bool(onroad and state.alert.size != AlertSize.FULL and not state.alert.critical and
               not occluded and
-              not getattr(state.appearance, 'hide_dm_icon', False) and
               placement(state.customization, profile, 'driver_monitor')['enabled'])
 
 

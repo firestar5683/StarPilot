@@ -46,7 +46,7 @@ def render_sample_road(rect: rl.Rectangle, state: OnroadState, profile: Profile)
     path = [(.231, 1), (.447, .45), (.503, .45), (.639, 1)]
   else:
     path = [(.18, 1), (.44, .45), (.51, .45), (.69, 1)]
-  mode = path_mode(style, False)
+  mode = path_mode(style)
   gradient = (RainbowPath().gradient() if mode == "rainbow" else
               solid_gradient(style.get("path", ROAD_COLORS["path"])) if mode == "color" else
               Gradient((0, 1), (0, 0), [rl.Color(13, 248, 122, 102), rl.Color(114, 255, 92, 89),
@@ -248,7 +248,7 @@ class _Canvas:
   def _render_driver_monitor(self, rect: rl.Rectangle, state: OnroadState) -> None:
     top_icons = (self.profile == Profile.COMPACT and state.alert.size == AlertSize.NONE and
                  state.appearance.camera_view != CameraViewChoice.DRIVER and not state.reverse_driver_camera and
-                 not state.appearance.hide_max_speed and self.view.compact_hud._set_speed_alpha.x > 0.01 and
+                 self.view.compact_hud._set_speed_alpha.x > 0.01 and
                  placement(state.customization, self.profile, "max_speed")["enabled"])
     if self.viewport is None:
       self.monitor.render(rect, state, top_icons=top_icons)

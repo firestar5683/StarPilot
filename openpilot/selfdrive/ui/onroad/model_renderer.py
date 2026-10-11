@@ -316,7 +316,7 @@ class ModelRenderer(Widget):
       for edge in getattr(self, "_path_edges", []):
         if edge.size:
           draw_polygon(self._rect, edge, gradient=edge_gradient(style["pathEdge"]))
-    mode = path_mode(style, self._rainbow_path.refresh_enabled(ui_state.params, now_ns))
+    mode = path_mode(style)
     if mode == "rainbow":
       car_fresh = bool(sm.valid.get('carState', False) and sm.alive.get('carState', False) and
                        sm.recv_frame['carState'] >= ui_state.started_frame)

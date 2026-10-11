@@ -136,7 +136,7 @@ class UnifiedNativeTest(unittest.TestCase):
     state = OnroadState(True, False, 20, 60, obs, metric=True, longitudinal_active=True, slc_system_long_available=bool(cp.openpilotLongitudinalControl))
     self.assertEqual((resolve_unified_speed(state).posted_text, resolve_unified_speed(state).source), ('90', 'dashboard'))
     # Hidden MAX moves the sign tap to its actual visible top row.
-    hidden = replace(state, appearance=replace(state.appearance, hide_max_speed=True))
+    hidden = replace(state, customization={**state.customization, "showMaxSpeed": False})
     emitted = []
     touch = OnroadInput(emitted.append, Profile.LARGE)
     touch.press(120, 630, hidden)

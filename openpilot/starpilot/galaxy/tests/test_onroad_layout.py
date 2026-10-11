@@ -120,6 +120,66 @@ class TestOnroadLayoutOwner(unittest.TestCase):
     self.assertIsNone(self.params.get(PARAM_KEY))
 
 
+class TestOnroadLayoutDisplay(unittest.TestCase):
+  def setUp(self):
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    self.params = Params(temporary.name)
+    self.parked = True
+    self.owner = OnroadLayoutOwner(self.params, lambda: self.parked)
+
+  def save(self, snapshot=None, **values):
+    snapshot = snapshot or self.owner.snapshot()
+    document = {**snapshot['document'], 'display': {**snapshot['display']['values'], **values}}
+    return self.owner.save({'revision': snapshot['revision'], 'document': document}, session_valid=lambda: True)
+
+  def test_snapshot_keeps_layout_pure_and_lists_display_rows(self):
+    snapshot = self.owner.snapshot()
+    self.assertEqual(snapshot['document'], default_document())
+    rows = {row['key']: row for row in snapshot['display']['rows']}
+    self.assertEqual(rows['LeadInfo']['requires'], 'HideLeadMarker')
+    self.assertTrue(rows['LeadInfo']['available'], 'editable once the draft shows the Lead indicator')
+    self.assertEqual({rows[key]['group'] for key in ('ShowBrakeStatus', 'StockConfidenceBallWidget')}, {'widget'})
+    self.assertFalse({'HideSpeed', 'RainbowPath', 'StoppedTimer', 'EnableTorqueBarWidget'} & rows.keys())
+    self.assertEqual(snapshot['display']['values']['HideLeadMarker'], 'Off')
+
+  def test_layout_and_dependent_display_choices_save_together(self):
+    saved = self.save(HideLeadMarker='On', LeadInfo='Distance', SignalMetrics='On')
+    self.assertEqual(saved['failed'], [])
+    self.assertEqual((self.params.get('HideLeadMarker'), self.params.get('LeadInfo'), self.params.get('SignalMetrics')),
+                     (False, True, True))
+    self.assertEqual(saved['display']['values']['LeadInfo'], 'Distance')
+    # Turning both off orders Lead info first, while the indicator still allows it.
+    saved = self.save(saved, HideLeadMarker='Off', LeadInfo='Off')
+    self.assertEqual(saved['failed'], [])
+    self.assertEqual((self.params.get('HideLeadMarker'), self.params.get('LeadInfo')), (True, False))
+
+  def test_display_change_elsewhere_makes_the_draft_stale(self):
+    snapshot = self.owner.snapshot()
+    self.params.put_bool('SignalMetrics', True, block=True)
+    with self.assertRaises(LayoutChanged):
+      self.save(snapshot, BlindSpotMetrics='Off')
+    self.assertIsNone(self.params.get(PARAM_KEY))
+
+  def test_invalid_display_requests_do_not_write(self):
+    for values in ({'HideSpeed': 'On'}, {'CameraView': 'Sideways'}, {'SignalMetrics': True}):
+      with self.subTest(values=values), self.assertRaises(ValueError):
+        self.save(**values)
+    self.assertIsNone(self.params.get(PARAM_KEY))
+    self.assertIsNone(self.params.get('SignalMetrics'))
+
+  def test_unchanged_invalid_choice_is_kept_and_failed_choices_are_reported(self):
+    Path(self.params.get_param_path('BlindSpotMetrics')).write_bytes(b'bad')
+    snapshot = self.owner.snapshot()
+    self.assertEqual(snapshot['display']['values']['BlindSpotMetrics'], 'Invalid saved choice')
+    from unittest import mock
+    with mock.patch('openpilot.starpilot.galaxy.onroad_layout.AppearanceOwner.apply', return_value=False):
+      saved = self.save(snapshot, SignalMetrics='On')
+    self.assertEqual(saved['failed'], ['C4 amber signal border'])
+    self.assertEqual(Path(self.params.get_param_path('BlindSpotMetrics')).read_bytes(), b'bad')
+    self.assertIsNotNone(self.params.get(PARAM_KEY), 'the layout itself still saved')
+
+
 class TestOnroadLayoutHttp(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()

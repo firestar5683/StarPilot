@@ -338,7 +338,7 @@ class OnroadInput:
     if self.profile != Profile.LARGE:
       self.cancel()
       return
-    inside = _inside_widget(x, y, state, "steering_wheel", (1588, 75, 1780, 267)) and not state.appearance.hide_steering_wheel
+    inside = _inside_widget(x, y, state, "steering_wheel", (1588, 75, 1780, 267))
     self._press = (x, y, state.experimental_enabled, state.experimental_action_token) if inside and state.experimental_available else None
 
   def move(self, x: float, y: float, state: OnroadState) -> None:
@@ -358,8 +358,7 @@ class OnroadInput:
     if self._press:
       px, py, previous, token = self._press
       if (abs(x - px) > 5 or abs(y - py) > 5 or not (_inside_widget(x, y, state, "steering_wheel", (1588, 75, 1780, 267)))
-          or previous != state.experimental_enabled or token != state.experimental_action_token or not state.experimental_available or
-          state.appearance.hide_steering_wheel):
+          or previous != state.experimental_enabled or token != state.experimental_action_token or not state.experimental_available):
         self.cancel()
 
   def release(self, x: float, y: float, state: OnroadState) -> None:
