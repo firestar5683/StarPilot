@@ -14,6 +14,7 @@ def cp_identity(cp):
 def _configured_transport_native(sm, cp, session, now_ns, native=None, *, require_longitudinal=True):
   """Validate the exact live native configuration and every Panda."""
   try:
+    validated_here = native is None
     native = native or current_native(sm, cp, now_ns=now_ns, axis_session_id=session)
     if (not session or native is None or str(native.axisSessionId) != session or
         native.requestedLateral and not native.lateralAllowed or
@@ -25,7 +26,9 @@ def _configured_transport_native(sm, cp, session, now_ns, native=None, *, requir
                      now_ns - native.observedMonoTime > SAFETY_MAX_AGE_NS or
                      native.validUntilMonoTime - native.observedMonoTime > SAFETY_MAX_AGE_NS):
       return None
-    if coherent and (not native_inventory_matches_cp(native, cp) or
+    # current_native already checked this exact inventory in this call.
+    # Supplied native values still need structural validation here.
+    if coherent and (not validated_here and not native_inventory_matches_cp(native, cp) or
                      any(p.safetyRxChecksInvalid or p.heartbeatLost or p.faults or
                          (require_longitudinal and native.requestedLongitudinal and str(config.safetyModel) not in ('silent', 'noOutput') and
                           not p.controlsAllowed)

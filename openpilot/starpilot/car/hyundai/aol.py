@@ -199,6 +199,10 @@ def native_profile_supported(model: int, param: int) -> bool:
 
 
 def native_accepts_cp(CP, model: int, param: int) -> bool:
+  # Ioniq 6 has its own exact contract; no generic Hyundai owner accepts it.
+  # Revalidate the complete contract on every call, without caching live authority.
+  if CP.carFingerprint == HyundaiCAR.HYUNDAI_IONIQ_6:
+    return qualified_ioniq6(CP)
   if qualified_blended_alpha(CP, marked_only=True) or qualified_blended_stock(CP, marked_only=True):
     return model == int(car.CarParams.SafetyModel.hyundai) and param == CP.safetyConfigs[0].safetyParam
   if qualified_angle_aol(CP, marked_only=True):
