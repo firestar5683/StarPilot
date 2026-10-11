@@ -664,6 +664,25 @@ class SelfdriveD:
           # A full bounded batch cannot establish that the receiver caught up.
           queue_invalid = True
         _car_state = samples[-1]
+    self.sm.update(0)
+
+    if (getattr(self, 'aol_replay', False) and getattr(self, 'axis_transport_required', False) and
+        not REPLAY):
+      # A carState may arrive during SubMaster work after the blocking wait/drain.
+      # Catch up without a second wait, preserving every transition and the total bound.
+      for _ in range(32 - len(samples)):
+        following = messaging.recv_one_or_none(self.car_state_sock)
+        if following is None:
+          break
+        previous_stamp = int(samples[-1].logMonoTime) if samples else self.aol_car_state_log_ns
+        queue_invalid |= int(following.logMonoTime) <= previous_stamp or not following.valid
+        samples.append(following)
+      else:
+        queue_invalid = True
+      if samples:
+        _car_state = samples[-1]
+      queue_invalid |= any(not sample.valid for sample in samples)
+
     self.car_state_samples = tuple((sample.carState, bool(sample.valid)) for sample in samples)
     CS = _car_state.carState if _car_state else self.CS_prev
     self.aol_expired_healthy_source = False
@@ -683,8 +702,6 @@ class SelfdriveD:
       if not retained:
         self.aol_car_state_log_ns = 0
         self.conditional_car_state_valid = False
-
-    self.sm.update(0)
 
     if not self.initialized:
       all_valid = CS.canValid and self.sm.all_checks()

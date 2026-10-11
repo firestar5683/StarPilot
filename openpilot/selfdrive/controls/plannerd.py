@@ -5,7 +5,7 @@ from collections import deque
 
 from opendbc.car.structs import car
 from openpilot.common.params import Params
-from openpilot.common.realtime import Priority, config_realtime_process
+from openpilot.common.realtime import Priority, config_realtime_process, set_core_affinity
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.ldw import LaneDepartureWarning
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner, NATIVE_PLAN_INPUTS
@@ -401,6 +401,8 @@ def starpilot_main():
   sm = messaging.SubMaster(subscribed_services, poll='modelV2',
                            ignore_alive=optional_conditional, ignore_valid=optional_conditional,
                            ignore_avg_freq=optional_conditional)
+
+  set_core_affinity([3, 5])
 
   try:
     while True:

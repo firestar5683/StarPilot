@@ -604,3 +604,42 @@ def test_split_drain_preserves_overrun_fail_closed():
   sm.logMonoTime['aolIntentWire'] = now
   assert current_intent(sm, car_state_ns=now, now_ns=now, companion=companion, drain=False) is None
   assert companion.last_rejection == 'drain_overrun'
+
+
+def test_late_car_state_after_submaster_update_preserves_batch_and_source():
+  from types import SimpleNamespace
+  for kind in ('fresh', 'timeout', 'invalid', 'reordered', 'full'):
+    sd = SelfdriveD.__new__(SelfdriveD)
+    sd.aol_replay = sd.axis_transport_required = True
+    sd.initialized, sd.enabled = True, False
+    sd.car_state_sock = object()
+    sd.CS_prev = car.CarState.new_message(canValid=True)
+    sd.aol_car_state_log_ns = 10_000_000_000
+    sd.conditional_car_state_valid = True
+    first = messaging.new_message('carState', valid=True, logMonoTime=10_010_000_000)
+    first.carState = car.CarState.new_message(canValid=True, brakePressed=True)
+    late = messaging.new_message('carState', valid=kind != 'invalid', logMonoTime=10_020_000_000)
+    late.carState = car.CarState.new_message(canValid=True, brakePressed=False)
+    if kind == 'reordered':
+      late.logMonoTime = first.logMonoTime
+    queue = []
+    def update(_, queue=queue, late=late, kind=kind):
+      queue.extend([late] if kind != 'full' else [late] * 32)
+    sd.sm = SimpleNamespace(update=update)
+    def receive(_, queue=queue):
+      return queue.pop(0) if queue else None
+    with patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False), \
+         patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=None if kind == 'timeout' else first), \
+         patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one_or_none', side_effect=receive), \
+         patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_025_000_000):
+      selected = sd.data_sample()
+    assert selected.brakePressed is False
+    assert len(sd.car_state_samples) <= 32
+    if kind in ('fresh', 'timeout'):
+      assert sd.conditional_car_state_valid
+      assert sd.aol_car_state_log_ns == late.logMonoTime
+    else:
+      assert not sd.conditional_car_state_valid
+      assert sd.aol_car_state_log_ns == 0
+    if kind != 'timeout':
+      assert sd.car_state_samples[0][0].brakePressed
