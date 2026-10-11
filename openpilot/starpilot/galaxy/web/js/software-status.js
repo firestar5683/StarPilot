@@ -5,7 +5,7 @@ import { ToggleBackup } from "./toggle-backup.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
-const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback", "versions", "version"])
+const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "update", "fast", "rollback", "versions", "version"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
 const UPDATER_ACTIVE = new Set(["checking...", "downloading...", "finalizing update...", "updating..."])
 const PRIMARY_BRANCHES = ["StarPilot", "Dom"]
@@ -64,7 +64,7 @@ export function softwareProgress(updater, operations = {}) {
     complete: "Update complete", error: "Update failed", unavailable: "Updater status unavailable", timed_out: "Update is taking longer than expected" }
   if (!active && (!stage || ["idle", "unknown"].includes(stage))) return null
   const percent = Number.isFinite(progress?.percent) && progress.percent >= 0 && progress.percent <= 100 ? progress.percent : null
-  return { active, percent, label: labels[progress?.stage || fast?.stage] || progress?.stage || fast?.stage || labels[updater.state] || "Update status",
+  return { active, failed: ["error", "unavailable", "timed_out"].includes(stage), percent, label: labels[progress?.stage || fast?.stage] || progress?.stage || fast?.stage || labels[updater.state] || "Update status",
     detail: progress?.detail || fast?.detail || "" }
 }
 
@@ -79,9 +79,9 @@ export function validHistory(value) {
 }
 
 export class SoftwareStatusFeed {
-  constructor({ includeHistory = true, publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
+  constructor({ includeHistory = true, publish, unauthorized = () => {}, restarting = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
-    Object.assign(this, { includeHistory, publish, unauthorized, fetcher, later, cancelTimer })
+    Object.assign(this, { includeHistory, publish, unauthorized, restarting, fetcher, later, cancelTimer })
     this.active = false
     this.generation = 0
     this.controller = null
@@ -100,7 +100,14 @@ export class SoftwareStatusFeed {
     this.error = ""
   }
 
-  emit(status) { this.publish({ status, data: this.data, busy: this.busy, uncertain: this.uncertain,
+  emit(status) {
+    const request = this.data?.operations?.request
+    const baseline = this.installBaseline
+    if (baseline && (request?.action === "install" || request?.outcome === "restarting" ||
+        this.data?.operations?.progress?.stage === "rebooting" || this.data?.updater.fast?.stage === "rebooting" ||
+        this.error && (request?.state === "pending" && request.action === baseline.action ||
+          this.uncertain && baseline.action === "install"))) this.restarting(baseline)
+    this.publish({ status, data: this.data, busy: this.busy, uncertain: this.uncertain,
     notice: this.notice, error: this.error }) }
 
   stop() {
@@ -144,7 +151,7 @@ export class SoftwareStatusFeed {
     this.controller = controller
     this.busy = body !== null || this.data === null
     this.mutating = body !== null
-    if (body !== null) this.error = ""
+    if (body !== null) { this.error = ""; this.notice = "" }
     this.emit(this.data ? "ready" : this.attempted ? "unavailable" : "loading")
     this.timeout = this.later(() => {
       if (!this.active || this.generation !== generation || this.controller !== controller) return
@@ -187,7 +194,7 @@ export class SoftwareStatusFeed {
         this.uncertain = false
         this.uncertainAction = null
         this.actionPriorRequestId = null
-        if (["fast", "rollback", "version"].includes(body.action)) {
+        if (["update", "fast", "rollback", "version"].includes(body.action)) {
           this.notice = `Updating ${body.branch}. Waiting for completion or reconnect.`
         } else if (body.action === "install") {
           this.installBaseline = this.installBaseline || { commit: payload.installed.commit, branch: payload.installed.branch, target: body.branch }
@@ -209,7 +216,7 @@ export class SoftwareStatusFeed {
           this.uncertainAction = null
           this.actionPriorRequestId = null
         }
-        if (["fast", "version"].includes(this.installBaseline?.action) && observed?.action === this.installBaseline.action && observed.target === this.installBaseline.target &&
+        if (["update", "fast", "version"].includes(this.installBaseline?.action) && observed?.action === this.installBaseline.action && observed.target === this.installBaseline.target &&
             (!this.installBaseline.selectedCommit || observed.selectedCommit === this.installBaseline.selectedCommit) &&
             ["complete", "failed"].includes(observed.state)) {
           if (observed.state === "failed" || observed.outcome === "up_to_date") {
@@ -238,7 +245,7 @@ export class SoftwareStatusFeed {
         if (body !== null) {
           this.uncertain = !error?.rejected
           this.uncertainAction = this.uncertain ? body : null
-          if (error?.rejected && ["install", "fast", "rollback", "version"].includes(body.action)) this.installBaseline = null
+          if (error?.rejected && ["install", "update", "fast", "rollback", "version"].includes(body.action)) this.installBaseline = null
         }
         this.error = error?.message || "Software request failed. Refresh to try again."
         this.emit(this.data ? "ready" : this.attempted ? "unavailable" : "loading")
@@ -266,12 +273,12 @@ export class SoftwareStatusFeed {
 
   action(action, branch = null, selection = null) {
     const operations = this.data?.operations
-    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", fast: "canFastUpdate", rollback: "canRollback", versions: "canFastUpdate", version: "canFastUpdate" }[action]
+    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", update: "canFastUpdate", fast: "canFastUpdate", rollback: "canRollback", versions: "canFastUpdate", version: "canFastUpdate" }[action]
     if (!this.active || !capability || this.mutating || this.blocked || this.uncertain || !operations?.parked ||
         operations[capability] !== true || operations.request?.state === "pending") return null
     if (action === "select" && (branch === "other:" || !operations.availableBranches.includes(branch) || branch === operations.selectedTarget)) return null
     if (["download", "install"].includes(action) && (!branch || branch !== operations.selectedTarget)) return null
-    if (["fast", "versions", "version"].includes(action) && (!branch || branch !== this.data.installed.branch && !operations.availableBranches.includes(branch))) return null
+    if (["update", "fast", "versions", "version"].includes(action) && (!branch || branch !== this.data.installed.branch && !operations.availableBranches.includes(branch))) return null
     if (action === "rollback" && branch !== this.data.installed.branch) return null
     if (action === "version") {
       if (selection?.expectedCommit !== this.data.installed.commit || !/^[0-9a-f]{40}$/.test(selection?.selectedCommit) ||
@@ -280,8 +287,8 @@ export class SoftwareStatusFeed {
     }
     this.actionPriorRequestId = operations.request?.id ?? null
     if (action === "install") this.installBaseline = { commit: this.data.installed.commit,
-      branch: this.data.installed.branch, target: branch }
-    if (["fast", "rollback", "version"].includes(action)) this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action, ...(action === "version" ? { selectedCommit: selection.selectedCommit } : {}) }
+      branch: this.data.installed.branch, target: branch, action }
+    if (["update", "fast", "rollback", "version"].includes(action)) this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action, ...(action === "version" ? { selectedCommit: selection.selectedCommit } : {}) }
     if (action === "version") return this.run({ action, branch, expectedCommit: selection.expectedCommit, selectedCommit: selection.selectedCommit })
     return this.run(action === "check" ? { action } : { action, branch })
   }
@@ -290,20 +297,60 @@ export class SoftwareStatusFeed {
 export const SoftwarePage = {
   components: { GxDialog, GxState, GxNotice, GalaxySelect, GalaxySettingRow, ToggleBackup },
   name: "SoftwarePage",
-  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
+  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true }, restarting: { type: Function, default: () => {} } },
   data: () => ({ status: "idle", data: null, busy: false, uncertain: false, notice: "", error: "",
-    draftBranch: "", primaryChoice: "", draftTouched: false, dialog: null, historyKind: "recent", version: "" }),
+    initialChecking: true, draftBranch: "", primaryChoice: "", draftTouched: false, dialog: null, historyKind: "recent", version: "" }),
   created() {
     this.feed = new SoftwareStatusFeed({ includeHistory: false, publish: (update) => {
       Object.assign(this.$data, update)
       if (update.data && !this.draftTouched) this.syncDraftBranch(update.data.operations.selectedTarget)
-    }, unauthorized: this.unauthorized })
+    }, unauthorized: this.unauthorized, restarting: this.restarting })
   },
-  mounted() { if (this.mode === "local") this.feed.start() },
+  async mounted() {
+    if (this.mode !== "local") return
+    try {
+      await this.feed.start()
+      if (this.feed.active && this.operations?.canCheck && !this.pending && !UPDATER_ACTIVE.has(this.data?.updater.state)) await this.feed.action("check")
+    } finally { this.initialChecking = false }
+  },
   beforeUnmount() { this.feed.stop() },
   computed: {
     operations() { return this.data?.operations },
-    updateProgress() { return softwareProgress(this.data?.updater, this.operations) },
+    reportedProgress() { return softwareProgress(this.data?.updater, this.operations) },
+    updateProgress() {
+      if (this.error || this.operations?.request?.state === "failed") return null
+      const progress = this.reportedProgress
+      if (progress?.active) return progress
+      if (progress?.failed) return null
+      if (this.initialChecking || this.busy || this.pending || this.uncertain) return {
+        active: true, percent: null, label: this.initialChecking || this.operations?.request?.action === "check" ?
+          "Checking for updates" : this.requestMessage(this.operations?.request) || "Reading update status", detail: "" }
+      return null
+    },
+    updateAvailable() { return this.data?.updater.targetChangeFound === true || this.data?.updater?.finalizedUpdateReady === true },
+    canUpdate() {
+      if (this.data?.updater?.finalizedUpdateReady && this.draftBranch === this.operations?.selectedTarget) return this.operations.canInstall
+      return this.operations?.canFastUpdate === true && this.branchOptions.some(branch => branch.name === this.draftBranch && branch.available)
+    },
+    updateBanner() {
+      const request = this.operations?.request
+      const progress = this.reportedProgress
+      const error = this.error || (request?.state === "failed" ? this.requestMessage(request) : "") ||
+        (progress?.failed ? progress.detail || progress.label : "")
+      if (error) return { tone: "danger", message: error }
+      if (this.updateProgress) return null
+      if (this.operations?.reason) return { tone: "warn", message: this.operations.reason }
+      if (this.notice) return { tone: "info", message: this.notice }
+      if (request && request.action !== "check") return { tone: "info", message: this.requestMessage(request) }
+      if (this.updateAvailable) return { tone: "success", message: "Update Available" }
+      if (this.data?.updater.targetChangeFound === false) return { tone: "success", message: "No Update Available" }
+      return { tone: "warn", message: "Update status unavailable. Check for updates to try again." }
+    },
+    repositoryUrl() {
+      const repository = this.operations?.repository
+      return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || "") ? `https://github.com/${repository}` : ""
+    },
+    commitUrl() { return this.repositoryUrl && /^[0-9a-f]{7,40}$/.test(this.data?.installed.commit || "") ? `${this.repositoryUrl}/commit/${this.data.installed.commit}` : "" },
     pending() { return this.operations?.request?.state === "pending" },
     actionUnavailable() { return this.uncertain || this.pending || !!this.error || !this.operations?.parked },
     actionDisabled() { return this.busy || this.actionUnavailable },
@@ -326,10 +373,7 @@ export const SoftwarePage = {
       const history = this.operations?.history
       return this.historyKind === "recent" ? (history?.recent?.branch === this.draftBranch ? history.recent.entries : []) : history?.[this.historyKind] || []
     },
-    commitsUrl() {
-      const repository = this.operations?.repository
-      return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || "") ? `https://github.com/${repository}/commits/${encodeURIComponent(this.draftBranch || this.data.installed.branch)}` : ""
-    },
+    commitsUrl() { return this.repositoryUrl ? `${this.repositoryUrl}/commits/${encodeURIComponent(this.data.installed.branch)}` : "" },
   },
   methods: {
     switchRow,
@@ -358,7 +402,7 @@ export const SoftwarePage = {
     requestMessage(request) {
       if (!request) return ""
       if (request.state === "failed") return request.error || "Update request failed. Refresh and try again."
-      if (["fast", "rollback", "version"].includes(request.action)) return request.state === "pending" ? `Updating ${request.target}…` :
+      if (["update", "fast", "rollback", "version"].includes(request.action)) return request.state === "pending" ? `Updating ${request.target}…` :
         request.outcome === "up_to_date" ? "Installed branch is already up to date. No restart needed." :
         "Update installed. Waiting to reconnect and verify the installed build."
       if (request.action === "versions") return request.state === "pending" ? "Loading recent versions…" : "Recent versions loaded."
@@ -371,12 +415,13 @@ export const SoftwarePage = {
       this.dialog = { action: "select", branch: this.draftBranch, title: "Change target branch",
         message: `Set ${this.draftBranch} as the target branch? This only stages the choice. Check for updates and download separately.`, label: "Set target branch" }
     },
-    askFastUpdate() {
+    askUpdate() {
       const branch = this.draftBranch || this.operations?.selectedTarget || this.data?.installed?.branch
-      if (this.actionDisabled || this.operations?.canFastUpdate !== true || !branch) return
-      const switching = branch !== this.data?.installed?.branch
-      this.dialog = { action: "fast", branch, title: switching ? "Switch branch" : "Fast Update",
-        message: `Download latest version of ${branch} and restart?`, label: switching ? "Switch & update" : "Fast Update" }
+      if (this.actionDisabled || !branch) return
+      if (this.data?.updater?.finalizedUpdateReady && branch === this.operations?.selectedTarget) return this.askInstall()
+      if (this.operations?.canFastUpdate !== true) return
+      this.dialog = { action: "update", branch, title: "Update software",
+        message: `Install the latest version of ${branch} and restart? This may include an operating system update.`, label: "Update & restart" }
     },
     loadHistory(event) {
       if (!event.target.open || this.operations?.history || this.busy) return
@@ -426,16 +471,17 @@ export const SoftwarePage = {
       <h2>Software &amp; Updates</h2>
       <GxState v-if="mode !== 'local'">Software updates are unavailable in preview.</GxState>
       <template v-else>
-        <GxNotice v-if="error" tone="danger">{{ error }}</GxNotice>
         <section class="gx-card gx-panel gx-stack gx-software-card">
           <dl v-if="data" class="gx-software-summary">
             <div><dt>Branch</dt><dd>{{ shown(data.installed.branch) }}</dd></div>
             <div><dt>Version</dt><dd>{{ shown(data.installed.displayVersion ?? data.installed.version) }}</dd></div>
-            <div><dt>Commit</dt><dd>{{ shortCommit(data.installed.commit) }}</dd></div>
+            <div><dt>Commit</dt><dd class="gx-actions">
+              <a v-if="commitUrl" class="gx-link" :href="commitUrl" target="_blank" rel="noopener noreferrer" title="View commit on GitHub"><i class="bi bi-github" aria-hidden="true"></i> {{ shortCommit(data.installed.commit) }}</a>
+              <span v-else>{{ shortCommit(data.installed.commit) }}</span>
+              <a v-if="commitsUrl" class="gx-link" :href="commitsUrl" target="_blank" rel="noopener noreferrer">View commits</a>
+            </dd></div>
           </dl>
-          <p v-else role="status"><span v-if="busy" class="gx-spinner" aria-hidden="true"></span> {{ status === 'unavailable' ? 'Update status unavailable. Reconnecting…' : 'Reading update status…' }}</p>
-          <GxNotice v-if="notice" :busy="busy || uncertain">{{ notice }}</GxNotice>
-          <GxNotice v-else-if="operations?.request" :tone="operations.request.state === 'failed' ? 'danger' : 'info'" :busy="pending">{{ requestMessage(operations.request) }}</GxNotice>
+          <GxNotice v-if="updateBanner" :tone="updateBanner.tone">{{ updateBanner.message }}</GxNotice>
           <div v-if="updateProgress" class="gx-update-progress" role="status">
             <div class="gx-update-progress__heading"><span>{{ updateProgress.label }}</span><span v-if="updateProgress.percent !== null">{{ Math.round(updateProgress.percent) }}%</span></div>
             <div v-if="updateProgress.active || updateProgress.percent !== null" class="gx-update-progress__track" role="progressbar" :aria-label="updateProgress.label"
@@ -444,19 +490,14 @@ export const SoftwarePage = {
                 :style="updateProgress.percent !== null ? {width: updateProgress.percent + '%'} : {}"></div>
             </div><p v-if="updateProgress.detail" class="gx-note">{{ updateProgress.detail }}</p>
           </div>
-          <div class="gx-actions">
-            <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations?.canCheck" @click="feed.action('check')">Check for updates</button>
-            <button type="button" class="gx-btn" :disabled="actionUnavailable || operations?.canFastUpdate !== true || !draftBranch || !branchOptions.some(branch => branch.name === draftBranch && branch.available)" @click="askFastUpdate">{{ branchChanging ? 'Switch & update' : 'Fast Update' }}</button>
-            <button v-if="data?.updater.finalizedUpdateReady === true" type="button" class="gx-btn" :disabled="actionUnavailable || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button>
+          <div v-if="!initialChecking && !updateProgress" class="gx-actions">
+            <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations?.canCheck" @click="feed.action('check')">Check for updates</button>
+            <button v-if="updateAvailable || branchChanging" type="button" class="gx-btn" :disabled="actionDisabled || !canUpdate" @click="askUpdate">Update</button>
           </div>
-          <p v-if="operations?.reason" class="gx-note">{{ operations.reason }}</p>
-          <p v-else-if="data?.updater.targetChangeFound === true" class="gx-note">Update available for {{ operations.selectedTarget }}.</p>
-          <p v-else-if="data?.updater.targetChangeFound === false && data?.updater.lastCheckedAt" class="gx-note">Up to date.</p>
           <p v-if="data?.updater.lastCheckedAt || data?.updater.lastFetchAt" class="gx-note">
             <span v-if="data.updater.lastCheckedAt">Checked {{ reported(data.updater.lastCheckedAt) }}</span>
             <span v-if="data.updater.lastFetchAt"> · Downloaded {{ reported(data.updater.lastFetchAt) }}</span>
           </p>
-          <a v-if="commitsUrl" class="gx-link" :href="commitsUrl" target="_blank" rel="noopener noreferrer"><i class="bi bi-github" aria-hidden="true"></i> View commits</a>
           <GalaxySettingRow v-if="operations?.automaticDownloads !== undefined" class="gx-row--borderless"
             :row="switchRow('Download updates automatically', operations.automaticDownloads, 'Prepare updates while parked; restart when ready.')"
             :index="0" :busy="busy" :disabled="uncertain || !!error || !operations.canConfigure"
@@ -482,13 +523,13 @@ export const SoftwarePage = {
             </div>
             <p v-if="draftBranch && !operations.availableBranches.includes(draftBranch)" class="gx-note">This branch is not in the updater's available list and cannot be selected yet.</p>
             <p v-else-if="!operations.availableBranches.length" class="gx-note">No branch list is available yet. Check for updates to refresh it.</p>
-            <p v-if="branchChanging" class="gx-note">Switch &amp; update installs {{ draftBranch }} and restarts the device.</p>
+            <p v-if="branchChanging" class="gx-note">Update installs {{ draftBranch }} and restarts the device.</p>
             <div class="gx-actions">
               <button v-if="canStageBranch" type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations.canSelect" @click="chooseBranch">Save target</button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations.canDownload || !operations.selectedTarget || draftBranch !== operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Normal Update</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || !operations.canDownload || !operations.selectedTarget || draftBranch !== operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Download only</button>
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionUnavailable || operations.canRollback !== true" @click="askRollback">Previous version</button>
             </div>
-            <p class="gx-note">Normal downloads without restarting. Previous version restores your last installed build.</p>
+            <p class="gx-note">Download only prepares an update without restarting. Previous version restores your last installed build.</p>
           </div></details>
           <details v-if="data" class="gx-software-options" @toggle="loadHistory($event)"><summary>Versions &amp; release notes</summary><div class="gx-stack">
             <div class="gx-tabs gx-actions" aria-label="Version source">

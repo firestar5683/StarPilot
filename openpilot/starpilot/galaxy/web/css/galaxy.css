@@ -304,6 +304,8 @@ body:has(.gx-underlay, .gx-drawer.open) #galaxy-bg .galaxy-hero {
 
 [v-cloak] { display: none !important; }
 a { color: inherit; text-decoration: none; }
+.gx-link { color: #60a5fa; }
+[data-theme="light"] .gx-link { color: #2563eb; }
 button { font-family: var(--font-body); }
 ul { list-style: none; margin: 0; padding: 0; }
 

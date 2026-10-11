@@ -1,8 +1,12 @@
+import { savedUpdateRestart, UPDATE_RESTART_MESSAGE } from "./update-restart.js"
+
 const status = document.getElementById("galaxy-boot")
 const message = status.querySelector("p")
 const retry = status.querySelector("button")
+if (savedUpdateRestart()) { message.textContent = UPDATE_RESTART_MESSAGE; retry.textContent = "↻ Refresh Galaxy"; retry.hidden = false }
 retry.addEventListener("click", () => location.reload())
 function failed() {
+  if (savedUpdateRestart()) return
   message.textContent = "Galaxy could not finish opening. Check your connection and try again."
   status.classList.add("gx-boot--failed")
   retry.hidden = false

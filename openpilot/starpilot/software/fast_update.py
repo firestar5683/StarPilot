@@ -17,6 +17,9 @@ class FastUpdateError(RuntimeError):
   pass
 
 
+class FastUpdateIncompatible(FastUpdateError):
+  pass
+
 def _stop_process(process):
   try:
     os.killpg(process.pid, signal.SIGTERM)
@@ -162,15 +165,15 @@ def fast_update(repo, branch, *, params, parked, expected_commit, current_os=Non
   launch = git('show', f'{target}:launch_env.sh')
   versions = re.findall(r'^\s*export\s+AGNOS_VERSION=["\']([^"\'\n]+)["\']\s*$', launch, re.MULTILINE)
   if len(versions) != 1 or not current_os or versions[0] != current_os:
-    raise FastUpdateError('Update requires a different or unverified operating system')
+    raise FastUpdateIncompatible('Update requires a different or unverified operating system')
   if target == previous and branch == initial_branch:
     notify('complete', 'Already up to date.')
     return 'up-to-date'
   for revision in (previous, target):
     if git('ls-tree', revision, '--', 'prebuilt').strip().split()[:1] != ['100644']:
-      raise FastUpdateError('Fast Update requires prebuilt releases; use a full validated update')
+      raise FastUpdateIncompatible('Fast Update requires prebuilt releases; use a full validated update')
   if not valid_receipt(git, target) and revision_digest(git, previous) != revision_digest(git, target):
-    raise FastUpdateError('Native build inputs or artifacts changed without a matching build receipt; use a full validated update')
+    raise FastUpdateIncompatible('Native build inputs or artifacts changed without a matching build receipt; use a full validated update')
   tracked = set(git('ls-tree', '-rz', '--name-only', target).split('\0')) - {''}
   untracked = set(git('ls-files', '--others', '-z').split('\0')) - {''}
   directories = {str(parent) for name in tracked for parent in Path(name).parents if str(parent) != '.'}

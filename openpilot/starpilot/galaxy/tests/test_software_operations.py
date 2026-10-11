@@ -25,7 +25,7 @@ class FakeProcess:
     if not self.running:
       raise SoftwareOperationError("Updater stopped", 503)
     self.sent.append(sig)
-    if sig == "fast":
+    if sig in ("update", "fast"):
       self.fast_requests.append(identity)
 
   def close(self):
@@ -147,6 +147,8 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.process.running = False
     view = self.owner.snapshot()
     self.assertEqual(view["progress"]["stage"], "unavailable")
+    self.assertIn("device updater service", view["progress"]["detail"])
+    self.assertNotIn("last reported state", view["progress"]["detail"])
     self.assertEqual(view["request"]["state"], "pending")
     self.assertEqual(view["reason"], "Updater status is unavailable")
     self.assertFalse(view["canCheck"])
@@ -434,6 +436,19 @@ class SoftwareOperationsTest(unittest.TestCase):
       self.owner.snapshot()
       self.assertEqual(recent.call_count, 3)
       self.assertEqual(reader.call_count, 6)
+
+  def test_unified_update_pins_source_and_tracks_completion(self):
+    result = self.act("update", "release")
+    self.assertEqual(result["request"]["action"], "update")
+    self.assertEqual(result["request"]["target"], "release")
+    self.assertEqual(self.process.sent, ["update"])
+    self.assertEqual(self.process.fast_requests, [{"branch": "release", "commit": "a" * 40}])
+    self.params.put("LastUpdateTime", datetime(2026, 10, 3, 12), block=True)
+    self.params.put("UpdaterLastFetchTime", datetime(2026, 10, 3, 12), block=True)
+    self.params.put_bool("DoReboot", True, block=True)
+    result = self.owner.snapshot()["request"]
+    self.assertEqual(result["state"], "complete")
+    self.assertEqual(result["outcome"], "restarting")
 
   def test_fast_current_branch_without_branch_list_or_selected_target(self):
     self.params.remove("UpdaterAvailableBranches")

@@ -44,11 +44,11 @@ const assert = require('node:assert/strict')
         const geometry = await page.evaluate(() => {
           const content = document.querySelector('.gx-content').getBoundingClientRect()
           const header = document.querySelector('.gx-appbar').getBoundingClientRect()
-          const notice = document.querySelector('.gx-alert').getBoundingClientRect()
-          const spinner = document.querySelector('.gx-alert .gx-spinner').getBoundingClientRect()
-          const text = document.querySelector('.gx-alert__body').getBoundingClientRect()
+          const notice = document.querySelector('.gx-update-progress').getBoundingClientRect()
+          const track = document.querySelector('.gx-update-progress__track').getBoundingClientRect()
+          const text = document.querySelector('.gx-update-progress__heading').getBoundingClientRect()
           return { width: content.width, left: content.left, right: content.right, header: header.width,
-            notice: notice.width, container: document.querySelector('.gx-software-card').clientWidth - 2 * parseFloat(getComputedStyle(document.querySelector('.gx-software-card')).paddingLeft), aligned: Math.abs(spinner.top - text.top) < 6,
+            notice: notice.width, container: document.querySelector('.gx-software-card').clientWidth - 2 * parseFloat(getComputedStyle(document.querySelector('.gx-software-card')).paddingLeft), aligned: track.top >= text.bottom,
             overflow: document.documentElement.scrollWidth > innerWidth }
         })
         assert.equal(geometry.overflow, false, `${theme}/${width}/${pinned}: no overflow`)
@@ -57,7 +57,7 @@ const assert = require('node:assert/strict')
         assert.equal(await page.locator('.gx-card-grid').evaluate(element => getComputedStyle(element).display), 'grid')
         const summary = await page.locator('.gx-summary > div').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
         assert.ok(summary.every(top => Math.abs(top - summary[0]) < 1), 'summary counts share one row')
-        assert.ok(Math.abs(geometry.notice - geometry.container) < 1 && geometry.aligned, 'notice fills the padded panel with aligned status icon')
+        assert.ok(Math.abs(geometry.notice - geometry.container) < 1 && geometry.aligned, 'progress fills the padded panel with the track below its label')
         for (const selector of ['.gx-panel', '.gx-message', '.gx-home__totals > section', '.gx-aa-step']) {
           const padding = await page.locator(selector).first().evaluate(element => { const style = getComputedStyle(element); return [parseFloat(style.paddingLeft), parseFloat(style.paddingRight), parseFloat(style.paddingTop), parseFloat(style.paddingBottom)] })
           assert.ok(padding[0] >= 16 && padding[1] >= 16, `${selector}: horizontal padding survives all themes and widths`)
@@ -103,12 +103,13 @@ const assert = require('node:assert/strict')
   })
   for (const width of [320, 1280, 3440]) {
     await page.setViewportSize({ width, height: 900 })
+    await page.locator('.gx-navigation--fullscreen').scrollIntoViewIfNeeded()
     const bounds = await page.getByRole('alert').filter({ hasText: 'Map tiles are unavailable.' }).boundingBox()
     assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 900,
       'map errors remain visible above the canvas')
   }
   assert.deepEqual(errors, [])
-  // Exercise the real software feed: controls render before a delayed status,
+  // Exercise the real software feed: controls wait for the automatic check,
   // history is fetched on demand, and secondary actions retain confirmations.
   const softwareRequests = []
   const snapshot = { schemaVersion: 1,
@@ -123,7 +124,7 @@ const assert = require('node:assert/strict')
     softwareRequests.push(url.search)
     await new Promise(resolve => setTimeout(resolve,250))
     const operations = {...snapshot.operations}
-    if (url.search !== '?history=0') operations.history = {installed:Array.from({length:20}, (_, index) => ({hash:index.toString(16).padStart(40,'0'),date:'2026-10-07T12:00:00Z',subject:index ? `Version ${index}: rendering and update fixes` : ''})),downloaded:[],
+    if (route.request().method() === 'GET' && url.search !== '?history=0') operations.history = {installed:Array.from({length:20}, (_, index) => ({hash:index.toString(16).padStart(40,'0'),date:'2026-10-07T12:00:00Z',subject:index ? `Version ${index}: rendering and update fixes` : ''})),downloaded:[],
       currentReleaseNotes:'Fixture release notes',downloadedReleaseNotes:null}
     await route.fulfill({json:{...snapshot,operations}})
   })
@@ -135,11 +136,12 @@ const assert = require('node:assert/strict')
     window.fixture = createApp(SoftwarePage,{mode:'local',unauthorized:()=>{}}).mount('#fixture')
   })
   const check = page.getByRole('button',{name:'Check for updates',exact:true})
-  await check.waitFor()
-  assert.equal(await check.isDisabled(),true,'no mutation before fresh status')
+  await page.getByRole('progressbar').waitFor()
+  assert.equal(await check.count(),0,'no update controls before the automatic check finishes')
   assert.equal(await page.getByRole('button',{name:'Back up toggles',exact:true}).isEnabled(),true,'backup does not wait for updater status')
-  await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(button => button.textContent === 'Check for updates').disabled)
-  assert.deepEqual(softwareRequests,['?history=0'])
+  await check.waitFor()
+  assert.equal(await check.isEnabled(),true)
+  assert.deepEqual(softwareRequests.slice(0,2),['?history=0',''])
   for (const width of [320,390,1280,3440]) {
     await page.setViewportSize({width,height:900})
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false,'minimal software stays within viewport')
@@ -150,20 +152,28 @@ const assert = require('node:assert/strict')
     await page.setViewportSize({width,height:900})
     await page.screenshot({path,fullPage:true})
   }
-  for (const name of ['Fast Update','Restart & install']) {
+  assert.equal(await page.getByRole('button',{name:'Fast Update',exact:true}).count(),0)
+  assert.equal(await page.getByRole('button',{name:'Normal Update',exact:true}).count(),0)
+  for (const name of ['Update']) {
     await page.getByRole('button',{name,exact:true}).click()
     await page.getByRole('dialog').waitFor()
     await page.getByRole('button',{name:'Cancel',exact:true}).click()
   }
+  snapshot.updater.finalizedUpdateReady = false
+  snapshot.operations.canInstall = false
+  await page.evaluate(() => window.fixture.feed.load())
+  await page.getByRole('button',{name:'Update',exact:true}).click()
+  await page.getByRole('dialog',{name:'Update software'}).waitFor()
+  await page.getByRole('button',{name:'Cancel',exact:true}).click()
   await page.getByText('Advanced options',{exact:true}).click()
   await page.getByRole('button',{name:'Previous version',exact:true}).click()
   await page.getByRole('dialog').waitFor()
   await page.getByRole('button',{name:'Cancel',exact:true}).click()
   await page.getByRole('combobox',{name:'Target branch',exact:true}).click()
   await page.getByRole('option',{name:/Development — Dom/}).click()
-  await page.getByRole('button',{name:'Switch & update',exact:true}).click()
-  await page.getByRole('dialog',{name:'Switch branch'}).waitFor()
-  assert.equal(await page.getByRole('dialog').getByText('Download latest version of Dom and restart?',{exact:true}).count(),1)
+  await page.getByRole('button',{name:'Update',exact:true}).click()
+  await page.getByRole('dialog',{name:'Update software'}).waitFor()
+  assert.equal(await page.getByRole('dialog').getByText('Install the latest version of Dom and restart? This may include an operating system update.',{exact:true}).count(),1)
   await page.getByRole('button',{name:'Cancel',exact:true}).click()
   await page.getByRole('button',{name:'Save target',exact:true}).click()
   await page.getByRole('dialog',{name:'Change target branch'}).waitFor()
@@ -171,7 +181,7 @@ const assert = require('node:assert/strict')
   await page.getByText('Versions & release notes',{exact:true}).click()
   await page.getByRole('button',{name:'Installed',exact:true}).click()
   await page.getByText('Fixture release notes',{exact:true}).waitFor()
-  assert.deepEqual(softwareRequests,['?history=0',''])
+  assert.equal(softwareRequests.at(-1),'','history is fetched only after opening release notes')
   assert.equal(await page.locator('.gx-build-history li').count(),20)
   assert.equal(await page.locator('.gx-build-history li strong').first().textContent(),'000000000000')
   assert.equal(await page.locator('.gx-build-history').evaluate(element=>getComputedStyle(element).listStyleType),'none')

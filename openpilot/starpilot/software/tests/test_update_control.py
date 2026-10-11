@@ -24,6 +24,7 @@ class UpdaterControlTests(unittest.TestCase):
     for action in ('check', 'download'):
       self.assertEqual(update_control._command(action), action.encode())
       self.assertEqual(update_control._parse(action.encode() + b'\n'), (action, None, None))
+    self.assertEqual(update_control._parse(update_control._command('update', 'Dom', commit) + b'\n'), ('update', 'Dom', commit))
     self.assertLessEqual(len(update_control._command('fast', 'x' * 128, commit)) + 1, update_control.MAX_COMMAND)
     for raw in (b'fast\n', b'fast Dom bad\n', b'fast Dom ' + commit.encode(),
                 b'fast Dom ' + commit.encode() + b' extra\n', b'fast Dom\ncheck ' + commit.encode() + b'\n'):
@@ -52,7 +53,8 @@ class UpdaterControlTests(unittest.TestCase):
       update_control._command('fast', 'Dom', expected, selected)
 
   def test_server_delivers_fast_identity_and_legacy_callback_shape(self):
-    for raw, expected in ((b'fast Dom ' + b'a' * 40 + b'\n', mock.call('fast', branch='Dom', commit='a' * 40)),
+    for raw, expected in ((b'update Dom ' + b'a' * 40 + b'\n', mock.call('update', branch='Dom', commit='a' * 40)),
+                          (b'fast Dom ' + b'a' * 40 + b'\n', mock.call('fast', branch='Dom', commit='a' * 40)),
                           (b'version Dom ' + b'a' * 40 + b' ' + b'b' * 40 + b'\n',
                            mock.call('version', branch='Dom', commit='a' * 40, selected_commit='b' * 40)),
                           (b'versions Dom ' + b'a' * 40 + b'\n', mock.call('versions', branch='Dom', commit='a' * 40)),

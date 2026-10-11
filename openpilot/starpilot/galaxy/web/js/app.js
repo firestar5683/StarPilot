@@ -2,6 +2,7 @@ import { rememberInstallPrompt } from "./install-app.js"
 import { toggleHaptic } from "./haptics.js"
 import { GxState } from "./state.js"
 import { BottomNav, NAV, primaryTab } from "./bottom-nav.js"
+import { UpdateRestart, UPDATE_RESTART_MESSAGE } from "./update-restart.js"
 import { GalaxyLoading } from "./loading-screen.js"
 import { GxNotice } from "./notice.js"
 import { createApp, reactive, defineAsyncComponent } from "../vendor/vue/vue.esm-browser.js"
@@ -57,6 +58,7 @@ const state = reactive({
   tools: [],
   loading: true,
   startupPending: false,
+  updateRestarting: false,
   error: "",
   pageError: "",
   monitorMode: "sample",
@@ -65,6 +67,7 @@ const state = reactive({
   theme: stored(THEME_KEY) === "light" ? "light" : "dark",
   searchPage: "",
 })
+const updateRestart = new UpdateRestart({ publish: waiting => { state.updateRestarting = waiting } })
 const authState = reactive({ status: "checking", error: "", localAccess: false, gatewayAccess: false })
 const authForm = reactive({ password: "" })
 const auth = new LocalAuth({ publish: (update) => {
@@ -76,7 +79,7 @@ const auth = new LocalAuth({ publish: (update) => {
 
 createApp({
   components: { BottomNav, GalaxyLoading, Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, MenuTile },
-  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1, nextLayoutLeavePresentation: "inline" }),
+  data: () => ({ state, authState, authForm, route, NAV, routeDirection: 1, updateRestart, UPDATE_RESTART_MESSAGE, nextLayoutLeavePresentation: "inline" }),
   computed: {
     visibleTools() { return state.tools.filter(tool => tool.visibility !== "authenticated" ||
       (state.monitorMode === "local" && authState.status === "authenticated")).sort((a, b) =>
@@ -162,6 +165,8 @@ createApp({
   },
   template: `
     <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}" @change.capture="toggleHaptic">
+      <GalaxyLoading v-if="state.updateRestarting" :message="UPDATE_RESTART_MESSAGE" refresh />
+      <template v-else>
       <header class="gx-appbar">
         <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" aria-label="Back" @click="routeBack"><i class="bi bi-arrow-left"></i></button>
         <div class="gx-appbar__pill">
@@ -192,7 +197,7 @@ createApp({
       </aside>
       <main class="gx-content" :style="{'--route-direction': routeDirection}"><div class="gx-route-stage">
         <Transition name="gx-route" @before-enter="setPageActive($event, true)" @before-leave="setPageActive($event, false)"><div class="gx-route" :key="route.path">
-        <template v-if="state.loading && !state.error"><GalaxyLoading v-if="state.startupPending" message="Connecting to your device…" /></template>
+        <template v-if="state.loading && !state.error"><GalaxyLoading v-if="state.startupPending && !state.updateRestarting" message="Connecting to your device…" /></template>
         <GxNotice v-else-if="state.error" tone="danger">{{ state.error }}</GxNotice>
         <section v-else-if="state.monitorMode === 'local' && authState.status !== 'authenticated'" class="gx-card gx-auth" aria-label="Galaxy sign in">
           <h2>Galaxy access</h2>
@@ -216,7 +221,7 @@ createApp({
         <GalaxyPage v-else-if="route.path === '/galaxy'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <OnroadLayoutPage ref="activeLayout" v-else-if="['/theme_maker', '/theme_maker/android_auto'].includes(route.path)" :key="route.path" :projection="route.path === '/theme_maker/android_auto'" :mode="state.monitorMode" :unauthorized="sessionExpired" @target="go($event === 'projection' ? '/theme_maker/android_auto' : '/theme_maker')" @close="routeBack" />
         <Logs v-else-if="route.path === '/logs' || route.path.startsWith('/logs/') || ['/troubleshoot', '/manage_tmux'].includes(route.path)" :path="route.path === '/troubleshoot' ? '/logs/troubleshoot' : route.path === '/manage_tmux' ? '/logs/tmux' : route.path" :mode="state.monitorMode" :unauthorized="sessionExpired" />
-        <SoftwarePage v-else-if="route.path === '/system'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
+        <SoftwarePage v-else-if="route.path === '/system'" :mode="state.monitorMode" :unauthorized="sessionExpired" :restarting="baseline => updateRestart.start(baseline)" />
         <NavigationPage v-else-if="['/navigation', '/navigation/maps', '/navigation/setup'].includes(route.path)" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go"
           :initial-tab="route.path === '/navigation/maps' ? 'maps' : route.path === '/navigation/setup' ? 'setup' : 'route'" />
         <ModelsPage v-else-if="route.path === '/manage_models'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
@@ -245,6 +250,7 @@ createApp({
         <GxState v-else :title="pageName">This capability is unavailable in this build. No operation was attempted.</GxState>
       </div></Transition></div></main>
       <BottomNav :path="route.path" @navigate="go" />
+      </template>
     </div>
   `,
 }).component("GxState", GxState).component("GxNotice", GxNotice).mount("#galaxy-app")

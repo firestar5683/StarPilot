@@ -89,7 +89,8 @@ def _command(action: str, branch=None, commit=None, selected_commit=None) -> byt
     raise UpdaterControlError('Invalid updater version target')
   if action in ('check', 'download') and branch is None and commit is None:
     return action.encode('ascii')
-  if action in ('fast', 'rollback', 'versions') and type(branch) is str and type(commit) is str and _BRANCH.fullmatch(branch) and _COMMIT.fullmatch(commit):
+  if (action in ('update', 'fast', 'rollback', 'versions') and type(branch) is str and type(commit) is str and
+      _BRANCH.fullmatch(branch) and _COMMIT.fullmatch(commit)):
     return f'{action} {branch} {commit}'.encode('ascii')
   raise UpdaterControlError('Invalid updater control action')
 
@@ -106,7 +107,7 @@ def _parse(command: bytes):
     action, branch, commit = parts
   except (UnicodeError, ValueError):
     raise UpdaterControlError('Invalid updater control message') from None
-  if not command.endswith(b'\n') or action not in ('fast', 'rollback', 'versions') or _command(action, branch, commit) + b'\n' != command:
+  if not command.endswith(b'\n') or action not in ('update', 'fast', 'rollback', 'versions') or _command(action, branch, commit) + b'\n' != command:
     raise UpdaterControlError('Invalid updater control message')
   return action, branch, commit
 
@@ -161,7 +162,7 @@ class UpdaterControlServer:
             action, branch, commit = parsed[:3]
             if action == 'version':
               self.request(action, branch=branch, commit=commit, selected_commit=parsed[3])
-            elif action in ('fast', 'rollback', 'versions'):
+            elif action in ('update', 'fast', 'rollback', 'versions'):
               self.request(action, branch=branch, commit=commit)
             elif action != 'status':
               self.request(action)

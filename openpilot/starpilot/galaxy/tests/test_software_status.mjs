@@ -281,12 +281,12 @@ assert.equal(staged.canStageBranch,true)
 SoftwarePage.methods.chooseBranch.call(staged)
 assert.equal(staged.dialog.action,"select") // Normal updates can still stage a target without restarting.
 assert.equal(staged.dialog.branch,"beta")
-SoftwarePage.methods.askFastUpdate.call({...staged, operations:{...staged.operations,canFastUpdate:true}})
+SoftwarePage.methods.askUpdate.call({...staged, operations:{...staged.operations,canFastUpdate:true}})
 const switchPage={...staged,operations:{...staged.operations,canFastUpdate:true}}
-SoftwarePage.methods.askFastUpdate.call(switchPage)
-assert.equal(switchPage.dialog.action,"fast")
+SoftwarePage.methods.askUpdate.call(switchPage)
+assert.equal(switchPage.dialog.action,"update")
 assert.equal(switchPage.dialog.branch,"beta")
-assert.equal(switchPage.dialog.label,"Switch & update")
+assert.equal(switchPage.dialog.label,"Update & restart")
 const alternateTarget=page("legacy",["StarPilot","Dom","beta"],"installed-only")
 SoftwarePage.methods.syncDraftBranch.call(alternateTarget,"legacy")
 assert.equal(alternateTarget.canStageBranch,false)
@@ -325,8 +325,8 @@ assert.match(SoftwarePage.template, /Development — Dom/)
 assert.match(SoftwarePage.template, /Other branches…/)
 assert.match(SoftwarePage.template, /onPrimaryBranchChange/)
 assert.match(SoftwarePage.template, /Check for updates/)
-assert.match(SoftwarePage.template, /Normal Update/)
-assert.match(SoftwarePage.template, /Restart &amp; install/)
+assert.match(SoftwarePage.template, /Download only/)
+assert.match(SoftwarePage.template, /@click="askUpdate">Update<\/button>/)
 assert.match(SoftwarePage.template, /displayVersion \?\? data\.installed\.version/)
 assert.match(SoftwarePage.template, /@click="askRollback">Previous version/ )
 assert.match(SoftwarePage.template, /operations\.canRollback !== true/)
@@ -388,8 +388,8 @@ assert.match(fastLost.feed.notice, /verified after reconnect/)
 fastLost.feed.stop()
 
 const fastPage = { actionDisabled: false, operations: { canFastUpdate: true, selectedTarget: "beta" }, data: { installed }, dialog: null }
-SoftwarePage.methods.askFastUpdate.call(fastPage)
-assert.deepEqual(fastPage.dialog, { action: "fast", branch: "beta", title: "Switch branch", message: "Download latest version of beta and restart?", label: "Switch & update" })
+SoftwarePage.methods.askUpdate.call(fastPage)
+assert.deepEqual(fastPage.dialog, { action: "update", branch: "beta", title: "Update software", message: "Install the latest version of beta and restart? This may include an operating system update.", label: "Update & restart" })
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canFastUpdate: "yes" } })), false)
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, request: { ...request("fast"), outcome: "invented" } } })), false)
 
@@ -439,7 +439,7 @@ assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canRo
 // Real stage progress remains indeterminate until measured numeric progress exists.
 assert.equal(softwareProgress(updater), null)
 assert.deepEqual(softwareProgress({...updater, state: "finalizing update..."}),
-  {active: true, percent: null, label: "Finalizing update", detail: ""})
+  {active: true, failed: false, percent: null, label: "Finalizing update", detail: ""})
 assert.equal(softwareProgress({...updater, state: "downloading..."}, {progress: {stage: "Downloading", detail: "", percent: 37}}).percent, 37)
 for (const percent of [NaN, Infinity, -1, 101]) {
   assert.equal(validSoftwareSnapshot(snapshot({operations: {...operations, progress: {stage: "fetching", detail: "", percent}}})), false)
@@ -479,11 +479,68 @@ const directBranch = fixture()
 directBranch.feed.start()
 await directBranch.reply(0,snapshot({operations:{...operations,availableBranches:['Dom','beta'],canFastUpdate:true}}))
 const branchVm={actionDisabled:false,draftBranch:'beta',operations:directBranch.states.at(-1).data.operations,data:{installed},dialog:null,feed:directBranch.feed}
-SoftwarePage.methods.askFastUpdate.call(branchVm)
-assert.equal(branchVm.dialog.label,'Switch & update')
+SoftwarePage.methods.askUpdate.call(branchVm)
+assert.equal(branchVm.dialog.label,'Update & restart')
 const acceptedSwitch=SoftwarePage.methods.confirmDialog.call(branchVm)
-assert.deepEqual(JSON.parse(directBranch.requests[1].options.body),{action:'fast',branch:'beta'})
+assert.deepEqual(JSON.parse(directBranch.requests[1].options.body),{action:'update',branch:'beta'})
 assert.equal(directBranch.requests.length,2,'switching uses one request and one confirmation')
 await directBranch.reply(1,snapshot())
 await acceptedSwitch
 directBranch.feed.stop()
+
+// A visit checks immediately, without interrupting an update already in progress.
+for (const [canCheck, pending, state, expected] of [
+  [true, false, 'idle', ['check']], [false, false, 'idle', []],
+  [true, true, 'idle', []], [true, false, 'downloading...', []],
+]) {
+  const actions = []
+  const view = { mode: 'local', initialChecking: true, operations: { canCheck }, pending,
+    data: { updater: { state } }, feed: { active: true, start: async () => {}, action: async action => actions.push(action) } }
+  await SoftwarePage.mounted.call(view)
+  assert.deepEqual(actions, expected)
+  assert.equal(view.initialChecking, false)
+}
+
+const updateView = { ...SoftwarePage.data(), data: snapshot(), operations: { ...operations },
+  requestMessage: SoftwarePage.methods.requestMessage }
+for (const key of ['pending', 'reportedProgress', 'updateProgress', 'updateAvailable', 'updateBanner', 'repositoryUrl', 'commitUrl', 'commitsUrl']) {
+  Object.defineProperty(updateView, key, { get: () => SoftwarePage.computed[key].call(updateView) })
+}
+assert.equal(updateView.updateProgress.label, 'Checking for updates')
+assert.equal(updateView.updateBanner, null)
+updateView.initialChecking = false
+assert.deepEqual(updateView.updateBanner, { tone: 'success', message: 'Update Available' })
+updateView.data = snapshot({ updater: { ...updater, targetChangeFound: false } })
+updateView.operations.request = request('check', 'complete')
+assert.equal(updateView.updateBanner.message, 'No Update Available')
+updateView.operations.request = request('check')
+assert.equal(updateView.updateProgress.label, 'Checking for updates')
+assert.equal(updateView.updateBanner, null)
+updateView.operations.request = request('check', 'failed', null, 'Network unavailable')
+assert.equal(updateView.updateProgress, null)
+assert.deepEqual(updateView.updateBanner, { tone: 'danger', message: 'Network unavailable' })
+updateView.error = 'Connection lost'
+assert.equal(updateView.updateBanner.message, 'Connection lost')
+updateView.operations.repository = 'firestar5683/openpilot'
+updateView.draftBranch = 'beta'
+assert.equal(updateView.commitUrl, `https://github.com/firestar5683/openpilot/commit/${installed.commit}`)
+assert.equal(updateView.commitsUrl, 'https://github.com/firestar5683/openpilot/commits/Dom')
+
+// The same button installs a prepared build or requests the updater-owned automatic path.
+const ready = { actionDisabled: false, draftBranch: "Dom", operations: { canInstall: true, selectedTarget: "Dom" },
+  data: snapshot({ updater: { ...updater, finalizedUpdateReady: true } }), askInstall() { this.installed = true } }
+assert.equal(SoftwarePage.computed.canUpdate.call(ready), true)
+SoftwarePage.methods.askUpdate.call(ready)
+assert.equal(ready.installed, true)
+const automatic = fixture()
+automatic.feed.start()
+await automatic.reply(0, snapshot({ operations: { ...operations, canFastUpdate: true } }))
+automatic.feed.action("update", installed.branch)
+assert.deepEqual(JSON.parse(automatic.requests[1].options.body), { action: "update", branch: installed.branch })
+await automatic.reply(1, snapshot({ updater: { ...updater, state: "updating..." },
+  operations: { ...operations, canFastUpdate: false, request: request("update", "pending", installed.branch) } }))
+assert.equal(automatic.feed.installBaseline.action, "update")
+automatic.fire(1000)
+await automatic.reply(2, snapshot({ operations: { ...operations, request: { ...request("update", "complete", installed.branch), outcome: "up_to_date" } } }))
+assert.equal(automatic.feed.installBaseline, null)
+automatic.feed.stop()
