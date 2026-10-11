@@ -22,7 +22,7 @@ from openpilot.common.version import get_build_metadata
 from openpilot.common.vendor_manifest import validate_revision
 from openpilot.starpilot.software.update_control import UpdaterControlError, UpdaterControlServer
 from openpilot.starpilot.software.preferences import AUTOMATIC_DOWNLOADS, download_permitted
-from openpilot.starpilot.software.fast_update import FastUpdateError, FastUpdateIncompatible, run as run_git
+from openpilot.starpilot.software.fast_update import FastUpdateError, FastUpdateIncompatible, required_os_version, run as run_git
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -412,6 +412,7 @@ class Updater:
     excluded_branches = ('release2', 'release2-staging')
 
     self._branches_checked = False
+    self.params.put("UpdaterOSUpdate", {}, block=True)
     setup_git_options(OVERLAY_MERGED)
     try:
       output = run(["git", "ls-remote", "--heads", "origin"], OVERLAY_MERGED)
@@ -435,6 +436,16 @@ class Updater:
     if new_commit is None:
       cloudlog.info("target branch %s is not published on origin; no update available", new_branch)
       return
+    if AGNOS:
+      try:
+        if cur_commit != new_commit:
+          run(["git", "fetch", "--depth=1", "--filter=blob:none", "--no-tags", "--no-recurse-submodules", "origin", new_commit], OVERLAY_MERGED)
+        version = required_os_version(run(["git", "show", f"{new_commit}:launch_env.sh"], OVERLAY_MERGED))
+        current_os = HARDWARE.get_os_version()
+        if version and current_os:
+          self.params.put("UpdaterOSUpdate", {"branch": new_branch, "required": version != current_os}, block=True)
+      except (OSError, subprocess.SubprocessError):
+        cloudlog.exception("Unable to check target operating system version")
     if (cur_branch, cur_commit) != (new_branch, new_commit):
       cloudlog.info(f"update available, {cur_branch} ({str(cur_commit)[:7]}) -> {new_branch} ({str(new_commit)[:7]})")
     else:

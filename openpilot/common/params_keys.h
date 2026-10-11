@@ -320,6 +320,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UpdaterFetchAvailable", {CLEAR_ON_MANAGER_START, BOOL}},
     {"UpdaterNewDescription", {CLEAR_ON_MANAGER_START, STRING}},
     {"UpdaterNewReleaseNotes", {CLEAR_ON_MANAGER_START, BYTES}},
+    {"UpdaterOSUpdate", {PERSISTENT | DONT_LOG, JSON}},
     {"UpdaterFastState", {PERSISTENT | DONT_LOG, JSON}},
     {"UpdaterState", {CLEAR_ON_MANAGER_START, STRING}},
     {"UpdaterLastCheckTime", {PERSISTENT, TIME}},

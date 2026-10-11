@@ -51,6 +51,13 @@ class SoftwareReaderTest(unittest.TestCase):
     self.params.put_bool("UpdateAvailable", True, block=True)
     self.assertTrue(self.reader.snapshot()["updater"]["finalizedUpdateReady"])
 
+  def test_os_update_requires_valid_branch_and_boolean(self):
+    for value, expected in (({"branch": "Dom", "required": True}, {"branch": "Dom", "required": True}),
+                            ({"branch": "Dom", "required": "yes"}, {}), ([], {}), (None, {})):
+      with self.subTest(value=value):
+        self.raw("UpdaterOSUpdate", json.dumps(value).encode())
+        self.assertEqual(self.reader.snapshot()["updater"]["osUpdate"], expected)
+
   def test_absent_and_malformed_never_imply_up_to_date(self):
     result = self.reader.snapshot()
     self.assertIsNone(result["updater"]["targetChangeFound"])

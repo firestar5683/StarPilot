@@ -389,7 +389,7 @@ fastLost.feed.stop()
 
 const fastPage = { actionDisabled: false, operations: { canFastUpdate: true, selectedTarget: "beta" }, data: { installed }, dialog: null }
 SoftwarePage.methods.askUpdate.call(fastPage)
-assert.deepEqual(fastPage.dialog, { action: "update", branch: "beta", title: "Update software", message: "Install the latest version of beta and restart? This may include an operating system update.", label: "Update & restart" })
+assert.deepEqual(fastPage.dialog, { action: "update", branch: "beta", title: "Update software", message: "Install the latest version of beta and restart?", label: "Update & restart" })
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canFastUpdate: "yes" } })), false)
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, request: { ...request("fast"), outcome: "invented" } } })), false)
 
@@ -503,13 +503,22 @@ for (const [canCheck, pending, state, expected] of [
 
 const updateView = { ...SoftwarePage.data(), data: snapshot(), operations: { ...operations },
   requestMessage: SoftwarePage.methods.requestMessage }
-for (const key of ['pending', 'reportedProgress', 'updateProgress', 'updateAvailable', 'updateBanner', 'repositoryUrl', 'commitUrl', 'commitsUrl']) {
+for (const key of ['pending', 'reportedProgress', 'updateProgress', 'updateAvailable', 'osUpdateRequired', 'updateBanner', 'repositoryUrl', 'commitUrl', 'commitsUrl']) {
   Object.defineProperty(updateView, key, { get: () => SoftwarePage.computed[key].call(updateView) })
 }
 assert.equal(updateView.updateProgress.label, 'Checking for updates')
 assert.equal(updateView.updateBanner, null)
 updateView.initialChecking = false
 assert.deepEqual(updateView.updateBanner, { tone: 'success', message: 'Update Available' })
+updateView.data.updater.osUpdate = { branch: updateView.operations.selectedTarget, required: true }
+assert.equal(updateView.updateBanner.tone, 'warn')
+assert.match(updateView.updateBanner.message, /operating system update required/)
+updateView.data.updater.osUpdate.branch = 'another-branch'
+assert.equal(updateView.updateBanner.tone, 'success')
+updateView.data.updater.osUpdate = { branch: updateView.operations.selectedTarget, required: false }
+assert.equal(updateView.updateBanner.tone, 'success')
+assert.ok(!SoftwarePage.template.includes('View commits'))
+
 updateView.data = snapshot({ updater: { ...updater, targetChangeFound: false } })
 updateView.operations.request = request('check', 'complete')
 assert.equal(updateView.updateBanner.message, 'No Update Available')
@@ -524,7 +533,9 @@ assert.equal(updateView.updateBanner.message, 'Connection lost')
 updateView.operations.repository = 'firestar5683/openpilot'
 updateView.draftBranch = 'beta'
 assert.equal(updateView.commitUrl, `https://github.com/firestar5683/openpilot/commit/${installed.commit}`)
-assert.equal(updateView.commitsUrl, 'https://github.com/firestar5683/openpilot/commits/Dom')
+assert.equal(updateView.commitsUrl, 'https://github.com/firestar5683/StarPilot/commits/Dom/')
+assert.equal(SoftwarePage.computed.commitsUrl.call({ data: { installed: { branch: 'SecretGoodStarPilot' } } }),
+  'https://github.com/firestar5683/StarPilot/commits/SecretGoodStarPilot/')
 
 // The same button installs a prepared build or requests the updater-owned automatic path.
 const ready = { actionDisabled: false, draftBranch: "Dom", operations: { canInstall: true, selectedTarget: "Dom" },

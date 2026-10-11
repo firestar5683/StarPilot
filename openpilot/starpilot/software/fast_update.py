@@ -20,6 +20,12 @@ class FastUpdateError(RuntimeError):
 class FastUpdateIncompatible(FastUpdateError):
   pass
 
+
+def required_os_version(launch):
+  versions = re.findall(r'^\s*export\s+AGNOS_VERSION=["\']([^"\'\n]+)["\']\s*$', launch, re.MULTILINE)
+  return versions[0] if len(versions) == 1 else None
+
+
 def _stop_process(process):
   try:
     os.killpg(process.pid, signal.SIGTERM)
@@ -163,8 +169,7 @@ def fast_update(repo, branch, *, params, parked, expected_commit, current_os=Non
   notify('validating', 'Checking downloaded operating system and native artifacts...')
   validate_revision(repo, target)
   launch = git('show', f'{target}:launch_env.sh')
-  versions = re.findall(r'^\s*export\s+AGNOS_VERSION=["\']([^"\'\n]+)["\']\s*$', launch, re.MULTILINE)
-  if len(versions) != 1 or not current_os or versions[0] != current_os:
+  if not current_os or required_os_version(launch) != current_os:
     raise FastUpdateIncompatible('Update requires a different or unverified operating system')
   if target == previous and branch == initial_branch:
     notify('complete', 'Already up to date.')

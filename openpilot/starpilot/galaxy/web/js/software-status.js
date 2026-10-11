@@ -328,6 +328,9 @@ export const SoftwarePage = {
       return null
     },
     updateAvailable() { return this.data?.updater.targetChangeFound === true || this.data?.updater?.finalizedUpdateReady === true },
+    osUpdateRequired() { return this.data?.updater.osUpdate?.required === true &&
+      this.data.updater.osUpdate.branch === (this.draftBranch || this.operations?.selectedTarget) &&
+      this.data.updater.osUpdate.branch === this.data.updater.targetBranch },
     canUpdate() {
       if (this.data?.updater?.finalizedUpdateReady && this.draftBranch === this.operations?.selectedTarget) return this.operations.canInstall
       return this.operations?.canFastUpdate === true && this.branchOptions.some(branch => branch.name === this.draftBranch && branch.available)
@@ -340,6 +343,9 @@ export const SoftwarePage = {
       if (error) return { tone: "danger", message: error }
       if (this.updateProgress) return null
       if (this.operations?.reason) return { tone: "warn", message: this.operations.reason }
+      if (this.updateAvailable && this.osUpdateRequired) return { tone: "warn",
+        message: this.data.updater.finalizedUpdateReady ? "Update ready — includes an operating system update. Restart to install." :
+          "Update available — operating system update required. This is a large download and may take a while. Keep the device powered and connected to Wi-Fi." }
       if (this.notice) return { tone: "info", message: this.notice }
       if (request && request.action !== "check") return { tone: "info", message: this.requestMessage(request) }
       if (this.updateAvailable) return { tone: "success", message: "Update Available" }
@@ -373,7 +379,7 @@ export const SoftwarePage = {
       const history = this.operations?.history
       return this.historyKind === "recent" ? (history?.recent?.branch === this.draftBranch ? history.recent.entries : []) : history?.[this.historyKind] || []
     },
-    commitsUrl() { return this.repositoryUrl ? `${this.repositoryUrl}/commits/${encodeURIComponent(this.data.installed.branch)}` : "" },
+    commitsUrl() { return this.data?.installed.branch ? `https://github.com/firestar5683/StarPilot/commits/${encodeURIComponent(this.data.installed.branch)}/` : "" },
   },
   methods: {
     switchRow,
@@ -421,7 +427,7 @@ export const SoftwarePage = {
       if (this.data?.updater?.finalizedUpdateReady && branch === this.operations?.selectedTarget) return this.askInstall()
       if (this.operations?.canFastUpdate !== true) return
       this.dialog = { action: "update", branch, title: "Update software",
-        message: `Install the latest version of ${branch} and restart? This may include an operating system update.`, label: "Update & restart" }
+        message: `Install the latest version of ${branch} and restart?`, label: "Update & restart" }
     },
     loadHistory(event) {
       if (!event.target.open || this.operations?.history || this.busy) return
@@ -473,12 +479,11 @@ export const SoftwarePage = {
       <template v-else>
         <section class="gx-card gx-panel gx-stack gx-software-card">
           <dl v-if="data" class="gx-software-summary">
-            <div><dt>Branch</dt><dd>{{ shown(data.installed.branch) }}</dd></div>
+            <div><dt>Branch</dt><dd><a v-if="commitsUrl" class="gx-link" :href="commitsUrl" target="_blank" rel="noopener noreferrer">{{ data.installed.branch }}</a><span v-else>{{ shown(data.installed.branch) }}</span></dd></div>
             <div><dt>Version</dt><dd>{{ shown(data.installed.displayVersion ?? data.installed.version) }}</dd></div>
             <div><dt>Commit</dt><dd class="gx-actions">
               <a v-if="commitUrl" class="gx-link" :href="commitUrl" target="_blank" rel="noopener noreferrer" title="View commit on GitHub"><i class="bi bi-github" aria-hidden="true"></i> {{ shortCommit(data.installed.commit) }}</a>
               <span v-else>{{ shortCommit(data.installed.commit) }}</span>
-              <a v-if="commitsUrl" class="gx-link" :href="commitsUrl" target="_blank" rel="noopener noreferrer">View commits</a>
             </dd></div>
           </dl>
           <GxNotice v-if="updateBanner" :tone="updateBanner.tone">{{ updateBanner.message }}</GxNotice>

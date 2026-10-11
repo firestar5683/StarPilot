@@ -194,6 +194,20 @@ class TestVendoredUpdate(unittest.TestCase):
       self.updater.normal_update(BRANCH, self.initial_commit, lambda: next(parked), Mock())
     self.assertNotIn("DoReboot", self.updater.params.values)
 
+  def test_check_reports_confirmed_os_requirement_without_changing_installed_files(self):
+    self.updated.AGNOS = True
+    self.updated.HARDWARE.get_os_version.return_value = "12"
+    for launch, required in (("export AGNOS_VERSION='12'\n", False), ("export AGNOS_VERSION='13'\n", True),
+                             ("# Unknown OS version\n", None)):
+      with self.subTest(launch=launch):
+        (self.source / "launch_env.sh").write_text(launch)
+        self.commit_source("Change target OS version")
+        self.updater.check_for_update()
+        expected = {} if required is None else {"branch": BRANCH, "required": required}
+        self.assertEqual(self.updater.params.values["UpdaterOSUpdate"], expected)
+        self.assertEqual(self.git(self.merged, "rev-parse", "HEAD"), self.initial_commit)
+        self.updated.handle_agnos_update.assert_not_called()
+
   def test_vendored_fetch_and_finalize(self):
     (self.source / "panda" / "README.md").write_text("Updated ordinary tracked source\n")
     target = self.commit_source("Update dependency source atomically")
