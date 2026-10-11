@@ -12,6 +12,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from opendbc.car.hyundai.ev6_aol import qualified as ev6_aol_qualified
+from opendbc.car.honda.stock_aol import qualified as honda_aol_qualified, temporary_restriction as honda_temporary_restriction
 from openpilot.cereal.visionipc import VisionStreamType
 from msgq.visionipc import VisionIpcClient
 
@@ -35,7 +36,7 @@ from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
-from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only
+from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only, cp_identity, healthy_transport
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -1068,6 +1069,38 @@ class SelfdriveD:
         sample.vEgo < (self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0)
         for sample, _ in getattr(self, 'car_state_samples', ())))
 
+  def honda_native_lateral_grant_lost(self, CS, native, previous, requested, *, source_current, previous_intent, intent, now_ns):
+    """An established host LAT request lost its native grant, not a cold wait."""
+    pause = getattr(self, 'aol_transport_pause', None)
+    prior = getattr(pause, 'observed_native', None)
+    if (not honda_aol_qualified(self.CP, marked_only=True) or not source_current or
+        not self.initialized or not previous.lateral_active or not requested.desired_lateral or
+        native is None or previous_intent is None or intent is None or not previous_intent.producerSessionId or
+        previous_intent.producerSessionId != intent.producerSessionId or
+        not 0 < previous_intent.carStateLogMonoTime <= native.observedMonoTime <= now_ns or
+        now_ns - previous_intent.carStateLogMonoTime > INTENT_MAX_AGE_NS or
+        native.requestedLateral or native.lateralAllowed or
+        prior is None or not prior.requestedLateral or not prior.lateralAllowed or
+        getattr(self, 'aol_fault_reason', 'none') != 'none' or
+        pause.active or getattr(getattr(self, 'aol_availability_pause', None), 'active', False) or
+        CS.brakePressed or CS.regenBraking or CS.gasPressed or CS.steeringPressed or
+        honda_temporary_restriction(self.CP, CS) or
+        any(self.events.contains(event) for event in
+            (ET.USER_DISABLE, ET.OVERRIDE_LATERAL, ET.OVERRIDE_LONGITUDINAL, ET.IMMEDIATE_DISABLE, ET.SOFT_DISABLE)) or
+        not self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) or
+        self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated):
+      return False
+    def identity(state):
+      return (state.axisSessionId, state.pandaSerial, state.safetyModel, state.safetyParam,
+              tuple((p.slotIndex, p.hardwareSerial, p.safetyModel, p.safetyParam,
+                     p.alternativeExperience) for p in state.pandaInventory))
+    return bool(pause.cp == cp_identity(self.CP) and pause.session == self.aol_session_id and
+                identity(prior) == identity(native) and
+                0 < prior.observedMonoTime <= native.observedMonoTime <= now_ns <= prior.validUntilMonoTime and
+                now_ns - prior.observedMonoTime <= SAFETY_MAX_AGE_NS and
+                current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id) == native and
+                healthy_transport(self.sm, self.CP, CS, self.aol_session_id, now_ns, native))
+
   def record_aol_authority_loss(self, *, now_ns, companion, drained, native, source_current,
                                 lost_active, lost_companion, lost_permission, upgraded):
     if now_ns - getattr(self, 'aol_last_authority_report_ns', 0) < 5_000_000_000:
@@ -1141,7 +1174,10 @@ class SelfdriveD:
                              self.events.contains(ET.USER_DISABLE))
       lost_companion = bool((previous.lateral_active or previous.longitudinal_active) and
                             not source_current and not self.events.contains(ET.USER_DISABLE))
-      lost_permission = bool(native is not None and not driver_override and (
+      lost_honda_lateral_grant = self.honda_native_lateral_grant_lost(
+        CS, native, previous, requested, source_current=source_current,
+        previous_intent=previous_intent, intent=intent, now_ns=now_ns)
+      lost_permission = bool(lost_honda_lateral_grant or native is not None and not driver_override and (
         previous.lateral_active and requested.desired_lateral and native.requestedLateral and
         not native.lateralAllowed and not CS.steeringPressed and not self.events.contains(ET.OVERRIDE_LATERAL) or
         previous.longitudinal_active and requested.desired_longitudinal and native.requestedLongitudinal and

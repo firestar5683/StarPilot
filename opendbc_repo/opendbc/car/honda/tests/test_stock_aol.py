@@ -5,7 +5,7 @@ import pytest
 
 from opendbc.car import gen_empty_fingerprint, structs
 from opendbc.car.honda.interface import CarInterface
-from opendbc.car.honda.stock_aol import CLASSIC_BOSCH, NIDEC, RADARLESS, qualified, temporary_restriction
+from opendbc.car.honda.stock_aol import CLASSIC_BOSCH, NIDEC, RADARLESS, qualified, temporary_restriction, native_observation
 from opendbc.car.honda.values import CAR, HondaFlags
 from openpilot.starpilot.aol.intent import AolSettings, AOL_TOGGLE
 from openpilot.starpilot.car.honda.aol import policy_for, create_intent, native_accepts_cp
@@ -347,6 +347,37 @@ def test_actual_card_active_observation_requires_fresh_applied_command(monkeypat
   assert tick(previous=True, long=True)["standard_active"]
   assert intent.allowed_latch  # Actual normal long activity also proves active engagement.
 
+  # The actual Card caller consumes the acknowledged native permission. Its
+  # immediate rejection boundary remains strict; no host grace is extended.
+  tick(enabled=False)
+  cs = state(True)
+  native = replace(native, requestedLateral=True, lateralAllowed=True,
+                   observedMonoTime=now + 10_000_000, validUntilMonoTime=now + 210_000_000)
+  tick(enabled=False)
+  assert not intent.allowed_latch  # The previously active latch toggles OFF.
+  cs = state(False)
+  native = replace(native, observedMonoTime=now + 10_000_000)
+  tick(enabled=False)
+  cs = state(True)
+  native = replace(native, observedMonoTime=now + 10_000_000)
+  tick(enabled=False)
+  assert intent.allowed_latch  # Release then a new physical press toggles ON.
+  cs = state(False)
+  native = replace(native, observedMonoTime=now + 10_000_000)
+  assert tick(enabled=False)["native_rejection_ns"] == 0
+  assert intent.allowed_latch
+  native = replace(native, lateralAllowed=False, observedMonoTime=now + 10_000_000)
+  observed_native = native.observedMonoTime
+  assert tick(enabled=False)["native_rejection_ns"] == observed_native
+  assert not intent.allowed_latch  # Native denial immediately revokes independent intent.
+  native = replace(native, lateralAllowed=True, observedMonoTime=now + 10_000_000)
+  assert tick(enabled=False)["native_rejection_ns"] == 0
+  assert not intent.allowed_latch  # Permission recovery alone cannot recreate a gesture.
+  cs = state(True)
+  native = replace(native, observedMonoTime=now + 10_000_000)
+  tick(enabled=False)
+  assert intent.allowed_latch  # A genuinely new LKAS edge can arm again.
+
   generic = AolCardIntent(intent.settings)
   host.aol_card_intent = generic
 
@@ -357,3 +388,97 @@ def test_actual_card_active_observation_requires_fresh_applied_command(monkeypat
   monkeypatch.setattr(generic, "update", generic_boundary)
   with pytest.raises(BoundaryReached):
     host.state_update()
+
+
+@pytest.mark.parametrize("acknowledged,requested,reset", ((False, True, False), (True, True, True),
+                                                          (True, False, False), (False, False, False)))
+def test_native_cold_pending_vs_requested_ack_loss(acknowledged, requested, reset):
+  native = SimpleNamespace(requestedLateral=False, lateralAllowed=False)
+  result = native_observation(native, latched=True, panda_ready=True, restricted=False,
+                              now_ns=1_000_000_000, pending_since_ns=0,
+                              previously_acknowledged=acknowledged, host_requested_lateral=requested)
+  assert result == ((0, False, True) if reset else (1_000_000_000, False, False))
+  if not reset:
+    assert native_observation(native, latched=True, panda_ready=True, restricted=False,
+                              now_ns=1_200_000_000, pending_since_ns=result[0],
+                              previously_acknowledged=acknowledged, host_requested_lateral=requested) == (result[0], False, True)
+
+
+@pytest.mark.parametrize("changed", ("cold", "session", "panda", "cp", "manual_off", "restriction",
+                                     "software_pause", "host_withdrawal", "invalid_axis", "stale_axis",
+                                     "replaced_producer", "older_native", "resuming_pause", "pending_pause", "requested_denial", "unpaired_event",
+                                     "fault_event", "invalid_event", "stale_event", "none"))
+def test_actual_card_ack_loss_requires_current_requested_same_identity(changed):
+  from openpilot.selfdrive.car.card import Car
+  from openpilot.starpilot.aol.transport_pause import TransportPauseFeedback
+  from openpilot.starpilot.aol.wire import SafetyState
+
+  cp = final_cp(CAR.HONDA_CIVIC_2022, alpha=True, hybrid=True)
+  cp.alternativeExperience |= 32
+  now = 2_000_000_000
+  native = SafetyState(1, True, now, now + 200_000_000, int(cp.safetyConfigs[0].safetyModel.raw),
+                       cp.safetyConfigs[0].safetyParam, True, False, True, False, "panda", "axis")
+  axis = SimpleNamespace(qualified=True, sessionId="axis", observedMonoTime=now, validUntilMonoTime=now+30_000_000,
+                         faultSessionId="axis", faultReason="none", faultEventMonoTime=now, sequence=1,
+                         nativeAcknowledged=True, desiredLateral=True, lateralActive=True, sourceCarStateMonoTime=now,
+                         intentProducerSessionId="producer")
+
+  class Samples(dict):
+    pass
+  sm = Samples(aolAxisState=axis, onroadEvents=[])
+  sm.valid = sm.alive = sm.seen = {"aolAxisState": True, "onroadEvents": True}
+  sm.logMonoTime = {"aolAxisState": now, "onroadEvents": now}
+  host = Car.__new__(Car)
+  host.CP, host.sm, host.slc_producer_session = cp, sm, "producer"
+  host.aol_transport_feedback = TransportPauseFeedback(cp)
+  kwargs = dict(latched=True, panda_ready=True, restricted=False, now_ns=now, pending_since_ns=0)
+  assert host.aol_honda_native_observation(native, **kwargs) == (0, False, False)
+  if changed == "cold":
+    host._honda_aol_acknowledgment = None
+  elif changed == "session":
+    native = replace(native, axisSessionId="replacement")
+  elif changed == "panda":
+    native = replace(native, pandaSerial="replacement")
+  elif changed == "cp":
+    host.CP = final_cp(CAR.HONDA_CIVIC_2022, alpha=False, hybrid=True)
+  elif changed == "manual_off":
+    kwargs['latched'] = False
+  elif changed == "restriction":
+    kwargs['restricted'] = True
+  elif changed == "software_pause":
+    axis.faultReason = "availabilityPause"
+    host.aol_transport_feedback.retention_qualified = True
+  elif changed == "host_withdrawal":
+    axis.desiredLateral = False
+  elif changed == "invalid_axis":
+    sm.valid = {"aolAxisState": False}
+  elif changed == "stale_axis":
+    kwargs['now_ns'] += 40_000_000
+  elif changed == "replaced_producer":
+    axis.intentProducerSessionId = "replacement"
+  elif changed == "resuming_pause":
+    axis.lateralActive = False
+  elif changed == "pending_pause":
+    host.aol_transport_feedback.awaiting = True
+  elif changed == "unpaired_event":
+    axis.faultEventMonoTime -= 1
+  elif changed == "fault_event":
+    sm["onroadEvents"] = [SimpleNamespace(immediateDisable=True, softDisable=False)]
+  elif changed == "invalid_event":
+    sm.valid = {"aolAxisState": True, "onroadEvents": False}
+  elif changed == "stale_event":
+    axis.faultEventMonoTime = sm.logMonoTime["onroadEvents"] = now-1_500_000_001
+  elif changed == "older_native":
+    native = replace(native, observedMonoTime=now-1)
+  withdrawn = replace(native, requestedLateral=False, lateralAllowed=False)
+  if changed == "requested_denial":
+    withdrawn = replace(withdrawn, requestedLateral=True)
+  result = host.aol_honda_native_observation(withdrawn, **kwargs)
+  if changed == "none":
+    assert result == (0, False, True)
+  else:
+    assert not result[2]  # No unexpected-loss cause is inferred from ambiguous zero.
+  if changed in ("manual_off", "restriction"):
+    assert result == (0, False, False)
+  if changed in ("cold", "session", "panda", "cp", "manual_off"):
+    assert host._honda_aol_acknowledgment is None

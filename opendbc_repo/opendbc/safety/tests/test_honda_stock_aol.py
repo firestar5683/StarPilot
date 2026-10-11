@@ -110,15 +110,13 @@ class TestHondaStockAol(unittest.TestCase):
 
   def test_blocked_normal_edge_is_not_replayed_after_sources_recover(self):
     for case in CASES:
-      for blocked in ("eps", "reverse", "heartbeat", "brake", "missing", "expired", "request_expired"):
+      for blocked in ("eps", "reverse", "brake", "missing", "expired", "request_expired"):
         with self.subTest(case=case[0], blocked=blocked):
           self.configure(case)
           self.stream(eps=7 if blocked == "eps" else 0, gear=2 if blocked == "reverse" else None,
                       brake=int(blocked == "brake"), omit="STEER_STATUS" if blocked == "missing" else None)
           self.assertEqual(self.safety.aol_get_permission_mask(), 0)
-          if blocked == "heartbeat":
-            self.safety.set_aol_test_heartbeat(False)
-          elif blocked in ("expired", "request_expired"):
+          if blocked in ("expired", "request_expired"):
             self.safety.set_timer(1_300_001)
             if blocked == "expired":
               self.safety.aol_set_host_request(1)
@@ -235,3 +233,120 @@ class TestHondaStockAol(unittest.TestCase):
         self.stream(main=False)
         self.stream(main=True, lkas=1)
         self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_cold_valid_normal_grant_precedes_engaged_heartbeat(self):
+    for case in CASES:
+      for button in ((3, 4) if case[2] in (10, 11) else (3,)):
+        with self.subTest(case=case[0], button=button):
+          self.configure(case)
+          self.safety.set_aol_test_heartbeat(False)
+          self.stream(request=False)
+          self.normal_engage(button=button)
+          self.assertEqual(self.safety.aol_get_request_mask(), 0)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.safety.set_timer(1_010_000)
+          self.safety.aol_set_host_request(3)
+          self.safety.set_aol_test_heartbeat(True)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 3 if self.scoped else 0)
+          self.press_brake()
+          self.assertFalse(self.safety.get_controls_allowed())
+          self.assertEqual(self.safety.aol_get_permission_mask(), 1 if self.scoped else 0)
+
+  def test_prior_session_new_lkas_survives_status_before_request_and_heartbeat(self):
+    for case in CASES:
+      with self.subTest(case=case[0]):
+        self.configure(case)
+        self.stream()
+        self.normal_engage()
+        self.safety.aol_set_host_request(3)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 3 if self.scoped else 0)
+        self.press_brake()
+        self.safety.set_aol_test_heartbeat(False)
+        self.safety.aol_set_host_request(0)
+        self.safety.set_timer(1_010_000)
+        self.stream(cruise=1, request=False)  # New neutral after old session loss.
+        self.stream(cruise=1, lkas=1, request=False)
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertEqual(self.safety.aol_get_request_mask(), 0)  # Actual first status order.
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        self.safety.set_timer(1_020_000)
+        self.safety.aol_set_host_request(1)
+        self.safety.set_aol_test_heartbeat(True)
+        self.assertEqual(self.safety.aol_get_request_mask(), 1 if self.scoped else 0)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1 if self.scoped else 0)
+        self.safety.set_aol_test_heartbeat(False)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)  # Active grant still revoked.
+        self.safety.set_aol_test_heartbeat(True)
+        self.stream(cruise=1, lkas=1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)  # Held button cannot replay.
+
+  def test_pending_physical_grant_requires_post_gesture_request(self):
+    for case in CASES:
+      with self.subTest(case=case[0]):
+        self.configure(case)
+        self.safety.set_aol_test_heartbeat(False)
+        self.stream()
+        self.safety.set_timer(1_010_000)
+        self.stream(lkas=1, request=False)
+        self.safety.set_aol_test_heartbeat(True)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)  # Previous request is insufficient.
+        self.safety.set_timer(1_020_000)
+        self.safety.aol_set_host_request(1)
+        self.assertEqual(self.safety.aol_get_permission_mask(), 1 if self.scoped else 0)
+
+  def test_expired_pending_heartbeat_and_sources_require_new_gesture(self):
+    for case in CASES:
+      for loss in ("heartbeat_expired", "eps_source", "gear_source", "main_source", "host_expired", "relay", "eps_invalid", "rx_checksum"):
+        with self.subTest(case=case[0], loss=loss):
+          self.configure(case)
+          self.safety.set_aol_test_heartbeat(False)
+          self.stream(request=False)
+          self.normal_engage()
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.safety.aol_set_host_request(0)
+          if loss in ("heartbeat_expired", "eps_source", "gear_source", "main_source", "host_expired"):
+            self.safety.set_timer(1_300_001)
+            source = {"eps_source": "STEER_STATUS", "gear_source": case[6],
+                      "main_source": "SCM_BUTTONS" if self.alt else "SCM_FEEDBACK"}.get(loss)
+            self.stream(cruise=1, omit=source, request=False)
+            if loss != "host_expired":
+              self.safety.aol_set_host_request(0)
+          elif loss == "relay":
+            self.safety.set_relay_malfunction(True)
+          elif loss == "rx_checksum":
+            invalid = self.packet("POWERTRAIN_DATA", {"ACC_STATUS": 1})
+            invalid.data[7] ^= 1
+            self.assertFalse(self.safety.safety_rx_hook(invalid))
+          else:
+            self.stream(cruise=1, eps=7, request=False)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.safety.set_relay_malfunction(False)
+          self.safety.set_aol_test_heartbeat(True)
+          self.stream(cruise=1)
+          self.press_brake()
+          self.safety.aol_set_host_request(3)
+          self.assertFalse(self.safety.get_controls_allowed())
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.stream(cruise=0)
+          self.normal_engage()
+          self.press_brake()
+          self.safety.aol_set_host_request(1)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 1 if self.scoped else 0)
+
+  def test_pending_grant_clock_wrap_and_deadline(self):
+    for case in CASES:
+      for delay in (100_000, 300_000, 300_001):
+        with self.subTest(case=case[0], delay=delay):
+          self.configure(case)
+          self.safety.set_timer(0xffff_0000)
+          self.safety.set_aol_test_heartbeat(False)
+          self.stream(request=False)
+          self.stream(lkas=1, request=False)
+          self.safety.set_timer((0xffff_0000 + delay) & 0xffff_ffff)
+          self.stream(lkas=1, request=False)  # Actual fresh CAN, held level, no new edge.
+          self.safety.aol_set_host_request(0)
+          self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+          self.safety.set_aol_test_heartbeat(True)
+          self.safety.aol_set_host_request(1)
+          self.assertEqual(self.safety.aol_get_permission_mask(),
+                           int(self.scoped and delay <= 300_000))

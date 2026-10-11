@@ -2,6 +2,8 @@
 
 static bool honda_stock_aol_enabled = false;
 static bool honda_stock_aol_token = false;
+static bool honda_stock_aol_pending = false;
+static uint32_t honda_stock_aol_grant_ts = 0U;
 static bool honda_stock_aol_main_neutral = false;
 static bool honda_stock_aol_lkas_neutral = false;
 static bool honda_stock_aol_lkas_previous = false;
@@ -18,8 +20,18 @@ static RxCheck honda_rx_workspace[7];
 
 static void honda_stock_aol_clear(void) {
   honda_stock_aol_token = false;
+  honda_stock_aol_pending = false;
   honda_stock_aol_main_neutral = false;
   honda_stock_aol_lkas_neutral = false;
+}
+
+// A new physical grant may precede the host engagement heartbeat. It grants no output
+// until an engaged heartbeat and a fresh host request acknowledge this gesture.
+static void honda_stock_aol_grant(void) {
+  honda_stock_aol_token = true;
+  honda_stock_aol_pending = !heartbeat_engaged;
+  honda_stock_aol_grant_ts = microsecond_timer_get();
+  honda_stock_aol_session = heartbeat_engaged;
 }
 
 static void honda_stock_aol_reset(void) {
@@ -55,14 +67,25 @@ static bool honda_stock_aol_sources_current(void) {
 
 static uint8_t honda_stock_aol_request_mask(void) {
   uint8_t request = 0U;
+  const uint32_t now = microsecond_timer_get();
+  const uint32_t grant_age = safety_get_ts_elapsed(now, honda_stock_aol_grant_ts);
+  const bool pending_expired = honda_stock_aol_pending && (grant_age > AOL_HOST_REQUEST_TIMEOUT_US);
   const bool expired = honda_stock_aol_request_seen &&
-    (safety_get_ts_elapsed(microsecond_timer_get(), aol_host_request_ts) > AOL_HOST_REQUEST_TIMEOUT_US);
-  if (relay_malfunction || expired || safety_rx_checks_invalid ||
-      (honda_stock_aol_session && (!heartbeat_engaged || !aol_rx_healthy() || !honda_stock_aol_sources_current()))) {
+    (safety_get_ts_elapsed(now, aol_host_request_ts) > AOL_HOST_REQUEST_TIMEOUT_US);
+  if (relay_malfunction || expired || pending_expired || safety_rx_checks_invalid ||
+      (honda_stock_aol_session && !heartbeat_engaged) ||
+      ((honda_stock_aol_session || honda_stock_aol_pending) &&
+       (!aol_rx_healthy() || !honda_stock_aol_sources_current()))) {
     honda_stock_aol_clear();
+    honda_stock_aol_session = false;
   } else if (heartbeat_engaged && aol_rx_healthy() && honda_stock_aol_sources_current()) {
-    honda_stock_aol_session = true;
-    request = aol_host_axis_mask;
+    const bool pending_ack = !honda_stock_aol_pending || ((aol_host_axis_mask != 0U) &&
+      (safety_get_ts_elapsed(now, aol_host_request_ts) <= grant_age));
+    if (pending_ack) {
+      honda_stock_aol_pending = false;
+      honda_stock_aol_session = true;
+      request = aol_host_axis_mask;
+    }
   } else {
   }
   return request;
@@ -94,6 +117,13 @@ static bool honda_stock_aol_selected(const CANPacket_t *msg, const RxCheck *chec
 
 static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus, bool normal_engagement) {
   if (honda_stock_aol_enabled) {
+    // Retire the old session before interpreting a new validated physical edge.
+    // The following gesture may create a bounded pending grant; a status read
+    // must not mistake that new grant for the retired session.
+    if (honda_stock_aol_session && !heartbeat_engaged) {
+      honda_stock_aol_clear();
+      honda_stock_aol_session = false;
+    }
     const unsigned int main_addr = honda_stock_aol_alt_main ? 0x1A6U : 0x326U;
     const unsigned int buttons_addr = honda_stock_aol_alt_main ? 0x1A6U : 0x296U;
     const unsigned int buttons_len = honda_stock_aol_alt_main ? 8U : 4U;
@@ -104,7 +134,7 @@ static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus, bool
         honda_stock_aol_clear();
         honda_stock_aol_main_neutral = true;
       } else if (honda_stock_aol_main_neutral) {
-        honda_stock_aol_token = true;
+        honda_stock_aol_grant();
         honda_stock_aol_main_neutral = false;
       } else {
       }
@@ -115,7 +145,7 @@ static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus, bool
       if (!lkas) {
         honda_stock_aol_lkas_neutral = true;
       } else if (honda_stock_aol_lkas_neutral && !honda_stock_aol_lkas_previous && acc_main_on) {
-        honda_stock_aol_token = true;
+        honda_stock_aol_grant();
         honda_stock_aol_lkas_neutral = false;
       } else {
       }
@@ -152,10 +182,9 @@ static void honda_stock_aol_rx(const CANPacket_t *msg, unsigned int pt_bus, bool
       (honda_stock_aol_eps == 3U) || (honda_stock_aol_eps == 4U) || (honda_stock_aol_eps == 6U);
     if (normal_engagement && engagement_source && controls_allowed && acc_main_on && honda_stock_aol_drive &&
         eps_known && !brake_pressed && !regen_braking && !steering_disengage &&
-        heartbeat_engaged && !relay_malfunction && !safety_rx_checks_invalid && request_current &&
+        !relay_malfunction && !safety_rx_checks_invalid && request_current &&
         aol_rx_healthy() && honda_stock_aol_sources_current()) {
-      honda_stock_aol_token = true;
-      honda_stock_aol_session = true;
+      honda_stock_aol_grant();
     }
   }
 }

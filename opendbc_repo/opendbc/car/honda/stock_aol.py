@@ -70,11 +70,16 @@ def temporary_restriction(cp, state):
               (state.gearShifter not in (gears.drive, gears.sport, gears.low, gears.brake) or state.steerFaultTemporary))
 
 
-def native_observation(native, *, latched, panda_ready, restricted, now_ns, pending_since_ns):
+def native_observation(native, *, latched, panda_ready, restricted, now_ns, pending_since_ns,
+                       previously_acknowledged=False, host_requested_lateral=False):
   lost = not panda_ready or native is None
   if not latched or lost or restricted:
     return 0, lost, False
   if native.requestedLateral and native.lateralAllowed:
     return 0, False, False
+  if (previously_acknowledged and host_requested_lateral and
+      not native.requestedLateral and not native.lateralAllowed):
+    # A current host request lost an established grant, not a cold handshake.
+    return 0, False, True
   pending_since_ns = pending_since_ns or now_ns
   return pending_since_ns, False, now_ns - pending_since_ns >= 200_000_000

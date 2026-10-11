@@ -35,7 +35,7 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
 from openpilot.starpilot.aol.intent import AolProcessFaultContext, independent_axis_requested, read_settings
-from openpilot.starpilot.aol.transport_pause import TransportPauseFeedback
+from openpilot.starpilot.aol.transport_pause import TransportPauseFeedback, cp_identity
 from opendbc.car.honda.stock_aol import (
   qualified as qualified_honda_stock_aol, native_observation as honda_native_observation,
   temporary_restriction as honda_temporary_restriction,
@@ -55,7 +55,7 @@ from opendbc.car.hyundai.canfd_angle_aol import native_observation, temporary_re
 from opendbc.car.hyundai.canfd_owner import config_index as hyundai_canfd_config_index
 from opendbc.car.hyundai.captured_adrv_startup import CapturedADRVStartup
 from openpilot.starpilot.car.hyundai.aol import aol_safety_config as hyundai_aol_safety_config
-from openpilot.starpilot.aol.runtime import current_native
+from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, current_axis, current_native
 from openpilot.starpilot.aol.vehicle import create_intent as create_aol_intent, native_latch_rejected, policy_for as aol_policy_for
 from openpilot.starpilot.aol.wire import IntentState, encode_intent
 from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, IoniqMediaMapCache, WheelMapCache, Press, ioniq6_media_eligible
@@ -460,7 +460,8 @@ class Car:
     CS = self.CI.update(can_list)
     self.timing_mark('interface_update_end')
     cancel_boot_ns = (time.clock_gettime_ns(time.CLOCK_BOOTTIME)
-                      if getattr(self.CI.CS, 'ev6_aol_source_healthy', False) else 0)
+                      if (getattr(self.CI.CS, 'ev6_aol_source_healthy', False) or
+                          qualified_honda_stock_aol(self.CP, marked_only=True)) else 0)
     self.observe_ioniq6_long_authority(can_list, CS)
     self.timing_mark('ioniq_authority_end')
     media_owner = getattr(self, 'ioniq6_media', None)
@@ -532,6 +533,7 @@ class Car:
         self.aol_transport_feedback = TransportPauseFeedback(self.CP)
       transport_reset = self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
         latched=self.aol_card_intent.allowed_latch, cancel_source_ns=self.aol_cancel_source(CS, now_ns),
+        brake_source_ns=self.aol_honda_brake_source(CS, now_ns),
         intent_producer_session=getattr(self, 'slc_producer_session', ''))
       fault_active = True if transport_reset else None
       event_ns = int(self.sm.logMonoTime['onroadEvents'])
@@ -549,7 +551,7 @@ class Car:
       )
       native_reset = False
       if permission_owner:
-        observe = (preap_native_observation if preap_aol else mazda_native_observation if mazda_aol else honda_native_observation if honda_aol else
+        observe = (preap_native_observation if preap_aol else mazda_native_observation if mazda_aol else self.aol_honda_native_observation if honda_aol else
                    ford_native_observation if ford_aol else native_observation)
         restrict = (preap_temporary_restriction if preap_aol else mazda_temporary_restriction if mazda_aol else honda_temporary_restriction if honda_aol else
                     ford_temporary_restriction if ford_aol else temporary_restriction)
@@ -738,13 +740,35 @@ class Car:
       return 0
     return received_ns
 
+  def aol_honda_brake_source(self, CS, now_ns: int) -> int:
+    observation = getattr(self, '_aol_can_observation', None)
+    if (not CS.brakePressed or not qualified_honda_stock_aol(self.CP, marked_only=True) or
+        observation is None or observation[0] is not CS):
+      return 0
+    from opendbc.car import Bus
+    from opendbc.car.honda.values import HondaFlags
+    parser = self.CI.can_parsers[Bus.pt]
+    message = 'BRAKE_MODULE' if self.CP.flags & HondaFlags.BOSCH_ALT_BRAKE else 'POWERTRAIN_DATA'
+    signals = parser.vl.get(message, {})
+    # Match the real parser's applied-brake or two-sample switch decision.
+    brake = bool(signals.get('BRAKE_PRESSED', 0) or message == 'POWERTRAIN_DATA' and
+                 signals.get('BRAKE_SWITCH', 0) and self.CI.CS.brake_switch_active)
+    stamp = int(parser.ts_nanos.get(message, {}).get('BRAKE_PRESSED', 0))
+    _, received_ns, can_source_ns, boot_ns = observation
+    # CANParser/CAN batch use BOOTTIME; retain the original MONOTONIC receipt.
+    if (not brake or not 0 < received_ns <= now_ns or now_ns - received_ns > 30_000_000 or
+        not 0 < stamp <= can_source_ns <= boot_ns or boot_ns - stamp > 30_000_000 or
+        can_source_ns - stamp > 30_000_000):
+      return 0
+    return received_ns
+
   def aol_disarming_fault(self, CS, event_ns: int, now_ns: int) -> bool:
     from openpilot.starpilot.car.gm.aol import intent_disarming_fault
     if getattr(self, 'aol_transport_feedback', None) is None:
       self.aol_transport_feedback = TransportPauseFeedback(self.CP)
     if self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
         latched=getattr(getattr(self, 'aol_card_intent', None), 'allowed_latch', True),
-        cancel_source_ns=self.aol_cancel_source(CS, now_ns),
+        cancel_source_ns=self.aol_cancel_source(CS, now_ns), brake_source_ns=self.aol_honda_brake_source(CS, now_ns),
         intent_producer_session=getattr(self, 'slc_producer_session', '')):
       return True
     events = self.sm['onroadEvents']
@@ -766,6 +790,44 @@ class Car:
                 bool(qualified_tesla_preap(self.CP, marked_only=True)))
       cached = self._aol_owner_cache = (self.CP, owners)
     return cached[1]
+
+  def aol_honda_native_observation(self, native, *, latched, panda_ready, restricted, now_ns, pending_since_ns):
+    acknowledged = getattr(self, '_honda_aol_acknowledgment', None)
+    key = None
+    host_requested = False
+    if native is not None and qualified_honda_stock_aol(self.CP, marked_only=True):
+      key = (cp_identity(self.CP), str(native.axisSessionId), str(native.pandaSerial),
+             tuple((p.hardwareSerial, p.safetyModel, p.safetyParam) for p in native.pandaInventory))
+      try:
+        axis = current_axis(self.sm, now_ns=now_ns)
+        feedback = self.aol_transport_feedback
+        host_requested = bool(axis is not None and axis.sessionId == native.axisSessionId and
+          axis.observedMonoTime == self.sm.logMonoTime['aolAxisState'] and
+          axis.validUntilMonoTime == axis.observedMonoTime + AXIS_MAX_AGE_NS and
+          axis.faultSessionId == axis.sessionId and str(axis.faultReason) == 'none' and
+          self.sm.seen['onroadEvents'] and self.sm.valid['onroadEvents'] and self.sm.alive['onroadEvents'] and
+          0 < axis.faultEventMonoTime == self.sm.logMonoTime['onroadEvents'] <= axis.observedMonoTime and
+          now_ns - axis.faultEventMonoTime <= 1_500_000_000 and
+          not any(event.immediateDisable or event.softDisable for event in self.sm['onroadEvents']) and
+          axis.sequence > 0 and axis.nativeAcknowledged and axis.desiredLateral and axis.lateralActive and
+          axis.intentProducerSessionId == self.slc_producer_session and
+          0 < axis.sourceCarStateMonoTime <= native.observedMonoTime <= now_ns and
+          now_ns - axis.sourceCarStateMonoTime <= AXIS_MAX_AGE_NS and
+          not feedback.qualified and not feedback.retention_qualified and not feedback.paused and
+          not feedback.awaiting and not feedback.retention_pending)
+      except (AttributeError, KeyError, TypeError, ValueError):
+        host_requested = False
+    previously_acknowledged = bool(acknowledged is not None and acknowledged[0] == key and
+                                    0 < acknowledged[1] <= native.observedMonoTime) if native is not None else False
+    if not latched or not panda_ready or key is None:
+      self._honda_aol_acknowledgment = None
+    elif native.requestedLateral and native.lateralAllowed:
+      self._honda_aol_acknowledgment = (key, int(native.observedMonoTime))
+    elif acknowledged is not None and acknowledged[0] != key:
+      self._honda_aol_acknowledgment = None
+    return honda_native_observation(native, latched=latched, panda_ready=panda_ready, restricted=restricted,
+      now_ns=now_ns, pending_since_ns=pending_since_ns,
+      previously_acknowledged=previously_acknowledged, host_requested_lateral=host_requested)
 
   def aol_axis_session(self) -> str:
     # pandad stamps aolSafetyWire with selfdrived's aolAxisState session, not card's producer session.

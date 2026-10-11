@@ -11,14 +11,14 @@ def cp_identity(cp):
           tuple((int(c.safetyModel.raw), int(c.safetyParam)) for c in cp.safetyConfigs))
 
 
-def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None):
+def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None, *, require_longitudinal=True):
   """Require the live, exact native configuration, including every Panda."""
   try:
     native = native or current_native(sm, cp, now_ns=now_ns, axis_session_id=session)
     if (not session or native is None or str(native.axisSessionId) != session or
         not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent or
         native.requestedLateral and not native.lateralAllowed or
-        native.requestedLongitudinal and not native.longitudinalAllowed):
+        require_longitudinal and native.requestedLongitudinal and not native.longitudinalAllowed):
       return None
     coherent = bool(native.pandaInventory)
     if coherent and (int(sm.logMonoTime['aolSafetyWire']) != native.observedMonoTime or
@@ -28,7 +28,7 @@ def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None):
       return None
     if coherent and (not native_inventory_matches_cp(native, cp) or
                      any(p.safetyRxChecksInvalid or p.heartbeatLost or p.faults or
-                         (native.requestedLongitudinal and str(config.safetyModel) not in ('silent', 'noOutput') and
+                         (require_longitudinal and native.requestedLongitudinal and str(config.safetyModel) not in ('silent', 'noOutput') and
                           not p.controlsAllowed)
                          for p, config in zip(native.pandaInventory, cp.safetyConfigs, strict=True))):
       return None
@@ -44,10 +44,16 @@ def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None):
     return native if all(int(p.safetyModel.raw) == int(c.safetyModel.raw) and p.safetyParam == c.safetyParam and
                p.alternativeExperience == cp.alternativeExperience and not p.safetyRxChecksInvalid and
                not p.heartbeatLost and not p.faults and
-               (not native.requestedLongitudinal or str(c.safetyModel) in ('silent', 'noOutput') or p.controlsAllowed)
+               (not require_longitudinal or not native.requestedLongitudinal or str(c.safetyModel) in ('silent', 'noOutput') or p.controlsAllowed)
                for p, c in zip(pandas, cp.safetyConfigs, strict=True)) else None
   except (AttributeError, KeyError, IndexError, TypeError, ValueError):
     return None
+
+
+def independent_lateral_health(sm, cp, cs, session, now_ns):
+  """Structural health for retaining LAT intent; never grant either output axis."""
+  native = _healthy_transport_native(sm, cp, cs, session, now_ns, require_longitudinal=False)
+  return native if native is not None and native.requestedLateral and native.lateralAllowed else None
 
 
 def healthy_transport(sm, cp, cs, session, now_ns, native=None):
@@ -202,6 +208,7 @@ class TransportPauseFeedback:
     self.lateral_native_ns = 0
     self.longitudinal_cancel_ns = 0
     self.last_cancel_source_ns = 0
+    self.honda_brake_ns = 0
     self.retention_qualified = False
     self.retention_pending = False
     self.retention_event_ns = 0
@@ -213,6 +220,38 @@ class TransportPauseFeedback:
     self.healthy_feedback_ns = 0
     self.healthy_native_ns = 0
     self.healthy_inventory = None
+
+  def _honda_brake_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, brake_source_ns):
+    """Preserve existing LAT intent through brake's LONG withdrawal, never output."""
+    from opendbc.car.honda.stock_aol import qualified
+    from opendbc.car.structs import car
+
+    source_ns = self.honda_brake_ns or (brake_source_ns if cs.brakePressed else 0)
+    if (not qualified(cp, marked_only=True) or not latched or self.failed or self.paused or self.pending_event or
+        not self.session or str(axis.sessionId) != self.session or
+        not self.healthy_feedback_ns or not 0 <= now_ns - self.healthy_feedback_ns <= AXIS_MAX_AGE_NS or
+        not 0 < source_ns <= now_ns or now_ns - source_ns > SAFETY_MAX_AGE_NS or
+        (not self.honda_brake_ns and now_ns - source_ns > AXIS_MAX_AGE_NS) or
+        cs.accFaulted or cs.seatbeltUnlatched or
+        cs.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
+                              car.CarState.GearShifter.low, car.CarState.GearShifter.brake) or
+        str(axis.faultReason) != 'none' or not axis.desiredLateral or not axis.lateralActive or
+        (not axis.nativeAcknowledged and (axis.desiredLongitudinal or axis.longitudinalActive)) or
+        not 0 < axis.sourceCarStateMonoTime <= axis.observedMonoTime or
+        axis.observedMonoTime - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
+      return None
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+        not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
+        any(e.immediateDisable or e.softDisable for e in sm['onroadEvents'])):
+      return None
+    native = independent_lateral_health(sm, cp, cs, self.session, now_ns)
+    if (native is None or not native.requestedLateral or not native.lateralAllowed or
+        not native.requestedLongitudinal or native.observedMonoTime < self.healthy_native_ns or
+        (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.healthy_inventory):
+      return None
+    self.honda_brake_ns = source_ns
+    return native
 
   def _longitudinal_cancel_current(self, sm, cp, cs, axis, now_ns, *, latched, cancel_source_ns, withdrawal_required=True) -> SafetyState | None:
     """Retain existing intent during Cancel's bounded LONG withdrawal handshake."""
@@ -399,7 +438,7 @@ class TransportPauseFeedback:
     self.awaiting = True
     return True
 
-  def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, intent_producer_session=''):
+  def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, brake_source_ns=0, intent_producer_session=''):
     self.qualified = False
     self.awaiting = False
     self.retention_qualified = False
@@ -420,6 +459,15 @@ class TransportPauseFeedback:
                      cp_identity(cp) == self.cp)
       continuity = bool(not self.session or axis.sessionId == self.session and
                         (axis.sequence > self.sequence or axis.sequence == self.sequence and signature == self.signature))
+      brake_native = (self._honda_brake_lateral_current(sm, cp, cs, axis, now_ns,
+        latched=latched, brake_source_ns=brake_source_ns) if current and continuity else None)
+      if brake_native is not None:
+        # Keep only existing intent. The original native lease and source stamps
+        # remain unchanged; decide_axes/native TX independently withdraw LONG.
+        self.healthy_feedback_ns = stamp
+        self.healthy_native_ns = int(brake_native.observedMonoTime)
+        self.sequence, self.signature = int(axis.sequence), signature
+        return False
       if self._source_availability_retention(sm, cp, cs, axis, stamp, now_ns,
           latched=latched, continuity=continuity, producer=intent_producer_session, signature=signature):
         self.sequence, self.signature = int(axis.sequence), signature
@@ -468,6 +516,8 @@ class TransportPauseFeedback:
         self.signature = signature
         return False
       if transport_healthy:
+        if native is not None and not native.requestedLongitudinal:
+          self.honda_brake_ns = 0
         if (not latched or native is not None and not native.requestedLongitudinal or
             self.longitudinal_cancel_ns and now_ns - self.longitudinal_cancel_ns > SAFETY_MAX_AGE_NS):
           self.longitudinal_cancel_ns = 0
