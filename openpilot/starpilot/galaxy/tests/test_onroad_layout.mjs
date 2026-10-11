@@ -135,6 +135,28 @@ function editor() {
   return { vm, event, emitted, calls, previewCalls, captures, publish }
 }
 
+// Layer visibility is local to the arrangement preview, including required widgets.
+for (const projection of [false, true]) {
+  const visibility = editor().vm
+  visibility.projection = projection
+  const original = copy(visibility.state.draft)
+  const order = visibility.layerWidgets.map(widget => widget.id)
+  visibility.profile.widgets.current_speed.required = true
+  visibility.togglePreviewVisibility("current_speed")
+  assert.equal(visibility.previewHidden("current_speed"), true)
+  assert.equal(visibility.renderWidgets.some(widget => widget.id === "current_speed"), false)
+  assert.deepEqual(visibility.layerWidgets.map(widget => widget.id), order)
+  assert.deepEqual(visibility.state.draft, original)
+  assert.equal(visibility.dirty, false)
+  assert.equal(visibility.canUndo, false)
+  visibility.state.profile = "compact"
+  assert.equal(visibility.previewHidden("current_speed"), false)
+  visibility.state.profile = "large"
+  visibility.togglePreviewVisibility("current_speed")
+  assert.equal(visibility.renderWidgets.some(widget => widget.id === "current_speed"), true)
+  assert.deepEqual(visibility.state.draft, original)
+}
+
 const dmEditor = editor().vm
 dmEditor.changePosition("driver_monitor", 700, 600)
 dmEditor.selectProfile("compact")

@@ -502,7 +502,7 @@ export const OnroadLayoutPage = {
     const state = reactive({ status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
-      history: { undo: [], redo: [], group: null } })
+      hiddenPreviewWidgets: {}, history: { undo: [], redo: [], group: null } })
     let deferred = null
     const apply = (update) => {
       if (state.drag || state.layerDrag) { deferred = { ...deferred, ...update }; return }
@@ -572,7 +572,7 @@ export const OnroadLayoutPage = {
     canUndo() { return this.state.history.undo.length > 0 },
     canRedo() { return this.state.history.redo.length > 0 },
     pendingLeave() { return typeof this.state.discard === "function" || ["back", "device", "projection"].includes(this.state.discard) },
-    inlineLeavePrompt() { return this.pendingLeave && this.state.leavePresentation !== "modal" },
+    inlineLeavePrompt() { return (this.pendingLeave || this.state.discard === "reload") && this.state.leavePresentation !== "modal" },
     modalLeavePrompt() { return this.pendingLeave && this.state.leavePresentation === "modal" },
     saveAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     canSavePending() { return this.saveAvailable && !this.busy },
@@ -590,7 +590,7 @@ export const OnroadLayoutPage = {
         width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom }
     },
     activeWidgets() { return this.widgets.filter(({ id }) => this.layout[id].enabled) },
-    renderWidgets() { return this.layerWidgets.slice().reverse().map((item) => {
+    renderWidgets() { return this.layerWidgets.filter(item => !this.previewHidden(item.id)).reverse().map((item) => {
       const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
       const widget = { ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
         visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0) }
@@ -636,6 +636,12 @@ export const OnroadLayoutPage = {
   beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
   methods: {
     switchRow,
+    previewHidden(id) { return this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
+    togglePreviewVisibility(id) {
+      if (this.state.drag || this.state.layerDrag) return
+      const hidden = this.state.hiddenPreviewWidgets[this.state.profile] ||= {}
+      hidden[id] = !hidden[id]
+    },
     selectWidget(id) {
       this.state.selected = id
       this.state.inspectorPanel = "edit"
@@ -1135,11 +1141,11 @@ export const OnroadLayoutPage = {
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
         <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}" :inert="busy">
-          <span role="status">{{ inlineLeavePrompt ? 'Leave without saving your changes?' : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
+          <span role="status">{{ inlineLeavePrompt ? (pendingLeave ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?') : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
-            <button class="gx-btn gx-btn--danger" type="button" aria-label="Discard and leave" title="Discard and leave" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">Discard and leave</span></button>
-            <button class="gx-btn" type="button" :disabled="!saveAvailable" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
+            <button class="gx-btn gx-btn--danger" type="button" :aria-label="pendingLeave ? 'Discard and leave' : 'Discard and reload'" :title="pendingLeave ? 'Discard and leave' : 'Discard and reload'" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">{{ pendingLeave ? 'Discard and leave' : 'Discard and reload' }}</span></button>
+            <button v-if="pendingLeave" class="gx-btn" type="button" :disabled="!saveAvailable" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
           </template>
           <template v-else>
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
@@ -1150,11 +1156,6 @@ export const OnroadLayoutPage = {
           </template>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <div v-if="state.discard && !inlineLeavePrompt && !modalLeavePrompt" class="gx-card gx-layout__discard" role="alert" :inert="busy">
-          <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
-          <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="cancelLeave">Keep editing</button>
-            <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
-        </div>
         <template v-if="state.data && state.draft">
           <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect" :inert="busy">
             <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
@@ -1261,7 +1262,7 @@ export const OnroadLayoutPage = {
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
-              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets.</p>
+              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets. Use the eye to hide a widget only in Arrange widgets; it stays visible on the driving screen and in Device preview.</p>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
                 :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
                 <button class="gx-layout__row-grip gx-icon-btn" type="button"
@@ -1273,6 +1274,12 @@ export const OnroadLayoutPage = {
                   @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">{{ widget.frontmost ? '↑' : '⠿' }}</span></button>
                 <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
                   @click="selectWidget(widget.id)">{{ widget.label }}</button>
+                <button class="gx-layout__visibility gx-icon-btn" type="button" :disabled="!!state.drag || !!state.layerDrag"
+                  :aria-label="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview'"
+                  :title="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview only'"
+                  :aria-pressed="!previewHidden(widget.id)" @click="togglePreviewVisibility(widget.id)">
+                  <i class="bi" :class="previewHidden(widget.id) ? 'bi-eye-slash' : 'bi-eye'" aria-hidden="true"></i>
+                </button>
                 <button v-if="!widget.required" class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
                   @click="requestRemove(widget.id)"><span aria-hidden="true">−</span></button>
                 <span v-else class="gx-note" title="This control cannot be removed or placed below another widget.">Top · Required</span>

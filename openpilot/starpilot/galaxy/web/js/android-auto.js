@@ -703,7 +703,9 @@ export const AndroidAutoPage = {
                 <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded.</li>
                 <li><strong>Upload is slow or stops:</strong> stay on this page and keep the comma awake and on the same Wi-Fi until it finishes.</li>
               </ul>
-              <p><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. Google Play sign-in contacts Google directly; your extracted identity stays on the comma. No Android app is installed on the comma.</p>
+              <ul>
+                <li><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. Google Play sign-in contacts Google directly; your extracted identity stays on the comma. No Android app is installed on the comma.</li>
+              </ul>
             </details>
           </div>
         </li>
@@ -758,9 +760,11 @@ export const AndroidAutoPage = {
               <button v-else class="gx-btn gx-btn--tonal" @click="cancelPairing">Cancel Search / Pairing</button>
             </div>
             <details class="gx-aa-wiki"><summary>Stuck pairing? Pairing order and wireless adapters</summary>
-              <p><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</p>
-              <p><strong>Cars with built-in wireless Android Auto:</strong>  Set the car into pairing (search) mode. On Comma, go to Settings -> Bluetooth -> Scan For Devices. Choose your car, then confirm the code on both screens.</p>
-              <p><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</p>
+              <ul>
+                <li><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</li>
+                <li><strong>Cars with built-in wireless Android Auto:</strong>  Set the car into pairing (search) mode. On Comma, go to Settings -> Bluetooth -> Scan For Devices. Choose your car, then confirm the code on both screens.</li>
+                <li><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</li>
+              </ul>
               <p><strong>Start fresh:</strong></p>
               <ol>
                 <li>Forget the car on the comma: <a href="#/bluetooth">Bluetooth</a> → Forget.</li>
@@ -789,11 +793,13 @@ export const AndroidAutoPage = {
               :save-value="(index, value) => control('auto_connect', { enabled: value === 'On' })" />
             <p v-if="runtime?.companion_name" class="gx-note">Car: {{ runtime.companion_name }}</p>
             <details class="gx-aa-wiki"><summary>Stuck connecting? Wi-Fi and screen troubleshooting</summary>
-              <p><strong>How it connects:</strong> after Bluetooth, the car (or adapter) creates its own hidden 5 GHz Wi-Fi network and tells the comma how to join. The picture streams over that Wi-Fi.</p>
-              <p><strong>First connection:</strong> stay in Park or offroad mode, and keep the car’s screen on.</p>
-              <p><strong>Black or frozen screen:</strong> tap Disconnect, wait a few seconds, then connect again. If it keeps happening, turn the car off and on.</p>
-              <p><strong>Car says the phone isn’t compatible:</strong> make sure wireless Android Auto (sometimes called “smartphone connection”) is turned on in the car’s settings, and that step 1 shows Ready.</p>
-              <p>Wired USB setup is unavailable. Use wireless Android Auto or a wireless adapter.</p>
+              <ul>
+                <li><strong>How it connects:</strong> after Bluetooth, the car (or adapter) creates its own hidden 5 GHz Wi-Fi network and tells the comma how to join. The picture streams over that Wi-Fi.</li>
+                <li><strong>First connection:</strong> stay in Park or offroad mode, and keep the car’s screen on.</li>
+                <li><strong>Black or frozen screen:</strong> tap Disconnect, wait a few seconds, then connect again. If it keeps happening, turn the car off and on.</li>
+                <li><strong>Car says the phone isn’t compatible:</strong> make sure wireless Android Auto (sometimes called “smartphone connection”) is turned on in the car’s settings, and that step 1 shows Ready.</li>
+                <li>Wired USB setup is unavailable. Use wireless Android Auto or a wireless adapter.</li>
+              </ul>
             </details>
           </div>
         </li>

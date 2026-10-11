@@ -4,6 +4,13 @@ import { OnroadLayoutPage } from "../web/js/onroad-layout.js"
 for (const projection of [false, true]) {
   assert.equal(OnroadLayoutPage.computed.inlineLeavePrompt.call({ projection, pendingLeave: true, state: { leavePresentation: "inline" } }), true)
 }
+for (const projection of [false, true]) {
+  const vm = { projection, pendingLeave: false, state: { discard: "reload", leavePresentation: "inline" } }
+  assert.equal(OnroadLayoutPage.computed.inlineLeavePrompt.call(vm), true)
+  assert.equal(OnroadLayoutPage.computed.modalLeavePrompt.call(vm), false)
+  vm.state.discard = null
+  assert.equal(OnroadLayoutPage.computed.inlineLeavePrompt.call(vm), false)
+}
 let flashes = 0
 const pendingAction = () => {}
 const pending = { inlineLeavePrompt: true, state: { discard: pendingAction }, flashLeavePrompt() { flashes++ } }

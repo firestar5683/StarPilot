@@ -89,7 +89,7 @@ assert.equal(await leaveVm.saveAndLeave(), false)
 assert.equal(proceeded, 1)
 assert.equal(leaveVm.modalLeavePrompt, true)
 leaveVm.cancelLeave()
-assert.match(OnroadLayoutPage.template, /inlineLeavePrompt \? 'Leave without saving your changes\?'/)
+assert.match(OnroadLayoutPage.template, /inlineLeavePrompt \? \(pendingLeave \? 'Leave without saving your changes\?'/)
 assert.match(OnroadLayoutPage.template, /v-if="modalLeavePrompt"/)
 assert.match(OnroadLayoutPage.template, /@click="saveAndLeave"/)
 

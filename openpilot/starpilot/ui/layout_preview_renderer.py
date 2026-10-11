@@ -68,7 +68,7 @@ def sample_state(scene: str, document: dict) -> OnroadState:
   longitudinal = longitudinal or scene in ('slc_max', 'slc_equal', 'slc_pedal', 'slc_retained')
   state = OnroadState(engaged=lateral or longitudinal, camera_available=False,
                      speed_mps=0.0 if scene in ("cem_lead", "stopped") else 22.0, cruise_kph=88.0,
-                     stopped_duration_s=PREVIEW_DURATION_S,
+                     stopped_duration_s=PREVIEW_DURATION_S if scene == "stopped" else None,
                      speed_limit=SpeedLimitObservation(kind=ObservationKind.VALID, source="dashboard", speed_limit_mps=20.0,
                                                        accepted_speed_limit_mps=20.0, accepted_source='dashboard',
                                                        accepted_adjusted_limit_mps=22.0, effective_cluster_target_mps=22.0,

@@ -17,6 +17,7 @@ import pyray as rl
 class LayoutPreviewRendererTests(unittest.TestCase):
   def test_native_and_projection_previews_supply_timer_sample(self):
     from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport
+    from openpilot.starpilot.ui.layout_preview_transport import SCENES
     from openpilot.starpilot.ui.onroad_customization import STOPPED_TIMER_WIDGET
     native = default_document()
     native['layouts']['compact'][STOPPED_TIMER_WIDGET]['enabled'] = True
@@ -37,9 +38,12 @@ class LayoutPreviewRendererTests(unittest.TestCase):
         if profile == 'projection':
           self.assertEqual(canvas_type.call_args.args, (Profile.LARGE, (2880, 1080)))
           self.assertEqual(state.customization['layouts']['large'][STOPPED_TIMER_WIDGET]['x'], 450)
+        for scene in SCENES - {'stopped'}:
+          with self.subTest(profile=profile, scene=scene):
+            renderer({'profile': profile, 'document': document, 'scene': scene})
+            state = canvas_type.return_value.render.call_args.args[0]
+            self.assertIsNone(state.stopped_duration_s)
         renderer.close()
-    # Ordinary layout scenes also show enabled widgets, even without live standstill data.
-    self.assertEqual(sample_state('engaged', native).stopped_duration_s, 134)
 
   def test_fixed_scenes_have_no_camera_or_live_input(self):
     document = default_document()
