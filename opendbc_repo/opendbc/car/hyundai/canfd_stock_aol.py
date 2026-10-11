@@ -28,23 +28,24 @@ STOCK_AOL_WORDS = frozenset(
   and (not extra & 0x2000 or (topology in (32, 40, 48, 176) and gas != 1))
 )
 
+STOCK_AOL_FLAGS = (
+  HyundaiFlags.CANFD
+  | HyundaiFlags.EV
+  | HyundaiFlags.HYBRID
+  | HyundaiFlags.CANFD_LKA_STEER_MSG
+  | HyundaiFlags.CANFD_LKA_STEER_MSG_ALT
+  | HyundaiFlags.CANFD_ALT_BUTTONS
+  | HyundaiFlags.CANFD_CAMERA_SCC
+  | HyundaiFlags.CANFD_ALT_GEARS
+  | HyundaiFlags.CANFD_ALT_GEARS_2
+  | HyundaiFlags.CANFD_RADAR_SCC
+  | HyundaiFlags.CANFD_NO_RADAR_DISABLE
+  | HyundaiFlags.CCNC
+)
 
 def _base_word(cp, *, experiences=(0,)):
   owner = config_index(cp)
-  allowed = (
-    HyundaiFlags.CANFD
-    | HyundaiFlags.EV
-    | HyundaiFlags.HYBRID
-    | HyundaiFlags.CANFD_LKA_STEER_MSG
-    | HyundaiFlags.CANFD_LKA_STEER_MSG_ALT
-    | HyundaiFlags.CANFD_ALT_BUTTONS
-    | HyundaiFlags.CANFD_CAMERA_SCC
-    | HyundaiFlags.CANFD_ALT_GEARS
-    | HyundaiFlags.CANFD_ALT_GEARS_2
-    | HyundaiFlags.CANFD_RADAR_SCC
-    | HyundaiFlags.CANFD_NO_RADAR_DISABLE
-    | HyundaiFlags.CCNC
-  )
+  allowed = STOCK_AOL_FLAGS
   try:
     factory = CAR(cp.carFingerprint)
   except ValueError:
