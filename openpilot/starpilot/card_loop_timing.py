@@ -8,7 +8,8 @@ class CardLoopTiming:
   REPORT_INTERVAL_NS = 5_000_000_000
   MAX_MARKS = 32
 
-  def __init__(self, clock=None):
+  def __init__(self, clock=None, *, detailed=True):
+    self.detailed = detailed
     self.clock = clock or self._clock
     self.pending = deque(maxlen=2)
     self.output_pending = deque(maxlen=2)
@@ -28,13 +29,17 @@ class CardLoopTiming:
             time.clock_gettime_ns(time.CLOCK_BOOTTIME) if hasattr(time, 'CLOCK_BOOTTIME') else 0)
 
   def begin(self):
+    if not self.detailed:
+      return
     self.points = [('loop_start', *self.clock())]
 
   def mark(self, name):
-    if self.points and len(self.points) < self.MAX_MARKS - 1:
+    if self.detailed and self.points and len(self.points) < self.MAX_MARKS - 1:
       self.points.append((name, *self.clock()))
 
   def finish(self, context, *, enabled):
+    if not self.detailed:
+      return
     self.points.append(('loop_end', *self.clock()))
     points = tuple(self.points)
     start, end = points[0][1], points[-1][1]

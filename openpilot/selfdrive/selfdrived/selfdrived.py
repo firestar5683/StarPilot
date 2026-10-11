@@ -932,10 +932,7 @@ class SelfdriveD:
       axis.sequence = self.aol_sequence
       axis.sourceCarStateMonoTime = self.aol_car_state_log_ns
       axis.observedMonoTime = now_ns
-      axis.validUntilMonoTime = (min(now_ns + 30_000_000, self.aol_car_state_log_ns + INTENT_MAX_AGE_NS)
-        if source_clock_scoped and
-           (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active)
-        else now_ns + 30_000_000)
+      axis.validUntilMonoTime = now_ns + 30_000_000
       axis.mode = self.aol_axis_decision.mode
       axis.lateralActive = self.aol_axis_decision.lateral_active
       axis.longitudinalActive = self.aol_axis_decision.longitudinal_active

@@ -443,7 +443,7 @@ class Car:
 
   def timing_mark(self, name):
     timing = getattr(self, 'loop_timing', None)
-    if timing is not None:
+    if timing is not None and getattr(timing, 'detailed', True):
       timing.mark(name)
 
   def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
@@ -1359,7 +1359,8 @@ class Car:
       time.sleep(0.1)
 
   def card_thread(self):
-    self.loop_timing = CardLoopTiming() if self.aol_replay and not REPLAY else None
+    self.loop_timing = (CardLoopTiming(detailed=os.getenv('CARD_PHASE_TIMING') == '1')
+                        if self.aol_replay and not REPLAY else None)
     self.timing_thread_id = threading.get_native_id()
     e = threading.Event()
     t = threading.Thread(target=self.params_thread, args=(e, ))
@@ -1367,13 +1368,13 @@ class Car:
       t.start()
       while True:
         timing = self.loop_timing
-        if timing is not None:
+        if timing is not None and timing.detailed:
           timing.begin()
         self.vehicle_startup.check()
         self.timing_mark('startup_check_end')
         self.step()
         self.rk.monitor_time()
-        if timing is not None:
+        if timing is not None and timing.detailed:
           timing.finish({'source_car_state_ns': getattr(self, 'timing_source_car_state_ns', 0),
                          'source_control_ns': int(self.sm.logMonoTime['carControl']),
                          'intent_sequence': self.aol_sequence, 'producer_session': self.slc_producer_session,

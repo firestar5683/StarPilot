@@ -156,7 +156,8 @@ def test_actual_card_thread_preserves_step_order_and_replay_disables_recorder(mo
     daemon.controls_update = control
     daemon.rk = SimpleNamespace(monitor_time=monitor)
     monkeypatch.setattr(module, 'REPLAY', replay)
-    monkeypatch.setattr(module, 'CardLoopTiming', lambda timing=timing: timing)
+    monkeypatch.setenv('CARD_PHASE_TIMING', '1')
+    monkeypatch.setattr(module, 'CardLoopTiming', lambda *, detailed, timing=timing: timing)
     monkeypatch.setattr(module.threading, 'Thread', Worker)
     monkeypatch.setattr(module.cloudlog, 'event', lambda *a, **k: (_ for _ in ()).throw(AssertionError('control-thread logging')))
     try:
@@ -512,3 +513,31 @@ def test_actual_params_worker_formats_output_snapshot_before_settings_reads(monk
   assert {tid for _, _, tid in order} == {worker.native_id} and worker.native_id != main_tid
   assert timing.take_report() is None and timing.take_output_report() is None
   assert daemon.slc_requested_configuration == 'configuration' and daemon.v_cruise_helper.intervals == 'intervals'
+
+
+def test_output_only_mode_never_samples_detailed_phase_clocks():
+  def unexpected_clock():
+    raise AssertionError('default Card phase mode sampled clocks')
+  timing = CardLoopTiming(unexpected_clock, detailed=False)
+  timing.begin()
+  for _ in range(32):
+    timing.mark('phase')
+  timing.finish({'intent_sequence': 1}, enabled=True)
+  assert timing.points == [] and timing.previous is None and timing.previous_end is None
+  assert timing.take_report() is None
+
+
+def test_output_only_mode_keeps_invalid_transition_receiver_evidence(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.starpilot import card_loop_timing as module
+  monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic_ns=lambda: 1_000_000_000))
+  timing = CardLoopTiming(detailed=False)
+  sm = _output_receiver()
+  timing.observe_output(True, 111, 222, sm)
+  timing.observe_output(False, 333, 444, sm)
+  report = timing.take_output_report()
+  assert report['car_output_ns'] == 333 and report['source_car_state_ns'] == 444
+  assert report['source_control_ns'] == 1234 and report['valid'] is True
+  assert report['alive'] is False and report['freq_ok'] is False
+  assert report['average_count'] == 4 and report['recent_count'] == 2
+  assert timing.take_output_report() is None

@@ -665,6 +665,88 @@ class CardIntentTests(unittest.TestCase):
 class IpcAxisContractTests(unittest.TestCase):
   _authority_callers = availability_fixture.IoniqAvailabilityTests._authority_callers
 
+  _ioniq_availability_callers = availability_fixture.IoniqAvailabilityTests._ioniq_availability_callers
+
+  def test_fresh_ioniq_input_gets_full_publication_lease(self):
+    from openpilot.starpilot.aol.runtime import current_axis
+
+    with OpenpilotPrefix():
+      sd, controls, step, _, _ = self._ioniq_availability_callers()
+      step(2)
+      source = sd.aol_car_state_log_ns
+      published = source + 29_960_000
+      with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=published):
+        sd.publish_axis_proof(sd.CS_prev)
+      proof = sd.pm.messages['aolAxisState']
+      self.assertEqual(proof.aolAxisState.sourceCarStateMonoTime, source)
+      self.assertEqual(proof.aolAxisState.observedMonoTime, published)
+      self.assertEqual(proof.aolAxisState.validUntilMonoTime, published + 30_000_000)
+      self.assertTrue(proof.aolAxisState.lateralActive and proof.aolAxisState.longitudinalActive)
+      controls.sm.update_msgs(published / 1e9, [proof])
+      # Source age has crossed 30 ms; this already-admitted output is still fresh.
+      for now in (source + 33_507_000, published + 30_000_000):
+        self.assertIsNotNone(current_axis(controls.sm, now_ns=now))
+        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now):
+          command, _ = controls.state_control()
+        self.assertTrue(command.latActive and command.longActive)
+      now = published + 30_000_001
+      self.assertIsNone(current_axis(controls.sm, now_ns=now))
+      with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now):
+        command, _ = controls.state_control()
+      self.assertFalse(command.latActive or command.longActive)
+
+  def test_expired_ioniq_input_has_inactive_publication_lease(self):
+    from openpilot.starpilot.aol.runtime import current_axis
+
+    for age in (30_008_000, 30_055_000):
+      with self.subTest(source_age_ns=age), OpenpilotPrefix():
+        sd, controls, step, _, _ = self._ioniq_availability_callers()
+        step(2)
+        published = sd.aol_car_state_log_ns + age
+        with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=published):
+          sd.publish_axis_proof(sd.CS_prev)
+        proof = sd.pm.messages['aolAxisState']
+        axis = proof.aolAxisState
+        self.assertEqual(axis.validUntilMonoTime, published + 30_000_000)
+        self.assertEqual(str(axis.faultReason), 'availabilityPause')
+        self.assertEqual(axis.sourceCarStateMonoTime, 0)
+        self.assertFalse(axis.lateralActive or axis.longitudinalActive or axis.desiredLongitudinal)
+        self.assertFalse(sd.enabled or sd.active)
+        controls.sm.update_msgs(published / 1e9, [proof])
+        # A fresh output lease does not make stale input eligible for actuation.
+        self.assertIsNotNone(current_axis(controls.sm, now_ns=published))
+        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=published):
+          command, _ = controls.state_control()
+        self.assertFalse(command.latActive or command.longActive)
+        self.assertIsNone(current_axis(controls.sm, now_ns=published + 30_000_001))
+
+  def test_publication_lease_preserves_ioniq_fault_denial(self):
+    for fault in ('native_missing', 'native_denied', 'can_invalid', 'permanent_eps'):
+      with self.subTest(fault=fault), OpenpilotPrefix():
+        sd, controls, step, _, _ = self._ioniq_availability_callers()
+        step(2)
+        observed = car_state()
+        kwargs = {}
+        if fault == 'native_missing':
+          kwargs['native_valid'] = False
+        elif fault == 'native_denied':
+          kwargs['allowed'] = False
+        elif fault == 'can_invalid':
+          observed.canValid = False
+        else:
+          observed.steerFaultPermanent = True
+        step(3, observed_state=observed, **kwargs)
+        published = 10_040_000_000
+        with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=published):
+          sd.publish_axis_proof(sd.CS_prev)
+        proof = sd.pm.messages['aolAxisState']
+        self.assertEqual(proof.aolAxisState.validUntilMonoTime, published + 30_000_000)
+        self.assertFalse(proof.aolAxisState.lateralActive or proof.aolAxisState.longitudinalActive)
+        controls.sm.update_msgs(published / 1e9, [proof])
+        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=published):
+          command, _ = controls.state_control()
+        self.assertFalse(command.latActive or command.longActive)
+
   def test_ioniq6_fresh_backlog_companion_keeps_axes_and_stale_loss_warns(self):
     from opendbc.car import gen_empty_fingerprint
     from opendbc.car.hyundai.interface import CarInterface
