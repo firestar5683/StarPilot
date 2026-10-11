@@ -139,7 +139,7 @@ def _git_identity(path: Path) -> tuple[str, str] | None:
 
 class SoftwareOperations:
   def __init__(self, params=None, status=None, parked=None, process=None, *, finalized=FINALIZED,
-               installed=BASEDIR, git_identity=_git_identity, clock=time.monotonic, history_reader=commit_history):
+               installed=BASEDIR, git_identity=_git_identity, clock=time.monotonic, history_reader=commit_history, refresh=None):
     self.params = params if params is not None else Params()
     self.status = status if status is not None else SoftwareStatus(self.params)
     if parked is None:
@@ -150,6 +150,7 @@ class SoftwareOperations:
       self.context = None
       self.parked = parked
     self.process = process if process is not None else UpdaterProcess()
+    self.refresh = refresh
     self.finalized = Path(finalized)
     self.installed = Path(installed)
     self.git_identity = git_identity
@@ -294,7 +295,11 @@ class SoftwareOperations:
         raise SoftwareOperationError("Updater status is unavailable", 503) from None
       process = self.process.available()
       self._refresh_request(status)
-      parked = self._parked()
+      try:
+        fresh = self.refresh is None or self.refresh() is True
+      except (OSError, RuntimeError, ValueError, TypeError):
+        fresh = False
+      parked = fresh and self._parked()
       branches = self._branches()
       updater_idle = status["updater"]["state"] == "idle"
       pending = self.request is not None and self.request["state"] == "pending"
@@ -306,7 +311,8 @@ class SoftwareOperations:
       selected = target is not None and target in branches and status["updater"]["targetBranch"] == target
       reason = None
       if not parked:
-        reason = "Park the vehicle to manage updates"
+        reason = ("Waiting for current offroad status before allowing updates" if not fresh or self._flag("IsOffroad") is True
+                  else "Park the vehicle to manage updates")
       elif disabled:
         reason = "Updates are disabled"
       elif reboot:

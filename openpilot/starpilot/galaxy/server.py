@@ -237,7 +237,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     nonlocal software_operations_source
     with software_lock:
       if software_operations_source is None:
-        software_operations_source = SoftwareOperations(parked=parked)
+        software_operations_source = SoftwareOperations(parked=parked, refresh=evidence_source.refresh if evidence_source is not None else None)
       server.software_operations_source = software_operations_source
       return software_operations_source
 

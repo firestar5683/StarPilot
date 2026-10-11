@@ -72,6 +72,50 @@ class SoftwareOperationsTest(unittest.TestCase):
       self.act(action, branch)
     self.assertEqual(caught.exception.status, status)
 
+  def test_snapshot_refresh_precedes_parked_read_and_relocks_without_signaling(self):
+    order = []
+
+    def refresh():
+      order.append('refresh')
+      self.parked = not self.parked
+      return True
+
+    def parked():
+      order.append('parked')
+      return self.parked
+
+    self.parked = False
+    self.owner = SoftwareOperations(self.params, parked=parked, process=self.process, refresh=refresh,
+                                    finalized=self.finalized, installed=self.installed, git_identity=lambda path: self.git.get(path))
+    self.addCleanup(self.owner.close)
+    for expected in (True, False):
+      order.clear()
+      view = self.owner.snapshot(include_history=False)
+      self.assertEqual(order, ['refresh', 'parked'])
+      self.assertIs(view['parked'], expected)
+      for key in ('canCheck', 'canDownload', 'canSelect'):
+        self.assertIs(view[key], expected)
+      self.assertIsNone(view['request'])
+      self.assertEqual(self.process.sent, [])
+
+  def test_failed_refresh_never_uses_cached_parked_authority(self):
+    self.parked = True
+    for outcome in (False, None, 1, OSError('collector failed')):
+      with self.subTest(outcome=outcome):
+        refresh = mock.Mock(side_effect=outcome) if isinstance(outcome, Exception) else mock.Mock(return_value=outcome)
+        parked = mock.Mock(return_value=True)
+        owner = SoftwareOperations(self.params, parked=parked, process=self.process, refresh=refresh,
+                                   finalized=self.finalized, installed=self.installed, git_identity=lambda path: self.git.get(path))
+        self.addCleanup(owner.close)
+        view = owner.snapshot(include_history=False)
+        refresh.assert_called_once_with()
+        parked.assert_not_called()
+        self.assertIs(view['parked'], False)
+        for key in ('canCheck', 'canDownload', 'canSelect', 'canInstall', 'canFastUpdate', 'canConfigure'):
+          self.assertIs(view[key], False)
+        self.assertIsNone(view['request'])
+        self.assertEqual(self.process.sent, [])
+
   def test_normal_finalization_completes_only_after_idle_success(self):
     for failed in (False, True):
       with self.subTest(failed=failed):
