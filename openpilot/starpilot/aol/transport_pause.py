@@ -110,8 +110,11 @@ class AvailabilityPause:
       inventory = (healthy.pandaSerial, tuple(p.hardwareSerial for p in healthy.pandaInventory))
       faults = [event for event in events if event.immediateDisable or event.softDisable]
       if not faults:
+        recovery_handoff = bool(self.active and source_current and not source_expired and self.baseline_ns > 0 and
+          self.producer == intent.producerSessionId and self.epoch == companion.integrity_epoch and
+          self.inventory == inventory and healthy.observedMonoTime >= self.native_ns)
         self.active = False
-        if prior_lateral_active:
+        if prior_lateral_active or recovery_handoff:
           self.producer, self.epoch = intent.producerSessionId, companion.integrity_epoch
           self.inventory, self.native_ns, self.baseline_ns = inventory, healthy.observedMonoTime, now_ns
         return False
