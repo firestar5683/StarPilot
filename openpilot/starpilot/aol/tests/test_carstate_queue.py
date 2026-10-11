@@ -42,6 +42,10 @@ def test_route3c_oldest_35ms_advances_to_exact_fresh_pair_and_actual_controls():
     with OpenpilotPrefix():
       sd, _, step, _, receive = case._ioniq_availability_callers()
       a, b, now = 10_019_000_000, 10_051_448_441, 10_054_292_276
+      # Publish the still-fresh retained source before the target queue interval.
+      with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_024_292_276):
+        sd.publish_axis_proof(sd.CS_prev)
+      receive(10_024_292_276, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
       axis, _, command = queued_step(sd, step, [message(a), message(10_030_000_000), message(b)])
       assert now - a == 35_292_276 and now - b == 2_843_835
       assert axis.sourceCarStateMonoTime == b and sd.aol_last_intent.carStateLogMonoTime == b
@@ -57,6 +61,10 @@ def test_queue_preserves_pulses_and_latest_reader_without_reengaging(pulse):
     cleanup.callback(case.doCleanups)
     with OpenpilotPrefix():
       sd, _, step, card, receive = case._ioniq_availability_callers()
+      # Publish the still-fresh retained source before the target queue interval.
+      with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=10_024_292_276):
+        sd.publish_axis_proof(sd.CS_prev)
+      receive(10_024_292_276, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
       first = fixture.car_state()
       first.cruiseState.available = True
       if pulse == 'cancel':

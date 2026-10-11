@@ -771,7 +771,7 @@ class IpcAxisContractTests(unittest.TestCase):
         self.assertIsInstance(sd.aol_intent_companion, IntentCompanion)
         self.assertEqual(sd.CP.safetyConfigs[-1].safetyParam, 0x8895)
         self.assertEqual(sd.CP.alternativeExperience, 0)
-        axis, _, command = step(0)
+        axis, _, command = step(0, offset_ns=50_000_000)
         self.assertTrue(axis.lateralActive and command.latActive)
         self.assertEqual(command.longActive, full_op)
         base = 10_000_000_000

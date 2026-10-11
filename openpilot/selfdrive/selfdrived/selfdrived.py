@@ -421,31 +421,6 @@ class SelfdriveD:
         set_offroad_alert("Offroad_DriverMonitoringUncertain", True)
         self.dm_uncertain_alerted = True
 
-    CS = self.refresh_event_car_state(CS)
-    self.event_car_state = CS
-    self._update_steering_authority(CS)
-    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
-    previous = self.CS_prev
-    for sample, envelope_valid in samples:
-      self._update_car_event_sample(sample, previous)
-      if len(samples) > 1:
-        if sample.canTimeout:
-          self.events.add(EventName.canBusMissing)
-        elif not envelope_valid or not sample.canValid:
-          self.events.add(EventName.canError)
-      previous = sample
-    if any(physical_cancel(sample) for sample, _ in samples):
-      self.nostalgia_paddle_cancel = False
-    if CS.canValid:
-      if self.tesla_stock_consumer.binding is not None:
-        intent_companion = getattr(self, 'aol_intent_companion', None)
-        drained = intent_companion is None or intent_companion.drain()
-        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
-        companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
-                                   previous=self.aol_last_intent, companion=intent_companion, drain=False) if drained else None
-        session = companion.producerSessionId if companion is not None else None
-        self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
-
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
       self.events.add(EventName.overheat)
@@ -491,31 +466,6 @@ class SelfdriveD:
       device_motion = Pose.from_device_motion(self.sm['deviceMotion'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_motion)
 
-    if self.calibrated_pose is not None and not self.CP.notCar:
-      excessive_actuation = self.excessive_actuation_check.update(self.sm, CS, self.calibrated_pose)
-      if not self.excessive_actuation and excessive_actuation is not None:
-        set_offroad_alert("Offroad_ExcessiveActuation", True, extra_text=str(excessive_actuation))
-        self.excessive_actuation = True
-
-    if self.excessive_actuation:
-      self.events.add(EventName.excessiveActuation)
-    # ******************************************************************************************
-
-    # Handle lane change
-    if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
-      direction = self.sm['modelV2'].meta.laneChangeDirection
-      if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
-         (CS.rightBlindspot and direction == LaneChangeDirection.right):
-        self.events.add(EventName.laneChangeBlocked)
-      else:
-        if direction == LaneChangeDirection.left:
-          self.events.add(EventName.preLaneChangeLeft)
-        else:
-          self.events.add(EventName.preLaneChangeRight)
-    elif self.sm['modelV2'].meta.laneChangeState in (LaneChangeState.laneChangeStarting,
-                                                    LaneChangeState.laneChangeFinishing):
-      self.events.add(EventName.laneChange)
-
     for i, pandaState in enumerate(self.sm['pandaStates']):
       # All pandas must match the list of safetyConfigs, and if outside this list, must be silent or noOutput
       if i < len(self.CP.safetyConfigs):
@@ -555,6 +505,59 @@ class SelfdriveD:
         self.events.add(EventName.radarTempUnavailable)
       elif any(self.sm['radarState'].radarErrors.to_dict().values()):
         self.events.add(EventName.radarFault)
+    hardware_events_added = len(self.events) - num_events
+
+    CS = self.refresh_event_car_state(CS)
+    self.event_car_state = CS
+    self._update_steering_authority(CS)
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+    previous = self.CS_prev
+    for sample, envelope_valid in samples:
+      self._update_car_event_sample(sample, previous)
+      if len(samples) > 1:
+        if sample.canTimeout:
+          self.events.add(EventName.canBusMissing)
+        elif not envelope_valid or not sample.canValid:
+          self.events.add(EventName.canError)
+      previous = sample
+    if any(physical_cancel(sample) for sample, _ in samples):
+      self.nostalgia_paddle_cancel = False
+    if CS.canValid:
+      if self.tesla_stock_consumer.binding is not None:
+        intent_companion = getattr(self, 'aol_intent_companion', None)
+        drained = intent_companion is None or intent_companion.drain()
+        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+        companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
+                                   previous=self.aol_last_intent, companion=intent_companion, drain=False) if drained else None
+        session = companion.producerSessionId if companion is not None else None
+        self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
+
+    if self.calibrated_pose is not None and not self.CP.notCar:
+      excessive_actuation = self.excessive_actuation_check.update(self.sm, CS, self.calibrated_pose)
+      if not self.excessive_actuation and excessive_actuation is not None:
+        set_offroad_alert("Offroad_ExcessiveActuation", True, extra_text=str(excessive_actuation))
+        self.excessive_actuation = True
+
+    if self.excessive_actuation:
+      self.events.add(EventName.excessiveActuation)
+    # ******************************************************************************************
+
+    # Handle lane change
+    if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
+      direction = self.sm['modelV2'].meta.laneChangeDirection
+      if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
+         (CS.rightBlindspot and direction == LaneChangeDirection.right):
+        self.events.add(EventName.laneChangeBlocked)
+      else:
+        if direction == LaneChangeDirection.left:
+          self.events.add(EventName.preLaneChangeLeft)
+        else:
+          self.events.add(EventName.preLaneChangeRight)
+    elif self.sm['modelV2'].meta.laneChangeState in (LaneChangeState.laneChangeStarting,
+                                                    LaneChangeState.laneChangeFinishing):
+      self.events.add(EventName.laneChange)
+
+    num_can_events = len(self.events)
     if CS.canTimeout:
       self.events.add(EventName.canBusMissing)
     elif not CS.canValid:
@@ -562,7 +565,7 @@ class SelfdriveD:
 
     # generic catch-all. ideally, a more specific event should be added above instead
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
-    no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
+    no_system_errors = (not has_disable_events) or (hardware_events_added == 0 and len(self.events) == num_can_events)
     warmup_sec = 5.
     big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + warmup_sec
     if not self.sm.all_checks() and no_system_errors and not big_model_settling:  # the load holds modelV2 and friends back on purpose
@@ -766,7 +769,7 @@ class SelfdriveD:
     intent = getattr(self, 'aol_last_intent', None)
     previous_native = getattr(self, 'aol_published_input_native', None)
     if (proof is None or companion is None or intent is None or previous_native is None or
-        not self.enabled or not self.active or self.aol_authority_lost or
+        self.aol_authority_lost or
         any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
         not self.sm.all_checks() or self.rk.lagging or
         self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated or
@@ -777,7 +780,11 @@ class SelfdriveD:
         any(self.sm['radarState'].radarErrors.to_dict().values()) or
         driving_process_failures(self.sm['managerState'].processes)):
       return 0
-    session, source, published, deadline, producer, epoch, lateral, longitudinal = proof
+    session, source, published, deadline, producer, epoch, lateral, longitudinal, active_lateral, active_longitudinal = proof
+    ordinary = bool(active_longitudinal and self.enabled and self.active)
+    lateral_only = bool(active_lateral and not active_longitudinal and intent.allowedLatch and intent.lateralArmed)
+    if not (ordinary or lateral_only):
+      return 0
     if (session != self.aol_session_id or not 0 < source <= published <= now_ns < deadline or
         published - source > INTENT_MAX_AGE_NS or deadline != published + INTENT_MAX_AGE_NS or
         intent.producerSessionId != producer or intent.carStateLogMonoTime != source or companion.integrity_epoch != epoch or
@@ -794,7 +801,7 @@ class SelfdriveD:
       return 0
     samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'car_state_retained_valid', False)),)
     if any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultTemporary or
-           sample.steerFaultPermanent or sample.brakePressed or sample.regenBraking or sample.gasPressed or
+           sample.steerFaultPermanent or sample.brakePressed or sample.regenBraking or active_longitudinal and sample.gasPressed or
            sample.seatbeltUnlatched or sample.accFaulted or sample.doorOpen or physical_cancel(sample) or
            sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
                                      car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
@@ -809,7 +816,7 @@ class SelfdriveD:
     return min(deadline - now_ns, int(DT_CTRL * 1e9))
 
   def refresh_event_car_state(self, CS):
-    if REPLAY or not self.aol_replay or not self.axis_transport_required or not getattr(self, 'event_input_refresh_pending', False):
+    if not getattr(self, 'event_input_refresh_pending', False) or REPLAY or not self.aol_replay or not self.axis_transport_required:
       return CS
     samples = list(getattr(self, 'car_state_envelopes', ()))
     invalid = getattr(self, 'car_state_queue_invalid', False)
@@ -939,6 +946,14 @@ class SelfdriveD:
       alerts.append(warning)
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
+    from openpilot.starpilot.audio.availability_warning import AvailabilityWarningDelivery
+    if not hasattr(self, 'availability_warning_delivery'):
+      self.availability_warning_delivery = AvailabilityWarningDelivery()
+    selected = self.AM.current_alert
+    self.availability_warning_delivery.observe(session=getattr(self, 'aol_session_id', None), drive=drive,
+      now_ns=now_ns, selected=bool(selected.alert_type == 'aolAvailability/warning' and
+        selected.audible_alert == log.SelfdriveState.AudibleAlert.prompt),
+      requested_until_ns=getattr(self, 'aol_availability_chime_until_ns', 0))
     recovery.selected(self.AM.current_alert)
 
   def _expire_axis_source(self, CS, now_ns):
@@ -1024,11 +1039,63 @@ class SelfdriveD:
       if ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
         self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
 
+  def _expire_axis_continuity(self, CS, now_ns):
+    proof = getattr(self, 'aol_step_input_proof', getattr(self, 'aol_published_input_proof', None))
+    decision = self.aol_axis_decision
+    if (proof is None or proof[0] != self.aol_session_id or now_ns <= proof[3] or
+        not (decision.lateral_active or decision.longitudinal_active)):
+      return False
+    # A fresh source cannot bridge an expired original output lease. This pause
+    # grants no output; any later ordinary engagement still needs accepted ENABLE.
+    self.aol_axis_decision = AxisDecision()
+    was_enabled = self.enabled
+    self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+    self.enabled = self.active = False
+    self.aol_availability_long_inhibit = True
+    if ET.ENABLE in self.state_machine.current_alert_types:
+      self.state_machine.current_alert_types.remove(ET.ENABLE)
+    intent = getattr(self, 'aol_last_intent', None)
+    pause = getattr(self, 'aol_availability_pause', None)
+    retained = False
+    if (intent is not None and pause is not None and not self.aol_authority_lost and
+        getattr(self, 'aol_fault_reason', 'none') == 'none' and
+        not any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE))):
+      self.events.add(EventName.commIssue)
+      native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
+      from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
+      healthy = _healthy_transport_native(self.sm, self.CP, CS, self.aol_session_id, now_ns, native)
+      retained = pause.observe(cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS,
+        native=native, now_ns=now_ns, companion=getattr(self, 'aol_intent_companion', None),
+        intent=intent, events=self.events.to_msg(),
+        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+        source_current=bool(self.conditional_car_state_valid and 0 < self.aol_car_state_log_ns <= now_ns and
+          now_ns - self.aol_car_state_log_ns <= INTENT_MAX_AGE_NS and CS.canValid and not CS.canTimeout),
+        source_expired=False, prior_lateral_active=bool(proof[8]), hard_fault=False, healthy_native=healthy)
+    if retained:
+      self.aol_fault_reason = 'availabilityPause'
+      self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
+      self.aol_availability_ordinary_warning = was_enabled
+      if getattr(self, 'aol_published_fault_reason', 'none') != 'availabilityPause':
+        self.aol_availability_chime_until_ns = now_ns + 400_000_000
+      if ET.WARNING not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.WARNING)
+      if was_enabled and ET.SOFT_DISABLE not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
+    else:
+      self.aol_fault_reason = 'critical'
+      self.aol_authority_lost = True
+      self.events.add(EventName.controlsMismatch)
+      if ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
+    return True
+
   def publish_axis_proof(self, CS, *, defer_events=False):
     now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
     source_clock_scoped = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if source_clock_scoped:
       self._expire_axis_source(CS, now_ns)
+      self._expire_axis_continuity(CS, now_ns)
     reason = getattr(self, 'aol_fault_reason', 'none')
     event_now_ns = now_ns
     ce_send = None
@@ -1073,6 +1140,8 @@ class SelfdriveD:
       axis.qualified = bool((self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)) and
         (not source_clock_scoped or self.aol_car_state_log_ns > 0 or
          reason in ('transportPause', 'availabilityPause', 'critical')))
+      if source_clock_scoped and self._expire_axis_continuity(CS, time.monotonic_ns()):
+        return self.publish_axis_proof(CS, defer_events=defer_events)
       self.pm.send('aolAxisState', axis_msg)
       self.aol_published_input_proof = None
       self.aol_published_input_native = None
@@ -1082,7 +1151,8 @@ class SelfdriveD:
           now_ns - axis.sourceCarStateMonoTime <= INTENT_MAX_AGE_NS):
         self.aol_published_input_proof = (str(axis.sessionId), int(axis.sourceCarStateMonoTime),
           now_ns, int(axis.validUntilMonoTime), str(axis.intentProducerSessionId),
-          int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal))
+          int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal),
+          bool(axis.lateralActive), bool(axis.longitudinalActive))
         self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
     if not defer_events:
       if ce_send is not None:
@@ -1109,6 +1179,13 @@ class SelfdriveD:
     ss.alertStatus = self.AM.current_alert.alert_status
     ss.alertType = self.AM.current_alert.alert_type
     ss.alertSound = self.AM.current_alert.audible_alert
+    delivery = getattr(self, 'availability_warning_delivery', None)
+    if delivery is not None and delivery.pending(session=getattr(self, 'aol_session_id', None),
+        drive=int(self.sm['deviceState'].startedMonoTime) if self.sm['deviceState'].started else 0,
+        now_ns=time.monotonic_ns(),
+        audible_none=ss.alertSound == log.SelfdriveState.AudibleAlert.none,
+        priority=self.AM.current_alert.priority, low_priority=AlertPriority.LOW):
+      ss.alertSound = log.SelfdriveState.AudibleAlert.prompt
     ss.alertHudVisual = self.AM.current_alert.visual_alert
 
     ce_send, reason = (None, None) if axis_published else self.publish_axis_proof(CS, defer_events=True)
@@ -1261,6 +1338,7 @@ class SelfdriveD:
 
   def step(self):
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
+    self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
     self.event_car_state = CS
     self.event_input_refresh_pending = True
@@ -1385,8 +1463,13 @@ class SelfdriveD:
         self.aol_authority_lost = True
       elif source_current and not intent.allowedLatch:
         self.aol_authority_lost = False
+      # Temporary EPS withdraws steering commands without revoking the armed
+      # latch. Keep the event and ordinary soft-disable behavior unchanged.
+      aol_hard_soft_fault = any(event.softDisable and not (
+        event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent)
+        for event in self.events.to_msg())
       self.aol_fault_reason = ('critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
-                               self.events.contains(ET.SOFT_DISABLE) and not availability else
+                               aol_hard_soft_fault and not availability else
                                'availabilityPause' if availability else 'transportPause' if pause else 'none')
       if self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
         self.record_aol_authority_loss(now_ns=now_ns, companion=intent_companion, drained=intent_drained, native=native,
@@ -1395,8 +1478,11 @@ class SelfdriveD:
       if self.aol_authority_lost or pause:
         self.events.add(EventName.controlsMismatch)
         lost_active_aol |= pause
+    was_enabled = self.enabled
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
+    if not was_enabled and self.enabled and self.events.contains(ET.ENABLE):
+      self.aol_step_input_proof = None
     if lost_active_aol and ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
       self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     if self.aol_replay:
@@ -1452,6 +1538,8 @@ class SelfdriveD:
     self.publish_selfdriveState(CS, axis_published=axis_published)
 
     self.CS_prev = CS
+    # Preserve an explicit None during a new engagement; retire it after publication.
+    del self.aol_step_input_proof
 
   def refresh_saved_driving_mode(self, now_ns: int):
     if self.conditional_replay:

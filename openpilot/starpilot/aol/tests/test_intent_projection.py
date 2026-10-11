@@ -318,6 +318,10 @@ def test_actual_hkg_raw_known_unaccepted_sm_projection_preserves_full_axes_then_
       case.assertTrue(native.pandaInventory)
       case.assertTrue(axis.lateralActive and axis.longitudinalActive and command.latActive and command.longActive)
       feedback(prior, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+      # Keep the established output continuous while its unchanged source is fresh.
+      with patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=c + 10_000_000):
+        sd.publish_axis_proof(sd.CS_prev)
+      feedback(c + 10_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
       old, source, latest = message(c, 4), message(a, 5), message(b, 6)
       with intent_receive(sd, side_effect=[old.as_reader(), None]):
         case.assertTrue(sd.aol_intent_companion.drain())

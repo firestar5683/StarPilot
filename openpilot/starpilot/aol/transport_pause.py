@@ -11,12 +11,11 @@ def cp_identity(cp):
           tuple((int(c.safetyModel.raw), int(c.safetyParam)) for c in cp.safetyConfigs))
 
 
-def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None, *, require_longitudinal=True):
-  """Require the live, exact native configuration, including every Panda."""
+def _configured_transport_native(sm, cp, session, now_ns, native=None, *, require_longitudinal=True):
+  """Validate the exact live native configuration and every Panda."""
   try:
     native = native or current_native(sm, cp, now_ns=now_ns, axis_session_id=session)
     if (not session or native is None or str(native.axisSessionId) != session or
-        not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent or
         native.requestedLateral and not native.lateralAllowed or
         require_longitudinal and native.requestedLongitudinal and not native.longitudinalAllowed):
       return None
@@ -46,6 +45,17 @@ def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None, *, requi
                not p.heartbeatLost and not p.faults and
                (not require_longitudinal or not native.requestedLongitudinal or str(c.safetyModel) in ('silent', 'noOutput') or p.controlsAllowed)
                for p, c in zip(pandas, cp.safetyConfigs, strict=True)) else None
+  except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+    return None
+
+
+def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None, *, require_longitudinal=True):
+  """Require both current vehicle health and the exact live native configuration."""
+  try:
+    if not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent:
+      return None
+    return _configured_transport_native(sm, cp, session, now_ns, native,
+                                        require_longitudinal=require_longitudinal)
   except (AttributeError, KeyError, IndexError, TypeError, ValueError):
     return None
 
@@ -220,6 +230,53 @@ class TransportPauseFeedback:
     self.healthy_feedback_ns = 0
     self.healthy_native_ns = 0
     self.healthy_inventory = None
+
+  def _temporary_steering_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
+    """Keep an existing armed intent during isolated temporary EPS withdrawal."""
+    if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
+        not self.session or str(axis.sessionId) != self.session or not cs.steerFaultTemporary or
+        cs.steerFaultPermanent or not cs.canValid or cs.canTimeout or
+        str(axis.faultReason) != 'none' or
+        not producer or producer != self.availability_producer or
+        str(getattr(axis, 'intentProducerSessionId', '')) != producer or
+        int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch or
+        not self.lateral_baseline_ns or not self.lateral_inventory or
+        not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
+        now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
+      return False
+    withdrawn = not axis.desiredLateral and not axis.lateralActive
+    # Card can parse the first temporary EPS sample before SD publishes its
+    # withdrawal. Retain only the already accepted original proof, still inside
+    # its original source/output lease; never synthesize a new output grant.
+    held_original = bool(axis.desiredLateral and axis.lateralActive and axis.nativeAcknowledged and
+                         signature == self.signature)
+    if not withdrawn and not held_original:
+      return False
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    events = sm['onroadEvents']
+    temporary_names = (log.OnroadEvent.EventName.steerTempUnavailable,
+                       log.OnroadEvent.EventName.steerTempUnavailableSilent)
+    if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+        not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
+        any(event.immediateDisable or event.softDisable and event.name != temporary_names[0] for event in events)):
+      return False
+    temporary_event = any(event.name in temporary_names for event in events)
+    if withdrawn and not (temporary_event and axis.faultEventMonoTime == event_ns <= stamp):
+      return False
+    if held_original and not (
+        axis.faultEventMonoTime == event_ns <= stamp and not any(event.softDisable for event in events) or
+        temporary_event and 0 < axis.faultEventMonoTime < event_ns and now_ns - event_ns <= AXIS_MAX_AGE_NS):
+      return False
+    # This exception validates intent only. The normal vehicle-health helper
+    # continues to reject temporary EPS for transport and availability proofs.
+    native = _configured_transport_native(sm, cp, self.session, now_ns)
+    if (native is None or not native.pandaInventory or
+        held_original and not (native.requestedLateral and native.lateralAllowed) or
+        axis.longitudinalActive and not native.longitudinalAllowed or
+        native.observedMonoTime < self.lateral_native_ns or
+        (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
+      return False
+    return True
 
   def _honda_brake_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, brake_source_ns):
     """Preserve existing LAT intent through brake's LONG withdrawal, never output."""
@@ -459,6 +516,12 @@ class TransportPauseFeedback:
                      cp_identity(cp) == self.cp)
       continuity = bool(not self.session or axis.sessionId == self.session and
                         (axis.sequence > self.sequence or axis.sequence == self.sequence and signature == self.signature))
+      if current and continuity and self._temporary_steering_intent_current(sm, cp, cs, axis, stamp, now_ns,
+          latched=latched, producer=intent_producer_session, signature=signature):
+        # Advance only received sequence identity; do not renew the prior output,
+        # native, source, or healthy lateral baseline leases.
+        self.sequence, self.signature = int(axis.sequence), signature
+        return False
       brake_native = (self._honda_brake_lateral_current(sm, cp, cs, axis, now_ns,
         latched=latched, brake_source_ns=brake_source_ns) if current and continuity else None)
       if brake_native is not None:
