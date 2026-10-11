@@ -9,7 +9,7 @@ from opendbc.car.structs import car
 import openpilot.cereal.messaging as messaging
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
-from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper
+from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper, set_core_affinity
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import interfaces
@@ -422,6 +422,7 @@ class Controls:
 def main():
   config_realtime_process(4, Priority.CTRL_HIGH)
   controls = Controls()
+  set_core_affinity([4, 5])
   controls.run()
 
 

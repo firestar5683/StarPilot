@@ -1343,10 +1343,10 @@ class Car:
       timing = getattr(self, 'loop_timing', None)
       report = timing.take_report() if timing is not None else None
       if report is not None:
-        cloudlog.event('card.loop_late', **report)
+        cloudlog.event('card.loop_late', error=True, **report)
       output_report = timing.take_output_report() if timing is not None else None
       if output_report is not None:
-        cloudlog.event('card.output_invalid', **output_report)
+        cloudlog.event('card.output_invalid', error=True, **output_report)
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       if self.aol_card_intent is not None:

@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from openpilot.cereal import messaging
-from openpilot.starpilot.aol.runtime import INTENT_MAX_AGE_NS
+from openpilot.starpilot.aol.runtime import INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS
 from openpilot.starpilot.aol.wire import INTENT_SERVICE, decode_intent
 
 MAX_COMPANIONS = 16
@@ -115,7 +115,9 @@ class IntentCompanion:
       verified = self.verified_sm_projection
       if (verified is not None and verified[0] == stamp and verified[2] == self.integrity_epoch and
           verified[3] == self.session and sm.valid.get(INTENT_SERVICE, False) and
-          sm.alive.get(INTENT_SERVICE, False) and stamp < source_ns and
+          sm.alive.get(INTENT_SERVICE, False) and
+          (stamp < source_ns or (source_ns == 0 or source_ns == stamp) and
+           0 < stamp <= now_ns <= stamp + SAFETY_MAX_AGE_NS) and
           now_ns - stamp > INTENT_MAX_AGE_NS and decode_intent(sm[INTENT_SERVICE]) == verified[1]):
         # This exact previously accepted SM identity contributes restrictions
         # only; it never replaces the fresh raw source pair or latest sample.

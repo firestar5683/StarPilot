@@ -77,11 +77,9 @@ class AvailabilityPause:
 
   def observe(self, *, cp, session, sm, cs, native, now_ns, companion, intent,
               events, model_ready, source_current, prior_lateral_active, hard_fault, healthy_native, source_expired=False):
-    if str(cp.carFingerprint) != 'HYUNDAI_IONIQ_6':
-      return False
     try:
       healthy = healthy_native
-      eligible = bool(str(cp.carFingerprint) == 'HYUNDAI_IONIQ_6' and cp_identity(cp) == self.cp and
+      eligible = bool(cp_identity(cp) == self.cp and
         session == self.session and not hard_fault and model_ready and (source_current or source_expired) and companion is not None and
         companion.last_drain_ok and intent is not None and intent.allowedLatch and intent.lateralArmed and
         healthy is not None and healthy.requestedLateral and healthy.lateralAllowed and healthy.pandaInventory)
@@ -92,11 +90,21 @@ class AvailabilityPause:
       if source_expired:
         latest = companion.latest
         raw = latest[2] if latest is not None and latest[1] else None
+        verified = companion.verified_sm_projection
+        sm_intent = decode_intent(sm['aolIntentWire'])
+        projection = bool(verified is not None and int(sm.logMonoTime['aolIntentWire']) == verified[0] and
+          verified[2] == companion.integrity_epoch and verified[3] == companion.session and
+          sm_intent == verified[1] and 0 < verified[0] <= now_ns <= verified[0] + SAFETY_MAX_AGE_NS and
+          sm_intent.settingsQualified and sm_intent.allowedLatch and sm_intent.lateralArmed and
+          sm_intent.producerSessionId == intent.producerSessionId)
         if (raw is None or not raw.settingsQualified or not raw.allowedLatch or not raw.lateralArmed or
             raw.producerSessionId != intent.producerSessionId or
-            not 0 < raw.carStateLogMonoTime <= now_ns <= raw.validUntilMonoTime or
-            int(sm.logMonoTime['aolIntentWire']) != raw.carStateLogMonoTime or
-            not sm.valid['aolIntentWire'] or not sm.alive['aolIntentWire']):
+            not 0 < intent.carStateLogMonoTime <= now_ns or
+            now_ns - intent.carStateLogMonoTime > SAFETY_MAX_AGE_NS or
+            not 0 < raw.carStateLogMonoTime <= now_ns or raw.observedMonoTime > now_ns or
+            now_ns - raw.carStateLogMonoTime > SAFETY_MAX_AGE_NS or
+            (int(sm.logMonoTime['aolIntentWire']) != raw.carStateLogMonoTime and not projection) or
+            not sm.seen['aolIntentWire'] or not sm.valid['aolIntentWire'] or not sm.alive['aolIntentWire']):
           self.active = False
           return False
       inventory = (healthy.pandaSerial, tuple(p.hardwareSerial for p in healthy.pandaInventory))
@@ -110,7 +118,8 @@ class AvailabilityPause:
       matched = bool(availability_only(events) and self.producer == intent.producerSessionId and
         self.epoch == companion.integrity_epoch and self.inventory == inventory and
         healthy.observedMonoTime >= self.native_ns and self.baseline_ns > 0 and
-        (self.active or 0 <= now_ns - self.baseline_ns <= AXIS_MAX_AGE_NS))
+        (self.active or 0 <= now_ns - self.baseline_ns <=
+         (SAFETY_MAX_AGE_NS if source_expired else AXIS_MAX_AGE_NS)))
       self.active = matched
       if matched:
         self.native_ns = healthy.observedMonoTime
@@ -137,7 +146,7 @@ class TransportPause:
     # Overwritten on every observation; consumed only by the adjacent producer.
     self.observed_native = None
     context_current = bool(cp_identity(cp) == self.cp and session == self.session and model_ready and companion is not None)
-    if context_current and (not hard_fault or str(cp.carFingerprint) == 'HYUNDAI_IONIQ_6'):
+    if context_current:
       self.observed_native = _healthy_transport_native(sm, cp, cs, session, now_ns, native)
     eligible = bool(context_current and not hard_fault and self.observed_native is not None)
     latest = companion.latest if companion is not None else None
@@ -185,6 +194,7 @@ class TransportPauseFeedback:
     self.awaiting = False
     self.failed = False
     self.lateral_baseline_ns = 0
+    self.lateral_source_ns = 0
     self.lateral_inventory = None
     self.lateral_native_ns = 0
     self.longitudinal_cancel_ns = 0
@@ -258,7 +268,7 @@ class TransportPauseFeedback:
             cp_identity(cp) == self.cp and intent_producer_session and
             getattr(axis, 'intentProducerSessionId', '') == intent_producer_session == self.availability_producer and
             int(getattr(axis, 'intentIntegrityEpoch', 0)) == self.availability_epoch and
-            str(cp.carFingerprint) == 'HYUNDAI_IONIQ_6' and self.session and
+            self.session and
             self.lateral_inventory and axis.desiredLateral and
             (str(axis.faultReason) == 'none' or not axis.desiredLongitudinal) and
             axis.nativeAcknowledged and (
@@ -280,12 +290,16 @@ class TransportPauseFeedback:
       return False
     typed = bool(reason == 'availabilityPause' and not axis.lateralActive and not axis.longitudinalActive and
                  0 < axis.faultEventMonoTime <= stamp)
+    source_expired = bool(typed and axis.sourceCarStateMonoTime == 0)
+    if source_expired and not 0 < self.lateral_source_ns <= now_ns <= self.lateral_source_ns + SAFETY_MAX_AGE_NS:
+      return False
+    baseline_age_limit = SAFETY_MAX_AGE_NS if source_expired else AXIS_MAX_AGE_NS
     matched = typed and issue and axis.faultEventMonoTime == event_ns
     occurrence = max(int(axis.faultEventMonoTime) if typed else 0, event_ns if issue else 0)
     if not occurrence or occurrence < self.retention_event_ns:
       return False
     if matched:
-      if not self.retention_verified and not 0 <= now_ns - self.lateral_baseline_ns <= AXIS_MAX_AGE_NS:
+      if not self.retention_verified and not 0 <= now_ns - self.lateral_baseline_ns <= baseline_age_limit:
         return False
       if self.retention_started_ns and now_ns - self.retention_started_ns > AXIS_MAX_AGE_NS:
         return False
@@ -294,7 +308,7 @@ class TransportPauseFeedback:
       self.retention_event_ns = occurrence
     else:
       if not self.retention_started_ns:
-        if not self.retention_verified and not 0 <= now_ns - self.lateral_baseline_ns <= AXIS_MAX_AGE_NS:
+        if not self.retention_verified and not 0 <= now_ns - self.lateral_baseline_ns <= baseline_age_limit:
           return False
         self.retention_started_ns = now_ns
         self.retention_event_ns = occurrence
@@ -306,7 +320,7 @@ class TransportPauseFeedback:
 
   def _source_availability_retention(self, sm, cp, cs, axis, stamp, now_ns, *, latched, continuity, producer):
     if (not latched or self.failed or self.paused or self.pending_event or not self.session or
-        str(cp.carFingerprint) != 'HYUNDAI_IONIQ_6' or cp_identity(cp) != self.cp or not continuity or
+        cp_identity(cp) != self.cp or not continuity or
         str(axis.sessionId) != self.session or str(axis.faultSessionId) != self.session or
         str(axis.faultReason) != 'none' or not axis.qualified or not axis.nativeAcknowledged or
         not axis.desiredLateral or not axis.lateralActive or axis.desiredLongitudinal or axis.longitudinalActive or
@@ -319,8 +333,10 @@ class TransportPauseFeedback:
         producer != self.availability_producer or
         int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch):
       return False
+    if not 0 < self.lateral_source_ns <= now_ns <= self.lateral_source_ns + SAFETY_MAX_AGE_NS:
+      return False
     if not self.source_retention_started_ns:
-      if not self.lateral_baseline_ns or not 0 <= now_ns - self.lateral_baseline_ns <= AXIS_MAX_AGE_NS:
+      if not self.lateral_baseline_ns or not 0 <= now_ns - self.lateral_baseline_ns <= SAFETY_MAX_AGE_NS:
         return False
       self.source_retention_started_ns = now_ns
     if not 0 <= now_ns - self.source_retention_started_ns <= SAFETY_MAX_AGE_NS:
@@ -344,7 +360,7 @@ class TransportPauseFeedback:
     if now_ns <= axis.validUntilMonoTime or signature != self.signature:
       return False
     if (not latched or self.failed or self.paused or not self.session or native is None or
-        str(cp.carFingerprint) != 'HYUNDAI_IONIQ_6' or cp_identity(cp) != self.cp or
+        cp_identity(cp) != self.cp or
         str(axis.sessionId) != self.session or
         str(axis.faultSessionId) != self.session or str(axis.faultReason) != 'none' or
         not axis.qualified or not axis.nativeAcknowledged or not axis.desiredLateral or not axis.lateralActive or
@@ -436,6 +452,7 @@ class TransportPauseFeedback:
           self.longitudinal_cancel_ns = int(cancel_source_ns)
           self.last_cancel_source_ns = int(cancel_source_ns)
         self.lateral_baseline_ns = now_ns
+        self.lateral_source_ns = int(axis.sourceCarStateMonoTime)
         self.lateral_native_ns = int(cancel_native.observedMonoTime)
         self.sequence = int(axis.sequence)
         self.signature = signature
@@ -498,6 +515,7 @@ class TransportPauseFeedback:
         lateral_baseline = bool(axis.desiredLateral and axis.lateralActive and native is not None and
                                 native.pandaInventory and native.requestedLateral and native.lateralAllowed)
         self.lateral_baseline_ns = now_ns if lateral_baseline else 0
+        self.lateral_source_ns = int(axis.sourceCarStateMonoTime) if lateral_baseline else 0
         self.availability_producer = (str(getattr(axis, 'intentProducerSessionId', '')) if lateral_baseline and
           intent_producer_session and getattr(axis, 'intentProducerSessionId', '') == intent_producer_session else '')
         self.availability_epoch = int(getattr(axis, 'intentIntegrityEpoch', 0)) if self.availability_producer else None

@@ -35,7 +35,7 @@ from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
 from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
-from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause
+from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -651,7 +651,7 @@ class SelfdriveD:
     if _car_state is not None:
       samples.append(_car_state)
       if (getattr(self, 'aol_replay', False) and getattr(self, 'axis_transport_required', False) and
-          not REPLAY and str(self.CP.carFingerprint) == 'HYUNDAI_IONIQ_6'):
+          not REPLAY):
         # Preserve every consumed transition; only the authority source advances.
         for _ in range(31):
           following = messaging.recv_one_or_none(self.car_state_sock)
@@ -815,7 +815,7 @@ class SelfdriveD:
     recovery.selected(self.AM.current_alert)
 
   def _expire_axis_source(self, CS, now_ns):
-    if REPLAY or not self.aol_replay or not self.axis_transport_required or str(self.CP.carFingerprint) != 'HYUNDAI_IONIQ_6':
+    if REPLAY or not self.aol_replay or not self.axis_transport_required:
       return
     source_ns = self.aol_car_state_log_ns
     if 0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS:
@@ -824,7 +824,7 @@ class SelfdriveD:
     intent = getattr(self, 'aol_last_intent', None) or getattr(self, 'aol_publication_retained_intent', None)
     if not source_ns and intent is not None:
       source_ns = int(intent.carStateLogMonoTime)
-    healthy_expiry = bool(source_ns > 0 and source_ns <= now_ns and
+    healthy_expiry = bool(not getattr(self, 'aol_selected_pair_future', False) and source_ns > 0 and source_ns <= now_ns and
       now_ns - source_ns <= SAFETY_MAX_AGE_NS and CS.canValid and not CS.canTimeout and
       (getattr(self, 'conditional_car_state_valid', False) or
        getattr(self, 'aol_publication_retained_intent', None) is intent))
@@ -838,7 +838,8 @@ class SelfdriveD:
     if (healthy_expiry and pause is not None and intent is not None and
         getattr(self, 'aol_fault_reason', 'none') in ('none', 'availabilityPause') and
         not self.aol_authority_lost and not self.events.contains(ET.IMMEDIATE_DISABLE) and
-        not self.events.contains(ET.SOFT_DISABLE) and not self.events.contains(ET.USER_DISABLE)):
+        (not self.events.contains(ET.SOFT_DISABLE) or availability_only(self.events.to_msg())) and
+        not self.events.contains(ET.USER_DISABLE)):
       self.events.add(EventName.commIssue)
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
@@ -881,8 +882,7 @@ class SelfdriveD:
 
   def publish_axis_proof(self, CS, *, defer_events=False):
     now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
-    source_clock_scoped = bool(not REPLAY and self.aol_replay and self.axis_transport_required and
-                               str(self.CP.carFingerprint) == 'HYUNDAI_IONIQ_6')
+    source_clock_scoped = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if source_clock_scoped:
       self._expire_axis_source(CS, now_ns)
     reason = getattr(self, 'aol_fault_reason', 'none')
@@ -918,8 +918,7 @@ class SelfdriveD:
       axis.sourceCarStateMonoTime = self.aol_car_state_log_ns
       axis.observedMonoTime = now_ns
       axis.validUntilMonoTime = (min(now_ns + 30_000_000, self.aol_car_state_log_ns + INTENT_MAX_AGE_NS)
-        if not REPLAY and self.aol_replay and self.axis_transport_required and
-           str(self.CP.carFingerprint) == 'HYUNDAI_IONIQ_6' and
+        if source_clock_scoped and
            (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active)
         else now_ns + 30_000_000)
       axis.mode = self.aol_axis_decision.mode
@@ -1098,6 +1097,22 @@ class SelfdriveD:
         self.events.add(EventName.controlsMismatch)
     if self.aol_replay:
       previous_intent = getattr(self, 'aol_last_intent', None)
+      source_pair = intent_companion.samples.get(self.aol_car_state_log_ns) if intent_companion is not None else None
+      verified = intent_companion.verified_sm_projection if intent_companion is not None else None
+      if (intent_companion is not None and source_pair is None and verified is not None and
+          verified[0] == self.aol_car_state_log_ns and
+          verified[2] == intent_companion.integrity_epoch and verified[3] == intent_companion.session):
+        source_pair = (verified[0], True, verified[1])
+      self.aol_selected_pair_future = bool(source_pair is not None and source_pair[2] is not None and
+        source_pair[2].observedMonoTime > now_ns)
+      known_intent = previous_intent or getattr(self, 'aol_publication_retained_intent', None)
+      if self.aol_car_state_log_ns > 0:
+        self.aol_expired_healthy_source = bool(not REPLAY and self.conditional_car_state_valid and
+          CS.canValid and not CS.canTimeout and now_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS and
+          source_pair is not None and source_pair[1] and source_pair[2] is not None and
+          source_pair[2].carStateLogMonoTime == self.aol_car_state_log_ns and source_pair[2].observedMonoTime <= now_ns and
+          source_pair[2].settingsQualified and source_pair[2].allowedLatch and source_pair[2].lateralArmed and
+          known_intent is not None and source_pair[2].producerSessionId == known_intent.producerSessionId)
       intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
                               previous=getattr(self, 'aol_last_intent', None),
                               companion=intent_companion, drain=False) if intent_drained else None
@@ -1126,7 +1141,7 @@ class SelfdriveD:
         companion=getattr(self, 'aol_intent_companion', None), previous_intent=previous_intent, intent=intent,
         expired_healthy_source=getattr(self, 'aol_expired_healthy_source', False),
         previously_active=previous.lateral_active, hard_fault=bool(
-          self.aol_authority_lost or lost_active_aol or lost_permission or self.events.contains(ET.IMMEDIATE_DISABLE) or
+          self.aol_selected_pair_future or self.aol_authority_lost or lost_active_aol or lost_permission or self.events.contains(ET.IMMEDIATE_DISABLE) or
           self.events.contains(ET.SOFT_DISABLE)),
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
           self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
@@ -1134,7 +1149,9 @@ class SelfdriveD:
       if not hasattr(self, 'aol_availability_pause'):
         self.aol_availability_pause = AvailabilityPause(self.CP, self.aol_session_id)
       retained_intent = getattr(self, 'aol_publication_retained_intent', None)
-      publication_expiry = bool(retained_intent is not None and not source_current and
+      if retained_intent is None and getattr(self, 'aol_expired_healthy_source', False):
+        retained_intent = previous_intent
+      publication_expiry = bool(not self.aol_selected_pair_future and retained_intent is not None and not source_current and
         0 < retained_intent.carStateLogMonoTime <= now_ns and
         now_ns - retained_intent.carStateLogMonoTime <= SAFETY_MAX_AGE_NS)
       if publication_expiry:
@@ -1145,9 +1162,14 @@ class SelfdriveD:
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
           self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
         source_current=source_current, source_expired=publication_expiry, prior_lateral_active=previous.lateral_active,
-        hard_fault=bool(self.aol_authority_lost or lost_active_aol or lost_companion or lost_permission or upgraded),
+        hard_fault=bool(self.aol_selected_pair_future or self.aol_authority_lost or lost_active_aol or
+          lost_companion and not publication_expiry or lost_permission or upgraded),
         healthy_native=self.aol_transport_pause.observed_native)
       if availability:
+        if publication_expiry:
+          self.aol_publication_retained_intent = retained_intent
+        lost_companion = False
+        self.aol_transport_pause.active = pause = False
         if previous_fault_reason != 'availabilityPause':
           self.aol_availability_ordinary_warning = self.enabled
           self.aol_availability_chime_until_ns = time.monotonic_ns() + 400_000_000
@@ -1221,8 +1243,7 @@ class SelfdriveD:
     if (getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause' and
         ET.WARNING not in self.state_machine.current_alert_types):
       self.state_machine.current_alert_types.append(ET.WARNING)
-    axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required and
-                          str(self.CP.carFingerprint) == 'HYUNDAI_IONIQ_6')
+    axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if axis_published:
       self.publish_axis_proof(CS)
     self.update_alerts(CS)
@@ -1245,7 +1266,7 @@ class SelfdriveD:
       reports = getattr(self, 'aol_authority_reports', None)
       if reports:
         try:
-          cloudlog.event('selfdrived.authority_lost', **reports.popleft())
+          cloudlog.event('selfdrived.authority_lost', error=True, **reports.popleft())
         except IndexError:
           pass
       self.is_metric = self.params.get_bool("IsMetric")
