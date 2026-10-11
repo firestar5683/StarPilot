@@ -50,7 +50,7 @@ class TestGMStockCaller(unittest.TestCase):
           previous = car.CarState.new_message()
           events = Events()
           producer = NS(CS_prev=previous, disengage_on_accelerator=accelerator_disengage)
-          if eval(predicate, {"CS": cs, "self": producer}):
+          if eval(predicate, {"CS": cs, "self": producer, "previous": previous}):
             events.add(log.OnroadEvent.EventName.pedalPressed)
           machine = StateMachine()
           machine.state = log.SelfdriveState.OpenpilotState.enabled

@@ -1,5 +1,6 @@
 """Real HKG callers with a controlled older SubMaster intent projection."""
 from contextlib import ExitStack
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -7,6 +8,17 @@ from openpilot.cereal import log, messaging
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.starpilot.aol.runtime import current_intent
 from openpilot.starpilot.aol.wire import IntentState, encode_intent
+
+
+def intent_receive(sd, **kwargs):
+  original_receive = messaging.recv_one_or_none
+  intent_sock = sd.aol_intent_companion.sock
+  receive_intent = Mock(**kwargs)
+
+  def receive(sock):
+    return receive_intent(sock) if sock is intent_sock else original_receive(sock)
+
+  return patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=receive)
 
 
 def test_actual_hkg_known_older_sm_and_raw_pair_preserve_current_axes_and_card_latch():
@@ -51,7 +63,6 @@ def test_actual_hkg_known_older_sm_and_raw_pair_preserve_current_axes_and_card_l
 @pytest.mark.parametrize('projection', ['C', 'A', 'B'])
 @pytest.mark.parametrize('hard_guard', ['source_expired', 'native_invalid', 'native_deny', 'critical_event'])
 def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard_guards(projection, hard_guard):
-  from unittest.mock import patch
   from openpilot.starpilot.aol.tests.test_runtime import IpcAxisContractTests
 
   case = IpcAxisContractTests(methodName='runTest')
@@ -66,13 +77,13 @@ def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard
     cleanup.callback(case.doCleanups)
     with OpenpilotPrefix():
       sd, _, step, card, feedback = case._transport_callers()
-      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=[old.as_reader(), source.as_reader(), None]):
+      with intent_receive(sd, side_effect=[old.as_reader(), source.as_reader(), None]):
         axis, _, command = step(0, state_stamp=c, intent_message=old, offset_ns=before - 10_000_000_000)
       case.assertTrue(axis.lateralActive and axis.longitudinalActive and command.latActive and command.longActive)
       feedback(before, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
       epoch = sd.aol_intent_companion.integrity_epoch
       selected = {'C': old, 'A': source, 'B': latest}[projection]
-      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=[latest.as_reader(), None]):
+      with intent_receive(sd, side_effect=[latest.as_reader(), None]):
         axis, state, command = step(1, state_stamp=a, intent_message=selected, offset_ns=now - 10_010_000_000)
       case.assertTrue(axis.nativeAcknowledged and axis.lateralActive and axis.longitudinalActive)
       case.assertTrue(command.latActive and command.longActive and sd.enabled)
@@ -84,7 +95,7 @@ def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard
       case.assertNotEqual(state.alertText1, 'TAKE CONTROL IMMEDIATELY')
       case.assertFalse(feedback(now, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
       case.assertTrue(card.aol_card_intent.allowed_latch)
-      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+      with intent_receive(sd, return_value=None):
         repeated, _, repeated_command = step(2, state_stamp=a, intent_message=selected, offset_ns=now + 1 - 10_020_000_000)
       case.assertTrue(repeated.lateralActive and repeated.longitudinalActive and repeated_command.latActive and repeated_command.longActive)
       case.assertFalse(sd.aol_authority_lost)
@@ -93,7 +104,7 @@ def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard
                 {'allowed': False} if hard_guard == 'native_deny' else
                 {'critical_event': log.OnroadEvent.EventName.controlsMismatch} if hard_guard == 'critical_event' else {})
       failed_at = a + 30_000_001 if hard_guard == 'source_expired' else now + 2
-      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+      with intent_receive(sd, return_value=None):
         axis, _, command = step(3, state_stamp=a, intent_message=selected, offset_ns=failed_at - 10_030_000_000, **kwargs)
       case.assertEqual(str(axis.faultReason), 'critical')
       case.assertFalse(axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
@@ -107,7 +118,6 @@ def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard
 @pytest.mark.parametrize('guard', ['healthy', 'latest_deny', 'latest_pause', 'future',
                                  'native_invalid', 'native_deny', 'source_expired', 'overrun'])
 def test_actual_hkg_drain_precedes_shared_decision_clock(guard):
-  from unittest.mock import patch
   from openpilot.selfdrive.selfdrived import selfdrived as sd_module
   from openpilot.starpilot.aol.intent_companion import MAX_DRAIN
   from openpilot.starpilot.aol.tests.test_runtime import IpcAxisContractTests
@@ -127,7 +137,7 @@ def test_actual_hkg_drain_precedes_shared_decision_clock(guard):
     cleanup.callback(case.doCleanups)
     with OpenpilotPrefix():
       sd, _, step, card, feedback = case._transport_callers()
-      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', return_value=None):
+      with intent_receive(sd, return_value=None):
         axis, _, command = step(0, intent_message=original)
       assert axis.lateralActive and command.latActive
       assert not feedback(a, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
@@ -138,7 +148,7 @@ def test_actual_hkg_drain_precedes_shared_decision_clock(guard):
         sd_module.time.monotonic_ns.return_value = a + 30_000_001 if guard == 'source_expired' else after
         return latest.as_reader() if len(calls) == 1 or guard == 'overrun' else None
       kwargs = {'native_valid': False} if guard == 'native_invalid' else {'allowed': False} if guard == 'native_deny' else {}
-      with patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none', side_effect=receive):
+      with intent_receive(sd, side_effect=receive):
         axis, state, command = step(1, state_stamp=a, intent_message=original,
                                     offset_ns=before - 10_010_000_000, **kwargs)
       assert len(calls) == (MAX_DRAIN if guard == 'overrun' else 2)

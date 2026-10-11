@@ -56,6 +56,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
     sd.events_prev = []
     sd.experimental_mode = sd.requested_experimental_mode = False
     sd.initialized = sd.aol_replay = True
+    sd.axis_transport_required = sd.aol_replay or policy.ordinary_axis_ack_required
     sd.aol_authority_lost = sd.aol_dm_lateral_inhibit = False
     sd.aol_axis_decision = AxisDecision()
     sd.aol_settings = None

@@ -197,6 +197,9 @@ class TransportPauseFeedback:
     self.availability_producer = ''
     self.availability_epoch = None
     self.source_retention_started_ns = 0
+    self.healthy_feedback_ns = 0
+    self.healthy_native_ns = 0
+    self.healthy_inventory = None
 
   def _longitudinal_cancel_current(self, sm, cp, cs, axis, now_ns, *, latched, cancel_source_ns, withdrawal_required=True) -> SafetyState | None:
     """Retain existing intent during Cancel's bounded LONG withdrawal handshake."""
@@ -335,6 +338,41 @@ class TransportPauseFeedback:
       return False
     return True
 
+  def _event_first_retention(self, sm, cp, axis, stamp, now_ns, *, latched, signature, native):
+    # A held source-capped proof may expire before the matching typed pause arrives.
+    # Reuse only its previously accepted identity for intent; its output lease stays expired.
+    if now_ns <= axis.validUntilMonoTime or signature != self.signature:
+      return False
+    if (not latched or self.failed or self.paused or not self.session or native is None or
+        str(cp.carFingerprint) != 'HYUNDAI_IONIQ_6' or cp_identity(cp) != self.cp or
+        str(axis.sessionId) != self.session or
+        str(axis.faultSessionId) != self.session or str(axis.faultReason) != 'none' or
+        not axis.qualified or not axis.nativeAcknowledged or not axis.desiredLateral or not axis.lateralActive or
+        not sm.seen['aolAxisState'] or not sm.valid['aolAxisState'] or not sm.alive['aolAxisState'] or
+        not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
+        not self.pending_event and now_ns - stamp > AXIS_MAX_AGE_NS or
+        stamp - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
+        axis.validUntilMonoTime != axis.sourceCarStateMonoTime + AXIS_MAX_AGE_NS or
+        not stamp <= axis.validUntilMonoTime < stamp + AXIS_MAX_AGE_NS or
+        native.observedMonoTime < self.healthy_native_ns or
+        (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.healthy_inventory):
+      return False
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    faults = [event for event in sm['onroadEvents'] if event.immediateDisable or event.softDisable]
+    isolated = bool(len(faults) == 1 and faults[0].name == log.OnroadEvent.EventName.controlsMismatch and
+                    faults[0].immediateDisable)
+    if (not isolated or not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+        not 0 < axis.faultEventMonoTime < event_ns <= now_ns or now_ns - event_ns > AXIS_MAX_AGE_NS):
+      return False
+    if not self.pending_event:
+      if not self.healthy_feedback_ns or not 0 <= now_ns - self.healthy_feedback_ns <= AXIS_MAX_AGE_NS:
+        return False
+      self.pending_event = event_ns
+    if event_ns != self.pending_event or now_ns - self.pending_event > AXIS_MAX_AGE_NS:
+      return False
+    self.awaiting = True
+    return True
+
   def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, intent_producer_session=''):
     self.qualified = False
     self.awaiting = False
@@ -378,6 +416,9 @@ class TransportPauseFeedback:
       cancel_native = (self._longitudinal_cancel_current(sm, cp, cs, axis, now_ns, latched=latched,
                                                         cancel_source_ns=cancel_source_ns)
                        if current and continuity and baseline and not transport_healthy else None)
+      if self._event_first_retention(sm, cp, axis, stamp, now_ns, latched=latched,
+          signature=signature, native=native):
+        return False
       current = bool(current and (transport_healthy or cancel_native is not None))
       if current and baseline and not latched:
         self.session = ''
@@ -449,6 +490,10 @@ class TransportPauseFeedback:
           self.longitudinal_cancel_ns = int(cancel_source_ns)
           self.last_cancel_source_ns = int(cancel_source_ns)
         self.source_retention_started_ns = 0
+        self.healthy_feedback_ns = now_ns
+        self.healthy_native_ns = int(native.observedMonoTime) if native is not None else 0
+        self.healthy_inventory = ((native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory))
+                                  if native is not None else None)
         self.session = str(axis.sessionId)
         lateral_baseline = bool(axis.desiredLateral and axis.lateralActive and native is not None and
                                 native.pandaInventory and native.requestedLateral and native.lateralAllowed)
