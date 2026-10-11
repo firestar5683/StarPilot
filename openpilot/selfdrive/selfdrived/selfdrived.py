@@ -821,6 +821,21 @@ class SelfdriveD:
     if 0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS:
       self.aol_publication_retained_intent = None
       return
+    pause = getattr(self, 'aol_transport_pause', None)
+    if (getattr(self, 'aol_fault_reason', 'none') == 'transportPause' and pause is not None and
+        pause.active and pause.observed_native is not None and not self.aol_authority_lost and
+        not getattr(self, 'aol_selected_pair_future', False) and
+        not self.aol_axis_decision.lateral_active and not self.aol_axis_decision.longitudinal_active):
+      # This step already validated the typed pause; its expired source grants no output.
+      self.aol_car_state_log_ns = 0
+      self.conditional_car_state_valid = False
+      self.aol_publication_retained_intent = None
+      self.aol_axis_decision = AxisDecision()
+      self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+      self.enabled = self.active = False
+      if ET.ENABLE in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.remove(ET.ENABLE)
+      return
     intent = getattr(self, 'aol_last_intent', None) or getattr(self, 'aol_publication_retained_intent', None)
     if not source_ns and intent is not None:
       source_ns = int(intent.carStateLogMonoTime)
@@ -1151,20 +1166,27 @@ class SelfdriveD:
       retained_intent = getattr(self, 'aol_publication_retained_intent', None)
       if retained_intent is None and getattr(self, 'aol_expired_healthy_source', False):
         retained_intent = previous_intent
-      publication_expiry = bool(not self.aol_selected_pair_future and retained_intent is not None and not source_current and
+      healthy_native = self.aol_transport_pause.observed_native
+      publication_expiry = bool(not self.aol_selected_pair_future and healthy_native is not None and
+        healthy_native.pandaInventory and retained_intent is not None and not source_current and
         0 < retained_intent.carStateLogMonoTime <= now_ns and
         now_ns - retained_intent.carStateLogMonoTime <= SAFETY_MAX_AGE_NS)
-      if publication_expiry:
-        self.events.add(EventName.commIssue)
+      availability_events = self.events.to_msg()
+      if publication_expiry and EventName.commIssue not in self.events.names:
+        source_expiry_events = Events()
+        source_expiry_events.add(EventName.commIssue)
+        availability_events += source_expiry_events.to_msg()
       availability = self.aol_availability_pause.observe(
         cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS, native=native, now_ns=now_ns,
-        companion=intent_companion, intent=intent if intent is not None else retained_intent, events=self.events.to_msg(),
+        companion=intent_companion, intent=intent if intent is not None else retained_intent, events=availability_events,
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
           self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
         source_current=source_current, source_expired=publication_expiry, prior_lateral_active=previous.lateral_active,
         hard_fault=bool(self.aol_selected_pair_future or self.aol_authority_lost or lost_active_aol or
           lost_companion and not publication_expiry or lost_permission or upgraded),
         healthy_native=self.aol_transport_pause.observed_native)
+      if publication_expiry and (availability or not pause) and EventName.commIssue not in self.events.names:
+        self.events.add(EventName.commIssue)
       if availability:
         if publication_expiry:
           self.aol_publication_retained_intent = retained_intent

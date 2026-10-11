@@ -85,7 +85,9 @@ class SteeringCompanionContractTests(unittest.TestCase):
             self.assertGreater(latest.logMonoTime, source_ns)
             sd.sm.update_msgs(now_ns / 1e9, [latest])
 
-          def deliver_raw(sock, *, case=case, source_ns=source_ns):
+          def deliver_raw(sock, *, case=case, source_ns=source_ns, sd=sd):
+            if sock is sd.car_state_sock:
+              return None  # Hold this decision's CS source; raw companion still overtakes it.
             message = real_recv_optional(sock)
             if case == 'sm_fault_before_raw' and message is not None and message.logMonoTime > source_ns:
               return None
@@ -99,7 +101,7 @@ class SteeringCompanionContractTests(unittest.TestCase):
             assert sd.steering_companion.latest is not None
             self.assertEqual(sd.steering_companion.latest[0], source_ns)
             self.assertTrue(sd.sm['starpilotCarState'].lateralAuthorityUnavailable)
-          self.assertEqual(axis.sourceCarStateMonoTime, source_ns)
+          self.assertEqual(axis.sourceCarStateMonoTime, 0 if case == 'expired_source' else source_ns)
           self.assertEqual(axis.lateralActive, case == 'healthy')
           self.assertEqual(command.latActive, case == 'healthy')
           self.assertEqual(command.longActive, full_op and case == 'healthy')

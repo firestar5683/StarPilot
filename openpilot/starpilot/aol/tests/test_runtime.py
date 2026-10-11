@@ -20,10 +20,21 @@ from openpilot.starpilot.aol.tests.test_ioniq_availability import car_state
 from openpilot.starpilot.aol.wire import IntentState, SafetyState, encode_intent, encode_safety
 
 
+def empty_carstate_queue(sock):
+  original_receive = messaging.recv_one_or_none
+
+  def receive(received_sock):
+    return None if received_sock is sock else original_receive(received_sock)
+
+  return mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one_or_none', side_effect=receive)
+
+
 def sample_car_state(sd, state, stamp):
   event = messaging.new_message('carState', valid=bool(state.canValid), logMonoTime=stamp)
   event.carState = state
-  with mock.patch.object(sd, 'car_state_sock', object(), create=True), \
+  sock = object()
+  with mock.patch.object(sd, 'car_state_sock', sock, create=True), \
+       empty_carstate_queue(sock), \
        mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=event.as_reader()), \
        mock.patch.object(sd.sm, 'update', create=True):
     return SelfdriveD.data_sample(sd)
@@ -100,7 +111,7 @@ class CardIntentTests(unittest.TestCase):
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now), \
          mock.patch.object(sd, 'sm', sm, create=True), mock.patch.object(sd, 'data_sample', side_effect=lambda: sample_car_state(sd, state, now)), \
          mock.patch.object(sd, 'update_events'), mock.patch.object(sd, 'update_alerts'), \
-         mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'), \
+         mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'), mock.patch.object(sd, 'publish_axis_proof'), \
          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.aol_no_entry', wraps=aol_no_entry) as veto:
       for pressed in (True, False, None):
         retained = step(pressed=pressed)
@@ -199,7 +210,7 @@ class CardIntentTests(unittest.TestCase):
          mock.patch.object(sd, 'sm', sm, create=True), \
          mock.patch.object(sd, 'data_sample', side_effect=lambda: sample_car_state(sd, state, now)), \
          mock.patch.object(sd, 'update_events'), mock.patch.object(sd, 'update_alerts'), \
-         mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'):
+         mock.patch.object(sd, 'update_conditional_mode'), mock.patch.object(sd, 'publish_selfdriveState'), mock.patch.object(sd, 'publish_axis_proof'):
       combined = step(1.40, armed=False, long_requested=True,
                       event=log.OnroadEvent.EventName.buttonEnable)
       self.assertEqual(combined.mode, 'combined')
@@ -1164,11 +1175,13 @@ class IpcAxisContractTests(unittest.TestCase):
     self.enterContext(mock.patch.object(sd, 'update_events', lambda _cs: sd.events.clear()))
     sd.update_conditional_mode = mock.Mock()
     sd.publish_selfdriveState = mock.Mock()
+    sd.publish_axis_proof = mock.Mock()
 
     native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=False,
                              lateralAllowed=True, longitudinalAllowed=False)
-    intent = SimpleNamespace(producerSessionId='alert-card', allowedLatch=True, lateralArmed=True,
-                             pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
+    intent_ns = time.monotonic_ns()
+    intent = IntentState('alert-card', 1, intent_ns, intent_ns, intent_ns + 200_000_000,
+                         True, False, False, True, True)
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \
          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', side_effect=(None, native, None, None)):
       sd.sm.frame = 1
@@ -1243,10 +1256,12 @@ class IpcAxisContractTests(unittest.TestCase):
     self.enterContext(mock.patch.object(sd, 'update_events', lambda _cs: sd.events.clear()))
     sd.update_conditional_mode = mock.Mock()
     sd.publish_selfdriveState = mock.Mock()
+    sd.publish_axis_proof = mock.Mock()
     native = SimpleNamespace(requestedLateral=False, requestedLongitudinal=False,
                              lateralAllowed=False, longitudinalAllowed=False)
-    intent = SimpleNamespace(producerSessionId='alert-card', allowedLatch=True, lateralArmed=True,
-                             pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
+    intent_ns = time.monotonic_ns()
+    intent = IntentState('alert-card', 1, intent_ns, intent_ns, intent_ns + 200_000_000,
+                         True, False, False, True, True)
     with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent),
           mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_native', return_value=native)):
       sd.step()
@@ -1432,10 +1447,12 @@ class IpcAxisContractTests(unittest.TestCase):
         sd.update_alerts = mock.Mock()
         sd.update_conditional_mode = mock.Mock()
         sd.publish_selfdriveState = mock.Mock()
+        sd.publish_axis_proof = mock.Mock()
         self.enterContext(mock.patch.object(sd, 'update_events', lambda _cs, sd=sd: sd.events.clear()))
         message = messaging.new_message('carState')
         message.valid, message.logMonoTime, message.carState = True, now, sd.CS_prev
         with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=message),
+              empty_carstate_queue(sd.car_state_sock),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.SIMULATION', False),
@@ -1678,10 +1695,12 @@ class IpcAxisContractTests(unittest.TestCase):
         sd.update_alerts = mock.Mock()
         sd.update_conditional_mode = mock.Mock()
         sd.publish_selfdriveState = mock.Mock()
+        sd.publish_axis_proof = mock.Mock()
         self.enterContext(mock.patch.object(sd, 'update_events', lambda _cs, sd=sd: sd.events.clear()))
         message = messaging.new_message('carState')
         message.valid, message.logMonoTime, message.carState = True, receipt_now, sd.CS_prev
         with (mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one', return_value=message),
+              empty_carstate_queue(sd.car_state_sock),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=receipt_now),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False),
               mock.patch('openpilot.selfdrive.selfdrived.selfdrived.SIMULATION', False),
@@ -1748,14 +1767,16 @@ class IpcAxisContractTests(unittest.TestCase):
       sd.update_alerts = mock.Mock()
       sd.update_conditional_mode = mock.Mock()
       sd.publish_selfdriveState = mock.Mock()
+      sd.publish_axis_proof = mock.Mock()
       self.enterContext(mock.patch.object(sd, 'update_events',
                                           lambda _cs: (sd.events.clear(), sd.events.add(log.OnroadEvent.EventName.buttonEnable))))
       return sd
 
     native = SimpleNamespace(requestedLateral=True, requestedLongitudinal=True,
                              lateralAllowed=True, longitudinalAllowed=True)
-    intent = SimpleNamespace(producerSessionId='alert-card', allowedLatch=True, lateralArmed=True,
-                             pauseLateral=False, pauseLongitudinal=False, optionalSetRelease=False)
+    intent_ns = time.monotonic_ns()
+    intent = IntentState('alert-card', 1, intent_ns, intent_ns, intent_ns + 200_000_000,
+                         True, False, False, True, True)
     sd = driver(True)
     sd.initialized = False
     with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.current_intent', return_value=intent), \

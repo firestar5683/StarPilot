@@ -106,13 +106,30 @@ def test_actual_hkg_verified_aged_sm_projection_preserves_current_axes_then_hard
       failed_at = a + 30_000_001 if hard_guard == 'source_expired' else now + 2
       with intent_receive(sd, return_value=None):
         axis, _, command = step(3, state_stamp=a, intent_message=selected, offset_ns=failed_at - 10_030_000_000, **kwargs)
-      case.assertEqual(str(axis.faultReason), 'critical')
-      case.assertFalse(axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
-      # The global event disables current output, but a healthy source/native
-      # does not create the separate sticky companion/native authority loss.
-      case.assertEqual(sd.aol_authority_lost, hard_guard != 'critical_event')
-      case.assertTrue(feedback(failed_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
-      case.assertFalse(card.aol_card_intent.allowed_latch)
+      if hard_guard == 'source_expired':
+        case.assertEqual(axis.sourceCarStateMonoTime, 0)
+        case.assertEqual(str(axis.faultReason), 'transportPause')
+        case.assertFalse(sd.enabled or sd.active or axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
+        case.assertFalse(sd.aol_authority_lost)
+        case.assertFalse(feedback(failed_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+        case.assertTrue(card.aol_card_intent.allowed_latch)
+        recovered_at = failed_at + 10_000_000
+        axis, _, command = step(4, offset_ns=recovered_at - 10_040_000_000, native_request_long=True)
+        case.assertEqual(axis.sourceCarStateMonoTime, recovered_at)
+        case.assertEqual(str(axis.faultReason), 'none')
+        case.assertTrue(axis.lateralActive and command.latActive)
+        case.assertFalse(sd.enabled or sd.active or axis.longitudinalActive or command.longActive)
+        case.assertFalse(sd.aol_authority_lost)
+        case.assertFalse(feedback(recovered_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+        case.assertTrue(card.aol_card_intent.allowed_latch)
+      else:
+        case.assertEqual(str(axis.faultReason), 'critical')
+        case.assertFalse(axis.lateralActive or axis.longitudinalActive or command.latActive or command.longActive)
+        # The global event disables current output, but a healthy source/native
+        # does not create the separate sticky companion/native authority loss.
+        case.assertEqual(sd.aol_authority_lost, hard_guard != 'critical_event')
+        case.assertTrue(feedback(failed_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
+        case.assertFalse(card.aol_card_intent.allowed_latch)
 
 
 @pytest.mark.parametrize('guard', ['healthy', 'latest_deny', 'latest_pause', 'future',
@@ -168,7 +185,16 @@ def test_actual_hkg_drain_precedes_shared_decision_clock(guard):
         assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names
       else:
         assert not axis.lateralActive and not command.latActive
-        if guard in ('future', 'native_invalid', 'native_deny', 'source_expired', 'overrun'):
+        if guard == 'source_expired':
+          assert axis.sourceCarStateMonoTime == 0
+          assert str(axis.faultReason) == 'transportPause'
+          assert not sd.enabled and not sd.active and not axis.longitudinalActive and not command.longActive
+          assert not sd.aol_authority_lost
+          publication_ns = int(sd.pm.messages['aolAxisState'].logMonoTime)
+          assert publication_ns == a + 30_000_001
+          assert not feedback(publication_ns, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
+          assert card.aol_card_intent.allowed_latch
+        elif guard in ('future', 'native_invalid', 'native_deny', 'overrun'):
           assert str(axis.faultReason) == 'critical'
           assert log.OnroadEvent.EventName.controlsMismatch in sd.events.names
           assert feedback(after, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
@@ -199,7 +225,7 @@ def test_authority_loss_diagnostic_is_bounded_and_logged_by_params_worker():
     with (patch('openpilot.selfdrive.selfdrived.selfdrived.cloudlog.event') as report,
           patch('openpilot.selfdrive.selfdrived.selfdrived.time.sleep')):
       sd.params_thread(evt)
-    report.assert_called_once_with('selfdrived.authority_lost', decision_ns=12_000_000_000, source_ns=90,
+    report.assert_called_once_with('selfdrived.authority_lost', error=True, decision_ns=12_000_000_000, source_ns=90,
       intent_snapshot={}, intent_rejection='no_companion', drain_ok=False, drain_count=0,
       source_current=False, source_expired=False, native_present=False, native_message_ns=100,
       native_requested_lateral=False, native_allowed_lateral=False, lost_active=True,
