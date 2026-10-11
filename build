@@ -44,7 +44,6 @@ for arg in "$@"; do
   esac
 done
 
-original_args=("$@")
 build_helper="${ROOT_DIR}/scripts/laptop_device_build.sh"
 if [[ -f /AGNOS && "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]]; then
   build_helper="${ROOT_DIR}/scripts/native_device_build.sh"
@@ -62,6 +61,8 @@ if [[ $# -gt 0 ]]; then
 fi
 shortcut_targets=()
 passthrough_args=()
+default_args=()
+jobs_arg=""
 shortcut_includes_panda=0
 panda_generated_files=(panda/board/obj/gitversion.h panda/board/obj/version)
 
@@ -78,11 +79,26 @@ while [[ $# -gt 0 ]]; do
       shortcut_targets+=(openpilot/cereal/libcereal.a openpilot/cereal/libsocketmaster.a
                          openpilot/cereal/messaging/bridge openpilot/cereal/services.h)
       ;;
+    -j|--jobs)
+      passthrough_args+=("$1")
+      default_args+=("$1")
+      if [[ $# -gt 1 ]]; then
+        passthrough_args+=("$2")
+        default_args+=("$2")
+        shift
+      fi
+      ;;
     *)
       if [[ "$1" =~ ^[0-9]+$ ]]; then
+        if [[ "$1" =~ ^0+$ ]]; then
+          echo "ERROR: jobs must be positive" >&2
+          exit 2
+        fi
+        jobs_arg="$1"
         passthrough_args+=("-j$1")
       else
         passthrough_args+=("$1")
+        default_args+=("$1")
       fi
       ;;
   esac
@@ -128,7 +144,13 @@ fi
 
 python3 "${ROOT_DIR}/tools/release/stage_mapd_provider.py" --source "${ROOT_DIR}" --require-tracked
 
-if [[ "${#original_args[@]}" -gt 0 ]]; then
-  exec "${build_helper}" build "${original_args[@]}"
+if [[ -n "${jobs_arg}" ]]; then
+  if [[ ${default_args[0]+present} ]]; then
+    exec "${build_helper}" build "${jobs_arg}" "${default_args[@]}"
+  fi
+  exec "${build_helper}" build "${jobs_arg}"
+fi
+if [[ ${default_args[0]+present} ]]; then
+  exec "${build_helper}" build "${default_args[@]}"
 fi
 exec "${build_helper}" build

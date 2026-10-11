@@ -97,7 +97,32 @@ exit "${HELPER_EXIT:-0}"
     self.assertEqual(self.run_build().returncode, 0)
     self.assertEqual(self.args(), ["build"])
     self.assertEqual(self.run_build("--verbose", "4").returncode, 0)
-    self.assertEqual(self.args(), ["build", "--verbose", "4"])
+    self.assertEqual(self.args(), ["build", "4", "--verbose"])
+    self.assertEqual(self.run_build("4", "--verbose").returncode, 0)
+    self.assertEqual(self.args(), ["build", "4", "--verbose"])
+    self.assertEqual(self.run_build("--verbose", "4", "FEATURE=value", "8").returncode, 0)
+    self.assertEqual(self.args(), ["build", "8", "--verbose", "FEATURE=value"])
+    self.assertEqual(self.run_build("8").returncode, 0)
+    self.assertEqual(self.args(), ["build", "8"])
+
+  def test_explicit_scons_jobs_options_keep_their_value(self):
+    for option in ("-j", "--jobs"):
+      with self.subTest(option=option):
+        self.assertEqual(self.run_build("--verbose", option, "4").returncode, 0)
+        self.assertEqual(self.args(), ["build", "--verbose", option, "4"])
+        self.assertEqual(self.run_build("--panda", option, "4").returncode, 0)
+        self.assertEqual(self.args(), ["scons", "--no-scrub", "panda/board/obj/panda.bin.signed",
+                                       "panda/board/obj/panda_h7.bin.signed", "panda/board/obj/body_h7.bin.signed", option, "4"])
+
+  def test_zero_jobs_fail_before_package_or_helper_mutation(self):
+    (self.root / "prebuilt").write_text("preserve")
+    for args in (("0",), ("--verbose", "00"), ("--panda", "0"), ("--params", "0")):
+      with self.subTest(args=args):
+        self.assertEqual(self.run_build(*args).returncode, 2)
+        self.assertFalse((self.root / "args").exists())
+        self.assertFalse((self.root / "mapd-check").exists())
+        self.assertFalse((self.root / "panda").exists())
+        self.assertEqual((self.root / "prebuilt").read_text(), "preserve")
 
   def test_missing_map_package_stops_full_build_but_allows_repair(self):
     self.env["MAPD_CHECK_EXIT"] = "9"
@@ -230,6 +255,12 @@ class NativeDeviceBuildTest(unittest.TestCase):
     self.assertEqual(self.run_helper("build", "2", "--dry-run").returncode, 0)
     self.assertFalse((self.root / "prebuilt").exists())
 
+  def test_zero_jobs_fail_before_scons_or_prebuilt_change(self):
+    (self.root / "prebuilt").write_text("preserve")
+    self.assertEqual(self.run_helper("build", "0").returncode, 2)
+    self.assertFalse((self.root / "scons-args").exists())
+    self.assertEqual((self.root / "prebuilt").read_text(), "preserve")
+
   def test_firmware_assignments_fail_before_scons_or_prebuilt_change(self):
     (self.root / "prebuilt").write_text("preserve")
     for mode in ("build", "scons"):
@@ -297,6 +328,17 @@ class LaptopReleaseForwardingTest(unittest.TestCase):
           self.assertIn("environment variables", result.stderr)
           self.assertFalse(self.capture.exists())
           self.assertEqual((self.root / "prebuilt").read_text(), "preserve")
+
+  def test_direct_build_zero_jobs_fail_before_builder_mutation(self):
+    (self.root / "prebuilt").write_text("preserve")
+    command = 'source "$1"; run_larch64_build() { touch "$CAPTURE_FILE"; }; main build 0'
+    result = subprocess.run(["bash", "-c", command, "bash", str(self.root / "scripts/laptop_device_build.sh")],
+                            cwd=self.root, env=dict(os.environ, CAPTURE_FILE=str(self.capture)),
+                            check=False, capture_output=True, text=True)
+    self.assertEqual(result.returncode, 2)
+    self.assertIn("jobs must be positive", result.stderr)
+    self.assertFalse(self.capture.exists())
+    self.assertEqual((self.root / "prebuilt").read_text(), "preserve")
 
   def test_release_certificate_with_spaces_is_mounted_and_forwarded(self):
     cert = self.root / "certs with spaces/release key"

@@ -835,6 +835,7 @@ main() {
       else
         jobs_arg="$(default_jobs)"
       fi
+      [[ ! "${jobs_arg}" =~ ^0+$ ]] || { echo "ERROR: jobs must be positive" >&2; exit 2; }
       run_larch64_build "${jobs_arg}" "$@"
       ;;
     scons)
