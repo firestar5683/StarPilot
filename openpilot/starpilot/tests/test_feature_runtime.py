@@ -167,3 +167,27 @@ def test_gm_saved_profiles_require_existing_longitudinal_owner():
     (root / 'CustomPersonalities').write_bytes(b'1')
     (root / 'LongitudinalPersonalityProfiles').write_text('{broken')
     assert not enabled(params, ascm_params(CAR.CHEVROLET_VOLT, radar=True), 'profile', {})
+
+
+def test_honda_slc_needs_openpilot_long_with_card_owned_set_speed():
+  from types import SimpleNamespace
+  from openpilot.starpilot.feature_runtime import slc_transport_capable, vision_control_enabled
+
+  def honda(**overrides):
+    return SimpleNamespace(**{'brand': 'honda', 'openpilotLongitudinalControl': True, 'pcmCruise': False,
+                              'passive': False, 'dashcamOnly': False, 'notCar': False, **overrides})
+
+  with TemporaryDirectory() as temporary:
+    params = Files(Path(temporary))
+    (params.root / 'SpeedLimitController').write_bytes(b'1')
+    (params.root / 'SLCPriority1').write_bytes(b'Dashboard')
+    (params.root / 'SLCPriority2').write_bytes(b'Map Data')
+    assert slc_transport_capable(honda(), {})
+    assert enabled(params, honda(), 'slc', {})
+    for name in ('vision', 'curve', 'conditional', 'profile'):
+      assert not enabled(params, honda(), name, {})
+    assert not vision_control_enabled(params, honda())
+    for blocked in (honda(openpilotLongitudinalControl=False), honda(pcmCruise=True), honda(dashcamOnly=True),
+                    honda(brand='toyota')):
+      assert not slc_transport_capable(blocked, {})
+      assert not enabled(params, blocked, 'slc', {})

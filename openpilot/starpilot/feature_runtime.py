@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 from opendbc.car.gm.feature_capabilities import longitudinal_supported as gm_long_supported, display_supported as gm_display_supported
+from opendbc.car.honda.parameter_profiles import longitudinal_eligible as honda_long_eligible
 
 from openpilot.starpilot.conditional_mode.preferences import PreferenceError, decode_preferences
 from openpilot.starpilot.aol.intent import independent_axis_requested, read_settings as read_aol_settings
@@ -18,6 +19,13 @@ from openpilot.starpilot.longitudinal.profile_preferences import read_document_v
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.speed_limits.runtime_settings import Settings as SlcSettings, read_params as read_slc_settings
 from openpilot.starpilot.speed_limits.selection import Source
+
+
+def honda_slc_supported(cp) -> bool:
+  try:
+    return bool(honda_long_eligible(cp) and not cp.pcmCruise)
+  except (AttributeError, TypeError):
+    return False
 
 
 def _read(params, key: str, limit: int = 4096) -> tuple[bytes | None, bool]:
@@ -80,7 +88,8 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str], *, saved_s
     return True
   capable = cp is not None and (ioniq6_long_eligible(cp) or
                                 (feature in ('conditional', 'curve', 'slc', 'profile') and gm_long_supported(cp)) or
-                                (feature in ('slc', 'vision') and gm_display_supported(cp)))
+                                (feature in ('slc', 'vision') and gm_display_supported(cp)) or
+                                (feature == 'slc' and honda_slc_supported(cp)))
   powertrain_requested = (feature == 'profile' and cp is not None and gm_long_supported(cp) and
                           read_document_value(params).valid and read_global_powertrain_preset(params, cp) is not None)
   return bool(capable and (requested(params, feature, saved_slc=saved_slc) or powertrain_requested))
@@ -89,7 +98,8 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str], *, saved_s
 def slc_transport_capable(cp, environment: Mapping[str, str]) -> bool:
   """Reserve optional transport without admitting a saved request or control."""
   return bool(environment.get('SLC_REPLAY_RUNTIME') == '1' or
-              (cp is not None and (ioniq6_long_eligible(cp) or gm_long_supported(cp) or gm_display_supported(cp))))
+              (cp is not None and (ioniq6_long_eligible(cp) or gm_long_supported(cp) or gm_display_supported(cp) or
+                                   honda_slc_supported(cp))))
 
 
 def slc_runtime_settings(params, cp, environment: Mapping[str, str], *, saved_slc: SlcSettings | None = None):
