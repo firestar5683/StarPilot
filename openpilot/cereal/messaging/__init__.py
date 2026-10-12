@@ -234,7 +234,9 @@ class SubMaster:
 
   def update(self, timeout: int = 100) -> None:
     msgs = []
-    for sock in self.poller.poll(timeout):
+    # Empty native polls can yield even with a zero timeout.
+    socks = (self.sock[s] for s in self.services if s not in self.non_polled_services) if timeout == 0 else self.poller.poll(timeout)
+    for sock in socks:
       msgs.append(recv_one_or_none(sock))
 
     # non-blocking receive for non-polled sockets

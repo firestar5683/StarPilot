@@ -2,6 +2,7 @@ import random
 import time
 from typing import cast
 from collections.abc import Sized
+from unittest.mock import Mock, patch
 
 from openpilot.common.test import OpenpilotTestCase
 import openpilot.cereal.messaging as messaging
@@ -67,6 +68,62 @@ class TestSubMaster(OpenpilotTestCase):
     assert t >= timeout/1000.
     assert t < 0.1
     assert not any(sm.updated.values())
+
+  def test_nonblocking_update(self):
+    services = ["modelV2", "carState", "carParams"]
+    for poll in (None, "modelV2"):
+      with self.subTest(poll=poll):
+        pm = messaging.PubMaster(services)
+        sm = messaging.SubMaster(services, poll=poll)
+        sm.poller = Mock()
+        sm.poller.poll.side_effect = AssertionError("nonblocking updates must not poll")
+
+        sm.update(0)
+        assert sm.frame == 0
+        assert not any(sm.updated.values())
+        assert not any(sm.seen.values())
+        assert not sm.alive["carState"] and not sm.alive["modelV2"]
+        assert not any(sm.valid.values())
+
+        for i, service in enumerate(services):
+          msg = messaging.new_message(service)
+          msg.logMonoTime = 100 + i
+          msg.valid = service != "carState"
+          pm.send(service, msg)
+
+        with patch.object(messaging, "recv_one_or_none", wraps=messaging.recv_one_or_none) as recv:
+          sm.update(0)
+          order = [s for s in services if s not in sm.non_polled_services] + list(sm.non_polled_services)
+          assert [call.args[0] for call in recv.call_args_list] == [sm.sock[s] for s in order]
+
+        assert all(sm.updated.values()) and all(sm.seen.values())
+        assert sm.logMonoTime == dict(zip(services, (100, 101, 102), strict=True))
+        assert sm.valid == {"modelV2": True, "carState": False, "carParams": True}
+        assert not sm.all_valid() and sm.all_valid(["modelV2", "carParams"])
+        assert len(set(sm.recv_time.values())) == 1
+        assert all(f == sm.frame for f in sm.recv_frame.values())
+
+        received = (sm.recv_time.copy(), sm.recv_frame.copy(), sm.logMonoTime.copy())
+        sm.update(0)
+        assert not any(sm.updated.values())
+        assert received == (sm.recv_time, sm.recv_frame, sm.logMonoTime)
+
+        for speed in range(3):
+          msg = messaging.new_message("carState")
+          msg.carState.vEgo = speed
+          pm.send("carState", msg)
+        sm.update(0)
+        assert sm["carState"].vEgo == 2
+        assert sm.updated == {"modelV2": False, "carState": True, "carParams": False}
+        sm.poller.poll.assert_not_called()
+        del sm, pm
+
+  def test_positive_timeout_uses_poller(self):
+    sm = messaging.SubMaster(["carState"])
+    sm.poller = Mock()
+    sm.poller.poll.return_value = []
+    sm.update(1)
+    sm.poller.poll.assert_called_once_with(1)
 
   def test_avg_frequency_checks(self):
     for poll in (True, False):
