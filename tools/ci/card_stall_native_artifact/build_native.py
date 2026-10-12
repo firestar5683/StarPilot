@@ -161,7 +161,9 @@ def main():
 
   run_logged('build', [sys.executable, '-m', 'SCons', '--minimal', '--cache-disable', '-j2', 'msgq/ipc_pyx.so'], build)
   candidate = build/'msgq/ipc_pyx.so'
-  run_logged('static_abi', [sys.executable, str(HERE/'validate_elf.py'), '--baseline', str(baseline), '--candidate', str(candidate), '--report', str(artifacts/'elf_comparison.json')], output)
+  baseline_executable = artifacts/'baseline-pandad.elf'
+  baseline_executable.write_bytes(subprocess.check_output(['git', 'show', base_commit+':openpilot/selfdrive/pandad/pandad'], cwd=source))
+  run_logged('static_abi', [sys.executable, str(HERE/'validate_elf.py'), '--baseline', str(baseline), '--candidate', str(candidate), '--report', str(artifacts/'elf_comparison.json'), '--baseline-executable', str(baseline_executable)], output)
   for name, package in [('baseline', baseline_root), ('candidate', build)]:
     with tempfile.TemporaryDirectory(prefix='msgq_armci_', dir='/dev/shm') as namespace:
       test_env = dict(env, PYTHONPATH=str(package), OPENPILOT_PREFIX=Path(namespace).name.removeprefix('msgq_'))

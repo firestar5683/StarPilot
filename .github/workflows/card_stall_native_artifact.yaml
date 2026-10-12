@@ -48,11 +48,12 @@ jobs:
           git config remote.origin.partialclonefilter blob:none
           git sparse-checkout init --no-cone
           printf '%s\n' '/msgq_repo/' '/openpilot/selfdrive/car/card.py' '/openpilot/starpilot/card_stall_timing.py' '/openpilot/starpilot/aol/tests/test_card_stall_timing.py' '/tools/ci/card_stall_native_artifact/' '/uv.lock' '/pyproject.toml' '/.github/workflows/card_stall_native_artifact.yaml' | git sparse-checkout set --no-cone --stdin
-          git -c protocol.version=2 fetch --filter=blob:none --depth=4 origin "$GITHUB_SHA"
+          git -c protocol.version=2 fetch --filter=blob:none --depth=5 origin "$GITHUB_SHA"
           test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse FETCH_HEAD^)" = c32912dbd66aabb62b67afa793af936c547e4f94
-          test "$(git rev-parse FETCH_HEAD^^)" = 402a55b49d15df5cff985d5034f0e2053a4c677a
-          test "$(git rev-parse FETCH_HEAD^^^)" = e8389b0b7529bad402f1f4e5fbd672ff13d9d382
+          test "$(git rev-parse FETCH_HEAD^)" = c7f14368b90ff43d75909200f01923312f420504
+          test "$(git rev-parse FETCH_HEAD^^)" = c32912dbd66aabb62b67afa793af936c547e4f94
+          test "$(git rev-parse FETCH_HEAD^^^)" = 402a55b49d15df5cff985d5034f0e2053a4c677a
+          test "$(git rev-parse FETCH_HEAD^^^^)" = e8389b0b7529bad402f1f4e5fbd672ff13d9d382
           git checkout --detach "$GITHUB_SHA"
           test ! -e openpilot/selfdrive/modeld/models
       - name: Verify frozen source and baseline artifacts

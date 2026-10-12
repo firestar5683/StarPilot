@@ -8,11 +8,99 @@ import re
 import struct
 import subprocess
 
+BASELINE_EXECUTABLE_SHA256 = '03e06bcb9c70999be2031d5e36b95413287392cad3fe03aee68b3aee25ce6129'
+LOADER_NAME = 'ld-linux-aarch64.so.1'
+LOADER_PATH = '/lib/ld-linux-aarch64.so.1'
+LOADER_ABI_SOURCE = 'https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/aarch64/ld.abilist;hb=glibc-2.34'
+
 BASELINE_SHA256 = '5a50085f727e3b22dcf596cb42be351066b0dcf7db7866fe04be40e69fe57133'
 
 
 def command(*args):
   return subprocess.check_output(args, text=True)
+
+
+def dynamic_symbols(path):
+  result = []
+  for line in command('readelf', '--wide', '--dyn-syms', str(path)).splitlines():
+    match = re.match(r'\s*\d+:\s+[0-9a-fA-F]+\s+(\d+)\s+(\w+)\s+(\w+)\s+(\w+)\s+(\w+)\s+(\S+)(?:\s+\((\d+)\))?', line)
+    if match:
+      size, kind, binding, visibility, section, name, version_index = match.groups()
+      result.append({'size': int(size), 'kind': kind, 'binding': binding, 'visibility': visibility,
+                     'section': section, 'name': name, 'version_index': int(version_index) if version_index else None})
+  return result
+
+
+def version_providers(versions):
+  providers = {}
+  provider = None
+  in_needs = False
+  for line in versions.splitlines():
+    if line.startswith('Version needs section'):
+      in_needs = True
+    elif line.startswith('Version ') and 'section' in line:
+      in_needs = False
+    if not in_needs:
+      continue
+    match = re.search(r'File: (\S+)', line)
+    if match:
+      provider = match.group(1)
+    match = re.search(r'Name: (\S+).*?Version: (\d+)', line)
+    if match:
+      providers[int(match.group(2))] = {'provider': provider, 'version': match.group(1)}
+  return providers
+
+
+def loader_exception(candidate, baseline_executable, runtime_loader):
+  evidence = {'status': 'rejected', 'upstream_abi_source': LOADER_ABI_SOURCE,
+              'upstream_abi_entry': 'GLIBC_2.17 __stack_chk_guard D 0x8',
+              'target_loader_binary_inspected': False}
+  errors = []
+  needed_versions = {p['version'] for p in candidate['version_providers'].values() if p['provider'] == LOADER_NAME}
+  if needed_versions != {'GLIBC_2.17'}:
+    errors.append(f'loader version-needs must be exactly GLIBC_2.17: {needed_versions}')
+  imports = []
+  for symbol in candidate['dynamic_symbols']:
+    provider = candidate['version_providers'].get(symbol['version_index'])
+    if symbol['section'] == 'UND' and provider and provider['provider'] == LOADER_NAME:
+      imports.append(symbol)
+  evidence['loader_imports'] = imports
+  if len(imports) != 1 or imports[0]['name'] != '__stack_chk_guard@GLIBC_2.17' or imports[0]['kind'] != 'OBJECT' or imports[0]['binding'] != 'GLOBAL':
+    errors.append('loader imports must be solely GLOBAL OBJECT __stack_chk_guard@GLIBC_2.17')
+  if baseline_executable is None or not baseline_executable.is_file():
+    errors.append('exact reviewed baseline executable is required for loader exception')
+  else:
+    data = baseline_executable.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    evidence['baseline_executable_sha256'] = digest
+    if digest != BASELINE_EXECUTABLE_SHA256:
+      errors.append('baseline executable hash differs from reviewed pandad')
+    else:
+      interp = re.findall(r'Requesting program interpreter: ([^\]]+)', command('readelf', '--wide', '-l', str(baseline_executable)))
+      evidence['baseline_executable_pt_interp'] = interp
+      if interp != [LOADER_PATH]:
+        errors.append('reviewed baseline executable does not identify the exact loader path')
+  if not runtime_loader.is_file():
+    errors.append('native CI runtime loader file is required for size/export check')
+  else:
+    data = runtime_loader.read_bytes()
+    if len(data) < 64 or data[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<HH', data, 16) != (3, 183):
+      errors.append('CI runtime loader is not an AArch64 ELF64 shared object')
+    else:
+      symbols = dynamic_symbols(runtime_loader)
+      guards = [symbol for symbol in symbols if symbol['section'] != 'UND' and symbol['name'] == '__stack_chk_guard@@GLIBC_2.17']
+      evidence['ci_loader'] = {'path': str(runtime_loader), 'sha256': hashlib.sha256(data).hexdigest(), 'guard_exports': guards}
+      if len(guards) != 1 or guards[0]['size'] != 8 or guards[0]['kind'] != 'OBJECT' or guards[0]['binding'] != 'GLOBAL':
+        errors.append('CI loader must export GLOBAL OBJECT __stack_chk_guard@@GLIBC_2.17 of size 8')
+      exported_names = {symbol['name'].split('@')[0] for symbol in symbols if symbol['section'] != 'UND'}
+      unversioned_loader_imports = [symbol['name'] for symbol in candidate['dynamic_symbols']
+                                    if symbol['section'] == 'UND' and symbol['version_index'] is None and symbol['name'] in exported_names]
+      if unversioned_loader_imports:
+        errors.append(f'unversioned imports also matching loader exports are not approved: {unversioned_loader_imports}')
+  if not errors:
+    evidence['status'] = 'approved_exact_stack_guard_dependency'
+  evidence['errors'] = errors
+  return evidence
 
 
 def inspect(path):
@@ -36,6 +124,7 @@ def inspect(path):
     'rpaths': re.findall(r'\((?:RUNPATH|RPATH)\).*?\[(.*?)\]', dynamic),
     'versions': version_names, 'defined_symbols': dict(zip(names, demangled, strict=True)),
     'undefined_symbols': undefined.splitlines(),
+    'version_providers': version_providers(versions), 'dynamic_symbols': dynamic_symbols(path),
   }
 
 
@@ -55,12 +144,21 @@ def main():
   parser.add_argument('--baseline', type=Path, required=True)
   parser.add_argument('--candidate', type=Path, required=True)
   parser.add_argument('--report', type=Path, required=True)
+  parser.add_argument('--baseline-executable', type=Path)
+  parser.add_argument('--runtime-loader', type=Path, default=Path(LOADER_PATH))
   args = parser.parse_args()
   baseline, candidate = inspect(args.baseline), inspect(args.candidate)
   errors = []
   if baseline['sha256'] != BASELINE_SHA256:
     errors.append('baseline hash does not match the reviewed e838 tracked artifact')
   unexpected = sorted(set(candidate['needed']) - set(baseline['needed']))
+  loader_evidence = None
+  if LOADER_NAME in unexpected:
+    loader_evidence = loader_exception(candidate, args.baseline_executable, args.runtime_loader)
+    if not loader_evidence['errors']:
+      unexpected.remove(LOADER_NAME)
+    else:
+      errors.extend(loader_evidence['errors'])
   if unexpected:
     errors.append(f'new dynamic dependencies: {unexpected}')
   # Standalone linking needs no runtime search path, so reject all rather than
@@ -83,7 +181,7 @@ def main():
     errors.append(f'missing existing msgq/extension exported symbols: {missing_project}')
   report = {
     'qualification': 'Static ABI boundary checks only; native tests and deployment review remain separate.',
-    'baseline': baseline, 'candidate': candidate, 'errors': errors,
+    'baseline': baseline, 'candidate': candidate, 'errors': errors, 'loader_exception': loader_evidence,
     'removed_exports': {n: bsyms[n] for n in sorted(set(bsyms)-set(csyms))},
     'added_exports': {n: csyms[n] for n in sorted(set(csyms)-set(bsyms))},
   }
