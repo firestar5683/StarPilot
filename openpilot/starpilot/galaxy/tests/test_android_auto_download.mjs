@@ -114,5 +114,18 @@ const mirror = nodes(fallback).find(node => node.type === "a" && node.props?.hre
 assert(mirror, "falls back to APKMirror when the comma has no link")
 assert.equal(mirror.props.target, "_blank")
 for (const gone of [/Google Play/, /sign-in/i, /oauth/i, /renew/i, /apkmirror-\d\.svg/, /installMethod/]) assert.doesNotMatch(AndroidAutoPage.template, gone)
-assert.match(AndroidAutoPage.template, /accept="\.apk,\.xapk,\.apkm,\.zip"/)
+// Phones have no file type for .xapk/.apkm, so a filter would grey out the download; choosePackage checks it instead.
+const picker = (vm) => nodes(vm).find(node => node.type === "input" && node.props?.type === "file")
+const navigatorBefore = Object.getOwnPropertyDescriptor(globalThis, "navigator")
+try {
+  for (const [browser, accept] of [[{ userAgent: "Mozilla/5.0 (iPhone)" }, undefined], [{ userAgent: "Mozilla/5.0 (Linux; Android 14)" }, undefined],
+    [{ userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 5 }, undefined],
+    [{ userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 0 }, ".apk,.xapk,.apkm,.zip"]]) {
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: browser })
+    assert.equal(picker(sheet).props.accept, accept, browser.userAgent)
+  }
+} finally {
+  if (navigatorBefore) Object.defineProperty(globalThis, "navigator", navigatorBefore)
+  else delete globalThis.navigator
+}
 console.log("Android Auto download: APKPure link, APKMirror fallback, file validation and clean setup sheet passed")

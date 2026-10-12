@@ -976,7 +976,7 @@ export const AndroidAutoPage = {
                 </div>
                 <div class="gx-aa-step-card__body">
                   <label class="gx-btn gx-btn--tonal gx-aa-file" :class="{ 'gx-aa-file--disabled': installState !== 'choose' }">
-                    <input type="file" accept=".apk,.xapk,.apkm,.zip" aria-label="Android Auto APK, XAPK, APKM, or ZIP" :disabled="installState !== 'choose'" @change="choosePackage" />
+                    <input type="file" :accept="onPhone ? undefined : '.apk,.xapk,.apkm,.zip'" aria-label="Android Auto APK, XAPK, APKM, or ZIP" :disabled="installState !== 'choose'" @change="choosePackage" />
                     <i class="bi bi-folder2-open"></i> {{ packageFile ? 'Choose a Different File' : 'Choose File' }}
                   </label>
                   <small v-if="packageChecking" role="status" class="gx-note">Checking downloaded file…</small>
