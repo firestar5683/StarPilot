@@ -102,6 +102,8 @@ class ProjectionOnroad:
     self._certificate_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
+    self._base_appearance = None
+    self._projection_appearance = None
     self.layout_watcher = layout_watcher
     self.native_focus = native_focus or (lambda: None)
     self.bookmark = lambda: False
@@ -217,6 +219,7 @@ class ProjectionOnroad:
     """Switch to a newly saved Android Auto layout without reconnecting."""
     self.customization = customization
     self._base_customization = self._projection_customization = None
+    self._base_appearance = self._projection_appearance = None
     self.camera.large_ui_gamma_trial = bool((customization or {}).get('largeUiGammaTrial', False))
     self._ensure_map()
 
@@ -323,7 +326,13 @@ class ProjectionOnroad:
         if state.customization is not self._base_customization:
           self._projection_customization = projection_customization(self.customization, state.customization)
           self._base_customization = state.customization
-        state = replace(state, customization=self._projection_customization)
+        if state.appearance is not self._base_appearance:
+          # The car screen's border switches live in the AA layout, not the comma's C4 settings.
+          self._projection_appearance = replace(state.appearance,
+                                                show_blindspot_border=self.customization.get('blindSpotBorder', False) is True,
+                                                show_signal_border=self.customization.get('signalBorder', False) is True)
+          self._base_appearance = state.appearance
+        state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance)
       self._state = self._with_certificate_notice(state, now_ns)
       self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)

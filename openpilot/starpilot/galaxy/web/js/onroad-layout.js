@@ -130,15 +130,19 @@ export function previewPoint(event, rect, profile) {
   }
 }
 
+// Android Auto's own border switches; the comma screen keeps its C4 settings.
+const PROJECTION_BORDERS = ["blindSpotBorder", "signalBorder"]
+
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 6 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_BORDERS.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
     (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
     (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
     (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
     (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
     (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
+    PROJECTION_BORDERS.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
     !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
     !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
@@ -910,7 +914,14 @@ export const OnroadLayoutPage = {
       const before = clone(this.state.draft)
       this.state.draft.largeUiGammaTrial = value === "On"
       this.recordChange(before)
-      this.state.notice = "Save and reconnect Android Auto to apply the camera effect."
+      this.state.notice = "Save to apply the camera effect on Android Auto."
+    },
+    setProjectionBorder(key, value) {
+      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag || !PROJECTION_BORDERS.includes(key)) return
+      const before = clone(this.state.draft)
+      this.state.draft[key] = value === "On"
+      this.recordChange(before)
+      this.state.notice = "Save to apply the border on Android Auto."
     },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
@@ -1223,10 +1234,14 @@ export const OnroadLayoutPage = {
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <template v-if="state.data && state.draft">
-          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect" :inert="busy">
+          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto display" :inert="busy">
             <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
               :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
-            <p class="gx-note">Try the large comma UI's road-camera effect on Android Auto: reduced color and increased contrast while engaged, dimming while disengaged. Off keeps the current full-color appearance. Save and reconnect Android Auto to apply. The layout preview does not simulate camera color.</p>
+            <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
+              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('blindSpotBorder', value)" />
+            <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
+              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('signalBorder', value)" />
+            <p class="gx-note">Gamma trial: the large comma UI's road-camera color effect (not shown in the preview). Borders are separate from the comma screen's C4 settings. Save to apply.</p>
           </section>
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
           <div v-if="!projection && availableProfiles.length" class="gx-layout__tabs gx-tabs" aria-label="Layout size">

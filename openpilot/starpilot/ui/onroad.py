@@ -21,7 +21,7 @@ from openpilot.starpilot.ui.onroad_customization import (CLOCK_WIDGET, MODE_WIDG
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 
 from openpilot.starpilot.ui.onroad_alerts import AlertRenderer
-from openpilot.starpilot.ui.onroad_border import render_compact_half_borders
+from openpilot.starpilot.ui.onroad_border import render_compact_half_borders, render_large_half_borders
 from openpilot.starpilot.ui.onroad_compact_widgets import (CompactHudRenderer, MiciSidebarWidgets,
                                                            draw_curve_road_icon, draw_lead_icon, draw_stop_light_icon)
 from openpilot.starpilot.ui.onroad_curve import controlling as curve_controlling, glow_color, intensity, render_glow, status_label
@@ -428,6 +428,8 @@ class OnroadView:
     render_glow(content, state, border_width=30, time_s=rl.get_time())
     rl.draw_rectangle_lines_ex(frame, 30, rl.BLACK)
     rl.draw_rectangle_rounded_lines_ex(content, 0.12, 10, 30, edge)
+    if self.projection_viewport:
+      render_large_half_borders(state, rl.get_time(), content, int(height))
     self._preview_badge(state)
 
   def _compact(self, state: OnroadState) -> None:

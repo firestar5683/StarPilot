@@ -99,6 +99,19 @@ class TestProjectionLayout(unittest.TestCase):
       with self.subTest(value=value), self.assertRaises(ValueError):
         validate_layout({**document, 'largeUiGammaTrial': value}, SCREEN)
 
+  def test_border_switches_are_separate_and_strictly_boolean(self):
+    document = default_layout(SCREEN)
+    self.assertIs(document['blindSpotBorder'], False)
+    self.assertIs(document['signalBorder'], False)
+    for key in ('blindSpotBorder', 'signalBorder'):
+      older = {k: v for k, v in document.items() if k != key}
+      self.assertEqual(validate_layout(older, SCREEN)[key], document[key], 'older layouts get the defaults')
+      flipped = validate_layout({**document, key: not document[key]}, SCREEN)
+      self.assertEqual(flipped[key], not document[key])
+      for value in (1, 0, 'true', None, [], {}):
+        with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+          validate_layout({**document, key: value}, SCREEN)
+
   def test_screen_roundtrip_omits_identity(self):
     with tempfile.TemporaryDirectory() as directory:
       path = Path(directory) / 'screen.json'

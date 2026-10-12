@@ -231,6 +231,30 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
       self.assertEqual(rendered[-1].customization['palette']['text'], '#123456FF')
       self.assertEqual(rendered[-1].customization['layouts']['large']['current_speed']['x'], 700)
 
+  def test_border_switches_come_from_the_android_auto_layout(self):
+    from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance
+    from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
+    helper = boundary.TestProjectionOnroad()
+    native, _ = helper.dependencies()
+    native.ui_state.started = True
+    comma = OnroadAppearance(show_signal_border=True, show_blindspot_border=True)  # the comma screen's own choice
+    state = OnroadState(False, False, None, None, SpeedLimitObservation(), customization=default_document(), appearance=comma)
+    rendered = []
+    native.adapter = lambda *_: SimpleNamespace(build=lambda *_a, **_k: SimpleNamespace(onroad=state))
+    layout = default_layout_for_viewport((2880, 1080))
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout)
+    self.addCleanup(view.close)
+    view.onroad.render = rendered.append
+    view.render()
+    view.render()
+    self.assertIs(rendered[0].appearance, rendered[1].appearance, 'cached while nothing changes')
+    self.assertEqual((rendered[-1].appearance.show_blindspot_border, rendered[-1].appearance.show_signal_border), (False, False),
+                     'both off by default on Android Auto, even when the comma screen has them on')
+    self.assertEqual((comma.show_blindspot_border, comma.show_signal_border), (True, True), 'the comma setting is untouched')
+    view.apply_layout({**layout, 'blindSpotBorder': True, 'signalBorder': False})
+    view.render()
+    self.assertEqual((rendered[-1].appearance.show_blindspot_border, rendered[-1].appearance.show_signal_border), (True, False))
+
   def test_real_onroad_state_unchanged_without_projection_document(self):
     from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
     helper = boundary.TestProjectionOnroad()
