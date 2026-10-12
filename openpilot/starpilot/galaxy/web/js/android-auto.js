@@ -336,6 +336,31 @@ export class AndroidAutoFeed {
 }
 
 export const APKMIRROR_URL = "https://www.apkmirror.com/apk/google-inc/android-auto/"
+export const MIRROR_RELEASE_LINK = /^https:\/\/www\.apkmirror\.com\/apk\/google-inc\/android-auto\/android-auto-(\d+(?:-\d+)+)-release\/(?![\s\S])/
+const MIRROR_OPENED_KEY = "aa.mirrorOpenedAt"
+const MIRROR_RESUME_MS = 30 * 60 * 1000
+const WRONG_DOWNLOAD = "That’s not the Android Auto download. Go back to APKMirror and tap Download APK."
+
+function mirrorRelease(release) {
+  return typeof release?.url === "string" && MIRROR_RELEASE_LINK.test(release.url) &&
+    typeof release.version === "string" && release.version.length <= 128 &&
+    /^[0-9]+(?:[.-][a-zA-Z0-9]+)+$/.test(release.version) ? release : null
+}
+
+function clearMirrorOpened() {
+  try { localStorage.removeItem(MIRROR_OPENED_KEY) } catch { /* storage can be disabled */ }
+}
+
+export function mirrorResumeDue(now = Date.now()) {
+  try {
+    const value = localStorage.getItem(MIRROR_OPENED_KEY)
+    if (value === null) return false
+    const age = now - Number(value)
+    if (value.trim() && Number.isFinite(age) && age >= 0 && age <= MIRROR_RESUME_MS) return true
+    clearMirrorOpened()
+  } catch { /* storage can be disabled */ }
+  return false
+}
 const STAGES = ["reading", "searching", "decrypting", "verifying", "installing", "done"]
 const CHECKS = [
   { stage: "reading", codes: ["NOT_PACKAGE", "CORRUPT", "NO_CODE", "TOO_LARGE"], label: "Android package opened" },
@@ -379,7 +404,7 @@ export function packagePreflight(file) {
   if (/com\.google\.android\.gms|play[ ._-]?services/i.test(name)) {
     return "This is Google Play Services, not Android Auto. Go back and download Android Auto by Google LLC."
   }
-  if (name && !/\.(apk|xapk|apkm)$/i.test(name)) return "That’s not an Android package. Choose the .apk, .xapk, or .apkm file you downloaded."
+  if (name && !/\.(apk|xapk|apkm|zip)$/i.test(name)) return "That’s not an Android package. Choose the .apk, .xapk, .apkm, or .zip file you downloaded."
   return ""
 }
 
@@ -459,15 +484,19 @@ export const AndroidAutoPage = {
   data: () => ({
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
+    mirrorResume: false, packageMagicError: "", packageChecking: false, packageSelection: 0,
     installMethod: "google", googleEmail: "", googleToken: "", googleRemember: true, tokenBrowser: "chrome", renewing: false,
     tokenBrowsers: TOKEN_BROWSERS,
-    installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false, enableOpen: false
+    installFileName: "", pairWhenReady: false, enableOpen: false
   }),
   mounted() {
     this.feed = new AndroidAutoFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
-    this.visibility = () => document.hidden ? this.feed.stop(true) : this.begin()
+    this.visibility = () => {
+      if (document.hidden) this.feed.stop(true)
+      else { this.resumeMirror(); this.begin() }
+    }
     document.addEventListener("visibilitychange", this.visibility)
-    if (!document.hidden) this.begin()
+    if (!document.hidden) { this.resumeMirror(); this.begin() }
   },
   beforeUnmount() { this.googleToken = ""; this.finishEnable(false); document.removeEventListener("visibilitychange", this.visibility); this.feed?.stop(true) },
   watch: {
@@ -479,23 +508,38 @@ export const AndroidAutoPage = {
     'setup.serviceReady'() { this.resumePairing() },
     busy(value) { if (!value) this.resumePairing() },
     'setup.enabled'(enabled) { if (!enabled) this.pairWhenReady = false },
+    'setup.identity.installed'(installed) {
+      if (installed) this.finishMirror()
+      else if (this.mirrorResume) this.scrollToMirrorUpload()
+    },
+    installState(state) { if (state === "done") this.finishMirror() },
   },
   computed: {
     canRespond() { return validPromptInput(this.pairing?.prompt, this.pairValue) },
     expiry() { return expiryInfo(this.setup?.identity) },
     projecting() { return this.runtime?.state === "streaming" },
     supportReady() { return !!(this.setup?.enabled && this.setup.identity.installed) },
+    mirrorLink() { return mirrorRelease(this.setup?.mirror?.latest) || { version: "", url: APKMIRROR_URL } },
+    compatibleMirrorLink() {
+      return this.setup?.import?.code === "UNSUPPORTED_VERSION" ? mirrorRelease(this.setup?.mirror?.compatible) : null
+    },
+    downloadsHint() {
+      if (typeof navigator === "undefined") return ""
+      if (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return "In Files, open Downloads."
+      return /Android/i.test(navigator.userAgent || "") ? "Open Downloads." : ""
+    },
     packageError() {
       if (!this.packageFile) return ""
       const preflight = packagePreflight(this.packageFile)
       if (preflight) return preflight
       if (!Number.isSafeInteger(this.packageFile.size) || this.packageFile.size <= 0) return "The selected file is empty or its size cannot be read."
       if (this.setup && this.packageFile.size > this.setup.maxUploadBytes) return "The selected package exceeds the maximum size shown below."
-      return ""
+      return this.packageMagicError
     },
     uploadReason() {
       if (!this.packageFile) return "Choose your Android Auto package."
       if (this.packageError) return this.packageError
+      if (this.packageChecking) return "Checking downloaded file…"
       if (!this.setup) return "Load setup status first."
       if (!this.setup.enabled && !this.setup.installReady) return "The Android Auto display and encoder must be installed before uploading."
       if (this.setup.import?.state === "running") return "Wait for the current package check to finish."
@@ -617,9 +661,29 @@ export const AndroidAutoPage = {
       return this.feed.action("./api/android-auto/pairing/response", { prompt_id: prompt.id, accepted, value })
     },
     openInstall() {
-      Object.assign(this, { installOpen: true, installAttempted: false, packageFile: null, renewing: false, googleRemember: true })
+      this.chooseAgain()
+      Object.assign(this, { installOpen: true, renewing: false, googleRemember: true })
     },
-    closeInstall() { this.installOpen = false; this.googleToken = ""; this.renewing = false },
+    closeInstall() { this.installOpen = false; this.googleToken = ""; this.renewing = false; this.finishMirror() },
+    markMirrorOpened() {
+      if (!this.busy && ["choose", "failed"].includes(this.installState)) {
+        this.packageSelection++
+        Object.assign(this, { packageFile: null, packageMagicError: "", packageChecking: false })
+      }
+      try { localStorage.setItem(MIRROR_OPENED_KEY, String(Date.now())) } catch { /* storage can be disabled */ }
+    },
+    resumeMirror() {
+      if (!mirrorResumeDue() || this.busy || this.enableOpen || this.packageFile || this.setup?.identity?.installed || this.setup?.import?.state === "running") return
+      this.chooseAgain()
+      Object.assign(this, { installOpen: true, installMethod: "manual", mirrorResume: true, renewing: false })
+      this.scrollToMirrorUpload()
+    },
+    scrollToMirrorUpload() {
+      this.$nextTick?.(() => {
+        if (this.mirrorResume && this.installState === "choose") this.$refs.mirrorUploadStep?.scrollIntoView({ block: "nearest" })
+      })
+    },
+    finishMirror() { this.mirrorResume = false; clearMirrorOpened() },
     // Auto-renew needs a fresh sign-in: the long-lived credential is only issued when a token is exchanged.
     startRenewal() { Object.assign(this, { renewing: true, installMethod: "google", googleRemember: true, googleToken: "", installAttempted: false }) },
     async googleImport() {
@@ -629,8 +693,30 @@ export const AndroidAutoPage = {
       this.googleToken = ""
       return this.feed.googleImport(this.googleEmail.trim(), token, this.renewing || this.googleRemember)
     },
-    chooseAgain() { Object.assign(this, { installAttempted: false, packageFile: null }) },
-    choosePackage(event) { this.packageFile = event.target.files?.[0] || null },
+    chooseAgain() {
+      this.packageSelection++
+      Object.assign(this, { installAttempted: false, packageFile: null, packageMagicError: "", packageChecking: false })
+    },
+    async choosePackage(event) {
+      const file = event.target.files?.[0] || null
+      const selection = ++this.packageSelection
+      Object.assign(this, { packageFile: file, packageMagicError: "", packageChecking: false })
+      // Leave useful name/size errors intact; never read the full package into browser memory.
+      if (!file || packagePreflight(file) || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > this.setup?.maxUploadBytes) return
+      this.packageChecking = true
+      let error = ""
+      try {
+        if (file.size < 5 * 1024 * 1024) error = WRONG_DOWNLOAD
+        else {
+          const bytes = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+          if (bytes.length !== 4 || ![0x50, 0x4b, 0x03, 0x04].every((byte, i) => bytes[i] === byte)) error = WRONG_DOWNLOAD
+        }
+      } catch { error = WRONG_DOWNLOAD }
+      if (selection === this.packageSelection) {
+        Object.assign(this, { packageMagicError: error, packageChecking: false })
+        if (!error) this.mirrorResume = false
+      }
+    },
     async upload() {
       if (this.busy || this.uploadReason) return false
       const file = this.packageFile
@@ -700,7 +786,7 @@ export const AndroidAutoPage = {
                 <li><strong>“This is the APKMirror Installer app”:</strong> you downloaded the helper app. Go back to the Android Auto release page and use <strong>Download APK Bundle</strong> there.</li>
                 <li><strong>“Not Android Auto” or an unverified file:</strong> make sure the app is <strong>Android Auto</strong> by <strong>Google LLC</strong>, and that the variant name ends in <strong>‑release</strong> (not beta or alpha).</li>
                 <li><strong>Certificate expired:</strong> that release is too old. Go back to All versions and download the one with the newest date.</li>
-                <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded.</li>
+                <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded. A .zip name from Safari is fine too.</li>
                 <li><strong>Upload is slow or stops:</strong> stay on this page and keep the comma awake and on the same Wi-Fi until it finishes.</li>
               </ul>
               <ul>
@@ -1137,7 +1223,9 @@ export const AndroidAutoPage = {
               <ul v-if="['checking', 'failed'].includes(installState)" class="gx-aa-checks" aria-live="polite">
                 <li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li>
               </ul>
-              <GxNotice v-if="installState === 'failed'" tone="danger"><p>{{ problem }}</p><button class="gx-btn gx-btn--tonal" @click="chooseAgain">Try Again</button></GxNotice>
+              <GxNotice v-if="installState === 'failed'" tone="danger"><p>{{ problem }}</p>
+                <a v-if="compatibleMirrorLink" class="gx-btn gx-btn--tonal" :href="compatibleMirrorLink.url" target="_blank" rel="noopener noreferrer" @click="markMirrorOpened">Get Android Auto {{ compatibleMirrorLink.version }}</a>
+                <button class="gx-btn gx-btn--tonal" @click="chooseAgain">Try Again</button></GxNotice>
               <p v-if="error && installState === 'choose' && installAttempted" class="gx-aa-bad" role="alert">{{ error }}</p>
               <p v-if="setup.googlePlay?.available === false" class="gx-note">Google Play isn’t available on this device yet. Use <strong>Upload a file</strong> instead.</p>
             </div>
@@ -1151,31 +1239,33 @@ export const AndroidAutoPage = {
                   </div>
                 </div>
                 <div class="gx-aa-step-card__body">
-                  <a class="gx-btn gx-btn--tonal" :href="apkmirror" target="_blank" rel="noopener noreferrer">
-                    <i class="bi bi-box-arrow-up-right"></i> Open APKMirror
+                  <a class="gx-btn gx-btn--tonal" :href="mirrorLink.url" target="_blank" rel="noopener noreferrer" @click="markMirrorOpened">
+                    <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> {{ mirrorLink.version ? 'Get Android Auto ' + mirrorLink.version : 'Open APKMirror' }}
                   </a>
-                  <ul class="gx-aa-token__how">
-                    <li>Select the Android Auto release with the <strong>newest release date</strong>.</li>
-                    <li>Under <strong>Variant</strong>, click the <strong>17.x or 18.x release</strong> entry.</li>
-                    <li>Download the bundle (keep file as <code>.apk</code>, <code>.xapk</code>, or <code>.apkm</code>; do not unzip).</li>
-                  </ul>
-                  <small class="gx-note">You don’t need the APKMirror Installer app.</small>
+                  <ol class="gx-aa-mirror-guide">
+                    <li><img src="./assets/aa/apkmirror-1.svg" alt="" width="160" height="96" /><span>Scroll down to <strong>Download</strong></span></li>
+                    <li><img src="./assets/aa/apkmirror-2.svg" alt="" width="160" height="96" /><span>Tap the variant marked <strong>BUNDLE</strong> or <strong>APK</strong>, arm64 / nodpi</span></li>
+                    <li><img src="./assets/aa/apkmirror-3.svg" alt="" width="160" height="96" /><span>Tap <strong>Download APK</strong>, then come back here</span></li>
+                  </ol>
+                  <small class="gx-note">For a BUNDLE, any arm64 DPI option is fine. Don’t unzip it. You don’t need the APKMirror Installer app.</small>
                 </div>
               </li>
-              <li class="gx-aa-step-card" :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
+              <li ref="mirrorUploadStep" class="gx-aa-step-card" :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose', 'gx-aa-mirror-resume': mirrorResume && installState === 'choose' }">
                 <div class="gx-aa-step-card__head">
                   <span class="gx-aa-step-card__num">2</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Choose the downloaded file</strong>
-                    <small>Select the APK file from your computer or phone</small>
+                    <small role="status">{{ mirrorResume ? 'Choose the file you just downloaded' : 'Select the APK file from your computer or phone' }}</small>
                   </div>
                 </div>
                 <div class="gx-aa-step-card__body">
                   <label class="gx-btn gx-btn--tonal gx-aa-file" :class="{ 'gx-aa-file--disabled': installState !== 'choose' }">
-                    <input type="file" accept=".apk,.xapk,.apkm" aria-label="Android Auto APK, XAPK, or APKM" :disabled="installState !== 'choose'" @change="choosePackage" />
+                    <input type="file" accept=".apk,.xapk,.apkm,.zip" aria-label="Android Auto APK, XAPK, APKM, or ZIP" :disabled="installState !== 'choose'" @change="choosePackage" />
                     <i class="bi bi-folder2-open"></i> {{ packageFile ? 'Choose a Different File' : 'Choose File' }}
                   </label>
-                  <div v-if="packageFile && !packageError" class="gx-aa-file-chip">
+                  <small v-if="mirrorResume && downloadsHint" class="gx-note">{{ downloadsHint }}</small>
+                  <small v-if="packageChecking" role="status" class="gx-note">Checking downloaded file…</small>
+                  <div v-if="packageFile && !packageError && !packageChecking" class="gx-aa-file-chip">
                     <i class="bi bi-file-earmark-zip"></i>
                     <span>{{ packageFile.name }}</span>
                     <small>{{ Math.ceil(packageFile.size / 1048576) }} MB</small>
@@ -1205,6 +1295,7 @@ export const AndroidAutoPage = {
                   </ul>
                   <GxNotice v-if="installState === 'failed'" tone="danger">
                     <p>{{ problem }}</p>
+                    <a v-if="compatibleMirrorLink" class="gx-btn gx-btn--tonal" :href="compatibleMirrorLink.url" target="_blank" rel="noopener noreferrer" @click="markMirrorOpened">Get Android Auto {{ compatibleMirrorLink.version }}</a>
                     <button class="gx-btn gx-btn--tonal" @click="chooseAgain">Choose Another File</button>
                   </GxNotice>
                   <p v-if="error && installState === 'choose' && installAttempted" class="gx-aa-bad" role="alert">{{ error }}</p>

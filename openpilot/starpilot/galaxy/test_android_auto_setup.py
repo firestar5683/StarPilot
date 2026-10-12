@@ -6,6 +6,53 @@ import pytest
 
 from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup, SetupRejected
 from openpilot.starpilot.system.android_auto.apk_identity import MAX_FILE_BYTES
+from openpilot.starpilot.system.android_auto import mirror_feed
+
+_start_mirror_refresh = mirror_feed.start_background_refresh
+
+
+@pytest.fixture(autouse=True)
+def offline_mirror(monkeypatch):
+  monkeypatch.setattr(mirror_feed, 'start_background_refresh', lambda: None)
+  monkeypatch.setattr(mirror_feed, '_cache', None)
+
+
+def test_mirror_status_never_waits_for_network(tmp_path, monkeypatch):
+  import threading
+  import time
+
+  entered, release = threading.Event(), threading.Event()
+  fetched = threading.Event()
+  def fetch():
+    entered.set()
+    assert release.wait(2)
+    fetched.set()
+    return [{'version': '17.9.6640', 'url': mirror_feed.LISTING_URL + 'android-auto-17-9-6640-release/'}]
+
+  threads = []
+  thread_class = threading.Thread
+  def thread(**kwargs):
+    instance = thread_class(**kwargs)
+    threads.append(instance)
+    return instance
+
+  monkeypatch.setattr(mirror_feed.threading, 'Thread', thread)
+  monkeypatch.setattr(mirror_feed, 'fetch_releases', fetch)
+  monkeypatch.setattr(mirror_feed, 'start_background_refresh', _start_mirror_refresh)
+  monkeypatch.setattr(mirror_feed, '_refresh_after', 0)
+  monkeypatch.setattr(mirror_feed, '_in_flight', False)
+  service, _ = setup(tmp_path, {'parked': True, 'enabled': True, 'session': ('galaxy', '1')})
+  try:
+    started = time.monotonic()
+    assert service.status(('galaxy', '1'))['mirror'] is None
+    assert time.monotonic() - started < 0.5
+    assert entered.wait(1)
+    assert not fetched.is_set()
+  finally:
+    release.set()
+    for instance in threads:
+      instance.join(2)
+  assert service.status(('galaxy', '1'))['mirror']['latest']['version'] == '17.9.6640'
 
 
 class SetupState(TypedDict, total=False):

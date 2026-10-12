@@ -11,6 +11,13 @@ from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.system.android_auto.source_verifier import GalaxySourceVerifier
 from openpilot.starpilot.bluetooth.owner import BluetoothUnavailable
+from openpilot.starpilot.system.android_auto import mirror_feed
+
+
+@pytest.fixture(autouse=True)
+def offline_mirror(monkeypatch):
+  monkeypatch.setattr(mirror_feed, 'start_background_refresh', lambda: None)
+  monkeypatch.setattr(mirror_feed, '_cache', None)
 
 
 class ApiState(TypedDict):
@@ -124,6 +131,7 @@ def test_galaxy_upload_requires_session_and_exact_binary_body(api):
   cookie = headers['Set-Cookie'].split(';', 1)[0]
   code, status, _ = request('GET', '/api/android-auto/setup', cookie=cookie)
   assert code == 200 and status['wiredAvailable'] is False
+  assert status['mirror'] is None
   assert request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie,
                  content_type='application/json')[0] == 415
   assert request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie)[0] == 202

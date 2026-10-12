@@ -14,7 +14,7 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import BinaryIO
 
-from openpilot.starpilot.system.android_auto import apk_identity, play_resolver
+from openpilot.starpilot.system.android_auto import apk_identity, mirror_feed, play_resolver
 
 
 class SetupRejected(RuntimeError):
@@ -54,12 +54,14 @@ class AndroidAutoSetup:
 
   def status(self, session: tuple) -> dict:
     self._require_session(session)
+    mirror_feed.start_background_refresh()
     ident = self.identity_status()
     return {
       'enabled': self.enabled(), 'bluetoothEnabled': self.bluetooth_enabled(), 'parked': self.parked(),
       'installReady': self.install_ready(), 'serviceReady': self.service_ready(),
       'identity': {key: ident[key] for key in ('installed', 'expires', 'days_left', 'warning', 'message', 'expired', 'error') if key in ident},
       'import': self.job.status(),
+      'mirror': mirror_feed.mirror_status(),
       'googlePlay': {'available': play_resolver.BINARY.is_file(), 'remembered': self.token_store.exists(),
                      **({'package': self.play_install.status()} if self.play_install is not None else {})},
       'maxUploadBytes': apk_identity.MAX_FILE_BYTES,

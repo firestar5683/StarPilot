@@ -166,9 +166,9 @@ uploadPage.feed = {
   async upload(file) { uploadCalls.push(["upload", file]); return true },
 }
 for (const [name, type] of [["android-auto.apk", ""], ["android-auto.xapk", "application/zip"], ["android-auto.apkm", "application/octet-stream"]]) {
-  const file = { name, size: 123, type }
+  const file = { name, size: 5 * 1024 * 1024, type, slice: () => new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04])]) }
   uploadPage.setup.enabled = false
-  uploadPage.choosePackage({ target: { files: [file] } })
+  await uploadPage.choosePackage({ target: { files: [file] } })
   assert.equal(uploadPage.packageFile, file)
   assert.equal(uploadPage.uploadReason, "", "valid selection can enable and upload")
   assert.equal(await uploadPage.upload(), true)
@@ -179,7 +179,7 @@ assert.match(uploadPage.uploadReason, /empty/)
 assert.equal(await uploadPage.upload(), false)
 uploadPage.choosePackage({ target: { files: [{ name: "large.apk", size: setup.maxUploadBytes + 1 }] } })
 assert.match(uploadPage.uploadReason, /maximum size/)
-uploadPage.choosePackage({ target: { files: [{ name: "ok.apk", size: 1 }] } })
+await uploadPage.choosePackage({ target: { files: [{ name: "ok.apk", size: 5 * 1024 * 1024, slice: () => new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04])]) }] } })
 uploadPage.setup.parked = false
 assert.equal(uploadPage.uploadReason, "")
 for (const enabled of [true, false]) {
@@ -347,7 +347,7 @@ assert.equal(expiryInfo({ installed: false }).level, "none")
 assert.equal(packagePreflight({ name: "com.google.android.projection.gearhead_17.6.663454-release-2025-apkmirror.com.apk" }), "")
 assert.match(packagePreflight({ name: "APKMirror Installer (Official)_1.6.apk" }), /Installer/)
 assert.match(packagePreflight({ name: "com.google.android.gms_24.apk" }), /Play Services/)
-assert.match(packagePreflight({ name: "android-auto.zip" }), /not an Android package/)
+assert.equal(packagePreflight({ name: "android-auto.zip" }), "")
 const wrongPage = page(setup)
 wrongPage.choosePackage({ target: { files: [{ name: "APKMirror Installer.apk", size: 10 }] } })
 assert.match(wrongPage.uploadReason, /Installer/)

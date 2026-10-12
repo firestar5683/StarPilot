@@ -48,6 +48,10 @@ from openpilot.starpilot.system.android_auto import play_resolver
 GOOGLE_ROOT_SHA256 = "49e52efc13ad2ed09f204c3b10698bd84bb7105f510558aa14b8119a5c4ad17f"
 PACKAGE = "com.google.android.projection.gearhead"
 KNOWN_GOOD_VERSION = "17.6.663454-release"
+# Android Auto versions confirmed to extract on device; newest first. Update from user reports.
+COMPATIBLE_VERSION_PREFIXES = ("17.6.",)
+# APKMirror's 17.6.6634 release lists the known-good 17.6.663454-release variant.
+COMPATIBLE_RELEASE_URL = "https://www.apkmirror.com/apk/google-inc/android-auto/android-auto-17-6-6634-release/"
 
 MAX_FILE_BYTES = 256 * 1024 * 1024       # an uploaded or downloaded APK/XAPK/APKM
 MAX_APK_BYTES = 192 * 1024 * 1024        # the base APK inside a bundle
@@ -125,6 +129,23 @@ def _dex_files(path: Path) -> tuple[list[bytes], str]:
         if dex:
           return [_checked_read(inner, i, MAX_DEX_BYTES) for i in dex[:MAX_DEX_FILES]], f"bundle ({info.filename})"
   raise IdentityImportError("No app code found; choose the Android Auto APK, XAPK, or APKM", "NO_CODE")
+
+
+def _app_version(path: Path) -> str | None:
+  """Best-effort local provenance; release_version is confirmed in a real APKM v5.
+
+  The available XAPK sample has no metadata. Do not guess keys or parse binary manifests.
+  This untrusted label never participates in identity verification.
+  """
+  try:
+    with zipfile.ZipFile(path) as archive:
+      data = json.loads(_checked_read(archive, archive.getinfo("info.json"), 64 * 1024))
+      version = data.get("release_version")
+      if isinstance(version, str) and len(version) <= 128 and re.fullmatch(r"[0-9]+(?:[.-][a-zA-Z0-9]+)+", version):
+        return version
+  except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, zipfile.BadZipFile, zlib.error):
+    pass
+  return None
 
 
 def _candidates(dexes: list[bytes]) -> tuple[set[bytes], list[bytes], list[bytes]]:
@@ -225,6 +246,8 @@ def extract_identity(path: Path, *, root_sha256: str = GOOGLE_ROOT_SHA256, now: 
           "imported": datetime.now(UTC).isoformat(timespec="seconds"),
           "key_matches": True,
         }
+        if (app_version := _app_version(Path(path))) is not None:
+          metadata["app_version"] = app_version
         return {identity_store.CERT_NAME: leaf_pem, identity_store.KEY_NAME: pem_key, identity_store.ROOT_NAME: root_pem}, metadata
   raise IdentityImportError(f"This Android Auto version stores its key differently; use version {KNOWN_GOOD_VERSION} or another that works",
                            "UNSUPPORTED_VERSION")
