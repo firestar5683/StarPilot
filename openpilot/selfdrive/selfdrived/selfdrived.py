@@ -1341,7 +1341,8 @@ class SelfdriveD:
     self.conditional_status = result.status
     self.conditional_result = result
 
-  def _decide_aol_axes(self, CS, intent, native):
+  def _decide_aol_axes(self, CS, intent, native, *, now_ns=0):
+    from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
         not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
@@ -1350,7 +1351,9 @@ class SelfdriveD:
                        self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
       no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
                            allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
-                                                     and ev6_aol_qualified(self.CP, marked_only=True)),
+                                                     and ev6_aol_qualified(self.CP, marked_only=True)) or
+                             physical_cancel_lateral_allowed(self.CP, CS, intent, native,
+                               source_ns=getattr(self, 'aol_car_state_log_ns', 0), now_ns=now_ns),
                            cruise_main_required=getattr(self, 'aol_cruise_main_required', True),
                            allow_below_engage_speed=bool(is_volt_ascm_longitudinal(self.CP) and
                                                        not self.CP.flags & GMFlags.PEDAL_LONG)),
@@ -1475,7 +1478,7 @@ class SelfdriveD:
       elif intent is not None and not intent.allowedLatch:
         self.aol_dm_lateral_inhibit = False
       previous = self.aol_axis_decision
-      requested = self._decide_aol_axes(CS, intent, native)
+      requested = self._decide_aol_axes(CS, intent, native, now_ns=now_ns)
       source_current = bool(intent is not None and getattr(self, 'conditional_car_state_valid', False) and
                             CS.canValid and not CS.canTimeout)
       driver_override = bool(CS.brakePressed or CS.regenBraking or CS.gasPressed or
@@ -1586,7 +1589,7 @@ class SelfdriveD:
             self.state_machine.soft_disable_timer > 0 and
             ET.SOFT_DISABLE not in self.state_machine.current_alert_types):
           self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
-      self.aol_axis_decision = self._decide_aol_axes(CS, intent, native)
+      self.aol_axis_decision = self._decide_aol_axes(CS, intent, native, now_ns=now_ns)
       if availability:
         self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
       elif getattr(self, 'aol_availability_long_inhibit', False):

@@ -222,6 +222,7 @@ class TransportPauseFeedback:
     self.longitudinal_cancel_ns = 0
     self.last_cancel_source_ns = 0
     self.honda_brake_ns = 0
+    self.gm_withdrawal_ns = 0
     self.retention_qualified = False
     self.retention_pending = False
     self.retention_event_ns = 0
@@ -498,7 +499,7 @@ class TransportPauseFeedback:
     self.awaiting = True
     return True
 
-  def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, brake_source_ns=0, intent_producer_session=''):
+  def observe(self, sm, cp, cs, now_ns, *, latched=True, cancel_source_ns=0, brake_source_ns=0, gm_withdrawal_source_ns=0, intent_producer_session=''):
     self.qualified = False
     self.awaiting = False
     self.retention_qualified = False
@@ -534,6 +535,17 @@ class TransportPauseFeedback:
         self.healthy_native_ns = int(brake_native.observedMonoTime)
         self.sequence, self.signature = int(axis.sequence), signature
         return False
+      if current and continuity and (gm_withdrawal_source_ns or self.gm_withdrawal_ns):
+        from openpilot.starpilot.car.gm.aol import retained_physical_longitudinal_intent
+        gm_native = retained_physical_longitudinal_intent(self, sm, cp, cs, axis, now_ns,
+          latched=latched, source_ns=gm_withdrawal_source_ns, producer=intent_producer_session)
+        if gm_native is not None:
+          # Existing GM intent only; independent runtime/native TX still owns
+          # both axes and every original source/native/output deadline.
+          self.healthy_feedback_ns = stamp
+          self.healthy_native_ns = int(gm_native.observedMonoTime)
+          self.sequence, self.signature = int(axis.sequence), signature
+          return False
       if self._source_availability_retention(sm, cp, cs, axis, stamp, now_ns,
           latched=latched, continuity=continuity, producer=intent_producer_session, signature=signature):
         self.sequence, self.signature = int(axis.sequence), signature
@@ -586,6 +598,8 @@ class TransportPauseFeedback:
         self.signature = signature
         return False
       if transport_healthy:
+        if not latched or native is not None and not native.requestedLongitudinal:
+          self.gm_withdrawal_ns = 0
         if native is not None and not native.requestedLongitudinal:
           self.honda_brake_ns = 0
         if (not latched or native is not None and not native.requestedLongitudinal or

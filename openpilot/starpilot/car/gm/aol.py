@@ -91,3 +91,98 @@ def intent_disarming_fault(cp, events, state, **context):
   if qualified_gm(cp) and camera_acc_pedal_profile(cp) is None and is_volt_ascm_longitudinal(cp):
     events = [event for event in events if event.name != log.OnroadEvent.EventName.accFaulted]
   return disarming_fault(events, state, **context)
+
+
+def physical_longitudinal_withdrawal_source(cp, cs, parser, observation, now_ns) -> int:
+  """Bind a Bolt pedal-owner withdrawal to its parsed CAN and local receipt."""
+  from opendbc.car.gm.values import CruiseButtons, is_bolt_present_no_acc_pedal_profile
+  from opendbc.car.structs import car
+  try:
+    if (not qualified_gm(cp) or not is_bolt_present_no_acc_pedal_profile(cp) or
+        int(cp.alternativeExperience) != GM_AOL_ALTERNATIVE_EXPERIENCE or
+        observation is None or observation[0] is not cs or not cs.canValid or cs.canTimeout):
+      return 0
+    fields = []
+    if cs.brakePressed and parser.vl['ECMEngineStatus']['BrakePressed']:
+      fields.append(('ECMEngineStatus', 'BrakePressed'))
+    if cs.regenBraking and parser.vl['EBCMRegenPaddle']['RegenPaddle']:
+      fields.append(('EBCMRegenPaddle', 'RegenPaddle'))
+    if (parser.vl['ASCMSteeringButton']['ACCButtons'] == CruiseButtons.CANCEL and
+        any(e.type == car.CarState.ButtonEvent.Type.cancel and e.pressed for e in cs.buttonEvents)):
+      fields.append(('ASCMSteeringButton', 'ACCButtons'))
+    _, received_ns, can_source_ns, boot_ns = observation
+    if not fields or not 0 < received_ns <= now_ns or now_ns - received_ns > 30_000_000:
+      return 0
+    # Parser/CAN batch use BOOTTIME. The fixed deadline uses the original
+    # local MONOTONIC receipt; neither clock is converted or restamped.
+    stamps = [int(parser.ts_nanos[message][signal]) for message, signal in fields]
+    if not all(0 < stamp <= can_source_ns <= boot_ns and boot_ns - stamp <= 30_000_000 and
+               can_source_ns - stamp <= 30_000_000 for stamp in stamps):
+      return 0
+    return received_ns
+  except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+    return 0
+
+
+def retained_physical_longitudinal_intent(feedback, sm, cp, cs, axis, now_ns, *, latched, source_ns, producer):
+  """Retain accepted LAT intent through a bounded physical LONG withdrawal."""
+  from opendbc.car.gm.values import is_bolt_present_no_acc_pedal_profile
+  from opendbc.car.structs import car
+  from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, SAFETY_MAX_AGE_NS
+  from openpilot.starpilot.aol.transport_pause import independent_lateral_health
+  occurrence = feedback.gm_withdrawal_ns or source_ns
+  if (not qualified_gm(cp) or not is_bolt_present_no_acc_pedal_profile(cp) or
+      int(cp.alternativeExperience) != GM_AOL_ALTERNATIVE_EXPERIENCE or
+      not latched or feedback.failed or feedback.paused or feedback.pending_event or
+      feedback.retention_started_ns or not feedback.session or str(axis.sessionId) != feedback.session or
+      not feedback.healthy_feedback_ns or not 0 <= now_ns - feedback.healthy_feedback_ns <= AXIS_MAX_AGE_NS or
+      not 0 < occurrence <= now_ns or now_ns - occurrence > SAFETY_MAX_AGE_NS or
+      not feedback.gm_withdrawal_ns and now_ns - occurrence > AXIS_MAX_AGE_NS or
+      not producer or producer != feedback.availability_producer or
+      str(axis.intentProducerSessionId) != producer or int(axis.intentIntegrityEpoch) != feedback.availability_epoch or
+      cs.accFaulted or cs.seatbeltUnlatched or cs.doorOpen or not cs.cruiseState.available or
+      cs.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.low,
+                            car.CarState.GearShifter.sport, car.CarState.GearShifter.brake) or
+      str(axis.faultReason) != 'none' or not axis.desiredLateral or not axis.lateralActive or
+      not axis.nativeAcknowledged or
+      not 0 < axis.sourceCarStateMonoTime <= axis.observedMonoTime <= now_ns or
+      now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
+    return None
+  event_ns = int(sm.logMonoTime['onroadEvents'])
+  if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+      not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
+      any(e.immediateDisable or e.softDisable for e in sm['onroadEvents'])):
+    return None
+  native = independent_lateral_health(sm, cp, cs, feedback.session, now_ns)
+  if (native is None or not native.pandaInventory or not native.requestedLongitudinal or
+      not any(not p.controlsAllowed for p in sm['pandaStates']) or
+      native.observedMonoTime < feedback.healthy_native_ns or
+      (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != feedback.healthy_inventory):
+    return None
+  # One occurrence spans the held native request. Held/released samples and
+  # duplicate Card calls cannot renew it; output/native leases remain original.
+  feedback.gm_withdrawal_ns = occurrence
+  return native
+
+
+def physical_cancel_lateral_allowed(cp, cs, intent, native, *, source_ns, now_ns) -> bool:
+  """Exact armed Bolt Cancel removes only the lateral NO_ENTRY restriction."""
+  from opendbc.car.gm.values import is_bolt_present_no_acc_pedal_profile
+  from opendbc.car.structs import car
+  from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, SAFETY_MAX_AGE_NS, native_inventory_matches_cp
+  try:
+    return bool(qualified_gm(cp) and is_bolt_present_no_acc_pedal_profile(cp) and
+      int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and
+      intent is not None and intent.settingsQualified and intent.allowedLatch and intent.lateralArmed and
+      intent.producerSessionId and intent.carStateLogMonoTime == source_ns and
+      0 < source_ns <= intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
+      now_ns - source_ns <= AXIS_MAX_AGE_NS and
+      # Card declares a 200ms wire lease; admission and this source remain 30ms fresh.
+      intent.validUntilMonoTime - intent.observedMonoTime <= SAFETY_MAX_AGE_NS and
+      cs.canValid and not cs.canTimeout and not cs.steerFaultTemporary and not cs.steerFaultPermanent and
+      any(e.type == car.CarState.ButtonEvent.Type.cancel for e in cs.buttonEvents) and
+      native is not None and native.requestedLateral and native.lateralAllowed and
+      native.pandaInventory and native_inventory_matches_cp(native, cp) and
+      0 < native.observedMonoTime <= now_ns <= native.validUntilMonoTime)
+  except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+    return False
