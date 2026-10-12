@@ -25,6 +25,17 @@ def fake_fonts():
 
 
 class FeatureVisualTests(unittest.TestCase):
+  def test_screen_off_help_is_visible_with_toggle_on_or_off(self):
+    from openpilot.starpilot.ui.display_preferences import SCREEN_OFF, SCREEN_OFF_DESCRIPTION
+    self.drawing()
+    for expanded in (True, False):
+      for value in ("Off", "On"):
+        fonts = fake_fonts()
+        row = FeatureRow(SCREEN_OFF, "Turn Off Comma Screen", value, choices=("Off", "On"),
+                         available=True, reason=SCREEN_OFF_DESCRIPTION)
+        view.FeatureSettingsView(fonts).render(FeatureSettingsState(rows=(row,), sidebar_expanded=expanded))
+        self.assertIn(SCREEN_OFF_DESCRIPTION, [call.args[0] for call in fonts.draw.call_args_list])
+
   def test_buttons_share_purple_feedback_without_changing_disabled_or_selected_controls(self):
     self.drawing()
     action = FeatureRow("wifi:test", "Network", "Available", available=True,

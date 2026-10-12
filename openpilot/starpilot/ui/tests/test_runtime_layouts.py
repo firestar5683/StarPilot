@@ -18,6 +18,23 @@ with patch.object(Params, "__init__", lambda self, d="": _original_params_init(s
 
 
 class TestOptInLayouts(unittest.TestCase):
+  def test_compact_device_has_one_display_entry_and_reuses_panel(self):
+    from openpilot.starpilot.ui.display_compact import DisplayCompact
+    from openpilot.selfdrive.ui.mici.layouts.settings.device import device_layout
+    layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
+    layout.star = self._session()
+    layout._compact_panels = {}
+    panel, entry = Mock(), Mock()
+    with patch.object(device_layout, "DeviceLayoutMici", return_value=panel) as create, \
+         patch.object(DisplayCompact, "entry_button", return_value=entry), \
+         patch.object(runtime_app.gui_app, "push_widget") as push:
+      layout._open_compact_destination(runtime_app.Destination.DEVICE)
+      layout._open_compact_destination(runtime_app.Destination.DEVICE)
+      create.assert_called_once()
+      panel._scroller.add_widgets.assert_called_once_with([entry])
+      self.assertEqual(push.call_count, 2)
+      push.assert_called_with(panel)
+
   def _session(self):
     session = Mock()
     session.profile = runtime_app.Profile.COMPACT

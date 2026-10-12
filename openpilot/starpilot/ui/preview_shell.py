@@ -14,7 +14,7 @@ from pathlib import Path
 import pyray as rl
 
 from openpilot.starpilot.ui.device_state import DeviceState
-from openpilot.starpilot.ui.display_preferences import MASTER
+from openpilot.starpilot.ui.display_preferences import MASTER, SCREEN_OFF, SCREEN_OFF_DESCRIPTION
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState, feature_parent_title
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
@@ -79,7 +79,10 @@ def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettin
             FeatureRow("ScreenTimeout", "Parked Screen Timeout", "30 s", page="ScreenTimeout", available=display_on,
                        reason=display_reason, presets=(("30 s", "30 s"),)),
             FeatureRow("ScreenTimeoutOnroad", "Driving Interaction Timeout", "10 s", page="ScreenTimeoutOnroad", available=display_on,
-                       reason=display_reason or "Returns to driving view; screen stays awake", presets=(("10 s", "10 s"),)),
+                       reason=display_reason or "Returns to driving view; turns off screen if Turn Off Comma Screen is on",
+                       presets=(("10 s", "10 s"),)),
+            FeatureRow(SCREEN_OFF, "Turn Off Comma Screen", "Off", choices=("Off", "On"), available=True,
+                       reason=SCREEN_OFF_DESCRIPTION),
             FeatureRow("power:enabled", "Parked Power", "Stock", choices=("Stock", "On"), available=True),
             FeatureRow("power:hours", "Maximum Parked Time", "30 h", page="power:hours", available=True,
                        reason="Saved; stock power policy applies", presets=(("30 h", "30 h"),)),
@@ -89,10 +92,10 @@ def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettin
                                                                               "totalGroups": 6}).rows
     destination, field, page, title = Destination.SYSTEM, "display", "system", "System"
     if scene.startswith("settings_display_preferences"):
-      rows = rows[2:7]
+      rows = rows[2:8]
       page, title = "display", "Custom Display Settings"
     else:
-      rows = rows[:2] + (replace(rows[2], page="display", reason="Brightness and screen timing"),) + rows[7:]
+      rows = rows[:2] + (replace(rows[2], page="display", reason="Brightness and screen timing"),) + rows[8:]
   elif scene == "settings_models":
     rows = (FeatureRow("", "Active Small", "Bundled driving model", page="models:small", available=True),
             FeatureRow("", "Active Big", "Bundled driving model", page="models:big", available=True),
