@@ -30,8 +30,8 @@ def test_source_cutoff_during_empty_drain_retains_only_original_output(full_op, 
       clock = [BASE + 29_999_000]
       original_drain = sd.drain_axis_intent
 
-      def drain(companion):
-        result = original_drain(companion)
+      def drain(companion, **kwargs):
+        result = original_drain(companion, **kwargs)
         assert companion.last_drain_count == 0
         clock[0] = BASE + 30_010_236
         return result
@@ -109,8 +109,8 @@ def test_post_drain_deferral_cannot_hide_new_intent_restriction(restriction):
           return queue.popleft() if queue else None
         return original_receive(sock)
 
-      def drain(companion):
-        result = original_drain(companion)
+      def drain(companion, **kwargs):
+        result = original_drain(companion, **kwargs)
         clock[0] = BASE + 30_010_236
         return result
 

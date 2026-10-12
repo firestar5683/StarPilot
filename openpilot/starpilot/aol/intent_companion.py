@@ -74,11 +74,11 @@ class IntentCompanion:
                 intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
                 now_ns - intent.observedMonoTime <= INTENT_MAX_AGE_NS)
 
-  def drain(self):
+  def drain(self, *, max_messages=MAX_DRAIN):
     """Read bounded transport before sampling the decision clock."""
     self.last_drain_count = 0
     self.last_drain_ok = False
-    for _ in range(MAX_DRAIN):
+    for _ in range(max(0, min(MAX_DRAIN, max_messages))):
       message = messaging.recv_one_or_none(self.sock)
       if message is None:
         break

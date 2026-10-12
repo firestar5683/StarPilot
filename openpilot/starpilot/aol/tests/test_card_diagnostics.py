@@ -270,8 +270,6 @@ def test_real_settings_worker_continues_after_diagnostic_sink_failure(monkeypatc
   monkeypatch.setattr(module.cloudlog, 'event', broken_sink)
   monkeypatch.setattr(module, 'read_cruise_intervals', lambda *a, **k: 'intervals')
   monkeypatch.setattr(module.time, 'sleep', lambda _: None)
-  monkeypatch.setattr(module, 'drop_realtime', lambda: None)
-  monkeypatch.setattr(module, 'set_core_affinity', lambda _: None)
   daemon.params_thread(Once())
   assert reads == ['IsMetric', 'ExperimentalMode']
   assert daemon.slc_requested_configuration == 'settings' and daemon.v_cruise_helper.intervals == 'intervals'

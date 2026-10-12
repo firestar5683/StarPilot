@@ -516,12 +516,13 @@ class SelfdriveD:
     hardware_events_added = len(self.events) - num_events
 
     self.mark_loop_phase('environment_events_return')
-    CS = self.refresh_event_car_state(CS)
     input_proof = getattr(self, 'aol_step_input_proof', None)
     reconcile_input = bool(input_proof is not None and not REPLAY and self.aol_replay and self.axis_transport_required and
                            self.CP.openpilotLongitudinalControl and qualified_ioniq6(self.CP) and
                            input_proof[0] == self.aol_session_id and
                            (input_proof[8] or input_proof[9]))
+    self.aol_event_input_reconcile = reconcile_input
+    CS = self.refresh_event_car_state(CS)
     if not reconcile_input:
       # Other vehicle owners retain their original ordering. In particular,
       # GM's exact steering companion must not lose an earlier source's fault
@@ -551,7 +552,16 @@ class SelfdriveD:
       # retains one total 32-envelope bound; only a blocking wait depends on
       # the original output deadline. A fresh pair may renew accepted engagement
       # after that deadline. The cursor processes each physical sample once.
-      CS = self.refresh_event_car_state(CS)
+      # Interleave the two raw inputs before selected-source owners. Intent
+      # can arrive just before its carState; never select that state without
+      # processing every newly consumed physical sample through this cursor.
+      # The cursor only repeats for new carStates (32 total); all of these
+      # intent drains share one 32-message step budget, including earlier waits.
+      companion = getattr(self, 'aol_intent_companion', None)
+      remaining = max(0, 32 - self.aol_step_intent_drain_count)
+      drained = companion is not None and self.drain_axis_intent(companion, max_messages=remaining)
+      self.aol_event_intent_drained = bool(drained and self.aol_step_intent_drain_ok and self.aol_event_intent_drained is not False)
+      CS = self.refresh_event_car_state(CS, allow_wait=not self.aol_event_input_wait_attempted)
       if len(getattr(self, 'car_state_samples', ())) <= consumed:
         break
       self.aol_reconciled_sources = ((retained_source,) if retained_source else ()) + tuple(
@@ -835,13 +845,20 @@ class SelfdriveD:
           and not sample.buttonEvents for sample, valid in samples))
     return held_brake, held_gas
 
-  def drain_axis_intent(self, companion):
+  def drain_axis_intent(self, companion, *, max_messages=None):
+    if getattr(self, 'aol_event_input_reconcile', False):
+      remaining = max(0, 32 - getattr(self, 'aol_step_intent_drain_count', 0))
+      max_messages = remaining if max_messages is None else min(max_messages, remaining)
     self.mark_loop_phase('intent_drain_start')
-    drained = companion.drain()
+    drained = companion.drain() if max_messages is None else companion.drain(max_messages=max_messages)
     self.mark_loop_phase('intent_drain_return')
     # Empty later drains must not erase earlier restrictive burst evidence.
     self.aol_step_intent_drain_count = (getattr(self, 'aol_step_intent_drain_count', 0) +
                                        getattr(companion, 'last_drain_count', 0))
+    # A later empty/fresh drain cannot erase a failed earlier burst. Only the
+    # qualified interleaved reconciliation consumes this cumulative verdict;
+    # legacy callers still receive this call's original result.
+    self.aol_step_intent_drain_ok = bool(getattr(self, 'aol_step_intent_drain_ok', True) and drained)
     return drained
 
   def event_input_wait_ns(self, CS, now_ns, *, final_held_override=False):
@@ -916,7 +933,7 @@ class SelfdriveD:
       return 0
     return wait_deadline_ns - wait_origin_ns
 
-  def refresh_event_car_state(self, CS):
+  def refresh_event_car_state(self, CS, *, allow_wait=True):
     if not getattr(self, 'event_input_refresh_pending', False) or REPLAY or not self.aol_replay or not self.axis_transport_required:
       return CS
     samples = list(getattr(self, 'car_state_envelopes', ()))
@@ -936,8 +953,10 @@ class SelfdriveD:
     # original published proof can independently remain valid at consumers.
     now_ns = time.monotonic_ns()
     selected_stamp = int(samples[-1].logMonoTime) if samples else getattr(self, 'car_state_retained_source_ns', 0)
-    if (not invalid and len(samples) == initial_count and selected_stamp > 0 and
-        now_ns - selected_stamp > INTENT_MAX_AGE_NS):
+    if (allow_wait and not invalid and len(samples) == initial_count and selected_stamp > 0 and
+        now_ns - selected_stamp > INTENT_MAX_AGE_NS and
+        not (getattr(self, 'aol_event_input_reconcile', False) and getattr(self, 'aol_event_input_wait_attempted', False))):
+      self.aol_event_input_wait_attempted = True
       wait_until_ns = now_ns + self.event_input_wait_ns(CS, now_ns)
       poller = getattr(self, 'car_state_poller', None)
       # Validation itself can consume the remaining lease. Never poll from its
@@ -985,7 +1004,10 @@ class SelfdriveD:
         getattr(self, 'aol_fault_reason', 'none') != 'none' or
         getattr(self, 'aol_published_fault_reason', 'none') != 'none' or
         initial_state != (self.state_machine.state, self.state_machine.soft_disable_timer, self.enabled, self.active) or
-        self.state_machine.soft_disable_timer != 0 or self.events.names != self.events_prev or
+        (self.state_machine.soft_disable_timer != 0 and not (
+          self.state_machine.state == log.SelfdriveState.OpenpilotState.disabled and
+          not self.enabled and not self.active and getattr(self, 'aol_availability_long_inhibit', False) and
+          proof[6] and not proof[7] and proof[8] and not proof[9])) or self.events.names != self.events_prev or
         CS.buttonEvents or any(sample.buttonEvents for sample, _ in getattr(self, 'car_state_samples', ())) or
         any(self.events.contains(kind) for kind in (ET.ENABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
         (self.aol_axis_decision.lateral_active, self.aol_axis_decision.longitudinal_active) != (proof[8], proof[9])):
@@ -1560,6 +1582,10 @@ class SelfdriveD:
     self.aol_axis_publication_deferred = False
     self.aol_step_deferral_checked = False
     self.aol_step_intent_drain_count = 0
+    self.aol_step_intent_drain_ok = True
+    self.aol_event_intent_drained = None
+    self.aol_event_input_reconcile = False
+    self.aol_event_input_wait_attempted = False
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
@@ -1582,7 +1608,8 @@ class SelfdriveD:
     lost_active_aol = bool(self.aol_replay and getattr(self, 'steering_authority_unavailable', False) and
                            (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active))
     intent_companion = getattr(self, 'aol_intent_companion', None)
-    intent_drained = not self.aol_replay or intent_companion is None or self.drain_axis_intent(intent_companion)
+    intent_drained = (self.aol_event_intent_drained and self.aol_step_intent_drain_ok if self.aol_event_intent_drained is not None else
+                      not self.aol_replay or intent_companion is None or self.drain_axis_intent(intent_companion))
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
       self._loop_decision_ns = now_ns
