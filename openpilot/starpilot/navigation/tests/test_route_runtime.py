@@ -39,6 +39,7 @@ class Executor:
 
 def configured(tmp_path):
   owner = NavigationOwner(tmp_path, runtime_source=lambda: None)
+  owner._is_metric = lambda: True
   settings = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
   owner.select({'name': 'Destination', 'longitude': .01, 'latitude': 0.}, settings['revision'], True)
   return owner
@@ -94,6 +95,25 @@ def test_arrival_does_not_override_a_newer_destination(tmp_path, route):
   owner.select({'name': 'Elsewhere', 'longitude': .02, 'latitude': 0.}, stale, True)
   runtime._end_route(stale)
   assert owner.read()['destination']['name'] == 'Elsewhere'
+
+
+def test_arrival_retries_after_clear_io_failure(tmp_path, monkeypatch):
+  owner = configured(tmp_path)
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=Executor())
+  revision = owner.read()['revision']
+  clear = owner.clear
+  calls = 0
+  def fail_once(*args):
+    nonlocal calls
+    calls += 1
+    if calls == 1:
+      raise OSError('temporary write failure')
+    return clear(*args)
+  monkeypatch.setattr(owner, 'clear', fail_once)
+  runtime._end_route(revision)
+  assert owner.read()['destination'] is not None
+  runtime._end_route(revision)
+  assert calls == 2 and owner.read()['destination'] is None
 
 
 def test_route_failure_backoff_and_no_parallel_requests(tmp_path):

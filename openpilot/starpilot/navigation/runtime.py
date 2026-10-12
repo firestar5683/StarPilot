@@ -138,11 +138,14 @@ class RouteRuntime:
     # Once per destination; a concurrent change (new destination, Galaxy edit) wins over arrival.
     if self.ended_revision == revision:
       return
-    self.ended_revision = revision
     try:
       self.owner.clear(revision, True)
-    except (ConflictError, ValidationError, OSError, PermissionError):
-      pass
+    except ConflictError:
+      self.ended_revision = revision
+    except (ValidationError, OSError):
+      return
+    else:
+      self.ended_revision = revision
 
 
 def publish_status(pm, value: dict) -> None:

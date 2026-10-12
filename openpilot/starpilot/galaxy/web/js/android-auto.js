@@ -910,21 +910,20 @@ export const AndroidAutoPage = {
 
       <GxDialog v-if="installOpen && setup" labelledby="gx-aa-install-title" class="gx-aa-sheet__dialog" @close="closeInstall">
         <div class="gx-aa-sheet__toolbar">
-          <span></span>
-          <button type="button" class="gx-icon-btn gx-aa-sheet__close" aria-label="Close" @click="closeInstall"><i class="bi bi-x-lg"></i></button>
+          <button type="button" class="gx-icon-btn" aria-label="Close" @click="closeInstall"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="gx-aa-sheet__body">
-          <div v-if="installState === 'done'" class="gx-aa-sheet__done">
+          <div v-if="installState === 'done'" class="gx-message gx-aa-sheet__done">
             <div class="gx-aa-done-badge"><i class="bi bi-check-lg" aria-hidden="true"></i></div>
             <h3 id="gx-aa-install-title">You’re all set</h3>
-            <p class="gx-aa-done-subtitle">{{ expiry.label }}</p>
+            <p class="gx-note">{{ expiry.label }}</p>
             <p v-if="!setup.enabled" class="gx-note">Turn on Android Auto in step 1 to connect to your car.</p>
             <ul class="gx-aa-checks"><li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li></ul>
-            <button class="gx-btn gx-aa-cta gx-aa-done-btn" @click="closeInstall">Done</button>
+            <button class="gx-btn gx-aa-cta" @click="closeInstall">Done</button>
           </div>
-          <div v-else-if="setup.identity.installed && !installAttempted" class="gx-aa-manage">
-            <div class="gx-aa-sheet__head">
-              <div class="gx-aa-sheet__lead">
+          <div v-else-if="setup.identity.installed && !installAttempted" class="gx-stack">
+            <div class="gx-stack gx-aa-sheet__head">
+              <div class="gx-cluster gx-aa-sheet__lead">
                 <div class="gx-aa-sheet__icon-badge"><i class="bi bi-shield-check"></i></div>
                 <div>
                   <h3 id="gx-aa-install-title">Android Auto Support</h3>
@@ -932,19 +931,19 @@ export const AndroidAutoPage = {
                 </div>
               </div>
             </div>
-            <dl class="gx-aa-manage__facts">
-              <div class="gx-aa-manage__card">
+            <dl class="gx-stack gx-aa-manage__facts">
+              <div class="gx-card gx-info-card">
                 <dt>Status</dt>
                 <dd><span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level">{{ expiry.label }}</span></dd>
               </div>
             </dl>
-            <div class="gx-actions gx-aa-manage__actions">
+            <div class="gx-actions">
               <button type="button" class="gx-btn gx-btn--danger" :disabled="!!removeReason" :title="removeReason || undefined" @click="closeInstall(); openRemove()"><i class="bi bi-trash3" aria-hidden="true"></i> Remove Android Auto support</button>
             </div>
           </div>
-          <div v-else class="gx-aa-setup">
-            <div class="gx-aa-sheet__head">
-              <div class="gx-aa-sheet__lead">
+          <div v-else class="gx-stack">
+            <div class="gx-stack gx-aa-sheet__head">
+              <div class="gx-cluster gx-aa-sheet__lead">
                 <div>
                   <h3 id="gx-aa-install-title">Set Up Android Auto Support</h3>
                   <p class="gx-note">One-time setup so your car accepts your comma.</p>
@@ -954,7 +953,7 @@ export const AndroidAutoPage = {
             <ol class="gx-aa-sheet__steps">
               <li class="gx-aa-step-card" :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
                 <div class="gx-aa-step-card__head">
-                  <span class="gx-aa-step-card__num">1</span>
+                  <span class="gx-aa-step__num gx-aa-step-card__num">1</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Download Android Auto</strong>
                     <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : 'Get the newest release from APKMirror' }}</small>
@@ -967,12 +966,12 @@ export const AndroidAutoPage = {
                   <a v-else class="gx-btn gx-btn--tonal" :href="download.url" target="_blank" rel="noopener noreferrer" @click="markDownloadStarted">
                     <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open APKMirror
                   </a>
-                  <small v-if="download.direct" class="gx-note">From APKPure, a third-party mirror (<a href="https://apkpure.com/terms.html" target="_blank" rel="noopener noreferrer">terms</a>). Don’t unzip it.</small>
+                  <small v-if="download.direct" class="gx-note">From APKPure, a third-party mirror (<a class="gx-link" href="https://apkpure.com/terms.html" target="_blank" rel="noopener noreferrer">terms</a>). Don’t unzip it.</small>
                 </div>
               </li>
               <li class="gx-aa-step-card" :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
                 <div class="gx-aa-step-card__head">
-                  <span class="gx-aa-step-card__num">2</span>
+                  <span class="gx-aa-step__num gx-aa-step-card__num">2</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Choose the downloaded file</strong>
                     <small>{{ downloadStarted && downloadsHint ? downloadsHint : 'The file you just downloaded' }}</small>
@@ -984,7 +983,7 @@ export const AndroidAutoPage = {
                     <i class="bi bi-folder2-open"></i> {{ packageFile ? 'Choose a Different File' : 'Choose File' }}
                   </label>
                   <small v-if="packageChecking" role="status" class="gx-note">Checking downloaded file…</small>
-                  <div v-if="packageFile && !packageError && !packageChecking" class="gx-aa-file-chip">
+                  <div v-if="packageFile && !packageError && !packageChecking" class="gx-chip gx-aa-file-chip">
                     <i class="bi bi-file-earmark-zip"></i>
                     <span>{{ packageFile.name }}</span>
                     <small>{{ Math.ceil(packageFile.size / 1048576) }} MB</small>
@@ -994,18 +993,18 @@ export const AndroidAutoPage = {
               </li>
               <li class="gx-aa-step-card">
                 <div class="gx-aa-step-card__head">
-                  <span class="gx-aa-step-card__num">3</span>
+                  <span class="gx-aa-step__num gx-aa-step-card__num">3</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Install</strong>
                     <small>Send it to your comma and check the certificate</small>
                   </div>
                 </div>
                 <div class="gx-aa-step-card__body">
-                  <button v-if="installState === 'choose'" class="gx-btn gx-aa-submit-btn" :disabled="!!uploadReason" @click="upload">
+                  <button v-if="installState === 'choose'" class="gx-btn gx-aa-cta" :disabled="!!uploadReason" @click="upload">
                     {{ setup.enabled ? 'Install' : 'Turn On and Install' }}
                   </button>
                   <small v-if="installState === 'choose' && uploadReason && packageFile && !packageError" class="gx-note" role="status">{{ uploadReason }}</small>
-                  <div v-if="installState === 'uploading'" role="status" aria-live="polite" class="gx-aa-progress">
+                  <div v-if="installState === 'uploading'" role="status" aria-live="polite" class="gx-stack">
                     <div class="gx-update-progress__track" role="progressbar" aria-label="Sending to your comma" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="uploadPercent">
                       <div class="gx-update-progress__fill" :style="{ width: uploadPercent + '%' }"></div>
                     </div>
@@ -1022,7 +1021,7 @@ export const AndroidAutoPage = {
                 </div>
               </li>
             </ol>
-            <div class="gx-aa-sheet__footer">
+            <div class="gx-stack gx-aa-sheet__footer">
               <small class="gx-note gx-aa-trademark">Google and Android Auto are trademarks of Google LLC. StarPilot is not affiliated with or endorsed by Google or APKPure.</small>
               <small class="gx-note">The uploaded file is deleted after import. Maximum size {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</small>
             </div>

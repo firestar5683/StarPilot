@@ -150,9 +150,7 @@ def _retire_display_switches(params, issues):
     issues.append("Invalid onroad layout kept; display switches were not carried over")
     document = None
   if document is None:
-    for key in RETIRED_DISPLAY_KEYS:
-      params.remove(key)
-    return True
+    return False
   saved = {key: read_visibility(params, key) for key in RETIRED_DISPLAY_KEYS}
   def chosen(key, value):
     return saved[key].readable and saved[key].value is value
