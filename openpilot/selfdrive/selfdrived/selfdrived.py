@@ -1553,8 +1553,11 @@ class SelfdriveD:
         self.aol_authority_lost = False
       # Temporary EPS withdraws steering commands without revoking the armed
       # latch. Keep the event and ordinary soft-disable behavior unchanged.
+      from openpilot.starpilot.car.gm.aol import seatbelt_lateral_soft_event_allowed
       aol_hard_soft_fault = any(event.softDisable and not (
-        event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent)
+        event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
+        seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
+          source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id))
         for event in self.events.to_msg())
       self.aol_fault_reason = ('critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
                                aol_hard_soft_fault and not availability else

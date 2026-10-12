@@ -34,7 +34,7 @@ class Peers:
     return getattr(self.messages[name], name)
 
 
-def parse(card, now, gesture=None, counter=0):
+def parse(card, now, gesture=None, counter=0, *, belt_unlatched=False, packets_only=False):
   packer = CANPacker(DBC[card.CP.carFingerprint][Bus.pt])
   _, packets = feed(SimpleNamespace(update=lambda _: None), packer, now, counter=counter,
                     active=False, speed=20., brake=gesture == 'brake', regen=gesture == 'paddle')
@@ -42,16 +42,23 @@ def parse(card, now, gesture=None, counter=0):
   packets += [packer.make_can_msg('BCMBlindSpotMonitor', 0, {}),
               packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 6}),
               (0x1E1, button_bytes(CruiseButtons.CANCEL if gesture == 'cancel' else CruiseButtons.UNPRESS, counter), 0)]
+  if belt_unlatched:
+    # Real physical BCMDoorBeltStatus (0x12A), not a CarState assignment.
+    packets = [p for p in packets if p[0] != 0x12A]
+    packets.append(packer.make_can_msg('BCMDoorBeltStatus', 0, {'LeftSeatBelt': 0}))
   sensor = bytearray(packer.make_can_msg('GAS_SENSOR', 0,
                      {'INTERCEPTOR_GAS': 0., 'INTERCEPTOR_GAS2': 0., 'STATE': 0, 'COUNTER_PEDAL': counter})[1])
   sensor[5] = pedal_crc(sensor)
   packets.append((0x201, bytes(sensor), 0))
+  if packets_only:
+    return packets
   if now == NOW:
     card.CI.update([(now - 1_000_000, packets)])
   cs = card.CI.update([(now, packets)])
   assert cs.canValid and not cs.canTimeout
   assert cs.brakePressed == (gesture == 'brake')
   assert cs.regenBraking == (gesture == 'paddle')
+  assert cs.seatbeltUnlatched == belt_unlatched
   card._aol_can_observation = (cs, now, now, now)
   return cs
 
@@ -210,9 +217,22 @@ def test_physical_withdrawal_keeps_identity_freshness_and_health_vetoes(fault):
       events.init('onroadEvents', 1)
       events.onroadEvents[0].name, events.onroadEvents[0].immediateDisable = 'controlsMismatch', True
     sm = Peers([sm.messages['aolSafetyWire'], pandas.as_reader(), axis.as_reader(), events.as_reader()])
-    assert feedback.observe(sm, card.CP, cs, now, latched=True, gm_withdrawal_source_ns=source,
-                            intent_producer_session=card.slc_producer_session)
-    assert feedback.failed
+    reset = feedback.observe(sm, card.CP, cs, now, latched=True, gm_withdrawal_source_ns=source,
+                             intent_producer_session=card.slc_producer_session)
+    if fault == 'seatbelt':
+      # Keep the original input, but correct its demonstrated contract: an
+      # unlatched belt locks LONG and does not erase accepted LAT intent.
+      card.aol_card_intent.update(cs, fault_active=reset, now_ns=now)
+      assert not reset and not feedback.failed and card.aol_card_intent.allowed_latch
+      intent = SimpleNamespace(allowedLatch=True, pauseLateral=False, pauseLongitudinal=False)
+      decision = decide_axes(standard_lateral=False, standard_longitudinal=True, intent=intent,
+        native=native, car_state=cs, initialized=True, model_ready=True, no_entry=False,
+        immediate_disable=False, dm_lockout=False, pause_brake_mps=0.)
+      assert decision.lateral_active
+      assert not decision.desired_longitudinal and not decision.longitudinal_active
+    else:
+      assert reset
+      assert feedback.failed
 
 
 def test_held_and_duplicate_samples_cannot_extend_withdrawal_deadline():
@@ -425,3 +445,388 @@ def test_real_card_published_cancel_intent_preserves_producer_lease_and_freshnes
       intent = replace(intent, validUntilMonoTime=0)
     assert physical_cancel_lateral_allowed(card.CP, cs, intent, native,
       source_ns=source, now_ns=now) == (fault is None)
+
+
+@pytest.mark.parametrize('gesture', ['brake', 'paddle', 'cancel'])
+def test_real_belt_loss_with_physical_withdrawal_retains_only_existing_lateral_intent(gesture):
+  from openpilot.starpilot.aol.intent import disarming_fault
+  from openpilot.starpilot.nostalgia import aol_no_entry
+  from openpilot.selfdrive.selfdrived.events import Events, EventName
+  with OpenpilotPrefix():
+    card, feedback, native = baseline()
+    occurrence = NOW + 10_000_000
+    for tick, unlatched, physical in ((1, True, gesture), (2, True, gesture),
+                                     (3, True, None), (4, False, None)):
+      now = NOW + tick * 10_000_000
+      cs = parse(card, now, physical, counter=tick % 4, belt_unlatched=unlatched)
+      sm, _ = peers(card.CP, card.slc_producer_session, now, controls=False, native=native,
+                    sequence=tick + 1, long_active=tick == 1)
+      events = Events()
+      # At the physical boundary Card consumes the prior event publication;
+      # the following call consumes the real seatbelt soft-disable classification.
+      if unlatched and tick > 1:
+        events.add(EventName.seatbeltNotLatched)
+      event_wire = sm.messages['onroadEvents'].as_builder()
+      event_wire.onroadEvents = events.to_msg()
+      sm = Peers([sm.messages['aolSafetyWire'], sm.messages['pandaStates'],
+                  sm.messages['aolAxisState'], event_wire.as_reader()])
+      source = card.aol_gm_withdrawal_source(cs, now)
+      assert source == (now if physical is not None and (gesture != 'cancel' or tick == 1) else 0)
+      reset = feedback.observe(sm, card.CP, cs, now, latched=True,
+        gm_withdrawal_source_ns=source, intent_producer_session=card.slc_producer_session)
+      card.aol_card_intent.update(cs, fault_active=reset or disarming_fault(events.to_msg(), cs), now_ns=now)
+      assert not reset and not feedback.failed and card.aol_card_intent.allowed_latch
+      assert feedback.gm_withdrawal_ns == occurrence
+      assert native.requestedLongitudinal and native.longitudinalAllowed
+      assert native.observedMonoTime == NOW and native.validUntilMonoTime == NOW + 200_000_000
+      allowed, pause_lat, pause_long = card.aol_card_intent.output(cs)
+      intent = SimpleNamespace(allowedLatch=allowed, pauseLateral=pause_lat, pauseLongitudinal=pause_long)
+      no_entry = aol_no_entry(events.names, cs, paddle_only_cancel=False)
+      decision = decide_axes(standard_lateral=True, standard_longitudinal=unlatched,
+        intent=intent, native=native, car_state=cs, initialized=True, model_ready=True,
+        no_entry=no_entry, immediate_disable=False, dm_lockout=False, pause_brake_mps=0.)
+      assert decision.desired_lateral and decision.lateral_active
+      # Belt loss locks LONG even with a standard LONG request. Rebuckling
+      # supplies no new standard engagement and cannot resume LONG automatically.
+      assert not decision.desired_longitudinal and not decision.longitudinal_active
+      locked = decide_axes(standard_lateral=True, standard_longitudinal=unlatched,
+        intent=intent, native=native, car_state=cs, initialized=True, model_ready=True,
+        no_entry=no_entry, immediate_disable=False, dm_lockout=True, pause_brake_mps=0.)
+      assert not locked.lateral_active and not locked.longitudinal_active
+    ack_ns = NOW + 50_000_000
+    cs = parse(card, ack_ns, counter=1)
+    lat_only = replace(native, observedMonoTime=ack_ns, validUntilMonoTime=ack_ns + 200_000_000,
+      requestedLongitudinal=False, longitudinalAllowed=False,
+      pandaInventory=(replace(native.pandaInventory[0], controlsAllowed=False),))
+    sm, _ = peers(card.CP, card.slc_producer_session, ack_ns, controls=False,
+                  native=lat_only, sequence=6, long_active=False)
+    assert not feedback.observe(sm, card.CP, cs, ack_ns, latched=True,
+                               intent_producer_session=card.slc_producer_session)
+    assert not feedback.failed and feedback.gm_withdrawal_ns == 0
+
+
+@pytest.mark.parametrize('fault', ['belt_immediate', 'belt_user_disable', 'belt_missing_noentry',
+  'wrong_belt_name', 'other_soft', 'mixed_soft', 'stale_events', 'future_events', 'door', 'eps'])
+def test_combined_belt_withdrawal_preserves_exact_event_and_vehicle_fault_vetoes(fault):
+  from openpilot.selfdrive.selfdrived.events import Events, EventName
+  with OpenpilotPrefix():
+    card, feedback, native = baseline()
+    now = NOW + 10_000_000
+    cs = parse(card, now, 'brake', counter=1, belt_unlatched=True)
+    source = card.aol_gm_withdrawal_source(cs, now)
+    assert source == now
+    sm, _ = peers(card.CP, card.slc_producer_session, now, controls=False, native=native, sequence=2)
+    events = Events()
+    events.add(EventName.seatbeltNotLatched)
+    if fault in ('other_soft', 'mixed_soft'):
+      if fault == 'other_soft':
+        events.clear()
+      events.add(EventName.processNotRunning)
+    event_wire = sm.messages['onroadEvents'].as_builder()
+    event_wire.onroadEvents = events.to_msg()
+    if fault == 'belt_immediate':
+      event_wire.onroadEvents[0].immediateDisable = True
+    elif fault == 'belt_user_disable':
+      event_wire.onroadEvents[0].userDisable = True
+    elif fault == 'belt_missing_noentry':
+      event_wire.onroadEvents[0].noEntry = False
+    elif fault == 'wrong_belt_name':
+      event_wire.onroadEvents[0].name = EventName.steerTempUnavailable
+    elif fault == 'stale_events':
+      event_wire.logMonoTime = now - 1_500_000_001
+    elif fault == 'future_events':
+      event_wire.logMonoTime = now + 1
+    elif fault == 'door':
+      cs.doorOpen = True
+    elif fault == 'eps':
+      cs.steerFaultPermanent = True
+    sm = Peers([sm.messages['aolSafetyWire'], sm.messages['pandaStates'],
+                sm.messages['aolAxisState'], event_wire.as_reader()])
+    assert feedback.observe(sm, card.CP, cs, now, latched=True,
+      gm_withdrawal_source_ns=source, intent_producer_session=card.slc_producer_session)
+    assert feedback.failed
+
+
+@pytest.mark.parametrize('gesture', ['brake', 'paddle', 'cancel'])
+@pytest.mark.parametrize('fault', [None, 'other_soft', 'immediate'])
+def test_actual_sd_belt_classification_wire_reaches_next_card_cycle(gesture, fault):
+  from contextlib import ExitStack
+
+  from openpilot.selfdrive.selfdrived.events import Events, EventName
+  from openpilot.starpilot.aol.intent_companion import IntentCompanion
+  from openpilot.starpilot.aol.tests.test_ioniq_availability import IoniqAvailabilityTests
+  from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause
+  from openpilot.starpilot.aol.wire import decode_intent
+
+  class PublishedCarState(Exception):
+    pass
+
+  case = IoniqAvailabilityTests(methodName='runTest')
+  with ExitStack() as cleanup, OpenpilotPrefix():
+    cleanup.callback(case.doCleanups)
+    card, _, native = baseline()
+    sock, queued = object(), []
+    companion = IntentCompanion(sock)
+    sd, _, step = case._authority_callers(True, cp=card.CP.as_reader().as_builder(), intent_companion=companion)
+    sd.aol_session_id = 'gm-session'
+    sd.aol_transport_pause = TransportPause(sd.CP, sd.aol_session_id)
+    sd.aol_availability_pause = AvailabilityPause(sd.CP, sd.aol_session_id)
+    original_receive = messaging.recv_one_or_none
+    cleanup.enter_context(patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none',
+      side_effect=lambda target: queued.pop(0) if target is sock and queued else None if target is sock else original_receive(target)))
+    current = {'now': NOW, 'controls': True, 'events': Events()}
+    original_update = sd.sm.update_msgs
+
+    def receive_native(timestamp, messages):
+      controlled, _ = peers(card.CP, card.slc_producer_session, current['now'],
+                             controls=current['controls'], native=native)
+      originals = [m for m in messages if m.which() not in ('aolSafetyWire', 'pandaStates')]
+      original_update(timestamp, originals + [controlled.messages[n] for n in ('aolSafetyWire', 'pandaStates')])
+
+    cleanup.enter_context(patch.object(sd.sm, 'update_msgs', side_effect=receive_native))
+    def receive_events(cs):
+      sd.events = current['events']
+      sd._update_steering_authority(cs)
+
+    cleanup.enter_context(patch.object(sd, 'update_events', side_effect=receive_events))
+    real_new_message = messaging.new_message
+
+    def publish_card(cs, now):
+      published = {}
+
+      def capture(service, message):
+        published[service] = messaging.log_from_bytes(message if isinstance(message, bytes) else message.to_bytes())
+        if service == 'carState':
+          raise PublishedCarState
+
+      with patch('openpilot.selfdrive.car.card.messaging.new_message',
+                 side_effect=lambda service=None, size=None, **kwargs: real_new_message(service, size, **({'logMonoTime': now} | kwargs))), \
+           patch.object(card.pm, 'send', side_effect=capture):
+        with pytest.raises(PublishedCarState):
+          card.state_publish(cs, None)
+      assert decode_intent(published['aolIntentWire'].aolIntentWire).validUntilMonoTime == now + 200_000_000
+      queued.append(published['aolIntentWire'])
+      return published['aolIntentWire'].as_builder()
+
+    # First establish the baseline from actual SD.step and its real publisher.
+    healthy = parse(card, NOW)
+    initial = publish_card(healthy, NOW)
+    axis, _, _ = step(0, observed_state=healthy, intent_message=initial)
+    assert str(axis.faultReason) == 'none' and axis.lateralActive and axis.longitudinalActive
+    card.aol_transport_feedback = TransportPauseFeedback(card.CP)
+
+    def receive_card(now, physical, unlatched, counter):
+      controlled, _ = peers(card.CP, card.slc_producer_session, now, controls=current['controls'], native=native)
+      frames = [controlled.messages[n] for n in ('aolSafetyWire', 'pandaStates')]
+      frames += [sd.pm.messages[n] for n in ('aolAxisState', 'onroadEvents')]
+      card.sm.update_msgs(now / 1e9, frames)
+      packets = parse(card, now, physical, counter=counter, belt_unlatched=unlatched, packets_only=True)
+      with patch('openpilot.selfdrive.car.card.messaging.drain_sock_raw', return_value=[b'controlled-can-transport']), \
+           patch('openpilot.selfdrive.car.card.can_capnp_to_list', return_value=[(now, packets)]), \
+           patch('openpilot.selfdrive.car.card.time.monotonic_ns', return_value=now), \
+           patch('openpilot.selfdrive.car.card.time.clock_gettime_ns', return_value=now), \
+           patch('openpilot.selfdrive.car.card.REPLAY', False), patch.object(card.sm, 'update'):
+        cs, _ = card.state_update()
+      assert cs.canValid and cs.seatbeltUnlatched == unlatched
+      return cs
+
+    receive_card(NOW + 1_000, None, False, 1)
+    assert card.aol_transport_feedback.session == 'gm-session' and card.aol_transport_feedback.healthy_inventory
+    assert card.aol_transport_feedback.availability_epoch == companion.integrity_epoch
+    for tick in (1, 2, 3):
+      now = NOW + tick * 10_000_000
+      current['now'], current['controls'] = now, False
+      cs = receive_card(now, gesture if tick < 3 else None, tick < 3, (tick + 1) % 4)
+      if tick == 2 and fault is not None:
+        assert card.aol_transport_feedback.failed and not card.aol_card_intent.allowed_latch
+        return
+      assert not card.aol_transport_feedback.failed and card.aol_card_intent.allowed_latch
+      assert card.aol_transport_feedback.gm_withdrawal_ns == NOW + 10_000_000
+      events = Events()
+      if cs.seatbeltUnlatched:
+        events.add(EventName.seatbeltNotLatched)
+      if cs.brakePressed or cs.regenBraking:
+        events.add(EventName.pedalPressed)
+      elif tick == 1 and gesture == 'cancel':
+        events.add(EventName.buttonCancel)
+      if tick == 1 and fault is not None:
+        events.add(EventName.overheat if fault == 'other_soft' else EventName.controlsMismatch)
+      current['events'] = events
+      produced = publish_card(cs, now)
+      axis, _, command = step(tick, observed_state=cs, intent_message=produced)
+      assert queued == [] and sd.aol_last_intent.producerSessionId == card.slc_producer_session
+      assert axis.intentIntegrityEpoch == companion.integrity_epoch
+      assert axis.intentProducerSessionId == card.slc_producer_session
+      assert axis.sourceCarStateMonoTime == axis.observedMonoTime == now
+      assert axis.validUntilMonoTime == now + 30_000_000
+      assert native.observedMonoTime == NOW and native.validUntilMonoTime == NOW + 200_000_000
+      assert native.requestedLateral and native.lateralAllowed and native.requestedLongitudinal and native.longitudinalAllowed
+      assert not axis.longitudinalActive and not command.longActive
+      if fault is not None:
+        assert str(axis.faultReason) == 'critical'
+      else:
+        assert str(axis.faultReason) == 'none' and axis.lateralActive
+        assert not sd.enabled  # Pedal/Cancel still disables ordinary LONG; rebuckling cannot resume it.
+
+
+@pytest.mark.parametrize('fault', [None, 'owner', 'profile', 'stale_source', 'future_source', 'future_observation',
+  'intent_expired', 'excessive_lease', 'unarmed', 'unqualified', 'native_missing', 'native_lateral',
+  'native_fault', 'native_session', 'native_expired', 'belt_mismatch', 'event_user', 'event_no_entry'])
+def test_belt_soft_classification_keeps_current_owner_intent_native_and_source_guards(fault):
+  from openpilot.selfdrive.selfdrived.events import Events, EventName
+  from openpilot.starpilot.aol.wire import IntentState
+  from openpilot.starpilot.car.gm.aol import seatbelt_lateral_soft_event_allowed
+
+  with OpenpilotPrefix():
+    card, _, native = baseline()
+    now = NOW + 10_000_000
+    cs = parse(card, now, 'brake', counter=1, belt_unlatched=True)
+    intent = IntentState(card.slc_producer_session, 1, now, now, now + 200_000_000,
+                         True, False, False, True, True)
+    source = now
+    events = Events()
+    events.add(EventName.seatbeltNotLatched)
+    event = events.to_msg()[0]
+    if fault == 'owner':
+      card.CP.alternativeExperience = 0
+    elif fault == 'profile':
+      card.CP.carFingerprint = CAR.CHEVROLET_VOLT
+    elif fault == 'stale_source':
+      now += 30_000_001
+    elif fault == 'future_source':
+      source += 1
+    elif fault == 'future_observation':
+      intent = replace(intent, observedMonoTime=now + 1)
+    elif fault == 'intent_expired':
+      intent = replace(intent, validUntilMonoTime=now - 1)
+    elif fault == 'excessive_lease':
+      intent = replace(intent, validUntilMonoTime=intent.observedMonoTime + 200_000_001)
+    elif fault == 'unarmed':
+      intent = replace(intent, allowedLatch=False)
+    elif fault == 'unqualified':
+      intent = replace(intent, settingsQualified=False)
+    elif fault == 'native_missing':
+      native = None
+    elif fault == 'native_lateral':
+      native = replace(native, lateralAllowed=False)
+    elif fault == 'native_fault':
+      native = replace(native, pandaInventory=(replace(native.pandaInventory[0], faults=1),))
+    elif fault == 'native_session':
+      native = replace(native, axisSessionId='other')
+    elif fault == 'native_expired':
+      native = replace(native, validUntilMonoTime=now - 1)
+    elif fault == 'belt_mismatch':
+      cs.seatbeltUnlatched = False
+    elif fault == 'event_user':
+      event.userDisable = True
+    elif fault == 'event_no_entry':
+      event.noEntry = False
+    assert seatbelt_lateral_soft_event_allowed(card.CP, cs, intent, native, event,
+      source_ns=source, now_ns=now, axis_session_id='gm-session') == (fault is None)
+
+
+@pytest.mark.parametrize('fault', [None, 'sparse_event', 'no_occurrence', 'same_cycle', 'event_mismatch',
+  'publisher_delay', 'future_event', 'axis_stamp', 'fault_session', 'stale_source', 'future_source', 'axis_expired',
+  'axis_excessive_lease', 'long_desired', 'long_active', 'event_user', 'event_immediate',
+  'event_no_entry', 'mixed_soft', 'producer', 'epoch', 'native_expired', 'occurrence_expired'])
+def test_rebuckled_belt_retention_requires_prior_paired_lat_only_proof(fault):
+  from openpilot.selfdrive.selfdrived.events import Events, EventName
+
+  with OpenpilotPrefix():
+    card, feedback, native = baseline()
+    occurrence = NOW + 10_000_000
+    cs = parse(card, occurrence, 'brake', counter=1, belt_unlatched=True)
+    sm, _ = peers(card.CP, card.slc_producer_session, occurrence, controls=False, native=native, sequence=2)
+    assert not feedback.observe(sm, card.CP, cs, occurrence, latched=True,
+      gm_withdrawal_source_ns=card.aol_gm_withdrawal_source(cs, occurrence),
+      intent_producer_session=card.slc_producer_session)
+    assert feedback.gm_withdrawal_ns == occurrence
+
+    now, prior = NOW + 30_000_000, NOW + 20_000_000
+    cs = parse(card, now, counter=2)
+    assert not cs.seatbeltUnlatched and not cs.brakePressed and not cs.regenBraking
+    assert card.aol_gm_withdrawal_source(cs, now) == 0
+    sm, _ = peers(card.CP, card.slc_producer_session, prior, controls=False, native=native,
+                  sequence=3, long_active=False)
+    axis = sm.messages['aolAxisState'].as_builder()
+    events = sm.messages['onroadEvents'].as_builder()
+    ordinary = Events()
+    ordinary.add(EventName.seatbeltNotLatched)
+    events.onroadEvents = ordinary.to_msg()
+    axis.aolAxisState.faultEventMonoTime = events.logMonoTime
+    if fault == 'sparse_event':
+      events.logMonoTime = axis.aolAxisState.faultEventMonoTime = occurrence
+    elif fault == 'no_occurrence':
+      feedback.gm_withdrawal_ns = 0
+    elif fault == 'same_cycle':
+      events.logMonoTime = now
+      axis.logMonoTime = now
+      axis.aolAxisState.sourceCarStateMonoTime = axis.aolAxisState.observedMonoTime = now
+      axis.aolAxisState.validUntilMonoTime = now + 30_000_000
+      axis.aolAxisState.faultEventMonoTime = now
+    elif fault == 'event_mismatch':
+      axis.aolAxisState.faultEventMonoTime -= 1
+    elif fault == 'publisher_delay':
+      axis.aolAxisState.sourceCarStateMonoTime = events.logMonoTime - 1_000
+    elif fault == 'future_event':
+      events.logMonoTime = axis.aolAxisState.faultEventMonoTime = prior + 1
+    elif fault == 'axis_stamp':
+      axis.logMonoTime -= 1
+    elif fault == 'fault_session':
+      axis.aolAxisState.faultSessionId = 'other-session'
+    elif fault == 'stale_source':
+      axis.aolAxisState.sourceCarStateMonoTime = now - 30_000_001
+    elif fault == 'future_source':
+      axis.aolAxisState.sourceCarStateMonoTime = now + 1
+    elif fault == 'axis_expired':
+      axis.aolAxisState.validUntilMonoTime = now - 1
+    elif fault == 'axis_excessive_lease':
+      axis.aolAxisState.validUntilMonoTime = prior + 30_000_001
+    elif fault == 'long_desired':
+      axis.aolAxisState.desiredLongitudinal = True
+    elif fault == 'long_active':
+      axis.aolAxisState.longitudinalActive = True
+    elif fault == 'event_user':
+      events.onroadEvents[0].userDisable = True
+    elif fault == 'event_immediate':
+      events.onroadEvents[0].immediateDisable = True
+    elif fault == 'event_no_entry':
+      events.onroadEvents[0].noEntry = False
+    elif fault == 'mixed_soft':
+      ordinary.add(EventName.overheat)
+      events.onroadEvents = ordinary.to_msg()
+    elif fault == 'producer':
+      axis.aolAxisState.intentProducerSessionId = 'other-producer'
+    elif fault == 'epoch':
+      axis.aolAxisState.intentIntegrityEpoch += 1
+    elif fault == 'native_expired':
+      native = replace(native, validUntilMonoTime=now - 1)
+      sm, _ = peers(card.CP, card.slc_producer_session, prior, controls=False, native=native,
+                    sequence=3, long_active=False)
+    elif fault == 'occurrence_expired':
+      now = occurrence + 200_000_001
+      prior = now - 10_000_000
+      cs = parse(card, now, counter=3)
+      axis.logMonoTime = prior
+      axis.aolAxisState.sourceCarStateMonoTime = axis.aolAxisState.observedMonoTime = prior
+      axis.aolAxisState.validUntilMonoTime = prior + 30_000_000
+      events.logMonoTime = axis.aolAxisState.faultEventMonoTime = prior
+      native = replace(native, observedMonoTime=prior, validUntilMonoTime=prior + 200_000_000)
+      sm, _ = peers(card.CP, card.slc_producer_session, prior, controls=False, native=native,
+                    sequence=3, long_active=False)
+    sm = Peers([sm.messages['aolSafetyWire'], sm.messages['pandaStates'], axis.as_reader(), events.as_reader()])
+    reset = feedback.observe(sm, card.CP, cs, now, latched=True,
+      gm_withdrawal_source_ns=0, intent_producer_session=card.slc_producer_session)
+    card.aol_card_intent.update(cs, fault_active=reset, now_ns=now)
+    if fault in (None, 'sparse_event', 'publisher_delay'):
+      assert not reset and not feedback.failed and card.aol_card_intent.allowed_latch
+      assert feedback.gm_withdrawal_ns == occurrence
+      assert native.observedMonoTime == NOW and native.validUntilMonoTime == NOW + 200_000_000
+      assert native.requestedLongitudinal and native.longitudinalAllowed
+      intent = SimpleNamespace(allowedLatch=True, pauseLateral=False, pauseLongitudinal=False)
+      decision = decide_axes(standard_lateral=False, standard_longitudinal=False, intent=intent,
+        native=native, car_state=cs, initialized=True, model_ready=True, no_entry=False,
+        immediate_disable=False, dm_lockout=False, pause_brake_mps=5.)
+      assert decision.lateral_active and not decision.desired_longitudinal and not decision.longitudinal_active
+    else:
+      assert reset and feedback.failed and not card.aol_card_intent.allowed_latch

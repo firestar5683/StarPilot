@@ -128,6 +128,7 @@ def retained_physical_longitudinal_intent(feedback, sm, cp, cs, axis, now_ns, *,
   """Retain accepted LAT intent through a bounded physical LONG withdrawal."""
   from opendbc.car.gm.values import is_bolt_present_no_acc_pedal_profile
   from opendbc.car.structs import car
+  from openpilot.cereal import log
   from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, SAFETY_MAX_AGE_NS
   from openpilot.starpilot.aol.transport_pause import independent_lateral_health
   occurrence = feedback.gm_withdrawal_ns or source_ns
@@ -140,7 +141,7 @@ def retained_physical_longitudinal_intent(feedback, sm, cp, cs, axis, now_ns, *,
       not feedback.gm_withdrawal_ns and now_ns - occurrence > AXIS_MAX_AGE_NS or
       not producer or producer != feedback.availability_producer or
       str(axis.intentProducerSessionId) != producer or int(axis.intentIntegrityEpoch) != feedback.availability_epoch or
-      cs.accFaulted or cs.seatbeltUnlatched or cs.doorOpen or not cs.cruiseState.available or
+      cs.accFaulted or cs.doorOpen or not cs.cruiseState.available or
       cs.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.low,
                             car.CarState.GearShifter.sport, car.CarState.GearShifter.brake) or
       str(axis.faultReason) != 'none' or not axis.desiredLateral or not axis.lateralActive or
@@ -148,10 +149,23 @@ def retained_physical_longitudinal_intent(feedback, sm, cp, cs, axis, now_ns, *,
       not 0 < axis.sourceCarStateMonoTime <= axis.observedMonoTime <= now_ns or
       now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
     return None
+  # The saved LAT contract treats a parsed unlatched belt as a LONG lock.
+  # After rebuckling, accept only a prior producer's matching belt event and
+  # LAT-only proof within the already established physical occurrence. Events
+  # publish sparsely, so their stamp binds to faultEventMonoTime, not the newer
+  # car-state source. The original axis/native leases remain unchanged.
   event_ns = int(sm.logMonoTime['onroadEvents'])
+  prior_belt_proof = bool(feedback.gm_withdrawal_ns and
+    feedback.gm_withdrawal_ns <= event_ns <= axis.observedMonoTime < now_ns and
+    event_ns == axis.faultEventMonoTime and str(axis.faultSessionId) == feedback.session and
+    int(sm.logMonoTime['aolAxisState']) == axis.observedMonoTime and
+    now_ns <= axis.validUntilMonoTime <= axis.observedMonoTime + AXIS_MAX_AGE_NS and
+    not axis.desiredLongitudinal and not axis.longitudinalActive)
   if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
       not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
-      any(e.immediateDisable or e.softDisable for e in sm['onroadEvents'])):
+      any(e.immediateDisable or e.softDisable and not
+          ((cs.seatbeltUnlatched or prior_belt_proof) and e.name == log.OnroadEvent.EventName.seatbeltNotLatched and
+           e.noEntry and not e.userDisable) for e in sm['onroadEvents'])):
     return None
   native = independent_lateral_health(sm, cp, cs, feedback.session, now_ns)
   if (native is None or not native.pandaInventory or not native.requestedLongitudinal or
@@ -184,5 +198,37 @@ def physical_cancel_lateral_allowed(cp, cs, intent, native, *, source_ns, now_ns
       native is not None and native.requestedLateral and native.lateralAllowed and
       native.pandaInventory and native_inventory_matches_cp(native, cp) and
       0 < native.observedMonoTime <= now_ns <= native.validUntilMonoTime)
+  except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+    return False
+
+
+def seatbelt_lateral_soft_event_allowed(cp, cs, intent, native, event, *, source_ns, now_ns, axis_session_id) -> bool:
+  """The qualified saved LAT owner treats only its ordinary belt event as a LONG lock."""
+  if not qualified_gm(cp):
+    return False
+  from opendbc.car.gm.values import is_bolt_present_no_acc_pedal_profile
+  from opendbc.car.structs import car
+  from openpilot.cereal import log
+  from openpilot.starpilot.aol.runtime import AXIS_MAX_AGE_NS, SAFETY_MAX_AGE_NS, native_inventory_matches_cp
+  try:
+    return bool(is_bolt_present_no_acc_pedal_profile(cp) and
+      int(cp.alternativeExperience) == GM_AOL_ALTERNATIVE_EXPERIENCE and
+      event.name == log.OnroadEvent.EventName.seatbeltNotLatched and event.softDisable and
+      event.noEntry and not event.immediateDisable and not event.userDisable and
+      cs.seatbeltUnlatched and cs.canValid and not cs.canTimeout and not cs.accFaulted and not cs.doorOpen and
+      not cs.steerFaultTemporary and not cs.steerFaultPermanent and cs.cruiseState.available and
+      cs.gearShifter in (car.CarState.GearShifter.drive, car.CarState.GearShifter.low,
+                        car.CarState.GearShifter.sport, car.CarState.GearShifter.brake) and
+      intent is not None and intent.settingsQualified and intent.allowedLatch and intent.lateralArmed and
+      intent.producerSessionId and intent.carStateLogMonoTime == source_ns and
+      0 < source_ns <= intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
+      now_ns - source_ns <= AXIS_MAX_AGE_NS and
+      intent.validUntilMonoTime - intent.observedMonoTime <= SAFETY_MAX_AGE_NS and
+      native is not None and native.compatible and int(native.protocolVersion) == 1 and
+      axis_session_id and native.axisSessionId == axis_session_id and
+      native.requestedLateral and native.lateralAllowed and native.pandaInventory and
+      native_inventory_matches_cp(native, cp) and
+      0 < native.observedMonoTime <= now_ns <= native.validUntilMonoTime and
+      native.validUntilMonoTime - native.observedMonoTime <= SAFETY_MAX_AGE_NS)
   except (AttributeError, KeyError, IndexError, TypeError, ValueError):
     return False
