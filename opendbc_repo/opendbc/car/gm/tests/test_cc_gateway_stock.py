@@ -130,7 +130,7 @@ class TestCcGatewayStock(unittest.TestCase):
   def test_manual_identity_and_stock_ownership(self):
     self.assertEqual(len(CC_GATEWAY_STOCK_CAR), 9)
     for car in CC_GATEWAY_STOCK_CAR:
-      self.assertEqual(car.config.car_docs, [])
+      self.assertEqual(car.config.car_docs[0].support_type.value, "Community")
       automatic = {CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT5_CC, CAR.CHEVROLET_EQUINOX_CC,
                    CAR.CHEVROLET_MALIBU_CC, CAR.CHEVROLET_SUBURBAN_CC, CAR.CHEVROLET_TRAILBLAZER_CC}
       self.assertEqual(car in FINGERPRINTS, car in automatic)

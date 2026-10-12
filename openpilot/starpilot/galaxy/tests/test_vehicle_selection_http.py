@@ -12,7 +12,7 @@ from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.galaxy.vehicle_selection import VehicleSelectionGateway
 from openpilot.starpilot.saved_document import WriteResult
-from openpilot.starpilot.vehicle_selection import KEY, VehicleSelectionOwner, read_selection
+from openpilot.starpilot.vehicle_selection import KEY, VehicleSelectionOwner, choices, read_selection
 
 
 class Context:
@@ -74,6 +74,8 @@ class VehicleSelectionHttpTest(unittest.TestCase):
     self.assertEqual(page['selectedLabel'], 'Auto detection')
     self.assertIsNone(page['reported'])
     self.assertNotIn('MOCK', [item['platform'] for item in page['choices']])
+    self.assertEqual(page['choices'], [{'platform': choice.platform, 'make': choice.make, 'label': choice.label}
+                                      for choice in choices()])
     selected = page['choices'][0]
     self.context.reported = SimpleNamespace(carFingerprint=selected['platform'], notCar=False)
     other_cookie = self.login()

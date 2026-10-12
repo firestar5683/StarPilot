@@ -459,7 +459,8 @@ class GMCarDocs(CarDocs):
   package: str = "Adaptive Cruise Control (ACC)"
 
   def init_make(self, CP: CarParams):
-    if CP.carFingerprint in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CC):
+    if (CP.carFingerprint in ASCM_INTERCEPT_CAR or CP.carFingerprint in CC_GATEWAY_STOCK_CAR or
+        CP.carFingerprint in (CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_MALIBU_HYBRID_CC)):
       self.car_parts = CarParts.common([CarHarness.custom])
     elif CP.networkLocation == CarParams.NetworkLocation.fwdCamera:
       if CP.carFingerprint in SDGM_CAR:
@@ -469,6 +470,13 @@ class GMCarDocs(CarDocs):
     else:
       self.footnotes.insert(0, Footnote.SETUP)
       self.car_parts = CarParts.common([CarHarness.obd_ii])
+
+
+@dataclass
+class GMCommunityCarDocs(GMCarDocs):
+  merged: bool = False
+  support_type: SupportType = SupportType.COMMUNITY
+  support_link: str = "#community"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -485,37 +493,9 @@ class GMPlatformConfig(PlatformConfig):
   })
 
 
-@dataclass
-class GMASCMPlatformConfig(GMPlatformConfig):
-  def init(self):
-    # ASCM is supported, but due to a janky install and hardware configuration, we are not showing in the car docs
-    self.car_docs = []
-
-
-@dataclass
-class GMSDGMPlatformConfig(GMPlatformConfig):
-  def init(self):
-    # Don't show in docs until the harness is sold. See https://github.com/commaai/openpilot/issues/32471
-    self.car_docs = []
-
-
-@dataclass
-class GMCCGatewayPlatformConfig(GMPlatformConfig):
-  def init(self):
-    # Manual-only identities; installation and route evidence is not available.
-    self.car_docs = []
-
-
-@dataclass
-class GMCameraStockPlatformConfig(GMPlatformConfig):
-  def init(self):
-    # Explicit identities pending independent install and route qualification.
-    self.car_docs = []
-
-
 class CAR(Platforms):
-  HOLDEN_ASTRA = GMASCMPlatformConfig(
-    [GMCarDocs("Holden Astra 2017")],
+  HOLDEN_ASTRA = GMPlatformConfig(
+    [GMCommunityCarDocs("Holden Astra (OBD-II Harness) 2017")],
     GMCarSpecs(mass=1363, wheelbase=2.662, steerRatio=15.7, centerToFrontRatio=0.4),
   )
   CHEVROLET_VOLT = GMPlatformConfig(
@@ -532,61 +512,62 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Volt (ASCM Harness) 2017-18", "Adaptive Cruise Control (ACC); custom ASCM harness install",
                support_type=SupportType.COMMUNITY, support_link="#community")], CHEVROLET_VOLT.specs,
   )
-  CADILLAC_ATS = GMASCMPlatformConfig(
-    [GMCarDocs("Cadillac ATS Premium Performance 2018")],
+  CADILLAC_ATS = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac ATS Premium Performance (OBD-II Harness) 2018")],
     GMCarSpecs(mass=1601, wheelbase=2.78, steerRatio=15.3),
   )
-  CHEVROLET_MALIBU = GMASCMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu Premier 2017")],
+  CHEVROLET_MALIBU = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Malibu Premier (OBD-II Harness) 2017")],
     GMCarSpecs(mass=1496, wheelbase=2.83, steerRatio=15.8, centerToFrontRatio=0.4),
   )
-  CHEVROLET_MALIBU_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu ASCM Harness 2017-19")], CHEVROLET_MALIBU.specs,
+  CHEVROLET_MALIBU_ASCM = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Malibu (ASCM Harness) 2017-19")], CHEVROLET_MALIBU.specs,
   )
-  GMC_ACADIA = GMASCMPlatformConfig(
-    [GMCarDocs("GMC Acadia 2018", video="https://www.youtube.com/watch?v=0ZN6DdsBUZo")],
+  GMC_ACADIA = GMPlatformConfig(
+    [GMCommunityCarDocs("GMC Acadia (OBD-II Harness) 2018", video="https://www.youtube.com/watch?v=0ZN6DdsBUZo")],
     GMCarSpecs(mass=1975, wheelbase=2.86, steerRatio=14.4, centerToFrontRatio=0.4),
   )
-  GMC_ACADIA_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("GMC Acadia ASCM Harness 2018")], GMC_ACADIA.specs,
+  GMC_ACADIA_ASCM = GMPlatformConfig(
+    [GMCommunityCarDocs("GMC Acadia (ASCM Harness) 2018")], GMC_ACADIA.specs,
   )
-  BUICK_LACROSSE = GMASCMPlatformConfig(
-    [GMCarDocs("Buick LaCrosse 2017-19", "Driver Confidence Package 2")],
+  BUICK_LACROSSE = GMPlatformConfig(
+    [GMCommunityCarDocs("Buick LaCrosse (OBD-II Harness) 2017-19", "Driver Confidence Package 2")],
     GMCarSpecs(mass=1712, wheelbase=2.91, steerRatio=15.8, centerToFrontRatio=0.4),
   )
-  BUICK_LACROSSE_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("Buick LaCrosse ASCM Harness 2017-19")], BUICK_LACROSSE.specs,
+  BUICK_LACROSSE_ASCM = GMPlatformConfig(
+    [GMCommunityCarDocs("Buick LaCrosse (ASCM Harness) 2017-19")], BUICK_LACROSSE.specs,
   )
-  BUICK_LACROSSE_ASCM_19US = GMASCMPlatformConfig(
-    [GMCarDocs("Buick LaCrosse US ASCM Harness 2019")], BUICK_LACROSSE.specs,
+  BUICK_LACROSSE_ASCM_19US = GMPlatformConfig(
+    [GMCommunityCarDocs("Buick LaCrosse US (ASCM Harness) 2019")], BUICK_LACROSSE.specs,
   )
-  BUICK_REGAL = GMASCMPlatformConfig(
-    [GMCarDocs("Buick Regal Essence 2018")],
+  BUICK_REGAL = GMPlatformConfig(
+    [GMCommunityCarDocs("Buick Regal Essence (OBD-II Harness) 2018")],
     GMCarSpecs(mass=1714, wheelbase=2.83, steerRatio=14.4, centerToFrontRatio=0.4),
   )
-  CADILLAC_ESCALADE = GMASCMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade 2017", "Driver Assist Package")],
+  CADILLAC_ESCALADE = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac Escalade (OBD-II Harness) 2017", "Driver Assist Package")],
     GMCarSpecs(mass=2564, wheelbase=2.95, steerRatio=17.3),
   )
-  CADILLAC_ESCALADE_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade ASCM Harness 2018")], CADILLAC_ESCALADE.specs,
+  CADILLAC_ESCALADE_ASCM = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac Escalade (ASCM Harness) 2018")], CADILLAC_ESCALADE.specs,
   )
-  CADILLAC_ESCALADE_ESV = GMASCMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade ESV 2016", "Adaptive Cruise Control (ACC) & LKAS")],
+  CADILLAC_ESCALADE_ESV = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac Escalade ESV (OBD-II Harness) 2016", "Adaptive Cruise Control (ACC) & LKAS")],
     GMCarSpecs(mass=2739, wheelbase=3.302, steerRatio=17.3, tireStiffnessFactor=1.0),
   )
-  CADILLAC_ESCALADE_ESV_2019 = GMASCMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade ESV 2019", "Adaptive Cruise Control (ACC) & LKAS")],
+  CADILLAC_ESCALADE_ESV_2019 = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac Escalade ESV (OBD-II Harness) 2019", "Adaptive Cruise Control (ACC) & LKAS")],
     CADILLAC_ESCALADE_ESV.specs,
   )
-  CADILLAC_ESCALADE_ESV_2019_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade ESV Platinum ASCM Harness 2019")], CADILLAC_ESCALADE_ESV_2019.specs,
+  CADILLAC_ESCALADE_ESV_2019_ASCM = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac Escalade ESV Platinum (ASCM Harness) 2019")], CADILLAC_ESCALADE_ESV_2019.specs,
   )
   CHEVROLET_SUBURBAN = GMPlatformConfig(
-    [], CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
+    [GMCommunityCarDocs("Chevrolet Suburban (OBD-II Harness)", "Configuration-specific install; observed CAN sources required")],
+    CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
   )
-  CHEVROLET_SUBURBAN_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("Chevrolet Suburban Premier ASCM Harness 2016-20")],
+  CHEVROLET_SUBURBAN_ASCM = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Suburban Premier (ASCM Harness) 2016-20")],
     CHEVROLET_SUBURBAN.specs,
   )
   CHEVROLET_BOLT_EUV = GMPlatformConfig(
@@ -596,7 +577,10 @@ class CAR(Platforms):
     ],
     GMCarSpecs(mass=1669, wheelbase=2.63779, steerRatio=16.8, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
   )
-  CHEVROLET_BOLT_ACC_2022_2023 = GMCameraStockPlatformConfig([], CHEVROLET_BOLT_EUV.specs)
+  CHEVROLET_BOLT_ACC_2022_2023 = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Bolt (Camera Harness) 2022-23", "ACC; recognized camera layout required")],
+    CHEVROLET_BOLT_EUV.specs,
+  )
   CHEVROLET_BOLT_CC_2017 = GMPlatformConfig(
     [GMCarDocs("Chevrolet Bolt EV 2017", "Cruise control with installed pedal interceptor")],
     CHEVROLET_BOLT_EUV.specs,
@@ -630,20 +614,20 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Trailblazer 2021-22")],
     GMCarSpecs(mass=1345, wheelbase=2.64, steerRatio=16.8, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
   )
-  CADILLAC_XT4 = GMSDGMPlatformConfig(
-    [GMCarDocs("Cadillac XT4 2023", "Driver Assist Package")],
+  CADILLAC_XT4 = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac XT4 (SDGM Harness) 2023", "Driver Assist Package")],
     GMCarSpecs(mass=1660, wheelbase=2.78, steerRatio=14.4, centerToFrontRatio=0.4),
   )
-  CADILLAC_XT5 = GMSDGMPlatformConfig(
-    [GMCarDocs("Cadillac XT5 2022", "Driver Assist Package")],
+  CADILLAC_XT5 = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac XT5 (SDGM Harness) 2022", "Driver Assist Package")],
     GMCarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5, tireStiffnessFactor=1.0),
   )
-  CADILLAC_XT6 = GMSDGMPlatformConfig(
-    [GMCarDocs("Cadillac XT6 2020", "Driver Assist Package")],
+  CADILLAC_XT6 = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac XT6 (SDGM Harness) 2020", "Driver Assist Package")],
     GMCarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.5, centerToFrontRatio=0.4),
   )
-  CHEVROLET_BLAZER = GMSDGMPlatformConfig(
-    [GMCarDocs("Chevrolet Blazer 2019-25", "Driver Assist Package")],
+  CHEVROLET_BLAZER = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Blazer (SDGM Harness) 2019-25", "Driver Assist Package")],
     GMCarSpecs(mass=1850, wheelbase=3.10, steerRatio=17.9, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
   )
   CHEVROLET_VOLT_2019 = GMPlatformConfig(
@@ -651,27 +635,29 @@ class CAR(Platforms):
                support_type=SupportType.COMMUNITY, support_link="#community")],
     GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45),
   )
-  CHEVROLET_TRAVERSE = GMSDGMPlatformConfig(
-    [GMCarDocs("Chevrolet Traverse 2022-23", "RS, Premier, or High Country Trim")],
+  CHEVROLET_TRAVERSE = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Traverse (SDGM Harness) 2022-23", "RS, Premier, or High Country Trim")],
     GMCarSpecs(mass=1955, wheelbase=3.07, steerRatio=17.9, centerToFrontRatio=0.4),
   )
-  CHEVROLET_MALIBU_SDGM = GMSDGMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu 2019", "SDGM Harness")],
+  CHEVROLET_MALIBU_SDGM = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Malibu (SDGM Harness) 2019", "SDGM Harness")],
     CHEVROLET_MALIBU.specs,
   )
-  BUICK_BABYENCLAVE = GMSDGMPlatformConfig(
-    [GMCarDocs("Buick Baby Enclave 2020-23", "Driver Assist Package")],
+  BUICK_BABYENCLAVE = GMPlatformConfig(
+    [GMCommunityCarDocs("Buick Baby Enclave (SDGM Harness) 2020-23", "Driver Assist Package")],
     GMCarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.0, centerToFrontRatio=0.5, tireStiffnessFactor=1.0),
   )
   GMC_YUKON = GMPlatformConfig(
     [GMCarDocs("GMC Yukon 2019-20", "Adaptive Cruise Control (ACC) & LKAS")],
     GMCarSpecs(mass=2490, wheelbase=2.94, steerRatio=17.3, centerToFrontRatio=0.5, tireStiffnessFactor=1.0),
   )
-  CHEVROLET_SUBURBAN_CAMERA = GMCameraStockPlatformConfig(
-    [], CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
+  CHEVROLET_SUBURBAN_CAMERA = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Suburban (Camera Harness)", "Manual camera configuration; recognized CAN layout required")],
+    CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
   )
-  CHEVROLET_TRAX = GMCameraStockPlatformConfig(
-    [], CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.4, centerToFrontRatio=0.4),
+  CHEVROLET_TRAX = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Trax (Camera Harness)", "Manual camera configuration; recognized CAN layout required")],
+    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.4, centerToFrontRatio=0.4),
   )
   CHEVROLET_VOLT_CAMERA = GMPlatformConfig(
     [GMCarDocs("Chevrolet Volt (Camera Harness)", "Manual configuration; recognized camera layout required",
@@ -679,17 +665,44 @@ class CAR(Platforms):
     GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45, tireStiffnessFactor=1.0),
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
-  CADILLAC_CT6_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4, tireStiffnessFactor=1.0))
-  CADILLAC_XT4_CC = GMCCGatewayPlatformConfig([], CADILLAC_XT4.specs)
-  CADILLAC_XT5_CC = GMCCGatewayPlatformConfig([], replace(CADILLAC_XT5.specs, tireStiffnessFactor=1.0))
-  CHEVROLET_EQUINOX_CC = GMCCGatewayPlatformConfig([], CHEVROLET_EQUINOX.specs)
-  CHEVROLET_MALIBU_HYBRID_CC = GMPlatformConfig([], GMCarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4))
-  CHEVROLET_MALIBU_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=1450, wheelbase=2.8, steerRatio=18.25,
-                                                                  centerToFrontRatio=0.4, tireStiffnessFactor=0.997))
-  CHEVROLET_SILVERADO_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=2994, wheelbase=3.75, steerRatio=16.3, tireStiffnessFactor=1.0))
-  CHEVROLET_SUBURBAN_CC = GMCCGatewayPlatformConfig([], replace(CHEVROLET_SUBURBAN_ASCM.specs, tireStiffnessFactor=1.0))
-  CHEVROLET_TRAILBLAZER_CC = GMCCGatewayPlatformConfig([], CHEVROLET_TRAILBLAZER.specs)
-  GMC_YUKON_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4, tireStiffnessFactor=1.0))
+  CADILLAC_CT6_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac CT6 (CC)", "Cruise control; configuration-specific installation")],
+    GMCarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
+  )
+  CADILLAC_XT4_CC = GMPlatformConfig([GMCommunityCarDocs("Cadillac XT4 (CC)", "Cruise control; configuration-specific installation")], CADILLAC_XT4.specs)
+  CADILLAC_XT5_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Cadillac XT5 (CC)", "Cruise control; configuration-specific installation")],
+    replace(CADILLAC_XT5.specs, tireStiffnessFactor=1.0),
+  )
+  CHEVROLET_EQUINOX_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Equinox (CC)", "Cruise control; configuration-specific installation")],
+    CHEVROLET_EQUINOX.specs,
+  )
+  CHEVROLET_MALIBU_HYBRID_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Malibu Hybrid (CC)", "Cruise control; configuration-specific installation")],
+    GMCarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4),
+  )
+  CHEVROLET_MALIBU_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Malibu (CC)", "Cruise control; configuration-specific installation")],
+    GMCarSpecs(mass=1450, wheelbase=2.8, steerRatio=18.25,
+                                                                  centerToFrontRatio=0.4, tireStiffnessFactor=0.997),
+  )
+  CHEVROLET_SILVERADO_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Silverado (CC)", "Cruise control; configuration-specific installation")],
+    GMCarSpecs(mass=2994, wheelbase=3.75, steerRatio=16.3, tireStiffnessFactor=1.0),
+  )
+  CHEVROLET_SUBURBAN_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Suburban (CC)", "Cruise control; configuration-specific installation")],
+    replace(CHEVROLET_SUBURBAN_ASCM.specs, tireStiffnessFactor=1.0),
+  )
+  CHEVROLET_TRAILBLAZER_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("Chevrolet Trailblazer (CC)", "Cruise control; configuration-specific installation")],
+    CHEVROLET_TRAILBLAZER.specs,
+  )
+  GMC_YUKON_CC = GMPlatformConfig(
+    [GMCommunityCarDocs("GMC Yukon (CC)", "Cruise control; configuration-specific installation")],
+    GMCarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
+  )
 
 
 class CruiseButtons:

@@ -64,8 +64,8 @@ class TestCarDocs(unittest.TestCase):
         if car.name == "comma body":
           raise unittest.SkipTest
 
-        if car.car_fingerprint in (GM.CHEVROLET_VOLT_CAMERA, GM.CHEVROLET_VOLT_CC):
-          # These manual configurations have no established model-year range.
+        if car.brand == "gm" and not car.merged and not car.years:
+          # Community configurations may have no established model-year range.
           self.assertEqual(car.support_type, SupportType.COMMUNITY)
           self.assertEqual(car.year_list, [])
           continue
@@ -87,6 +87,24 @@ class TestCarDocs(unittest.TestCase):
         self.assertEqual(docs[platform].make, "Chevrolet")
         self.assertEqual(docs[platform].support_type, support)
         self.assertEqual([part for part in docs[platform].car_parts.parts if isinstance(part, CarHarness)], [harness])
+
+  def test_every_gm_platform_has_minimal_docs(self):
+    from opendbc.car.gm.values import GMCommunityCarDocs
+
+    documented = {car.car_fingerprint for car in self.all_cars}
+    for platform in GM:
+      with self.subTest(platform=platform):
+        self.assertIn(platform, documented)
+        self.assertTrue(platform.config.car_docs)
+        for doc in platform.config.car_docs:
+          self.assertTrue(doc.make and doc.model and doc.package)
+          if isinstance(doc, GMCommunityCarDocs):
+            self.assertEqual(doc.support_type, SupportType.COMMUNITY)
+            self.assertFalse(doc.merged)
+            expected_harness = (CarHarness.custom if "ASCM Harness" in doc.name or "(CC)" in doc.name else
+                                CarHarness.gmsdgm if "SDGM Harness" in doc.name else
+                                CarHarness.gm if "Camera Harness" in doc.name else CarHarness.obd_ii)
+            self.assertIn(expected_harness, doc.car_parts.parts)
 
   def test_harnesses(self):
     for car in self.all_cars:

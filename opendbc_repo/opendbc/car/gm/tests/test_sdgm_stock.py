@@ -37,7 +37,7 @@ class TestSdgmStock(unittest.TestCase):
           self.assertTrue(flags & GMSafetyFlags.SDGM)
           self.assertFalse(flags & GMSafetyFlags.HW_CAM_LONG)
           self.assertEqual(cp.radarUnavailable, not radar)
-          self.assertEqual(car.config.car_docs, [])
+          self.assertEqual(car.config.car_docs[0].support_type.value, "Community")
           self.assertNotIn(car, FINGERPRINTS)
           self.assertNotIn(car, FW_VERSIONS)
 

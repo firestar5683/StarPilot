@@ -174,28 +174,36 @@ class TestRuntimePanelActions(unittest.TestCase):
           alert.assert_not_called()
           self.assertIsNone(startup_candidate(self.ui.params))
 
-  def test_large_chevrolet_picker_lists_and_saves_all_volt_configurations(self):
+  def test_large_picker_lists_and_saves_every_gm_platform(self):
     from opendbc.car.gm.values import CAR
     from openpilot.starpilot.vehicle_selection import choices, startup_candidate
     from openpilot.system.ui.widgets import DialogResult
 
-    platforms = (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019,
-                 CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_CC)
+    manufacturers = {'CHEVROLET': 'Chevrolet', 'CADILLAC': 'Cadillac', 'BUICK': 'Buick', 'GMC': 'GMC', 'HOLDEN': 'Holden'}
     catalog = {choice.platform: choice for choice in choices()}
-    for platform in platforms:
+    for platform in CAR:
       with self.subTest(platform=platform):
         session = self._vehicle_session()
         self.ui.CP = None
+        manufacturer = manufacturers[str(platform).split('_', 1)[0]]
         with patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
              patch.object(runtime_app.gui_app, "push_widget") as pushed:
           make = self._open_vehicle_picker(session, pushed)
-          make.selection = "Chevrolet"
+          self.assertIn(manufacturer, make.options)
+          self.assertNotIn("Gm", make.options)
+          make.selection = manufacturer
           make.callback(DialogResult.CONFIRM)
           model = pushed.call_args.args[0]
-          self.assertTrue(all(catalog[item].label in model.options for item in platforms))
+          self.assertEqual(model.title, f"Select {manufacturer} model")
+          self.assertEqual(set(model.options), {choice.label for choice in catalog.values() if choice.make == manufacturer})
+          self.assertEqual(model.options.count(catalog[platform].label), 1)
           model.selection = catalog[platform].label
           model.callback(DialogResult.CONFIRM)
           self.assertEqual(startup_candidate(self.ui.params), platform)
+          self.ui.CP = NS(carFingerprint=str(platform), notCar=False)
+          rows = session._vehicle_selector().rows()
+          self.assertEqual(rows[0].value, catalog[platform].label)
+          self.assertEqual(rows[1].value, catalog[platform].label)
 
   def test_large_vehicle_picker_uses_real_dialog_stack_and_returns_to_same_panel(self):
     from opendbc.car.hyundai.values import CAR
