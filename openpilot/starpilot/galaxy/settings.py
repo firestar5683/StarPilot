@@ -351,8 +351,7 @@ def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
     value = request.value + (" " + row.unit if row.unit and request.value != "Auto" and not request.value.endswith(row.unit) else "")
     return f"Save {row.label.lower()} as {value}? This changes only the display."
   if key in APPEARANCE_LABELS:
-    label = "torque bar" if key == "EnableTorqueBarWidget" else row.label
-    return f"Save {label} as {request.value}? This changes only the display."
+    return f"Save {row.label} as {request.value}? This changes only the display."
   if key == VASM_RESET:
     return "Replace saved spot-monitor settings with Off and unconfigured defaults? Saved regions will be lost."
   if key == VASM_ANNOTATION:

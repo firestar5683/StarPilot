@@ -18,6 +18,8 @@ export function remainingLocationLease(lease, requestStarted, now = performance.
 }
 
 const STATUS = new Set(["disabled", "needsKey", "noDestination", "waitingForLocation", "routing", "guiding", "arrived", "routeUnavailable", "stale"])
+const ROUTE_AVOIDANCES = [{ key: "avoidTolls", label: "Avoid tolls" }, { key: "avoidHighways", label: "Avoid highways" },
+  { key: "avoidFerries", label: "Avoid ferries" }]
 const coordinate = (value) => !!value && Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 90 &&
   Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180
 const text = (value, limit) => typeof value === "string" && value.trim().length > 0 && value.length <= limit
@@ -35,6 +37,7 @@ export function validNavigation(value) {
         Number.isFinite(row.distanceMeters) && row.distanceMeters >= 0 && Array.isArray(row.geometry) && row.geometry.length <= 512 && row.geometry.every(coordinate)) ||
       !Number.isInteger(value.selectedRoute) || value.selectedRoute < 0 || value.selectedRoute > 2)) return false
   return !!value && typeof value.enabled === "boolean" && typeof value.isMetric === "boolean" && typeof value.hasKey === "boolean" && STATUS.has(value.status) &&
+    ROUTE_AVOIDANCES.every(({ key }) => value[key] === undefined || typeof value[key] === "boolean") &&
     (value.network === undefined || ["online", "offline", "unknown"].includes(value.network)) &&
     typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 128 &&
     (value.destination === null || validDestination(value.destination)) && Array.isArray(value.favorites) && value.favorites.length <= 100 &&
@@ -289,6 +292,7 @@ export const NavigationPage = {
     suggestions: [], suggestOpen: false, savedSuggestionPlaces: {}, favoritePicker: null, searchPending: false } },
   watch: { initialTab(value) { this.tab = value } },
   computed: {
+    routeAvoidances() { return ROUTE_AVOIDANCES },
     controlsAvailable() { return this.mode === "local" && !!this.data && !this.stale },
     available() { return this.controlsAvailable && !this.busy && !this.searchPending },
     ready() { return !!this.data?.enabled && !!this.data?.hasKey },
@@ -445,6 +449,15 @@ export const NavigationPage = {
           <p>Show directions on your comma. Navigation works with every driving model. Route guidance helps prepare for turns; steering and speed control follow your normal engagement settings.</p>
           <button v-if="data" type="button" class="gx-btn" :class="{'gx-btn--tonal':data.enabled}" :disabled="!controlsAvailable"
             @click="client.action('configure',{patch:{enabled:!data.enabled}})">{{ data.enabled ? 'Turn off navigation' : 'Turn on navigation' }}</button>
+        </section>
+        <section class="gx-card gx-navigation__section">
+          <h3>Route preferences</h3>
+          <p>Apply to new routes and automatic reroutes. Changing a preference recalculates your current route.</p>
+          <div v-for="option in routeAvoidances" :key="option.key" class="gx-row">
+            <span class="gx-row__info gx-row__label">{{ option.label }}</span>
+            <label class="gx-switch"><input type="checkbox" role="switch" :aria-label="option.label" :checked="!!data?.[option.key]"
+              :disabled="!available" @change="client.action('configure', {patch: {[option.key]: $event.target.checked}})"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
+          </div>
         </section>
         <section class="gx-card gx-navigation__section">
           <h3>Mapbox</h3>

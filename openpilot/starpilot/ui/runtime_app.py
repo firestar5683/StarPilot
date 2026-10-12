@@ -71,10 +71,12 @@ from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
 from openpilot.starpilot.favorites.owner import FavoritesOwner
 from openpilot.starpilot.controllers.cruise_action import CruiseActionPublisher, ui_authority as cruise_action_authority
 from openpilot.starpilot.controllers.wheel_actions import WheelConsumer
+from openpilot.starpilot.system.android_auto.projection_bookmark import BookmarkReceiver
 from openpilot.starpilot.controllers.mode_actions import ModeActionPublisher, producer_available, authority as mode_action_authority
 from openpilot.starpilot.favorites.actions import (BOOKMARK, CYCLE_PERSONALITY, EXPERIMENTAL, INCREASE_SPEED, DECREASE_SPEED, SET_SPEED,
                                                   FORCE_COAST, PULSE_GLIDE, DISENGAGE, TRAFFIC, SWITCHBACK, SCREEN_OFF, mapped_actions)
 from openpilot.starpilot.favorites.state import FavoriteAction
+from openpilot.starpilot.favorites.layout_actions import layout_actions
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.conditional_mode.preferences import PreferenceError, SavedPreferences, decode_preferences
@@ -270,6 +272,12 @@ class StarShellSession:
     self._favorite_data = None
     self._favorite_read_at = None
     self._favorite_claimed = False
+    self._projection_bookmarks = None
+    if getattr(ui_state, 'replay_clock', None) is None:
+      try:
+        self._projection_bookmarks = BookmarkReceiver()
+      except OSError:
+        pass  # Projection bookmarks stay unavailable without affecting the native UI.
 
   def _favorite_authority(self, *, allow_personality_notice: bool = False) -> bool:
     if getattr(ui_state, "replay_clock", None) is not None:
@@ -291,7 +299,7 @@ class StarShellSession:
       self._driver_monitor_layer = DriverMonitorLayer(self.profile)
     top_icons = (self.profile == Profile.COMPACT and state.alert.size == AlertSize.NONE and
                  state.appearance.camera_view != CameraViewChoice.DRIVER and not state.reverse_driver_camera and
-                 not state.appearance.hide_max_speed and self.view.onroad.compact_hud._set_speed_alpha.x > 0.01 and
+                 self.view.onroad.compact_hud._set_speed_alpha.x > 0.01 and
                  state.customization["layouts"]["compact"]["max_speed"]["enabled"])
     self._driver_monitor_layer.render(state, monitor=monitor, driver=driver,
                                       fresh=monitor is not None and driver is not None,
@@ -306,6 +314,9 @@ class StarShellSession:
   def _favorite_actions(self):
     actions = mapped_actions(lambda page: self.feature_snapshot(page, favorite=True), self.feature_request,
                              lambda: self.appearance_owner.snapshot(self.profile), self.appearance_owner.apply)
+    actions.update(layout_actions(ui_state.params, str(self.profile),
+                                  lambda: self._settings_preference_authority() or self._favorite_authority(),
+                                  lambda: self.adapter.invalidate_appearance()))
     actions.update(self._native_favorite_actions())
     return actions
 
@@ -445,6 +456,18 @@ class StarShellSession:
       actions[SET_SPEED] = FavoriteAction(SET_SPEED, "Set Speed To", available=current and not ui_state.params.get_bool("SafeMode"),
         reason="Active software cruise required; speed uses device units", token=repr((drive, current)), invoke_value=set_speed)
     return actions
+
+  def _poll_projection_bookmark(self, now_ns):
+    receiver = getattr(self, '_projection_bookmarks', None)
+    if receiver is None:
+      return
+    authorized = bool(ui_state.started and self._favorite_authority() and
+                      current_message(ui_state.sm, 'carState', now_ns, after_frame=ui_state.started_frame) is not None)
+    stamp = int(ui_state.sm.logMonoTime['carState']) if authorized else 0
+    for _ in range(receiver.drain(now_ns, stamp, authorized=authorized)):
+      action = self._native_favorite_actions().get(BOOKMARK)
+      if action is not None and action.available and action.invoke is not None:
+        action.invoke()
 
   def _poll_wheel(self, now_ns):
     if getattr(ui_state, "replay_clock", None) is not None:
@@ -1273,6 +1296,7 @@ class StarShellSession:
         self._snapshot_cache = None
     snapshot = self.snapshot(mode)
     self._mode = mode
+    self._poll_projection_bookmark(time.monotonic_ns())
     if mode == ShellMode.ONROAD and self.slc_actions is not None:
       observation = snapshot.onroad.speed_limit
       snapshot = replace(snapshot, onroad=replace(snapshot.onroad, speed_limit=replace(
@@ -1598,6 +1622,9 @@ class StarShellSession:
     self._favorite_claimed = False
 
   def close(self) -> None:
+    if receiver := getattr(self, '_projection_bookmarks', None):
+      receiver.close()
+      self._projection_bookmarks = None
     self._aol_save_closed = True
     if pending := getattr(self, "_aol_save", None):
       pending.cancel.set()

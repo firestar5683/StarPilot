@@ -3,8 +3,7 @@
 The car accepts a projection source only when it presents Google's Android Auto
 phone certificate and proves it holds the matching key. Both are embedded in the
 Android Auto app, so each user supplies their own APK (or XAPK/APKM bundle) and
-the comma extracts the identity on device. Nothing is downloaded from or sent to
-anyone except the link the user provides.
+the comma extracts the identity on device.
 
 Extraction needs no decompiler. The app's DEX files hold the phone certificate
 and the Google Automotive Link root as PEM string constants, and the key as an
@@ -46,7 +45,6 @@ from openpilot.starpilot.system.android_auto import identity as identity_store
 # SHA-256 of the DER Google Automotive Link root certificate (valid until 2044).
 GOOGLE_ROOT_SHA256 = "49e52efc13ad2ed09f204c3b10698bd84bb7105f510558aa14b8119a5c4ad17f"
 PACKAGE = "com.google.android.projection.gearhead"
-KNOWN_GOOD_VERSION = "17.6.663454-release"
 
 MAX_FILE_BYTES = 256 * 1024 * 1024       # an uploaded or downloaded APK/XAPK/APKM
 MAX_APK_BYTES = 192 * 1024 * 1024        # the base APK inside a bundle
@@ -124,6 +122,23 @@ def _dex_files(path: Path) -> tuple[list[bytes], str]:
         if dex:
           return [_checked_read(inner, i, MAX_DEX_BYTES) for i in dex[:MAX_DEX_FILES]], f"bundle ({info.filename})"
   raise IdentityImportError("No app code found; choose the Android Auto APK, XAPK, or APKM", "NO_CODE")
+
+
+def _app_version(path: Path) -> str | None:
+  """Best-effort local provenance; release_version is confirmed in a real APKM v5.
+
+  The available XAPK sample has no metadata. Do not guess keys or parse binary manifests.
+  This untrusted label never participates in identity verification.
+  """
+  try:
+    with zipfile.ZipFile(path) as archive:
+      data = json.loads(_checked_read(archive, archive.getinfo("info.json"), 64 * 1024))
+      version = data.get("release_version")
+      if isinstance(version, str) and len(version) <= 128 and re.fullmatch(r"[0-9]+(?:[.-][a-zA-Z0-9]+)+", version):
+        return version
+  except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, zipfile.BadZipFile, zlib.error):
+    pass
+  return None
 
 
 def _candidates(dexes: list[bytes]) -> tuple[set[bytes], list[bytes], list[bytes]]:
@@ -224,8 +239,10 @@ def extract_identity(path: Path, *, root_sha256: str = GOOGLE_ROOT_SHA256, now: 
           "imported": datetime.now(UTC).isoformat(timespec="seconds"),
           "key_matches": True,
         }
+        if (app_version := _app_version(Path(path))) is not None:
+          metadata["app_version"] = app_version
         return {identity_store.CERT_NAME: leaf_pem, identity_store.KEY_NAME: pem_key, identity_store.ROOT_NAME: root_pem}, metadata
-  raise IdentityImportError(f"This Android Auto version stores its key differently; use version {KNOWN_GOOD_VERSION} or another that works",
+  raise IdentityImportError("This Android Auto version stores its key differently; try a newer or older release",
                            "UNSUPPORTED_VERSION")
 
 

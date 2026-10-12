@@ -17,6 +17,12 @@ def road():
   return OnroadState(True, True, 20, 80, SpeedLimitObservation())
 
 
+def _without_current_speed():
+  document = default_document()
+  document['layouts']['large']['current_speed']['enabled'] = False
+  return document
+
+
 def observation():
   return NS(isRHD=False, activePolicy='vision', visionPolicyState=NS(faceDetected=True, awarenessPercent=100, pose=NS(pitch=0.0, yaw=0.0))), NS(
     leftDriverData=NS(), rightDriverData=NS()
@@ -94,7 +100,6 @@ class TestDriverMonitor(unittest.TestCase):
       self.assertTrue(monitor_visible(profile, state, fresh=True, onroad=True, top_icons=False))
       for changes, source in (
         ({}, {'onroad': False}),
-        ({'appearance': replace(state.appearance, hide_dm_icon=True)}, {}),
         ({'alert': OnroadAlert(size=AlertSize.FULL)}, {}),
       ):
         with self.subTest(profile=profile, changes=changes, source=source):
@@ -186,7 +191,7 @@ class TestDriverMonitor(unittest.TestCase):
     order = []
     view.driver_monitor_layer = lambda rect, state: order.append('dm')
     self.enterContext(patch.object(view.alert, 'render', lambda rect, alert: order.append('alert'), create=True))
-    scene = replace(road(), camera_available=False, alert=OnroadAlert(size=AlertSize.FULL), appearance=replace(road().appearance, hide_speed=True))
+    scene = replace(road(), camera_available=False, alert=OnroadAlert(size=AlertSize.FULL), customization=_without_current_speed())
     with ExitStack() as stack:
       for name in ('draw_rectangle_rec', 'draw_rectangle_gradient_v', 'draw_rectangle_lines_ex', 'draw_rectangle_rounded_lines_ex'):
         stack.enter_context(patch.object(onroad.rl, name))

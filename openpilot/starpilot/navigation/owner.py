@@ -39,6 +39,7 @@ SUGGESTS_PER_SESSION = 50  # Mapbox starts a new billable session after this man
 MAX_FAVORITES = 100
 MAX_RECENTS = 10
 FAVORITE_LABELS = ('home', 'work')
+ROUTE_AVOIDANCES = {'avoidTolls': 'toll', 'avoidHighways': 'motorway', 'avoidFerries': 'ferry'}
 # Fixed provider styles matching Galaxy; cache entries are separate for each theme.
 MAP_STYLES = {'light': 'mapbox/light-v11', 'dark': 'mapbox/dark-v11'}
 
@@ -144,7 +145,8 @@ class NavigationOwner:
     try:
       info = os.stat(self.path)
     except FileNotFoundError:
-      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': []}
+      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': [],
+              **dict.fromkeys(ROUTE_AVOIDANCES, False)}
     key = (info.st_ino, info.st_mtime_ns, info.st_size)
     cached = getattr(self, '_read_cache', None)
     if cached is not None and cached[0] == key:
@@ -153,7 +155,8 @@ class NavigationOwner:
       with self.path.open('rb') as source:
         raw = source.read(MAX_DOCUMENT + 1)
     except FileNotFoundError:
-      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': []}
+      return {'version': 1, 'revision': '0', 'enabled': False, 'token': '', 'destination': None, 'favorites': [], 'recents': [],
+              **dict.fromkeys(ROUTE_AVOIDANCES, False)}
     try:
       value = json.loads(raw)
       if (len(raw) > MAX_DOCUMENT or not isinstance(value, dict) or value.get('version') != 1 or
@@ -169,6 +172,9 @@ class NavigationOwner:
         value['destination'] = destination(value['destination'])
       value['favorites'] = [favorite_place(item) for item in value['favorites']]
       value['recents'] = [destination(item) for item in value.get('recents', [])][:MAX_RECENTS]
+      for setting in ROUTE_AVOIDANCES:
+        if type(value.setdefault(setting, False)) is not bool:
+          raise ValueError
     except (ValueError, TypeError, KeyError):
       raise ValidationError('Saved navigation settings could not be read') from None
     self._read_cache = (key, copy.deepcopy(value))
@@ -323,6 +329,7 @@ class NavigationOwner:
     status = ('disabled' if not document['enabled'] else 'needsKey' if not document['token'] else
               'noDestination' if document['destination'] is None else 'waitingForLocation')
     result = {key: document[key] for key in ('enabled', 'destination', 'recents', 'revision')}
+    result.update({key: document[key] for key in ROUTE_AVOIDANCES})
     # Home and Work lead, then places in the order they were saved.
     result['favorites'] = sorted(document['favorites'], key=lambda row: FAVORITE_LABELS.index(row['label']) if 'label' in row else 2)
     from openpilot.starpilot.navigation.mapbox_budget import read_usage
@@ -471,16 +478,22 @@ class NavigationOwner:
         self._tile_bytes -= len(tile)
 
   def configure(self, patch: dict, expected_revision: str, authorized) -> dict:
-    if not isinstance(patch, dict) or not patch or set(patch) - {'enabled', 'token'}:
+    if not isinstance(patch, dict) or not patch or set(patch) - ({'enabled', 'token'} | ROUTE_AVOIDANCES.keys()):
       raise ValidationError('Unknown navigation setting')
     if 'enabled' in patch and type(patch['enabled']) is not bool:
       raise ValidationError('Navigation enabled must be on or off')
+    if any(type(patch[key]) is not bool for key in ROUTE_AVOIDANCES if key in patch):
+      raise ValidationError('Route avoidance settings must be on or off')
     if 'token' in patch and (not isinstance(patch['token'], str) or len(patch['token']) > 2048 or
                              any(ch.isspace() for ch in patch['token'])):
       raise ValidationError('Enter a valid Mapbox access token')
     with self._lock:
       self._searches.clear()
-    result = self._change(lambda value: value.update(patch), expected_revision, authorized)
+    def update(value):
+      if any(key in patch and patch[key] != value[key] for key in ROUTE_AVOIDANCES):
+        value['routeChoice'] = 0
+      value.update(patch)
+    result = self._change(update, expected_revision, authorized, preserve_active=set(patch) <= ROUTE_AVOIDANCES.keys())
     if 'token' in patch:
       with self._tile_lock:
         self._tiles.clear()

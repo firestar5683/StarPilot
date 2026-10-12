@@ -148,7 +148,6 @@ class WheelPreferenceTests(unittest.TestCase):
 
   def test_original_default_compatibility_and_single_effective_control(self):
     self.assertFalse(onroad_appearance(self.params).wheel_pedal_feedback)
-    self.assertFalse(onroad_appearance(self.params).hide_dm_icon)
     for profile in Profile:
       self.assertEqual(self.row(profile=profile).value, "Off")
     self.path("PedalsOnUI").write_bytes(b"1")
@@ -204,15 +203,6 @@ class WheelPreferenceTests(unittest.TestCase):
     self.assertTrue(onroad_appearance(self.params).wheel_pedal_feedback)
     self.assertTrue(self.owner.apply(required_change(self.row())))
     self.assertFalse(onroad_appearance(self.params).wheel_pedal_feedback)
-
-  def test_dm_visibility_is_parked_and_source_bound(self):
-    request = required_change(self.row("HideDMIcon", Profile.COMPACT))
-    self.parked = False
-    self.assertFalse(self.owner.apply(request))
-    self.parked = True
-    self.assertTrue(self.owner.apply(request))
-    self.assertTrue(onroad_appearance(self.params).hide_dm_icon)
-    self.assertFalse(self.owner.apply(request))
 
 
 if __name__ == "__main__":

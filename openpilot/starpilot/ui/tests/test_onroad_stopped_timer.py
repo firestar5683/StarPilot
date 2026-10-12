@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from opendbc.car.structs import car as car_schema
 
-from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance
+from openpilot.starpilot.ui.onroad_customization import STOPPED_TIMER_WIDGET, default_document
 from openpilot.starpilot.ui.onroad_stopped_timer import (ENGAGED, EXPERIMENTAL, TRAFFIC, StoppedTimer,
                                                        duration_color, duration_text)
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter
@@ -17,6 +17,25 @@ SECOND = 1_000_000_000
 
 
 class StoppedTimerTests(unittest.TestCase):
+  def test_projection_timer_enablement_overrides_native_choice(self):
+    for native_enabled, projection_enabled in ((False, True), (True, False)):
+      with self.subTest(native_enabled=native_enabled, projection_enabled=projection_enabled):
+        ui = ui_fake()
+        car = ui.sm.messages['carState']
+        car.canValid, car.canTimeout, car.standstill = True, False, True
+        car.gearShifter = car_schema.CarState.GearShifter.drive
+        adapter = RuntimeSnapshotAdapter(ui)
+        document = default_document()
+        document['layouts']['compact'][STOPPED_TIMER_WIDGET]['enabled'] = native_enabled
+        with patch('openpilot.starpilot.ui.runtime_snapshot.read_customization', return_value=document):
+          for second in (0, 61):
+            now = NOW + second * SECOND
+            for name in ('deviceState', 'pandaStates', 'carState'):
+              ui.sm.logMonoTime[name] = now
+            state = adapter.build(ShellMode.ONROAD, now_ns=now, stopped_timer_enabled=projection_enabled).onroad
+        self.assertEqual(state.stopped_duration_s, 61 if projection_enabled else None)
+        self.assertEqual(document['layouts']['compact'][STOPPED_TIMER_WIDGET]['enabled'], native_enabled)
+
   def test_first_drive_minute_then_elapsed_and_color_transitions(self):
     timer = StoppedTimer()
     def step(second):
@@ -66,11 +85,12 @@ class StoppedTimerTests(unittest.TestCase):
     car.standstill = True
     car.gearShifter = car_schema.CarState.GearShifter.drive
     adapter = RuntimeSnapshotAdapter(ui)
+    timer_on = default_document()
+    timer_on["layouts"]["compact"][STOPPED_TIMER_WIDGET]["enabled"] = True
     def refresh(now_ns, *, car_age_ns=0):
       for name in ("deviceState", "pandaStates", "carState"):
         ui.sm.logMonoTime[name] = now_ns - (car_age_ns if name == "carState" else 0)
-      with patch("openpilot.starpilot.ui.runtime_snapshot.onroad_appearance",
-                 return_value=OnroadAppearance(show_stopped_timer=True)):
+      with patch("openpilot.starpilot.ui.runtime_snapshot.read_customization", return_value=timer_on):
         return adapter.build(ShellMode.ONROAD, now_ns=now_ns).onroad.stopped_duration_s
     self.assertIsNone(refresh(NOW))
     self.assertIsNone(refresh(NOW + 59 * SECOND))

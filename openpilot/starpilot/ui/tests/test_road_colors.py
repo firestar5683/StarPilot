@@ -51,10 +51,10 @@ def test_invalid_road_style_rejected(value):
 
 
 def test_mode_inheritance_and_original_fixed_color_fades():
-  assert path_mode({}, False) == 'acceleration'
-  assert path_mode({}, True) == 'rainbow'
-  assert path_mode({'pathMode': 'color'}, True) == 'color'
-  assert path_mode({'pathMode': 'acceleration'}, True) == 'acceleration'
+  assert path_mode({}) == 'acceleration'
+  assert path_mode({'pathMode': 'default'}) == 'acceleration'
+  assert path_mode({'pathMode': 'rainbow'}) == 'rainbow'
+  assert path_mode({'pathMode': 'color'}) == 'color'
   assert [rgba(c) for c in solid_gradient('#12345680').colors] == [(18, 52, 86, 128), (18, 52, 86, 70), (18, 52, 86, 12)]
   assert [c.a for c in edge_gradient('#123456FF').colors] == [102, 89, 0]
   original = rl.Color(1, 2, 3, 4)

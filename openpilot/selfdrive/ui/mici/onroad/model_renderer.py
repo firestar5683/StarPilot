@@ -459,7 +459,7 @@ class ModelRenderer(Widget):
 
     now_ns = time.monotonic_ns()
     style = getattr(self, "road_style", {})
-    mode = path_mode(style, self._rainbow_path.refresh_enabled(ui_state.params, now_ns))
+    mode = path_mode(style)
     if mode == "rainbow":
       car_fresh = bool(sm.valid.get('carState', False) and sm.alive.get('carState', False) and
                        sm.recv_frame['carState'] >= ui_state.started_frame)

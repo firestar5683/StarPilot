@@ -48,6 +48,20 @@ def render_compact_half_borders(state: OnroadState, time_s: float) -> None:
       clip.end_scissor_mode()
 
 
+def render_large_half_borders(state: OnroadState, time_s: float, content: rl.Rectangle, frame_height: int) -> None:
+  """Android Auto: tint each half of the large status edge, matching the C4 half borders."""
+  left, right = half_colors(state, time_s)
+  middle = int(content.x + content.width / 2)
+  for x, width, color in ((0, middle, left), (middle, int(content.x * 2 + content.width) - middle, right)):
+    if color is None:
+      continue
+    clip.begin_scissor_mode(x, 0, width, frame_height)
+    try:
+      rl.draw_rectangle_rounded_lines_ex(content, 0.12, 10, 30, color)
+    finally:
+      clip.end_scissor_mode()
+
+
 def draw_turn_signal(x: float, y: float, direction: int, alpha: int = 255, *, blocked: bool = False) -> None:
   name, width, height = ('blind_spot_left.png', 134, 150) if blocked else ('turn_signal_left.png', 104, 96)
   texture = gui_app.texture('icons_mici/onroad/' + name, width, height, flip_x=direction > 0)

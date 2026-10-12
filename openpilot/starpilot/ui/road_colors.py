@@ -8,9 +8,10 @@ from openpilot.starpilot.ui.onroad_customization import ROAD_COLORS
 from openpilot.system.ui.lib.shader_polygon import Gradient
 
 
-def path_mode(style: dict, saved_rainbow: bool) -> str:
+def path_mode(style: dict) -> str:
+  # "default" predates per-layout path styles; RainbowPath retirement rewrote rainbow users.
   mode = style.get("pathMode", "default")
-  return ("rainbow" if saved_rainbow else "acceleration") if mode == "default" else mode
+  return "acceleration" if mode == "default" else mode
 
 
 def lane_color(style: dict, adjacent: bool, default: rl.Color, probability: float) -> rl.Color:

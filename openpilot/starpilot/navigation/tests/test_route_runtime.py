@@ -39,6 +39,7 @@ class Executor:
 
 def configured(tmp_path):
   owner = NavigationOwner(tmp_path, runtime_source=lambda: None)
+  owner._is_metric = lambda: True
   settings = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
   owner.select({'name': 'Destination', 'longitude': .01, 'latitude': 0.}, settings['revision'], True)
   return owner
@@ -61,6 +62,58 @@ def test_generation_discard_and_current_drive_control(tmp_path, route):
   assert result['status'] == 'waitingForLocation' and not result['controlValid']
   result = runtime.update(15_000_000_000, (14_999_000_000, (0., 0.), 5., 90.), 14_000_000_000)
   assert result['status'] == 'routing' and not result['controlValid']
+
+
+def test_arrival_ends_navigation_after_a_short_stop(tmp_path, route):
+  owner, executor = configured(tmp_path), Executor()
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
+  def at(t, speed=0.):
+    return runtime.update(t * 1_000_000_000, (t * 1_000_000_000 - 1_000_000, (.01, 0.), speed, 90.), 1_000_000_000)
+  at(10, 5.)
+  executor.jobs[0].set_result(route)
+  assert at(11, 5.)['status'] == 'guiding'
+  assert at(12)['status'] == 'guiding'  # stopping starts the arrival clock
+  assert at(17)['status'] == 'arrived'
+  assert owner.read()['destination'] is not None
+  assert at(20, 5.)['status'] == 'guiding', 'driving off resets arrival'
+  at(21)
+  assert at(35)['status'] == 'arrived' and owner.read()['destination'] is not None
+  assert at(36)['status'] == 'arrived'
+  assert owner.read()['destination'] is None, 'navigation ends 15 s after stopping at the destination'
+  assert at(37)['status'] == 'noDestination'
+
+
+def test_arrival_does_not_override_a_newer_destination(tmp_path, route):
+  owner, executor = configured(tmp_path), Executor()
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
+  def at(t):
+    return runtime.update(t * 1_000_000_000, (t * 1_000_000_000 - 1_000_000, (.01, 0.), 0., 90.), 1_000_000_000)
+  at(10)
+  executor.jobs[0].set_result(route)
+  at(11)
+  stale = owner.read()['revision']
+  owner.select({'name': 'Elsewhere', 'longitude': .02, 'latitude': 0.}, stale, True)
+  runtime._end_route(stale)
+  assert owner.read()['destination']['name'] == 'Elsewhere'
+
+
+def test_arrival_retries_after_clear_io_failure(tmp_path, monkeypatch):
+  owner = configured(tmp_path)
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=Executor())
+  revision = owner.read()['revision']
+  clear = owner.clear
+  calls = 0
+  def fail_once(*args):
+    nonlocal calls
+    calls += 1
+    if calls == 1:
+      raise OSError('temporary write failure')
+    return clear(*args)
+  monkeypatch.setattr(owner, 'clear', fail_once)
+  runtime._end_route(revision)
+  assert owner.read()['destination'] is not None
+  runtime._end_route(revision)
+  assert calls == 2 and owner.read()['destination'] is None
 
 
 def test_route_failure_backoff_and_no_parallel_requests(tmp_path):

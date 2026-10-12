@@ -143,12 +143,15 @@ class MapboxRouteEngine:
     self.session = session
     self.budget = budget  # MonthlyBudget for directions; None in tests
 
-  def fetch(self, token: str, position, destination: dict, bearing: float | None = None) -> NavigationRoute:
+  def fetch(self, token: str, position, destination: dict, bearing: float | None = None,
+            exclusions: tuple[str, ...] = ()) -> NavigationRoute:
     if self.budget is not None:
       self.budget.spend(enforce=False)  # upstream routing: counted for Setup, never refused
     url = ('https://api.mapbox.com/directions/v5/mapbox/driving-traffic/' +
            f'{position[0]},{position[1]};{destination["longitude"]},{destination["latitude"]}')
     params = {'access_token': token, 'geometries': 'geojson', 'steps': 'true', 'overview': 'full', 'banner_instructions': 'true', 'alternatives': 'true'}
+    if exclusions:
+      params['exclude'] = ','.join(exclusions)
     if bearing is not None:
       params['bearings'] = f'{int(bearing % 360)},90;'
     data = response_json(self.session, url, params)

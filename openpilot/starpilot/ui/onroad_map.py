@@ -41,6 +41,7 @@ MAX_CANVAS = 2560
 TILE_CACHE = 48
 MISSING_RETRY_S = 3.0
 DEAD_RECKON_S = 1.0
+ROUTE_STALE_OVERLAY_SECONDS = 10.0   # a route lost mid-guidance only brings back "Starting navigation" after this long
 CAR_ANCHOR = 0.68            # the car sits below center so more road ahead is visible
 ZOOM_SLOW_M_PER_PX = 0.9     # parking-lot and city detail
 ZOOM_FAST_M_PER_PX = 3.4     # highway overview
@@ -422,6 +423,7 @@ class MapOverlay:
     self.has_roads = False
     self._route_key: tuple | None = None
     self._route_world: np.ndarray | None = None
+    self._route_last_shown: float | None = None   # clock time the route was last available this navigation session
     self._generation_built = -1
     # Smoothed display state.
     self._world: tuple[float, float] | None = None
@@ -469,6 +471,17 @@ class MapOverlay:
       self._guidance_key = None
       self._route_world = np.array([world_xy(lat, lon) for lat, lon in route], np.float64) if len(route) >= 2 else None
     self._route_key = route
+
+  def _track_route(self, data: MapInput, now: float) -> None:
+    if self._route_world is not None:
+      self._route_last_shown = now
+    elif not data.navigation_active:
+      self._route_last_shown = None
+
+  def _starting_navigation(self) -> bool:
+    """Navigation is active without a route: at once on a fresh start, after a grace period once a route was lost."""
+    return (self._input.navigation_active and self._route_world is None and
+            (self._route_last_shown is None or self.clock() - self._route_last_shown >= ROUTE_STALE_OVERLAY_SECONDS))
 
   # ---- canvas planning
 
@@ -655,6 +668,7 @@ class MapOverlay:
     now = self.clock()
     self._advance(data, now)
     self._route(data.route)
+    self._track_route(data, now)
     if self._world is not None:
       side = self._canvas_side(width, height)
       with self._lock:
@@ -692,12 +706,36 @@ class MapOverlay:
     if self.status == "waiting":
       self._draw_gps_status(rect)
       return
+    if self._starting_navigation():
+      self._draw_starting_navigation(rect, opacity)
+      return
     text = "" if self.has_roads or self._canvas_request is None else "No map data here yet"
     if text and self.fonts is not None:
       from openpilot.starpilot.ui.presentation import FontRole
       measured = self.fonts.measure(text, FontRole.MEDIUM, 26)
       self.fonts.draw(text, FontRole.MEDIUM, 26, rect.x + (rect.width - measured.width) / 2,
                       rect.y + rect.height * CAR_ANCHOR + 40, rl.Color(225, 228, 238, round(200 * opacity)))
+
+  def _draw_starting_navigation(self, rect: rl.Rectangle, opacity: float) -> None:
+    """Shown while navigation is starting but its route has not arrived to draw yet."""
+    if self.fonts is None:
+      return
+    from openpilot.starpilot.ui.presentation import FontRole
+    scale = max(.7, min(1.0, rect.width / 560, rect.height / 420))
+    inset, padding = 20 * scale, 14 * scale
+    width = rect.width - 2 * inset
+    rows = [('Starting navigation', FontRole.SEMI_BOLD, 26), ('Finding your route…', FontRole.NORMAL, 18)]
+    scale = min(scale, *(max(1, width - 2 * padding) / self.fonts.measure(text, role, size).width
+                         for text, role, size in rows))
+    height = (len(rows) * 32 + 22) * scale
+    card = rl.Rectangle(rect.x + inset, rect.y + rect.height - inset - height, width, height)
+    rl.draw_rectangle_rounded(card, .2, 8, rl.Color(15, 13, 23, round(235 * opacity)))
+    y = card.y + 10 * scale
+    for text, role, size in rows:
+      measured = self.fonts.measure(text, role, size * scale)
+      self.fonts.draw(text, role, size * scale, card.x + (card.width - measured.width) / 2, y,
+                      rl.Color(225, 228, 238, round(255 * opacity)))
+      y += 32 * scale
 
   def _draw_gps_status(self, rect: rl.Rectangle) -> None:
     """AAComma's acquisition overlay, fitted to the bottom of the projected map."""
@@ -709,14 +747,14 @@ class MapOverlay:
     satellites = ('Searching for satellites' if data.satellites is None else
                   f"{data.satellites} satellite{'s' if data.satellites != 1 else ''} locked")
     rows = [('Navigation active', FontRole.SEMI_BOLD, 22)] if data.navigation_active else []
-    rows += [('Waiting for GPS', FontRole.MEDIUM, 22), (f'{satellites}  •  {elapsed // 60}:{elapsed % 60:02d}', FontRole.NORMAL, 18)]
+    rows += [('Waiting for GPS', FontRole.MEDIUM, 26), (f'{satellites}  •  {elapsed // 60}:{elapsed % 60:02d}', FontRole.NORMAL, 18)]
     scale = max(.7, min(1.0, rect.width / 560, rect.height / 420))
     inset, padding = 20 * scale, 14 * scale
     width = rect.width - 2 * inset
     # Keep every line inside even the smallest allowed map widget.
     scale = min(scale, *(max(1, width - 2 * padding) / self.fonts.measure(text, role, size).width
                          for text, role, size in rows))
-    height = (len(rows) * 29 + 32) * scale
+    height = (len(rows) * 30 + 30) * scale
     card = rl.Rectangle(rect.x + inset, rect.y + rect.height - inset - height, width, height)
     rl.draw_rectangle_rounded(card, .2, 8, rl.Color(15, 13, 23, 235))
     y = card.y + 10 * scale
@@ -724,7 +762,7 @@ class MapOverlay:
       measured = self.fonts.measure(text, role, size * scale)
       self.fonts.draw(text, role, size * scale, card.x + (card.width - measured.width) / 2, y,
                       rl.Color(225, 228, 238, 255))
-      y += 29 * scale
+      y += 30 * scale
     track = rl.Rectangle(card.x + padding, y + 2 * scale, card.width - 2 * padding, 6 * scale)
     rl.draw_rectangle_rounded(track, 1, 8, rl.Color(66, 58, 82, 255))
     fill = rl.Rectangle(track.x, track.y, max(track.height, track.width * acquisition_progress(data.satellites)), track.height)

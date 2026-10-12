@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette } from "../web/js/onroad-layout.js"
+import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette,
+  withDisplay, layoutDocument } from "../web/js/onroad-layout.js"
 import { SettingsPage, SETTINGS_SECTIONS } from "../web/js/settings.js"
 import { loadCatalog } from "../web/js/startup.js"
 
@@ -132,6 +133,28 @@ function editor() {
   vm.previewFeed.stop = () => previewCalls.push("stop")
   const event = (x, y, pointerId = 1) => ({ clientX: x, clientY: y, pointerId, button: 0, currentTarget: { setPointerCapture() { throw new Error("Capture must belong to the stable preview") } }, preventDefault() {} })
   return { vm, event, emitted, calls, previewCalls, captures, publish }
+}
+
+// Layer visibility is local to the arrangement preview, including required widgets.
+for (const projection of [false, true]) {
+  const visibility = editor().vm
+  visibility.projection = projection
+  const original = copy(visibility.state.draft)
+  const order = visibility.layerWidgets.map(widget => widget.id)
+  visibility.profile.widgets.current_speed.required = true
+  visibility.togglePreviewVisibility("current_speed")
+  assert.equal(visibility.previewHidden("current_speed"), true)
+  assert.equal(visibility.renderWidgets.some(widget => widget.id === "current_speed"), false)
+  assert.deepEqual(visibility.layerWidgets.map(widget => widget.id), order)
+  assert.deepEqual(visibility.state.draft, original)
+  assert.equal(visibility.dirty, false)
+  assert.equal(visibility.canUndo, false)
+  visibility.state.profile = "compact"
+  assert.equal(visibility.previewHidden("current_speed"), false)
+  visibility.state.profile = "large"
+  visibility.togglePreviewVisibility("current_speed")
+  assert.equal(visibility.renderWidgets.some(widget => widget.id === "current_speed"), true)
+  assert.deepEqual(visibility.state.draft, original)
 }
 
 const dmEditor = editor().vm
@@ -536,7 +559,7 @@ assert.deepEqual(navigated.slice(-2), ["stop", "appearance"])
 const appSource = readFileSync(new URL("../web/js/app.js", import.meta.url), "utf8")
 const editorSource = readFileSync(new URL("../web/js/onroad-layout.js", import.meta.url), "utf8")
 const catalog = JSON.parse(readFileSync(new URL("../web/data/catalog.json", import.meta.url), "utf8"))
-assert.ok(appSource.includes("['/theme_maker', '/theme_maker/android_auto'].includes(route.path)"))
+assert.ok(appSource.includes("['/theme_maker', '/theme_maker/android_auto', '/appearance'].includes(route.path)"))
 assert.ok(appSource.includes(':key="route.path" :projection="route.path ==='))
 assert.ok(appSource.includes('@target="go($event ==='))
 assert.match(appSource, /goFromMenu\(path\)/)
@@ -636,12 +659,12 @@ roadEditor.roadAlpha('path', { target: { value: '128' } })
 assert.equal(roadEditor.roadGradient[0].alpha, 128 / 255)
 assert.equal(roadEditor.roadLabel('pathEdge'), 'Path border')
 roadEditor.selectProfile('compact')
-assert.equal(roadEditor.roadMode, 'default')
+assert.equal(roadEditor.roadMode, 'acceleration')
 assert.equal(roadEditor.roadLabel('pathEdge'), 'Closest lane markings')
 roadEditor.setRoadMode('rainbow')
 assert.equal(roadEditor.roadGradient.length, 12)
 roadEditor.undo()
-assert.equal(roadEditor.roadMode, 'default')
+assert.equal(roadEditor.roadMode, 'acceleration')
 roadEditor.redo()
 assert.equal(roadEditor.roadMode, 'rainbow')
 roadEditor.resetRoad()
@@ -741,3 +764,88 @@ layers.selectProfile('large')
 layers.resetLayout()
 assert.equal(layers.state.draft.widgetOrder, undefined)
 console.log('Widget layer order: movement, selection, profile isolation, validation, undo and reset passed')
+
+
+// Display preferences travel beside the layout and join the draft.
+const displayRows = [
+  { key: "ShowBrakeStatus", label: "Wheel brake and acceleration colors", group: "widget", choices: ["Off", "On"], available: true, reason: "", requires: "" },
+  { key: "HideLeadMarker", label: "Lead Indicator", group: "Lead car", choices: ["Off", "On"], available: true, reason: "", requires: "" },
+  { key: "LeadInfo", label: "Lead Info", group: "Lead car", choices: ["Off", "Distance", "Speed"], available: true, reason: "", requires: "HideLeadMarker" },
+  { key: "SignalMetrics", label: "C4 amber signal border", group: "Alerts and borders", choices: ["Off", "On"], available: true, reason: "", requires: "" },
+]
+const withDisplayData = () => ({ ...snapshot(), display: { rows: copy(displayRows),
+  values: { ShowBrakeStatus: "Off", HideLeadMarker: "Off", LeadInfo: "Off", SignalMetrics: "Off" },
+  defaults: { ShowBrakeStatus: "Off", HideLeadMarker: "Off", LeadInfo: "Off", SignalMetrics: "Off" } } })
+const merged = withDisplay(withDisplayData())
+assert.equal(validSnapshot(merged), true)
+assert.deepEqual(merged.document.display, merged.defaults.display)
+assert.equal(merged.display.length, 4)
+assert.deepEqual(layoutDocument(merged.document), snapshot().document)
+assert.equal(validDocument({ ...merged.document, display: { SignalMetrics: true } }, merged.metadata), false)
+assert.equal(validDocument({ ...merged.document, showMaxSpeed: "no" }, merged.metadata), false)
+
+const display = editor()
+display.vm.state.data = merged; display.vm.state.draft = copy(merged.document)
+assert.deepEqual(display.vm.displayGroups.map(group => [group.name, group.rows.map(row => row.key)]),
+  [["Lead car", ["HideLeadMarker", "LeadInfo"]], ["Alerts and borders", ["SignalMetrics"]]])
+const leadInfo = display.vm.displayRow("LeadInfo")
+assert.equal(display.vm.displaySettingRow(leadInfo).reason, "Turn on Lead Indicator first")
+display.vm.setDisplay("LeadInfo", "Distance")
+assert.equal(display.vm.displayValue("LeadInfo"), "Off", "blocked until the draft shows the Lead indicator")
+display.vm.setDisplay("HideLeadMarker", "On")
+display.vm.setDisplay("LeadInfo", "Distance")
+assert.equal(display.vm.displayValue("LeadInfo"), "Distance")
+assert.equal(display.vm.dirty, true)
+display.vm.undo(); display.vm.undo()
+assert.equal(display.vm.dirty, false)
+display.vm.state.selected = "cruise_limits"
+display.vm.setShowMaxSpeed({ target: { checked: false } })
+assert.equal(display.vm.state.draft.showMaxSpeed, false)
+assert.equal(validDocument(display.vm.state.draft, display.vm.state.data.metadata), true)
+display.vm.resetToStock()
+assert.deepEqual(display.vm.state.draft, merged.defaults)
+assert.match(OnroadLayoutPage.template, /state\.inspectorPanel = 'display'">Display<\/button>/)
+assert.doesNotMatch(OnroadLayoutPage.template, /Follow Appearance Settings/)
+assert.equal(OnroadLayoutPage.setup({ mode: "local", unauthorized() {}, initialPanel: "display" }).state.inspectorPanel, "display")
+assert.equal(OnroadLayoutPage.setup({ mode: "local", unauthorized() {}, initialPanel: "display", projection: true }).state.inspectorPanel, "widgets")
+
+// Target switches must not be swallowed while a layout loads or a drag flag lingers.
+const switching = editor()
+switching.vm.state.status = "loading"
+let proceeded = 0
+switching.vm.requestLeave(() => { proceeded++ })
+assert.equal(proceeded, 1)
+switching.vm.state.status = "ready"
+switching.vm.state.layerDrag = { id: "current_speed", pointerId: 9, rows: [], before: copy(switching.vm.state.draft) }
+switching.vm.requestLeave(() => { proceeded++ })
+assert.equal(switching.vm.state.layerDrag, null, "a stray layer drag is cancelled")
+assert.equal(proceeded, 2)
+switching.vm.state.status = "saving"
+switching.vm.requestLeave(() => { proceeded++ })
+assert.equal(proceeded, 2, "an in-flight save finishes first")
+assert.match(OnroadLayoutPage.template, /<section class="gx-settings gx-layout" aria-label="Colors and layout" :aria-busy/)
+assert.match(OnroadLayoutPage.template, /<div class="gx-layout__workspace" :inert="busy">/)
+
+// An explicit reload replaces a background poll instead of being dropped.
+const reloading = feedFixture()
+reloading.feed.start(); await reloading.reply(0, withDisplayData())
+assert.equal(reloading.feed.data.document.display.SignalMetrics, "Off")
+reloading.feed.load(true)
+assert.equal(reloading.requests.length, 2)
+reloading.feed.load(true)
+assert.equal(reloading.requests.length, 2, "polls never stack")
+reloading.feed.load()
+assert.equal(reloading.requests.length, 3)
+assert.equal(reloading.updates.at(-1).status, "loading")
+await reloading.reply(2, withDisplayData())
+assert.equal(reloading.updates.at(-1).notice, "Reloaded the saved layout.")
+assert.ok(reloading.updates.at(-1).draft)
+const settled = reloading.updates.length
+await reloading.reply(1, withDisplayData())
+assert.equal(reloading.updates.length, settled, "the replaced poll is ignored")
+const failedSave = feedFixture()
+failedSave.feed.start(); await failedSave.reply(0, withDisplayData())
+failedSave.feed.save(failedSave.feed.data.document)
+await failedSave.reply(1, { ...withDisplayData(), failed: ["Lead Info"] })
+assert.match(failedSave.updates.at(-1).notice, /did not change: Lead Info/)
+console.log('Display options, target switching and reload during polling passed')

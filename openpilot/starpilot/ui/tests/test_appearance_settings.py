@@ -14,15 +14,25 @@ from openpilot.common.params import Params
 from openpilot.starpilot import saved_document
 from openpilot.starpilot.ui import appearance_compact, onroad
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner
-from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance, onroad_appearance, read_visibility
+from openpilot.starpilot.ui.appearance_preferences import RETIRED_DISPLAY_KEYS, OnroadAppearance, onroad_appearance, read_visibility
+from openpilot.starpilot.ui.onroad_customization import default_document
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureSettingsState, FeatureUiAction, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureSettingsState, row_change
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadInput, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode
 from openpilot.starpilot.ui.tests.test_runtime_snapshot import NOW, ui_fake
+
+
+def _hidden_widgets():
+  document = default_document()
+  document["layouts"]["large"]["current_speed"]["enabled"] = False
+  for profile in ("large", "compact"):
+    for key in ("steering_wheel", "torque_bar"):
+      document["layouts"][profile][key]["enabled"] = False
+  return document
 
 
 class AppearanceSettingsTests(unittest.TestCase):
@@ -41,19 +51,20 @@ class AppearanceSettingsTests(unittest.TestCase):
 
   def test_absent_defaults_are_read_only_and_match_both_views(self):
     self.assertEqual(onroad_appearance(self.params), OnroadAppearance())
-    self.assertEqual(len(self.owner.snapshot(Profile.LARGE).rows), 10)
+    self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.LARGE).rows),
+                     ("HidePersonalityAlerts", "ShowBrakeStatus", "BlindSpotMetrics", "SignalMetrics"))
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.COMPACT).rows),
-                     ("CameraView", "DriverCamera", "StoppedTimer", "StockConfidenceBallWidget", "EnableTorqueBarWidget",
-                      "RainbowPath", "HideDMIcon", "HidePersonalityAlerts", "ShowBrakeStatus", "HideLeadMarker", "LeadInfo",
-                      "SignalMetrics", "BlindSpotMetrics"))
+                     ("CameraView", "DriverCamera", "StockConfidenceBallWidget", "HidePersonalityAlerts", "ShowBrakeStatus",
+                      "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics"))
+    # Widget visibility, the stopped timer and Rainbow Road moved into the onroad layout.
+    for profile in Profile:
+      self.assertFalse(set(RETIRED_DISPLAY_KEYS) & {row.key for row in self.owner.snapshot(profile).rows})
     for key in ("HideSpeed", "HideMaxSpeed", "HideSteeringWheel", "DriverCamera", "StoppedTimer",
                 "StockConfidenceBallWidget", "EnableTorqueBarWidget", "RainbowPath", "HideLeadMarker", "SignalMetrics", "BlindSpotMetrics"):
       self.assertIsNone(read_visibility(self.params, key).raw)
       self.assertEqual(self.params.get_type(key).name, "BOOL")
     self.assertEqual(self.row("SignalMetrics").value, "Off")
-    self.assertEqual(self.row("RainbowPath").value, "Off")
     self.assertEqual(self.row("BlindSpotMetrics").value, "On")
-    self.assertEqual(self.row("StoppedTimer", Profile.COMPACT).value, "Off")
     self.assertEqual((self.row("StockConfidenceBallWidget", Profile.COMPACT).label,
                       self.row("StockConfidenceBallWidget", Profile.COMPACT).value),
                      ("Use StarPilot Widgets", "On"))
@@ -110,26 +121,6 @@ class AppearanceSettingsTests(unittest.TestCase):
     self.assertTrue(self.owner.apply(repair))
     self.assertEqual(source.read_bytes(), b"1")
 
-  def test_rainbow_path_is_parked_and_exact_source_bound(self):
-    initial = self.row("RainbowPath", Profile.COMPACT)
-    self.assertEqual((initial.value, initial.source), ("Off", None))
-    request = row_change(initial)
-    assert request is not None
-    self.parked = False
-    self.assertFalse(self.owner.apply(request))
-    self.parked = True
-    self.assertTrue(self.owner.apply(request))
-    self.assertEqual(read_visibility(self.params, "RainbowPath").value, True)
-    self.assertFalse(self.owner.apply(request))
-    source = Path(self.params.get_param_path("RainbowPath"))
-    source.write_bytes(b"bad")
-    invalid = self.row("RainbowPath", Profile.COMPACT)
-    self.assertEqual((invalid.value, invalid.repair_value), ("Invalid saved choice", "Off"))
-    repair = row_change(invalid)
-    assert repair is not None
-    self.assertTrue(self.owner.apply(repair))
-    self.assertEqual(source.read_bytes(), b"0")
-
   def test_staged_camera_and_visibility_edits_preserve_competing_values(self):
     actual_fsync = os.fsync
     for key, concurrent in (("CameraView", b"3"), ("HideLeadMarker", b"1")):
@@ -165,17 +156,6 @@ class AppearanceSettingsTests(unittest.TestCase):
         with patch.object(saved_document.os, "fsync", side_effect=revoke):
           self.assertFalse(self.owner.apply(request))
         self.assertFalse(Path(self.params.get_param_path(key)).exists())
-
-  def test_stopped_timer_is_compact_only_and_uses_saved_parked_choice(self):
-    self.assertNotIn("StoppedTimer", (row.key for row in self.owner.snapshot(Profile.LARGE).rows))
-    request = row_change(self.row("StoppedTimer", Profile.COMPACT))
-    assert request is not None
-    self.parked = False
-    self.assertFalse(self.owner.apply(request))
-    self.parked = True
-    self.assertTrue(self.owner.apply(request))
-    self.assertTrue(onroad_appearance(self.params).show_stopped_timer)
-    self.assertFalse(self.owner.apply(request))
 
   def test_widgets_choice_inverts_legacy_stock_ball_without_rewriting_it(self):
     self.assertNotIn("StockConfidenceBallWidget", (row.key for row in self.owner.snapshot(Profile.LARGE).rows))
@@ -371,15 +351,15 @@ class AppearanceSettingsTests(unittest.TestCase):
     native_view._confidence_ball.render_with_lateral.assert_called_once_with(rect, True)
 
   def test_edit_repair_and_stale_source_guards(self):
-    request = row_change(self.row("HideSpeed"))
+    request = row_change(self.row("HidePersonalityAlerts"))
     assert request is not None
     self.assertEqual(request.value, "On")
     self.assertTrue(self.owner.apply(request))
-    self.assertTrue(onroad_appearance(self.params).hide_speed)
+    self.assertTrue(onroad_appearance(self.params).hide_personality_alerts)
     self.assertFalse(self.owner.apply(request))
-    corrupt_path = Path(self.params.get_param_path("HideMaxSpeed"))
+    corrupt_path = Path(self.params.get_param_path("SignalMetrics"))
     corrupt_path.write_bytes(b"\xff")
-    row = self.row("HideMaxSpeed")
+    row = self.row("SignalMetrics")
     self.assertEqual(row.value, "Invalid saved choice")
     self.assertEqual(corrupt_path.read_bytes(), b"\xff")
     repair = row_change(row)
@@ -388,20 +368,20 @@ class AppearanceSettingsTests(unittest.TestCase):
     corrupt_path.write_bytes(b"2")
     self.assertFalse(self.owner.apply(repair))
     self.assertEqual(corrupt_path.read_bytes(), b"2")
-    repaired = row_change(self.row("HideMaxSpeed"))
+    repaired = row_change(self.row("SignalMetrics"))
     assert repaired is not None
     self.assertTrue(self.owner.apply(repaired))
     self.assertEqual(corrupt_path.read_bytes(), b"0")
 
   def test_parked_final_read_and_oversized_source_guards(self):
-    request = row_change(self.row("EnableTorqueBarWidget"))
+    request = row_change(self.row("BlindSpotMetrics"))
     assert request is not None
     self.parked = False
     self.assertFalse(self.owner.apply(request))
-    self.assertIsNone(read_visibility(self.params, "EnableTorqueBarWidget").raw)
+    self.assertIsNone(read_visibility(self.params, "BlindSpotMetrics").raw)
 
     self.parked = True
-    path = Path(self.params.get_param_path("EnableTorqueBarWidget"))
+    path = Path(self.params.get_param_path("BlindSpotMetrics"))
     checks = 0
     def parked_once():
       nonlocal checks
@@ -409,10 +389,10 @@ class AppearanceSettingsTests(unittest.TestCase):
       return checks == 1
     owner = AppearanceOwner(self.params, parked_once)
     self.assertFalse(owner.apply(request))
-    self.assertIsNone(read_visibility(self.params, "EnableTorqueBarWidget").raw)
+    self.assertIsNone(read_visibility(self.params, "BlindSpotMetrics").raw)
     original = b"1" * 100_000
     path.write_bytes(original)
-    row = self.row("EnableTorqueBarWidget")
+    row = self.row("BlindSpotMetrics")
     self.assertFalse(row.available)
     self.assertIsNone(row_change(row))
     path.write_bytes(original[:-1] + b"0")
@@ -429,19 +409,19 @@ class AppearanceSettingsTests(unittest.TestCase):
       return original_path(key)
     with patch.object(self.params, "get_param_path", side_effect=get_path):
       self.assertFalse(self.owner.apply(request))
-    self.assertIsNone(read_visibility(self.params, "EnableTorqueBarWidget").raw)
+    self.assertIsNone(read_visibility(self.params, "BlindSpotMetrics").raw)
 
   def test_nonregular_sources_are_unavailable_without_reading_or_repair(self):
-    path = Path(self.params.get_param_path("HideSpeed"))
+    path = Path(self.params.get_param_path("SignalMetrics"))
     target = path.parent / "elsewhere"
     target.write_bytes(b"1")
     path.symlink_to(target)
-    self.assertFalse(read_visibility(self.params, "HideSpeed").readable)
-    self.assertFalse(self.row("HideSpeed").available)
+    self.assertFalse(read_visibility(self.params, "SignalMetrics").readable)
+    self.assertFalse(self.row("SignalMetrics").available)
     path.unlink()
     os.mkfifo(path)
-    self.assertFalse(read_visibility(self.params, "HideSpeed").readable)
-    self.assertFalse(self.row("HideSpeed").available)
+    self.assertFalse(read_visibility(self.params, "SignalMetrics").readable)
+    self.assertFalse(self.row("SignalMetrics").available)
     self.assertTrue(path.is_fifo())
 
   def test_large_tile_press_and_compact_visuals_refresh(self):
@@ -458,11 +438,10 @@ class AppearanceSettingsTests(unittest.TestCase):
     large.press(1980, 300, state)
     large.move(1800, 300, state)
     large.release(1800, 300, state)
-    self.assertEqual(changed, [FeatureUiAction("scroll")])
-    changed.clear()
+    self.assertEqual(changed, [], "the remaining rows fit on one page")
     large.press(1980, 300, state)
     large.release(1980, 300, state)
-    self.assertEqual(changed[0].row.key, "HideSpeed")
+    self.assertEqual(changed[0].row.key, "HidePersonalityAlerts")
 
     class Button:
       def __init__(self, label, value):
@@ -496,9 +475,9 @@ class AppearanceSettingsTests(unittest.TestCase):
       appearance_compact.AppearanceCompact(Session()).entry_button().click()
       page = shown[0]
       self.assertEqual(page.items[0].label, "visuals")
-      next(item for item in page.items if item.label == "show torque bar").click()
-      self.assertFalse(read_visibility(self.params, "EnableTorqueBarWidget").value)
-      self.assertEqual(next(item for item in page.items if item.label == "show torque bar").value, "off")
+      next(item for item in page.items if item.label == "hide personality alerts").click()
+      self.assertTrue(read_visibility(self.params, "HidePersonalityAlerts").value)
+      self.assertEqual(next(item for item in page.items if item.label == "hide personality alerts").value, "on")
 
   def test_runtime_snapshot_reads_saved_choice_and_large_session_routes_back(self):
     from openpilot.starpilot.ui.runtime_app import StarShellSession
@@ -528,8 +507,8 @@ class AppearanceSettingsTests(unittest.TestCase):
     session.input = ShellInput(Profile.LARGE, lambda _: None)
     session.profile = Profile.LARGE
     session._unavailable = Mock()
-    session._appearance_ui(FeatureUiAction("change", self.row("HideSpeed")))
-    self.assertTrue(adapter.build(ShellMode.ONROAD, now_ns=NOW + 1_000_000_003).onroad.appearance.hide_speed)
+    session._appearance_ui(FeatureUiAction("change", self.row("HidePersonalityAlerts")))
+    self.assertTrue(adapter.build(ShellMode.ONROAD, now_ns=NOW + 1_000_000_003).onroad.appearance.hide_personality_alerts)
     session._appearance_ui(FeatureUiAction("back"))
     self.assertEqual(session.selected, Destination.STAR)
 
@@ -577,8 +556,7 @@ class AppearanceSettingsTests(unittest.TestCase):
           view.current_speed.render.assert_called_once()
           view.steering_wheel.render.assert_called_once()
         view.torque_bar.reset_mock()
-        hidden = replace(base, appearance=OnroadAppearance(True, True, True, False),
-                         alert=OnroadAlert(AlertSize.NONE, "", "", True))
+        hidden = replace(base, customization=_hidden_widgets(), alert=OnroadAlert(AlertSize.NONE, "", "", True))
         view.render(hidden)
         view.torque_bar.render.assert_not_called()
         view.alert.render.assert_called()
@@ -594,9 +572,9 @@ class AppearanceSettingsTests(unittest.TestCase):
     actions = []
     touch = OnroadInput(actions.append, Profile.LARGE)
     touch.press(1600, 100, base)
-    touch.release(1600, 100, replace(base, appearance=OnroadAppearance(hide_steering_wheel=True)))
+    touch.release(1600, 100, replace(base, customization=_hidden_widgets()))
     self.assertFalse(actions)
-    touch.press(1600, 100, replace(base, appearance=OnroadAppearance(hide_steering_wheel=True)))
+    touch.press(1600, 100, replace(base, customization=_hidden_widgets()))
     touch.release(1600, 100, base)
     self.assertFalse(actions)
 

@@ -4,7 +4,7 @@ No message default, missing drive history, or old onroad message is presented as
 an observed value. This module has no transport construction or write path.
 """
 
-from openpilot.starpilot.ui.onroad_customization import default_document, read_customization
+from openpilot.starpilot.ui.onroad_customization import STOPPED_TIMER_WIDGET, default_document, placement, read_customization
 # Temporary old-route replay compatibility; remove with the marked hook below.
 from openpilot.starpilot.ui.old_starpilot_route_shim import speed_limit_fallback
 
@@ -358,7 +358,7 @@ class RuntimeSnapshotAdapter:
 
   def build(self, mode: ShellMode, selected: Destination = Destination.STAR, *, compact_y: float = 0,
             compact_scroll_x: float = 0, sidebar_expanded: bool = True, now_ns: int | None = None,
-            menu_only: bool = False) -> ShellSnapshot:
+            menu_only: bool = False, stopped_timer_enabled: bool | None = None) -> ShellSnapshot:
     replay = getattr(self.ui_state, "replay_sample", None)
     if getattr(self.ui_state, "replay_clock", None) is not None:
       if replay is not None and replay.epoch != self._replay_epoch:
@@ -459,7 +459,8 @@ class RuntimeSnapshotAdapter:
       now_ns=now_ns,
       drive_key=drive_key,
       car_fresh=timer_car_fresh, standstill=timer_standstill, reverse=timer_reverse,
-      enabled=self._appearance_value.show_stopped_timer,
+      enabled=(placement(self._customization_value, "compact", STOPPED_TIMER_WIDGET)["enabled"]
+               if stopped_timer_enabled is None else stopped_timer_enabled),
     )
     border_signals = (BorderSignals(bool(getattr(display_car, 'leftBlinker', False)),
                                     bool(getattr(display_car, 'rightBlinker', False)),

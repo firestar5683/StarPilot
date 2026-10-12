@@ -2494,6 +2494,14 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.software_operations_source = software_operations_source
   if drive_stats_source is not None:
     server.drive_stats_source = drive_stats_source
+  legacy_google_removed = False
+  def maintain_android_auto():
+    nonlocal legacy_google_removed
+    if not legacy_google_removed:
+      legacy_google_removed = True
+      from openpilot.starpilot.galaxy.android_auto_setup import remove_legacy_google_files
+      remove_legacy_google_files()
+  server.maintain_android_auto = maintain_android_auto
   server.start_drive_history = lambda: statistics_owner().start()
   return server
 

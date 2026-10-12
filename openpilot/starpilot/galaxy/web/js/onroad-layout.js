@@ -10,9 +10,28 @@ import { GxDialog } from "./dialog.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
 
 const PROFILES = ["large", "compact"]
+const previewVisibilityKey = projection => "gx-layout-preview-visibility-v1:" + (projection ? "android-auto" : "comma")
+function loadPreviewVisibility(projection) {
+  const hidden = { large: { stopped_timer: true }, compact: { stopped_timer: true } }
+  try {
+    const saved = JSON.parse(localStorage.getItem(previewVisibilityKey(projection)))
+    for (const profile of PROFILES) {
+      const widgets = saved?.[profile]
+      if (!widgets || typeof widgets !== "object" || Array.isArray(widgets)) continue
+      hidden[profile] = {
+        ...hidden[profile], ...Object.fromEntries(Object.entries(widgets)
+          .filter(([id, value]) => typeof value === "boolean" && !(projection && id === "car_exit")))
+      }
+    }
+  } catch { /* Preview controls still work when browser storage is unavailable. */ }
+  return hidden
+}
 const COLORS = ["cardFill", "cardBorder", "text"]
 const ROAD_COLORS = ["path", "pathEdge", "laneLines"]
+// "default" is a legacy saved value that now renders as acceleration colors.
 const PATH_MODES = ["default", "color", "rainbow", "acceleration"]
+// Optional widgets start off and never block placement while off.
+const OPTIONAL_WIDGETS = ["driving_mode_descriptions", "clock", "stopped_timer"]
 const HEX = /^#[0-9a-fA-F]{8}$/
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const keysEqual = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
@@ -24,14 +43,25 @@ const frontmostOrder = (order, profile) => {
   return pinned.length <= 1 && (!pinned.length || order.at(-1) === pinned[0])
 }
 
+// Display preferences ride along in the draft but are not part of the rendered layout.
+export const layoutDocument = ({ display, ...document }) => document
+// The device sends them beside the layout; the editor keeps them in its draft so Save, undo and reload cover them.
+export const withDisplay = (data) => !object(data?.display) || !Array.isArray(data.display.rows) ? data : {
+  ...data, display: data.display.rows,
+  document: { ...data.document, display: { ...data.display.values } },
+  defaults: { ...data.defaults, display: { ...data.display.defaults } }
+}
+
 export function orderedWidgetIds(document, metadata, profile) {
   return document.widgetOrder?.[profile] || metadata.profiles[profile].widgetOrder || Object.keys(metadata.profiles[profile].widgets)
 }
 
 export function widgetPalette(document, metadata, profile, id) {
   const colors = metadata.profiles[profile].widgets[id].colors
-  return { ...Object.fromEntries(Object.entries(colors).map(([key, value]) => [key, value ?? document.palette[key]])),
-    ...document.widgetColors[profile][id] }
+  return {
+    ...Object.fromEntries(Object.entries(colors).map(([key, value]) => [key, value ?? document.palette[key]])),
+    ...document.widgetColors[profile][id]
+  }
 }
 
 export const withAlpha = (color, factor) => color.slice(0, 7) + Math.floor(parseInt(color.slice(7), 16) * factor).toString(16).padStart(2, "0")
@@ -47,16 +77,20 @@ export function widgetSize(widget, position) {
 export function placementLimits(profile, id, layout = null) {
   const widget = profile.widgets[id], bounds = widget.bounds || profile.bounds
   const [width, height] = widgetSize(widget, layout?.[id])
-  return { minX: bounds.x, maxX: bounds.x + bounds.width - width,
-    minY: bounds.y, maxY: bounds.y + bounds.height - height }
+  return {
+    minX: bounds.x, maxX: bounds.x + bounds.width - width,
+    minY: bounds.y, maxY: bounds.y + bounds.height - height
+  }
 }
 
 // The largest box that still fits from the widget's current corner, within its own limits.
 export function clampBox(profile, id, position, width, height) {
   const widget = profile.widgets[id], box = widget.box, bounds = widget.bounds || profile.bounds
   if (!box || !Number.isFinite(width) || !Number.isFinite(height)) return null
-  return { width: Math.round(Math.max(box.minWidth, Math.min(box.maxWidth, bounds.x + bounds.width - position.x, width))),
-    height: Math.round(Math.max(box.minHeight, Math.min(box.maxHeight, bounds.y + bounds.height - position.y, height))) }
+  return {
+    width: Math.round(Math.max(box.minWidth, Math.min(box.maxWidth, bounds.x + bounds.width - position.x, width))),
+    height: Math.round(Math.max(box.minHeight, Math.min(box.maxHeight, bounds.y + bounds.height - position.y, height)))
+  }
 }
 
 export function clampPlacement(profile, id, x, y, layout = null) {
@@ -79,7 +113,7 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
   if (id === "speed_limit_actions") return Object.entries(profile.widgets).some(([key, other]) => {
     const at = positions[key]
     return key !== id && key !== "speed_limit" && other.layer !== "underlay" && at &&
-      !(key === "driving_mode_descriptions" && !at.enabled) && Number.isFinite(at.x) && Number.isFinite(at.y) &&
+      !(OPTIONAL_WIDGETS.includes(key) && !at.enabled) && Number.isFinite(at.x) && Number.isFinite(at.y) &&
       intersects(at.x, at.y, ...widgetSize(other, at))
   })
   if (id === "speed_limit") return false
@@ -90,29 +124,37 @@ export function overlapsReserved(profile, id, x, y, layout = null) {
 
 export function previewPoint(event, rect, profile) {
   if (!rect?.width || !rect?.height) return null
-  return { x: (event.clientX - rect.left) * profile.width / rect.width,
-    y: (event.clientY - rect.top) * profile.height / rect.height }
+  return {
+    x: (event.clientX - rect.left) * profile.width / rect.width,
+    y: (event.clientY - rect.top) * profile.height / rect.height
+  }
 }
+
+// Android Auto's own border switches; the comma screen keeps its C4 settings.
+const PROJECTION_BORDERS = ["blindSpotBorder", "signalBorder"]
 
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : [])]) || document.version !== 6 ||
-      (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
-      (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
-      (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
-      !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
-      !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_BORDERS.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
+    (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
+    (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
+    (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
+    (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
+    (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
+    PROJECTION_BORDERS.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
+    !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
+    !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
-      !Object.entries(document.widgetOrder).every(([name, order]) => profiles.includes(name) && Array.isArray(order) &&
-        order.length === Object.keys(metadata.profiles[name].widgets).length && new Set(order).size === order.length &&
-        order.every(id => typeof id === "string" && Object.hasOwn(metadata.profiles[name].widgets, id)) &&
-        frontmostOrder(order, metadata.profiles[name])))) return false
+    !Object.entries(document.widgetOrder).every(([name, order]) => profiles.includes(name) && Array.isArray(order) &&
+      order.length === Object.keys(metadata.profiles[name].widgets).length && new Set(order).size === order.length &&
+      order.every(id => typeof id === "string" && Object.hasOwn(metadata.profiles[name].widgets, id)) &&
+      frontmostOrder(order, metadata.profiles[name])))) return false
   return profiles.every((name) => {
     const profile = metadata.profiles[name], layout = document.layouts[name]
     const road = document.roadColors[name]
     if (!object(road) || !Object.entries(road).every(([key, value]) => key === "pathMode" ? PATH_MODES.includes(value) :
-        ROAD_COLORS.includes(key) && typeof value === "string" && HEX.test(value))) return false
+      ROAD_COLORS.includes(key) && typeof value === "string" && HEX.test(value))) return false
     const colors = document.widgetColors[name]
     if (!object(colors) || !Object.entries(colors).every(([id, overrides]) => {
       const fields = profile.widgets[id]?.colors
@@ -122,16 +164,18 @@ export function validDocument(document, metadata) {
     return keysEqual(layout, Object.keys(profile.widgets)) && Object.entries(layout).every(([id, position]) => {
       const widget = profile.widgets[id], limits = placementLimits(profile, id, layout)
       const resizable = widget.resizable, box = widget.box, opacity = widget.opacity
-      return keysEqual(position, resizable ? ["x", "y", "enabled", "size"] : box ? ["x", "y", "enabled", "width", "height", "opacity"] : ["x", "y", "enabled", ...(widget.iconSize ? ["display"] : [])]) &&
+      return keysEqual(position, ["x", "y", "enabled", ...(resizable ? ["size"] : []), ...(box ? ["width", "height"] : []),
+        ...(opacity ? ["opacity"] : []), ...(widget.iconSize ? ["display"] : []), ...(widget.backgroundToggle ? ["background"] : [])]) &&
         (!widget.iconSize || ["words", "icons"].includes(position.display)) &&
+        (!widget.backgroundToggle || typeof position.background === "boolean") &&
+        (!opacity || (Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
         (!resizable || (Number.isInteger(position.size) && position.size >= resizable.min && position.size <= resizable.max)) &&
         (!box || (Number.isInteger(position.width) && position.width >= box.minWidth && position.width <= box.maxWidth &&
-          Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight &&
-          Number.isInteger(position.opacity) && position.opacity >= opacity.min && position.opacity <= opacity.max)) &&
+          Number.isInteger(position.height) && position.height >= box.minHeight && position.height <= box.maxHeight)) &&
         typeof position.enabled === "boolean" && (!widget.required || position.enabled === true) &&
         Number.isFinite(position.x) && Number.isFinite(position.y) &&
         position.x >= limits.minX && position.x <= limits.maxX && position.y >= limits.minY && position.y <= limits.maxY &&
-        ((id === "driving_mode_descriptions" && !position.enabled) || !overlapsReserved(profile, id, position.x, position.y, layout))
+        ((OPTIONAL_WIDGETS.includes(id) && !position.enabled) || !overlapsReserved(profile, id, position.x, position.y, layout))
     })
   })
 }
@@ -141,33 +185,33 @@ export function validSnapshot(data) {
   if ((data?.projection === true) !== (data?.metadata?.projection === true)) return false
   const profiles = projection ? ["large"] : PROFILES
   if (!data || typeof data.revision !== "string" || !data.revision || typeof data.editable !== "boolean" ||
-      typeof data.valid !== "boolean" || !keysEqual(data.metadata?.profiles, profiles) ||
-      !Array.isArray(data.metadata.paletteFields) || data.metadata.paletteFields.length !== COLORS.length ||
-      new Set(data.metadata.paletteFields.map((field) => field.id)).size !== COLORS.length ||
-      !data.metadata.paletteFields.every((field) => COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
-      !Array.isArray(data.metadata.roadColorFields) || data.metadata.roadColorFields.length !== ROAD_COLORS.length ||
-      new Set(data.metadata.roadColorFields.map((field) => field.id)).size !== ROAD_COLORS.length ||
-      !data.metadata.roadColorFields.every((field) => ROAD_COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
-      (data.activeProfile != null && !profiles.includes(data.activeProfile))) return false
+    typeof data.valid !== "boolean" || !keysEqual(data.metadata?.profiles, profiles) ||
+    !Array.isArray(data.metadata.paletteFields) || data.metadata.paletteFields.length !== COLORS.length ||
+    new Set(data.metadata.paletteFields.map((field) => field.id)).size !== COLORS.length ||
+    !data.metadata.paletteFields.every((field) => COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
+    !Array.isArray(data.metadata.roadColorFields) || data.metadata.roadColorFields.length !== ROAD_COLORS.length ||
+    new Set(data.metadata.roadColorFields.map((field) => field.id)).size !== ROAD_COLORS.length ||
+    !data.metadata.roadColorFields.every((field) => ROAD_COLORS.includes(field.id) && typeof field.label === "string" && HEX.test(field.default)) ||
+    (data.activeProfile != null && !profiles.includes(data.activeProfile))) return false
   for (const profile of Object.values(data.metadata.profiles)) {
     if (profile.widgetOrder != null && (!Array.isArray(profile.widgetOrder) ||
-        profile.widgetOrder.length !== Object.keys(profile.widgets || {}).length ||
-        new Set(profile.widgetOrder).size !== profile.widgetOrder.length ||
-        !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)) ||
-        !frontmostOrder(profile.widgetOrder, profile))) return false
+      profile.widgetOrder.length !== Object.keys(profile.widgets || {}).length ||
+      new Set(profile.widgetOrder).size !== profile.widgetOrder.length ||
+      !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)) ||
+      !frontmostOrder(profile.widgetOrder, profile))) return false
     const bounds = profile.bounds
     if (projection && (profile.widgets?.car_exit?.kind !== "car_exit" || profile.widgets.car_exit.required !== true)) return false
     if (profile.protectedWidget != null && (profile.protectedWidget !== "speed_limit_actions" ||
-        profile.widgets?.[profile.protectedWidget]?.kind !== "speed_limit_actions")) return false
+      profile.widgets?.[profile.protectedWidget]?.kind !== "speed_limit_actions")) return false
     if (!positive(profile.width) || !positive(profile.height) || typeof profile.label !== "string" ||
-        !bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) || bounds.x < 0 || bounds.y < 0 ||
-        !positive(bounds.width) || !positive(bounds.height) || bounds.x + bounds.width > profile.width ||
-        bounds.y + bounds.height > profile.height || !profile.widgets || Array.isArray(profile.widgets) ||
-        Object.keys(profile.widgets).length > 32 || !Array.isArray(profile.reservedZones) || profile.reservedZones.length > 32) return false
+      !bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y) || bounds.x < 0 || bounds.y < 0 ||
+      !positive(bounds.width) || !positive(bounds.height) || bounds.x + bounds.width > profile.width ||
+      bounds.y + bounds.height > profile.height || !profile.widgets || Array.isArray(profile.widgets) ||
+      Object.keys(profile.widgets).length > 32 || !Array.isArray(profile.reservedZones) || profile.reservedZones.length > 32) return false
     for (const zone of profile.reservedZones) {
       if (typeof zone.label !== "string" || !Number.isFinite(zone.x) || !Number.isFinite(zone.y) ||
-          !positive(zone.width) || !positive(zone.height) || zone.x < bounds.x || zone.y < bounds.y ||
-          zone.x + zone.width > bounds.x + bounds.width || zone.y + zone.height > bounds.y + bounds.height) return false
+        !positive(zone.width) || !positive(zone.height) || zone.x < bounds.x || zone.y < bounds.y ||
+        zone.x + zone.width > bounds.x + bounds.width || zone.y + zone.height > bounds.y + bounds.height) return false
     }
     for (const widget of Object.values(profile.widgets)) {
       const area = widget.bounds || bounds
@@ -175,23 +219,29 @@ export function validSnapshot(data) {
       if (!object(widget.colors) || !Object.entries(widget.colors).every(([key, value]) =>
         COLORS.includes(key) && (value === null || (typeof value === "string" && HEX.test(value))))) return false
       if (!Number.isFinite(area.x) || !Number.isFinite(area.y) || area.x < 0 || area.y < 0 ||
-          !positive(area.width) || !positive(area.height) || area.x + area.width > profile.width ||
-          area.y + area.height > profile.height || typeof widget.label !== "string" || typeof widget.kind !== "string" ||
-          !positive(widget.width) || !positive(widget.height) || widget.width > area.width || widget.height > area.height) return false
+        !positive(area.width) || !positive(area.height) || area.x + area.width > profile.width ||
+        area.y + area.height > profile.height || typeof widget.label !== "string" || typeof widget.kind !== "string" ||
+        !positive(widget.width) || !positive(widget.height) || widget.width > area.width || widget.height > area.height) return false
       if (widget.box && (data.metadata.projection !== true || widget.kind !== "nav_map" || !object(widget.opacity) ||
-          ![widget.box.minWidth, widget.box.maxWidth, widget.box.minHeight, widget.box.maxHeight].every(Number.isInteger) ||
-          widget.box.minWidth < 24 || widget.box.minHeight < 24 || widget.box.minWidth > widget.box.maxWidth ||
-          widget.box.minHeight > widget.box.maxHeight || widget.box.maxWidth > area.width || widget.box.maxHeight > area.height ||
-          ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
-          widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
-          widget.opacity.default > widget.opacity.max)) return false
+        ![widget.box.minWidth, widget.box.maxWidth, widget.box.minHeight, widget.box.maxHeight].every(Number.isInteger) ||
+        widget.box.minWidth < 24 || widget.box.minHeight < 24 || widget.box.minWidth > widget.box.maxWidth ||
+        widget.box.minHeight > widget.box.maxHeight || widget.box.maxWidth > area.width || widget.box.maxHeight > area.height ||
+        ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
+        widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
+        widget.opacity.default > widget.opacity.max)) return false
+      if (widget.opacity && (!projection || !["nav_map", "nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
+        !object(widget.opacity) || ![widget.opacity.min, widget.opacity.max, widget.opacity.default].every(Number.isInteger) ||
+        widget.opacity.min < 0 || widget.opacity.max > 100 || widget.opacity.min > widget.opacity.default ||
+        widget.opacity.default > widget.opacity.max)) return false
+      if (widget.backgroundToggle != null && (!projection || !["nav_home", "nav_work", "bookmark", "car_exit"].includes(widget.kind) ||
+        widget.backgroundToggle !== true || !widget.opacity)) return false
       if (widget.resizable && (widget.kind !== "steering_wheel" || !Number.isInteger(widget.resizable.min) ||
-          !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
-          widget.resizable.default !== widget.width || widget.width !== widget.height ||
-          widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||
-          widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
-      if (widget.iconSize != null && (!projection || !["nav_home", "nav_work"].includes(widget.kind) ||
-          !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
+        !Number.isInteger(widget.resizable.default) || !Number.isInteger(widget.resizable.max) ||
+        widget.resizable.default !== widget.width || widget.width !== widget.height ||
+        widget.resizable.min < 24 || widget.resizable.max > area.width || widget.resizable.max > area.height ||
+        widget.resizable.min > widget.resizable.default || widget.resizable.default > widget.resizable.max)) return false
+      if (widget.iconSize != null && (!projection || !["nav_home", "nav_work", "bookmark"].includes(widget.kind) ||
+        !Number.isInteger(widget.iconSize) || widget.iconSize < 44 || widget.iconSize > Math.min(widget.width, widget.height))) return false
       if (widget.required != null && (!projection || widget.kind !== "car_exit" || widget.required !== true)) return false
       if (widget.frontmost != null && (!projection || widget.kind !== "car_exit" || widget.frontmost !== true)) return false
       if (widget.kind === "car_exit" && (widget.required !== true || widget.frontmost !== true)) return false
@@ -201,8 +251,8 @@ export function validSnapshot(data) {
 }
 
 export class OnroadLayoutFeed {
-  constructor({ publish, projection = false, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
-                later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
+  constructor({ publish, projection = false, unauthorized = () => { }, fetcher = (...args) => fetch(...args),
+    later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id) }) {
     Object.assign(this, { publish, projection, unauthorized, fetcher, later, cancelTimer })
     this.active = false
     this.generation = 0
@@ -231,14 +281,15 @@ export class OnroadLayoutFeed {
   async run(body = null, { background = false } = {}) {
     if (!this.active) return
     if (this.request) {
-      if (body === null || this.saving) return
+      // Polls yield to anything in flight; an explicit reload replaces a pending poll.
+      if (background || this.saving) return
       this.request.abort(); this.generation++; this.cancelTimer(this.timer)
       this.request = this.timer = null
     }
     const saving = body !== null, generation = ++this.generation, request = new AbortController()
     this.request = request
     this.saving = saving
-    if (saving || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
+    if (saving || !background || !this.data && !this.error) this.publish({ status: saving ? "saving" : "loading", notice: "" })
     const fail = (message) => {
       this.error = message
       this.needsReload ||= saving
@@ -253,8 +304,10 @@ export class OnroadLayoutFeed {
         "Reading colors and layouts timed out. Try reloading.")
     }, 5000)
     try {
-      const response = await this.fetcher(this.projection ? "./api/android-auto/layout" : "./api/ui/layout", { credentials: "same-origin", cache: "no-store", signal: request.signal,
-        ...(saving ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(this.projection ? projectionPayload(body, this.data.metadata) : body) } : {}) })
+      const response = await this.fetcher(this.projection ? "./api/android-auto/layout" : "./api/ui/layout", {
+        credentials: "same-origin", cache: "no-store", signal: request.signal,
+        ...(saving ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(this.projection ? projectionPayload(body, this.data.metadata) : body) } : {})
+      })
       if (!this.active || generation !== this.generation) return
       let data = await response.json().catch(() => null)
       if (!this.active || generation !== this.generation) return
@@ -264,14 +317,19 @@ export class OnroadLayoutFeed {
       if (response.status === 409) throw new Error("Saved values or parked status changed. Your edits are kept here. Reload before saving again.")
       if (!response.ok) throw new Error(saving ? "Colors and layout could not be saved. Your edits are kept here. Reload before trying again." :
         "Colors and layout are unavailable. Try reloading.")
-      if (this.projection) data = editorSnapshot(data)
+      data = this.projection ? editorSnapshot(data) : withDisplay(data)
       if (!validSnapshot(data)) throw new Error("The device returned an unsupported colors and layout document. Reload to try again.")
       const initial = !this.data
       this.data = data
       this.error = ""
       this.needsReload = false
-      this.publish({ status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
-        notice: saving ? (this.projection ? "Android Auto layout saved." : "Colors and both layouts saved.") : "" })
+      this.publish({
+        status: "ready", data, ...((saving || initial || !background) ? { draft: clone(data.document) } : {}), error: "", needsReload: false,
+        notice: saving ? (this.projection ? "Android Auto layout saved." : data.failed?.length ?
+          "Layout saved, but these display options did not change: " + data.failed.join(", ") + ". Reload and try again." :
+          "Colors and both layouts saved.") :
+          !background && !initial ? "Reloaded the saved layout." : ""
+      })
       return true
     } catch (error) {
       if (this.active && generation === this.generation) fail(connectionError(error))
@@ -312,6 +370,12 @@ export const LayoutWidgetPreview = {
           <tspan v-for="(line, index) in modeLines(scene, profile)" :key="index" :x="widget.width / 2"
             :y="widget.height / 2 + (index - (modeLines(scene, profile).length - 1) / 2) * 25">{{ line }}</tspan>
         </text>
+      </template>
+      <template v-else-if="widget.kind === 'stopped_timer'">
+        <text :x="widget.width / 2" :y="widget.height * 53 / 112" text-anchor="middle" dominant-baseline="middle" :font-size="widget.height * 64 / 112" font-weight="700" fill="#b67129"
+          style="filter: drop-shadow(2px 2px 1px #000000aa)">2 minutes</text>
+        <text :x="widget.width / 2" :y="widget.height * 101 / 112" text-anchor="middle" dominant-baseline="middle" :font-size="widget.height * 30 / 112" font-weight="500" fill="#fffffff2"
+          style="filter: drop-shadow(2px 2px 1px #000000aa)">14 seconds</text>
       </template>
       <template v-else-if="widget.kind === 'clock'">
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
@@ -404,19 +468,20 @@ export const LayoutWidgetPreview = {
         <circle cx="30" cy="31" r="6" fill="white" />
         <path d="M20 47 Q20 38 30 38 Q40 38 40 47 Z" fill="white" />
       </g>
-      <g v-else-if="['nav_home', 'nav_work'].includes(widget.kind)">
-        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
+      <g v-else-if="['nav_home', 'nav_work', 'bookmark'].includes(widget.kind)" :opacity="(widget.opacity ?? 100) / 100">
+        <rect v-if="widget.background !== false" x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
         <g v-if="widget.display === 'icons'" transform="translate(23 23) scale(2.6667)" fill="none" stroke="#c7aef7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path v-if="widget.kind === 'nav_home'" d="M3 11 L12 3 L21 11 M5 9 V21 H10 V14 H14 V21 H19 V9" />
+          <path v-else-if="widget.kind === 'bookmark'" d="M6 3 H18 V21 L12 16 L6 21 Z" />
           <path v-else d="M8 7 V4 H16 V7 M3 7 H21 V21 H3 Z M3 12 L10 15 H14 L21 12 M10 13 V17 H14 V13" />
         </g>
         <template v-else>
-        <text :x="widget.width / 2" y="48" text-anchor="middle" font-size="34" font-weight="600" fill="#c7aef7">{{ widget.label }}</text>
-        <text :x="widget.width / 2" y="89" text-anchor="middle" font-size="25" fill="#c7aef7">Navigate</text>
+        <text :x="widget.width / 2" :y="widget.kind === 'bookmark' ? 48 : 43" text-anchor="middle" :font-size="widget.kind === 'bookmark' ? 34 : 25" :font-weight="widget.kind === 'bookmark' ? 600 : 400" fill="#c7aef7">{{ widget.kind === 'bookmark' ? widget.label : 'Navigate' }}</text>
+        <text :x="widget.width / 2" :y="widget.kind === 'bookmark' ? 89 : 88" text-anchor="middle" :font-size="widget.kind === 'bookmark' ? 25 : 34" :font-weight="widget.kind === 'bookmark' ? 400 : 600" fill="#c7aef7">{{ widget.kind === 'bookmark' ? 'Save event' : widget.label }}</text>
         </template>
       </g>
-      <g v-else-if="widget.kind === 'car_exit'">
-        <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="15" fill="#0f0d17a6" stroke="#c7aef7c8" stroke-width="3" />
+      <g v-else-if="widget.kind === 'car_exit'" :opacity="(widget.opacity ?? 100) / 100">
+        <rect v-if="widget.background !== false" x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="15" fill="#0f0d17a6" stroke="#c7aef7c8" stroke-width="3" />
         <g data-preview-icon="door-exit" fill="none" stroke="#c7aef7e6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M54 20 H24 V76 H54" />
           <path d="M38 48 H78 M67 37 L78 48 L67 59" />
@@ -438,7 +503,7 @@ export const LayoutWidgetPreview = {
           <mask id="gx-nav-map-mask"><rect :width="widget.width" :height="widget.height" :rx="Math.min(widget.width, widget.height) * .08" fill="url(#gx-nav-map-fade)" /></mask>
         </defs>
         <g mask="url(#gx-nav-map-mask)" :transform="'scale(' + widget.width / 600 + ' ' + widget.height / 450 + ')'" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <g :opacity="(widget.opacity ?? 70) / 100">
+          <g :opacity="(widget.opacity ?? 50) / 100">
           <rect width="600" height="450" fill="#0b0f16" opacity=".45" />
           <g stroke="#000000a8" vector-effect="non-scaling-stroke">
             <path d="M-20 120 Q200 150 640 90 M90 -20 L130 480 M430 -20 Q400 200 470 480 M-20 330 L640 360 M260 -20 L250 480" stroke-width="11" vector-effect="non-scaling-stroke" />
@@ -463,13 +528,18 @@ export const LayoutWidgetPreview = {
 
 export const OnroadLayoutPage = {
   components: { GxState, LayoutWidgetPreview, GalaxySelect, GxNotice, GxDialog, GalaxySettingRow },
-  props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
+  props: {
+    projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
+    initialPanel: { type: String, default: "widgets" }
+  },
   emits: ["close", "target"],
   setup(props) {
-    const state = reactive({ status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
+    const state = reactive({
+      status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
-      inspectorPanel: "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
-      history: { undo: [], redo: [], group: null } })
+      inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
+      hiddenPreviewWidgets: loadPreviewVisibility(props.projection), history: { undo: [], redo: [], group: null }
+    })
     let deferred = null
     const apply = (update) => {
       if (state.drag || state.layerDrag) { deferred = { ...deferred, ...update }; return }
@@ -512,8 +582,10 @@ export const OnroadLayoutPage = {
     }
     const feed = new OnroadLayoutFeed({ projection: props.projection, unauthorized: props.unauthorized, publish: apply })
     watch(() => !!state.drag || !!state.layerDrag, (dragging) => { if (!dragging && deferred) apply({}) }, { flush: "sync" })
-    const previewFeed = new LayoutPreviewFeed({ unauthorized: props.unauthorized,
-      publish: (update) => Object.assign(state.preview, update) })
+    const previewFeed = new LayoutPreviewFeed({
+      unauthorized: props.unauthorized,
+      publish: (update) => Object.assign(state.preview, update)
+    })
     watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag, state.data?.revision],
       () => {
         if (props.projection && state.draft && props.mode === 'local' && !state.devicePreviewOpen) {
@@ -521,7 +593,7 @@ export const OnroadLayoutPage = {
           previewFeed.start()
         }
         if (state.devicePreviewOpen && props.mode === "local") {
-          const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : state.draft
+          const document = props.projection ? projectionPayload({ document: state.draft }, state.data.metadata).document : layoutDocument(state.draft)
           previewFeed.update(document, props.projection ? 'projection' : state.profile, state.scene, !!state.drag)
         }
       }, { flush: "sync" })
@@ -539,51 +611,79 @@ export const OnroadLayoutPage = {
     canUndo() { return this.state.history.undo.length > 0 },
     canRedo() { return this.state.history.redo.length > 0 },
     pendingLeave() { return typeof this.state.discard === "function" || ["back", "device", "projection"].includes(this.state.discard) },
-    inlineLeavePrompt() { return this.pendingLeave && this.state.leavePresentation !== "modal" },
+    inlineLeavePrompt() { return (this.pendingLeave || this.state.discard === "reload") && this.state.leavePresentation !== "modal" },
     modalLeavePrompt() { return this.pendingLeave && this.state.leavePresentation === "modal" },
     saveAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     canSavePending() { return this.saveAvailable && !this.busy },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
-    layerWidgets() { return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
-      .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled) },
+    layerWidgets() {
+      return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
+        .slice().reverse().map(id => this.widgets.find(widget => widget.id === id)).filter(widget => this.layout[widget.id].enabled)
+    },
     listWidgets() { return this.state.layerDrag ? this.state.layerDrag.rows.map(id => this.widgets.find(widget => widget.id === id)) : this.layerWidgets },
     selectionBox() {
       if (!this.state.layerDrag) return null
       const widget = this.renderWidgets.find(widget => widget.id === this.state.selected)
       if (!widget) return null
-      return { x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
-        width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom }
+      return {
+        x: this.selectedPosition.x, y: this.selectedPosition.y - widget.visualInsetTop,
+        width: widget.width, height: widget.height + widget.visualInsetTop + widget.visualInsetBottom
+      }
     },
     activeWidgets() { return this.widgets.filter(({ id }) => this.layout[id].enabled) },
-    renderWidgets() { return this.layerWidgets.slice().reverse().map((item) => {
-      const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
-      const widget = { ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
-        visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0) }
-      const [width, height] = widgetSize(widget, this.layout[widget.id])
-      return { ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
-        ...(widget.box ? { opacity: this.layout[widget.id].opacity } : {}) } }) },
+    renderWidgets() {
+      return this.layerWidgets.filter(item => !this.previewHidden(item.id)).reverse().map((item) => {
+        const below = item.visualInsetTop && this.layout[item.id].y < item.visualInsetTop
+        const widget = {
+          ...item, visualInsetTop: below ? 0 : item.visualInsetTop || 0,
+          visualInsetBottom: below ? item.visualInsetTop : 0, visualHeaderY: below ? item.height + 8 : -(item.visualInsetTop || 0)
+        }
+        const [width, height] = widgetSize(widget, this.layout[widget.id])
+        return {
+          ...widget, width, height, ...(widget.iconSize ? { display: this.layout[widget.id].display } : {}),
+          ...(widget.opacity ? { opacity: this.layout[widget.id].opacity } : {}),
+          ...(widget.backgroundToggle ? { background: this.layout[widget.id].background } : {})
+        }
+      })
+    },
     inactiveWidgets() { return this.widgets.filter(({ id }) => !this.layout[id].enabled || (this.state.drag?.fromTray && this.state.drag.id === id)) },
     availableProfiles() { return this.state.data?.supportedProfiles || (this.state.data?.activeProfile ? [this.state.data.activeProfile] : []) },
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
     selectedPosition() { return this.layout?.[this.state.selected] },
     selectedSize() { return this.selectedWidget ? widgetSize(this.selectedWidget, this.selectedPosition) : [0, 0] },
     selectedColors() { return this.selectedWidget ? this.widgetColors(this.state.selected) : {} },
-    colorFields() { return (this.state.data?.metadata.paletteFields || []).filter((field) =>
-      Object.hasOwn(this.selectedWidget?.colors || {}, field.id)) },
+    colorFields() {
+      return (this.state.data?.metadata.paletteFields || []).filter((field) =>
+        Object.hasOwn(this.selectedWidget?.colors || {}, field.id))
+    },
     roadStyle() { return this.state.draft?.roadColors[this.state.profile] || {} },
-    roadMode() { return this.roadStyle.pathMode || 'default' },
+    roadMode() { const mode = this.roadStyle.pathMode || 'acceleration'; return mode === 'default' ? 'acceleration' : mode },
     roadColors() { return { ...Object.fromEntries((this.state.data?.metadata.roadColorFields || []).map(field => [field.id, field.default])), ...this.roadStyle } },
     roadGradient() {
-      if (this.roadMode === 'rainbow') return Array.from({ length: 12 }, (_, i) => ({ offset: i / 11,
-        color: 'hsl(' + i / 11 * 120 + ',100%,50%)', alpha: .5 - .4 * i / 11 }))
-      if (this.roadMode === 'color') return [1, .55, .10].map((factor, i) => ({ offset: 1 - i / 2,
-        color: this.roadColors.path.slice(0, 7), alpha: Math.floor(this.alpha(this.roadColors.path) * factor) / 255 }))
+      if (this.roadMode === 'rainbow') return Array.from({ length: 12 }, (_, i) => ({
+        offset: i / 11,
+        color: 'hsl(' + i / 11 * 120 + ',100%,50%)', alpha: .5 - .4 * i / 11
+      }))
+      if (this.roadMode === 'color') return [1, .55, .10].map((factor, i) => ({
+        offset: 1 - i / 2,
+        color: this.roadColors.path.slice(0, 7), alpha: Math.floor(this.alpha(this.roadColors.path) * factor) / 255
+      }))
       return [{ offset: 0, color: '#72ff5c', alpha: 0 }, { offset: .5, color: '#72ff5c', alpha: 89 / 255 },
-        { offset: 1, color: '#0df87a', alpha: 102 / 255 }]
+      { offset: 1, color: '#0df87a', alpha: 102 / 255 }]
     },
     limits() { return this.selectedWidget ? placementLimits(this.profile, this.state.selected, this.layout) : null },
+    displayGroups() {
+      const groups = []
+      for (const row of this.state.data?.display || []) {
+        if (row.group === "widget") continue
+        const group = groups.find(item => item.name === row.group) || groups[groups.push({ name: row.group, rows: [] }) - 1]
+        group.rows.push(row)
+      }
+      return groups
+    },
+    stockConfidence() { return this.displayValue("StockConfidenceBallWidget") === "Off" },
   },
   mounted() {
     if (this.mode === "local") this.feed.start()
@@ -592,6 +692,13 @@ export const OnroadLayoutPage = {
   beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
   methods: {
     switchRow,
+    previewHidden(id) { return !(this.projection && id === "car_exit") && this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
+    togglePreviewVisibility(id) {
+      if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit")) return
+      const hidden = this.state.hiddenPreviewWidgets[this.state.profile] ||= {}
+      hidden[id] = !hidden[id]
+      try { localStorage.setItem(previewVisibilityKey(this.projection), JSON.stringify(this.state.hiddenPreviewWidgets)) } catch { }
+    },
     selectWidget(id) {
       this.state.selected = id
       this.state.inspectorPanel = "edit"
@@ -603,7 +710,7 @@ export const OnroadLayoutPage = {
     },
     reorderLayer(id, target) {
       if (!this.editable || this.state.drag || id === target ||
-          this.profile.widgets[id]?.frontmost || this.profile.widgets[target]?.frontmost) return
+        this.profile.widgets[id]?.frontmost || this.profile.widgets[target]?.frontmost) return
       const order = [...orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)]
       const from = order.indexOf(id), to = order.indexOf(target)
       if (from < 0 || to < 0) return
@@ -621,9 +728,11 @@ export const OnroadLayoutPage = {
       event.currentTarget.setPointerCapture(event.pointerId)
       const rect = event.currentTarget.closest("[data-layer-id]").getBoundingClientRect()
       this.state.selected = id
-      this.state.layerDrag = { id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY,
+      this.state.layerDrag = {
+        id, pointerId: event.pointerId, target: null, startX: event.clientX, startY: event.clientY,
         x: rect.x, y: rect.y, width: rect.width, offsetX: event.clientX - rect.x, offsetY: event.clientY - rect.y,
-        rows: this.layerWidgets.map(widget => widget.id), before: clone(this.state.draft), moved: false }
+        rows: this.layerWidgets.map(widget => widget.id), before: clone(this.state.draft), moved: false
+      }
       this._layerTarget = event.currentTarget
     },
     moveLayerDrag(event) {
@@ -665,7 +774,7 @@ export const OnroadLayoutPage = {
     layerKey(event, id) {
       if (event.key === 'Escape' && this.state.layerDrag) {
         event.preventDefault()
-        this.endLayerDrag({pointerId: this.state.layerDrag.pointerId}, true)
+        this.endLayerDrag({ pointerId: this.state.layerDrag.pointerId }, true)
         return
       }
       if (this.state.layerDrag) return
@@ -715,7 +824,7 @@ export const OnroadLayoutPage = {
       if (this.mode !== "local" || !this.state.data || !this.state.draft || this.state.drag || this.state.devicePreviewOpen) return
       this.state.devicePreviewOpen = true
       this.previewFeed.start()
-      this.previewFeed.update(this.projection ? projectionPayload({document: this.state.draft}, this.state.data.metadata).document : this.state.draft, this.projection ? 'projection' : this.state.profile, this.state.scene)
+      this.previewFeed.update(this.projection ? projectionPayload({ document: this.state.draft }, this.state.data.metadata).document : layoutDocument(this.state.draft), this.projection ? 'projection' : this.state.profile, this.state.scene)
     },
     hideDevicePreview() {
       this.state.previewMode = "layout"
@@ -758,7 +867,7 @@ export const OnroadLayoutPage = {
     },
     requestRemove(id = this.state.selected) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.layout?.[id]?.enabled ||
-          !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].required) return
+        !Object.hasOwn(this.profile.widgets, id) || this.profile.widgets[id].required) return
       this.state.selected = id
       this.state.removeConfirm = id
     },
@@ -775,19 +884,56 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = ""
     },
+    displayRow(key) { return this.state.data?.display?.find(row => row.key === key) },
+    displayValue(key) { return this.state.draft?.display?.[key] },
+    displayAvailable(row) { return !!row?.available && (!row.requires || this.displayValue(row.requires) === "On") },
+    displaySettingRow(row) {
+      const blocked = row.requires && this.displayValue(row.requires) !== "On"
+      return {
+        label: row.label, value: this.displayValue(row.key), choices: row.choices, available: this.displayAvailable(row),
+        reason: blocked ? "Turn on Lead Indicator first" : row.reason, action: true
+      }
+    },
+    setDisplay(key, value) {
+      const row = this.displayRow(key)
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.displayAvailable(row) || !row.choices.includes(value)) return
+      const before = clone(this.state.draft)
+      this.state.draft.display[key] = value
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    setShowMaxSpeed(event) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits") return
+      const before = clone(this.state.draft)
+      this.state.draft.showMaxSpeed = event.target.checked
+      this.recordChange(before)
+      this.state.notice = ""
+    },
     setLargeUiGammaTrial(value) {
       if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag) return
       const before = clone(this.state.draft)
       this.state.draft.largeUiGammaTrial = value === "On"
       this.recordChange(before)
-      this.state.notice = "Save and reconnect Android Auto to apply the camera effect."
+      this.state.notice = "Save to apply the camera effect on Android Auto."
+    },
+    setProjectionBorder(key, value) {
+      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag || !PROJECTION_BORDERS.includes(key)) return
+      const before = clone(this.state.draft)
+      this.state.draft[key] = value === "On"
+      this.recordChange(before)
+      this.state.notice = "Save to apply the border on Android Auto."
     },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
-          !["words", "icons"].includes(display)) return
+        !["words", "icons"].includes(display)) return
       this.finishColorEdit()
       const before = clone(this.state.draft)
+      const [oldWidth] = widgetSize(this.selectedWidget, this.selectedPosition)
       this.selectedPosition.display = display
+      if (["nav_home", "nav_work"].includes(this.selectedWidget.kind)) {
+        const [newWidth] = widgetSize(this.selectedWidget, this.selectedPosition)
+        this.selectedPosition.x += (oldWidth - newWidth) / 2
+      }
       Object.assign(this.selectedPosition, clampPlacement(this.profile, this.state.selected,
         this.selectedPosition.x, this.selectedPosition.y, this.layout))
       this.recordChange(before)
@@ -837,9 +983,11 @@ export const OnroadLayoutPage = {
       const [width, height] = widgetSize(widget, position)
       this.state.selected = id
       this.finishColorEdit()
-      this.state.drag = { id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
+      this.state.drag = {
+        id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
         offsetX: fromTray ? width / 2 : point.x - position.x,
-        offsetY: fromTray ? height / 2 : point.y - position.y }
+        offsetY: fromTray ? height / 2 : point.y - position.y
+      }
       this._dragTarget = this.$refs.preview
       this._dragTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()
@@ -852,8 +1000,10 @@ export const OnroadLayoutPage = {
       const position = this.layout[id]
       this.state.selected = id
       this.finishColorEdit()
-      this.state.drag = { id, pointerId: event.pointerId, resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
-        inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height }
+      this.state.drag = {
+        id, pointerId: event.pointerId, resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
+        inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height
+      }
       this._dragTarget = this.$refs.preview
       this._dragTarget.setPointerCapture?.(event.pointerId)
       event.stopPropagation()
@@ -877,10 +1027,18 @@ export const OnroadLayoutPage = {
     },
     opacityInput(event) {
       const value = Number(event.target.value), range = this.selectedWidget?.opacity
-      if (!this.editable || this.state.drag || !range || !Number.isInteger(value) || value < range.min || value > range.max) return
+      if (!this.editable || this.state.drag || this.state.layerDrag || !range || !Number.isInteger(value) || value < range.min || value > range.max) return
       const before = clone(this.state.draft)
       this.selectedPosition.opacity = value
       this.recordChange(before, this.state.profile + ":" + this.state.selected + ":opacity")
+    },
+    setWidgetBackground(event) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.backgroundToggle) return
+      this.finishColorEdit()
+      const before = clone(this.state.draft)
+      this.selectedPosition.background = event.target.checked
+      this.recordChange(before)
+      this.state.notice = ""
     },
     moveDrag(event) {
       const drag = this.state.drag
@@ -912,7 +1070,7 @@ export const OnroadLayoutPage = {
       this._dragTarget = null
     },
     cancelDrag() {
-      if (this.state.layerDrag) this.endLayerDrag({pointerId: this.state.layerDrag.pointerId}, true)
+      if (this.state.layerDrag) this.endLayerDrag({ pointerId: this.state.layerDrag.pointerId }, true)
       const drag = this.state.drag
       if (drag) Object.assign(this.layout[drag.id], drag.before)
       this.releaseDrag()
@@ -944,7 +1102,7 @@ export const OnroadLayoutPage = {
     },
     roadPoints(points) {
       const r = this.profile.bounds
-      return points.map(([x, y]) => (r.x + x*r.width) + ',' + (r.y + y*r.height)).join(' ')
+      return points.map(([x, y]) => (r.x + x * r.width) + ',' + (r.y + y * r.height)).join(' ')
     },
     roadLabel(id) {
       if (id === 'pathEdge') return this.state.profile === 'large' ? 'Path border' : 'Closest lane markings'
@@ -1013,7 +1171,9 @@ export const OnroadLayoutPage = {
     },
     requestLeave(action, presentation = "inline") {
       if (this.inlineLeavePrompt) { this.flashLeavePrompt(); return }
-      if (this.busy || this.state.drag || this.state.layerDrag) return
+      // Saving must finish first; a load or a stray drag must not swallow navigation.
+      if (this.state.status === "saving") return
+      if (this.state.drag || this.state.layerDrag) this.cancelDrag()
       this.state.removeConfirm = null
       if (this.dirty) {
         this.state.discard = action
@@ -1044,7 +1204,7 @@ export const OnroadLayoutPage = {
     },
   },
   template: `
-    <section class="gx-settings gx-layout" aria-label="Colors and layout" :inert="busy" :aria-busy="busy || undefined">
+    <section class="gx-settings gx-layout" aria-label="Colors and layout" :aria-busy="busy || undefined">
       <div class="gx-settings__header gx-page-header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
         <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
 
@@ -1057,12 +1217,12 @@ export const OnroadLayoutPage = {
       <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
-        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}">
-          <span role="status">{{ inlineLeavePrompt ? 'Leave without saving your changes?' : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
+        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}" :inert="busy">
+          <span role="status">{{ inlineLeavePrompt ? (pendingLeave ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?') : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
-            <button class="gx-btn gx-btn--danger" type="button" aria-label="Discard and leave" title="Discard and leave" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">Discard and leave</span></button>
-            <button class="gx-btn" type="button" :disabled="!saveAvailable" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
+            <button class="gx-btn gx-btn--danger" type="button" :aria-label="pendingLeave ? 'Discard and leave' : 'Discard and reload'" :title="pendingLeave ? 'Discard and leave' : 'Discard and reload'" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">{{ pendingLeave ? 'Discard and leave' : 'Discard and reload' }}</span></button>
+            <button v-if="pendingLeave" class="gx-btn" type="button" :disabled="!saveAvailable" aria-label="Save changes" title="Save changes" @click="saveAndLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">{{ state.status === 'saving' ? 'Saving…' : 'Save changes' }}</span></button>
           </template>
           <template v-else>
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
@@ -1073,23 +1233,22 @@ export const OnroadLayoutPage = {
           </template>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
-        <div v-if="state.discard && !inlineLeavePrompt && !modalLeavePrompt" class="gx-card gx-layout__discard" role="alert">
-          <p>{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?' }}</p>
-          <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="cancelLeave">Keep editing</button>
-            <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
-        </div>
         <template v-if="state.data && state.draft">
-          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto camera effect">
+          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto display" :inert="busy">
             <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
               :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
-            <p class="gx-note">Try the large comma UI's road-camera effect on Android Auto: reduced color and increased contrast while engaged, dimming while disengaged. Off keeps the current full-color appearance. Save and reconnect Android Auto to apply. The layout preview does not simulate camera color.</p>
+            <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
+              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('blindSpotBorder', value)" />
+            <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
+              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('signalBorder', value)" />
+            <p class="gx-note">Gamma trial: the large comma UI's road-camera color effect (not shown in the preview). Borders are separate from the comma screen's C4 settings. Save to apply.</p>
           </section>
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
           <div v-if="!projection && availableProfiles.length" class="gx-layout__tabs gx-tabs" aria-label="Layout size">
             <button v-if="!projection" v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
               :aria-pressed="state.profile === tab.id" :disabled="!!state.drag" @click="selectProfile(tab.id)">{{ tab.label }}<span v-if="state.data.activeProfile === tab.id"> · Active UI</span></button>
           </div>
-          <div class="gx-layout__workspace">
+          <div class="gx-layout__workspace" :inert="busy">
             <section class="gx-card gx-layout__preview-card" aria-label="Driving screen preview">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
               <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
@@ -1167,6 +1326,7 @@ export const OnroadLayoutPage = {
               </section>
               <details class="gx-layout__help"><summary>Preview tips &amp; display behavior</summary><div>
                 <p class="gx-note">Drag widgets in Arrange widgets to place them. Readings are samples.</p>
+                <p class="gx-note">Add Stopped timer to preview its minutes and seconds. Device preview renders the same widget as the driving screen; choose Stopped timer for a sample at rest.</p>
               <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
               <p v-if="!projection && state.showFavoriteZones" class="gx-note">Favorite tap areas apply to enabled slots. Speed-limit controls and the steering wheel take priority when the drawer is closed.</p>
@@ -1179,10 +1339,11 @@ export const OnroadLayoutPage = {
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'widgets'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'widgets'">Widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'">Edit widget</button>
                 <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'">Road colors</button>
+                <button v-if="!projection && displayGroups.length" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'display'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'display'">Display</button>
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
-              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets.</p>
+              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets. Use the eye to hide certain widgets while arranging; does not affect driving screen.</p>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
                 :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
                 <button class="gx-layout__row-grip gx-icon-btn" type="button"
@@ -1194,9 +1355,15 @@ export const OnroadLayoutPage = {
                   @keydown="layerKey($event, widget.id)" @click="layerClick($event, widget.id)"><span aria-hidden="true">{{ widget.frontmost ? '↑' : '⠿' }}</span></button>
                 <button class="gx-layout__layer-name" type="button" :aria-pressed="state.selected === widget.id" :disabled="!!state.drag || !!state.layerDrag"
                   @click="selectWidget(widget.id)">{{ widget.label }}</button>
+                <button v-if="!projection || widget.id !== 'car_exit'" class="gx-layout__visibility gx-icon-btn" type="button" :disabled="!!state.drag || !!state.layerDrag"
+                  :aria-label="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview'"
+                  :title="(previewHidden(widget.id) ? 'Show ' : 'Hide ') + widget.label + ' in arrangement preview only'"
+                  :aria-pressed="!previewHidden(widget.id)" @click="togglePreviewVisibility(widget.id)">
+                  <i class="bi" :class="previewHidden(widget.id) ? 'bi-eye-slash' : 'bi-eye'" aria-hidden="true"></i>
+                </button>
                 <button v-if="!widget.required" class="gx-layout__remove gx-icon-btn" type="button" :aria-label="'Remove ' + widget.label" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
                   @click="requestRemove(widget.id)"><span aria-hidden="true">−</span></button>
-                <span v-else class="gx-note" title="This control cannot be removed or placed below another widget.">Top · Required</span>
+                <span v-else class="gx-note gx-layout__required" title="This control cannot be removed or placed below another widget.">Required</span>
               </div></div>
               <Teleport to="body"><div v-if="state.layerDrag?.moved" class="gx-layout__drag-ghost" aria-hidden="true"
                 :style="{left: state.layerDrag.x + 'px', top: state.layerDrag.y + 'px', width: state.layerDrag.width + 'px'}">
@@ -1225,14 +1392,32 @@ export const OnroadLayoutPage = {
                 <template v-if="selectedWidget.box">
                   <div class="gx-layout__coordinates"><label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editAvailable || !!state.drag" @change="boxInput('width', $event)"></label>
                     <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editAvailable || !!state.drag" @change="boxInput('height', $event)"></label></div>
-                  <label for="layout-map-opacity">Map opacity · {{ selectedPosition.opacity }}%</label>
-                  <input id="layout-map-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
-                    :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
                   <span class="gx-note">Lower values let more of the road show through. Drag the corner handle on the preview to resize.</span>
                 </template>
+                <template v-if="selectedWidget.opacity">
+                  <label for="layout-widget-opacity">{{ selectedWidget.box ? 'Map opacity' : 'Opacity' }} · {{ selectedPosition.opacity }}%</label>
+                  <input id="layout-widget-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
+                    :value="selectedPosition.opacity" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="opacityInput($event)" @change="finishColorEdit" @blur="finishColorEdit">
+                </template>
+                <label v-if="selectedWidget.backgroundToggle"><input type="checkbox" :checked="selectedPosition.background"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setWidgetBackground"> Show background</label>
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
+                <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
+                <label v-if="!projection && selectedWidget.kind === 'steering_wheel' && displayRow('ShowBrakeStatus')" class="gx-layout__clock-format"><input type="checkbox" :checked="displayValue('ShowBrakeStatus') === 'On'"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('ShowBrakeStatus'))" @change="setDisplay('ShowBrakeStatus', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
+                <div v-if="!projection && selectedWidget.kind === 'model_confidence' && displayRow('StockConfidenceBallWidget')" class="gx-layout__favorite-display">
+                  <span>Style</span>
+                  <div class="gx-segment" role="group" aria-label="Model confidence style">
+                    <button v-for="choice in [['On', 'StarPilot widgets'], ['Off', 'Stock confidence ball']]" :key="choice[0]" class="gx-btn" type="button"
+                      :class="displayValue('StockConfidenceBallWidget') === choice[0] ? 'gx-btn--primary' : 'gx-btn--tonal'"
+                      :aria-pressed="displayValue('StockConfidenceBallWidget') === choice[0]"
+                      :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('StockConfidenceBallWidget'))"
+                      @click="setDisplay('StockConfidenceBallWidget', choice[0])">{{ choice[1] }}</button>
+                  </div>
+                </div>
+                <p v-if="!projection && stockConfidence && selectedWidget.kind === 'conditional_mode'" class="gx-note">Hidden while Model confidence uses the stock confidence ball.</p>
                 <div v-if="projection && selectedWidget.iconSize" class="gx-layout__favorite-display">
                   <span>Show as</span>
                   <div class="gx-segment" role="group" :aria-label="selectedWidget.label + ' display'">
@@ -1263,11 +1448,11 @@ export const OnroadLayoutPage = {
               <section v-if="!projection" v-show="state.inspectorPanel === 'road'" class="gx-layout__colors" aria-label="Path and lane colors">
                 <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="resetRoad">Reset road colors</button></div>
                 <label>Path style<GalaxySelect class="gx-field gx-field--full" :value="roadMode" :disabled="!editAvailable || !!state.drag" @change="setRoadMode($event.target.value)">
-                  <option value="default">Follow Appearance Settings</option><option value="acceleration">Acceleration colors</option>
+                  <option value="acceleration">Acceleration colors</option>
                   <option value="color">Custom color</option><option value="rainbow">Rainbow Road</option>
                 </GalaxySelect></label>
                 <details class="gx-layout__help"><summary>About path &amp; lane colors</summary><div>
-                <p class="gx-note">Choose how the path is colored. Follow Appearance Settings uses your existing Rainbow Road preference. Acceleration colors change with acceleration and braking. Custom color stays one color. Rainbow Road shows a moving rainbow.</p>
+                <p class="gx-note">Choose how the path is colored. Acceleration colors change with acceleration and braking. Custom color stays one color. Rainbow Road shows a moving rainbow.</p>
                 <p class="gx-note">{{ state.profile === 'large' ? 'Path border colors the strips along the path. Lane lines keep their own color.' : 'Lane marking colors apply to the lines beside your lane and the outer lines separately.' }} Blue lane-centering and orange steering-effort indicators stay blue and orange.</p>
                 </div></details>
                 <div class="gx-layout__palette"><div v-for="field in state.data.metadata.roadColorFields" :key="field.id" class="gx-layout__color">
@@ -1277,8 +1462,17 @@ export const OnroadLayoutPage = {
                   <label :for="'road-alpha-' + field.id">Opacity · {{ Math.round(alpha(roadColors[field.id]) / 255 * 100) }}%</label>
                   <input :id="'road-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(roadColors[field.id])" :disabled="!editAvailable || !!state.drag" @input="roadAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                 </div></div>
-                <p class="gx-note">These colors apply to this layout only. The preview uses a sample road. Follow Appearance Settings previews acceleration colors; your saved Rainbow Road preference still applies while driving.</p>
+                <p class="gx-note">These colors apply to this layout only. The preview uses a sample road.</p>
                 <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
+              </section>
+              <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Display options">
+                <div class="gx-layout__subhead"><h4>Display options</h4></div>
+                <p class="gx-note">These apply to the whole driving screen on both layouts. Save changes to apply them.</p>
+                <template v-for="group in displayGroups" :key="group.name">
+                  <h5 class="gx-layout__display-group">{{ group.name }}</h5>
+                  <GalaxySettingRow v-for="(row, index) in group.rows" :key="row.key" :row="displaySettingRow(row)" :index="index"
+                    :disabled="!editable || !!state.drag || !!state.layerDrag || !displayAvailable(row)" :save-value="(_, value) => setDisplay(row.key, value)" />
+                </template>
               </section>
             </section>
           </div>

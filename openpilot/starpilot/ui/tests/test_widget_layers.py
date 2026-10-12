@@ -61,7 +61,8 @@ def test_legacy_projection_order_adds_upstream_mode_widget():
   projection['widgetOrder'] = [key for key in DEFAULT_WIDGET_ORDER['large'] if key != MODE_WIDGET]
   migrated = validate_layout_for_viewport(projection, (2880, 1080))
   assert migrated['widgets'][MODE_WIDGET]['enabled'] is False
-  assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work', CAR_EXIT]
+  assert migrated['widgetOrder'] == [*projection['widgetOrder'], MODE_WIDGET, 'nav_card', 'nav_map', 'nav_home', 'nav_work',
+                                     'bookmark', 'stopped_timer', CAR_EXIT]
 
 
 def test_old_documents_keep_their_original_shape():
@@ -103,13 +104,13 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   from pathlib import Path
   from types import SimpleNamespace as NS
   from unittest.mock import Mock
-  from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET, placement, widget_order, RAIL_WIDGETS
+  from openpilot.starpilot.ui.onroad_customization import MODE_WIDGET, STOPPED_TIMER_WIDGET, placement, widget_order, RAIL_WIDGETS
 
   source = Path(__file__).parents[1] / 'onroad.py'
   tree = ast.parse(source.read_text())
   method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_ordered_widgets')
   namespace: dict[str, Any] = {'CLOCK_WIDGET': CLOCK_WIDGET, 'MODE_WIDGET': MODE_WIDGET, 'placement': placement, 'widget_order': widget_order,
-                             'RAIL_WIDGETS': RAIL_WIDGETS,
+                             'RAIL_WIDGETS': RAIL_WIDGETS, 'STOPPED_TIMER_WIDGET': STOPPED_TIMER_WIDGET,
                'AlertSize': NS(NONE='none', FULL='full'), 'CameraViewChoice': NS(NONE='none'),
                'rl': NS(Rectangle=lambda x, y, width, height: NS(x=x, y=y, width=width, height=height))}
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
@@ -120,6 +121,7 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   view.driver_monitor_layer = lambda *args: seen.append('driver_monitor')
   view._driving_mode = lambda *args: seen.append(MODE_WIDGET)
   view._clock = lambda *args: seen.append(CLOCK_WIDGET)
+  view._stopped_timer = lambda *args: seen.append(STOPPED_TIMER_WIDGET)
   view._slc_actions = lambda *args: seen.append('speed_limit_actions')
   for attr, key in [('unified_speed', 'cruise_limits'), ('current_speed', 'current_speed'),
                     ('steering_wheel', 'steering_wheel'), ('torque_bar', 'torque_bar')]:
@@ -141,8 +143,8 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
     view.navigation_favorites = NS(render=lambda key, state: seen.append(key))
     view.projection_exit_layer = lambda state: seen.append(CAR_EXIT)
   document['widgetOrder'] = {profile: order}
-  state = NS(customization=document, camera_available=True, viewport_width=1860, alert=NS(size='none'),
-             appearance=NS(camera_view='road', hide_speed=False, hide_steering_wheel=False, show_torque_bar=True))
+  state = NS(customization=document, camera_available=True, viewport_width=1860, alert=NS(size='none'), stopped_duration_s=65,
+             appearance=NS(camera_view='road'))
   namespace['_ordered_widgets'](view, NS(x=30, y=30, width=1800, height=1020), state)
   assert seen == order
   view.pip_layer.assert_called_once()  # Acquire the camera frame once, then draw each side at its layer.
@@ -152,6 +154,7 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   assert 'steering_wheel' not in seen
   assert 'speed_limit_actions' not in seen
   assert 'torque_bar' not in seen
+  assert STOPPED_TIMER_WIDGET not in seen
   if profile == 'compact':
     seen.clear()
     state.alert.size = 'none'

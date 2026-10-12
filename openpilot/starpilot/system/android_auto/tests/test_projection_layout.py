@@ -8,9 +8,9 @@ import unittest
 from openpilot.starpilot.system.android_auto.display_profile import record_screen, read_screen
 from openpilot.starpilot.system.android_auto.projection_layout import (
   default_layout, validate_layout, decode_layout, layout_metadata, projection_customization, ProjectionLayoutSource,
-  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, CAR_EXIT, placement_size,
+  PROJECTION_WIDGETS, NAV_CARD, NAV_MAP, FAVORITE_WIDGETS, BOOKMARK_WIDGET, CAR_EXIT, ACTION_WIDGETS, placement_size,
 )
-from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, default_document, customization_metadata
+from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, default_document, customization_metadata
 from openpilot.starpilot.saved_document import commit_exact
 
 SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
@@ -18,6 +18,76 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_stopped_timer_migrates_and_keeps_independent_placement_and_order(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    expected = document['widgets'].pop(STOPPED_TIMER_WIDGET)
+    self.assertFalse(expected['enabled'])
+    self.assertEqual((metadata['widgets'][STOPPED_TIMER_WIDGET]['width'],
+                      metadata['widgets'][STOPPED_TIMER_WIDGET]['height']), (660, 168))
+    document['widgetOrder'] = [key for key in metadata['widgetOrder'] if key != STOPPED_TIMER_WIDGET]
+    document['widgets']['current_speed']['x'] += 20
+    before = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, before)
+    self.assertEqual(migrated['widgets'][STOPPED_TIMER_WIDGET], expected)
+    self.assertEqual(migrated['widgets']['current_speed'], document['widgets']['current_speed'])
+    self.assertEqual(migrated['widgetOrder'], [*document['widgetOrder'][:-1], STOPPED_TIMER_WIDGET, CAR_EXIT])
+    migrated['widgets'][STOPPED_TIMER_WIDGET].update(enabled=True, x=450, y=600)
+    decoded = decode_layout(json.dumps(migrated).encode(), SCREEN)
+    base = default_document()
+    converted = projection_customization(decoded, base)
+    self.assertEqual(converted['layouts']['large'][STOPPED_TIMER_WIDGET], {'enabled': True, 'x': 450, 'y': 600})
+    self.assertEqual(converted['layouts']['compact'], base['layouts']['compact'])
+    self.assertFalse(base['layouts']['compact'][STOPPED_TIMER_WIDGET]['enabled'])
+
+  def test_bookmark_is_opt_in_and_upgrades_existing_layouts_without_changing_them(self):
+    document = default_layout(SCREEN)
+    metadata = layout_metadata(SCREEN)
+    bookmark = document['widgets'].pop(BOOKMARK_WIDGET)
+    self.assertFalse(bookmark['enabled'])
+    self.assertEqual((bookmark['opacity'], bookmark['background'], bookmark['display']), (100, True, 'words'))
+    document['widgets']['current_speed']['x'] += 20
+    document['widgetOrder'] = [key for key in metadata['widgetOrder'] if key != BOOKMARK_WIDGET]
+    original = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, original)
+    self.assertEqual(migrated['widgets'].pop(BOOKMARK_WIDGET), bookmark)
+    self.assertEqual(migrated['widgets'], original['widgets'])
+    self.assertEqual(migrated['widgetOrder'], [*original['widgetOrder'][:-1], BOOKMARK_WIDGET, CAR_EXIT])
+    bookmark.update(enabled=True, display='icons', opacity=35, background=False, x=2740)
+    migrated['widgets'][BOOKMARK_WIDGET] = bookmark
+    self.assertEqual(placement_size(BOOKMARK_WIDGET, metadata['widgets'][BOOKMARK_WIDGET], bookmark), (110, 110))
+    self.assertEqual(validate_layout(migrated, SCREEN), migrated)
+    self.assertEqual(decode_layout(json.dumps(migrated).encode(), SCREEN), migrated)
+
+  def test_action_appearance_migrates_and_survives_serialization(self):
+    document = default_layout(SCREEN)
+    for key in ACTION_WIDGETS:
+      document['widgets'][key].pop('opacity')
+      document['widgets'][key].pop('background')
+    original = copy.deepcopy(document)
+    migrated = validate_layout(document, SCREEN)
+    self.assertEqual(document, original)
+    for key in ACTION_WIDGETS:
+      self.assertEqual(migrated['widgets'][key], {**document['widgets'][key], 'opacity': 100, 'background': True})
+    for key, opacity in zip(ACTION_WIDGETS, (0, 45, 70, 100), strict=True):
+      migrated['widgets'][key].update(opacity=opacity, background=False)
+    decoded = decode_layout(json.dumps(migrated).encode(), SCREEN)
+    self.assertEqual(decoded, migrated)
+    projected = projection_customization(decoded, default_document())
+    for key in ACTION_WIDGETS:
+      self.assertEqual(projected['layouts']['large'][key], migrated['widgets'][key])
+
+  def test_action_appearance_is_strictly_validated(self):
+    for key in ACTION_WIDGETS:
+      for field, values in [('opacity', (-1, 101, 50.5, True, None, '50')), ('background', (0, 1, None, 'false', [], {}))]:
+        for value in values:
+          document = default_layout(SCREEN)
+          document['widgets'][key][field] = value
+          with self.subTest(key=key, field=field, value=value), self.assertRaises(ValueError):
+            validate_layout(document, SCREEN)
+
   def test_gamma_trial_is_opt_in_and_strictly_boolean(self):
     document = default_layout(SCREEN)
     self.assertFalse(document['largeUiGammaTrial'])
@@ -28,6 +98,19 @@ class TestProjectionLayout(unittest.TestCase):
     for value in (1, 0, 'true', None, [], {}):
       with self.subTest(value=value), self.assertRaises(ValueError):
         validate_layout({**document, 'largeUiGammaTrial': value}, SCREEN)
+
+  def test_border_switches_are_separate_and_strictly_boolean(self):
+    document = default_layout(SCREEN)
+    self.assertIs(document['blindSpotBorder'], False)
+    self.assertIs(document['signalBorder'], False)
+    for key in ('blindSpotBorder', 'signalBorder'):
+      older = {k: v for k, v in document.items() if k != key}
+      self.assertEqual(validate_layout(older, SCREEN)[key], document[key], 'older layouts get the defaults')
+      flipped = validate_layout({**document, key: not document[key]}, SCREEN)
+      self.assertEqual(flipped[key], not document[key])
+      for value in (1, 0, 'true', None, [], {}):
+        with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+          validate_layout({**document, key: value}, SCREEN)
 
   def test_screen_roundtrip_omits_identity(self):
     with tempfile.TemporaryDirectory() as directory:
@@ -175,6 +258,21 @@ class TestProjectionLayout(unittest.TestCase):
     document['widgets'][CAR_EXIT]['enabled'] = False
     with self.assertRaisesRegex(ValueError, 'Required'):
       validate_layout(document, SCREEN)
+
+  def test_car_exit_opacity_minimum_and_saved_layout_migration(self):
+    document = default_layout(SCREEN)
+    self.assertEqual(layout_metadata(SCREEN)['widgets'][CAR_EXIT]['opacity']['min'], 25)
+    document['widgets'][CAR_EXIT]['opacity'] = 25
+    self.assertEqual(validate_layout(document, SCREEN), document)
+    for opacity in (0, 24):
+      document['widgets'][CAR_EXIT]['opacity'] = opacity
+      with self.subTest(opacity=opacity):
+        with self.assertRaisesRegex(ValueError, 'at least 25%'):
+          validate_layout(document, SCREEN)
+        migrated = decode_layout(json.dumps(document).encode(), SCREEN)
+        self.assertEqual(migrated['widgets'][CAR_EXIT]['opacity'], 25)
+        migrated['widgets'][CAR_EXIT]['opacity'] = opacity
+        self.assertEqual(migrated, document, 'all other layout settings are preserved')
 
   def test_map_overlay_size_opacity_and_edges(self):
     document = default_layout(SCREEN)

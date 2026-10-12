@@ -6,10 +6,13 @@ import math
 import time
 import uuid
 
-from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError
+from openpilot.starpilot.navigation.owner import ConflictError, NavigationOwner, ValidationError, ROUTE_AVOIDANCES
 from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
 from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SOURCES, bearing, select_location
+
+ARRIVED_NS = 5_000_000_000      # stopped at the destination this long shows "You have arrived"
+END_ROUTE_NS = 15_000_000_000   # ...and this long ends navigation, like tapping End navigation
 
 
 def location(sm, now_ns: int):
@@ -39,6 +42,7 @@ class RouteRuntime:
     self.retry_after = 0
     self.off_route_since = 0
     self.arrived_since = 0
+    self.ended_revision = None
     self.session = uuid.uuid4().hex
 
   def update(self, now_ns: int, position, drive_id: int) -> dict:
@@ -51,7 +55,8 @@ class RouteRuntime:
     settings = self.owner.read_routing()
     selected = settings['destination']
     destination_key = None if selected is None else (selected['id'], selected['longitude'], selected['latitude'])
-    key = settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive_id
+    exclusions = tuple(value for key, value in ROUTE_AVOIDANCES.items() if settings[key])
+    key = settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive_id, exclusions
     if key != self.key:
       self.key, self.route = key, None
       self.routes = []
@@ -103,7 +108,7 @@ class RouteRuntime:
             self.preview_only = True
             self.fetch_key = self.key
             self.future = self.executor.submit(self.engine.fetch, settings['token'],
-                                               (saved['longitude'], saved['latitude']), settings['destination'], saved.get('bearing'))
+                                               (saved['longitude'], saved['latitude']), settings['destination'], saved.get('bearing'), exclusions)
       return result
     stamp, coordinates, speed, bearing = position
     result['locationMonoTime'] = stamp
@@ -111,7 +116,7 @@ class RouteRuntime:
       result['status'] = 'routeUnavailable' if self.retry_after > now_ns else 'routing'
       if self.future is None and now_ns >= self.retry_after:
         self.fetch_key = self.key
-        self.future = self.executor.submit(self.engine.fetch, settings['token'], coordinates, settings['destination'], bearing)
+        self.future = self.executor.submit(self.engine.fetch, settings['token'], coordinates, settings['destination'], bearing, exclusions)
       return result
     progress = self.route.progress(coordinates, speed, bearing)
     self.off_route_since = (self.off_route_since or now_ns) if progress.off_route else 0
@@ -121,11 +126,26 @@ class RouteRuntime:
       self.routes = []
       result['status'] = 'routing'
       return result
-    arrived = self.arrived_since and now_ns - self.arrived_since >= 5_000_000_000
+    arrived = self.arrived_since and now_ns - self.arrived_since >= ARRIVED_NS
+    if self.arrived_since and now_ns - self.arrived_since >= END_ROUTE_NS:
+      self._end_route(settings['revision'])
     result.update(status='arrived' if arrived else 'guiding', instruction=progress.instruction,
                   nextManeuver=progress.next_maneuver, route=self.route.preview(),
                   controlValid=bool(drive_id > 0 and not progress.off_route and not progress.arrived and stamp >= drive_id))
     return result
+
+  def _end_route(self, revision: str) -> None:
+    # Once per destination; a concurrent change (new destination, Galaxy edit) wins over arrival.
+    if self.ended_revision == revision:
+      return
+    try:
+      self.owner.clear(revision, True)
+    except ConflictError:
+      self.ended_revision = revision
+    except (ValidationError, OSError):
+      return
+    else:
+      self.ended_revision = revision
 
 
 def publish_status(pm, value: dict) -> None:

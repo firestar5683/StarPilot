@@ -114,6 +114,31 @@ def test_rejects_identity_not_from_google_root(tmp_path, ident):
     apk_identity.extract_identity(make_apk(tmp_path, ident))  # the real pinned root, not the fixture's
 
 
+def test_apkm_version_is_local_provenance(tmp_path, ident):
+  path = make_xapk(tmp_path, ident)
+  with zipfile.ZipFile(path, 'a') as archive:
+    archive.writestr('info.json', (Path(__file__).with_name('fixtures') / 'apkm_info.json').read_bytes())
+  _, metadata = apk_identity.extract_identity(path, root_sha256=ident['root_sha'])
+  assert metadata['app_version'] == '17.8.163804-release.daily'
+  assert metadata['key_matches']
+
+
+@pytest.mark.parametrize('body', [b'{', b'[]', b'null', b'{}', b'{"release_version": 123}',
+                                  b'{"release_version": "<script>invalid</script>"}', b' ' * (64 * 1024 + 1)])
+def test_invalid_optional_version_never_prevents_extraction(tmp_path, ident, body):
+  path = make_xapk(tmp_path, ident)
+  with zipfile.ZipFile(path, 'a') as archive:
+    archive.writestr('info.json', body)
+  _, metadata = apk_identity.extract_identity(path, root_sha256=ident['root_sha'])
+  assert 'app_version' not in metadata
+
+
+def test_bare_apk_and_metadata_free_xapk_have_no_app_version(tmp_path, ident):
+  for path in (make_apk(tmp_path, ident), make_xapk(tmp_path, ident)):
+    _, metadata = apk_identity.extract_identity(path, root_sha256=ident['root_sha'])
+    assert 'app_version' not in metadata
+
+
 def test_rejects_when_no_mask_decrypts_the_key(tmp_path, ident):
   path = make_apk(tmp_path, ident, mask=bytes(256))
   with pytest.raises(apk_identity.IdentityImportError, match="stores its key differently"):

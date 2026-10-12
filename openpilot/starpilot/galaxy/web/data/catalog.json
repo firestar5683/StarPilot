@@ -68,7 +68,7 @@
       "name": "Colors & Layout",
       "path": "/theme_maker",
       "icon": "bi-palette-fill",
-      "description": "Parked widget arrangement, colors and Big or Small driving layouts",
+      "description": "Widgets, colors, road and display options for Big and Small layouts",
       "availability": "local-only"
     },
     {

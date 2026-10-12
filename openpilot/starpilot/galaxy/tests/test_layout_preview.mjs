@@ -19,7 +19,7 @@ function fixture() {
   return { feed, requests, updates, timers, revoked, tick, reply, get unauthorized() { return unauthorized } }
 }
 
-assert.deepEqual(PREVIEW_SCENES.map(({ id }) => id), ["engaged", "aol", "long_only", "experimental", "braking",
+assert.deepEqual(PREVIEW_SCENES.map(({ id }) => id), ["engaged", "aol", "long_only", "experimental", "braking", "stopped",
   "cem_stop_light", "cem_lead", "cem_curve", "slc_pending", "slc_max", "slc_equal",
   "slc_pedal", "slc_retained", "slc_disengaged", "slc_unavailable", "slc_display"])
 assert.equal(PREVIEW_SCENES.find(({ id }) => id === "experimental").label, "Manual experimental")

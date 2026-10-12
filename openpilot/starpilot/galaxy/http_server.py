@@ -57,6 +57,15 @@ class _LocalHTTPServer(ThreadingHTTPServer):
       for _ in range(acquired):
         self._slots.release()
 
+  def service_actions(self):
+    super().service_actions()
+    maintain = getattr(self, 'maintain_android_auto', None)
+    if maintain is not None:
+      try:
+        maintain()
+      except Exception:
+        pass  # Optional housekeeping must never stop serve_forever.
+
   def server_close(self, *, close_sources: bool = True):
     if not close_sources:
       # Managed shutdown can abandon a stuck daemon request. Its readers must
@@ -76,7 +85,8 @@ class _LocalHTTPServer(ThreadingHTTPServer):
       for name in ('map_source', 'settings_source', 'vehicle_selection_source', 'model_source', 'plots_source',
                    'flm_source', 'bluetooth_authority', 'bluetooth_source', 'model_manager_source', 'model_authority', 'layout_authority', 'favorites_source',
                    'sound_authority', 'sound_source', 'software_operations_source', 'drive_stats_authority', 'drive_stats_source',
-                   'pairing_authority', 'evidence_source', 'device_state_source', 'navigation_source', 'drive_physical_source', 'notification_source'):
+                   'pairing_authority', 'evidence_source', 'device_state_source', 'navigation_source', 'drive_physical_source', 'notification_source',
+                   'android_auto_setup_source'):
         close = getattr(getattr(self, name, None), 'close', None)
         if callable(close):
           cleanup.callback(close)

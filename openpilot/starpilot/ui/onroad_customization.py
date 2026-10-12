@@ -133,6 +133,15 @@ for _profile, _geometry in {"large": (300, 72, 780, 430), "compact": (140, 44, 1
   _clock_widget["default"]["enabled"] = False
   PROFILES[_profile]["widgets"][CLOCK_WIDGET] = _clock_widget
 
+# Small-UI only; the box matches the old fixed, centered position.
+STOPPED_TIMER_WIDGET = "stopped_timer"
+_timer_widget = _widget("Stopped timer", STOPPED_TIMER_WIDGET, 440, 112, 18, 48)
+_timer_widget["default"]["enabled"] = False
+_timer_widget["note"] = "Counts how long you have been stopped"
+PROFILES["compact"]["widgets"][STOPPED_TIMER_WIDGET] = _timer_widget
+# Widgets an older saved layout may lack; they start off and never block placement.
+OPTIONAL_WIDGETS = frozenset({MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET})
+
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}
 _ACTION_COLORS = {"cardFill": "#0C1820EB", "cardBorder": "#A6DFBEFF", "text": "#FFFFFFFF"}
 WIDGET_COLORS = {
@@ -163,7 +172,7 @@ DEFAULT_WIDGET_ORDER = {
   "large": ("pip_left", "pip_right", "cruise_limits", "speed_limit_actions", "current_speed",
             "steering_wheel", "torque_bar", "driver_monitor", MODE_WIDGET, CLOCK_WIDGET),
   "compact": ("pip_left", "pip_right", "speed_limit", "max_speed", "steering_wheel", "torque_bar",
-              "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET, CLOCK_WIDGET),
+              "speed_limit_actions", "driver_monitor", *RAIL_WIDGETS, MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET),
 }
 
 
@@ -247,13 +256,17 @@ def validate_document(value, *, _legacy_geometry=False):
     fields.add('clock24Hour')
     if type(value['clock24Hour']) is not bool:
       raise ValueError('Invalid clock format preference')
+  if 'showMaxSpeed' in value:
+    fields.add('showMaxSpeed')
+    if type(value['showMaxSpeed']) is not bool:
+      raise ValueError('Invalid MAX speed preference')
   if set(value) != fields:
     raise ValueError("Invalid customization fields")
   palette, layouts = value["palette"], value["layouts"]
   if type(palette) is not dict or set(palette) != set(PALETTE) or type(layouts) is not dict or set(layouts) != set(PROFILES):
     raise ValueError("Invalid customization fields")
   if any(all(type(layouts[profile]) is dict and
-             (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET, *CAMERA_WIDGETS}) == keys
+             (set(layouts[profile]) - {"vasm", *OPTIONAL_WIDGETS, *CAMERA_WIDGETS}) == keys
              for profile, keys in shape.items())
          for shape in (LEGACY_WIDGETS, DM_WIDGETS, ACTIONLESS_WIDGETS)):
     layouts = copy.deepcopy(layouts)
@@ -277,12 +290,12 @@ def validate_document(value, *, _legacy_geometry=False):
     for profile in PROFILES:
       for key in ("driver_monitor", "torque_bar", "speed_limit_actions"):
         layouts[profile].setdefault(key, dict(PROFILES[profile]["widgets"][key]["default"]))
-  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET, *CAMERA_WIDGETS}) == keys
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", *OPTIONAL_WIDGETS, *CAMERA_WIDGETS}) == keys
          for profile, keys in RAILLESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for key in RAIL_WIDGETS:
       layouts["compact"][key] = dict(PROFILES["compact"]["widgets"][key]["default"])
-  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", MODE_WIDGET, CLOCK_WIDGET}) == keys
+  if all(type(layouts[profile]) is dict and (set(layouts[profile]) - {"vasm", *OPTIONAL_WIDGETS}) == keys
          for profile, keys in CAMERALESS_WIDGETS.items()):
     layouts = copy.deepcopy(layouts)
     for profile in PROFILES:
@@ -305,7 +318,7 @@ def validate_document(value, *, _legacy_geometry=False):
   for profile, data in PROFILES.items():
     if type(layouts[profile]) is dict:
       missing = set(data["widgets"]) - set(layouts[profile])
-      if missing and missing <= {MODE_WIDGET, CLOCK_WIDGET}:
+      if missing and missing <= OPTIONAL_WIDGETS:
         for optional in missing:
           layouts[profile][optional] = dict(data["widgets"][optional]["default"])
   result = default_document()
@@ -374,7 +387,7 @@ def validate_document(value, *, _legacy_geometry=False):
         if key in ("speed_limit_actions", "speed_limit") or widget.get("layer") == "underlay":
           continue
         placement = result["layouts"][profile][key]
-        if key in (MODE_WIDGET, CLOCK_WIDGET) and not placement["enabled"]:
+        if key in OPTIONAL_WIDGETS and not placement["enabled"]:
           continue
         width, height = ((placement["size"],) * 2 if key == "steering_wheel" else
                          (widget["width"], widget["height"]))
@@ -388,12 +401,14 @@ def validate_document(value, *, _legacy_geometry=False):
     result['widgetOrder'] = {}
     for profile, order in orders.items():
       if type(order) is list:
-        order = [*order, *(key for key in (MODE_WIDGET, CLOCK_WIDGET) if key not in order)]
+        order = [*order, *(key for key in PROFILES[profile]['widgets'] if key in OPTIONAL_WIDGETS and key not in order)]
       result['widgetOrder'][profile] = validate_widget_order(order, PROFILES[profile]['widgets'])
   if 'speedSources' in value:
     result['speedSources'] = value['speedSources']
   if 'clock24Hour' in value:
     result['clock24Hour'] = value['clock24Hour']
+  if 'showMaxSpeed' in value:
+    result['showMaxSpeed'] = value['showMaxSpeed']
   if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_BYTES:
     raise ValueError("Customization too large")
   return result

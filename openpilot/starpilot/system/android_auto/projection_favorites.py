@@ -1,8 +1,8 @@
-"""Navigation-only action owner for the projected Home and Work widgets."""
+"""Touch owner for projected Home, Work and Bookmark actions."""
 import time
 
 from openpilot.starpilot.navigation.owner import NavigationOwner
-from openpilot.starpilot.system.android_auto.projection_layout import FAVORITE_WIDGETS, FAVORITE_SIZE, FAVORITE_ICON_SIZE
+from openpilot.starpilot.system.android_auto.projection_layout import BOOKMARK_WIDGET, DISPLAY_WIDGETS, FAVORITE_WIDGETS, FAVORITE_SIZE, FAVORITE_ICON_SIZE
 from openpilot.starpilot.ui.onroad_customization import widget_order
 from openpilot.starpilot.ui.navigation_favorites_state import favorite_visible
 
@@ -14,6 +14,7 @@ class ProjectionFavorites:
     self.document = None
     self.error = ''
     self.card_bounds = None
+    self.bookmark = lambda: False
     self._read_at = float('-inf')
     self._press = None
 
@@ -26,9 +27,12 @@ class ProjectionFavorites:
       self.document = self.owner.read()
     except (OSError, ValueError):
       self.document = None
-      self.cancel()
+      if self._press is not None and self._press[0] != BOOKMARK_WIDGET:
+        self.cancel()
 
   def action(self, key):
+    if key == BOOKMARK_WIDGET:
+      return ('bookmark',)
     doc = self.document
     if doc is None or key not in FAVORITE_WIDGETS:
       return None
@@ -45,7 +49,7 @@ class ProjectionFavorites:
     if state.alert.size != 'none':
       return None
     placements = state.customization['layouts']['large']
-    if not favorite_visible(key, self.document, placements):
+    if key != BOOKMARK_WIDGET and not favorite_visible(key, self.document, placements):
       return None
     placed = placements.get(key)
     return placed if placed is not None and placed['enabled'] else None
@@ -53,7 +57,7 @@ class ProjectionFavorites:
   def hit(self, x, y, state):
     order = state.customization.get('widgetOrder', {}).get('large')
     if order is None:
-      order = [*widget_order(state.customization, 'large'), *FAVORITE_WIDGETS]
+      order = [*widget_order(state.customization, 'large'), *DISPLAY_WIDGETS]
     for key in reversed(order):
       placed = state.customization['layouts']['large'].get(key)
       if placed is not None and placed['enabled']:
@@ -66,7 +70,7 @@ class ProjectionFavorites:
           width = height = 0
         if px <= x < px + width and py <= y < py + height:
           return None
-      if key in FAVORITE_WIDGETS and (placed := self.bounds(key, state)) is not None:
+      if key in DISPLAY_WIDGETS and (placed := self.bounds(key, state)) is not None:
         width, height = (FAVORITE_ICON_SIZE, FAVORITE_ICON_SIZE) if placed.get('display') == 'icons' else FAVORITE_SIZE
         if placed['x'] <= x < placed['x'] + width and placed['y'] <= y < placed['y'] + height:
           return key
@@ -93,6 +97,10 @@ class ProjectionFavorites:
     if kind != 'up':
       return
     self.cancel()
+    if key == BOOKMARK_WIDGET:
+      if self.authorized() and self.bounds(key, state) is not None:
+        self.bookmark()
+      return
     # A changed destination or relabeled favorite must never turn a held tap
     # into a different command. The owner's revision check covers concurrent writers.
     self.refresh(force=True)

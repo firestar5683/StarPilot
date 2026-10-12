@@ -6,13 +6,25 @@ module has no routes, device side effects, or credential material on import.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import threading
 from pathlib import Path
 from collections.abc import Callable
 from typing import BinaryIO
 
-from openpilot.starpilot.system.android_auto import apk_identity
+from openpilot.starpilot.system.android_auto import apk_identity, apkpure
+
+# Left behind by the removed Google sign-in: a saved refresh token and the resolver binary.
+LEGACY_GOOGLE_FILES = (Path('/data/starpilot/aa_token'), Path('/data/starpilot/google-play'))
+
+
+def remove_legacy_google_files(paths: tuple[Path, ...] = LEGACY_GOOGLE_FILES) -> None:
+  for path in paths:
+    if path.is_dir() and not path.is_symlink():
+      shutil.rmtree(path, ignore_errors=True)
+    else:
+      path.unlink(missing_ok=True)
 
 
 class SetupRejected(RuntimeError):
@@ -49,12 +61,14 @@ class AndroidAutoSetup:
 
   def status(self, session: tuple) -> dict:
     self._require_session(session)
+    apkpure.start_background_refresh()
     ident = self.identity_status()
     return {
       'enabled': self.enabled(), 'bluetoothEnabled': self.bluetooth_enabled(), 'parked': self.parked(),
       'installReady': self.install_ready(), 'serviceReady': self.service_ready(),
       'identity': {key: ident[key] for key in ('installed', 'expires', 'days_left', 'warning', 'message', 'expired', 'error') if key in ident},
       'import': self.job.status(),
+      'download': apkpure.download_status(),
       'maxUploadBytes': apk_identity.MAX_FILE_BYTES,
       'wiredAvailable': False,
       'steps': [

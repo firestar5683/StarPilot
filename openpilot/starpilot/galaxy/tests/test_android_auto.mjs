@@ -166,9 +166,9 @@ uploadPage.feed = {
   async upload(file) { uploadCalls.push(["upload", file]); return true },
 }
 for (const [name, type] of [["android-auto.apk", ""], ["android-auto.xapk", "application/zip"], ["android-auto.apkm", "application/octet-stream"]]) {
-  const file = { name, size: 123, type }
+  const file = { name, size: 5 * 1024 * 1024, type, slice: () => new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04])]) }
   uploadPage.setup.enabled = false
-  uploadPage.choosePackage({ target: { files: [file] } })
+  await uploadPage.choosePackage({ target: { files: [file] } })
   assert.equal(uploadPage.packageFile, file)
   assert.equal(uploadPage.uploadReason, "", "valid selection can enable and upload")
   assert.equal(await uploadPage.upload(), true)
@@ -179,7 +179,7 @@ assert.match(uploadPage.uploadReason, /empty/)
 assert.equal(await uploadPage.upload(), false)
 uploadPage.choosePackage({ target: { files: [{ name: "large.apk", size: setup.maxUploadBytes + 1 }] } })
 assert.match(uploadPage.uploadReason, /maximum size/)
-uploadPage.choosePackage({ target: { files: [{ name: "ok.apk", size: 1 }] } })
+await uploadPage.choosePackage({ target: { files: [{ name: "ok.apk", size: 5 * 1024 * 1024, slice: () => new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04])]) }] } })
 uploadPage.setup.parked = false
 assert.equal(uploadPage.uploadReason, "")
 for (const enabled of [true, false]) {
@@ -292,9 +292,9 @@ console.log('Remote-capable binary uploader: progress, credentials, failure, tim
 // renders an inert DOM node and hides every setup control in real browsers.
 const { compile } = await import('../web/vendor/vue/vue.esm-browser.js')
 const render = compile(AndroidAutoPage.template, { decodeEntities: value => value })
-const vm = page(setup)
+const vm = page({ ...setup, identity: { ...setup.identity, installed: false } })
 vm.mode = 'local'
-vm.installOpen = true  // the package picker lives in the install sheet
+vm.installOpen = true  // the package picker lives in the install sheet, shown only before setup
 const tree = render(vm, [])
 const tags = []
 function visit(node) {
@@ -305,6 +305,14 @@ function visit(node) {
 visit(tree)
 assert(!tags.includes('template'), 'setup cannot live inside an inert template element')
 assert(tags.includes('input') && tags.includes('button'), 'setup renders package selection and actions')
+// Once installed, Manage package shows status and removal only; setup needs removal first.
+const managed = page({ ...setup, identity: { ...setup.identity, installed: true } })
+managed.installOpen = true
+const managedTags = []
+const collect = (node) => { if (!node || typeof node !== 'object') return; if (typeof node.type === 'string') managedTags.push(node.type); if (Array.isArray(node.children)) node.children.forEach(collect) }
+collect(render(managed, []))
+assert(!managedTags.includes('input'), 'manage view offers no setup inputs')
+assert(managedTags.includes('dl'), 'manage view shows status')
 for (const [field, reason] of [['installReady', /display|encoder/],
                              ['serviceReady', /service/], ['bluetoothEnabled', /Bluetooth/], ['parked', /Park/]]) {
   const blocked = page({ ...setup, [field]: false })
@@ -339,7 +347,7 @@ assert.equal(expiryInfo({ installed: false }).level, "none")
 assert.equal(packagePreflight({ name: "com.google.android.projection.gearhead_17.6.663454-release-2025-apkmirror.com.apk" }), "")
 assert.match(packagePreflight({ name: "APKMirror Installer (Official)_1.6.apk" }), /Installer/)
 assert.match(packagePreflight({ name: "com.google.android.gms_24.apk" }), /Play Services/)
-assert.match(packagePreflight({ name: "android-auto.zip" }), /not an Android package/)
+assert.equal(packagePreflight({ name: "android-auto.zip" }), "")
 const wrongPage = page(setup)
 wrongPage.choosePackage({ target: { files: [{ name: "APKMirror Installer.apk", size: 10 }] } })
 assert.match(wrongPage.uploadReason, /Installer/)
@@ -393,3 +401,22 @@ connectingPage.runtime = { running: true, state: 'connecting_bluetooth' }
 assert.equal(connectingPage.projecting, false)
 connectingPage.runtime.state = 'streaming'
 assert.equal(connectingPage.projecting, true)
+
+assert.match(AndroidAutoPage.template, /Remove Android Auto support/)
+assert.match(AndroidAutoPage.template, /Manage package/)
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+try {
+  for (const [browser, mobile] of [
+    [{ userAgent: 'Mozilla/5.0 (iPhone)' }, true],
+    [{ userAgent: 'Mozilla/5.0 (Linux; Android 14)', userAgentData: { mobile: false } }, true],
+    [{ userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 5 }, true],
+    [{ userAgent: 'Mozilla/5.0 (Macintosh)', platform: 'MacIntel', maxTouchPoints: 0 }, false],
+  ]) {
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: browser })
+    assert.equal(AndroidAutoPage.computed.onPhone(), mobile, 'detect phones and tablets without blocking desktop browsers')
+  }
+} finally {
+  if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
+  else delete globalThis.navigator
+}
+console.log('Android Auto page: manage view, pairing gates and phone detection passed')

@@ -11,6 +11,13 @@ from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.system.android_auto.source_verifier import GalaxySourceVerifier
 from openpilot.starpilot.bluetooth.owner import BluetoothUnavailable
+from openpilot.starpilot.system.android_auto import apkpure
+
+
+@pytest.fixture(autouse=True)
+def offline_download(monkeypatch):
+  monkeypatch.setattr(apkpure, 'start_background_refresh', lambda: None)
+  monkeypatch.setattr(apkpure, '_cache', None)
 
 
 class ApiState(TypedDict):
@@ -56,6 +63,7 @@ def api(tmp_path):
                                                                      'message': 'Package status'},
                            bluetooth_enabled=lambda: state['bluetooth_enabled'], install_ready=lambda: state['install_ready'],
                            service_ready=lambda: True, set_enabled=set_enabled, enable_bluetooth=enable_bluetooth)
+  state['setup_owner'] = setup
   class FakeClient:
     def __init__(self):
       self.calls = []
@@ -123,6 +131,7 @@ def test_galaxy_upload_requires_session_and_exact_binary_body(api):
   cookie = headers['Set-Cookie'].split(';', 1)[0]
   code, status, _ = request('GET', '/api/android-auto/setup', cookie=cookie)
   assert code == 200 and status['wiredAvailable'] is False
+  assert status['download'] is None
   assert request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie,
                  content_type='application/json')[0] == 415
   assert request('POST', '/api/android-auto/upload', b'fake-apk', cookie=cookie)[0] == 202
@@ -440,3 +449,20 @@ def test_outgoing_car_selection_requires_current_pairing_session_and_valid_addre
   state['parked'] = True
   assert request('POST', '/api/android-auto/pairing/cancel', '{}', cookie=cookie, content_type='application/json')[0] == 200
   assert select() == 409
+
+
+def test_google_sign_in_api_is_gone(api):
+  request, _, _, _ = api
+  _, _, headers = request('POST', '/api/auth/login', '{"password":"password123"}', content_type='application/json')
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  payload = json.dumps({'email': 'a@example.com', 'token': 'oauth2_4/test', 'remember': False})
+  for path in ('/api/android-auto/google-import', '/api/android-auto/google-forget'):
+    assert request('POST', path, payload, cookie=cookie, content_type='application/json')[0] == 405
+
+
+def test_on_device_browser_api_is_gone(api):
+  request, _, _, _ = api
+  _, _, headers = request('POST', '/api/auth/login', '{"password":"password123"}', content_type='application/json')
+  cookie = headers['Set-Cookie'].split(';', 1)[0]
+  start = {'operation': 'start', 'email': 'user@example.com', 'remember': False}
+  assert request('POST', '/api/android-auto/google-browser', json.dumps(start), cookie=cookie, content_type='application/json')[0] != 200

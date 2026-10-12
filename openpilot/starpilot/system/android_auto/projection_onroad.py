@@ -1,4 +1,4 @@
-"""Large onroad projection with navigation-only favorite actions."""
+"""Large onroad projection with navigation and drive-bookmark actions."""
 
 from contextlib import ExitStack
 from dataclasses import replace
@@ -91,9 +91,10 @@ def native_dependencies():
 
 
 class ProjectionOnroad:
-  """Separate renderer with Home/Work navigation; native UIState stays read-only."""
+  """Separate renderer with projected actions; native UIState stays read-only."""
 
-  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None):
+  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None,
+               layout_watcher=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
     self.width, self.height = viewport
     self.customization = customization
@@ -101,7 +102,11 @@ class ProjectionOnroad:
     self._certificate_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
+    self._base_appearance = None
+    self._projection_appearance = None
+    self.layout_watcher = layout_watcher
     self.native_focus = native_focus or (lambda: None)
+    self.bookmark = lambda: False
     self.camera_stream = None  # the camera stream the last frame drew, or None
     self.native = dependencies or native_dependencies()
     native = self.native
@@ -131,16 +136,13 @@ class ProjectionOnroad:
         self.onroad.pip_layer = self._pip_layer
       self.map = None
       self.map_feed = None
-      if self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
-        self.map = native.map_overlay(fonts=self.fonts)
-        self._resources.callback(self.map.close)
-        self.map_feed = native.map_feed()
-        self.onroad.map_layer = self._map_layer
+      self._ensure_map()
       self.adapter = native.adapter(native.ui_state)
       self._state = None
       self.favorites = None
       if getattr(native, 'favorites', None) is not None:
         self.favorites = native.favorites(lambda: native.ui_state.started)
+        self.favorites.bookmark = lambda: self.bookmark()
         self.favorites.card_bounds = getattr(getattr(self.onroad, 'navigation', None), 'bounds', None)
         self._resources.callback(self.favorites.close)
     except BaseException:
@@ -204,6 +206,29 @@ class ProjectionOnroad:
     finally:
       self.native.rl.rl_pop_matrix()
 
+  def _ensure_map(self):
+    """Build the map overlay the first time a layout turns it on; it stays for the connection."""
+    native = self.native
+    if self.map is None and self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
+      self.map = native.map_overlay(fonts=self.fonts)
+      self._resources.callback(self.map.close)
+      self.map_feed = native.map_feed()
+      self.onroad.map_layer = self._map_layer
+
+  def apply_layout(self, customization):
+    """Switch to a newly saved Android Auto layout without reconnecting."""
+    self.customization = customization
+    self._base_customization = self._projection_customization = None
+    self._base_appearance = self._projection_appearance = None
+    self.camera.large_ui_gamma_trial = bool((customization or {}).get('largeUiGammaTrial', False))
+    self._ensure_map()
+
+  def _check_layout(self):
+    # The watcher's own thread does all file work; this only takes a finished layout.
+    changed = self.layout_watcher.take() if self.layout_watcher is not None else None
+    if changed is not None:
+      self.apply_layout(changed)
+
   def _map_placement(self):
     """The enabled map overlay's placement from this connection's layout, or None."""
     if self.customization is None:
@@ -213,6 +238,7 @@ class ProjectionOnroad:
 
   def prepare(self):
     """Before the frame's render target is bound: offscreen map work happens here."""
+    self._check_layout()
     if self.favorites is not None:
       self.favorites.refresh()
       self.onroad.navigation_favorites.document = self.favorites.document
@@ -293,13 +319,20 @@ class ProjectionOnroad:
     self.camera_stream = None
     if ui.started:
       now_ns = time.monotonic_ns()
-      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=now_ns).onroad
+      timer_enabled = bool((self.customization or {}).get('widgets', {}).get('stopped_timer', {}).get('enabled', False))
+      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=now_ns, stopped_timer_enabled=timer_enabled).onroad
       if self.customization is not None:
         from openpilot.starpilot.system.android_auto.projection_layout import projection_customization
         if state.customization is not self._base_customization:
           self._projection_customization = projection_customization(self.customization, state.customization)
           self._base_customization = state.customization
-        state = replace(state, customization=self._projection_customization)
+        if state.appearance is not self._base_appearance:
+          # The car screen's border switches live in the AA layout, not the comma's C4 settings.
+          self._projection_appearance = replace(state.appearance,
+                                                show_blindspot_border=self.customization.get('blindSpotBorder', False) is True,
+                                                show_signal_border=self.customization.get('signalBorder', False) is True)
+          self._base_appearance = state.appearance
+        state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance)
       self._state = self._with_certificate_notice(state, now_ns)
       self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)

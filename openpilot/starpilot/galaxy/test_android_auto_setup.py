@@ -6,6 +6,56 @@ import pytest
 
 from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup, SetupRejected
 from openpilot.starpilot.system.android_auto.apk_identity import MAX_FILE_BYTES
+from openpilot.starpilot.galaxy import android_auto_setup
+from openpilot.starpilot.system.android_auto import apkpure
+
+_start_download_refresh = apkpure.start_background_refresh
+RELEASE = {'version': '17.7.663654-release', 'code': 177663654, 'size': 50281364,
+           'url': 'https://download.pureapk.com/b/XAPK/abc?k=1', 'expires': 4102444800.0}
+
+
+@pytest.fixture(autouse=True)
+def offline_download(monkeypatch):
+  monkeypatch.setattr(apkpure, 'start_background_refresh', lambda: None)
+  monkeypatch.setattr(apkpure, '_cache', None)
+
+
+def test_download_status_never_waits_for_network(tmp_path, monkeypatch):
+  import threading
+  import time
+
+  entered, release = threading.Event(), threading.Event()
+  fetched = threading.Event()
+  def fetch():
+    entered.set()
+    assert release.wait(2)
+    fetched.set()
+    return dict(RELEASE)
+
+  threads = []
+  thread_class = threading.Thread
+  def thread(**kwargs):
+    instance = thread_class(**kwargs)
+    threads.append(instance)
+    return instance
+
+  monkeypatch.setattr(apkpure.threading, 'Thread', thread)
+  monkeypatch.setattr(apkpure, 'fetch_latest', fetch)
+  monkeypatch.setattr(apkpure, 'start_background_refresh', _start_download_refresh)
+  monkeypatch.setattr(apkpure, '_refresh_after', 0)
+  monkeypatch.setattr(apkpure, '_in_flight', False)
+  service, _ = setup(tmp_path, {'parked': True, 'enabled': True, 'session': ('galaxy', '1')})
+  try:
+    started = time.monotonic()
+    assert service.status(('galaxy', '1'))['download'] is None
+    assert time.monotonic() - started < 0.5
+    assert entered.wait(1)
+    assert not fetched.is_set()
+  finally:
+    release.set()
+    for instance in threads:
+      instance.join(2)
+  assert service.status(('galaxy', '1'))['download'] == {key: RELEASE[key] for key in ('version', 'url', 'size')}
 
 
 class SetupState(TypedDict, total=False):
@@ -217,3 +267,19 @@ def test_session_loss_while_enabling_bluetooth_never_enables_android_auto(tmp_pa
   with pytest.raises(SetupRejected, match='session expired'):
     service.enable(session, True, enable_bluetooth=True)
   setter.assert_not_called()
+
+
+def test_status_has_no_google_sign_in(tmp_path):
+  service, _ = setup(tmp_path, {'parked': True, 'enabled': True, 'session': ('galaxy', '1')})
+  status = service.status(('galaxy', '1'))
+  assert 'googlePlay' not in status and 'mirror' not in status
+  assert not hasattr(service, 'start_google_import') and not hasattr(service, 'maintain')
+
+
+def test_legacy_google_files_are_removed(tmp_path):
+  token, runtime, missing = tmp_path / 'aa_token', tmp_path / 'google-play', tmp_path / 'missing'
+  token.write_text('{"token": "aas_et/x"}')
+  (runtime / 'pinned').mkdir(parents=True)
+  (runtime / 'pinned' / 'playlink').write_bytes(b'binary')
+  android_auto_setup.remove_legacy_google_files((token, runtime, missing))
+  assert not token.exists() and not runtime.exists()

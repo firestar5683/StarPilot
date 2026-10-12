@@ -808,6 +808,7 @@ requires-dist = [
     { name = "requests" },
     { name = "ruff", marker = "extra == 'testing'" },
     { name = "scons" },
+    { name = "sentry-sdk", specifier = "==2.38.0" },
     { name = "setproctitle" },
     { name = "sounddevice" },
     { name = "teleoprtc", marker = "extra == 'vendored'", editable = "teleoprtc_repo" },

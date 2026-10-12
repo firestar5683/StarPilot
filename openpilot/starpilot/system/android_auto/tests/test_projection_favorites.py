@@ -13,7 +13,7 @@ from openpilot.starpilot.system.android_auto.current_car_ui import projected_tou
 from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites
 from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
 from openpilot.starpilot.system.android_auto.projection_layout import (
-  CAR_EXIT, FAVORITE_WIDGETS, default_layout_for_viewport, layout_metadata_for_viewport, projection_customization,
+  BOOKMARK_WIDGET, CAR_EXIT, FAVORITE_WIDGETS, default_layout_for_viewport, layout_metadata_for_viewport, projection_customization,
   validate_layout_for_viewport,
 )
 from openpilot.starpilot.system.android_auto.touch import InputConfig, TouchMapper, TouchReceiver, TouchSender
@@ -55,6 +55,61 @@ def tap(control, state, key):
   x, y = point(state, key)
   control.touch('down', x, y, state, 1)
   control.touch('up', x, y, state, 1)
+
+
+@pytest.mark.parametrize('display', ['icons', 'words'])
+def test_bookmark_tap_works_without_navigation_and_preserves_navigation(favorites, display):
+  view = state()
+  placed = view.customization['layouts']['large'][BOOKMARK_WIDGET]
+  favorites.bookmark = Mock(return_value=True)
+  tap(favorites, view, BOOKMARK_WIDGET)
+  favorites.bookmark.assert_not_called()  # opt in only
+  placed.update(enabled=True, display=display, opacity=30, background=False)
+  tap(favorites, view, 'nav_home')
+  destination_before = favorites.owner.read()['destination']
+  tap(favorites, view, BOOKMARK_WIDGET)
+  favorites.bookmark.assert_called_once_with()
+  assert favorites.owner.read()['destination'] == destination_before
+  favorites.owner.read = Mock(side_effect=OSError('navigation unavailable'))
+  tap(favorites, view, BOOKMARK_WIDGET)
+  assert favorites.bookmark.call_count == 2
+  if display == 'icons':
+    assert favorites.hit(placed['x'] + 150, placed['y'] + 55, view) != BOOKMARK_WIDGET
+
+
+@pytest.mark.parametrize('cancel', ['drag', 'alert', 'offroad', 'new_drive', 'disabled', 'cancel'])
+def test_bookmark_requires_valid_release_in_same_drive(favorites, cancel):
+  view = state()
+  view.customization['layouts']['large'][BOOKMARK_WIDGET]['enabled'] = True
+  favorites.bookmark = Mock()
+  x, y = point(view, BOOKMARK_WIDGET)
+  favorites.touch('down', x, y, view, 1)
+  if cancel == 'alert':
+    view.alert.size = 'full'
+  elif cancel == 'offroad':
+    favorites.authorized = lambda: False
+  elif cancel == 'disabled':
+    view.customization['layouts']['large'][BOOKMARK_WIDGET]['enabled'] = False
+  elif cancel == 'cancel':
+    favorites.touch('cancel', x, y, view, 1)
+  favorites.touch('up', x + (30 if cancel == 'drag' else 0), y, view, 2 if cancel == 'new_drive' else 1)
+  favorites.bookmark.assert_not_called()
+
+
+def test_bookmark_and_favorites_respect_saved_order(favorites):
+  view = state(ordered=True)
+  placements = view.customization['layouts']['large']
+  placements[BOOKMARK_WIDGET].update(enabled=True, x=placements['nav_home']['x'], y=placements['nav_home']['y'])
+  favorites.bookmark = Mock(return_value=True)
+  tap(favorites, view, 'nav_home')
+  favorites.bookmark.assert_called_once()
+  assert favorites.owner.read()['destination'] is None
+  order = view.customization['widgetOrder']['large']
+  order.remove('nav_home')
+  order.insert(-1, 'nav_home')
+  tap(favorites, view, BOOKMARK_WIDGET)
+  assert favorites.bookmark.call_count == 1
+  assert favorites.owner.read()['destination']['name'] == 'My home'
 
 
 def test_map_above_home_blocks_touch(favorites):

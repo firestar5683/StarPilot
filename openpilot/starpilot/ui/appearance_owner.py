@@ -5,23 +5,17 @@ from dataclasses import replace
 
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.ui.appearance_preferences import (CAMERA_LABELS, DEFAULTS, LEAD_INFO_LABELS, MAX_RAW_BYTES,
-                                                          read_camera_view, read_lead_info, read_visibility)
+                                                          RETIRED_DISPLAY_KEYS, read_camera_view, read_lead_info, read_visibility)
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, FeatureSettingsState
 from openpilot.starpilot.ui.presentation import Profile
 
 
+# Widget visibility, the stopped timer and Rainbow Road live in the onroad customization document.
 LABELS = {
-  "HideSpeed": "Hide Current Speed",
-  "HideMaxSpeed": "Hide MAX Speed",
-  "HideSteeringWheel": "Hide Steering Wheel",
-  "HideDMIcon": "Hide Driver Monitoring Icon",
   "HidePersonalityAlerts": "Hide Personality Alerts",
   "ShowBrakeStatus": "Wheel brake and acceleration colors",
   "DriverCamera": "Driver Camera on Reverse",
-  "StoppedTimer": "Stopped Timer",
   "StockConfidenceBallWidget": "Use StarPilot Widgets",
-  "EnableTorqueBarWidget": "Show Torque Bar",
-  "RainbowPath": "Rainbow Road",
   "HideLeadMarker": "Lead Indicator",
   "LeadInfo": "Lead Info",
   "SignalMetrics": "C4 amber signal border",
@@ -36,10 +30,9 @@ class AppearanceOwner:
 
   def snapshot(self, profile: Profile) -> FeatureSettingsState:
     parked = self.parked()
-    compact_only = ("StoppedTimer", "StockConfidenceBallWidget", "DriverCamera", "HideLeadMarker", "LeadInfo")
+    compact_only = ("StockConfidenceBallWidget", "DriverCamera", "HideLeadMarker", "LeadInfo")
     keys = tuple(key for key in DEFAULTS if key not in compact_only and key in LABELS) if profile == Profile.LARGE else \
-      ("DriverCamera", "StoppedTimer", "StockConfidenceBallWidget", "EnableTorqueBarWidget", "RainbowPath", "HideDMIcon", "HidePersonalityAlerts",
-       "ShowBrakeStatus",
+      ("DriverCamera", "StockConfidenceBallWidget", "HidePersonalityAlerts", "ShowBrakeStatus",
        "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics")
     rows = []
     if profile == Profile.COMPACT:
@@ -100,7 +93,7 @@ class AppearanceOwner:
     if request.key == "CameraView" and request.value in CAMERA_LABELS:
       raw = str(CAMERA_LABELS.index(request.value)).encode()
       max_bytes = 8
-    elif request.key in DEFAULTS and request.value in ("Off", "On"):
+    elif request.key in DEFAULTS and request.key not in RETIRED_DISPLAY_KEYS and request.value in ("Off", "On"):
       desired = (request.value != "On") if request.key in ("HideLeadMarker", "StockConfidenceBallWidget") else request.value == "On"
       raw = b"1" if desired else b"0"
       max_bytes = MAX_RAW_BYTES

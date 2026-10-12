@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from openpilot.starpilot.ui import onroad_border
 from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance
-from openpilot.starpilot.ui.onroad_border import half_colors, render_compact_half_borders
+from openpilot.starpilot.ui.onroad_border import half_colors, render_compact_half_borders, render_large_half_borders
 from openpilot.starpilot.ui.onroad_state import AlertSize, BorderSignals, OnroadAlert
 from openpilot.starpilot.ui.preview_shell import reference_onroad
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter
@@ -48,6 +48,20 @@ class TestOnroadBorder(unittest.TestCase):
     self.assertEqual(draw.call_count, 2)
     self.assertEqual([(call.args[0].x, call.args[0].y, call.args[0].width, call.args[0].height)
                       for call in draw.call_args_list], [(4, 4, 468, 232)] * 2)
+
+  def test_android_auto_large_edge_tints_each_half(self):
+    content = onroad_border.rl.Rectangle(30, 30, 1860, 1020)
+    with patch.object(onroad_border.clip, 'begin_scissor_mode') as begin, \
+         patch.object(onroad_border.clip, 'end_scissor_mode') as end, \
+         patch.object(onroad_border.rl, 'draw_rectangle_rounded_lines_ex') as draw:
+      render_large_half_borders(state(BorderSignals(True, False, False, True)), 0.1, content, 1080)
+    self.assertEqual([call.args for call in begin.call_args_list], [(0, 0, 960, 1080), (960, 0, 960, 1080)])
+    self.assertEqual(end.call_count, 2)
+    self.assertEqual([(call.args[1:], call.args[0].width) for call in draw.call_args_list],
+                     [((0.12, 10, 30, onroad_border.BLINKER_AMBER), 1860), ((0.12, 10, 30, onroad_border.BLINDSPOT_RED), 1860)])
+    with patch.object(onroad_border.rl, 'draw_rectangle_rounded_lines_ex') as draw:
+      render_large_half_borders(state(None), 0.1, content, 1080)
+    draw.assert_not_called()
 
   def test_stale_or_invalid_car_clears_visual_signal(self):
     ui = ui_fake()

@@ -312,6 +312,18 @@ export class AndroidAutoFeed {
 }
 
 export const APKMIRROR_URL = "https://www.apkmirror.com/apk/google-inc/android-auto/"
+// Signed APKPure links the comma looked up; the browser downloads the app itself.
+export const DOWNLOAD_LINK = /^https:\/\/download\.pureapk\.com\/b\/X?APK\/[!-~]+$/
+const WRONG_DOWNLOAD = "That’s not the Android Auto download. Download it again in step 1."
+
+export function downloadLink(release) {
+  if (typeof release?.url === "string" && DOWNLOAD_LINK.test(release.url) && typeof release.version === "string" &&
+      release.version.length <= 128 && /^[0-9]+(?:\.[0-9]+)+-release$/.test(release.version) &&
+      Number.isSafeInteger(release.size) && release.size > 0) {
+    return { direct: true, url: release.url, version: release.version.replace(/-release$/, ""), megabytes: Math.ceil(release.size / 1048576) }
+  }
+  return { direct: false, url: APKMIRROR_URL }
+}
 const STAGES = ["reading", "searching", "decrypting", "verifying", "installing", "done"]
 const CHECKS = [
   { stage: "reading", codes: ["NOT_PACKAGE", "CORRUPT", "NO_CODE", "TOO_LARGE"], label: "Android package opened" },
@@ -355,7 +367,7 @@ export function packagePreflight(file) {
   if (/com\.google\.android\.gms|play[ ._-]?services/i.test(name)) {
     return "This is Google Play Services, not Android Auto. Go back and download Android Auto by Google LLC."
   }
-  if (name && !/\.(apk|xapk|apkm)$/i.test(name)) return "That’s not an Android package. Choose the .apk, .xapk, or .apkm file you downloaded."
+  if (name && !/\.(apk|xapk|apkm|zip)$/i.test(name)) return "That’s not an Android package. Choose the .apk, .xapk, .apkm, or .zip file you downloaded."
   return ""
 }
 
@@ -377,7 +389,7 @@ export function importProblem(job, fileName = "", locale = undefined) {
     case "UNSUPPORTED_VERSION":
       return job.error || "This version stores its key differently. Choose another Android Auto release."
     case "TOO_LARGE": return "This file is too large to be the Android Auto app."
-    case "CANCELLED": return "Setup stopped because Android Auto was turned off. Try again."
+    case "CANCELLED": return "Setup authorization changed. Sign in to Galaxy and try again."
     default: return job.error || "Something went wrong. Try again."
   }
 }
@@ -408,11 +420,15 @@ export const AndroidAutoPage = {
   data: () => ({
     setup: null, pairing: null, selected: null, runtime: null, receivers: [], endReason: "", busy: false, error: "",
     pairValue: "", packageFile: null, uploadProgress: null, installOpen: false, removeOpen: false, installAttempted: false, installBaseline: null,
-    installFileName: "", apkmirror: APKMIRROR_URL, pairWhenReady: false, enableOpen: false
+    downloadStarted: false, packageMagicError: "", packageChecking: false, packageSelection: 0,
+    installFileName: "", pairWhenReady: false, enableOpen: false
   }),
   mounted() {
     this.feed = new AndroidAutoFeed({ publish: (value) => Object.assign(this, value), unauthorized: this.unauthorized })
-    this.visibility = () => document.hidden ? this.feed.stop(true) : this.begin()
+    this.visibility = () => {
+      if (document.hidden) this.feed.stop(true)
+      else this.begin()
+    }
     document.addEventListener("visibilitychange", this.visibility)
     if (!document.hidden) this.begin()
   },
@@ -432,17 +448,28 @@ export const AndroidAutoPage = {
     expiry() { return expiryInfo(this.setup?.identity) },
     projecting() { return this.runtime?.state === "streaming" },
     supportReady() { return !!(this.setup?.enabled && this.setup.identity.installed) },
+    download() { return downloadLink(this.setup?.download) },
+    uploadPercent() {
+      const { loaded, total } = this.uploadProgress || {}
+      return total > 0 ? Math.min(100, Math.round(100 * loaded / total)) : 0
+    },
+    downloadsHint() {
+      if (typeof navigator === "undefined") return ""
+      if (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return "In Files, open Downloads."
+      return /Android/i.test(navigator.userAgent || "") ? "Open Downloads." : ""
+    },
     packageError() {
       if (!this.packageFile) return ""
       const preflight = packagePreflight(this.packageFile)
       if (preflight) return preflight
       if (!Number.isSafeInteger(this.packageFile.size) || this.packageFile.size <= 0) return "The selected file is empty or its size cannot be read."
       if (this.setup && this.packageFile.size > this.setup.maxUploadBytes) return "The selected package exceeds the maximum size shown below."
-      return ""
+      return this.packageMagicError
     },
     uploadReason() {
       if (!this.packageFile) return "Choose your Android Auto package."
       if (this.packageError) return this.packageError
+      if (this.packageChecking) return "Checking downloaded file…"
       if (!this.setup) return "Load setup status first."
       if (!this.setup.enabled && !this.setup.installReady) return "The Android Auto display and encoder must be installed before uploading."
       if (this.setup.import?.state === "running") return "Wait for the current package check to finish."
@@ -460,6 +487,10 @@ export const AndroidAutoPage = {
     checks() { return installChecks(this.setup?.import) },
     problem() { return importProblem(this.setup?.import, this.installFileName) },
     hasPackage() { return !!(this.setup?.identity.installed || this.setup?.identity.expired || this.setup?.identity.error) },
+    onPhone() {
+      return typeof navigator !== "undefined" && (navigator.userAgentData?.mobile === true ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    },
     removeReason() {
       if (!this.setup) return "Load setup status first."
       if (this.setup.import?.state === "running") return "Wait for the current package check to finish."
@@ -544,11 +575,35 @@ export const AndroidAutoPage = {
       return this.feed.action("./api/android-auto/pairing/response", { prompt_id: prompt.id, accepted, value })
     },
     openInstall() {
-      Object.assign(this, { installOpen: true, installAttempted: false, packageFile: null })
+      this.chooseAgain()
+      Object.assign(this, { installOpen: true, downloadStarted: false })
     },
     closeInstall() { this.installOpen = false },
-    chooseAgain() { Object.assign(this, { installAttempted: false, packageFile: null }) },
-    choosePackage(event) { this.packageFile = event.target.files?.[0] || null },
+    markDownloadStarted() {
+      if (!this.busy && ["choose", "failed"].includes(this.installState)) this.chooseAgain()
+      this.downloadStarted = true
+    },
+    chooseAgain() {
+      this.packageSelection++
+      Object.assign(this, { installAttempted: false, packageFile: null, packageMagicError: "", packageChecking: false })
+    },
+    async choosePackage(event) {
+      const file = event.target.files?.[0] || null
+      const selection = ++this.packageSelection
+      Object.assign(this, { packageFile: file, packageMagicError: "", packageChecking: false })
+      // Leave useful name/size errors intact; never read the full package into browser memory.
+      if (!file || packagePreflight(file) || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > this.setup?.maxUploadBytes) return
+      this.packageChecking = true
+      let error = ""
+      try {
+        if (file.size < 5 * 1024 * 1024) error = WRONG_DOWNLOAD
+        else {
+          const bytes = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+          if (bytes.length !== 4 || ![0x50, 0x4b, 0x03, 0x04].every((byte, i) => bytes[i] === byte)) error = WRONG_DOWNLOAD
+        }
+      } catch { error = WRONG_DOWNLOAD }
+      if (selection === this.packageSelection) Object.assign(this, { packageMagicError: error, packageChecking: false })
+    },
     async upload() {
       if (this.busy || this.uploadReason) return false
       const file = this.packageFile
@@ -596,6 +651,7 @@ export const AndroidAutoPage = {
                 <div class="gx-actions gx-aa-status__actions">
                   <button v-if="!setup.identity.installed" class="gx-btn" @click="openInstall">{{ setup.identity.expired || setup.identity.error ? 'Reinstall' : 'Install support' }}</button>
                   <button v-else-if="expiry.level === 'soon'" class="gx-btn" @click="openInstall">Update</button>
+                  <button v-if="setup.identity.installed" class="gx-btn gx-btn--tonal" @click="openInstall">Manage package</button>
                   <button v-if="setup.identity.installed && !setup.enabled" class="gx-btn" @click="setEnabled(true)">Turn On</button>
                   <button v-if="setup.enabled" class="gx-btn gx-btn--tonal" @click="setEnabled(false)">Turn Off</button>
                 </div>
@@ -604,14 +660,16 @@ export const AndroidAutoPage = {
             </template>
             <details class="gx-aa-wiki"><summary>Stuck installing? Common problems</summary>
               <ul>
+                <li><strong>The download button opens APKMirror instead:</strong> the comma couldn’t reach APKPure just now. Download the newest Android Auto release from APKMirror, or close this window and try again in a few minutes.</li>
                 <li><strong>“This is the APKMirror Installer app”:</strong> you downloaded the helper app. Go back to the Android Auto release page and use <strong>Download APK Bundle</strong> there.</li>
                 <li><strong>“Not Android Auto” or an unverified file:</strong> make sure the app is <strong>Android Auto</strong> by <strong>Google LLC</strong>, and that the variant name ends in <strong>‑release</strong> (not beta or alpha).</li>
-                <li><strong>Certificate expired:</strong> that release is too old. Go back to All versions and download the one with the newest date.</li>
-                <li><strong>Can’t find the right file:</strong> only the release’s <strong>Variant</strong> entries are the app. Skip the ones named beta or any other app.</li>
-                <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded.</li>
+                <li><strong>Certificate expired:</strong> that release is too old. Download again in step 1; it always gets the newest release.</li>
+                <li><strong>The file won’t pick or was rejected:</strong> don’t unzip it. Use the .apk, .xapk or .apkm file exactly as downloaded. A .zip name from Safari is fine too.</li>
                 <li><strong>Upload is slow or stops:</strong> stay on this page and keep the comma awake and on the same Wi-Fi until it finishes.</li>
               </ul>
-              <p><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. Nothing is sent anywhere, and no Android app is installed on the comma.</p>
+              <ul>
+                <li><strong>Why is this needed?</strong> Car screens only talk to devices that present Google’s Android Auto certificate. Your comma reads it from your own copy of the app, on the device. No Android app is installed on the comma.</li>
+              </ul>
             </details>
           </div>
         </li>
@@ -666,9 +724,11 @@ export const AndroidAutoPage = {
               <button v-else class="gx-btn gx-btn--tonal" @click="cancelPairing">Cancel Search / Pairing</button>
             </div>
             <details class="gx-aa-wiki"><summary>Stuck pairing? Pairing order and wireless adapters</summary>
-              <p><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</p>
-              <p><strong>Cars with built-in wireless Android Auto:</strong>  Set the car into pairing (search) mode. On Comma, go to Settings -> Bluetooth -> Scan For Devices. Choose your car, then confirm the code on both screens.</p>
-              <p><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</p>
+              <ul>
+                <li><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</li>
+                <li><strong>Cars with built-in wireless Android Auto:</strong>  Set the car into pairing (search) mode. On Comma, go to Settings -> Bluetooth -> Scan For Devices. Choose your car, then confirm the code on both screens.</li>
+                <li><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): pair your car in <a href="#/bluetooth">Bluetooth</a> first so calls keep working, then put the adapter in pairing mode and pair it here. Adapter names often look like AndroidAuto-XXXX.</li>
+              </ul>
               <p><strong>Start fresh:</strong></p>
               <ol>
                 <li>Forget the car on the comma: <a href="#/bluetooth">Bluetooth</a> → Forget.</li>
@@ -697,11 +757,13 @@ export const AndroidAutoPage = {
               :save-value="(index, value) => control('auto_connect', { enabled: value === 'On' })" />
             <p v-if="runtime?.companion_name" class="gx-note">Car: {{ runtime.companion_name }}</p>
             <details class="gx-aa-wiki"><summary>Stuck connecting? Wi-Fi and screen troubleshooting</summary>
-              <p><strong>How it connects:</strong> after Bluetooth, the car (or adapter) creates its own hidden 5 GHz Wi-Fi network and tells the comma how to join. The picture streams over that Wi-Fi.</p>
-              <p><strong>First connection:</strong> stay in Park or offroad mode, and keep the car’s screen on.</p>
-              <p><strong>Black or frozen screen:</strong> tap Disconnect, wait a few seconds, then connect again. If it keeps happening, turn the car off and on.</p>
-              <p><strong>Car says the phone isn’t compatible:</strong> make sure wireless Android Auto (sometimes called “smartphone connection”) is turned on in the car’s settings, and that step 1 shows Ready.</p>
-              <p>Wired USB setup is unavailable. Use wireless Android Auto or a wireless adapter.</p>
+              <ul>
+                <li><strong>How it connects:</strong> after Bluetooth, the car (or adapter) creates its own hidden 5 GHz Wi-Fi network and tells the comma how to join. The picture streams over that Wi-Fi.</li>
+                <li><strong>First connection:</strong> stay in Park or offroad mode, and keep the car’s screen on.</li>
+                <li><strong>Black or frozen screen:</strong> tap Disconnect, wait a few seconds, then connect again. If it keeps happening, turn the car off and on.</li>
+                <li><strong>Car says the phone isn’t compatible:</strong> make sure wireless Android Auto (sometimes called “smartphone connection”) is turned on in the car’s settings, and that step 1 shows Ready.</li>
+                <li>Wired USB setup is unavailable. Use wireless Android Auto or a wireless adapter.</li>
+              </ul>
             </details>
           </div>
         </li>
@@ -811,7 +873,7 @@ export const AndroidAutoPage = {
           <p>Pair each car in step 2 with <strong>Pair another</strong>. All your paired cars appear in the list. Tap <strong>Use</strong> next to the one you’re driving. Disconnect first if Android Auto is running.</p>
         </details>
         <details class="gx-aa-wiki"><summary>Is my information private?</summary>
-          <p>Yes. The Android Auto file you install stays on your comma and isn’t sent anywhere. Connection logs also stay on the comma until you download them yourself. They leave out Wi‑Fi passwords, Bluetooth addresses, and your vehicle ID.</p>
+          <p>Yes. Your extracted Android Auto identity stays on your comma. The app downloads straight to your phone or computer, and the copy you upload is deleted after import. Connection logs also stay on the comma until you download them yourself. They leave out Wi‑Fi passwords, Bluetooth addresses, and your vehicle ID.</p>
         </details>
 
         <h4>Still stuck?</h4>
@@ -838,68 +900,133 @@ export const AndroidAutoPage = {
       </GxDialog>
 
       <GxDialog v-if="removeOpen && setup" :inert="busy" labelledby="gx-aa-remove-title" describedby="gx-aa-remove-body" alert @close="closeRemove">
-          <div><h3 id="gx-aa-remove-title">Remove the package?</h3>
-            <p id="gx-aa-remove-body">Are you sure you want to remove the package? Android Auto will disconnect first if connected. The device will not connect to your car until you re-add one.</p></div>
+          <div><h3 id="gx-aa-remove-title">Remove Android Auto support?</h3>
+            <p id="gx-aa-remove-body">This deletes the Android Auto certificate and key from this comma. Android Auto will disconnect first if connected. Your comma won’t connect to your car until you set it up again.</p></div>
           <div class="gx-settings__controls gx-actions">
             <button type="button" class="gx-btn gx-btn--tonal" @click="closeRemove">Cancel</button>
-            <button type="button" class="gx-btn gx-btn--danger" @click="removePackage">Confirm</button>
+            <button type="button" class="gx-btn gx-btn--danger" @click="removePackage">Remove</button>
           </div>
       </GxDialog>
 
       <GxDialog v-if="installOpen && setup" labelledby="gx-aa-install-title" class="gx-aa-sheet__dialog" @close="closeInstall">
-          <button type="button" class="gx-icon-btn gx-aa-sheet__close" aria-label="Close" @click="closeInstall"><i class="bi bi-x-lg"></i></button>
-          <div v-if="installState === 'done'" class="gx-aa-sheet__done">
-            <i class="bi bi-check-circle-fill gx-aa-ok" aria-hidden="true"></i>
+        <div class="gx-aa-sheet__toolbar">
+          <button type="button" class="gx-icon-btn" aria-label="Close" @click="closeInstall"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="gx-aa-sheet__body">
+          <div v-if="installState === 'done'" class="gx-message gx-aa-sheet__done">
+            <div class="gx-aa-done-badge"><i class="bi bi-check-lg" aria-hidden="true"></i></div>
             <h3 id="gx-aa-install-title">You’re all set</h3>
-            <p>{{ expiry.label }}</p>
+            <p class="gx-note">{{ expiry.label }}</p>
             <p v-if="!setup.enabled" class="gx-note">Turn on Android Auto in step 1 to connect to your car.</p>
             <ul class="gx-aa-checks"><li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li></ul>
             <button class="gx-btn gx-aa-cta" @click="closeInstall">Done</button>
           </div>
-          <template v-else>
-            <div class="gx-aa-sheet__head"><h3 id="gx-aa-install-title">Set Up Android Auto Support</h3>
-              <p class="gx-note">A quick one-time setup that enables wireless projection with your car.</p></div>
-            <ol class="gx-aa-sheet__steps">
-              <li :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
-                <strong>Download Android Auto</strong>
-                <a class="gx-btn gx-btn--tonal" :href="apkmirror" target="_blank" rel="noopener noreferrer">Open APKMirror <i class="bi bi-box-arrow-up-right"></i></a>
-                <ol class="gx-aa-sheet__substeps">
-                  <li>Open <strong>Android Auto</strong> on APKMirror, then open the <strong>All versions</strong> list and click through the versions to compare their release dates.</li>
-                  <li>Click the version with the <strong>newest release date</strong>.</li>
-                  <li>Click <strong>Scroll down to Available downloads</strong>.</li>
-                  <li>Under <strong>Variant</strong>, click the <strong>17.x.xxxx‑release</strong> or <strong>18.x.xxxx‑release</strong> entry.</li>
-                  <li>Click <strong>Download APK Bundle</strong> (or <strong>Download APK</strong>). You get an <strong>.apk</strong>, <strong>.xapk</strong> or <strong>.apkm</strong> file. Leave it zipped.</li>
-                </ol>
-                <small>You don’t need the APKMirror Installer app.</small>
-              </li>
-              <li :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
-                <strong>Choose the downloaded file</strong>
-                <label class="gx-btn gx-btn--tonal gx-aa-file" :class="{ 'gx-aa-file--disabled': installState !== 'choose' }">
-                  <input type="file" accept=".apk,.xapk,.apkm" aria-label="Android Auto APK, XAPK, or APKM" :disabled="installState !== 'choose'" @change="choosePackage" />
-                  <i class="bi bi-folder2-open"></i> {{ packageFile ? 'Choose a Different File' : 'Choose File' }}</label>
-                <small v-if="packageFile && !packageError" class="gx-aa-picked"><i class="bi bi-file-earmark-zip"></i> {{ packageFile.name }} · {{ Math.ceil(packageFile.size / 1048576) }} MB</small>
-                <small v-if="packageError" class="gx-aa-bad" role="alert">{{ packageError }}</small>
-              </li>
-              <li>
-                <strong>Install</strong>
-                <button v-if="installState === 'choose'" class="gx-btn" :disabled="!!uploadReason" @click="upload">{{ setup.enabled ? 'Install' : 'Turn On and Install' }}</button>
-                <small v-if="installState === 'choose' && uploadReason && packageFile && !packageError" class="gx-note" role="status">{{ uploadReason }}</small>
-                <div v-if="installState === 'uploading'" role="status" aria-live="polite" class="gx-aa-progress">
-                  <progress :value="uploadProgress?.loaded || 0" :max="uploadProgress?.total || 1"></progress>
-                  <small>Sending to your comma… {{ uploadProgress ? Math.round(100 * uploadProgress.loaded / uploadProgress.total) : 0 }}%</small>
+          <div v-else-if="setup.identity.installed && !installAttempted" class="gx-stack">
+            <div class="gx-stack gx-aa-sheet__head">
+              <div class="gx-cluster gx-aa-sheet__lead">
+                <div class="gx-aa-sheet__icon-badge"><i class="bi bi-shield-check"></i></div>
+                <div>
+                  <h3 id="gx-aa-install-title">Android Auto Support</h3>
+                  <p class="gx-note">Support is set up on this comma. To set it up again, remove it first.</p>
                 </div>
-                <ul v-if="['checking', 'failed'].includes(installState)" class="gx-aa-checks" aria-live="polite">
-                  <li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li>
-                </ul>
-                <GxNotice v-if="installState === 'failed'" tone="danger">
-                  <p>{{ problem }}</p>
-                  <button class="gx-btn gx-btn--tonal" @click="chooseAgain">Choose Another File</button>
-                </GxNotice>
-                <p v-if="error && installState === 'choose' && installAttempted" class="gx-aa-bad" role="alert">{{ error }}</p>
+              </div>
+            </div>
+            <dl class="gx-stack gx-aa-manage__facts">
+              <div class="gx-card gx-info-card">
+                <dt>Status</dt>
+                <dd><span class="gx-aa-pill" :class="'gx-aa-pill--' + expiry.level">{{ expiry.label }}</span></dd>
+              </div>
+            </dl>
+            <div class="gx-actions">
+              <button type="button" class="gx-btn gx-btn--danger" :disabled="!!removeReason" :title="removeReason || undefined" @click="closeInstall(); openRemove()"><i class="bi bi-trash3" aria-hidden="true"></i> Remove Android Auto support</button>
+            </div>
+          </div>
+          <div v-else class="gx-stack">
+            <div class="gx-stack gx-aa-sheet__head">
+              <div class="gx-cluster gx-aa-sheet__lead">
+                <div>
+                  <h3 id="gx-aa-install-title">Set Up Android Auto Support</h3>
+                  <p class="gx-note">One-time setup so your car accepts your comma.</p>
+                </div>
+              </div>
+            </div>
+            <ol class="gx-aa-sheet__steps">
+              <li class="gx-aa-step-card" :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
+                <div class="gx-aa-step-card__head">
+                  <span class="gx-aa-step__num gx-aa-step-card__num">1</span>
+                  <div class="gx-aa-step-card__title">
+                    <strong>Download Android Auto</strong>
+                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : 'Get the newest release from APKMirror' }}</small>
+                  </div>
+                </div>
+                <div class="gx-aa-step-card__body">
+                  <a v-if="download.direct" class="gx-btn gx-btn--tonal" :href="download.url" rel="noreferrer" download @click="markDownloadStarted">
+                    <i class="bi bi-download" aria-hidden="true"></i> Download Android Auto {{ download.version }} · {{ download.megabytes }} MB
+                  </a>
+                  <a v-else class="gx-btn gx-btn--tonal" :href="download.url" target="_blank" rel="noopener noreferrer" @click="markDownloadStarted">
+                    <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open APKMirror
+                  </a>
+                  <small v-if="download.direct" class="gx-note">From APKPure, a third-party mirror (<a class="gx-link" href="https://apkpure.com/terms.html" target="_blank" rel="noopener noreferrer">terms</a>). Don’t unzip it.</small>
+                </div>
+              </li>
+              <li class="gx-aa-step-card" :class="{ 'gx-aa-sheet__step--muted': installState !== 'choose' }">
+                <div class="gx-aa-step-card__head">
+                  <span class="gx-aa-step__num gx-aa-step-card__num">2</span>
+                  <div class="gx-aa-step-card__title">
+                    <strong>Choose the downloaded file</strong>
+                    <small>{{ downloadStarted && downloadsHint ? downloadsHint : 'The file you just downloaded' }}</small>
+                  </div>
+                </div>
+                <div class="gx-aa-step-card__body">
+                  <label class="gx-btn gx-btn--tonal gx-aa-file" :class="{ 'gx-aa-file--disabled': installState !== 'choose' }">
+                    <input type="file" :accept="onPhone ? undefined : '.apk,.xapk,.apkm,.zip'" aria-label="Android Auto APK, XAPK, APKM, or ZIP" :disabled="installState !== 'choose'" @change="choosePackage" />
+                    <i class="bi bi-folder2-open"></i> {{ packageFile ? 'Choose a Different File' : 'Choose File' }}
+                  </label>
+                  <small v-if="packageChecking" role="status" class="gx-note">Checking downloaded file…</small>
+                  <div v-if="packageFile && !packageError && !packageChecking" class="gx-chip gx-aa-file-chip">
+                    <i class="bi bi-file-earmark-zip"></i>
+                    <span>{{ packageFile.name }}</span>
+                    <small>{{ Math.ceil(packageFile.size / 1048576) }} MB</small>
+                  </div>
+                  <small v-if="packageError" class="gx-aa-bad" role="alert">{{ packageError }}</small>
+                </div>
+              </li>
+              <li class="gx-aa-step-card">
+                <div class="gx-aa-step-card__head">
+                  <span class="gx-aa-step__num gx-aa-step-card__num">3</span>
+                  <div class="gx-aa-step-card__title">
+                    <strong>Install</strong>
+                    <small>Send it to your comma and check the certificate</small>
+                  </div>
+                </div>
+                <div class="gx-aa-step-card__body">
+                  <button v-if="installState === 'choose'" class="gx-btn gx-aa-cta" :disabled="!!uploadReason" @click="upload">
+                    {{ setup.enabled ? 'Install' : 'Turn On and Install' }}
+                  </button>
+                  <small v-if="installState === 'choose' && uploadReason && packageFile && !packageError" class="gx-note" role="status">{{ uploadReason }}</small>
+                  <div v-if="installState === 'uploading'" role="status" aria-live="polite" class="gx-stack">
+                    <div class="gx-update-progress__track" role="progressbar" aria-label="Sending to your comma" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="uploadPercent">
+                      <div class="gx-update-progress__fill" :style="{ width: uploadPercent + '%' }"></div>
+                    </div>
+                    <small>Sending to your comma… {{ uploadPercent }}%</small>
+                  </div>
+                  <ul v-if="['checking', 'failed'].includes(installState)" class="gx-aa-checks" aria-live="polite">
+                    <li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li>
+                  </ul>
+                  <GxNotice v-if="installState === 'failed'" tone="danger">
+                    <p>{{ problem }}</p>
+                    <button class="gx-btn gx-btn--tonal" @click="chooseAgain">Choose Another File</button>
+                  </GxNotice>
+                  <p v-if="error && installState === 'choose' && installAttempted" class="gx-aa-bad" role="alert">{{ error }}</p>
+                </div>
               </li>
             </ol>
-            <small class="gx-note">Your package stays on this comma. Maximum size {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</small>
-          </template>
+            <div class="gx-stack gx-aa-sheet__footer">
+              <small class="gx-note gx-aa-trademark">Google and Android Auto are trademarks of Google LLC. StarPilot is not affiliated with or endorsed by Google or APKPure.</small>
+              <small class="gx-note">The uploaded file is deleted after import. Maximum size {{ Math.floor(setup.maxUploadBytes / 1048576) }} MB.</small>
+            </div>
+          </div>
+        </div>
       </GxDialog>
     </section>`,
 }

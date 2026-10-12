@@ -74,6 +74,9 @@ DEFAULTS = {
   "UseVienna": False,
 }
 MAX_RAW_BYTES = 16
+# Superseded by the onroad customization document; read only to retire them.
+RETIRED_DISPLAY_KEYS = ("HideSpeed", "HideMaxSpeed", "HideSteeringWheel", "HideDMIcon", "EnableTorqueBarWidget",
+                        "StoppedTimer", "RainbowPath")
 
 
 @dataclass(frozen=True)
@@ -135,22 +138,16 @@ def read_visibility(params: Any, key: str) -> SavedVisibility:
 
 @dataclass(frozen=True)
 class OnroadAppearance:
-  hide_speed: bool = False
-  hide_max_speed: bool = False
-  hide_steering_wheel: bool = False
-  show_torque_bar: bool = True
   show_blindspot_border: bool = True
   show_signal_border: bool = False
   show_speed_limit_sign: bool = True
   use_vienna_sign: bool = False
-  show_stopped_timer: bool = False
   show_stock_confidence_ball: bool = False
   show_lead_indicator: bool = False
   lead_info_mode: LeadInfoMode = LeadInfoMode.OFF
   lead_info_metric: bool | None = False
   camera_view: CameraViewChoice = CameraViewChoice.STANDARD
   driver_camera_on_reverse: bool = False
-  hide_dm_icon: bool = False
   hide_personality_alerts: bool = False
   wheel_pedal_feedback: bool = False
 
@@ -166,18 +163,12 @@ def onroad_appearance(params: Any) -> OnroadAppearance:
     metric_raw, metric_readable = None, False
   metric = False if metric_readable and metric_raw in (None, b"0") else True if metric_readable and metric_raw == b"1" else None
   return OnroadAppearance(
-    hide_speed=values["HideSpeed"] is True,
-    hide_max_speed=values["HideMaxSpeed"] is True,
-    hide_steering_wheel=values["HideSteeringWheel"] is True,
-    hide_dm_icon=values["HideDMIcon"] is True,
     hide_personality_alerts=values["HidePersonalityAlerts"] is True,
     wheel_pedal_feedback=values["ShowBrakeStatus"] is True or values["PedalsOnUI"] is True,
-    show_torque_bar=values["EnableTorqueBarWidget"] is not False,
     show_blindspot_border=values["BlindSpotMetrics"] is True,
     show_signal_border=values["SignalMetrics"] is True,
     show_speed_limit_sign=values["ShowSpeedLimits"] is True,
     use_vienna_sign=values["UseVienna"] is True,
-    show_stopped_timer=values["StoppedTimer"] is True,
     show_stock_confidence_ball=values["StockConfidenceBallWidget"] is True,
     show_lead_indicator=values["HideLeadMarker"] is False,
     lead_info_mode=saved_lead_info.mode if values["HideLeadMarker"] is False and saved_lead_info.mode is not None else LeadInfoMode.OFF,

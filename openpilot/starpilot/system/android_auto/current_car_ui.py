@@ -1,6 +1,6 @@
 """Headless producer for a separate large StarPilot projection view.
 
-Frames are rendered only while requested. Touch input controls navigation favorites.
+Frames are rendered only while requested. Touch input controls navigation favorites and drive bookmarks.
 Onroad, each new camera frame is drawn exactly once, as soon as it lands (see
 CameraPacer). When the encoder takes NV12, the frame is converted on the GPU,
 and it can be read back without stalling the renderer.
@@ -164,6 +164,7 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
   from openpilot.starpilot.system.android_auto.headless_egl import FrameReadback, HeadlessContext
   from openpilot.starpilot.system.android_auto import gpu_nv12
   from openpilot.starpilot.system.android_auto.projection_control import DEFAULT_CONTROL_SOCKET, NATIVE_FOCUS, ProjectionControlSender
+  from openpilot.starpilot.system.android_auto.projection_bookmark import BookmarkSender
   from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
   from openpilot.starpilot.system.android_auto.touch import TouchReceiver, DEFAULT_TOUCH_SOCKET
   import pyray as rl
@@ -188,16 +189,29 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
     gui_app._scale = 1.0
     gui_app._render_texture = None
     from openpilot.starpilot.system.android_auto.identity import certificate_days_left
-    from openpilot.starpilot.system.android_auto.projection_layout_runtime import load_projection_layout
+    from openpilot.starpilot.system.android_auto.projection_layout_runtime import ProjectionLayoutWatcher
     viewport = (geometry.logical_width, geometry.logical_height)
-    layout = ProjectionOnroad(viewport=viewport, customization=load_projection_layout(viewport),
-                              certificate_days=certificate_days_left())
+    watcher = ProjectionLayoutWatcher(viewport)
+    layout = ProjectionOnroad(viewport=viewport, customization=watcher.load(),
+                              certificate_days=certificate_days_left(), layout_watcher=watcher)
     resources.callback(layout.close)
+    watcher.start()
+    resources.callback(watcher.close)
     touch = TouchReceiver(touch_path or DEFAULT_TOUCH_SOCKET)
     resources.callback(touch.close)
     control = ProjectionControlSender(control_path or DEFAULT_CONTROL_SOCKET)
     resources.callback(control.close)
     layout.native_focus = lambda: control.send(NATIVE_FOCUS)
+    bookmark_sender = BookmarkSender()
+    resources.callback(bookmark_sender.close)
+
+    def bookmark():
+      if (not ui_state.started or layout.native.current_message(ui_state.sm, 'carState', time.monotonic_ns(),
+                                                               after_frame=ui_state.started_frame) is None):
+        return False
+      return bookmark_sender.send(int(ui_state.sm.logMonoTime['carState']))
+
+    layout.bookmark = bookmark
     # ANDROID AUTO VIDEO PERFORMANCE GUARDRAIL: Visible-size targets, GPU NV12 conversion, and async readback limit GPU work and copies.
     # Altering this can degrade video smoothness or introduce lag on Android Auto.
     # Do not change it autonomously; require an explicit user request specifically for this video optimization.

@@ -12,12 +12,13 @@ metadata.bounds.width = 2820
 metadata.widgets.current_speed.default.x += 510
 metadata.widgets.steering_wheel.default.x += 1020
 metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96, height: 96, colors: {}, required: true, frontmost: true,
+  opacity: { min: 25, max: 100, default: 100 }, backgroundToggle: true,
   note: "Returns to the car's own screen without disconnecting Android Auto. Always enabled and above other widgets.",
-  default: { x: 30, y: 954, enabled: true } }
+  default: { x: 30, y: 954, enabled: true, opacity: 100, background: true } }
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-screen-and-layout", editable: true, valid: true,
@@ -25,6 +26,15 @@ const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
 const data = editorSnapshot(raw)
 assert.equal(validSnapshot(data), true)
 assert.equal(validDocument(data.document, data.metadata), true)
+const exitOpacity = copy(data.document)
+exitOpacity.layouts.large.car_exit.opacity = 24
+assert.equal(validDocument(exitOpacity, data.metadata), false)
+exitOpacity.layouts.large.car_exit.opacity = 25
+assert.equal(validDocument(exitOpacity, data.metadata), true)
+const visibilityVm = { projection: true, state: { profile: "large", hiddenPreviewWidgets: { large: { car_exit: true } } } }
+assert.equal(OnroadLayoutPage.methods.previewHidden.call(visibilityVm, "car_exit"), false)
+OnroadLayoutPage.methods.togglePreviewVisibility.call(visibilityVm, "car_exit")
+assert.equal(visibilityVm.state.hiddenPreviewWidgets.large.car_exit, true)
 const missingFrontmost = copy(data)
 delete missingFrontmost.metadata.profiles.large.widgets.car_exit.frontmost
 assert.equal(validSnapshot(missingFrontmost), false)
@@ -51,11 +61,32 @@ const gammaVm = { projection: true, editable: true,
 OnroadLayoutPage.methods.setLargeUiGammaTrial.call(gammaVm, "On")
 assert.equal(gammaVm.state.draft.largeUiGammaTrial, true)
 assert.deepEqual(gammaChanges, [{ largeUiGammaTrial: false }])
-assert.match(gammaVm.state.notice, /Save and reconnect/)
+assert.match(gammaVm.state.notice, /Save to apply/)
 for (const blocked of [{ projection: false }, { editable: false }]) {
   OnroadLayoutPage.methods.setLargeUiGammaTrial.call({ ...gammaVm, ...blocked }, "Off")
   assert.equal(gammaVm.state.draft.largeUiGammaTrial, true)
 }
+// Android Auto has its own border switches, both off unless saved on.
+assert.equal(data.document.blindSpotBorder, false)
+assert.equal(data.document.signalBorder, false)
+assert.equal(editorSnapshot({ ...raw, document: { ...raw.document, blindSpotBorder: undefined, signalBorder: undefined } }).document.blindSpotBorder, false)
+for (const key of ["blindSpotBorder", "signalBorder"]) assert.equal(validDocument({ ...data.document, [key]: 1 }, data.metadata), false)
+assert.equal(validDocument({ ...native.document, signalBorder: true }, native.metadata), false, "the comma screen keeps its C4 settings")
+assert.match(OnroadLayoutPage.template, /Red blind-spot border/)
+assert.match(OnroadLayoutPage.template, /Amber signal border/)
+const borderChanges = []
+const borderVm = { projection: true, editable: true, state: { draft: { blindSpotBorder: false, signalBorder: false }, drag: null, layerDrag: null, notice: '' },
+  recordChange: before => borderChanges.push(before) }
+OnroadLayoutPage.methods.setProjectionBorder.call(borderVm, "signalBorder", "On")
+OnroadLayoutPage.methods.setProjectionBorder.call(borderVm, "blindSpotBorder", "On")
+assert.deepEqual(borderVm.state.draft, { blindSpotBorder: true, signalBorder: true })
+assert.equal(borderChanges.length, 2)
+assert.match(borderVm.state.notice, /Save to apply/)
+OnroadLayoutPage.methods.setProjectionBorder.call(borderVm, "largeUiGammaTrial", "On")
+for (const blocked of [{ projection: false }, { editable: false }]) OnroadLayoutPage.methods.setProjectionBorder.call({ ...borderVm, ...blocked }, "signalBorder", "Off")
+assert.deepEqual(borderVm.state.draft, { blindSpotBorder: true, signalBorder: true })
+assert.equal((OnroadLayoutPage.template.match(/aria-label="Android Auto display"/g) || []).length, 1, "one compact card for all Android Auto display switches")
+assert.deepEqual(projectionPayload({ document: { ...data.document, ...borderVm.state.draft } }, data.metadata).document.signalBorder, true)
 assert.throws(() => editorSnapshot({ version: 1, screen: null, reason: "Connect Android Auto once" }), /Connect Android Auto once/)
 assert.equal(editorSnapshot({ ...raw, editable: false, reason: "Enable Android Auto" }).editable, false)
 assert.ok(!OnroadLayoutPage.template.includes('<section class="gx-layout__colors" aria-label="Path'))
@@ -89,7 +120,7 @@ assert.equal(await leaveVm.saveAndLeave(), false)
 assert.equal(proceeded, 1)
 assert.equal(leaveVm.modalLeavePrompt, true)
 leaveVm.cancelLeave()
-assert.match(OnroadLayoutPage.template, /inlineLeavePrompt \? 'Leave without saving your changes\?'/)
+assert.match(OnroadLayoutPage.template, /inlineLeavePrompt \? \(pendingLeave \? 'Leave without saving your changes\?'/)
 assert.match(OnroadLayoutPage.template, /v-if="modalLeavePrompt"/)
 assert.match(OnroadLayoutPage.template, /@click="saveAndLeave"/)
 
@@ -111,7 +142,7 @@ draft.layouts.large.current_speed.x += 20
 assert.equal(await feed.save(draft), true)
 assert.equal(requests[0].url, "./api/android-auto/layout")
 assert.equal(requests[1].body.document.version, 2)
-assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["canvas", "clock24Hour", "largeUiGammaTrial", "version", "widgets"])
+assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "canvas", "clock24Hour", "largeUiGammaTrial", "signalBorder", "version", "widgets"])
 assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
 feed.stop()
