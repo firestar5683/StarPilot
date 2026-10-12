@@ -947,12 +947,13 @@ class SelfdriveD:
       CS = latest.carState
     return CS
 
-  def defer_expired_axis_publication(self, CS, initial_state):
+  def defer_expired_axis_publication(self, CS, initial_state, *, now_ns=None):
     """Keep an existing unexpired proof for one normal tick; issue no new lease."""
     if REPLAY or not self.aol_replay or not self.axis_transport_required or not qualified_ioniq6(self.CP):
       return False
     proof = getattr(self, 'aol_step_input_proof', None)
-    now_ns = time.monotonic_ns()
+    if now_ns is None:
+      now_ns = time.monotonic_ns()
     source = self.aol_car_state_log_ns
     if (getattr(self, 'aol_step_deferral_checked', False) or proof is None or proof != getattr(self, 'aol_published_input_proof', None) or
         not self.conditional_car_state_valid or not 0 < source <= now_ns or
@@ -1545,18 +1546,6 @@ class SelfdriveD:
     finally:
       self.event_input_refresh_pending = False
     CS = self.event_car_state
-    # Event owners have checked every consumed physical transition. If the
-    # selected source ages out here, decide whether the original output proof
-    # can be retained before source-expiry handling mutates the authority state.
-    # No new input, proof, timestamp, deadline, or enable is generated.
-    if (not previous_deferred and self.defer_expired_axis_publication(CS, initial_state)):
-      self.aol_axis_publication_deferred = True
-      self.update_alerts(CS)
-      self.update_conditional_mode(CS)
-      self.publish_selfdriveState(CS, axis_published=True)
-      self.CS_prev = CS
-      del self.aol_step_input_proof
-      return
     if max(self.car_event_sample_count, len(getattr(self, 'car_state_samples', ()))) > 1 and any(self.events.contains(kind) for kind in (
         ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
       # A queued enable cannot override a cancellation or pedal edge in this batch.
@@ -1568,6 +1557,17 @@ class SelfdriveD:
     intent_drained = not self.aol_replay or intent_companion is None or self.drain_axis_intent(intent_companion)
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+      # Intent draining can cross the source cutoff. Check the original proof
+      # against the same post-drain clock used by admission, before authority
+      # state changes. This retains no new input, proof, deadline, or enable.
+      if not previous_deferred and self.defer_expired_axis_publication(CS, initial_state, now_ns=now_ns):
+        self.aol_axis_publication_deferred = True
+        self.update_alerts(CS)
+        self.update_conditional_mode(CS)
+        self.publish_selfdriveState(CS, axis_published=True)
+        self.CS_prev = CS
+        del self.aol_step_input_proof
+        return
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       if native is None and self.initialized:
         lost_active_aol = self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active

@@ -63,8 +63,8 @@ def test_early(mode, condition):
           wires.append(wire(BASE + 31_000_000, 4, True).as_reader())
         return result
 
-      def defer(cs, initial):
-        out = old_defer(cs, initial)
+      def defer(cs, initial, **kwargs):
+        out = old_defer(cs, initial, **kwargs)
         attempt.append(out)
         return out
 
