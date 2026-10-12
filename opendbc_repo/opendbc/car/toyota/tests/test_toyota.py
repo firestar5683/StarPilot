@@ -1,7 +1,9 @@
 import unittest
+from typing import cast
 
 from opendbc.car import Bus
 from opendbc.car.structs import CarParams
+from opendbc.car.fw_query_definitions import OfflineFwVersions
 from opendbc.car.fw_versions import build_fw_dict
 from opendbc.car.toyota.fingerprints import FW_VERSIONS
 from opendbc.car.toyota.values import CAR, DBC, ToyotaFlags, FW_QUERY_CONFIG, PLATFORM_CODE_ECUS, \
@@ -21,6 +23,38 @@ def cars_with(flags):
 
 
 class TestToyotaInterfaces(unittest.TestCase):
+  def test_dashboard_lanes_follow_applied_lateral_axis(self):
+    from opendbc.car import structs
+    from opendbc.car.toyota.tests.test_auto_hold import setup_hold, step_hold, decode
+
+    for car in (CAR.TOYOTA_PRIUS_RETROFIT, CAR.TOYOTA_COROLLA_TSS2, CAR.TOYOTA_RAV4_TSS2):
+      cp, controller, command, state = setup_hold(car, enabled=False)
+      state.out.standstill = state.out.brakePressed = False
+      command.actuators.torque = 0.2
+      command.cruiseControl.cancel = True
+      command.hudControl.visualAlert = structs.CarControl.HUDControl.VisualAlert.steerRequired
+      command.hudControl.leftLaneVisible = True
+      command.hudControl.rightLaneDepart = True
+      state.lkas_hud = {'LANE_SWAY_FLD': 5, 'LANE_SWAY_BUZZER': 1, 'LANE_SWAY_WARNING': 1,
+                        'LANE_SWAY_SENSITIVITY': 1, 'LANE_SWAY_TOGGLE': 0}
+      cases = ((True, False, 0, False), (False, True, 0, True), (True, True, 499, True),
+               (True, True, 500, False), (True, True, -500, False), (True, True, 0, True),
+               (True, False, 0, False))
+      for enabled, requested, driver_torque, applied in cases:
+        with self.subTest(car=car, enabled=enabled, requested=requested, driver_torque=driver_torque):
+          command.enabled, command.latActive = enabled, requested
+          state.out.steeringTorque = driver_torque
+          frames = step_hold(controller, command, state)
+          hud = decode(cp, next(frame for frame in frames if frame[0] == 0x412), 'LKAS_HUD')
+          steering = decode(cp, next(frame for frame in frames if frame[0] == 0x2E4), 'STEERING_LKA')
+          self.assertEqual((hud['LEFT_LINE'], hud['RIGHT_LINE'], hud['BARRIERS']),
+                           (1, 3, 1) if applied else (0, 0, 0))
+          self.assertEqual(steering['STEER_REQUEST'], int(applied))
+          self.assertEqual(steering['STEER_TORQUE_CMD'] != 0, applied)
+          self.assertEqual((hud['LKAS_STATUS'], hud['LDA_SA_TOGGLE'], hud['LDA_ALERT'], hud['TWO_BEEPS']), (1, 1, 1, 1))
+          for signal, value in state.lkas_hud.items():
+            self.assertEqual(hud[signal], value)
+
   def test_distance_command_matches_hud_bars_until_pcm_acknowledges(self):
     from opendbc.car.toyota.tests.test_auto_hold import setup_hold, step_hold, decode
 
@@ -210,6 +244,8 @@ class TestToyotaFingerprint(unittest.TestCase):
 
   def test_fuzzy_excluded_platforms(self):
     # Asserts a list of platforms that will not fuzzy fingerprint with platform codes due to them being shared.
+    matcher = FW_QUERY_CONFIG.match_fw_to_car_fuzzy
+    assert matcher is not None
     platforms_with_shared_codes = set()
     for platform, fw_by_addr in FW_VERSIONS.items():
       car_fw = []
@@ -220,7 +256,7 @@ class TestToyotaFingerprint(unittest.TestCase):
                                         subAddress=0 if sub_addr is None else sub_addr))
 
       CP = CarParams(carFw=car_fw)
-      matches = FW_QUERY_CONFIG.match_fw_to_car_fuzzy(build_fw_dict(CP.carFw), CP.carVin, FW_VERSIONS)
+      matches = matcher(build_fw_dict(CP.carFw), CP.carVin, cast(OfflineFwVersions, FW_VERSIONS))
       if len(matches) == 1:
         assert list(matches)[0] == platform
       else:
