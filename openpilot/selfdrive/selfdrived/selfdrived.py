@@ -516,7 +516,7 @@ class SelfdriveD:
     reconcile_input = bool(input_proof is not None and not REPLAY and self.aol_replay and self.axis_transport_required and
                            self.CP.openpilotLongitudinalControl and qualified_ioniq6(self.CP) and
                            input_proof[0] == self.aol_session_id and
-                           (input_proof[8] or input_proof[9]) and time.monotonic_ns() <= input_proof[3])
+                           (input_proof[8] or input_proof[9]))
     if not reconcile_input:
       # Other vehicle owners retain their original ordering. In particular,
       # GM's exact steering companion must not lose an earlier source's fault
@@ -543,8 +543,9 @@ class SelfdriveD:
         break
       # Input can arrive while car-event owners run. Reconcile it before the
       # selected-source owners and authority/state-machine decisions. The drain
-      # retains one total 32-envelope bound and the original output deadline;
-      # the cursor ensures no stateful car-event owner sees a sample twice.
+      # retains one total 32-envelope bound; only a blocking wait depends on
+      # the original output deadline. A fresh pair may renew accepted engagement
+      # after that deadline. The cursor processes each physical sample once.
       CS = self.refresh_event_car_state(CS)
       if len(getattr(self, 'car_state_samples', ())) <= consumed:
         break
