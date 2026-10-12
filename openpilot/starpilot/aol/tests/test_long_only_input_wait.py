@@ -127,17 +127,35 @@ def test_long_only_wait_keeps_original_deadline_and_restrictions(timing):
         axis, _, command = step(5, timeout=True, offset_ns=338_798, intent_message=latest,
                                 latched=False, pause=True, native_request_lat=False, allowed=False,
                                 long_allowed=timing != 'native_denied', native_valid=timing != 'native_invalid', panda_fault=timing == 'panda_fault')
+      if timing == 'pre_refresh_cutoff':
+        # The source expires after the normal refresh cutoff. One early deferral
+        # retains exactly the old packet, without another state transition.
+        assert sd.aol_axis_publication_deferred and transition.call_count == 0
+        assert axis.to_dict() == original.to_dict() and poller.poll.call_count == 0
+        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=deadline + 1):
+          expired, _ = controls.state_control()
+        assert not expired.latActive and not expired.longActive
+        missing, _, missing_command = step(6, timeout=True, intent_message=latest,
+          latched=False, pause=True, native_request_lat=False, allowed=False)
+        assert not missing.longitudinalActive and not missing_command.longActive and not sd.enabled
+        recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
+        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+        return
       assert transition.call_count == 1
       if timing in ('native_denied', 'pause_set', 'pause_long', 'native_invalid', 'panda_fault', 'session_change', 'producer_change', 'pre_refresh_cutoff'):
         assert poller.poll.call_count == 0
       else:
         assert poller.poll.call_count == 1
-      if timing in ('timely', 'temporary_eps', 'pause_clear'):
+      # Expired output inhibits consumers; a fresh owner decision may renew an
+      # engagement that was never revoked. Source/native/physical negatives stay off.
+      renewed = timing in ('late_poll', 'processing_crosses_deadline', 'construction_crosses_deadline')
+      if timing in ('timely', 'temporary_eps', 'pause_clear') or renewed:
         assert poller.poll.call_count == 1 and not queued
         assert axis.sourceCarStateMonoTime == next_stamp
         assert not axis.lateralActive and not command.latActive
         assert axis.longitudinalActive and command.longActive and sd.enabled and sd.active
-        assert now[0] < deadline
+        assert (now[0] > deadline) == renewed
+        assert now[0] - axis.sourceCarStateMonoTime <= 30_000_000
         if timing == 'temporary_eps':
           assert fixture.log.OnroadEvent.EventName.steerTempUnavailableSilent in sd.events.names
       else:

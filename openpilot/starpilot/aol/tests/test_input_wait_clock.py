@@ -72,12 +72,13 @@ def test_last_refresh_intent_wait_uses_post_drain_clock(condition):
           return wires.popleft() if wires else None
         return original_receive(sock)
 
-      def wait(sample, sampled_now):
+      def wait(sample, sampled_now, **kwargs):
         nonlocal in_wait
         in_wait = True
         try:
-          result = original_wait(sample, sampled_now)
-          waits.append((sampled_now, result, now[0]))
+          result = original_wait(sample, sampled_now, **kwargs)
+          if not kwargs.get('final_held_override', False):
+            waits.append((sampled_now, result, now[0]))
           return result
         finally:
           in_wait = False
@@ -128,10 +129,28 @@ def test_last_refresh_intent_wait_uses_post_drain_clock(condition):
       if not denied:
         # Return duration remains anchored to the original caller timestamp.
         assert waits[0][0] + waits[0][1] == deadline
-      if condition in ('timely', 'pause_clear'):
+      if condition == 'missing':
+        # No new source is granted. The early check can retain the unchanged
+        # prior proof for this iteration only; expiry still withdraws output.
+        assert sd.aol_axis_publication_deferred and axis.to_dict() == original.to_dict()
+        with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=deadline + 1):
+          expired, _ = controls.state_control()
+        assert not expired.latActive and not expired.longActive
+        missing, _, missing_command = step(6, timeout=True, intent_message=intent(BASE, 3),
+          latched=False, pause=True, native_request_lat=False, allowed=False)
+        assert not missing.longitudinalActive and not missing_command.longActive and not sd.enabled
+        recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
+        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+        return
+      # A new valid source renews an existing engagement even if the prior output
+      # expired; the original bounded wait still cannot extend that old lease.
+      renewed = condition in ('late_poll', 'processing_deadline')
+      if condition in ('timely', 'pause_clear') or renewed:
         assert axis.longitudinalActive and command.longActive and sd.enabled and sd.active
         assert not axis.lateralActive and not command.latActive
-        assert axis.sourceCarStateMonoTime == next_stamp and now[0] < deadline
+        assert axis.sourceCarStateMonoTime == next_stamp
+        assert (now[0] > deadline) == renewed
+        assert now[0] - axis.sourceCarStateMonoTime <= 30_000_000
       else:
         assert not axis.longitudinalActive and not command.longActive
         assert not axis.lateralActive and not command.latActive

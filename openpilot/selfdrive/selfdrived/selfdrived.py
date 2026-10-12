@@ -562,7 +562,7 @@ class SelfdriveD:
     if CS.canValid:
       if self.tesla_stock_consumer.binding is not None:
         intent_companion = getattr(self, 'aol_intent_companion', None)
-        drained = intent_companion is None or intent_companion.drain()
+        drained = intent_companion is None or self.drain_axis_intent(intent_companion)
         now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
         companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
                                    previous=self.aol_last_intent, companion=intent_companion, drain=False) if drained else None
@@ -818,6 +818,13 @@ class SelfdriveD:
           and not sample.buttonEvents for sample, valid in samples))
     return held_brake, held_gas
 
+  def drain_axis_intent(self, companion):
+    drained = companion.drain()
+    # Empty later drains must not erase earlier restrictive burst evidence.
+    self.aol_step_intent_drain_count = (getattr(self, 'aol_step_intent_drain_count', 0) +
+                                       getattr(companion, 'last_drain_count', 0))
+    return drained
+
   def event_input_wait_ns(self, CS, now_ns, *, final_held_override=False):
     """Bound an input wait by an original published lease; grant no new output."""
     proof = getattr(self, 'aol_published_input_proof', None)
@@ -850,7 +857,7 @@ class SelfdriveD:
       return 0
     wait_origin_ns = now_ns
     wait_deadline_ns = min(deadline, wait_origin_ns + int(DT_CTRL * 1e9))
-    if not companion.drain() or companion.integrity_epoch != epoch:
+    if not self.drain_axis_intent(companion) or companion.integrity_epoch != epoch:
       return 0
     # Transport may deliver intent published after the caller's clock sample.
     # Validate it against a post-drain clock without renewing the original wait.
@@ -858,7 +865,7 @@ class SelfdriveD:
     if not wait_origin_ns <= now_ns < wait_deadline_ns:
       return 0
     latest = companion.latest
-    if final_held_override and getattr(companion, 'last_drain_count', 0) > 1:
+    if final_held_override and getattr(self, 'aol_step_intent_drain_count', 0) > 1:
       # A burst could contain an intermediate restriction. Do not infer an
       # unchanged permission from just its final sample during this hold.
       return 0
@@ -1519,6 +1526,7 @@ class SelfdriveD:
     previous_deferred = getattr(self, 'aol_axis_publication_deferred', False)
     self.aol_axis_publication_deferred = False
     self.aol_step_deferral_checked = False
+    self.aol_step_intent_drain_count = 0
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
@@ -1531,6 +1539,18 @@ class SelfdriveD:
     finally:
       self.event_input_refresh_pending = False
     CS = self.event_car_state
+    # Event owners have checked every consumed physical transition. If the
+    # selected source ages out here, decide whether the original output proof
+    # can be retained before source-expiry handling mutates the authority state.
+    # No new input, proof, timestamp, deadline, or enable is generated.
+    if (not previous_deferred and self.defer_expired_axis_publication(CS, initial_state)):
+      self.aol_axis_publication_deferred = True
+      self.update_alerts(CS)
+      self.update_conditional_mode(CS)
+      self.publish_selfdriveState(CS, axis_published=True)
+      self.CS_prev = CS
+      del self.aol_step_input_proof
+      return
     if max(self.car_event_sample_count, len(getattr(self, 'car_state_samples', ()))) > 1 and any(self.events.contains(kind) for kind in (
         ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
       # A queued enable cannot override a cancellation or pedal edge in this batch.
@@ -1539,7 +1559,7 @@ class SelfdriveD:
     lost_active_aol = bool(self.aol_replay and getattr(self, 'steering_authority_unavailable', False) and
                            (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active))
     intent_companion = getattr(self, 'aol_intent_companion', None)
-    intent_drained = not self.aol_replay or intent_companion is None or intent_companion.drain()
+    intent_drained = not self.aol_replay or intent_companion is None or self.drain_axis_intent(intent_companion)
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
