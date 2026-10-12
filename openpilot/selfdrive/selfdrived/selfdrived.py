@@ -20,6 +20,7 @@ from msgq.visionipc import VisionIpcClient
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot import intense_logging
 from openpilot.common.gps import get_gps_location_service
 from openpilot.starpilot.gps.source import observation as gps_observation
 
@@ -1680,6 +1681,7 @@ class SelfdriveD:
     self.aol_ordinary_source_pause = False
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
+    self.timing_mark('data_sample_end')
     self.car_event_sample_count = 0
     self.aol_reconciled_sources = ()
     self.event_car_state = CS
@@ -1916,14 +1918,18 @@ class SelfdriveD:
         ET.WARNING not in self.state_machine.current_alert_types):
       self.state_machine.current_alert_types.append(ET.WARNING)
     axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
+    self.timing_mark('decide_end')
     if axis_published:
       self.aol_axis_publication_deferred = bool(not previous_deferred and self.defer_expired_axis_publication(CS, initial_state))
       if not self.aol_axis_publication_deferred:
         self.publish_axis_proof(CS, source_context=(initial_state, not previous_deferred))
+    self.timing_mark('axis_proof_end')
     self.update_alerts(CS)
     self.update_conditional_mode(CS)
+    self.timing_mark('alerts_end')
 
     self.publish_selfdriveState(CS, axis_published=axis_published)
+    self.timing_mark('publish_end')
 
     self.CS_prev = CS
     # Preserve an explicit None during a new engagement; retire it after publication.
@@ -1950,17 +1956,31 @@ class SelfdriveD:
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 
+  def timing_mark(self, name):
+    timing = getattr(self, 'intense_loop_timing', None)
+    if timing is not None:
+      timing.mark(name)
+
   def run(self):
     e = threading.Event()
     t = threading.Thread(target=self.params_thread, args=(e, ))
+    self.intense_loop_timing = timing = intense_logging.loop_timing() if not REPLAY else None
+    # selfdrived hosts the system-wide run-queue sampler; its worker runs on cores 0-3.
+    intense_logger = intense_logging.start('selfdrived', timing, sched_waits=True) if not REPLAY else None
     try:
       t.start()
       while True:
+        if timing is not None:
+          timing.begin()
         self.step()
         self.rk.monitor_time()
+        if timing is not None:
+          timing.finish({'thread_id': threading.get_native_id(), 'enabled': self.enabled}, enabled=self.initialized)
     finally:
       e.set()
       t.join()
+      if intense_logger is not None:
+        intense_logger.stop()
 
 
 def main():

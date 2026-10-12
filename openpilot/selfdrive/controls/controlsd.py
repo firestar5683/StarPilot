@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
 import os
+import threading
 import time
 from numbers import Number
 
@@ -12,6 +13,7 @@ from openpilot.common.hardware import HARDWARE
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper, set_core_affinity
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot import intense_logging
 
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.vehicle_model import VehicleModel
@@ -495,11 +497,25 @@ class Controls:
 
   def run(self):
     rk = Ratekeeper(100, print_delay_threshold=None)
-    while True:
-      self.update()
-      CC, lac_log = self.state_control()
-      self.publish(CC, lac_log)
-      rk.monitor_time()
+    timing = intense_logging.loop_timing()
+    intense_logger = intense_logging.start('controlsd', timing)
+    try:
+      while True:
+        if timing is not None:
+          timing.begin()
+        self.update()
+        if timing is not None:
+          timing.mark('update_end')
+        CC, lac_log = self.state_control()
+        if timing is not None:
+          timing.mark('state_control_end')
+        self.publish(CC, lac_log)
+        rk.monitor_time()
+        if timing is not None:
+          timing.finish({'thread_id': threading.get_native_id(), 'enabled': bool(self.sm['selfdriveState'].enabled)}, enabled=True)
+    finally:
+      if intense_logger is not None:
+        intense_logger.stop()
 
 
 def main():
