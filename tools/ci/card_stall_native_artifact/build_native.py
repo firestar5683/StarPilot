@@ -19,7 +19,7 @@ from validate_elf import BASELINE_SHA256
 
 HERE = Path(__file__).resolve().parent
 PINNED = {'Cython': '3.3.0', 'SCons': '4.11.1', 'pytest': '8.4.2', 'iniconfig': '2.3.0',
-          'packaging': '26.3', 'pluggy': '1.6.0', 'Pygments': '2.21.0'}
+          'packaging': '26.3', 'pluggy': '1.6.0', 'Pygments': '2.21.0', 'setuptools': '84.0.0'}
 
 
 def check(condition, message):
@@ -85,6 +85,13 @@ def main():
   check(not capture('git', 'status', '--porcelain', '--untracked-files=all', cwd=source), 'Source checkout must be clean, including untracked paths')
   versions = {name: importlib.metadata.version(name) for name in PINNED}
   check(versions == PINNED, f'Build/test packages differ from reviewed uv.lock pins: {versions}')
+  # Python 3.12 removed stdlib distutils; Cython lazily needs setuptools' copy.
+  # Exercise the actual import closure before allocating a build directory.
+  for module_name in ('distutils.extension', 'Cython.Build.Dependencies', 'SCons.Script'):
+    try:
+      importlib.import_module(module_name)
+    except ImportError as exc:
+      raise RuntimeError(f'Minimal native build import preflight failed: {module_name}: {exc}') from exc
   compiler = {key: Path(os.environ.get(key, '/usr/bin/'+name+'-13')).resolve() for key, name in [('GCC', 'gcc'), ('GXX', 'g++')]}
   expected_gcc = os.environ['EXPECTED_GCC_VERSION']
   check(expected_gcc.split('.')[0] == '13', 'Only explicitly reviewed GCC 13 is allowed')
