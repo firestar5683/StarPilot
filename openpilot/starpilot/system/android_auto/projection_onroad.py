@@ -93,7 +93,8 @@ def native_dependencies():
 class ProjectionOnroad:
   """Separate renderer with projected actions; native UIState stays read-only."""
 
-  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None):
+  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None,
+               layout_watcher=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
     self.width, self.height = viewport
     self.customization = customization
@@ -101,6 +102,7 @@ class ProjectionOnroad:
     self._certificate_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
+    self.layout_watcher = layout_watcher
     self.native_focus = native_focus or (lambda: None)
     self.bookmark = lambda: False
     self.camera_stream = None  # the camera stream the last frame drew, or None
@@ -132,11 +134,7 @@ class ProjectionOnroad:
         self.onroad.pip_layer = self._pip_layer
       self.map = None
       self.map_feed = None
-      if self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
-        self.map = native.map_overlay(fonts=self.fonts)
-        self._resources.callback(self.map.close)
-        self.map_feed = native.map_feed()
-        self.onroad.map_layer = self._map_layer
+      self._ensure_map()
       self.adapter = native.adapter(native.ui_state)
       self._state = None
       self.favorites = None
@@ -206,6 +204,28 @@ class ProjectionOnroad:
     finally:
       self.native.rl.rl_pop_matrix()
 
+  def _ensure_map(self):
+    """Build the map overlay the first time a layout turns it on; it stays for the connection."""
+    native = self.native
+    if self.map is None and self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
+      self.map = native.map_overlay(fonts=self.fonts)
+      self._resources.callback(self.map.close)
+      self.map_feed = native.map_feed()
+      self.onroad.map_layer = self._map_layer
+
+  def apply_layout(self, customization):
+    """Switch to a newly saved Android Auto layout without reconnecting."""
+    self.customization = customization
+    self._base_customization = self._projection_customization = None
+    self.camera.large_ui_gamma_trial = bool((customization or {}).get('largeUiGammaTrial', False))
+    self._ensure_map()
+
+  def _check_layout(self):
+    # The watcher's own thread does all file work; this only takes a finished layout.
+    changed = self.layout_watcher.take() if self.layout_watcher is not None else None
+    if changed is not None:
+      self.apply_layout(changed)
+
   def _map_placement(self):
     """The enabled map overlay's placement from this connection's layout, or None."""
     if self.customization is None:
@@ -215,6 +235,7 @@ class ProjectionOnroad:
 
   def prepare(self):
     """Before the frame's render target is bound: offscreen map work happens here."""
+    self._check_layout()
     if self.favorites is not None:
       self.favorites.refresh()
       self.onroad.navigation_favorites.document = self.favorites.document

@@ -1,17 +1,19 @@
-"""Connection-scoped saved layout and real frozen-state replacement regressions."""
+"""Saved projection layout loading, live reload after a Galaxy save, and frozen-state replacement regressions."""
 import copy
 import fcntl
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from openpilot.starpilot.system.android_auto.display_profile import record_screen, read_screen
 from openpilot.starpilot.system.android_auto.projection_layout import ProjectionLayoutSource, default_layout_for_viewport
-from openpilot.starpilot.system.android_auto.projection_layout_runtime import load_projection_layout
+from openpilot.starpilot.system.android_auto.projection_layout_runtime import ProjectionLayoutWatcher, load_projection_layout
 from openpilot.starpilot.system.android_auto.tests import test_projection_onroad_boundary as boundary
 projection = boundary.projection
 from openpilot.starpilot.ui.onroad_customization import default_document
@@ -87,6 +89,99 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
       source.path.write_text(json.dumps(changed))
       self.assertEqual(connection, original)
       self.assertEqual(load_projection_layout((2880, 1080), source), changed)
+
+  def test_watcher_reports_each_save_once_and_skips_reads_otherwise(self):
+    with tempfile.TemporaryDirectory() as directory:
+      source = ProjectionLayoutSource(Path(directory) / 'layouts/document.json')
+      source.prepare()
+      viewport = (2880, 1080)
+      original = default_layout_for_viewport(viewport)
+      source.path.write_text(json.dumps(original))
+      watcher = ProjectionLayoutWatcher(viewport, source)
+      self.assertEqual(watcher.load(), original)
+      with patch('openpilot.starpilot.system.android_auto.projection_layout_runtime.read_saved',
+                 side_effect=AssertionError('unchanged file reread')):
+        self.assertIsNone(watcher.poll())
+      changed = copy.deepcopy(original)
+      changed['widgets']['current_speed']['x'] += 60
+      temporary = source.path.with_suffix('.tmp')
+      temporary.write_text(json.dumps(changed))
+      os.replace(temporary, source.path)  # Galaxy saves by atomic replace
+      self.assertEqual(watcher.poll(), changed)
+      self.assertIsNone(watcher.poll())
+      source.path.write_bytes(b'x' * 16385)  # unreadable: keep the current layout and retry
+      self.assertIsNone(watcher.poll())
+      self.assertIsNone(watcher.poll())
+      source.path.write_text(json.dumps(original))
+      self.assertEqual(watcher.poll(), original)
+      source.path.unlink()
+      self.assertEqual(watcher.poll(), default_layout_for_viewport(viewport))
+      self.assertIsNone(watcher.poll())
+
+  def test_background_thread_hands_over_saved_layouts_without_drawing_thread_reads(self):
+    with tempfile.TemporaryDirectory() as directory:
+      source = ProjectionLayoutSource(Path(directory) / 'layouts/document.json')
+      source.prepare()
+      viewport = (2880, 1080)
+      original = default_layout_for_viewport(viewport)
+      source.path.write_text(json.dumps(original))
+      watcher = ProjectionLayoutWatcher(viewport, source)
+      watcher.load()
+      polled = threading.Event()
+      poll = watcher.poll
+      def observed_poll():
+        try:
+          return poll()
+        finally:
+          polled.set()
+      watcher.poll = observed_poll
+      with patch('openpilot.starpilot.system.android_auto.projection_layout_runtime.CHECK_SECONDS', 0.01):
+        watcher.start()
+        try:
+          changed = copy.deepcopy(original)
+          changed['widgets']['current_speed']['x'] += 60
+          temporary = source.path.with_suffix('.tmp')
+          temporary.write_text(json.dumps(changed))
+          os.replace(temporary, source.path)
+          deadline = time.monotonic() + 2
+          taken = None
+          while taken is None and time.monotonic() < deadline:
+            taken = watcher.take()
+            polled.wait(0.05)
+          self.assertEqual(taken, changed)
+          self.assertIsNone(watcher.take(), 'each save is handed over once')
+        finally:
+          watcher.close()
+      self.assertFalse(watcher._thread.is_alive())
+
+  def test_take_never_touches_files(self):
+    watcher = ProjectionLayoutWatcher((2880, 1080), ProjectionLayoutSource('/nonexistent/document.json'))
+    with patch('openpilot.starpilot.system.android_auto.projection_layout_runtime.os.stat', side_effect=AssertionError('stat')), \
+         patch('openpilot.starpilot.system.android_auto.projection_layout_runtime.read_saved', side_effect=AssertionError('read')):
+      self.assertIsNone(watcher.take())
+
+  def test_renderer_applies_a_handed_over_layout(self):
+    from openpilot.starpilot.system.android_auto.tests.test_projection_map import FakeFeed, FakeMap
+    native, _ = boundary.TestProjectionOnroad().dependencies()
+    native.map_overlay, native.map_feed = FakeMap, FakeFeed
+    layout = default_layout_for_viewport((2880, 1080))
+    saved = copy.deepcopy(layout)
+    saved['widgets']['nav_map'].update(enabled=True, x=100, y=200, width=640, height=480, opacity=45)
+    saved['largeUiGammaTrial'] = True
+    pending = [None, saved]
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout,
+                                       layout_watcher=SimpleNamespace(take=lambda: pending.pop(0) if pending else None))
+    self.addCleanup(view.close)
+    self.assertIsNone(view.map)
+    view._projection_customization = view._base_customization = object()
+    view.prepare()
+    self.assertIs(view.customization, layout)
+    view.prepare()
+    self.assertIs(view.customization, saved)
+    self.assertIsNone(view._projection_customization, 'the cached projected layout is rebuilt')
+    self.assertIs(view.camera.large_ui_gamma_trial, True)
+    self.assertIsInstance(view.map, FakeMap, 'turning the map on in Galaxy builds it without reconnecting')
+    self.assertEqual(view.onroad.map_layer, view._map_layer)
 
   def test_screen_writer_lock_contention_preserves_previous_receipt(self):
     with tempfile.TemporaryDirectory() as directory:
