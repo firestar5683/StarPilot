@@ -4,7 +4,7 @@ from collections import deque
 
 from openpilot.cereal import log
 from opendbc.car import structs
-from opendbc.car.hyundai.values import HyundaiFlags
+from opendbc.car.hyundai.values import CAR, HyundaiFlags
 from opendbc.car.lateral import FRICTION_THRESHOLD, get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY, CV
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -41,6 +41,7 @@ class LatControlTorque(LatControl):
   def __init__(self, CP, CI, dt, *, controller_mode: ControllerMode | None = None, turn_assist: bool = False):
     super().__init__(CP, CI, dt)
     self.hkg_canfd_torque = bool(CP.brand == 'hyundai' and CP.flags & HyundaiFlags.CANFD and
+                                CP.carFingerprint != CAR.HYUNDAI_IONIQ_6 and
                                 CP.steerControlType == structs.CarParams.SteerControlType.torque and
                                 not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and
                                 not (CP.notCar or CP.passive or CP.dashcamOnly))

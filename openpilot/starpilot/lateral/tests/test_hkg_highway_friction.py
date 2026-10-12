@@ -31,6 +31,7 @@ class HKGHighwayFrictionTests(unittest.TestCase):
         continue
       _, controller = controller_for(vehicle)
       expected = bool(cp.flags & HyundaiFlags.CANFD and not cp.flags & HyundaiFlags.CANFD_ANGLE_STEERING and
+                      vehicle != CAR.HYUNDAI_IONIQ_6 and
                       cp.steerControlType == structs.CarParams.SteerControlType.torque and
                       not (cp.passive or cp.dashcamOnly or cp.notCar))
       self.assertEqual(controller.hkg_canfd_torque, expected, str(vehicle))
@@ -130,8 +131,26 @@ class HKGHighwayFrictionTests(unittest.TestCase):
                              (baseline.pid.pos_limit, baseline.pid.neg_limit, baseline.steer_max))
             for changed, original in zip(*traces, strict=True):
               self.assertEqual(changed[1:5], original[1:5])
-            if quiet:
+            if quiet and vehicle != CAR.HYUNDAI_IONIQ_6:
               self.assertLess(abs(traces[0][-1][5]), abs(traces[1][-1][5]))
               self.assertLess(abs(traces[0][-1][0]), abs(traces[1][-1][0]))
             else:
               self.assertEqual(traces[0], traces[1])
+
+
+  def test_ioniq6_preserves_original_threshold_and_error(self):
+    for mode in ControllerMode:
+      _, controller = controller_for(CAR.HYUNDAI_IONIQ_6, mode)
+      self.assertFalse(controller.hkg_canfd_torque)
+      for mph in (0., 30., 50., 60., 65., 75., 100.):
+        for setpoint in (-1., -.65, -.25, 0., .25, .65, 1.):
+          for pressed in (False, True):
+            cs = SimpleNamespace(vEgo=mph * CV.MPH_TO_MS, steeringPressed=pressed)
+            for error in (-1., -.1, -.04, -.02, 0., .02, .04, .1, 1.):
+              for threshold in (.2, .39, .9):
+                with self.subTest(mode=mode, mph=mph, setpoint=setpoint, pressed=pressed,
+                                  error=error, threshold=threshold):
+                  with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as friction:
+                    value = controller.friction(error, .01, threshold, cs, setpoint)
+                  self.assertEqual(friction.call_args.args, (error, .01, threshold, controller.torque_params))
+                  self.assertEqual(value, get_friction(error, .01, threshold, controller.torque_params))

@@ -134,7 +134,7 @@ class Ioniq6PolicyTests(unittest.TestCase):
             self.assertAlmostEqual(value, reference, places=6)
 
   def test_threshold_reaches_controller_without_changing_requests_or_pid(self):
-    for speed, curvature, unchanged in ((20., .0002, True), (32., .001, True), (32., .0001, False)):
+    for speed, curvature in ((20., .0002), (32., .001), (32., .0001)):
       with self.subTest(speed=speed, curvature=curvature):
         sequence = [(False, speed, 0., curvature, False)] * 100 + [(True, speed, 0., curvature, False)] * 100
         with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as friction:
@@ -142,20 +142,13 @@ class Ioniq6PolicyTests(unittest.TestCase):
         with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as old_friction:
           with mock.patch.object(LatControlTorque, 'friction', _legacy_friction):
             baseline, original = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, roll=0.)
-        if unchanged:
-          self.assertEqual(friction.call_args.args[:3], old_friction.call_args.args[:3])
-        else:
-          self.assertGreater(friction.call_args.args[2], old_friction.call_args.args[2])
-          self.assertLess(abs(friction.call_args.args[0]), abs(old_friction.call_args.args[0]))
+        self.assertEqual(friction.call_args.args[:3], old_friction.call_args.args[:3])
         self.assertEqual(controller.torque_params.to_dict(), baseline.torque_params.to_dict())
         self.assertEqual((controller.pid.pos_limit, controller.pid.neg_limit),
                          (baseline.pid.pos_limit, baseline.pid.neg_limit))
         for row, old in zip(actual, original, strict=True):
           self.assertEqual(row[1:5], old[1:5])
-        if unchanged:
-          self.assertEqual(actual, original)
-        else:
-          self.assertLess(abs(actual[-1][0]), abs(original[-1][0]))
+        self.assertEqual(actual, original)
 
   def test_firmware_gate_and_live_factor_do_not_stack(self):
     cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
