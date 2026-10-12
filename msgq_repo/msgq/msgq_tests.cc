@@ -1,4 +1,6 @@
 #include <array>
+#include <chrono>
+#include <thread>
 #include <unistd.h>
 #include "msgq/test_runner.h"
 #include "msgq/msgq.h"
@@ -18,6 +20,89 @@ TEST_CASE("ALIGN")
   REQUIRE(ALIGN(7) == 8);
   REQUIRE(ALIGN(8) == 8);
   REQUIRE(ALIGN(99999) == 100000);
+}
+
+TEST_CASE("msgq_poll nonblocking readiness")
+{
+  cleanup_test_queue();
+  msgq_queue_t writer, first, second;
+  msgq_new_queue(&writer, "test_queue", 1024);
+  msgq_init_publisher(&writer);
+  msgq_new_queue(&first, "test_queue", 1024);
+  msgq_init_subscriber(&first);
+  msgq_new_queue(&second, "test_queue", 1024);
+  msgq_init_subscriber(&second);
+
+  msgq_pollitem_t items[] = {{&first, 1}, {&second, 1}};
+  REQUIRE(msgq_poll(nullptr, 0, 0) == 0);
+  REQUIRE(msgq_poll(items, 2, 0) == 0);
+  REQUIRE(items[0].revents == 0);
+  REQUIRE(items[1].revents == 0);
+
+  char data[] = "poll payload";
+  msgq_msg_t outgoing, incoming;
+  msgq_msg_init_data(&outgoing, data, sizeof(data));
+  REQUIRE(msgq_msg_send(&outgoing, &writer) == sizeof(data));
+  REQUIRE(msgq_poll(items, 2, 0) == 2);
+  REQUIRE(items[0].revents == 1);
+  REQUIRE(items[1].revents == 1);
+  REQUIRE(msgq_msg_recv(&incoming, &first) == sizeof(data));
+  REQUIRE(memcmp(incoming.data, data, sizeof(data)) == 0);
+  msgq_msg_close(&incoming);
+
+  REQUIRE(msgq_poll(items, 2, 0) == 1);
+  REQUIRE(items[0].revents == 0);
+  REQUIRE(items[1].revents == 1);
+  REQUIRE(msgq_msg_recv(&incoming, &second) == sizeof(data));
+  REQUIRE(memcmp(incoming.data, data, sizeof(data)) == 0);
+  msgq_msg_close(&incoming);
+  REQUIRE(msgq_poll(items, 2, 0) == 0);
+  REQUIRE(items[0].revents == 0);
+  REQUIRE(items[1].revents == 0);
+
+  msgq_msg_close(&outgoing);
+  msgq_close_queue(&second);
+  msgq_close_queue(&first);
+  msgq_close_queue(&writer);
+  cleanup_test_queue();
+}
+
+TEST_CASE("msgq_poll waiting modes")
+{
+  for (int timeout : {1000, -1}) {
+    cleanup_test_queue();
+    msgq_queue_t writer, reader;
+    msgq_new_queue(&writer, "test_queue", 1024);
+    msgq_init_publisher(&writer);
+    msgq_new_queue(&reader, "test_queue", 1024);
+    msgq_init_subscriber(&reader);
+    msgq_pollitem_t item{&reader, 1};
+
+    auto start = std::chrono::steady_clock::now();
+    REQUIRE(msgq_poll(&item, 1, 2) == 0);
+    REQUIRE(item.revents == 0);
+    REQUIRE(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(2));
+
+    msgq_msg_t outgoing;
+    msgq_msg_init_size(&outgoing, 1);
+    outgoing.data[0] = 'p';
+    std::thread sender([&]() {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      msgq_msg_send(&outgoing, &writer);
+    });
+    int received = msgq_poll(&item, 1, timeout);
+    sender.join();
+    REQUIRE(received == 1);
+    REQUIRE(item.revents == 1);
+    msgq_msg_t incoming;
+    REQUIRE(msgq_msg_recv(&incoming, &reader) == 1);
+    REQUIRE(incoming.data[0] == 'p');
+    msgq_msg_close(&incoming);
+    msgq_msg_close(&outgoing);
+    msgq_close_queue(&reader);
+    msgq_close_queue(&writer);
+    cleanup_test_queue();
+  }
 }
 
 TEST_CASE("msgq_msg_init_size")
