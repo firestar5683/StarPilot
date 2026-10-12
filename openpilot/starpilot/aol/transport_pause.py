@@ -421,6 +421,28 @@ class TransportPauseFeedback:
     self.lateral_native_ns = native.observedMonoTime
     return True
 
+  def _availability_recovery_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, current, continuity, producer):
+    """Join a verified pause's healthy recovery pair; this never grants output."""
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    if (not latched or self.failed or self.paused or self.pending_event or not self.retention_verified or
+        not self.retention_started_ns or not 0 <= now_ns - self.retention_started_ns <= AXIS_MAX_AGE_NS or
+        not current or not continuity or str(axis.sessionId) != self.session or
+        not producer or producer != self.availability_producer or
+        str(getattr(axis, 'intentProducerSessionId', '')) != producer or
+        int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch or
+        str(axis.faultReason) != 'none' or not axis.nativeAcknowledged or
+        not axis.desiredLateral or not axis.lateralActive or axis.desiredLongitudinal or axis.longitudinalActive or
+        not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
+        now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
+        not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+        not self.retention_event_ns < event_ns == axis.faultEventMonoTime <= stamp or
+        any(event.userDisable or event.softDisable or event.immediateDisable for event in sm['onroadEvents'])):
+      return False
+    native = _healthy_transport_native(sm, cp, cs, self.session, now_ns)
+    return bool(native is not None and native.requestedLateral and native.lateralAllowed and
+      native.observedMonoTime >= self.lateral_native_ns and
+      (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) == self.lateral_inventory)
+
   def _source_availability_retention(self, sm, cp, cs, axis, stamp, now_ns, *, latched, continuity, producer, signature):
     # Output freshness withdraws commands, not previously accepted driver intent.
     # Missing/expired full-LONG output can retain only the exact held identity;
@@ -554,6 +576,12 @@ class TransportPauseFeedback:
           latched=latched, current=current, continuity=continuity, intent_producer_session=intent_producer_session):
         self.sequence, self.signature = int(axis.sequence), signature
         return False
+      if self._availability_recovery_current(sm, cp, cs, axis, stamp, now_ns,
+          latched=latched, current=current, continuity=continuity, producer=intent_producer_session):
+        # Separate sockets may deliver either half first. A matched healthy
+        # recovery resolves that pending join before ordinary baseline handling.
+        self.retention_started_ns = self.retention_event_ns = 0
+        self.retention_verified = False
       if self.retention_started_ns:
         # This unmatched episode terminates fail closed. Leave failure set;
         # only the existing healthy, unlatched baseline may clear it later.
