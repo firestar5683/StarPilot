@@ -189,7 +189,9 @@ def test_final_handoff_full_owner(mode, condition):
            mock.patch.object(sd, 'step', side_effect=run_normal_iterations):
         axis, _, command = step(5, timeout=True, offset_ns=-100_000, intent_message=wire(BASE, 3),
                                 latched=lateral_only, gas=gas, brake=brake)
-      accepted = condition in ('timely', 'poll', 'same_source_serialization') or condition == 'brake_edge' and lateral_only
+      fresh_replacement = condition in ('late', 'processing_late') and not lateral_only
+      accepted = (condition in ('timely', 'poll', 'same_source_serialization') or fresh_replacement or
+                  condition == 'brake_edge' and lateral_only)
       assert len(states) <= 2 and len(samples) <= 2
       assert sd.sm.update.call_count == health.call_count == len(states)
       if condition == 'burst_deny_permit':
@@ -208,7 +210,9 @@ def test_final_handoff_full_owner(mode, condition):
         assert axis.lateralActive and command.latActive
         assert axis.longitudinalActive == (not lateral_only)
         assert command.longActive == (mode == 'ordinary')
-        assert now[0] < deadline and len(samples) == 2
+        assert len(samples) == 2
+        assert (now[0] > deadline) == fresh_replacement
+        assert now[0] - axis.sourceCarStateMonoTime <= owner.INTENT_MAX_AGE_NS
       else:
         assert not axis.longitudinalActive and not command.longActive
         if condition != 'brake_edge':

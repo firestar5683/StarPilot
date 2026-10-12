@@ -92,7 +92,7 @@ def test_late_carstate_during_environment_work_reaches_final_owners_once(pulse):
 
 @pytest.mark.parametrize('operation', ['ordinary', 'aol_only', 'aol_only_gas'])
 @pytest.mark.parametrize('timing', ['timely', 'late_poll', 'processing_crosses_deadline'])
-def test_original_continuity_deadline_reaches_final_output(operation, timing):
+def test_fresh_source_replaces_expired_output_without_restoring_disengagement(operation, timing):
   case = fixture.IoniqAvailabilityTests(methodName='runTest')
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
@@ -154,20 +154,39 @@ def test_original_continuity_deadline_reaches_final_output(operation, timing):
       assert poller.poll.call_count == 1 and transition.call_count == 1 and not queued
       assert sd.aol_last_intent is not None and sd.aol_last_intent.allowedLatch and sd.aol_last_intent.lateralArmed
       assert now[0] - next_stamp < 30_000_000
-      if timing == 'timely':
-        assert axis.sourceCarStateMonoTime == next_stamp and axis.lateralActive and command.latActive
-        assert axis.longitudinalActive == full_op and command.longActive == full_op
-        assert sd.enabled == full_op and not sd.aol_authority_lost
-        if operation == 'aol_only_gas':
-          for tick in range(7, 107):
-            continued, _, continued_command = step(tick, observed_state=state, gas=held_gas, native_request_long=False)
-            assert continued.lateralActive and continued_command.latActive
-            assert sd.CS_prev.gasPressed
-            assert not continued.longitudinalActive and not continued_command.longActive and not sd.enabled
-            assert sd.aol_last_intent.allowedLatch and sd.aol_last_intent.lateralArmed
-      else:
-        assert not axis.lateralActive and not axis.longitudinalActive and not command.latActive and not command.longActive
-        assert not sd.enabled and not sd.active
-        assert now[0] > deadline and sd.aol_availability_long_inhibit
-        recovered, _, recovered_command = step(7, observed_state=state, gas=held_gas, native_request_long=full_op)
-        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+      assert axis.sourceCarStateMonoTime == next_stamp and axis.lateralActive and command.latActive
+      assert axis.longitudinalActive == full_op and command.longActive == full_op
+      assert sd.enabled == full_op and not sd.aol_authority_lost
+      assert axis.validUntilMonoTime > deadline
+      if operation == 'aol_only_gas':
+        for tick in range(7, 107):
+          continued, _, continued_command = step(tick, observed_state=state, gas=held_gas, native_request_long=False)
+          assert continued.lateralActive and continued_command.latActive
+          assert sd.CS_prev.gasPressed
+          assert not continued.longitudinalActive and not continued_command.longActive and not sd.enabled
+          assert sd.aol_last_intent.allowedLatch and sd.aol_last_intent.lateralArmed
+
+
+@pytest.mark.parametrize('latched', [False, True])
+def test_route_4f_new_source_after_previous_output_deadline(latched):
+  case = fixture.IoniqAvailabilityTests(methodName='runTest')
+  with ExitStack() as cleanup:
+    cleanup.callback(case.doCleanups)
+    with OpenpilotPrefix():
+      sd, controls, step, _, _ = case._ioniq_availability_callers()
+      prior, _, _ = step(2, offset_ns=4_322_384, state_stamp=BASE,
+                         intent_message=intent(BASE, 3, latched=latched), latched=latched)
+      now = BASE + 35_936_883
+      source = BASE + 32_971_113
+      assert now - prior.validUntilMonoTime == 1_614_499
+      assert now - source == 2_965_770
+      with mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now):
+        expired, _ = controls.state_control()
+      assert not expired.latActive and not expired.longActive
+      axis, state, command = step(5, offset_ns=5_936_883, state_stamp=source,
+                                 intent_message=intent(source, 4, latched=latched), latched=latched)
+      assert axis.sourceCarStateMonoTime == source
+      assert axis.lateralActive and axis.longitudinalActive and command.latActive and command.longActive
+      assert state.enabled and sd.enabled and sd.active
+      assert not sd.aol_authority_lost
+      assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names

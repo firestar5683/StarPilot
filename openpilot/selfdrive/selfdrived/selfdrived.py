@@ -1178,8 +1178,32 @@ class SelfdriveD:
     if (proof is None or proof[0] != self.aol_session_id or now_ns <= proof[3] or
         not (decision.lateral_active or decision.longitudinal_active)):
       return False
-    # A fresh source cannot bridge an expired original output lease. This pause
-    # grants no output; any later ordinary engagement still needs accepted ENABLE.
+    source_ns = self.aol_car_state_log_ns
+    intent = getattr(self, 'aol_last_intent', None)
+    companion = getattr(self, 'aol_intent_companion', None)
+    if (proof[1] < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS and
+        self.conditional_car_state_valid and CS.canValid and not CS.canTimeout and
+        intent is not None and intent.carStateLogMonoTime == source_ns and
+        intent.producerSessionId == proof[4] and intent.settingsQualified and
+        0 < intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
+        now_ns - intent.observedMonoTime <= INTENT_MAX_AGE_NS and
+        companion is not None and companion.integrity_epoch == proof[5] and
+        decision.native_acknowledged and not self.aol_authority_lost and
+        getattr(self, 'aol_fault_reason', 'none') == 'none' and
+        not any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) and
+        (not decision.longitudinal_active or self.enabled and self.active)):
+      native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
+      prior_native = getattr(self, 'aol_published_input_native', None)
+      if (native is not None and prior_native is not None and native.pandaSerial == prior_native.pandaSerial and
+          native.observedMonoTime >= prior_native.observedMonoTime and
+          tuple(slot.hardwareSerial for slot in native.pandaInventory) ==
+          tuple(slot.hardwareSerial for slot in prior_native.pandaInventory) and
+          (not decision.lateral_active or native.requestedLateral and native.lateralAllowed) and
+          (not decision.longitudinal_active or native.requestedLongitudinal and native.longitudinalAllowed)):
+        # The old lease still expires at consumers. A newly validated source
+        # supplies its own permission without restoring a disengaged state.
+        return False
+    # A retained source cannot renew an expired output lease.
     self.aol_axis_decision = AxisDecision()
     was_enabled = self.enabled
     self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
