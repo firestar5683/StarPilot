@@ -747,7 +747,7 @@ def test_stopped_timer_draws_inside_its_moved_widget():
   view.fonts = Mock(spec=BitmapFonts)
   view.fonts.profile = Profile.COMPACT
   view.fonts.measure.return_value = NS(width=100, height=20)
-  state = NS(customization=document)
+  state = road(document)
   view._stopped_timer(state, 75)
   view.fonts.draw.assert_not_called()
   document["layouts"]["compact"][STOPPED_TIMER_WIDGET]["enabled"] = True
@@ -770,11 +770,11 @@ def test_projection_timer_renders_at_saved_coordinates_without_native_timer_enab
   view.fonts = Mock(spec=BitmapFonts)
   view.fonts.profile = Profile.LARGE
   view.fonts.measure.return_value = NS(width=100, height=20)
-  view._stopped_timer(NS(customization=document), 134)
+  view._stopped_timer(road(document), 134)
   text_calls = view.fonts.draw.call_args_list[1::2]
   assert [call.args[0] for call in text_calls] == ['2 minutes', '14 seconds']
   assert [call.args[3:5] for call in text_calls] == [(730, 669.5), (730, 741.5)]
   view.fonts.draw.reset_mock()
   document['layouts']['large'][STOPPED_TIMER_WIDGET]['enabled'] = False
-  view._stopped_timer(NS(customization=document), 134)
+  view._stopped_timer(road(document), 134)
   view.fonts.draw.assert_not_called()

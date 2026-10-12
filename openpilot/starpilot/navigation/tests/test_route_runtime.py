@@ -38,8 +38,10 @@ class Executor:
 
 
 def configured(tmp_path):
-  owner = NavigationOwner(tmp_path, runtime_source=lambda: None)
-  owner._is_metric = lambda: True
+  class MetricNavigationOwner(NavigationOwner):
+    def _is_metric(self) -> bool:
+      return True
+  owner = MetricNavigationOwner(tmp_path, runtime_source=lambda: None)
   settings = owner.configure({'enabled': True, 'token': 'pk.test'}, '0', True)
   owner.select({'name': 'Destination', 'longitude': .01, 'latitude': 0.}, settings['revision'], True)
   return owner

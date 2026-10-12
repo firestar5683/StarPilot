@@ -112,7 +112,8 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
       source.path.write_bytes(b'x' * 16385)  # unreadable: keep the current layout and retry
       self.assertIsNone(watcher.poll())
       self.assertIsNone(watcher.poll())
-      source.path.write_text(json.dumps(original))
+      temporary.write_text(json.dumps(original))
+      os.replace(temporary, source.path)  # Galaxy saves by atomic replace
       self.assertEqual(watcher.poll(), original)
       source.path.unlink()
       self.assertEqual(watcher.poll(), default_layout_for_viewport(viewport))
@@ -134,8 +135,8 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
           return poll()
         finally:
           polled.set()
-      watcher.poll = observed_poll
-      with patch('openpilot.starpilot.system.android_auto.projection_layout_runtime.CHECK_SECONDS', 0.01):
+      with patch.object(watcher, 'poll', observed_poll), \
+           patch('openpilot.starpilot.system.android_auto.projection_layout_runtime.CHECK_SECONDS', 0.01):
         watcher.start()
         try:
           changed = copy.deepcopy(original)

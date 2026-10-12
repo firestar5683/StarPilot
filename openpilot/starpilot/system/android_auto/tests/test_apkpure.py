@@ -85,7 +85,9 @@ def test_fetch_skips_links_about_to_expire(monkeypatch):
   body = response(release(expires=soon), release("17.6.663454-release", 176663454))
   opener = fake_open(body)
   monkeypatch.setattr(apkpure.urllib.request, "build_opener", lambda *handlers: opener)
-  assert apkpure.fetch_latest(now=NOW)["version"] == "17.6.663454-release"
+  latest = apkpure.fetch_latest(now=NOW)
+  assert latest is not None
+  assert latest["version"] == "17.6.663454-release"
   request = opener.open.call_args.args[0]
   assert request.full_url == apkpure.API_URL and request.get_header("X-sv") == "29"
   assert request.get_header("User-agent") == "StarPilot-AndroidAuto/1"

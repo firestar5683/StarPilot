@@ -28,6 +28,7 @@ class ApiState(TypedDict):
   install_ready: bool
   enable_events: list[str]
   bluetooth_failure: NotRequired[str]
+  setup_owner: NotRequired[AndroidAutoSetup]
 
 
 class FakeImport:
