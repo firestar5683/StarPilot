@@ -453,6 +453,7 @@ class Car:
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
     self.timing_mark('can_receive_end')
     can_received_ns = time.monotonic_ns()
+    self.timing_can_packet_count = len(can_strs)
     can_list = can_capnp_to_list(can_strs)
     self.timing_mark('can_decode_end')
 
@@ -476,6 +477,7 @@ class Car:
     RD: structs.RadarDataT | None = self.RI.update(can_list)
     self.timing_mark('radar_update_end')
 
+    self.timing_mark('submaster_start')
     self.sm.update(0)
     self.timing_mark('submaster_end')
 
@@ -527,6 +529,8 @@ class Car:
                                              now_ns=now_ns, is_metric=self.is_metric,
                                              enabled=bool(host_control_enabled and can_rcv_valid and not self.params.get_bool("SafeMode")))
     consumed = self.v_cruise_helper.slc_consumed_button
+    timing = getattr(self, 'loop_timing', None)
+    intent_before = timing.intent_snapshot(self.aol_card_intent) if timing is not None and timing.detailed and self.aol_card_intent is not None else None
     if self.aol_card_intent is not None:
       if self.aol_process_fault_context is None:
         self.aol_process_fault_context = AolProcessFaultContext()
@@ -602,6 +606,12 @@ class Car:
         media_eligible=ioniq6_media_eligible(self.CP), fault_active=fault_active)
       self.observe_aol_calibration(CS, now_ns,
         host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False) else host_control_enabled)
+      if intent_before is not None:
+        timing.observe_intent(self.aol_card_intent, intent_before, CS, self.sm, now_ns=now_ns,
+          source_can_ns=self._aol_can_observation[2], can_received_ns=can_received_ns,
+          producer_session=self.slc_producer_session, intent_sequence=self.aol_sequence + 1,
+          stage='update_auxiliary_calibration', fault_active=fault_active, transport_reset=transport_reset,
+          native_rejection_ns=rejection_ns, native_reset=native_reset, native=native)
     self.observe_distance_personality(CS, now_ns)
     gm_claim = getattr(self, 'gm_distance_claim_tracker', None)
     if gm_claim is not None:
@@ -1416,12 +1426,11 @@ class Car:
     next_cruise_read = 0.0
     while not evt.is_set():
       timing = getattr(self, 'loop_timing', None)
-      report = timing.take_report() if timing is not None else None
-      if report is not None:
-        cloudlog.event('card.loop_late', error=True, **report)
-      output_report = timing.take_output_report() if timing is not None else None
-      if output_report is not None:
-        cloudlog.event('card.output_invalid', error=True, **output_report)
+      if timing is not None:
+        timing.worker_begin('diagnostic_flush')
+        timing.flush_reports(cloudlog.event)
+        timing.worker_end()
+        timing.worker_begin('settings_read')
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       if self.aol_card_intent is not None:
@@ -1431,10 +1440,14 @@ class Car:
         self.slc_requested_configuration = self.read_slc_configuration()
         self.v_cruise_helper.intervals = read_cruise_intervals(self.params, pcm_cruise=self.CP.pcmCruise)
         next_cruise_read = now + 1.0
+      if timing is not None:
+        timing.worker_end()
       time.sleep(0.1)
 
   def card_thread(self):
-    self.loop_timing = (CardLoopTiming(detailed=os.getenv('CARD_PHASE_TIMING') == '1')
+    self.loop_timing = (CardLoopTiming(detailed=os.getenv('CARD_PHASE_TIMING',
+                          '1' if self.aol_qualified and self.CP.carFingerprint == HYUNDAI_CAR.HYUNDAI_IONIQ_6 else '0') == '1',
+                          compact=os.getenv('CARD_PHASE_TIMING') != '1')
                         if self.aol_replay and not REPLAY else None)
     self.timing_thread_id = threading.get_native_id()
     e = threading.Event()
@@ -1453,7 +1466,13 @@ class Car:
           timing.finish({'source_car_state_ns': getattr(self, 'timing_source_car_state_ns', 0),
                          'source_control_ns': int(self.sm.logMonoTime['carControl']),
                          'intent_sequence': self.aol_sequence, 'producer_session': self.slc_producer_session,
-                         'thread_id': self.timing_thread_id, 'replay': REPLAY},
+                         'thread_id': self.timing_thread_id, 'replay': REPLAY,
+                         'can_packet_count': getattr(self, 'timing_can_packet_count', 0),
+                         'can_timeout_count': getattr(self, 'can_rcv_cum_timeout_counter', 0),
+                         'can_received_mono_ns': getattr(self, '_aol_can_observation', (None, 0, 0, 0))[1],
+                         'source_can_boot_ns': getattr(self, '_aol_can_observation', (None, 0, 0, 0))[2],
+                         'worker_current': timing.worker_current, 'worker_recent': tuple(timing.worker_recent),
+                         'capture_errors': timing.capture_errors},
                         enabled=self.initialized_prev)
     finally:
       e.set()

@@ -141,6 +141,9 @@ class AolCardIntent:
     self.explicit_latch = explicit_latch
     self.lkas_button_supported = lkas_button_supported
     self.allowed_latch = False
+    # Observational only: records the exact branch that changed True to False.
+    self.latch_clear_count = 0
+    self.latch_clear_reason = ''
     self.pause_lateral = False
     self.pause_longitudinal = False
     self._gesture_neutral_seen = False
@@ -164,8 +167,14 @@ class AolCardIntent:
   def lkas_action(self) -> int:
     return self.settings.lkas_action if self.lkas_button_supported else 0
 
+  def _record_latch_clear(self, reason: str) -> None:
+    if self.allowed_latch:
+      self.latch_clear_count += 1
+      self.latch_clear_reason = reason
+
   def _perform(self, action: int) -> None:
     if action == AOL_TOGGLE and self.settings.enabled and not self.explicit_latch:
+      self._record_latch_clear('configured_toggle')
       self.allowed_latch = not self.allowed_latch
       if self.allowed_latch:
         self.pause_lateral = False
@@ -181,13 +190,16 @@ class AolCardIntent:
       if self._last_latch_edge_ns < native_rejection_ns <= now_ns:
         # Native authorization was revoked. Keep neutral/held-button history so
         # the next fresh physical press arms once, without replaying a held one.
+        self._record_latch_clear('native_rejection')
         self.allowed_latch = False
     if self.explicit_latch and (fault_active is not None or CS.steerFaultPermanent):
       self._fault_inhibit = bool(fault_active or CS.steerFaultPermanent)
       if self._fault_inhibit:
+        self._record_latch_clear('disarming_fault')
         self.allowed_latch = False
         self._gesture_neutral_seen = False
     if not CS.canValid or CS.canTimeout:
+      self._record_latch_clear('can_invalid_or_timeout')
       self.allowed_latch = False
       self._gesture_neutral_seen = False
       self._distance_neutral_seen = False
@@ -199,6 +211,7 @@ class AolCardIntent:
       return
 
     if not self.settings.enabled:
+      self._record_latch_clear('settings_disabled')
       self.allowed_latch = False
       if self.explicit_latch:
         self._gesture_neutral_seen = False
@@ -209,11 +222,15 @@ class AolCardIntent:
     lkas_managed = self.lkas_action == AOL_TOGGLE
     main_managed = self.settings.main_action == AOL_TOGGLE
     if self.explicit_latch and CS.accFaulted:
+      self._record_latch_clear('acc_fault')
       self.allowed_latch = False
       self._gesture_neutral_seen = False
     elif self.settings.enabled and not self.explicit_latch and not lkas_managed and not main_managed:
+      if not CS.cruiseState.available:
+        self._record_latch_clear('cruise_unavailable')
       self.allowed_latch = bool(CS.cruiseState.available)
     elif not self.explicit_latch and not CS.cruiseState.available:
+      self._record_latch_clear('cruise_unavailable')
       self.allowed_latch = False
 
     for button in consumed_buttons:
@@ -240,6 +257,7 @@ class AolCardIntent:
       if not previously_held and gesture_held:
         self._last_latch_edge_ns = now_ns
       if cancel_pressed:
+        self._record_latch_clear('cancel_press')
         self.allowed_latch = False
       elif not self._gesture_neutral_seen:
         self._gesture_neutral_seen = not gesture_held
@@ -247,6 +265,8 @@ class AolCardIntent:
         # The physical gesture owns lateral intent even while ordinary cruise
         # is engaged. Dropping only the AOL latch leaves standard steering on.
         lateral_engaged = not self.pause_lateral and (self.allowed_latch or standard_enabled)
+        if lateral_engaged:
+          self._record_latch_clear('physical_toggle')
         self.allowed_latch = not lateral_engaged
         self.pause_lateral = lateral_engaged
 
@@ -305,6 +325,7 @@ class AolCardIntent:
     elif self._calibration_rearm_required and fresh_edge and rearm_safe and self.settings.enabled:
       self._calibration_rearm_required = False
     if self._calibration_inhibit or self._calibration_rearm_required:
+      self._record_latch_clear('calibration_inhibit')
       self.allowed_latch = False
     self._calibration_main = main
     self._calibration_engaged = engaged

@@ -130,10 +130,10 @@ def test_actual_card_thread_preserves_step_order_and_replay_disables_recorder(mo
     clock = Clock()
     timing = CardLoopTiming(clock)
     daemon: Any = module.Car.__new__(module.Car)
-    daemon.aol_replay = True
+    daemon.aol_replay = daemon.aol_qualified = True
     daemon.ioniq6_keepalive = None
     daemon.vehicle_startup = SimpleNamespace(owner=None, check=lambda trace=trace: trace.append('check'))
-    daemon.CP = SimpleNamespace(passive=False)
+    daemon.CP = SimpleNamespace(passive=False, carFingerprint='HYUNDAI IONIQ 6 2023')
     daemon.sm = SM(onroadEvents=[], carControl='command')
     daemon.aol_sequence = 1
     daemon.slc_producer_session = 'session'
@@ -157,7 +157,7 @@ def test_actual_card_thread_preserves_step_order_and_replay_disables_recorder(mo
     daemon.rk = SimpleNamespace(monitor_time=monitor)
     monkeypatch.setattr(module, 'REPLAY', replay)
     monkeypatch.setenv('CARD_PHASE_TIMING', '1')
-    monkeypatch.setattr(module, 'CardLoopTiming', lambda *, detailed, timing=timing: timing)
+    monkeypatch.setattr(module, 'CardLoopTiming', lambda *, detailed, compact, timing=timing: timing)
     monkeypatch.setattr(module.threading, 'Thread', Worker)
     monkeypatch.setattr(module.cloudlog, 'event', lambda *a, **k: (_ for _ in ()).throw(AssertionError('control-thread logging')))
     try:
@@ -469,7 +469,7 @@ def test_actual_params_worker_formats_output_snapshot_before_settings_reads(monk
   stopped = threading.Event()
   clock = Clock()
   timing = CardLoopTiming(clock)
-  monkeypatch.setattr(timing_module, 'time', SimpleNamespace(monotonic_ns=lambda: 1_000_000_000))
+  monkeypatch.setattr(timing_module, 'time', SimpleNamespace(monotonic_ns=lambda: 1_000_000_000, thread_time_ns=lambda: 1))
   def event(name, **report):
     assert threading.get_native_id() != main_tid
     order.append((name, report, threading.get_native_id()))
