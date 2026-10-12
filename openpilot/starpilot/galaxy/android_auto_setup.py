@@ -6,15 +6,25 @@ module has no routes, device side effects, or credential material on import.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import threading
-import time
-from datetime import UTC, datetime
 from pathlib import Path
 from collections.abc import Callable
 from typing import BinaryIO
 
-from openpilot.starpilot.system.android_auto import apk_identity, mirror_feed, play_resolver
+from openpilot.starpilot.system.android_auto import apk_identity, apkpure
+
+# Left behind by the removed Google sign-in: a saved refresh token and the resolver binary.
+LEGACY_GOOGLE_FILES = (Path('/data/starpilot/aa_token'), Path('/data/starpilot/google-play'))
+
+
+def remove_legacy_google_files(paths: tuple[Path, ...] = LEGACY_GOOGLE_FILES) -> None:
+  for path in paths:
+    if path.is_dir() and not path.is_symlink():
+      shutil.rmtree(path, ignore_errors=True)
+    else:
+      path.unlink(missing_ok=True)
 
 
 class SetupRejected(RuntimeError):
@@ -36,17 +46,14 @@ class AndroidAutoSetup:
                install_ready: Callable[[], bool] = lambda: False,
                service_ready: Callable[[], bool] = lambda: False,
                set_enabled: Callable[[bool], None] | None = None,
-               enable_bluetooth: Callable[[tuple], None] | None = None, play_install=None):
+               enable_bluetooth: Callable[[tuple], None] | None = None):
     self.parked, self.enabled, self.session_valid = parked, enabled, session_valid
     self.bluetooth_enabled = bluetooth_enabled
     self.install_ready, self.service_ready, self.set_enabled_value = install_ready, service_ready, set_enabled
     self.enable_bluetooth_value = enable_bluetooth
-    self.play_install = play_install
     self.job = import_job or apk_identity.ImportJob()
     self.identity_status = identity_status
-    self.token_store = self.job.token_store if isinstance(self.job, apk_identity.ImportJob) else play_resolver.TokenStore()
     self._upload_lock = threading.Lock()
-    self._refresh_after = 0.0
 
   def _require_session(self, session: tuple) -> None:
     if not session or not self.session_valid(session):
@@ -54,16 +61,14 @@ class AndroidAutoSetup:
 
   def status(self, session: tuple) -> dict:
     self._require_session(session)
-    mirror_feed.start_background_refresh()
+    apkpure.start_background_refresh()
     ident = self.identity_status()
     return {
       'enabled': self.enabled(), 'bluetoothEnabled': self.bluetooth_enabled(), 'parked': self.parked(),
       'installReady': self.install_ready(), 'serviceReady': self.service_ready(),
       'identity': {key: ident[key] for key in ('installed', 'expires', 'days_left', 'warning', 'message', 'expired', 'error') if key in ident},
       'import': self.job.status(),
-      'mirror': mirror_feed.mirror_status(),
-      'googlePlay': {'available': play_resolver.BINARY.is_file(), 'remembered': self.token_store.exists(),
-                     **({'package': self.play_install.status()} if self.play_install is not None else {})},
+      'download': apkpure.download_status(),
       'maxUploadBytes': apk_identity.MAX_FILE_BYTES,
       'wiredAvailable': False,
       'steps': [
@@ -136,65 +141,6 @@ class AndroidAutoSetup:
         path.unlink(missing_ok=True)
       self._upload_lock.release()
 
-  def start_google_import(self, session: tuple, *, email: str, token: str, remember: bool = False) -> dict:
-    self._require_session(session)
-    if type(remember) is not bool:
-      raise SetupRejected('Remember must be a boolean')
-    play_resolver.validate_credentials(email, token)
-    if not self._upload_lock.acquire(blocking=False):
-      raise SetupRejected('Another Android Auto upload is running')
-    try:
-      self._require_session(session)
-      if self.job.busy():
-        raise SetupRejected('An Android Auto import is running')
-      self.job.start_google_import(email=email, save_token=remember,
-                                   **({'oauth_token': token} if token.startswith('oauth2_4/') else {'aas_token': token}),
-                                   enabled=lambda: self.session_valid(session))
-      self._refresh_after = time.monotonic() + 86400
-    finally:
-      self._upload_lock.release()
-    return self.status(session)
-
-  def forget_google(self, session: tuple) -> dict:
-    self._require_session(session)
-    with self._upload_lock:
-      self._require_session(session)
-      if self.job.busy():
-        raise SetupRejected('Wait for the current import before forgetting Google sign-in')
-      self.token_store.forget()
-    return self.status(session)
-
-  def maintain(self, now: float | None = None) -> None:
-    """Called by Galaxy housekeeping; at most one refresh per day, only offroad.
-
-    Uses the same job and admission lock as manual imports. Explicitly saved
-    credentials authorize renewal without the user signing in again. No account secrets
-    or signed links enter the HTTP status or logs.
-    """
-    now = time.monotonic() if now is None else now
-    if now < self._refresh_after or not self._upload_lock.acquire(blocking=False):
-      return
-    try:
-      self._refresh_after = now + 60
-      if self.job.busy() or not self.token_store.exists() or not self.enabled() or not self.parked():
-        return
-      ident = self.identity_status()
-      expires = ident.get('expires')
-      if not expires or (datetime.fromisoformat(expires) - datetime.now(UTC)).total_seconds() > 14 * 86400:
-        return
-      self._refresh_after = now + 86400
-      credentials = self.token_store.load()
-      try:
-        self.job.start_google_import(email=credentials['email'], aas_token=credentials['token'], save_token=True,
-                                     enabled=lambda: self.enabled() and self.parked() and self.token_store.exists())
-      finally:
-        credentials.clear()
-    except (OSError, ValueError, TypeError, RuntimeError):
-      # Malformed/revoked credentials must not crash Galaxy or cause retry storms.
-      self._refresh_after = now + 86400
-    finally:
-      self._upload_lock.release()
-
   def remove(self, session: tuple, *, disconnect: Callable[[], None] | None = None) -> dict:
     self._require_session(session)
     with self._upload_lock:
@@ -204,6 +150,5 @@ class AndroidAutoSetup:
       if disconnect is not None:
         disconnect()
       self._require_session(session)
-      self.token_store.forget()
       apk_identity.remove_identity()
     return self.status(session)

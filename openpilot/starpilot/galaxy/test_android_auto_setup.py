@@ -6,18 +6,21 @@ import pytest
 
 from openpilot.starpilot.galaxy.android_auto_setup import AndroidAutoSetup, SetupRejected
 from openpilot.starpilot.system.android_auto.apk_identity import MAX_FILE_BYTES
-from openpilot.starpilot.system.android_auto import mirror_feed
+from openpilot.starpilot.galaxy import android_auto_setup
+from openpilot.starpilot.system.android_auto import apkpure
 
-_start_mirror_refresh = mirror_feed.start_background_refresh
+_start_download_refresh = apkpure.start_background_refresh
+RELEASE = {'version': '17.7.663654-release', 'code': 177663654, 'size': 50281364,
+           'url': 'https://download.pureapk.com/b/XAPK/abc?k=1', 'expires': 4102444800.0}
 
 
 @pytest.fixture(autouse=True)
-def offline_mirror(monkeypatch):
-  monkeypatch.setattr(mirror_feed, 'start_background_refresh', lambda: None)
-  monkeypatch.setattr(mirror_feed, '_cache', None)
+def offline_download(monkeypatch):
+  monkeypatch.setattr(apkpure, 'start_background_refresh', lambda: None)
+  monkeypatch.setattr(apkpure, '_cache', None)
 
 
-def test_mirror_status_never_waits_for_network(tmp_path, monkeypatch):
+def test_download_status_never_waits_for_network(tmp_path, monkeypatch):
   import threading
   import time
 
@@ -27,7 +30,7 @@ def test_mirror_status_never_waits_for_network(tmp_path, monkeypatch):
     entered.set()
     assert release.wait(2)
     fetched.set()
-    return [{'version': '17.9.6640', 'url': mirror_feed.LISTING_URL + 'android-auto-17-9-6640-release/'}]
+    return dict(RELEASE)
 
   threads = []
   thread_class = threading.Thread
@@ -36,15 +39,15 @@ def test_mirror_status_never_waits_for_network(tmp_path, monkeypatch):
     threads.append(instance)
     return instance
 
-  monkeypatch.setattr(mirror_feed.threading, 'Thread', thread)
-  monkeypatch.setattr(mirror_feed, 'fetch_releases', fetch)
-  monkeypatch.setattr(mirror_feed, 'start_background_refresh', _start_mirror_refresh)
-  monkeypatch.setattr(mirror_feed, '_refresh_after', 0)
-  monkeypatch.setattr(mirror_feed, '_in_flight', False)
+  monkeypatch.setattr(apkpure.threading, 'Thread', thread)
+  monkeypatch.setattr(apkpure, 'fetch_latest', fetch)
+  monkeypatch.setattr(apkpure, 'start_background_refresh', _start_download_refresh)
+  monkeypatch.setattr(apkpure, '_refresh_after', 0)
+  monkeypatch.setattr(apkpure, '_in_flight', False)
   service, _ = setup(tmp_path, {'parked': True, 'enabled': True, 'session': ('galaxy', '1')})
   try:
     started = time.monotonic()
-    assert service.status(('galaxy', '1'))['mirror'] is None
+    assert service.status(('galaxy', '1'))['download'] is None
     assert time.monotonic() - started < 0.5
     assert entered.wait(1)
     assert not fetched.is_set()
@@ -52,7 +55,7 @@ def test_mirror_status_never_waits_for_network(tmp_path, monkeypatch):
     release.set()
     for instance in threads:
       instance.join(2)
-  assert service.status(('galaxy', '1'))['mirror']['latest']['version'] == '17.9.6640'
+  assert service.status(('galaxy', '1'))['download'] == {key: RELEASE[key] for key in ('version', 'url', 'size')}
 
 
 class SetupState(TypedDict, total=False):
@@ -266,56 +269,17 @@ def test_session_loss_while_enabling_bluetooth_never_enables_android_auto(tmp_pa
   setter.assert_not_called()
 
 
-def google_setup(tmp_path):
-  from openpilot.starpilot.system.android_auto import apk_identity, play_resolver
-  state = {'enabled': True, 'parked': True, 'session': ('galaxy', '1')}
-  store = play_resolver.TokenStore(tmp_path / 'aa_token')
-  job = apk_identity.ImportJob(work_dir=tmp_path / 'imports', token_store=store)
-  job.start_google_import = Mock()
-  service = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: state['enabled'],
-                             session_valid=lambda session: session == state['session'], import_job=job,
-                             identity_status=lambda: {'installed': True, 'expires': '2020-01-01T00:00:00+00:00'})
-  return service, job, state, store
+def test_status_has_no_google_sign_in(tmp_path):
+  service, _ = setup(tmp_path, {'parked': True, 'enabled': True, 'session': ('galaxy', '1')})
+  status = service.status(('galaxy', '1'))
+  assert 'googlePlay' not in status and 'mirror' not in status
+  assert not hasattr(service, 'start_google_import') and not hasattr(service, 'maintain')
 
 
-def test_google_import_session_admission_and_exclusive_upload_lock(tmp_path):
-  service, job, state, _ = google_setup(tmp_path)
-  with pytest.raises(SetupRejected):
-    service.start_google_import(('old', '1'), email='a@example.com', token='oauth2_4/test')
-  with service._upload_lock, pytest.raises(SetupRejected):
-    service.start_google_import(state['session'], email='a@example.com', token='oauth2_4/test')
-  job.start_google_import.assert_not_called()
-  service.start_google_import(state['session'], email='a@example.com', token='oauth2_4/test', remember=True)
-  kwargs = job.start_google_import.call_args.kwargs
-  assert kwargs['save_token'] and kwargs['enabled']()
-  state['session'] = None
-  assert not kwargs['enabled']()
-
-
-def test_refresh_requires_opt_in_offroad_and_throttles_failed_attempts(tmp_path):
-  service, job, state, store = google_setup(tmp_path)
-  service.maintain(0)
-  job.start_google_import.assert_not_called()
-  store.save('a@example.com', 'aas_et/test')
-  state['parked'] = False
-  service.maintain(60)
-  job.start_google_import.assert_not_called()
-  state['parked'] = True
-  service.maintain(120)
-  job.start_google_import.assert_called_once()
-  kwargs = job.start_google_import.call_args.kwargs
-  assert kwargs['aas_token'] == 'aas_et/test' and kwargs['enabled']()
-  service.maintain(180)
-  job.start_google_import.assert_called_once()
-  state['enabled'] = False
-  assert not kwargs['enabled']()
-  service.forget_google(state['session'])
-  assert not store.exists()
-
-
-def test_refresh_skips_identity_not_due_for_renewal(tmp_path):
-  service, job, _, store = google_setup(tmp_path)
-  store.save('a@example.com', 'aas_et/test')
-  service.identity_status = lambda: {'installed': True, 'expires': '2099-01-01T00:00:00+00:00'}
-  service.maintain(0)
-  job.start_google_import.assert_not_called()
+def test_legacy_google_files_are_removed(tmp_path):
+  token, runtime, missing = tmp_path / 'aa_token', tmp_path / 'google-play', tmp_path / 'missing'
+  token.write_text('{"token": "aas_et/x"}')
+  (runtime / 'pinned').mkdir(parents=True)
+  (runtime / 'pinned' / 'playlink').write_bytes(b'binary')
+  android_auto_setup.remove_legacy_google_files((token, runtime, missing))
+  assert not token.exists() and not runtime.exists()

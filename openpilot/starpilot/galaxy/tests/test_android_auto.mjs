@@ -306,13 +306,13 @@ visit(tree)
 assert(!tags.includes('template'), 'setup cannot live inside an inert template element')
 assert(tags.includes('input') && tags.includes('button'), 'setup renders package selection and actions')
 // Once installed, Manage package shows status and removal only; setup needs removal first.
-const managed = page({ ...setup, identity: { ...setup.identity, installed: true }, googlePlay: { available: true, remembered: true } })
+const managed = page({ ...setup, identity: { ...setup.identity, installed: true } })
 managed.installOpen = true
 const managedTags = []
 const collect = (node) => { if (!node || typeof node !== 'object') return; if (typeof node.type === 'string') managedTags.push(node.type); if (Array.isArray(node.children)) node.children.forEach(collect) }
 collect(render(managed, []))
 assert(!managedTags.includes('input'), 'manage view offers no setup inputs')
-assert(managedTags.includes('dl'), 'manage view shows status and renewal')
+assert(managedTags.includes('dl'), 'manage view shows status')
 for (const [field, reason] of [['installReady', /display|encoder/],
                              ['serviceReady', /service/], ['bluetoothEnabled', /Bluetooth/], ['parked', /Park/]]) {
   const blocked = page({ ...setup, [field]: false })
@@ -402,62 +402,8 @@ assert.equal(connectingPage.projecting, false)
 connectingPage.runtime.state = 'streaming'
 assert.equal(connectingPage.projecting, true)
 
-// Google import keeps session material out of page state after submission.
-const { googleInstallChecks } = await import('../web/js/android-auto.js')
-const googlePage = page({ ...setup, googlePlay: { available: true, remembered: false } })
-googlePage.googleEmail = 'user@example.com'
-googlePage.googleToken = 'oauth2_4/test-private'
-googlePage.googleRemember = false
-let googleCall
-googlePage.feed = { async googleImport(...args) { googleCall = args; assert.equal(googlePage.googleToken, ''); return true } }
-assert.equal(await googlePage.googleImport(), true)
-assert.deepEqual(googleCall, ['user@example.com', 'oauth2_4/test-private', false])
-googlePage.googleToken = 'another-private-value'
-googlePage.closeInstall()
-assert.equal(googlePage.googleToken, '')
-assert.deepEqual(googleInstallChecks({ state: 'running', stage: 'resolving' }).map(c => c.status), ['done', 'active', 'pending', 'pending'])
-assert.deepEqual(googleInstallChecks({ state: 'failed', stage: 'downloading' }).map(c => c.status), ['done', 'done', 'failed', 'pending'])
-assert.match(googleInstallChecks({ state: 'running', stage: 'downloading', downloaded: 5, total: 10 })[2].label, /50%/)
-assert(googleInstallChecks({ state: 'done', stage: 'done' }).every(c => c.status === 'done'))
-assert.match(AndroidAutoPage.template, /Upload a file/)
-assert.match(AndroidAutoPage.template, /Turn off automatic renewal/)
 assert.match(AndroidAutoPage.template, /Remove Android Auto support/)
-assert.match(AndroidAutoPage.template, /page will keep loading/)
-assert.equal(AndroidAutoPage.computed.renewLabel.call({ setup: { googlePlay: { remembered: true } } }), 'Auto-renew on')
-assert.equal(AndroidAutoPage.computed.renewLabel.call({ setup: { googlePlay: { remembered: false } } }), 'Auto-renew off')
 assert.match(AndroidAutoPage.template, /Manage package/)
-const { cleanToken, tokenProblem } = await import('../web/js/android-auto.js')
-assert.equal(cleanToken('  "oauth2_4/abc-DEF_123"  '), 'oauth2_4/abc-DEF_123')
-assert.equal(cleanToken('oauth_token=oauth2_4/abc;'), 'oauth2_4/abc')
-assert.equal(cleanToken('oauth2_4%2Fabc'), 'oauth2_4/abc')
-assert.equal(tokenProblem(''), '')
-assert.equal(tokenProblem('oauth2_4/abc'), '')
-assert.match(tokenProblem('SAPISID-value'), /oauth2_4\//)
-assert.match(tokenProblem('oauth2_4/abc def'), /spaces/)
-const cleaning = page({ ...setup, googlePlay: { available: true, remembered: false } })
-Object.assign(cleaning, { googleEmail: 'user@example.com', googleToken: ' "oauth2_4/pasted" ', googleRemember: true })
-let cleanedCall
-cleaning.feed = { async googleImport(...args) { cleanedCall = args; return true } }
-assert.equal(await cleaning.googleImport(), true)
-assert.deepEqual(cleanedCall, ['user@example.com', 'oauth2_4/pasted', true])
-// Auto-renew is on by default, and turning it on later always saves the renewal credential.
-assert.equal(AndroidAutoPage.data().googleRemember, true)
-const renewal = page({ ...setup, identity: { ...setup.identity, installed: true }, googlePlay: { available: true, remembered: false } })
-Object.assign(renewal, { googleRemember: false, installMethod: 'manual', googleToken: 'stale' })
-renewal.startRenewal()
-assert.equal(renewal.renewing, true)
-assert.equal(renewal.installMethod, 'google')
-assert.equal(renewal.googleToken, '')
-Object.assign(renewal, { googleEmail: 'user@example.com', googleToken: 'oauth2_4/renew', googleRemember: false })
-let renewCall
-renewal.feed = { async googleImport(...args) { renewCall = args; return true } }
-assert.equal(await renewal.googleImport(), true)
-assert.deepEqual(renewCall, ['user@example.com', 'oauth2_4/renew', true])
-renewal.closeInstall()
-assert.equal(renewal.renewing, false)
-assert.match(AndroidAutoPage.template, /Turn on automatic renewal/)
-assert.match(AndroidAutoPage.template, /Use a computer for automatic download setup/)
-assert.equal(await AndroidAutoPage.methods.googleImport.call({ onPhone: true }), false, 'mobile cannot start automatic downloads')
 const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
 try {
   for (const [browser, mobile] of [
@@ -473,4 +419,4 @@ try {
   if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
   else delete globalThis.navigator
 }
-console.log('Google Play import: credential clearing, progress, retry and manual fallback passed')
+console.log('Android Auto page: manage view, pairing gates and phone detection passed')

@@ -137,4 +137,3 @@ openpilot/selfdrive/modeld/models/*.unchunked
 /jetlink_repo/jetlink.egg-info/
 
 # Local Google Play resolver build output (source and lockfile are versioned).
-/tools/playlink/target/
