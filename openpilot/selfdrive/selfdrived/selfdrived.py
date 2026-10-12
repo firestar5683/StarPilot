@@ -799,15 +799,37 @@ class SelfdriveD:
 
     return CS
 
-  def event_input_wait_ns(self, CS, now_ns):
+  def held_axis_override_wait(self, CS, proof, now_ns):
+    """Recognize an already applied override; never admit a new physical edge."""
+    if (proof is None or not qualified_ioniq6(self.CP) or not self.sm.seen['carControl'] or
+        not self.sm.valid['carControl'] or self.sm['carControl'].longActive or
+        not 0 < int(self.sm.logMonoTime['carControl']) <= now_ns or
+        now_ns - int(self.sm.logMonoTime['carControl']) > INTENT_MAX_AGE_NS):
+      return False, False
+    previous = self.CS_prev
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, self.conditional_car_state_valid),)
+    held_brake = bool(proof[8] and not proof[9] and not self.enabled and not self.active and
+      (previous.brakePressed or previous.regenBraking) and
+      all(valid and sample.brakePressed == previous.brakePressed and sample.regenBraking == previous.regenBraking
+          and not sample.gasPressed and not sample.buttonEvents for sample, valid in samples))
+    held_gas = bool(proof[9] and self.enabled and self.active and previous.gasPressed and
+      self.events.contains(ET.OVERRIDE_LONGITUDINAL) and
+      all(valid and sample.gasPressed and not sample.brakePressed and not sample.regenBraking
+          and not sample.buttonEvents for sample, valid in samples))
+    return held_brake, held_gas
+
+  def event_input_wait_ns(self, CS, now_ns, *, final_held_override=False):
     """Bound an input wait by an original published lease; grant no new output."""
     proof = getattr(self, 'aol_published_input_proof', None)
     companion = getattr(self, 'aol_intent_companion', None)
     intent = getattr(self, 'aol_last_intent', None)
     previous_native = getattr(self, 'aol_published_input_native', None)
+    held_brake, held_gas = self.held_axis_override_wait(CS, proof, now_ns) if final_held_override else (False, False)
+    user_disable = (any(event.userDisable and event.name != EventName.pedalPressed for event in self.events.to_msg())
+                    if held_brake else self.events.contains(ET.USER_DISABLE))
     if (proof is None or companion is None or intent is None or previous_native is None or
         self.aol_authority_lost or
-        any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
+        user_disable or any(self.events.contains(kind) for kind in (ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
         not self.sm.all_checks() or self.rk.lagging or
         self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated or
         self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated or
@@ -836,6 +858,10 @@ class SelfdriveD:
     if not wait_origin_ns <= now_ns < wait_deadline_ns:
       return 0
     latest = companion.latest
+    if final_held_override and getattr(companion, 'last_drain_count', 0) > 1:
+      # A burst could contain an intermediate restriction. Do not infer an
+      # unchanged permission from just its final sample during this hold.
+      return 0
     # An unchanged pause on an unrequested, inactive axis does not revoke the
     # other axis's existing lease. New pauses and requested-axis pauses still veto.
     if (latest is None or not latest[1] or latest[2] is None or
@@ -849,7 +875,8 @@ class SelfdriveD:
       return 0
     samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'car_state_retained_valid', False)),)
     if any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultTemporary or
-           sample.steerFaultPermanent or sample.brakePressed or sample.regenBraking or active_longitudinal and sample.gasPressed or
+           sample.steerFaultPermanent or (sample.brakePressed or sample.regenBraking) and not held_brake or
+           active_longitudinal and sample.gasPressed and not held_gas or
            sample.seatbeltUnlatched or sample.accFaulted or sample.doorOpen or physical_cancel(sample) or
            sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
                                      car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
@@ -911,6 +938,32 @@ class SelfdriveD:
       self.aol_expired_healthy_source = False
       CS = latest.carState
     return CS
+
+  def defer_expired_axis_publication(self, CS, initial_state):
+    """Keep an existing unexpired proof for one normal tick; issue no new lease."""
+    if REPLAY or not self.aol_replay or not self.axis_transport_required or not qualified_ioniq6(self.CP):
+      return False
+    proof = getattr(self, 'aol_step_input_proof', None)
+    now_ns = time.monotonic_ns()
+    source = self.aol_car_state_log_ns
+    if (getattr(self, 'aol_step_deferral_checked', False) or proof is None or proof != getattr(self, 'aol_published_input_proof', None) or
+        not self.conditional_car_state_valid or not 0 < source <= now_ns or
+        now_ns - source <= INTENT_MAX_AGE_NS or source != proof[1] or
+        now_ns >= proof[3] or self.aol_authority_lost or
+        getattr(self, 'aol_fault_reason', 'none') != 'none' or
+        getattr(self, 'aol_published_fault_reason', 'none') != 'none' or
+        initial_state != (self.state_machine.state, self.state_machine.soft_disable_timer, self.enabled, self.active) or
+        self.state_machine.soft_disable_timer != 0 or self.events.names != self.events_prev or
+        CS.buttonEvents or any(sample.buttonEvents for sample, _ in getattr(self, 'car_state_samples', ())) or
+        any(self.events.contains(kind) for kind in (ET.ENABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
+        (self.aol_axis_decision.lateral_active, self.aol_axis_decision.longitudinal_active) != (proof[8], proof[9])):
+      return False
+    # This eligibility check uses the same native/intent/health checks as an
+    # existing bounded input wait. It never changes the source or publishes an
+    # active decision. The next ordinary loop iteration consumes the next input.
+    self.aol_step_deferral_checked = True
+    allowed = self.event_input_wait_ns(CS, now_ns, final_held_override=True) > 0
+    return bool(allowed and now_ns <= time.monotonic_ns() < proof[3])
 
   def reconciled_intent(self, intent, previous, pairs, epoch, now_ns):
     sources = getattr(self, 'aol_reconciled_sources', ())
@@ -1170,7 +1223,7 @@ class SelfdriveD:
         self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     return True
 
-  def publish_axis_proof(self, CS, *, defer_events=False):
+  def publish_axis_proof(self, CS, *, defer_events=False, source_context=None):
     now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
     source_clock_scoped = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if source_clock_scoped:
@@ -1185,11 +1238,11 @@ class SelfdriveD:
       ce_send.logMonoTime = event_now_ns
       ce_send.valid = True
       ce_send.onroadEvents = self.events.to_msg()
-      self.aol_fault_event_ns = int(ce_send.logMonoTime)
+    fault_event_ns = int(ce_send.logMonoTime) if ce_send is not None else getattr(self, 'aol_fault_event_ns', 0)
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       if not source_clock_scoped:
         now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
-      self.aol_sequence += 1
+      next_sequence = self.aol_sequence + 1
       axis_msg = messaging.new_message('aolAxisState')
       axis_msg.logMonoTime = now_ns
       axis_msg.valid = bool(self.aol_car_state_log_ns > 0 or reason == 'transportPause' or
@@ -1204,8 +1257,8 @@ class SelfdriveD:
       accepted_companion = getattr(self, 'aol_intent_companion', None)
       axis.intentProducerSessionId = accepted_intent.producerSessionId if accepted_intent is not None else ''
       axis.intentIntegrityEpoch = accepted_companion.integrity_epoch if accepted_companion is not None else 0
-      axis.faultEventMonoTime = getattr(self, 'aol_fault_event_ns', 0)
-      axis.sequence = self.aol_sequence
+      axis.faultEventMonoTime = fault_event_ns
+      axis.sequence = next_sequence
       axis.sourceCarStateMonoTime = self.aol_car_state_log_ns
       axis.observedMonoTime = now_ns
       axis.validUntilMonoTime = now_ns + 30_000_000
@@ -1220,22 +1273,38 @@ class SelfdriveD:
       axis.qualified = bool((self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)) and
         (not source_clock_scoped or self.aol_car_state_log_ns > 0 or
          reason in ('transportPause', 'availabilityPause', 'critical')))
-      if source_clock_scoped and self._expire_axis_continuity(CS, time.monotonic_ns()):
-        return self.publish_axis_proof(CS, defer_events=defer_events)
-      self.pm.send('aolAxisState', axis_msg)
-      self.aol_published_input_proof = None
-      self.aol_published_input_native = None
-      if (source_clock_scoped and reason == 'none' and axis_msg.valid and axis.qualified and
-          axis.nativeAcknowledged and (axis.lateralActive or axis.longitudinalActive) and
-          0 < axis.sourceCarStateMonoTime <= now_ns and
-          now_ns - axis.sourceCarStateMonoTime <= INTENT_MAX_AGE_NS):
-        self.aol_published_input_proof = (str(axis.sessionId), int(axis.sourceCarStateMonoTime),
-          now_ns, int(axis.validUntilMonoTime), str(axis.intentProducerSessionId),
-          int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal),
-          bool(axis.lateralActive), bool(axis.longitudinalActive))
-        self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
+      axis_deferred = False
+      if source_clock_scoped:
+        final_ns = time.monotonic_ns()
+        if (qualified_ioniq6(self.CP) and (axis.lateralActive or axis.longitudinalActive) and
+            (not 0 < self.aol_car_state_log_ns <= final_ns or final_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS)):
+          if (source_context is not None and source_context[1] and
+              self.defer_expired_axis_publication(CS, source_context[0])):
+            # Serialization crossed the same source boundary. Retain only the
+            # original proof; staged message metadata grants no new authority.
+            self.aol_axis_publication_deferred = axis_deferred = True
+          else:
+            self._expire_axis_source(CS, time.monotonic_ns())
+            return self.publish_axis_proof(CS, defer_events=defer_events, source_context=source_context)
+        if not axis_deferred and self._expire_axis_continuity(CS, final_ns):
+          return self.publish_axis_proof(CS, defer_events=defer_events, source_context=source_context)
+      if not axis_deferred:
+        self.aol_sequence = next_sequence
+        self.pm.send('aolAxisState', axis_msg)
+        self.aol_published_input_proof = None
+        self.aol_published_input_native = None
+        if (source_clock_scoped and reason == 'none' and axis_msg.valid and axis.qualified and
+            axis.nativeAcknowledged and (axis.lateralActive or axis.longitudinalActive) and
+            0 < axis.sourceCarStateMonoTime <= now_ns and
+            now_ns - axis.sourceCarStateMonoTime <= INTENT_MAX_AGE_NS):
+          self.aol_published_input_proof = (str(axis.sessionId), int(axis.sourceCarStateMonoTime),
+            now_ns, int(axis.validUntilMonoTime), str(axis.intentProducerSessionId),
+            int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal),
+            bool(axis.lateralActive), bool(axis.longitudinalActive))
+          self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
     if not defer_events:
       if ce_send is not None:
+        self.aol_fault_event_ns = int(ce_send.logMonoTime)
         self.pm.send('onroadEvents', ce_send)
       self.aol_published_fault_reason = reason
       self.events_prev = self.events.names.copy()
@@ -1293,6 +1362,7 @@ class SelfdriveD:
 
     if not axis_published:
       if ce_send is not None:
+        self.aol_fault_event_ns = int(ce_send.logMonoTime)
         self.pm.send('onroadEvents', ce_send)
       self.aol_published_fault_reason = reason
       self.events_prev = self.events.names.copy()
@@ -1327,6 +1397,7 @@ class SelfdriveD:
                 for service in required)
     axis_active = self.aol_axis_decision.longitudinal_active if self.aol_replay else self.enabled
     authority = bool(configured and fresh and self.initialized and axis_active and
+                     not getattr(self, 'aol_axis_publication_deferred', False) and
                      self.CP.openpilotLongitudinalControl and not self.CP.passive and
                      self.conditional_car_state_valid and CS.canValid and not CS.canTimeout and self.sm['deviceState'].started and
                      self.sm['carControl'].longActive and self.sm.seen['slcState'] and self.sm.alive['slcState'])
@@ -1420,6 +1491,10 @@ class SelfdriveD:
     self.aol_last_authority_report_ns = now_ns
 
   def step(self):
+    initial_state = (self.state_machine.state, self.state_machine.soft_disable_timer, self.enabled, self.active)
+    previous_deferred = getattr(self, 'aol_axis_publication_deferred', False)
+    self.aol_axis_publication_deferred = False
+    self.aol_step_deferral_checked = False
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
@@ -1622,7 +1697,9 @@ class SelfdriveD:
       self.state_machine.current_alert_types.append(ET.WARNING)
     axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if axis_published:
-      self.publish_axis_proof(CS)
+      self.aol_axis_publication_deferred = bool(not previous_deferred and self.defer_expired_axis_publication(CS, initial_state))
+      if not self.aol_axis_publication_deferred:
+        self.publish_axis_proof(CS, source_context=(initial_state, not previous_deferred))
     self.update_alerts(CS)
     self.update_conditional_mode(CS)
 
@@ -1679,3 +1756,4 @@ def main():
 
 if __name__ == "__main__":
   main()
+
