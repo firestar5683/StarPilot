@@ -598,6 +598,12 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           self.camera_video(path.removeprefix('/api/recordings/media/'))
         return
+      if path == '/api/developer/intense-logging':
+        if not self.require_session():
+          return
+        from openpilot.starpilot import intense_logging
+        self.json(200, {'enabled': intense_logging.enabled()})
+        return
       if path == '/api/connect/provider':
         if not self.require_session():
           return
@@ -1391,7 +1397,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         finally:
           self.connection.settimeout(old_timeout)
         return
-      if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+      if path not in ('/api/connect/provider', '/api/developer/intense-logging', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/replay/start', '/api/replay/control', '/api/replay/stop',
@@ -1412,7 +1418,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/replay/', '/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
+      if (path.startswith(('/api/replay/', '/api/recordings/', '/api/connect/', '/api/developer/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
                            '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
@@ -1507,6 +1513,18 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, result)
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
+        return
+      if path == '/api/developer/intense-logging':
+        if type(payload) is not dict or set(payload) != {'enabled'} or type(payload['enabled']) is not bool:
+          self.json(400, {'error': 'Choose on or off'})
+          return
+        from openpilot.starpilot import intense_logging
+        try:
+          intense_logging.set_enabled(payload['enabled'])
+        except OSError:
+          self.json(503, {'error': 'Intense logging could not be changed'})
+        else:
+          self.json(200, {'enabled': intense_logging.enabled()})
         return
       if path == '/api/connect/provider':
         identity = self.settings_session()

@@ -1,6 +1,6 @@
 """Opt-in onroad diagnostics for performance work.
 
-Turn on or off from Settings > Developer > intense logging, or over SSH with
+Turn on or off from Galaxy > Settings > Developer > Intense logging, or over SSH with
 `python3 -m openpilot.starpilot.intense_logging on|off|status`. Takes effect at the next drive.
 
 Control threads only append to bounded deques. A non-realtime worker thread on cores 0-3

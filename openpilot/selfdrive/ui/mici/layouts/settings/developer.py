@@ -8,7 +8,6 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.starpilot.car.hyundai.aol import ioniq6_settings_capable
-from openpilot.starpilot import intense_logging
 from openpilot.selfdrive.ui.widgets.ssh_key import SshKeyFetcher
 
 
@@ -106,10 +105,6 @@ class DeveloperLayoutMici(NavScroller):
     self._debug_mode_toggle = BigParamControl("ui debug mode", "ShowDebugInfo",
                                               toggle_callback=lambda checked: (gui_app.set_show_touches(checked), gui_app.set_show_fps(checked)),
                                               description="Show touch locations and the UI frame rate.")
-    self._intense_logging_toggle = BigToggle("intense logging", initial_state=intense_logging.enabled(),
-                                             toggle_callback=intense_logging.set_enabled,
-                                             description="Log detailed timing for card, selfdrived, controls and the planner, plus GC " +
-                                                         "pauses and CPU waits. Applies at the next drive.")
 
     self._scroller.add_widgets([
       self._adb_toggle,
@@ -119,7 +114,6 @@ class DeveloperLayoutMici(NavScroller):
       self._joystick_toggle,
       self._alpha_long_toggle,
       self._debug_mode_toggle,
-      self._intense_logging_toggle,
     ])
 
     # Toggle lists
@@ -175,7 +169,6 @@ class DeveloperLayoutMici(NavScroller):
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
       item.set_checked(ui_state.params.get_bool(key))
-    self._intense_logging_toggle.set_checked(intense_logging.enabled())
 
   def _on_joystick_debug_mode(self, state: bool):
     ui_state.params.put_bool("JoystickDebugMode", state, block=True)

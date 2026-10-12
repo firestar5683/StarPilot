@@ -16,7 +16,7 @@ export const CloudProviderPage = {
   name: "CloudProviderPage",
   components: { GxState, GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ status: null, selection: null, busy: false, error: "", request: null }),
+  data: () => ({ status: null, selection: null, busy: false, error: "", request: null, logging: null, loggingBusy: false }),
   mounted() { this.activePage = true; this.poller = new PollTimer({ read: () => this.load() }); this.poller.start(); this.load() },
   beforeUnmount() { this.activePage = false; this.poller.stop(); this.request?.abort() },
   computed: {
@@ -40,8 +40,28 @@ export const CloudProviderPage = {
       }
     },
     async load() {
-      if (this.mode !== "local" || this.busy || this.request) return
+      if (this.mode !== "local") return
+      this.loadLogging()
+      if (this.busy || this.request) return
       try { await this.call() } catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
+    },
+    async loggingRequest(body) {
+      const value = await requestJson("./api/developer/intense-logging", { request:
+        body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {} })
+      if (typeof value?.enabled !== "boolean") throw new Error("Intense logging status is unavailable")
+      if (this.activePage) this.logging = value.enabled
+    },
+    async loadLogging() {
+      if (this.loggingBusy) return
+      try { await this.loggingRequest() } catch (error) { if (error.status === 401) this.unauthorized() }
+    },
+    async setLogging(input) {
+      if (this.loggingBusy) return
+      this.loggingBusy = true
+      this.error = ""
+      try { await this.loggingRequest({ enabled: input.checked }) }
+      catch (error) { if (error.status === 401) this.unauthorized(); else this.error = connectionError(error) }
+      finally { this.loggingBusy = false; input.checked = this.logging === true }
     },
     async select(name) {
       if (!this.status?.canSelect || this.busy || !this.status.providers.some(p => p.id === name)) return
@@ -65,7 +85,12 @@ export const CloudProviderPage = {
           :disabled="!status?.canSelect" @change="select($event.target.value)">
           <option v-for="provider in status?.providers || []" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
         </GalaxySelect>
-      </label></div></div></section>
+      </label></div></div>
+      <div class="gx-row" :inert="loggingBusy" :aria-busy="loggingBusy || undefined"><div class="gx-row__info">
+        <span class="gx-row__label">Intense logging</span>
+        <span class="gx-row__desc">Log detailed timing for card, selfdrived, controls and the planner, plus GC pauses and CPU waits. Applies at the next drive.</span></div>
+        <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Intense logging" :checked="logging === true" :disabled="typeof logging !== 'boolean'"
+          @change="setLogging($event.target)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div></section>
       <GxNotice v-if="status?.restartRequired" tone="warn">{{ selected?.label }} applies after the next reboot. No automatic reboot will occur.</GxNotice>
 
       <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>

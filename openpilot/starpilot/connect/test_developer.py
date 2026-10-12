@@ -67,6 +67,49 @@ class TestDeveloperProviderHTTP(unittest.TestCase):
         worker.join(2)
 
 
+class TestIntenseLoggingHTTP(unittest.TestCase):
+  def test_authenticated_toggle_writes_flag(self):
+    from openpilot.starpilot import intense_logging
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      access = GalaxyAccessOwner(root/'access')
+      access.configure('password123', lambda: True)
+      flag = root/'intense_logging'
+      server = make_server(port=0, owner=access, parked=lambda: False)
+      worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+      worker.start()
+      def request(path, payload=None, cookie=None):
+        connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+        headers = {'Forwarded': 'for=203.0.113.8', 'Origin': f'http://127.0.0.1:{server.server_port}', 'Content-Type': 'application/json'}
+        if cookie:
+          headers['Cookie'] = cookie
+        try:
+          connection.request('GET' if payload is None else 'POST', path, None if payload is None else json.dumps(payload), headers)
+          response = connection.getresponse()
+          return response.status, json.loads(response.read()), dict(response.getheaders())
+        finally:
+          connection.close()
+      try:
+        with patch.object(intense_logging, 'FLAG_PATH', str(flag)):
+          self.assertEqual(request('/api/developer/intense-logging')[0], 401)
+          self.assertEqual(request('/api/developer/intense-logging', {'enabled': True})[0], 401)
+          self.assertFalse(flag.exists())
+          code, _, headers = request('/api/auth/login', {'password': 'password123'})
+          self.assertEqual(code, 200)
+          cookie = headers['Set-Cookie'].split(';', 1)[0]
+          self.assertEqual(request('/api/developer/intense-logging', cookie=cookie)[:2], (200, {'enabled': False}))
+          self.assertEqual(request('/api/developer/intense-logging', {'enabled': 'yes'}, cookie)[0], 400)
+          self.assertEqual(request('/api/developer/intense-logging', {'enabled': True}, cookie)[:2], (200, {'enabled': True}))
+          self.assertTrue(flag.exists())
+          self.assertEqual(request('/api/developer/intense-logging', cookie=cookie)[:2], (200, {'enabled': True}))
+          self.assertEqual(request('/api/developer/intense-logging', {'enabled': False}, cookie)[:2], (200, {'enabled': False}))
+          self.assertFalse(flag.exists())
+      finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(2)
+
+
 class TestNativeProviderCallbacks(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
