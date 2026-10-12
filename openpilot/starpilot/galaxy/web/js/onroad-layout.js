@@ -136,19 +136,19 @@ let makerPagesOpen = 0
 // Screen pixels a pointer may wobble before a press on a preview widget becomes a drag.
 const DRAG_SLOP = 6
 
-// Android Auto's own border switches; the comma screen keeps its C4 settings.
-const PROJECTION_BORDERS = ["blindSpotBorder", "signalBorder"]
+// Android Auto display switches, independent of the comma screen's preferences.
+const PROJECTION_DISPLAY_SWITCHES = ["blindSpotBorder", "signalBorder", "blindSpotCamera", "hidePersonalityAlerts", "wheelPedalFeedback"]
 
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_BORDERS.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_DISPLAY_SWITCHES.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
     (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
     (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
     (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
     (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
     (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
-    PROJECTION_BORDERS.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
+    PROJECTION_DISPLAY_SWITCHES.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
     !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
     !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
@@ -544,7 +544,7 @@ export const OnroadLayoutPage = {
       status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false,
-      aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, barStuck: false, openColor: null, preview: { status: "idle", error: "", url: null },
+      aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, stuck: { leaveBar: false, pinned: false, sections: false }, openColor: null, preview: { status: "idle", error: "", url: null },
       hiddenPreviewWidgets: loadPreviewVisibility(props.projection), history: { undo: [], redo: [], group: null }
     })
     let deferred = null
@@ -624,6 +624,9 @@ export const OnroadLayoutPage = {
     canSavePending() { return this.saveAvailable && !this.busy },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
+    projectionHasPipWidget() {
+      return ["pip_left", "pip_right"].some(id => this.state.draft?.layouts?.large?.[id]?.enabled === true)
+    },
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
     layerWidgets() {
       return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
@@ -755,12 +758,14 @@ export const OnroadLayoutPage = {
         for (const [name, ref] of [["--layout-bar-h", "leaveBar"], ["--layout-pin-h", "pinned"]])
           if (this.$refs[ref]) this.$el.style.setProperty(name, this.$refs[ref].getBoundingClientRect().height + "px")
       })
-      // Once the save bar pins under the app bar, it also hides the editor scrolling up behind the app bar.
+      // Page-colored fills only appear while a piece is actually pinned, so they never show over the backdrop otherwise.
       if (!this._onPinScroll) {
         this._onPinScroll = () => {
-          const bar = this.$refs.leaveBar
-          const stuck = !!bar && bar.getBoundingClientRect().top <= (parseFloat(getComputedStyle(bar).top) || 0) + 1
-          if (this.state.barStuck !== stuck) this.state.barStuck = stuck
+          for (const ref of ["leaveBar", "pinned", "sections"]) {
+            const element = this.$refs[ref], style = element && getComputedStyle(element)
+            const stuck = style?.position === "sticky" && element.getBoundingClientRect().top <= (parseFloat(style.top) || 0) + 1
+            if (this.state.stuck[ref] !== stuck) this.state.stuck[ref] = stuck
+          }
         }
         window.addEventListener("scroll", this._onPinScroll, { passive: true, capture: true })
         this._onPinScroll()
@@ -1034,12 +1039,13 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = "Save to apply the camera effect on Android Auto."
     },
-    setProjectionBorder(key, value) {
-      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag || !PROJECTION_BORDERS.includes(key)) return
+    setProjectionDisplay(key, value) {
+      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag || !PROJECTION_DISPLAY_SWITCHES.includes(key)) return
+      if (key === "blindSpotCamera" && !this.projectionHasPipWidget) return
       const before = clone(this.state.draft)
       this.state.draft[key] = value === "On"
       this.recordChange(before)
-      this.state.notice = "Save to apply the border on Android Auto."
+      this.state.notice = "Save to apply the screen options on Android Auto."
     },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
@@ -1373,7 +1379,7 @@ export const OnroadLayoutPage = {
       <p v-if="projection && state.data?.reason" class="gx-note">{{ state.data.reason }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
-        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt, 'is-stuck': state.barStuck}" :inert="busy">
+        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt, 'is-stuck': state.stuck.leaveBar}" :inert="busy">
           <span role="status" :class="{'is-dirty': dirty && !inlineLeavePrompt && state.status !== 'saving'}">{{ inlineLeavePrompt ? (pendingLeave ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?') : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved' : state.notice || 'Saved' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
@@ -1399,7 +1405,7 @@ export const OnroadLayoutPage = {
         <template v-if="state.data && state.draft">
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
           <div class="gx-layout__workspace" :inert="busy">
-            <section ref="pinned" class="gx-card gx-layout__preview-card" aria-label="Driving screen preview" :style="{'--layout-ratio': profile.width / profile.height}">
+            <section ref="pinned" class="gx-card gx-layout__preview-card" :class="{'is-stuck': state.stuck.pinned}" aria-label="Driving screen preview" :style="{'--layout-ratio': profile.width / profile.height}">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
               <div class="gx-layout__preview-bar">
                 <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
@@ -1491,11 +1497,11 @@ export const OnroadLayoutPage = {
               <p v-if="state.placementError" class="gx-note" role="status">{{ state.placementError }}</p>
             </section>
             <section class="gx-card gx-layout__inspector" aria-label="Widget placement" @focusin="revealField">
-              <nav class="gx-layout__switcher gx-layout__sections gx-settings-tabs" aria-label="Editor sections">
+              <nav ref="sections" class="gx-layout__switcher gx-layout__sections gx-settings-tabs" :class="{'is-stuck': state.stuck.sections}" aria-label="Editor sections">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'widgets'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'widgets'">Widgets</button>
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'"><span>Edit<span class="gx-layout__long"> widget</span></span></button>
                 <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'"><span>Road<span class="gx-layout__long"> colors</span></span></button>
-                <button v-if="projection || displayGroups.length" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'display'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'display'">Display</button>
+                <button v-if="projection || displayGroups.length" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'display'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'display'">Options</button>
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
               <div ref="widgetsHelp" class="gx-layout__subhead gx-layout__help-anchor"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span>
@@ -1565,6 +1571,8 @@ export const OnroadLayoutPage = {
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
                 <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
+                <label v-if="projection && selectedWidget.kind === 'steering_wheel'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.wheelPedalFeedback === true"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setProjectionDisplay('wheelPedalFeedback', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
                 <label v-if="!projection && selectedWidget.kind === 'steering_wheel' && displayRow('ShowBrakeStatus')" class="gx-layout__clock-format"><input type="checkbox" :checked="displayValue('ShowBrakeStatus') === 'On'"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('ShowBrakeStatus'))" @change="setDisplay('ShowBrakeStatus', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
                 <div v-if="!projection && selectedWidget.kind === 'model_confidence' && displayRow('StockConfidenceBallWidget')" class="gx-layout__favorite-display">
@@ -1655,18 +1663,24 @@ export const OnroadLayoutPage = {
                 </div></div>
                 <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
               </section>
-            <section v-if="projection" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Android Auto display">
+            <section v-if="projection" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Android Auto screen options">
+              <div class="gx-layout__subhead"><h4>Android Auto screen options</h4></div>
+              <p class="gx-note">Only the Android Auto screen uses these. The comma screen has its own options on the Comma tab. Save to apply.</p>
+              <h5 class="gx-layout__display-group">Alerts and borders</h5>
+              <GalaxySettingRow :row="switchRow('Hide Personality Alerts', state.draft.hidePersonalityAlerts === true)" :index="0"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('hidePersonalityAlerts', value)" />
+              <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('blindSpotBorder', value)" />
+              <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('signalBorder', value)" />
+              <h5 class="gx-layout__display-group">Camera</h5>
               <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
-              <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
-                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('blindSpotBorder', value)" />
-              <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
-                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('signalBorder', value)" />
-              <p class="gx-note">Gamma trial: the large comma UI's road-camera color effect (not shown in the preview). Borders are separate from the comma screen's C4 settings. Save to apply.</p>
+              <p class="gx-note">Gamma trial: the large comma UI's road-camera color effect (not shown in the preview).</p>
             </section>
-              <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Display options">
-                <div class="gx-layout__subhead"><h4>Display options</h4></div>
-                <p class="gx-note">These apply to the whole driving screen on both layouts. Save changes to apply them.</p>
+              <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Comma screen options">
+                <div class="gx-layout__subhead"><h4>Comma screen options</h4></div>
+                <p class="gx-note">Only the comma screen uses these, in both the Big and Small layouts unless marked. Android Auto has its own options on the Android Auto tab. Save to apply.</p>
                 <template v-for="group in displayGroups" :key="group.name">
                   <h5 class="gx-layout__display-group">{{ group.name }}</h5>
                   <GalaxySettingRow v-for="(row, index) in group.rows" :key="row.key" :row="displaySettingRow(row)" :index="index"
@@ -1677,10 +1691,10 @@ export const OnroadLayoutPage = {
           </div>
         </template>
       </template>
-      <GxDialog v-if="state.removeConfirm && profile" labelledby="gx-layout-remove-title" describedby="gx-layout-remove-body" alert @close="cancelRemove">
-        <div><h3 id="gx-layout-remove-title">Remove {{ profile.widgets[state.removeConfirm]?.label }}?</h3>
+      <GxDialog v-if="state.removeConfirm && profile" class="gx-layout__remove-dialog" labelledby="gx-layout-remove-title" describedby="gx-layout-remove-body" alert @close="cancelRemove">
+        <div class="gx-layout__leave-copy"><h3 id="gx-layout-remove-title">Remove {{ profile.widgets[state.removeConfirm]?.label }}?</h3>
           <p id="gx-layout-remove-body">Remove this widget from the {{ projection ? 'Android Auto' : state.profile === 'large' ? 'Big' : 'Small' }} layout? You can add it again from Inactive Widgets.</p></div>
-        <div class="gx-settings__controls">
+        <div class="gx-layout__remove-actions">
           <button type="button" class="gx-btn gx-btn--tonal" @click="cancelRemove">Cancel</button>
           <button type="button" class="gx-btn gx-btn--danger" @click="confirmRemove">Remove widget</button>
         </div>

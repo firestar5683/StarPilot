@@ -65,6 +65,7 @@ class TestProjectionLayoutOwner(unittest.TestCase):
     self.assertEqual(value['document']['canvas'], {'width': 2880, 'height': 1080})
     payload = self.payload()
     payload['document']['widgets']['current_speed']['x'] += 10
+    payload['document']['blindSpotCamera'] = True
     saved = self.owner.save(payload, session_valid=lambda: True)
     self.assertTrue(saved['valid'])
     self.assertEqual(saved['document'], payload['document'])

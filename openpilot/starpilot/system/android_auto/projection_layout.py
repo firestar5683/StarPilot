@@ -117,8 +117,22 @@ def layout_metadata_for_viewport(viewport):
   return profile
 
 
-# Android Auto's own border switches, separate from the comma screen's C4 settings.
-BORDER_DEFAULTS = {'blindSpotBorder': False, 'signalBorder': False}
+# Android Auto display switches, independent of the comma screen's preferences.
+DISPLAY_DEFAULTS = {'blindSpotBorder': False, 'signalBorder': False, 'blindSpotCamera': False,
+                    'hidePersonalityAlerts': False, 'wheelPedalFeedback': False}
+
+
+def projection_appearance(appearance, document):
+  """The comma's onroad appearance with every car-screen choice taken from the AA layout instead."""
+  from dataclasses import replace
+  from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
+  # The car screen always shows the road camera; the comma's camera choices stay on the comma.
+  return replace(appearance,
+                 show_blindspot_border=document.get('blindSpotBorder', False) is True,
+                 show_signal_border=document.get('signalBorder', False) is True,
+                 hide_personality_alerts=document.get('hidePersonalityAlerts', False) is True,
+                 wheel_pedal_feedback=document.get('wheelPedalFeedback', False) is True,
+                 camera_view=CameraViewChoice.STANDARD, driver_camera_on_reverse=False)
 
 
 def default_layout(screen):
@@ -128,7 +142,7 @@ def default_layout(screen):
 
 def default_layout_for_viewport(viewport):
   metadata = layout_metadata_for_viewport(viewport)
-  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, **BORDER_DEFAULTS, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, **DISPLAY_DEFAULTS, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 
@@ -163,7 +177,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     return validate_layout_for_viewport(result, viewport)
   fields = {'version', 'canvas', 'widgets'}
   if type(value) is dict:
-    fields |= {field for field in ('widgetOrder', 'clock24Hour', 'largeUiGammaTrial', *BORDER_DEFAULTS) if field in value}
+    fields |= {field for field in ('widgetOrder', 'clock24Hour', 'largeUiGammaTrial', *DISPLAY_DEFAULTS) if field in value}
   if (type(value) is not dict or set(value) != fields or
       type(value['version']) is not int or value['version'] not in (1, 2) or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
@@ -177,9 +191,9 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   if 'largeUiGammaTrial' in value and type(value['largeUiGammaTrial']) is not bool:
     raise ValueError('Invalid large UI gamma trial')
   result.setdefault('largeUiGammaTrial', False)
-  for field, default in BORDER_DEFAULTS.items():
+  for field, default in DISPLAY_DEFAULTS.items():
     if field in value and type(value[field]) is not bool:
-      raise ValueError('Invalid projection border setting')
+      raise ValueError('Invalid projection display setting')
     result.setdefault(field, default)
   for key in set(metadata['widgets']) - set(value['widgets']):
     result['widgets'][key] = dict(metadata['widgets'][key]['default'])

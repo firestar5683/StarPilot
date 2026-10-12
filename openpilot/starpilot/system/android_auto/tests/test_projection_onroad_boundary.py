@@ -174,7 +174,7 @@ class TestProjectionOnroad(unittest.TestCase):
     native.pip_widgets = ('pip_left', 'pip_right')
     native.placement = lambda _doc, profile, key: layouts[key] if profile == 'large' else None
     native.widget_size = lambda *_: (600, 600)
-    view = projection.ProjectionOnroad(dependencies=native)
+    view = projection.ProjectionOnroad(dependencies=native, customization={'blindSpotCamera': True, 'widgets': {}})
     self.assertEqual(view.onroad.pip_layer, view._pip_layer)
 
     view._pip_layer('content', SimpleNamespace(customization={}))
@@ -184,6 +184,7 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertEqual(view.onroad.alert.text_only_alert_names, projection.BUBBLE_REDUNDANT_ALERTS)
 
     saved.enabled = False
+    view.apply_layout({'blindSpotCamera': False, 'widgets': {}})
     view._pip_read_ns = None
     view._pip_layer('content', SimpleNamespace(customization={}))
     self.assertEqual(len(calls), 1)
@@ -194,6 +195,78 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertEqual(events[before:before + 2], ['pip_off', 'draw'])
     view.close()
     self.assertIn('pip_closed', events)
+
+  def test_blind_spot_camera_uses_its_own_switch_fresh_signals_and_enabled_sides(self):
+    from openpilot.starpilot.ui.pip_preferences import DEFAULT_MASK
+    from openpilot.starpilot.ui.pip_sidecam import Mask, Signals, selected_sides
+
+    native, events = self.dependencies()
+    shown = []
+
+    class Renderer:
+      def __init__(self, _shape): pass
+      def render(self, _rect, mask, signals, **kwargs):
+        sides = selected_sides(mask, signals, started=True, enabled=kwargs['enabled'],
+                               on_blinker=kwargs['on_blinker'], on_bsm=kwargs['on_bsm'])
+        shown.append(tuple(side for side in sides if side in kwargs['placements']))
+        return 'rendered' if shown[-1] else 'inactive'
+      def deactivate(self): events.append('pip_off')
+      def close(self): pass
+
+    # The Android Auto switch works even with the comma camera switches off.
+    saved = SimpleNamespace(enabled=False, mask=Mask.parse(DEFAULT_MASK), invert=False, on_blinker=False, on_bsm=False)
+    car = SimpleNamespace(leftBlinker=False, rightBlinker=False, leftBlindspot=True, rightBlindspot=False)
+    layouts = {key: {'x': 10, 'y': 20, 'enabled': True} for key in ('pip_left', 'pip_right')}
+    native.ui_state.params = object()
+    native.display_message = lambda *_a, **_k: car
+    native.pip_renderer = Renderer
+    native.read_pip = lambda _params: saved
+    native.pip_signals = Signals
+    native.pip_rect = lambda *values: values
+    native.pip_widgets = ('pip_left', 'pip_right')
+    native.placement = lambda _doc, _profile, key: layouts[key]
+    native.widget_size = lambda *_: (600, 600)
+    view = projection.ProjectionOnroad(dependencies=native, customization={'blindSpotCamera': True, 'widgets': {}})
+    self.addCleanup(view.close)
+    state = SimpleNamespace(customization={})
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], ('left',))
+    car.leftBlindspot, car.rightBlindspot = False, True
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], ('right',))
+    layouts['pip_right']['enabled'] = False
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], ())
+    layouts['pip_right']['enabled'] = True
+    car.leftBlindspot = True
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], ('right', 'left'))
+    native.display_message = lambda *_a, **_k: None
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], (), 'stale car state cannot keep a popup visible')
+    native.display_message = lambda *_a, **_k: car
+    car.leftBlindspot, car.rightBlindspot, car.leftBlinker = False, False, True
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], (), 'the blind-spot switch alone does not enable blinker popups')
+    saved.enabled, saved.on_bsm = True, True
+    car.leftBlindspot = True
+    view.apply_layout({'blindSpotCamera': False, 'widgets': {}})
+    before = len(shown)
+    view._pip_layer('content', state)
+    self.assertEqual(len(shown), before, 'comma blind-spot settings cannot override Android Auto off')
+    self.assertEqual(events[-1], 'pip_off')
+    view.apply_layout({'blindSpotCamera': True, 'widgets': {}})
+    saved.mask = None
+    view._pip_layer('content', state)
+    self.assertEqual(len(shown), before, 'invalid camera alignment cannot be rendered')
+    self.assertEqual(events[-1], 'pip_off')
+    saved.mask = Mask.parse(DEFAULT_MASK)
+    view._pip_layer('content', state)
+    self.assertEqual(shown[-1], ('left',))
+    before = len(events)
+    view.render()  # Ending a drive releases the camera even with the AA switch on.
+    self.assertEqual(events[before:before + 2], ['pip_off', 'draw'])
+    self.assertEqual(view.onroad.alert.text_only_alert_names, frozenset())
 
   def test_driver_monitor_holds_a_joint_display_observation_across_brief_service_skew(self):
     native, _ = self.dependencies()

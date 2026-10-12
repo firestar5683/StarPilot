@@ -16,8 +16,8 @@ from openpilot.starpilot.ui.presentation import Profile
 # Display preferences edited with the layout but saved in their own params. Groups order the editor.
 DISPLAY_GROUPS = {
   "ShowBrakeStatus": "widget", "StockConfidenceBallWidget": "widget",
-  "HideLeadMarker": "Lead car", "LeadInfo": "Lead car",
-  "CameraView": "Camera", "DriverCamera": "Camera",
+  "HideLeadMarker": "Lead car (Small layout)", "LeadInfo": "Lead car (Small layout)",
+  "CameraView": "Camera (Small layout)", "DriverCamera": "Camera (Small layout)",
   "HidePersonalityAlerts": "Alerts and borders", "SignalMetrics": "Alerts and borders", "BlindSpotMetrics": "Alerts and borders",
 }
 

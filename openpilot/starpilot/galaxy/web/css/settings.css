@@ -489,6 +489,12 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
   .gx-layout__leave-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Widget removal uses the same roomy copy, with Cancel and Remove as two even buttons. */
+.gx-card.gx-layout__remove-dialog { width: min(calc(100% - 48px), 480px); padding: 28px; gap: 24px; }
+.gx-layout__remove-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.gx-layout__remove-actions .gx-btn { min-height: 48px; padding: 12px 16px; }
+@media (max-width: 600px) { .gx-card.gx-layout__remove-dialog { width: calc(100% - 32px); padding: 24px; } }
+
 /* Compact editor chrome: one target row, one-line save bar, overflow menu, accordion colors. */
 .gx-layout { --layout-pin-max: 34vh; --layout-pin-max: 34svh; --layout-solid: linear-gradient(var(--surface-container), var(--surface-container)), var(--background); }
 .gx-layout__targets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
@@ -617,22 +623,23 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
   .gx-layout__savebar:not(.gx-layout__savebar--leave) > .gx-btn.gx-layout__save:last-child { flex: 0 0 auto; width: auto; padding-inline: 14px; }
 }
 
-/* Pinned pieces keep the same 12px gap as the unpinned layout. A page-colored strip fills each gap
-   and the slivers beside the rounded corners, so the controls never show through while scrolling. */
+/* Pinned pieces keep the same 12px gap as the unpinned layout. While a piece is pinned, a page-colored strip fills
+   the gap below it and the slivers beside its rounded corners, so the controls never show through while scrolling.
+   Unpinned pieces get no fill, so nothing dark sits over the page backdrop. */
 .gx-layout__savebar { --pin-r: var(--radius-md); }
 .gx-layout__preview-card { --pin-r: var(--radius-lg); }
 @container (max-width: 1040px) {
   .gx-layout__preview-card { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + 12px); overflow: visible; }
   .gx-layout__sections { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + 24px + var(--layout-pin-h, 0px)); }
-  .gx-layout__savebar::before, .gx-layout__savebar::after, .gx-layout__preview-card::before, .gx-layout__preview-card::after {
+  .gx-layout__preview-card.is-stuck::before, .gx-layout__preview-card.is-stuck::after {
     content: ""; position: absolute; left: -1px; right: -1px; pointer-events: none; --pin-bg: var(--background); }
-  .gx-layout__savebar::after, .gx-layout__preview-card::after {
+  .gx-layout__preview-card.is-stuck::after {
     top: calc(100% + 1px - var(--pin-r)); height: calc(var(--pin-r) + 12px);
     background:
       radial-gradient(circle at 100% 0, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 0 0 / var(--pin-r) var(--pin-r) no-repeat,
       radial-gradient(circle at 0 0, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 100% 0 / var(--pin-r) var(--pin-r) no-repeat,
       linear-gradient(var(--pin-bg), var(--pin-bg)) 0 100% / 100% 12px no-repeat; }
-  .gx-layout__savebar::before, .gx-layout__preview-card::before {
+  .gx-layout__preview-card.is-stuck::before {
     top: -1px; height: var(--pin-r);
     background:
       radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 0 0 / var(--pin-r) var(--pin-r) no-repeat,
@@ -640,14 +647,16 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 }
 @media (orientation: landscape) and (max-height: 560px) {
   .gx-layout__sections { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + 12px); }
-  .gx-layout__preview-card::after { content: none; }
+  .gx-layout__preview-card.is-stuck::after { content: none; }
 }
 
-/* Pinned editor tabs carry the panel's rounded top edge; page-colored tiles fill outside the corners. */
+/* Editor tabs carry the panel's rounded top edge. Once pinned, page-colored tiles fill outside the top corners
+   and the bottom corners round too, so the pinned tabs read as one rounded bar over the scrolling controls. */
 @container (max-width: 1040px) {
   .gx-layout__inspector { overflow: visible; }
-  .gx-layout__sections { --pin-r: var(--radius-lg); margin: -15px -15px 0; padding: 10px 15px; border: 1px solid var(--glass-border); border-radius: var(--pin-r) var(--pin-r) 0 0; }
-  .gx-layout__sections::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: var(--pin-r); pointer-events: none;
+  .gx-layout__sections { --pin-r: var(--radius-lg); margin: -15px -15px 0; padding: 10px 15px; border: 1px solid var(--glass-border); border-radius: var(--pin-r) var(--pin-r) 0 0; transition: border-radius var(--motion-fast); }
+  .gx-layout__sections.is-stuck { border-radius: var(--pin-r); }
+  .gx-layout__sections.is-stuck::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: var(--pin-r); pointer-events: none;
     background:
       radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) 0 0 / var(--pin-r) var(--pin-r) no-repeat,
       radial-gradient(circle at 0 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) 100% 0 / var(--pin-r) var(--pin-r) no-repeat; }
@@ -657,16 +666,26 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 .gx-layout__preview-card > .gx-layout__stage { position: relative; margin-inline: 0; min-width: 0; }
 .gx-layout__stage-chip { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #b799ff88; border-radius: var(--radius-full); background: rgba(22, 18, 31, .82); color: #d8c8ff; font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; pointer-events: none; }
 
-/* A pinned save bar also covers the strip behind the app bar, so the editor never scrolls up behind the search. */
+/* On narrow editors a pinned save bar also covers the strip behind the app bar, so the editor never scrolls up
+   behind the search. The fill stays inside the editor column and follows the bar's rounded corners. Its outline is
+   drawn above that fill, so the top edge and corners stay visible. Wide editors skip the fill: only the save bar pins there. */
 .gx-layout__savebar { --pin-r: var(--radius-md); }
-.gx-layout__savebar.is-stuck::before {
-  content: ""; position: absolute; left: -24px; right: -24px; top: calc(-1px - var(--layout-sticky-top, 0px)); height: calc(var(--layout-sticky-top, 0px) + var(--pin-r)); pointer-events: none;
-  background:
-    radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) 23px 100% / var(--pin-r) var(--pin-r) no-repeat,
-    radial-gradient(circle at 0 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) calc(100% - 23px) 100% / var(--pin-r) var(--pin-r) no-repeat,
-    linear-gradient(var(--background), var(--background)) 0 0 / 100% calc(100% - var(--pin-r)) no-repeat,
-    linear-gradient(var(--background), var(--background)) 0 100% / 23px var(--pin-r) no-repeat,
-    linear-gradient(var(--background), var(--background)) 100% 100% / 23px var(--pin-r) no-repeat; }
+@container (max-width: 1040px) {
+  .gx-layout__savebar.is-stuck { --pin-line: var(--glass-border); --pin-shadow: var(--elev-1); border-color: transparent; box-shadow: none; }
+  .gx-layout__savebar.gx-layout__savebar--leave.is-stuck { --pin-line: var(--primary); --pin-shadow: 0 0 0 1px var(--primary-glow), 0 0 24px var(--primary-glow); }
+  .gx-layout__savebar.is-stuck::before {
+    content: ""; position: absolute; top: calc(-1px - var(--layout-sticky-top, 0px)); bottom: -13px; left: -1px; right: -1px; pointer-events: none;
+    background:
+      radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) left 0 top var(--layout-sticky-top, 0px) / var(--pin-r) var(--pin-r) no-repeat,
+      radial-gradient(circle at 0 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) right 0 top var(--layout-sticky-top, 0px) / var(--pin-r) var(--pin-r) no-repeat,
+      radial-gradient(circle at 100% 0, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) left 0 bottom 12px / var(--pin-r) var(--pin-r) no-repeat,
+      radial-gradient(circle at 0 0, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) right 0 bottom 12px / var(--pin-r) var(--pin-r) no-repeat,
+      linear-gradient(var(--background), var(--background)) 0 0 / 100% var(--layout-sticky-top, 0px) no-repeat,
+      linear-gradient(var(--background), var(--background)) 0 100% / 100% 12px no-repeat; }
+  .gx-layout__savebar.is-stuck::after {
+    content: ""; position: absolute; inset: -1px; pointer-events: none;
+    border: 1px solid var(--pin-line); border-radius: var(--pin-r); box-shadow: var(--pin-shadow); }
+}
 
 /* Selected switches and tabs stay lit on touch screens, where :hover sticks to the last tapped button. */
 .gx-layout .gx-settings-tabs > .gx-btn[aria-pressed="true"], .gx-layout .gx-layout__segment > .gx-btn[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
@@ -698,5 +717,3 @@ html.gx-maker-open, html.gx-maker-open body { touch-action: manipulation; }
 .gx-layout__inspector .gx-select__button { min-height: 40px; padding-block: 7px; }
 .gx-layout__display .gx-row .gx-select__button { min-height: 36px; padding-block: 5px; }
 .gx-layout__display .gx-row .gx-field { min-height: 0; padding-block: 0; }
-/* Maker pages give the app bar a solid backdrop, so nothing scrolls visibly behind the search. */
-html.gx-maker-open .gx-appbar { background: var(--background); }
