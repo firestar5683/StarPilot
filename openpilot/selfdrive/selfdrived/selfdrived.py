@@ -1337,8 +1337,9 @@ class SelfdriveD:
       axis_deferred = False
       if source_clock_scoped:
         final_ns = time.monotonic_ns()
-        if (qualified_ioniq6(self.CP) and (axis.lateralActive or axis.longitudinalActive) and
-            (not 0 < self.aol_car_state_log_ns <= final_ns or final_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS)):
+        if ((axis.lateralActive or axis.longitudinalActive) and
+            (not 0 < self.aol_car_state_log_ns <= final_ns or final_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS) and
+            qualified_ioniq6(self.CP)):
           if (source_context is not None and source_context[1] and
               self.defer_expired_axis_publication(CS, source_context[0])):
             # Serialization crossed the same source boundary. Retain only the
