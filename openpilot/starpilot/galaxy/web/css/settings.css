@@ -488,3 +488,215 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
   .gx-card.gx-layout__leave-dialog { width: calc(100% - 32px); padding: 24px; gap: 24px; }
   .gx-layout__leave-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Compact editor chrome: one target row, one-line save bar, overflow menu, accordion colors. */
+.gx-layout { --layout-pin-max: 34vh; --layout-pin-max: 34svh; --layout-solid: linear-gradient(var(--surface-container), var(--surface-container)), var(--background); }
+.gx-layout__targets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.gx-layout__segment { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--glass-border); border-radius: var(--radius-full); background: var(--surface-container); min-width: 0; }
+.gx-layout__segment > .gx-btn { min-height: 38px; padding: 6px 14px; border-radius: var(--radius-full); background: transparent; box-shadow: none; white-space: nowrap; }
+.gx-layout__segment > .gx-btn[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+.gx-layout__active::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.gx-layout__info { flex: none; color: var(--on-surface-variant); }
+.gx-layout .gx-settings__header { align-items: center; }
+.gx-layout .gx-settings__header h2 { margin: 0; }
+.gx-layout__info[aria-expanded="true"], .gx-layout__bar-toggle[aria-expanded="true"], .gx-layout__bar-toggle[aria-pressed="true"] { color: var(--primary); background: var(--primary-container); }
+.gx-layout__about { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); }
+
+
+.gx-layout__savebar > span.is-dirty::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--warning); vertical-align: middle; }
+.gx-layout__more { position: relative; flex: none; }
+.gx-layout__menu-scrim { position: fixed; inset: 0; z-index: 19; padding: 0; border: 0; background: transparent; cursor: default; }
+.gx-layout__menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: grid; gap: 2px; min-width: 240px; padding: 6px; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: linear-gradient(var(--surface-container-high), var(--surface-container-high)), var(--background); box-shadow: var(--elev-2); }
+.gx-layout__menu-item { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--on-surface); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.gx-layout__menu-item .gx-layout__action-icon { display: block; width: 20px; height: 20px; }
+.gx-layout__menu-item:hover:not(:disabled), .gx-layout__menu-item:focus-visible { background: var(--primary-container); }
+.gx-layout__menu-item:disabled { opacity: .45; cursor: default; }
+
+.gx-layout__preview-bar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gx-layout__preview-bar > .gx-layout__switcher { flex: 1; }
+.gx-layout__bar-toggle { flex: none; color: var(--on-surface-variant); }
+.gx-layout__tips { display: grid; gap: 10px; max-height: 30vh; overflow-y: auto; overscroll-behavior: contain; }
+.gx-layout__device-stop { position: absolute; top: 8px; right: 8px; z-index: 2; width: 36px; height: 36px; min-width: 36px; min-height: 36px; background: rgba(0, 0, 0, .6); color: #fff; }
+
+.gx-layout__picker-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.gx-layout__coordinates { grid-template-columns: repeat(auto-fit, minmax(68px, 1fr)); gap: 8px; }
+@media (hover: none) { .gx-layout__keys-note { display: none; } }
+
+.gx-layout__tray { display: grid; gap: 10px; }
+.gx-layout__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.gx-layout__chips .gx-layout__tray-item { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-full); }
+.gx-layout__chips .gx-layout__drag-handle { flex: 0 0 34px; min-height: 40px; }
+.gx-layout__chips .gx-layout__inactive-name { flex: none; white-space: nowrap; font-size: var(--fs-sm); }
+.gx-layout__chip-add { flex: none; width: 40px; height: 40px; min-width: 40px; min-height: 40px; color: var(--primary); }
+
+.gx-layout__inspector .gx-layout__palette { grid-template-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); overflow: hidden; }
+.gx-layout__palette > .gx-layout__color { gap: 0; }
+.gx-layout__palette > .gx-layout__color + .gx-layout__color { border-top: 1px solid var(--glass-border); }
+.gx-layout__color.is-open { background: var(--primary-container); }
+.gx-layout__color-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 6px 12px; border: 0; background: transparent; color: var(--on-surface); font: inherit; text-align: left; cursor: pointer; }
+.gx-layout__swatch { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--glass-border);
+  background: linear-gradient(var(--swatch), var(--swatch)), repeating-conic-gradient(#8886 0 25%, transparent 0 50%) 0 0 / 10px 10px; }
+.gx-layout__color-name { flex: 1; min-width: 0; font-weight: var(--fw-bold); overflow-wrap: anywhere; }
+.gx-layout__color-value, .gx-layout__color-alpha { flex: none; color: var(--on-surface-variant); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.gx-layout__color-alpha { min-width: 3.2em; text-align: right; }
+.gx-layout__color-row > .bi { flex: none; color: var(--on-surface-variant); transition: rotate var(--motion-fast); }
+.gx-layout__color.is-open .gx-layout__color-row > .bi { rotate: 180deg; }
+.gx-layout__color-editor { display: grid; gap: 8px; padding: 2px 12px 14px; }
+.gx-layout__color-editor > label { color: var(--on-surface-variant); font-size: var(--fs-sm); }
+@media (prefers-reduced-motion: reduce) { .gx-layout__color-row > .bi { transition: none; } }
+
+/* Narrow editors pin the save bar, preview and editor tabs; controls scroll underneath. */
+@container (max-width: 1040px) {
+  .gx-layout__inspector { overflow: clip; }
+  .gx-layout__preview-card { position: sticky; top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px)); z-index: 6; padding: 10px; gap: 8px; margin-bottom: 0; background: var(--layout-solid); }
+  .gx-layout__preview-card > .gx-layout__subhead, .gx-layout__device > .gx-layout__subhead { display: none; }
+  .gx-layout__preview-card .gx-layout__preview, .gx-layout__device-frame { width: 100%; max-width: calc(var(--layout-pin-max) * var(--layout-ratio, 2)); margin-inline: auto; }
+  .gx-layout__device { gap: 8px; }
+  .gx-layout__sections { position: sticky; top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + var(--layout-pin-h, 0px)); z-index: 5;
+    margin: -14px -14px 0; padding: 10px 14px; background: var(--layout-solid); border-bottom: 1px solid var(--glass-border); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .gx-layout__widget-list { gap: 6px; }
+  .gx-layout__layer { padding: 2px; }
+}
+@container (max-width: 850px) {
+  .gx-layout__savebar:not(.gx-layout__savebar--leave) > span { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gx-layout__savebar:not(.gx-layout__savebar--leave) { gap: 4px; }
+  .gx-layout__savebar .gx-layout__more > .gx-btn { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 10px; display: flex; align-items: center; justify-content: center; }
+  .gx-layout__savebar > .gx-btn.gx-layout__save:last-child { flex: 0 0 auto; width: auto; padding-inline: 16px; }
+  .gx-layout__savebar .gx-layout__save .gx-layout__save-label { display: inline; }
+  .gx-layout__savebar .gx-layout__save .gx-layout__action-icon { display: none; }
+}
+@container (max-width: 560px) {
+  .gx-layout__long { display: none; }
+  .gx-layout__switcher .gx-btn { padding-inline: 8px; }
+}
+
+/* Landscape phones: preview and controls side by side, preview sized to the short screen. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .gx-layout { max-width: none; --layout-pin-max: calc(100vh - var(--layout-sticky-top, 0px) - var(--layout-bar-h, 60px) - 76px); --layout-pin-max: calc(100svh - var(--layout-sticky-top, 0px) - var(--layout-bar-h, 60px) - 76px); }
+  .gx-layout__workspace { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+  .gx-layout__preview-card .gx-layout__preview, .gx-layout__device-frame { max-width: calc(var(--layout-pin-max) * var(--layout-ratio, 2)); margin-inline: auto; }
+  .gx-layout__sections { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px)); }
+}
+
+/* Widget list help pops over the list; widget rows and Edit controls run tighter. */
+.gx-layout__help-anchor { position: relative; flex-wrap: nowrap; gap: 8px; }
+.gx-layout__help-anchor > .gx-layout__info { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+.gx-layout__popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 4; display: grid; gap: 6px; width: min(300px, 100%); padding: 12px 14px; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: linear-gradient(var(--surface-container-high), var(--surface-container-high)), var(--background); box-shadow: var(--elev-2); color: var(--on-surface); font-size: var(--fs-sm); line-height: 1.45; cursor: pointer; }
+.gx-layout__inspector .gx-layout__panel { gap: 10px; }
+.gx-layout__widget-list { gap: 4px; }
+.gx-layout__layer { gap: 0; padding: 0 2px; }
+.gx-layout__layer-name { min-height: 40px; padding: 4px 6px; }
+.gx-layout__layer .gx-icon-btn { width: 40px; height: 40px; min-width: 40px; min-height: 40px; }
+.gx-layout__required { padding: 4px 10px; }
+.gx-layout__position { gap: 8px; }
+.gx-layout__widget-picker { gap: 4px; }
+.gx-layout__coordinates { gap: 6px; }
+.gx-layout__coordinates label { gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.gx-layout__inspector .gx-field { min-height: 40px; padding-block: 7px; }
+.gx-layout__inspector .gx-layout__colors { gap: 10px; }
+.gx-layout__color-row { min-height: 44px; padding-block: 4px; }
+.gx-layout__swatch { width: 24px; height: 24px; border-radius: 7px; }
+.gx-layout__color-editor { gap: 6px; padding-bottom: 10px; }
+.gx-layout__color-values input[type="color"] { height: 40px; }
+.gx-layout__color input[type="range"] { min-height: 28px; }
+.gx-layout__clock-format { min-height: 40px; }
+.gx-layout .gx-layout__reset { min-height: 34px; padding: 6px 12px; }
+.gx-layout__inspector .gx-layout__colors > .gx-layout__subhead { flex-wrap: nowrap; }
+.gx-layout__inspector .gx-layout__colors > .gx-layout__subhead > .gx-btn { flex: none; min-height: 34px; padding: 6px 14px; }
+
+/* Slimmer preview switcher and save bar on narrow editors. */
+@container (max-width: 1040px) {
+  .gx-layout__preview-card { padding: 8px; gap: 6px; }
+  .gx-layout__preview-bar .gx-layout__switcher .gx-btn { min-height: 36px; padding-block: 6px; }
+  .gx-layout__preview-bar .gx-layout__bar-toggle { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+}
+@container (max-width: 850px) {
+  .gx-layout__savebar:not(.gx-layout__savebar--leave) { padding: 6px 8px; }
+  .gx-layout__savebar:not(.gx-layout__savebar--leave) > .gx-btn, .gx-layout__savebar:not(.gx-layout__savebar--leave) > .gx-btn:last-child,
+  .gx-layout__savebar .gx-layout__more > .gx-btn { flex-basis: 40px; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 8px; }
+  .gx-layout__savebar:not(.gx-layout__savebar--leave) > .gx-btn.gx-layout__save:last-child { flex: 0 0 auto; width: auto; padding-inline: 14px; }
+}
+
+/* Pinned pieces keep the same 12px gap as the unpinned layout. A page-colored strip fills each gap
+   and the slivers beside the rounded corners, so the controls never show through while scrolling. */
+.gx-layout__savebar { --pin-r: var(--radius-md); }
+.gx-layout__preview-card { --pin-r: var(--radius-lg); }
+@container (max-width: 1040px) {
+  .gx-layout__preview-card { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + 12px); overflow: visible; }
+  .gx-layout__sections { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + 24px + var(--layout-pin-h, 0px)); }
+  .gx-layout__savebar::before, .gx-layout__savebar::after, .gx-layout__preview-card::before, .gx-layout__preview-card::after {
+    content: ""; position: absolute; left: -1px; right: -1px; pointer-events: none; --pin-bg: var(--background); }
+  .gx-layout__savebar::after, .gx-layout__preview-card::after {
+    top: calc(100% + 1px - var(--pin-r)); height: calc(var(--pin-r) + 12px);
+    background:
+      radial-gradient(circle at 100% 0, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 0 0 / var(--pin-r) var(--pin-r) no-repeat,
+      radial-gradient(circle at 0 0, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 100% 0 / var(--pin-r) var(--pin-r) no-repeat,
+      linear-gradient(var(--pin-bg), var(--pin-bg)) 0 100% / 100% 12px no-repeat; }
+  .gx-layout__savebar::before, .gx-layout__preview-card::before {
+    top: -1px; height: var(--pin-r);
+    background:
+      radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 0 0 / var(--pin-r) var(--pin-r) no-repeat,
+      radial-gradient(circle at 0 100%, transparent calc(var(--pin-r) - .5px), var(--pin-bg) var(--pin-r)) 100% 0 / var(--pin-r) var(--pin-r) no-repeat; }
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .gx-layout__sections { top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px) + 12px); }
+  .gx-layout__preview-card::after { content: none; }
+}
+
+/* Pinned editor tabs carry the panel's rounded top edge; page-colored tiles fill outside the corners. */
+@container (max-width: 1040px) {
+  .gx-layout__inspector { overflow: visible; }
+  .gx-layout__sections { --pin-r: var(--radius-lg); margin: -15px -15px 0; padding: 10px 15px; border: 1px solid var(--glass-border); border-radius: var(--pin-r) var(--pin-r) 0 0; }
+  .gx-layout__sections::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: var(--pin-r); pointer-events: none;
+    background:
+      radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) 0 0 / var(--pin-r) var(--pin-r) no-repeat,
+      radial-gradient(circle at 0 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) 100% 0 / var(--pin-r) var(--pin-r) no-repeat; }
+}
+
+/* Tap-area overlay label sits on the preview while the grid toggle is on. */
+.gx-layout__preview-card > .gx-layout__stage { position: relative; margin-inline: 0; min-width: 0; }
+.gx-layout__stage-chip { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #b799ff88; border-radius: var(--radius-full); background: rgba(22, 18, 31, .82); color: #d8c8ff; font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; pointer-events: none; }
+
+/* A pinned save bar also covers the strip behind the app bar, so the editor never scrolls up behind the search. */
+.gx-layout__savebar { --pin-r: var(--radius-md); }
+.gx-layout__savebar.is-stuck::before {
+  content: ""; position: absolute; left: -24px; right: -24px; top: calc(-1px - var(--layout-sticky-top, 0px)); height: calc(var(--layout-sticky-top, 0px) + var(--pin-r)); pointer-events: none;
+  background:
+    radial-gradient(circle at 100% 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) 23px 100% / var(--pin-r) var(--pin-r) no-repeat,
+    radial-gradient(circle at 0 100%, transparent calc(var(--pin-r) - .5px), var(--background) var(--pin-r)) calc(100% - 23px) 100% / var(--pin-r) var(--pin-r) no-repeat,
+    linear-gradient(var(--background), var(--background)) 0 0 / 100% calc(100% - var(--pin-r)) no-repeat,
+    linear-gradient(var(--background), var(--background)) 0 100% / 23px var(--pin-r) no-repeat,
+    linear-gradient(var(--background), var(--background)) 100% 100% / 23px var(--pin-r) no-repeat; }
+
+/* Selected switches and tabs stay lit on touch screens, where :hover sticks to the last tapped button. */
+.gx-layout .gx-settings-tabs > .gx-btn[aria-pressed="true"], .gx-layout .gx-layout__segment > .gx-btn[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+@media (hover: none) {
+  .gx-layout .gx-settings-tabs > .gx-btn--tonal:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--primary-container); }
+  .gx-layout .gx-layout__segment > .gx-btn--tonal:hover:not(:disabled):not([aria-pressed="true"]) { background: transparent; }
+}
+/* Dragging rows, chips and preview widgets never starts a text selection or the long-press menu. */
+.gx-layout__widget-list, .gx-layout__chips, .gx-layout__preview, .gx-layout__drag-ghost { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.gx-layout__row-grip { touch-action: none; }
+
+/* iPhone zooms into any field under 16px and leaves the page zoomed; editor fields stay at 16px. */
+.gx-layout input:is([type="text"], [type="number"], [type="search"], :not([type])), .gx-layout select, .gx-layout textarea { font-size: max(16px, 1em); }
+
+/* No double-tap zoom while editing; touch screens size widgets from Edit, so the tiny corner handle is hidden there. */
+.gx-layout { touch-action: manipulation; }
+@media (pointer: coarse) { .gx-layout__resize { display: none; } }
+.gx-layout__color { scroll-margin-bottom: 16px; }
+html.gx-maker-open, html.gx-maker-open body { touch-action: manipulation; }
+
+/* Display options: compact rows, small dropdowns and tight group headings. */
+.gx-layout__inspector .gx-layout__display { gap: 0; }
+.gx-layout__display > .gx-layout__subhead, .gx-layout__display > .gx-note { margin-bottom: 8px; }
+.gx-layout__display .gx-row { min-height: 48px; padding: 4px 4px; gap: 10px; }
+.gx-layout__display .gx-row .gx-field { min-height: 38px; padding-block: 5px; flex: 0 1 44%; }
+.gx-layout__display .gx-row__desc { font-size: var(--fs-xs); }
+.gx-layout__display .gx-layout__display-group { margin: 14px 0 4px; }
+.gx-layout__display .gx-layout__display-group + .gx-row { border-top: 0; }
+.gx-layout__inspector .gx-select__button { min-height: 40px; padding-block: 7px; }
+.gx-layout__display .gx-row .gx-select__button { min-height: 36px; padding-block: 5px; }
+.gx-layout__display .gx-row .gx-field { min-height: 0; padding-block: 0; }
+/* Maker pages give the app bar a solid backdrop, so nothing scrolls visibly behind the search. */
+html.gx-maker-open .gx-appbar { background: var(--background); }
