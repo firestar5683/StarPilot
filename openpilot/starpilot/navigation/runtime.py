@@ -6,10 +6,13 @@ import math
 import time
 import uuid
 
-from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError, ROUTE_AVOIDANCES
+from openpilot.starpilot.navigation.owner import ConflictError, NavigationOwner, ValidationError, ROUTE_AVOIDANCES
 from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
 from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SOURCES, bearing, select_location
+
+ARRIVED_NS = 5_000_000_000      # stopped at the destination this long shows "You have arrived"
+END_ROUTE_NS = 15_000_000_000   # ...and this long ends navigation, like tapping End navigation
 
 
 def location(sm, now_ns: int):
@@ -39,6 +42,7 @@ class RouteRuntime:
     self.retry_after = 0
     self.off_route_since = 0
     self.arrived_since = 0
+    self.ended_revision = None
     self.session = uuid.uuid4().hex
 
   def update(self, now_ns: int, position, drive_id: int) -> dict:
@@ -122,11 +126,23 @@ class RouteRuntime:
       self.routes = []
       result['status'] = 'routing'
       return result
-    arrived = self.arrived_since and now_ns - self.arrived_since >= 5_000_000_000
+    arrived = self.arrived_since and now_ns - self.arrived_since >= ARRIVED_NS
+    if self.arrived_since and now_ns - self.arrived_since >= END_ROUTE_NS:
+      self._end_route(settings['revision'])
     result.update(status='arrived' if arrived else 'guiding', instruction=progress.instruction,
                   nextManeuver=progress.next_maneuver, route=self.route.preview(),
                   controlValid=bool(drive_id > 0 and not progress.off_route and not progress.arrived and stamp >= drive_id))
     return result
+
+  def _end_route(self, revision: str) -> None:
+    # Once per destination; a concurrent change (new destination, Galaxy edit) wins over arrival.
+    if self.ended_revision == revision:
+      return
+    self.ended_revision = revision
+    try:
+      self.owner.clear(revision, True)
+    except (ConflictError, ValidationError, OSError, PermissionError):
+      pass
 
 
 def publish_status(pm, value: dict) -> None:

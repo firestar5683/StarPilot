@@ -63,6 +63,39 @@ def test_generation_discard_and_current_drive_control(tmp_path, route):
   assert result['status'] == 'routing' and not result['controlValid']
 
 
+def test_arrival_ends_navigation_after_a_short_stop(tmp_path, route):
+  owner, executor = configured(tmp_path), Executor()
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
+  def at(t, speed=0.):
+    return runtime.update(t * 1_000_000_000, (t * 1_000_000_000 - 1_000_000, (.01, 0.), speed, 90.), 1_000_000_000)
+  at(10, 5.)
+  executor.jobs[0].set_result(route)
+  assert at(11, 5.)['status'] == 'guiding'
+  assert at(12)['status'] == 'guiding'  # stopping starts the arrival clock
+  assert at(17)['status'] == 'arrived'
+  assert owner.read()['destination'] is not None
+  assert at(20, 5.)['status'] == 'guiding', 'driving off resets arrival'
+  at(21)
+  assert at(35)['status'] == 'arrived' and owner.read()['destination'] is not None
+  assert at(36)['status'] == 'arrived'
+  assert owner.read()['destination'] is None, 'navigation ends 15 s after stopping at the destination'
+  assert at(37)['status'] == 'noDestination'
+
+
+def test_arrival_does_not_override_a_newer_destination(tmp_path, route):
+  owner, executor = configured(tmp_path), Executor()
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
+  def at(t):
+    return runtime.update(t * 1_000_000_000, (t * 1_000_000_000 - 1_000_000, (.01, 0.), 0., 90.), 1_000_000_000)
+  at(10)
+  executor.jobs[0].set_result(route)
+  at(11)
+  stale = owner.read()['revision']
+  owner.select({'name': 'Elsewhere', 'longitude': .02, 'latitude': 0.}, stale, True)
+  runtime._end_route(stale)
+  assert owner.read()['destination']['name'] == 'Elsewhere'
+
+
 def test_route_failure_backoff_and_no_parallel_requests(tmp_path):
   executor = Executor()
   runtime = RouteRuntime(configured(tmp_path), engine=SimpleNamespace(fetch=None), executor=executor)
