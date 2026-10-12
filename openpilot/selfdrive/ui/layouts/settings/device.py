@@ -180,25 +180,25 @@ class DeviceLayout(Widget):
 
     self._reset_calib_btn.set_description(desc)
 
-  def _reboot_prompt(self):
+  def _reboot_prompt(self, action_guard: Callable[[], bool] | None = None):
     if ui_state.engaged:
       gui_app.push_widget(alert_dialog(tr("Disengage to Reboot")))
       return
 
     def perform_reboot(result: DialogResult):
-      if not ui_state.engaged and result == DialogResult.CONFIRM:
+      if not ui_state.engaged and result == DialogResult.CONFIRM and (action_guard is None or action_guard()):
         self._params.put_bool("DoReboot", True)
 
     dialog = ConfirmDialog(tr("Are you sure you want to reboot?"), tr("Reboot"), callback=perform_reboot)
     gui_app.push_widget(dialog)
 
-  def _power_off_prompt(self):
+  def _power_off_prompt(self, action_guard: Callable[[], bool] | None = None):
     if ui_state.engaged:
       gui_app.push_widget(alert_dialog(tr("Disengage to Power Off")))
       return
 
     def perform_power_off(result: DialogResult):
-      if not ui_state.engaged and result == DialogResult.CONFIRM:
+      if not ui_state.engaged and result == DialogResult.CONFIRM and (action_guard is None or action_guard()):
         self._params.put_bool("DoShutdown", True)
 
     dialog = ConfirmDialog(tr("Are you sure you want to power off?"), tr("Power Off"), callback=perform_power_off)

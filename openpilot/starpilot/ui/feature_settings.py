@@ -12,7 +12,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS, FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT,
   FEATURE_BUTTON_TOP, FEATURE_BUTTON_HEIGHT, FEATURE_ACTION_MARGIN, FEATURE_HEADER_HEIGHT,
   FEATURE_TAP_SLOP, FEATURE_FLICK_DISTANCE, FEATURE_PAGE_COUNTER_WIDTH,
-  feature_scroll, feature_action_left, feature_row_top, feature_page_counter_left, feature_footer_buttons,
+  feature_scroll, feature_action_left, feature_action_rects, feature_row_top, feature_page_counter_left, feature_footer_buttons,
   value_buttons, value_editor_rect, value_done_rect, value_text,
 )
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
@@ -28,6 +28,7 @@ PAGE_TRANSITION_TIME = 0.18
 EDGE_ACCENT = rl.color_lerp(PANEL_BG, ACCENT, 0.5)
 VALUE_SELECTED_BORDER = rl.Color(ACCENT.r, ACCENT.g, ACCENT.b, 100)
 VALUE_DONE_BG = rl.Color(ACCENT.r, ACCENT.g, ACCENT.b, 34)
+DRIVE_MODE_BORDER = rl.Color(108, 102, 122, 255)
 
 
 def _confirmation(row: FeatureRow) -> bool:
@@ -175,15 +176,26 @@ class FeatureSettingsView:
           action = rl.Rectangle(FEATURE_CONTROL_LEFT, y + FEATURE_ACTION_MARGIN, FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT,
                                 FEATURE_ROW_HEIGHT - 2 * FEATURE_ACTION_MARGIN)
           if row.actions:
-            for index, (text, enabled) in enumerate(row.actions):
-              button = rl.Rectangle(feature_action_left(row) + index * (action.width + 16), action.y, action.width, action.height)
+            for index, ((text, enabled), rect) in enumerate(zip(row.actions, feature_action_rects(row, y), strict=True)):
+              button = rl.Rectangle(*rect)
               active = row.available and enabled and pressed == FeatureUiAction("action", row, index)
-              draw_rounded_fill(button, CONTROL_PRESSED_BG if active else CONTROL_BG)
-              draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
-              self._center(self._elide(text, FontRole.MEDIUM, DETAIL_SIZE, button.width - 24), DETAIL_SIZE, button,
-                           TEXT_PRIMARY if row.available and enabled else TEXT_MUTED)
-          elif row.page:
-            self._center("Open >", DETAIL_SIZE, action, TEXT_PRIMARY if row.available else TEXT_MUTED)
+              selected = row.key == "drive_state" and row.available and row.value == text
+              draw_rounded_fill(button, CONTROL_PRESSED_BG if active else rl.color_lerp(PANEL_BG, ACCENT, 0.22) if selected else CONTROL_BG)
+              draw_rounded_stroke(button, ACCENT if active or selected else DRIVE_MODE_BORDER if row.key == "drive_state" else CONTROL_BORDER)
+              color = TEXT_PRIMARY if row.available and (enabled or selected) else TEXT_MUTED
+              if row.key == "drive_state":
+                self.fonts.draw(text, FontRole.MEDIUM, 36, button.x + 22, button.y + 19, color)
+                description = ("Follows ignition", "Stops driving services", "Park & disengage")[index]
+                self.fonts.draw(description, FontRole.NORMAL, 24, button.x + 22, button.y + 79, TEXT_SECONDARY if color == TEXT_PRIMARY else TEXT_MUTED)
+                if selected:
+                  rl.draw_line_ex(rl.Vector2(button.x + button.width - 47, button.y + 32),
+                                  rl.Vector2(button.x + button.width - 38, button.y + 41), 3, ACCENT)
+                  rl.draw_line_ex(rl.Vector2(button.x + button.width - 38, button.y + 41),
+                                  rl.Vector2(button.x + button.width - 22, button.y + 22), 3, ACCENT)
+              else:
+                self._center(self._elide(text, FontRole.MEDIUM, DETAIL_SIZE, button.width - 24), DETAIL_SIZE, button, color)
+          elif row.page and value is None:
+            self._center("Open >", DETAIL_SIZE, action, TEXT_PRIMARY if row.available or row.choices == ("Off", "On") else TEXT_MUTED)
           elif _confirmation(row):
             if row.key in ("torque_adopt", "slc_adopt"):
               action = "Adopt…"
@@ -202,6 +214,13 @@ class FeatureSettingsView:
             draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
             self._center(action, DETAIL_SIZE, button, DANGER if row.available else TEXT_MUTED)
           elif value is not None:
+            if row.page:
+              button = rl.Rectangle(feature_action_left(row), y + FEATURE_ACTION_MARGIN,
+                                    FEATURE_CONTROL_LEFT - 24 - feature_action_left(row), FEATURE_ROW_HEIGHT - 2 * FEATURE_ACTION_MARGIN)
+              active = pressed == FeatureUiAction("open", row)
+              draw_rounded_fill(button, CONTROL_PRESSED_BG if active else CONTROL_BG)
+              draw_rounded_stroke(button, ACCENT if active else CONTROL_BORDER)
+              self._center("Open >", DETAIL_SIZE, button)
             action = rl.Rectangle(FEATURE_CONTROL_LEFT, y + 18, FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT, FEATURE_ROW_HEIGHT - 36)
             self._center("On" if value else "Off", LABEL_SIZE, rl.Rectangle(1760, action.y, 220, action.height),
                          TEXT_PRIMARY if row.available else TEXT_MUTED, role=FontRole.NORMAL)
@@ -257,9 +276,18 @@ class FeatureSettingsView:
     value = value_text(row)
     value = self._elide(value, FontRole.SEMI_BOLD, DETAIL_SIZE, (2094 - left - 55) / 2)
     value_width = self.fonts.measure(value, FontRole.SEMI_BOLD, DETAIL_SIZE).width
-    label = self._elide(row.label, FontRole.NORMAL, LABEL_SIZE, 2050 - value_width - 48 - left - 55)
-    for text, role, size, x, color in ((label, FontRole.NORMAL, LABEL_SIZE, left + 55, TEXT_PRIMARY),
-                                      (value, FontRole.SEMI_BOLD, DETAIL_SIZE, 2050 - value_width, TEXT_SECONDARY),
+    label_width = 2050 - value_width - 48 - left - 55
+    label = self._elide(row.label, FontRole.NORMAL, LABEL_SIZE, label_width)
+    reason = self._elide(row.reason, FontRole.NORMAL, DETAIL_SIZE, label_width) if not row.available else ""
+    top, bottom = self.fonts.vertical_ink(label, FontRole.NORMAL, LABEL_SIZE)
+    label_y = y + (FEATURE_ROW_HEIGHT - top - bottom) / 2
+    if reason:
+      detail_top, detail_bottom = self.fonts.vertical_ink(reason, FontRole.NORMAL, DETAIL_SIZE)
+      height = bottom - top + 12 + detail_bottom - detail_top
+      label_y = y + (FEATURE_ROW_HEIGHT - height) / 2 - top
+      self.fonts.draw(reason, FontRole.NORMAL, DETAIL_SIZE, left + 55, label_y + bottom + 12 - detail_top, TEXT_MUTED)
+    self.fonts.draw(label, FontRole.NORMAL, LABEL_SIZE, left + 55, label_y, TEXT_PRIMARY if row.available else TEXT_MUTED)
+    for text, role, size, x, color in ((value, FontRole.SEMI_BOLD, DETAIL_SIZE, 2050 - value_width, TEXT_SECONDARY if row.available else TEXT_MUTED),
                                       (">", FontRole.MEDIUM, DETAIL_SIZE, 2070, TEXT_SECONDARY if row.available else TEXT_MUTED)):
       top, bottom = self.fonts.vertical_ink(text, role, size)
       self.fonts.draw(text, role, size, x, y + (FEATURE_ROW_HEIGHT - top - bottom) / 2, color)

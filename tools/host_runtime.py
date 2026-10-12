@@ -315,7 +315,7 @@ class HostRuntime:
     inside(self.venv, self.cache)
     env = self.environment()
     env.update(UV_PROJECT_ENVIRONMENT=str(self.venv), UV_PYTHON='3.12')
-    run([uv, 'sync', '--frozen', '--extra', 'tools', '--extra', 'testing', '--extra', 'dev'], cwd=self.work, env=env)
+    run([uv, 'sync', '--frozen', '--extra', 'tools', '--extra', 'testing', '--extra', 'dev', '--extra', 'safety'], cwd=self.work, env=env)
     link = self.work / '.venv'
     if link.is_symlink():
       if link.resolve() != self.venv.resolve():

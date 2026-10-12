@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from openpilot.starpilot.ui.feature_settings_state import FeatureInput
+from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsState
+from openpilot.starpilot.ui.display_preferences import MASTER
 from openpilot.starpilot.ui.maps_compact import MapsCompact, _MapsPage
 from openpilot.starpilot.ui.maps_state import MapStatusSource, map_page
 
@@ -84,8 +85,10 @@ class TestMaps(unittest.TestCase):
     session.drive_state = mock.Mock(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
                                                "effective": None, "overrideAllowed": False})
     session.profile = Profile.LARGE
-    session.display_owner = mock.Mock(snapshot=mock.Mock(return_value=map_page(None)))
-    session.power_owner = mock.Mock(snapshot=mock.Mock(return_value=map_page(None)))
+    session.display_owner = mock.Mock(snapshot=mock.Mock(return_value=FeatureSettingsState(rows=(
+      FeatureRow(MASTER, "Custom Display Settings", "Off", choices=("Off", "On")),
+    ))))
+    session.power_owner = mock.Mock(snapshot=mock.Mock(return_value=FeatureSettingsState()))
     session.map_source = mock.Mock(snapshot=mock.Mock(return_value=map_page(STATUS)))
     result = session.system_snapshot()
     self.assertIn("offline map", result.subtitle)

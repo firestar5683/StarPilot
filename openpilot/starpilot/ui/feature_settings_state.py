@@ -198,7 +198,7 @@ def feature_parent_title(page: str) -> str:
 
 
 def boolean_value(row: FeatureRow) -> bool | None:
-  if (not row.key or row.page or row.actions or row.repair_value or row.step or row.key in FEATURE_CONFIRM_ACTIONS or
+  if (not row.key or row.actions or row.repair_value or row.step or row.key in FEATURE_CONFIRM_ACTIONS or
       row.key.startswith("pip:format:") or is_long_confirm_action(row.key) or row.choices != ("Off", "On")):
     return None
   if row.value in ("Off", "On"):
@@ -208,8 +208,18 @@ def boolean_value(row: FeatureRow) -> bool | None:
   return None
 
 
-def feature_action_left(row: FeatureRow) -> int:
-  return FEATURE_CONTROL_LEFT - max(0, len(row.actions) - 1) * (FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT + 16)
+def feature_action_left(row: FeatureRow) -> float:
+  if row.page and boolean_value(row) is not None:
+    return FEATURE_CONTROL_LEFT - 280
+  return feature_action_rects(row, 0)[0][0] if row.actions else FEATURE_CONTROL_LEFT
+
+
+def feature_action_rects(row: FeatureRow, y: float) -> tuple[tuple[float, float, float, float], ...]:
+  width = 300 if row.key == "drive_state" else FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT
+  margin = 14 if row.key == "drive_state" else FEATURE_ACTION_MARGIN
+  left = FEATURE_CONTROL_RIGHT - len(row.actions) * width - max(0, len(row.actions) - 1) * 16
+  return tuple((left + index * (width + 16), y + margin, width, FEATURE_ROW_HEIGHT - 2 * margin)
+               for index in range(len(row.actions)))
 
 
 def feature_scroll(scroll: int, direction: int, row_count: int) -> int:
@@ -302,14 +312,17 @@ class FeatureInput:
     if 0 <= index < len(state.rows):
       row = state.rows[index]
       if row.actions:
-        local_y = y - row_top - visible * FEATURE_ROW_HEIGHT
-        if FEATURE_ACTION_MARGIN <= local_y <= FEATURE_ROW_HEIGHT - FEATURE_ACTION_MARGIN:
-          width = FEATURE_CONTROL_RIGHT - FEATURE_CONTROL_LEFT
-          for action, (_, enabled) in enumerate(row.actions):
-            left = feature_action_left(row) + action * (width + 16)
-            if left <= x <= left + width:
-              return FeatureUiAction("action", row, action) if row.available and enabled else None
+        for action, (bx, by, width, height) in enumerate(feature_action_rects(row, row_top + visible * FEATURE_ROW_HEIGHT)):
+          if bx <= x <= bx + width and by <= y <= by + height:
+            return FeatureUiAction("action", row, action) if row.available and row.actions[action][1] else None
         return FeatureUiAction("details", row) if x < feature_action_left(row) else None
+      if row.page and row.choices == ("Off", "On"):
+        if boolean_value(row) is None or x < FEATURE_CONTROL_LEFT - 24:
+          return FeatureUiAction("open", row)
+        local_y = y - row_top - visible * FEATURE_ROW_HEIGHT
+        if row.available and FEATURE_CONTROL_LEFT <= x <= FEATURE_CONTROL_RIGHT and 18 <= local_y <= FEATURE_ROW_HEIGHT - 18:
+          return FeatureUiAction("change", row, -1 if x < 1930 else 1)
+        return None
       if row.page and row.available:
         return FeatureUiAction("open", row)
       if FEATURE_CONTROL_LEFT <= x <= FEATURE_CONTROL_RIGHT:

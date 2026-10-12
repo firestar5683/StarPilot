@@ -34,6 +34,7 @@ from openpilot.starpilot.ui.conditional_feature import confirmation_question as 
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 from openpilot.starpilot.ui.display_owner import AUTO_PREFIX as DISPLAY_AUTO_PREFIX, DisplayOwner
+from openpilot.starpilot.ui.display_preferences import MASTER as DISPLAY_MASTER
 from openpilot.starpilot.ui.developer_preview import parse_flags, preview_at
 from openpilot.starpilot.ui.power_owner import POWER_KEYS, PowerOwner, confirm_question, power_row_change
 from openpilot.starpilot.ui.pip_owner import FORMAT_PREFIX as PIP_FORMAT_PREFIX, PiPOwner, RESET as PIP_RESET
@@ -203,6 +204,7 @@ class StarShellSession:
     self.model_scroll = 0
     self.drive_state = DriveStateControl(DriveStateOwner(ui_state.params, starpilot_storage_root() / "drive-state"),
                                          PhysicalSource(ui_state.sm))
+    self.system_power_action: Callable[[int], None] | None = None
     self.power_owner = PowerOwner(ui_state.params, self._settings_preference_authority)
     self._power_request_epoch = 0
     self._pip_request_epoch = 0
@@ -214,6 +216,7 @@ class StarShellSession:
     self.sounds_edit_key: str | None = None
     self.appearance_scroll = 0
     self.display_scroll = 0
+    self.display_page = "system"
     self.display_edit_key: str | None = None
     self.slc_actions: SlcActionDispatcher | None = None
     if slc_action_transport_enabled(os.environ, ui_state.params):
@@ -765,22 +768,32 @@ class StarShellSession:
     display = self.display_snapshot()
     power = self.power_snapshot()
     maps = self.map_snapshot()
-    drive = self.drive_state.snapshot()
-    drive_row = FeatureRow("drive_state", "Force Drive State", LABELS[drive["mode"]],
-                           source=drive["revision"].encode() if drive["revision"] else None,
-                           choices=("Auto", "Offroad", "Onroad"), available=drive["available"],
-                           reason=f"Device: {drive["effective"] or 'unavailable'}. " +
-                                  "Offroad stops services; Onroad requires Park and disengagement. Auto follows ignition.")
-    state = replace(display, title="System", subtitle="Display, parked power, and offline map status.",
-                    rows=display.rows + power.rows + maps.rows + (drive_row,))
+    state = replace(display, title="System", subtitle="Display, drive state, power, and offline maps.",
+                    rows=display.rows + power.rows + maps.rows)
     if self.profile == Profile.LARGE:
-      rows = tuple(replace(row, presets=SYSTEM_PRESETS[row.key], page=row.key) if row.key in SYSTEM_PRESETS else row
-                   for row in state.rows if not row.key.startswith(DISPLAY_AUTO_PREFIX))
+      display_rows = tuple(replace(row, presets=SYSTEM_PRESETS[row.key], page=row.key) if row.key in SYSTEM_PRESETS else row
+                           for row in display.rows if not row.key.startswith(DISPLAY_AUTO_PREFIX))
+      power_rows = tuple(replace(row, presets=SYSTEM_PRESETS[row.key], page=row.key) if row.key in SYSTEM_PRESETS else row
+                         for row in power.rows)
       if getattr(self, "display_edit_key", None) is not None:
-        row = next(row for row in rows if row.key == self.display_edit_key)
-        return replace(state, title=row.label, subtitle=row.reason, rows=(replace(row, page=""),), parent_title="System",
-                       editor=True, save_hint="Changes require confirmation" if row.key in POWER_KEYS else state.save_hint)
-      state = replace(state, rows=rows)
+        row = next(row for row in display_rows + power_rows if row.key == self.display_edit_key)
+        return replace(state, page=getattr(self, "display_page", "system"), title=row.label, subtitle=row.reason, rows=(replace(row, page=""),),
+                       parent_title="System" if row.key in POWER_KEYS else "Custom Display Settings", editor=True,
+                       save_hint="Changes require confirmation" if row.key in POWER_KEYS else state.save_hint)
+      if getattr(self, "display_page", "system") == "display":
+        return replace(display, title="Custom Display Settings", subtitle="Brightness and screen timing.",
+                       rows=display_rows, parent_title="System")
+      drive = self.drive_state.snapshot()
+      drive_row = FeatureRow("drive_state", "Force Drive State", LABELS[drive["mode"]],
+                             source=drive["revision"].encode() if drive["revision"] is not None else None,
+                             available=drive["available"], reason=f"Device: {drive['effective'] or 'unavailable'}",
+                             actions=tuple((label, drive["mode"] != mode and (mode != "onroad" or drive["overrideAllowed"]))
+                                           for mode, label in LABELS.items()))
+      power_available = getattr(self, "system_power_action", None) is not None and not ui_state.engaged
+      device_power = FeatureRow("device_power", "Device Power", "", available=power_available,
+                                actions=(("Reboot", True), ("Power Off", power_available and ui_state.is_offroad() and self.confirmed_offroad())))
+      master = replace(display_rows[0], page="display", reason=display_rows[0].reason or "Brightness and screen timing")
+      state = replace(state, page="system", rows=(drive_row, device_power, master) + power_rows + maps.rows)
     return state
 
   def map_snapshot(self):
@@ -871,17 +884,34 @@ class StarShellSession:
     if action.kind == "back":
       if state.editor:
         self.display_edit_key = None
+      elif state.page == "display":
+        self.display_page = "system"
+        self.display_scroll = 0
       else:
         self.selected = Destination.STAR
         self.display_scroll = 0
       self.input.cancel()
-    elif action.kind == "open" and not state.editor and action.row in state.rows and action.row.available and action.row.presets:
-      self.display_edit_key = action.row.key
+    elif action.kind == "open" and not state.editor and action.row in state.rows:
+      if action.row.key == DISPLAY_MASTER and action.row.page == "display":
+        self.display_page = "display"
+        self.display_scroll = 0
+      elif action.row.available and action.row.presets:
+        self.display_edit_key = action.row.key
+      else:
+        return
       self.input.cancel()
     elif action.kind == "scroll" and not state.editor:
       self.display_scroll = feature_scroll(self.display_scroll, action.direction, len(state.rows))
     elif action.kind in ("change", "action") and action.row is not None and action.row in state.rows:
-      if state.editor:
+      request = None
+      if action.kind == "action" and action.row.key in ("drive_state", "device_power"):
+        if not action.row.available or not 0 <= action.direction < len(action.row.actions) or not action.row.actions[action.direction][1]:
+          return
+        if action.row.key == "drive_state":
+          self._drive_change(tuple(LABELS)[action.direction].value, action.row.source.decode() if action.row.source else None)
+        elif self.system_power_action is not None:
+          self.system_power_action(action.direction)
+      elif state.editor:
         request = value_request(state, action)
       elif action.kind == "change" and not action.row.presets:
         request = power_row_change(action.row, action.direction) if action.row.key in POWER_KEYS else row_change(action.row, action.direction)
@@ -894,24 +924,28 @@ class StarShellSession:
           epoch = getattr(self, "_power_request_epoch", 0)
           def confirmed(result: DialogResult) -> None:
             if (result == DialogResult.CONFIRM and self._mode == ShellMode.SETTINGS and
-                self.selected == Destination.SYSTEM and epoch == getattr(self, "_power_request_epoch", 0)):
+                self.selected == Destination.SYSTEM and getattr(self, "display_page", "system") == "system" and
+                epoch == getattr(self, "_power_request_epoch", 0)):
               self.power_request(replace(request, confirmation=True))
           gui_app.push_widget(ConfirmDialog(confirm_question(request), "Save", callback=confirmed))
-        elif request.key == "drive_state":
-          self._drive_change(request.value.lower(), request.expected.decode() if request.expected else None)
         else:
-          self.display_request(request)
+          if self.display_request(request) and request.key == DISPLAY_MASTER and request.value == "On" and state.page == "system":
+            self.display_page = "display"
+            self.display_scroll = 0
+            self.input.cancel()
     self._snapshot_cache = None
 
   def _drive_change(self, mode, revision, *, confirmation=False):
     if mode == "offroad" and not confirmation and (ui_state.started or self.drive_state.snapshot()["effective"] == "onroad"):
       from openpilot.system.ui.widgets import DialogResult
       destination = self.selected
+      page = getattr(self, "display_page", "system")
       epoch = getattr(self, "_power_request_epoch", 0)
       pipeline = (bool(ui_state.started), ui_state.started_frame)
       def confirmed(result: DialogResult) -> None:
         if (result == DialogResult.CONFIRM and self._mode == ShellMode.SETTINGS and
-            self.selected == destination and epoch == getattr(self, "_power_request_epoch", 0) and
+            self.selected == destination and page == getattr(self, "display_page", "system") and
+            epoch == getattr(self, "_power_request_epoch", 0) and
             pipeline == (bool(ui_state.started), ui_state.started_frame)):
           self._drive_change(mode, revision, confirmation=True)
       if self.profile == Profile.COMPACT:
@@ -1343,7 +1377,10 @@ class StarShellSession:
         self._unavailable("experimental mode owner")
     elif request.source == "settings":
       if action.kind == SettingsActionKind.CLOSE:
-        if self.selected != Destination.STAR:
+        if self.selected == Destination.SYSTEM and (getattr(self, "display_edit_key", None) is not None or
+                                                   getattr(self, "display_page", "system") == "display"):
+          self._display_ui(FeatureUiAction("back"))
+        elif self.selected != Destination.STAR:
           self.selected = Destination.STAR
         elif self._on_home is not None:
           self._on_home()
@@ -1369,6 +1406,7 @@ class StarShellSession:
             self.appearance_page = "appearance"
           elif destination == Destination.SYSTEM:
             self.display_scroll = 0
+            self.display_page = "system"
             self.display_edit_key = None
           elif destination == Destination.DRIVING_MODEL:
             self.model_scroll = 0
@@ -1705,6 +1743,8 @@ class StarMainLayout(MainLayout):
       raise
     self.page = StarShellPage(self.star, ShellMode.HOME, on_background_tap=self._on_background_tap)
     device_scroller = self._large_panels[Destination.DEVICE]._scroller
+    device_scroller._items.remove(self._large_panels[Destination.DEVICE]._power_off_btn)
+    self.star.system_power_action = self._system_power_action
     device_scroller.add_widget(
       button_item("Galaxy", "OPEN", callback=self.star.galaxy_flow.open_large))
     device_scroller._items.insert(0, device_scroller._items.pop())
@@ -1733,6 +1773,16 @@ class StarMainLayout(MainLayout):
     # The display snapshot may be cached across a touch. Recheck transport and
     # the native layout's own gate immediately before invoking an effect owner.
     return bool(ui_state.is_offroad() and self.star.adapter.confirmed_offroad())
+
+  def _system_power_action(self, index: int) -> None:
+    from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
+    def allowed() -> bool:
+      return (self._current_mode == MainState.SETTINGS and self.star._mode == ShellMode.SETTINGS and
+              self.star.selected == Destination.SYSTEM and getattr(self.star, "display_page", "system") == "system" and
+              (index == 0 or self._confirmed_offroad()))
+    if index in (0, 1) and allowed():
+      owner = self._panel_owner(PanelType.DEVICE)
+      (owner._reboot_prompt, owner._power_off_prompt)[index](allowed)
 
   def _show_pairing(self) -> None:
     if self._confirmed_offroad() and not ui_state.prime_state.is_paired():

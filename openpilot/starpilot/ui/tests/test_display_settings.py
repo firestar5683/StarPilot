@@ -16,11 +16,11 @@ from openpilot.starpilot.ui.display_preferences import MASTER, read_choice, read
 from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
   FeatureInput, FeatureSettingsRequest, feature_row_top, row_change,
-  FeatureSettingsState, value_buttons, value_done_rect,
+  FeatureSettingsState, FeatureUiAction, feature_action_rects, value_buttons, value_done_rect,
 )
 from openpilot.starpilot.ui.presentation import Profile
-from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
-from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellSnapshot
+from openpilot.starpilot.ui.settings_state import Destination, SettingsAction, SettingsActionKind, SettingsInput, SettingsState, tile_rects
+from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellRequest, ShellSnapshot
 from openpilot.starpilot.ui.power_owner import PowerOwner, HOURS, VOLTS
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.starpilot.ui.tests.test_runtime_snapshot import NOW, ui_fake
@@ -51,8 +51,10 @@ class DisplaySettingsTests(unittest.TestCase):
     session.power_owner = PowerOwner(self.params, lambda: self.parked)
     session.map_snapshot = Mock(return_value=FeatureSettingsState())
     self.enterContext(patch.object(session, 'drive_state',
-                                  NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False, "effective": None}), create=True))
+                                  NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                       "effective": None, "overrideAllowed": False}), create=True))
     session.display_scroll, session.display_edit_key = 0, None
+    session.display_page = "system"
     session.sidebar_expanded = expanded
     session._snapshot_cache = None
     session._on_destination_change = None
@@ -62,6 +64,161 @@ class DisplaySettingsTests(unittest.TestCase):
     session._unavailable = Mock()
     session.input = ShellInput(Profile.LARGE, session._emit)
     return session
+
+  def test_system_pages_keep_every_control_in_a_stable_group(self):
+    from openpilot.starpilot.ui.maps_state import map_page
+    session = self.large_session()
+    first = ("drive_state", "device_power", MASTER, "power:enabled", HOURS)
+    for enabled in (False, True):
+      self.params.put_bool(MASTER, enabled, block=True)
+      for brightness in (50, 101):
+        self.params.put("ScreenBrightness", brightness, block=True)
+        for status in (None, "idle", "transferring", "failed"):
+          maps = map_page(None if status is None else {"schemaVersion": 1, "state": status,
+                          "selectedGeneration": "", "completedGroups": 1, "totalGroups": 2})
+          session.map_snapshot.return_value = maps
+          rows = session.system_snapshot().rows
+          self.assertEqual(tuple(row.key for row in rows[:5]), first)
+          self.assertEqual(rows[5].key, VOLTS)
+          self.assertEqual(rows[6:], maps.rows)
+          session._display_ui(FeatureUiAction("open", rows[2]))
+          submenu = session.system_snapshot()
+          self.assertEqual(tuple(row.key for row in submenu.rows), (MASTER, "ScreenBrightness", "ScreenBrightnessOnroad",
+                                                                   "ScreenTimeout", "ScreenTimeoutOnroad"))
+          self.assertEqual(submenu.rows[1].source, self.row("ScreenBrightness").source)
+          self.assertEqual(submenu.rows[1].dependencies, self.row("ScreenBrightness").dependencies)
+          session._display_ui(FeatureUiAction("back"))
+
+  def test_system_modes_select_directly_and_cancel_changed_or_dragged_touches(self):
+    session = self.large_session()
+    session._drive_change = Mock()
+    status = {"mode": "auto", "revision": "shown-revision", "available": True,
+              "effective": "offroad", "overrideAllowed": True}
+    session.drive_state.snapshot = Mock(return_value=status)
+    inputs = FeatureInput(session._display_ui)
+    for expanded in (False, True):
+      for current in ("auto", "offroad", "onroad"):
+        status["mode"] = current
+        state = replace(session.system_snapshot(), sidebar_expanded=expanded)
+        row = state.rows[0]
+        rects = feature_action_rects(row, feature_row_top(state))
+        for index, desired in enumerate(("auto", "offroad", "onroad")):
+          session._drive_change.reset_mock()
+          x, y, width, height = rects[index]
+          point = x + width / 2, y + height / 2
+          inputs.press(*point, state)
+          session._drive_change.assert_not_called()
+          inputs.release(*point, state)
+          if desired == current:
+            session._drive_change.assert_not_called()
+          else:
+            session._drive_change.assert_called_once_with(desired, "shown-revision")
+        self.assertIsNone(inputs.target(rects[0][0] + rects[0][2] + 8, point[1], state))
+    status["mode"] = "auto"
+    state = session.system_snapshot()
+    row = state.rows[0]
+    x, y, width, height = feature_action_rects(row, feature_row_top(state))[2]
+    point = x + width / 2, y + height / 2
+    for changed in (replace(state, scroll=5), replace(state, sidebar_expanded=False),
+                    replace(state, rows=(replace(row, source=b"new-revision"),) + state.rows[1:]),
+                    replace(state, rows=(replace(row, available=False),) + state.rows[1:])):
+      session._drive_change.reset_mock()
+      inputs.press(*point, state)
+      inputs.release(*point, changed)
+      session._drive_change.assert_not_called()
+    inputs.press(*point, state)
+    inputs.move(point[0] - 50, point[1], state)
+    inputs.release(*point, state)
+    session._drive_change.assert_not_called()
+    status["overrideAllowed"] = False
+    fresh = session.system_snapshot()
+    self.assertIsNone(inputs.target(*point, fresh))
+    session._display_ui(FeatureUiAction("action", row, 2))
+    session._drive_change.assert_not_called()
+    self.assertTrue(fresh.rows[0].actions[1][1])  # Offroad remains available when Onroad admission fails.
+
+  def test_display_submenu_opens_while_off_enabling_enters_and_back_keeps_the_hierarchy(self):
+    with patch("openpilot.starpilot.ui.runtime_app.native_device.invalidate_display_preferences"):
+      for expanded in (True, False):
+        session = self.large_session(expanded)
+        inputs = FeatureInput(session._display_ui)
+        root = replace(session.system_snapshot(), sidebar_expanded=expanded)
+        y = feature_row_top(root) + 2.5 * FEATURE_ROW_HEIGHT
+        inputs.press(800, y, root)
+        inputs.release(800, y, root)
+        submenu = session.system_snapshot()
+        self.assertEqual(submenu.page, "display")
+        self.assertEqual(len(submenu.rows), 5)
+        self.assertEqual(submenu.rows[0].key, MASTER)
+        self.assertTrue(all(not row.available for row in submenu.rows[1:]))
+        self.assertFalse(read_preferences(self.params, large=True).enabled)
+        session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.CLOSE)))
+        self.assertEqual(session.display_page, "system")
+        root = replace(session.system_snapshot(), sidebar_expanded=expanded)
+        inputs.press(2000, y, root)
+        inputs.release(2000, y, root)
+        self.assertTrue(read_preferences(self.params, large=True).enabled)
+        submenu = session.system_snapshot()
+        self.assertEqual(submenu.page, "display")
+        self.assertTrue(all(row.available for row in submenu.rows))
+        self.assertEqual(submenu.parent_title, "System")
+        session._display_ui(FeatureUiAction("open", submenu.rows[1]))
+        self.assertEqual(session.system_snapshot().parent_title, "Custom Display Settings")
+        session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.CLOSE)))
+        self.assertIsNone(session.display_edit_key)
+        self.assertEqual(session.system_snapshot().page, "display")
+        session._display_ui(FeatureUiAction("change", session.system_snapshot().rows[0]))
+        self.assertEqual(session.system_snapshot().page, "display")
+        self.assertFalse(read_preferences(self.params, large=True).enabled)
+        self.assertTrue(all(not row.available for row in session.system_snapshot().rows[1:]))
+        session._display_ui(FeatureUiAction("back"))
+        self.parked = False
+        root = session.system_snapshot()
+        session._display_ui(FeatureInput.target(800, y, root))
+        self.assertEqual(session.system_snapshot().page, "display")
+        self.parked = True
+
+  def test_display_parent_does_not_enter_after_failed_enable_or_a_changed_page(self):
+    session = self.large_session()
+    Path(self.params.get_param_path("ScreenBrightness")).write_bytes(b"bad")
+    root = session.system_snapshot()
+    session._display_ui(FeatureUiAction("change", root.rows[2]))
+    self.assertEqual(session.display_page, "system")
+    self.assertFalse(read_preferences(self.params, large=True).enabled)
+    session._unavailable.assert_called_once()
+    inputs = FeatureInput(session._display_ui)
+    y = feature_row_top(root) + 2.5 * FEATURE_ROW_HEIGHT
+    inputs.press(2000, y, root)
+    session._display_ui(FeatureUiAction("open", root.rows[2]))
+    inputs.release(2000, y, session.system_snapshot())
+    self.assertFalse(read_preferences(self.params, large=True).enabled)
+    self.assertTrue(session.system_snapshot().rows[1].available)  # Invalid saved choices remain repairable.
+
+  def test_system_power_touches_revalidate_engagement_and_offroad(self):
+    from openpilot.starpilot.ui import runtime_app
+    session = self.large_session()
+    session.system_power_action = Mock()
+    ui = NS(engaged=False, is_offroad=lambda: self.parked)
+    with patch.object(runtime_app, "ui_state", ui):
+      state = session.system_snapshot()
+      row = state.rows[1]
+      inputs = FeatureInput(session._display_ui)
+      for index, rect in enumerate(feature_action_rects(row, feature_row_top(state) + FEATURE_ROW_HEIGHT)):
+        x, y, width, height = rect
+        inputs.press(x + width / 2, y + height / 2, state)
+        session.system_power_action.assert_not_called()
+        inputs.release(x + width / 2, y + height / 2, state)
+        session.system_power_action.assert_called_once_with(index)
+        session.system_power_action.reset_mock()
+      for index in (-1, 2):
+        session._display_ui(FeatureUiAction("action", row, index))
+      ui.engaged = True
+      session._display_ui(FeatureUiAction("action", row, 0))
+      ui.engaged = False
+      self.parked = False
+      session._display_ui(FeatureUiAction("action", row, 1))
+      session.system_power_action.assert_not_called()
+      self.assertEqual(session.system_snapshot().rows[1].actions, (("Reboot", True), ("Power Off", False)))
 
   def touch(self, session, state, bounds):
     from openpilot.starpilot.ui import runtime_app
@@ -90,6 +247,8 @@ class DisplaySettingsTests(unittest.TestCase):
       for expanded in (True, False):
         for key, presets in SYSTEM_PRESETS.items():
           session = self.large_session(expanded)
+          if key not in (HOURS, VOLTS):
+            session._display_ui(FeatureUiAction("open", session.system_snapshot().rows[2]))
           overview = session.system_snapshot()
           index = next(i for i, row in enumerate(overview.rows) if row.key == key)
           session.display_scroll = index // FEATURE_VISIBLE_ROWS * FEATURE_VISIBLE_ROWS
@@ -213,6 +372,29 @@ class DisplaySettingsTests(unittest.TestCase):
     self.assertTrue(self.owner.apply(self.request(MASTER)))
     self.assertFalse(read_preferences(self.params, large=True).enabled)
     self.assertEqual(path.read_bytes(), b"broken")
+
+  def test_all_display_children_disable_without_losing_saved_values(self):
+    session = self.large_session()
+    values = {"ScreenBrightness": 50, "ScreenBrightnessOnroad": 75, "ScreenTimeout": 30, "ScreenTimeoutOnroad": 10}
+    self.params.put_bool(MASTER, True, block=True)
+    for key, value in values.items():
+      self.params.put(key, value, block=True)
+    requests = {key: self.request(key) for key in values}
+    self.assertTrue(self.owner.apply(self.request(MASTER)))
+    session._display_ui(FeatureUiAction("open", session.system_snapshot().rows[2]))
+    disabled = session.system_snapshot()
+    self.assertTrue(next(row for row in disabled.rows if row.key == MASTER).available)
+    for index, row in enumerate(disabled.rows):
+      if row.key in values:
+        self.assertFalse(row.available)
+        self.assertIn("custom display is off", row.reason)
+        page = replace(disabled, scroll=index // FEATURE_VISIBLE_ROWS * FEATURE_VISIBLE_ROWS)
+        target = FeatureInput.target(800, feature_row_top(page) + (index % FEATURE_VISIBLE_ROWS + .5) * FEATURE_ROW_HEIGHT, page)
+        self.assertEqual(target.kind, "details")
+        self.assertFalse(self.owner.apply(requests[row.key]))
+        self.assertEqual(read_choice(self.params, row.key, large=True).value, values[row.key])
+    self.assertTrue(self.owner.apply(self.request(MASTER)))
+    self.assertTrue(all(row.available for row in session.system_snapshot().rows if row.key in values))
 
   def test_source_dependency_and_parked_guards(self):
     self.assertFalse(self.row("ScreenTimeout").available)

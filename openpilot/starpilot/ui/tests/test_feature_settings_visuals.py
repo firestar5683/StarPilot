@@ -15,7 +15,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
   value_buttons, value_editor_rect, value_done_rect,
 )
 from openpilot.starpilot.ui.presentation import FontRole, Profile
-from openpilot.starpilot.ui.runtime_app import SOUND_PRESETS
+from openpilot.starpilot.ui.runtime_app import SOUND_PRESETS, SYSTEM_PRESETS
 
 
 def fake_fonts():
@@ -135,6 +135,32 @@ class FeatureVisualTests(unittest.TestCase):
         target = FeatureInput.target(800, feature_row_top(state) + i * FEATURE_ROW_HEIGHT + 77, state)
         self.assertEqual(target.kind, "open")
         self.assertEqual(target.row, row)
+
+  def test_disabled_display_summaries_mute_labels_values_and_explain_the_master(self):
+    self.drawing()
+    reason = "Saved; custom display is off"
+    rows = tuple(FeatureRow(key, label, value, unit=unit, available=True, reason=reason, page=key, presets=SYSTEM_PRESETS[key])
+                 for key, label, value, unit in (("ScreenBrightness", "Parked Brightness", "42", "%"),
+                                                 ("ScreenBrightnessOnroad", "Driving Brightness", "64", "%"),
+                                                 ("ScreenTimeout", "Parked Screen Timeout", "30", "s"),
+                                                 ("ScreenTimeoutOnroad", "Driving Interaction Timeout", "10", "s")))
+    for expanded in (True, False):
+      for available in (True, False):
+        fonts = fake_fonts()
+        state = FeatureSettingsState(rows=tuple(replace(row, available=available) for row in rows), sidebar_expanded=expanded)
+        view.FeatureSettingsView(fonts).render(state)
+        calls = fonts.draw.call_args_list
+        explanations = [call for call in calls if call.args[0] == reason]
+        self.assertEqual(len(explanations), 0 if available else len(rows))
+        for index, (row, value) in enumerate(zip(rows, ("42%", "64%", "30 s", "10 s"), strict=True)):
+          label = next(call for call in calls if call.args[0] == row.label)
+          saved = next(call for call in calls if call.args[0] == value)
+          self.assertIs(label.args[-1], geometry.TEXT_PRIMARY if available else geometry.TEXT_MUTED)
+          self.assertIs(saved.args[-1], geometry.TEXT_SECONDARY if available else geometry.TEXT_MUTED)
+          target = FeatureInput.target(800, feature_row_top(state) + (index + .5) * FEATURE_ROW_HEIGHT, state)
+          self.assertEqual(target.kind, "open" if available else "details")
+          if not available:
+            self.assertLess(label.args[4] + 33, explanations[index].args[4] + 6)
 
   def test_sound_value_and_legal_presets_share_drawn_touch_bounds(self):
     self.drawing()
@@ -423,8 +449,9 @@ class FeatureVisualTests(unittest.TestCase):
   def test_boolean_uses_display_value_and_excludes_other_controls(self):
     row = FeatureRow("switch", "Switch", "Off", b"1", ("Off", "On"), available=True)
     self.assertIs(view._boolean_value(row), False)
+    self.assertIs(view._boolean_value(replace(row, page="child")), False)
     self.assertIs(view._boolean_value(replace(row, value="On", available=False)), True)
-    for changes in ({"key": ""}, {"page": "child"}, {"repair_value": "Off"}, {"step": 1},
+    for changes in ({"key": ""}, {"repair_value": "Off"}, {"step": 1},
                     {"key": "pip:reset"}, {"key": "pip:format:test"}, {"key": "long_repair:test"},
                     {"choices": ("Stock", "On")}, {"choices": ("Off", "Auto", "On")},
                     {"value": "Invalid saved choice"}, {"choices": ()}):
@@ -433,6 +460,27 @@ class FeatureVisualTests(unittest.TestCase):
     special = replace(row, key="SLCFallback", value="Off (saved mode 0 or 1)")
     self.assertIs(view._boolean_value(special), False)
     self.assertIsNone(view._boolean_value(replace(special, key="other")))
+
+  def test_parent_toggle_and_open_have_separate_targets_and_navigation_stays_available(self):
+    self.drawing()
+    for expanded in (True, False):
+      for available in (True, False):
+        row = FeatureRow("parent", "Custom Display Settings", "Off", choices=("Off", "On"), available=available,
+                         page="display", reason="Brightness and screen timing")
+        state = FeatureSettingsState(page="system", rows=(row,), sidebar_expanded=expanded)
+        fonts = fake_fonts()
+        with patch.object(view, "draw_aether_toggle") as toggle:
+          view.FeatureSettingsView(fonts).render(state)
+        self.assertEqual(toggle.call_args.kwargs["available"], available)
+        opened = next(call for call in fonts.draw.call_args_list if call.args[0] == "Open >")
+        x = opened.args[3] + fonts.measure(*opened.args[:3]).width / 2
+        y = feature_row_top(state) + FEATURE_ROW_HEIGHT / 2
+        self.assertEqual(FeatureInput.target(x, y, state), FeatureUiAction("open", row))
+        self.assertEqual(FeatureInput.target(800, y, state), FeatureUiAction("open", row))
+        self.assertEqual(FeatureInput.target(2000, y, state), FeatureUiAction("change", row) if available else None)
+        self.assertIsNone(FeatureInput.target(1730, y, state))
+        invalid = replace(state, rows=(replace(row, value="Invalid saved choice", repair_value="Off"),))
+        self.assertEqual(FeatureInput.target(2000, y, invalid).kind, "open")
 
   def test_toggle_stars_only_for_editable_on_and_thumb_keeps_saved_position(self):
     self.drawing()

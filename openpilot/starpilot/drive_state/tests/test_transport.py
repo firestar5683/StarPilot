@@ -67,8 +67,13 @@ def test_actual_native_small_and_big_dispatch_same_owner(fixture, monkeypatch):
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.shell import ShellMode, ShellRequest
   from openpilot.starpilot.ui.presentation import Profile
-  from openpilot.starpilot.ui.settings_state import Destination, DestinationAvailability, SettingsAction, SettingsActionKind
-  from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsState, FeatureUiAction
+  from openpilot.starpilot.ui.settings_state import (
+    Destination, DestinationAvailability, SettingsAction, SettingsActionKind,
+  )
+  from openpilot.starpilot.ui.feature_settings_state import (
+    FeatureInput, FeatureRow, FeatureSettingsState, FEATURE_ROW_HEIGHT, feature_row_top, feature_action_rects,
+  )
+  from openpilot.starpilot.ui.display_preferences import MASTER
 
   f = fixture
   native = object.__new__(StarShellSession)
@@ -89,16 +94,22 @@ def test_actual_native_small_and_big_dispatch_same_owner(fixture, monkeypatch):
   assert f.owner.snapshot().mode == Mode.OFFROAD
   native.profile = Profile.LARGE
   native.selected = Destination.SYSTEM
-  native.display_scroll = 0
-  monkeypatch.setattr(native, 'display_snapshot', lambda: FeatureSettingsState(rows=()), raising=False)
+  monkeypatch.setattr(native, 'display_snapshot', lambda: FeatureSettingsState(rows=(
+    FeatureRow(MASTER, 'Custom Display Settings', 'Off', choices=('Off', 'On')),
+  )), raising=False)
   monkeypatch.setattr(native, 'power_snapshot', lambda: FeatureSettingsState(rows=()), raising=False)
   monkeypatch.setattr(native, 'map_snapshot', lambda: NS(rows=()), raising=False)
-  state = native.system_snapshot()
-  row = state.rows[-1]
-  native._display_ui(FeatureUiAction('change', row, 1))
-  assert f.owner.snapshot().mode == Mode.ONROAD
-  native._display_ui(FeatureUiAction('change', native.system_snapshot().rows[-1], 1))
-  assert f.owner.snapshot().mode == Mode.AUTO
+  inputs = FeatureInput(native._display_ui)
+  for index, expected in ((0, Mode.AUTO), (2, Mode.ONROAD), (0, Mode.AUTO)):
+    state = native.system_snapshot()
+    row_index, row = next((i, row) for i, row in enumerate(state.rows) if row.key == 'drive_state')
+    assert row.value.lower() == f.owner.snapshot().mode.value
+    assert row.source.decode() == f.owner.snapshot().revision
+    x, y, width, height = feature_action_rects(row, feature_row_top(state) + row_index * FEATURE_ROW_HEIGHT)[index]
+    inputs.press(x + width / 2, y + height / 2, state)
+    inputs.release(x + width / 2, y + height / 2, state)
+    assert f.owner.snapshot().mode == expected
+  assert not row.choices  # Large UI directly selects a mode; Compact retains its cycle action.
 
 
 def test_actual_settings_gesture_tracks_pipeline_epoch_not_physical_parked_flag(monkeypatch):
@@ -247,6 +258,11 @@ def test_native_offroad_confirmation_preserves_revision_without_requiring_health
     fake.started_frame = 11
     dialog._callback(DialogResult.CONFIRM)
     assert f.owner.snapshot().mode == Mode.AUTO
+    native._drive_change('offroad', revision)
+    native.display_page = 'display'
+    push.call_args.args[0]._callback(DialogResult.CONFIRM)
+    assert f.owner.snapshot().mode == Mode.AUTO
+    native.display_page = 'system'
     native._drive_change('offroad', revision)
     f.physical.allowed.return_value = False
     push.call_args.args[0]._callback(DialogResult.CONFIRM)

@@ -224,10 +224,57 @@ class NativeSettingsTests(unittest.TestCase):
     self.assertEqual(toggles._scroller._items[2].title, 'Safe Mode')
     self.assertEqual(toggles._scroller._items[7].title, 'Right Hand Driving')
     self.assertEqual(self.device._scroller._items[0].title, 'Galaxy')
-    self.assertIs(self.device._scroller._items[-1], self.device._power_off_btn)
+    self.assertNotIn(self.device._power_off_btn, self.device._scroller._items)
+    self.assertEqual(session.system_power_action, layout._system_power_action)
     galaxy = next(item for item in self.device._scroller._items if item.title == 'Galaxy')
     galaxy.callback()
     session.galaxy_flow.open_large.assert_called_once_with()
+
+  def test_system_power_uses_native_confirmation_and_rechecks_before_effects(self):
+    put_bool = self.params.put_bool
+    self.enterContext(patch.object(self.params, 'put_bool', side_effect=lambda key, value: put_bool(key, value, block=True)))
+    layout = runtime_app.StarMainLayout.__new__(runtime_app.StarMainLayout)
+    layout._current_mode = runtime_app.MainState.SETTINGS
+    layout.star = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    layout.star._mode = ShellMode.SETTINGS
+    layout.star.selected = Destination.SYSTEM
+    layout._panel_owner = Mock(return_value=self.device)
+    self.enterContext(patch.object(layout, '_confirmed_offroad', side_effect=lambda: self.offroad))
+    for index, key in enumerate(("DoReboot", "DoShutdown")):
+      with self.subTest(key=key), patch.object(device, 'ConfirmDialog') as dialog:
+        layout._system_power_action(index)
+        confirm = dialog.call_args.kwargs['callback']
+        confirm(DialogResult.CANCEL)
+        self.assertFalse(self.params.get_bool(key))
+        self.ui.engaged = True
+        confirm(DialogResult.CONFIRM)
+        self.assertFalse(self.params.get_bool(key))
+        self.ui.engaged = False
+        layout.star.selected = Destination.STAR
+        confirm(DialogResult.CONFIRM)
+        self.assertFalse(self.params.get_bool(key))
+        layout.star.selected = Destination.SYSTEM
+        layout.star.display_page = "display"
+        confirm(DialogResult.CONFIRM)
+        self.assertFalse(self.params.get_bool(key))
+        layout.star.display_page = "system"
+        layout._current_mode = runtime_app.MainState.HOME
+        confirm(DialogResult.CONFIRM)
+        self.assertFalse(self.params.get_bool(key))
+        layout._current_mode = runtime_app.MainState.SETTINGS
+        if index == 1:
+          self.offroad = False
+          confirm(DialogResult.CONFIRM)
+          self.assertFalse(self.params.get_bool(key))
+          self.offroad = True
+        confirm(DialogResult.CONFIRM)
+        self.assertTrue(self.params.get_bool(key))
+    with patch.object(device, 'ConfirmDialog') as dialog:
+      self.offroad = False
+      layout._system_power_action(1)
+      layout._system_power_action(-1)
+      layout._system_power_action(2)
+      dialog.assert_not_called()
 
 
 if __name__ == '__main__':

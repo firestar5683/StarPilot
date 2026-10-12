@@ -14,23 +14,30 @@ from pathlib import Path
 import pyray as rl
 
 from openpilot.starpilot.ui.device_state import DeviceState
+from openpilot.starpilot.ui.display_preferences import MASTER
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState, feature_parent_title
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.preview_home import reference_state
 from openpilot.starpilot.ui.preview_settings import reference_settings_state
 from openpilot.starpilot.ui.settings_state import Destination
+from openpilot.starpilot.ui.maps_state import map_page
 from openpilot.starpilot.ui.software_state import SoftwareState
 from openpilot.starpilot.ui.toggles_state import TogglesState
 from openpilot.starpilot.ui.shell import ShellMode, ShellSnapshot, ShellView
 
 
 FEATURE_SCENES = ("settings_driving_controls", "settings_sounds", "settings_appearance", "settings_system",
+                  "settings_system_maps", "settings_system_collapsed",
+                  "settings_system_offroad", "settings_system_onroad", "settings_system_unavailable",
+                  "settings_system_display_off", "settings_system_display_off_collapsed",
+                  "settings_display_preferences", "settings_display_preferences_off", "settings_display_preferences_off_collapsed",
                   "settings_models", "settings_vehicle_features", "settings_pip", "settings_feature_states",
                   "settings_feature_states_scrolled", "settings_long_text")
 LARGE_SCENES = ("home", "settings_starpilot", "settings_device", "settings_toggles", "settings_software",
                 "onroad_engaged_no_camera", "onroad_disengaged_no_camera", "onroad_alert_small",
-                "onroad_alert_mid", "onroad_alert_full", "settings_starpilot_collapsed", *FEATURE_SCENES)
+                "onroad_alert_mid", "onroad_alert_full", "settings_starpilot_collapsed",
+                *FEATURE_SCENES)
 COMPACT_SCENES = ("home", "settings", "onroad_engaged_no_camera", "onroad_disengaged_no_camera",
                   "onroad_alert_small", "onroad_alert_mid", "onroad_alert_full")
 
@@ -55,12 +62,37 @@ def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettin
     rows = (FeatureRow("soundpack", "Sound Pack", "Standard", choices=("Standard", "Classic"), available=True),
             FeatureRow("volume", "Alert Volume", "Auto", choices=("Auto",), step=5, maximum=100, available=True), number)
     destination, field, page, title = Destination.SOUNDS, "sounds", "sounds", "Sounds & Alerts"
-  elif scene == "settings_system":
-    rows = (number, boolean("display", "On"),
-            FeatureRow("power", "Parked Power", "Stock", choices=("Stock", "On"), available=True),
-            FeatureRow("drive_state", "Force Drive State", "Auto", choices=("Auto", "Offroad", "Onroad"), available=True),
-            FeatureRow("", "Map manager", "Unavailable", reason="Open Galaxy to manage parked downloads"))
-    destination, field, page, title = Destination.SYSTEM, "display", "display", "System"
+  elif scene.startswith(("settings_system", "settings_display_preferences")):
+    available = not scene.endswith("_unavailable")
+    mode = "Offroad" if scene.endswith("_offroad") else "Onroad" if scene.endswith("_onroad") else "Auto"
+    display_on = "_display_off" not in scene and not scene.endswith(("_off", "_off_collapsed"))
+    display_reason = "" if display_on else "Saved; custom display is off"
+    rows = (FeatureRow("drive_state", "Force Drive State", mode, available=available,
+                       reason="Device: " + ("unavailable" if not available else "onroad" if mode == "Onroad" else "offroad"),
+                       actions=tuple((label, available and label != mode) for label in ("Auto", "Offroad", "Onroad"))),
+            FeatureRow("device_power", "Device Power", "", available=True, actions=(("Reboot", True), ("Power Off", mode != "Onroad"))),
+            FeatureRow(MASTER, "Custom Display Settings", "On" if display_on else "Off", choices=("Off", "On"), available=True),
+            FeatureRow("ScreenBrightness", "Parked Brightness", "Auto", page="ScreenBrightness", available=display_on,
+                       reason=display_reason, presets=(("Auto", "Auto"),)),
+            FeatureRow("ScreenBrightnessOnroad", "Driving Brightness", "Auto", page="ScreenBrightnessOnroad", available=display_on,
+                       reason=display_reason, presets=(("Auto", "Auto"),)),
+            FeatureRow("ScreenTimeout", "Parked Screen Timeout", "30 s", page="ScreenTimeout", available=display_on,
+                       reason=display_reason, presets=(("30 s", "30 s"),)),
+            FeatureRow("ScreenTimeoutOnroad", "Driving Interaction Timeout", "10 s", page="ScreenTimeoutOnroad", available=display_on,
+                       reason=display_reason or "Returns to driving view; screen stays awake", presets=(("10 s", "10 s"),)),
+            FeatureRow("power:enabled", "Parked Power", "Stock", choices=("Stock", "On"), available=True),
+            FeatureRow("power:hours", "Maximum Parked Time", "30 h", page="power:hours", available=True,
+                       reason="Saved; stock power policy applies", presets=(("30 h", "30 h"),)),
+            FeatureRow("power:volts", "Low-Voltage Cutoff", "11.8 V", page="power:volts", available=True,
+                       reason="Saved; stock power policy applies", presets=(("11.8 V", "11.8 V"),))) + map_page({"schemaVersion": 1, "state": "transferring",
+                                                                              "selectedGeneration": "", "completedGroups": 2,
+                                                                              "totalGroups": 6}).rows
+    destination, field, page, title = Destination.SYSTEM, "display", "system", "System"
+    if scene.startswith("settings_display_preferences"):
+      rows = rows[2:7]
+      page, title = "display", "Custom Display Settings"
+    else:
+      rows = rows[:2] + (replace(rows[2], page="display", reason="Brightness and screen timing"),) + rows[7:]
   elif scene == "settings_models":
     rows = (FeatureRow("", "Active Small", "Bundled driving model", page="models:small", available=True),
             FeatureRow("", "Active Big", "Bundled driving model", page="models:big", available=True),
@@ -94,9 +126,14 @@ def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettin
                            reason="Long explanatory reason with descenders, units, and saved source information. " * 3)
                    for row in rows)
   state = FeatureSettingsState(page=page, title=title,
-                               subtitle="Saved display preferences; changes remain governed by existing settings owners.",
-                               parent_title=feature_parent_title(page) if field == "features" else "Appearance" if page == "pip" else "StarPilot",
-                               rows=rows, parked=True, scroll=5 if scene.endswith("_scrolled") else 0)
+                               subtitle="Brightness and screen timing." if page == "display" else
+                                        "Display, drive state, power, and offline maps." if field == "display" else
+                                        "Saved display preferences; changes remain governed by existing settings owners.",
+                               parent_title=feature_parent_title(page) if field == "features" else "Appearance" if page == "pip" else
+                                            "System" if page == "display" else "StarPilot",
+                               rows=rows, parked=True,
+                               scroll=5 if scene == "settings_system_maps" or scene.endswith("_scrolled") else 0,
+                               sidebar_expanded=not scene.endswith("_collapsed"))
   return destination, field, state
 
 
@@ -133,6 +170,9 @@ class ShellViews:
     features = {}
     if scene in FEATURE_SCENES:
       selected, field, state = reference_feature_scene(scene)
+      # Capture each supplied page at rest, independently of the previous scene's animation.
+      getattr(self.view, field).reset(state)
+      settings = replace(settings, sidebar_expanded=state.sidebar_expanded)
       features[field] = state
     elif scene == "settings_starpilot_collapsed":
       settings = replace(settings, sidebar_expanded=False)
