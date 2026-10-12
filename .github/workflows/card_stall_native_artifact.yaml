@@ -26,7 +26,6 @@ jobs:
     env:
       PYTHONNOUSERSITE: '1'
       UV_NO_PROGRESS: '1'
-      ARTIFACT_DIR: ${{ runner.temp }}/card-stall-native-artifact
     steps:
       - name: Fetch exact public source with no archive fallback
         shell: bash
@@ -37,6 +36,7 @@ jobs:
           GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
+          printf 'ARTIFACT_DIR=%s/card-stall-native-artifact\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           test "$GITHUB_REPOSITORY" = firestar5683/StarPilot
           test "$GITHUB_REF" = refs/heads/diagnostics/card-stall-build-20261012
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -48,9 +48,10 @@ jobs:
           git config remote.origin.partialclonefilter blob:none
           git sparse-checkout init --no-cone
           printf '%s\n' '/msgq_repo/' '/openpilot/selfdrive/car/card.py' '/openpilot/starpilot/card_stall_timing.py' '/openpilot/starpilot/aol/tests/test_card_stall_timing.py' '/tools/ci/card_stall_native_artifact/' '/uv.lock' '/pyproject.toml' '/.github/workflows/card_stall_native_artifact.yaml' | git sparse-checkout set --no-cone --stdin
-          git -c protocol.version=2 fetch --filter=blob:none --depth=2 origin "$GITHUB_SHA"
+          git -c protocol.version=2 fetch --filter=blob:none --depth=3 origin "$GITHUB_SHA"
           test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse FETCH_HEAD^)" = e8389b0b7529bad402f1f4e5fbd672ff13d9d382
+          test "$(git rev-parse FETCH_HEAD^)" = 402a55b49d15df5cff985d5034f0e2053a4c677a
+          test "$(git rev-parse FETCH_HEAD^^)" = e8389b0b7529bad402f1f4e5fbd672ff13d9d382
           git checkout --detach "$GITHUB_SHA"
           test ! -e openpilot/selfdrive/modeld/models
       - name: Verify frozen source and baseline artifacts
