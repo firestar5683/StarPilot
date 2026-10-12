@@ -358,3 +358,28 @@ def test_actual_hkg_raw_known_unaccepted_sm_projection_preserves_full_axes_then_
                        denied_command.latActive or denied_command.longActive)
       case.assertFalse(feedback(denied_at, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents']))
       case.assertFalse(card.aol_card_intent.allowed_latch)
+
+
+def test_reduced_owner_subscribes_control_before_receiving_actual_command():
+  from openpilot.starpilot.aol.tests.test_runtime import IpcAxisContractTests
+
+  case = IpcAxisContractTests(methodName='runTest')
+  with ExitStack() as cleanup:
+    cleanup.callback(case.doCleanups)
+    with OpenpilotPrefix():
+      sd, controls, step, _, _ = case._transport_callers()
+      assert 'carControl' in sd.sm.seen
+      assert not sd.sm.seen['carControl'] and not sd.sm.valid['carControl']
+      assert sd.sm.logMonoTime['carControl'] == 0
+      # A subscribed-but-unseen packet cannot establish a held pedal override.
+      proof = ('authority-session', 1, 1, 30_000_001, 'authority-card', 0, True, True, True, True)
+      assert sd.held_axis_override_wait(sd.CS_prev, proof, 2) == (False, False)
+      _, _, command = step(0)
+      published = controls.pm.messages['carControl']
+      assert not sd.sm.seen['carControl']
+      step(1)
+      assert sd.sm.seen['carControl'] and sd.sm.valid['carControl']
+      assert sd.sm.logMonoTime['carControl'] == published.logMonoTime
+      assert sd.sm['carControl'].to_dict() == published.carControl.to_dict()
+      assert (sd.sm['carControl'].enabled, sd.sm['carControl'].latActive, sd.sm['carControl'].longActive) == (
+        command.enabled, command.latActive, command.longActive)

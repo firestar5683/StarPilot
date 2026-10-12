@@ -45,7 +45,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
     sd.params = params
     sd.CP = cp.as_reader()
     services = ['deviceState', 'pandaStates', 'driverMonitoringState', 'extrinsicsCalibration', 'modelV2',
-                'carState', 'aolIntentWire', 'aolSafetyWire', 'starpilotCarState']
+                'carState', 'carControl', 'aolIntentWire', 'aolSafetyWire', 'starpilotCarState']
     if not genuine_events:
       self.enterContext(mock.patch.object(sd, 'sm', messaging.SubMaster(services, ignore_avg_freq=services), create=True))
     sd.sm.update = mock.Mock()
@@ -115,6 +115,9 @@ class IoniqAvailabilityTests(unittest.TestCase):
     # The opt-in path keeps the constructor's production subscriptions and
     # frequency/validity checks. Only receive transport and the clock are synthetic.
     previous_control = [car.CarControl(enabled=full_op, latActive=full_op, longActive=full_op).as_reader()]
+    # Production subscribes before the first Controls packet arrives. Preserve
+    # that unseen state, then feed only the preceding actual published command.
+    previous_control_message = [None]
     due = {}
     def feed_event_sources(stamp, companions=(), *, car_output_valid=True):
       from openpilot.cereal.services import SERVICE_LIST
@@ -227,6 +230,8 @@ class IoniqAvailabilityTests(unittest.TestCase):
       if genuine_events:
         feed_event_sources(now, frames + [intent.as_reader(), native.as_reader()], car_output_valid=car_output_valid)
       else:
+        if previous_control_message[0] is not None:
+          frames.append(previous_control_message[0])
         sd.sm.update_msgs(now / 1e9, frames + [intent.as_reader(), native.as_reader()])
       if user_disable:
         self.enterContext(mock.patch.object(sd, 'update_events', lambda cs: (
@@ -250,6 +255,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
                               sd.pm.messages['aolAxisState'], sd.pm.messages['selfdriveState']])
       command, lac_log = controls.state_control()
       controls.publish(command, lac_log)
+      previous_control_message[0] = controls.pm.messages['carControl']
       if genuine_events:
         previous_control[0] = command.as_reader()
       return sd.pm.messages['aolAxisState'].aolAxisState, sd.pm.messages['selfdriveState'].selfdriveState, command
