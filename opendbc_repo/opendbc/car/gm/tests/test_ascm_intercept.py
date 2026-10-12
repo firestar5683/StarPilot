@@ -328,7 +328,10 @@ class TestAscmIntercept(unittest.TestCase):
         self.assertAlmostEqual(cp.minEnableSpeed, -1. if car == CAR.CADILLAC_ESCALADE_ESV_2019_ASCM else 5 / 3.6, places=6)
         self.assertTrue(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.ASCM_INTERCEPT)
         self.assertFalse(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.HW_CAM_LONG)
-        self.assertEqual(car.config.car_docs, [])
+        if car == CAR.CHEVROLET_VOLT_ASCM:
+          self.assertEqual(car.config.car_docs[0].make, "Chevrolet")
+        else:
+          self.assertEqual(car.config.car_docs, [])
         self.assertNotIn(car, FINGERPRINTS)
         self.assertNotIn(car, FW_VERSIONS)
 

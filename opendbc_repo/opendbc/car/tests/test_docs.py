@@ -3,7 +3,8 @@ import unittest
 
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.docs import get_all_car_docs
-from opendbc.car.docs_definitions import Cable, Column, PartType, Star, SupportType
+from opendbc.car.docs_definitions import Cable, CarHarness, Column, PartType, Star, SupportType
+from opendbc.car.gm.values import CAR as GM
 from opendbc.car.honda.values import CAR as HONDA
 from opendbc.car.values import PLATFORMS
 
@@ -63,7 +64,29 @@ class TestCarDocs(unittest.TestCase):
         if car.name == "comma body":
           raise unittest.SkipTest
 
+        if car.car_fingerprint in (GM.CHEVROLET_VOLT_CAMERA, GM.CHEVROLET_VOLT_CC):
+          # These manual configurations have no established model-year range.
+          self.assertEqual(car.support_type, SupportType.COMMUNITY)
+          self.assertEqual(car.year_list, [])
+          continue
+
         assert car.years and car.year_list, f"Format years correctly: {car.name}"
+
+  def test_volt_docs_support_and_hardware(self):
+    expected = {
+      GM.CHEVROLET_VOLT: (SupportType.COMMUNITY, CarHarness.obd_ii),
+      GM.CHEVROLET_VOLT_ASCM: (SupportType.COMMUNITY, CarHarness.custom),
+      GM.CHEVROLET_VOLT_2019: (SupportType.COMMUNITY, CarHarness.gmsdgm),
+      GM.CHEVROLET_VOLT_CAMERA: (SupportType.COMMUNITY, CarHarness.gm),
+      GM.CHEVROLET_VOLT_CC: (SupportType.COMMUNITY, CarHarness.custom),
+    }
+    docs = {car.car_fingerprint: car for car in self.all_cars if car.car_fingerprint in expected}
+    self.assertEqual(set(docs), set(expected))
+    for platform, (support, harness) in expected.items():
+      with self.subTest(platform=platform):
+        self.assertEqual(docs[platform].make, "Chevrolet")
+        self.assertEqual(docs[platform].support_type, support)
+        self.assertEqual([part for part in docs[platform].car_parts.parts if isinstance(part, CarHarness)], [harness])
 
   def test_harnesses(self):
     for car in self.all_cars:

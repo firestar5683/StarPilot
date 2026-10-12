@@ -5,7 +5,7 @@ from types import MappingProxyType
 
 from opendbc.car import Bus, PlatformConfig, DbcDict, Platforms, CarSpecs
 from opendbc.car.structs import CarParams
-from opendbc.car.docs_definitions import CarDocs, CarFootnote, CarHarness, CarParts, Column
+from opendbc.car.docs_definitions import CarDocs, CarFootnote, CarHarness, CarParts, Column, SupportType
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries
 
 Ecu = CarParams.Ecu
@@ -459,7 +459,9 @@ class GMCarDocs(CarDocs):
   package: str = "Adaptive Cruise Control (ACC)"
 
   def init_make(self, CP: CarParams):
-    if CP.networkLocation == CarParams.NetworkLocation.fwdCamera:
+    if CP.carFingerprint in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CC):
+      self.car_parts = CarParts.common([CarHarness.custom])
+    elif CP.networkLocation == CarParams.NetworkLocation.fwdCamera:
       if CP.carFingerprint in SDGM_CAR:
         self.car_parts = CarParts.common([CarHarness.gmsdgm])
       else:
@@ -516,16 +518,19 @@ class CAR(Platforms):
     [GMCarDocs("Holden Astra 2017")],
     GMCarSpecs(mass=1363, wheelbase=2.662, steerRatio=15.7, centerToFrontRatio=0.4),
   )
-  CHEVROLET_VOLT = GMASCMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt 2017-18", min_enable_speed=0, video="https://youtu.be/QeMCN_4TFfQ")],
+  CHEVROLET_VOLT = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Volt (OBD-II Harness) 2017-18", support_type=SupportType.COMMUNITY, support_link="#community",
+               min_enable_speed=0, video="https://youtu.be/QeMCN_4TFfQ")],
     GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45, tireStiffnessFactor=1.0),
   )
   CHEVROLET_VOLT_CC = GMPlatformConfig(
-    [],  # Manual development identity; no fingerprint, firmware alias or public driving claim.
+    [GMCarDocs("Chevrolet Volt (CC)", "Manual development configuration; installation must be verified",
+               merged=False, support_type=SupportType.COMMUNITY, support_link="#community")],
     CHEVROLET_VOLT.specs, dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
-  CHEVROLET_VOLT_ASCM = GMASCMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt ASCM Harness 2017-18")], CHEVROLET_VOLT.specs,
+  CHEVROLET_VOLT_ASCM = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Volt (ASCM Harness) 2017-18", "Adaptive Cruise Control (ACC); custom ASCM harness install",
+               support_type=SupportType.COMMUNITY, support_link="#community")], CHEVROLET_VOLT.specs,
   )
   CADILLAC_ATS = GMASCMPlatformConfig(
     [GMCarDocs("Cadillac ATS Premium Performance 2018")],
@@ -641,8 +646,9 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Blazer 2019-25", "Driver Assist Package")],
     GMCarSpecs(mass=1850, wheelbase=3.10, steerRatio=17.9, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
   )
-  CHEVROLET_VOLT_2019 = GMSDGMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt 2019", "Adaptive Cruise Control (ACC) & LKAS")],
+  CHEVROLET_VOLT_2019 = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Volt (SDGM Harness) 2019", "Adaptive Cruise Control (ACC) & LKAS",
+               support_type=SupportType.COMMUNITY, support_link="#community")],
     GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45),
   )
   CHEVROLET_TRAVERSE = GMSDGMPlatformConfig(
@@ -667,8 +673,10 @@ class CAR(Platforms):
   CHEVROLET_TRAX = GMCameraStockPlatformConfig(
     [], CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.4, centerToFrontRatio=0.4),
   )
-  CHEVROLET_VOLT_CAMERA = GMCameraStockPlatformConfig(
-    [], GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45, tireStiffnessFactor=1.0),
+  CHEVROLET_VOLT_CAMERA = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Volt (Camera Harness)", "Manual configuration; recognized camera layout required",
+               merged=False, support_type=SupportType.COMMUNITY, support_link="#community")],
+    GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45, tireStiffnessFactor=1.0),
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
   CADILLAC_CT6_CC = GMCCGatewayPlatformConfig([], GMCarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4, tireStiffnessFactor=1.0))

@@ -131,7 +131,8 @@ class TestVoltCc(unittest.TestCase):
         self.assertFalse(is_volt_cc_longitudinal(invalid))
     self.assertNotIn(CAR.CHEVROLET_VOLT_CC, FINGERPRINTS)
     self.assertNotIn(CAR.CHEVROLET_VOLT_CC, FW_VERSIONS)
-    self.assertFalse(CAR.CHEVROLET_VOLT_CC.config.car_docs)
+    self.assertEqual(CAR.CHEVROLET_VOLT_CC.config.car_docs[0].package,
+                     "Manual development configuration; installation must be verified")
 
   def test_actual_controls_constructor_registers_required_services(self):
     class Registered(Exception):

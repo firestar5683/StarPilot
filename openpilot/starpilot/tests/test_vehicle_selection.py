@@ -34,6 +34,25 @@ class TestVehicleSelection(unittest.TestCase):
     self.assertEqual(len(selected), 1)
     self.assertEqual(selected[0].label, 'Hyundai Ioniq 6')
 
+  def test_volt_harness_choices_are_under_chevrolet(self):
+    from opendbc.car.gm.values import CAR as GM
+
+    expected = {
+      GM.CHEVROLET_VOLT: 'Chevrolet Volt (OBD-II Harness) 2017-18',
+      GM.CHEVROLET_VOLT_ASCM: 'Chevrolet Volt (ASCM Harness) 2017-18',
+      GM.CHEVROLET_VOLT_2019: 'Chevrolet Volt (SDGM Harness) 2019',
+      GM.CHEVROLET_VOLT_CAMERA: 'Chevrolet Volt (Camera Harness)',
+      GM.CHEVROLET_VOLT_CC: 'Chevrolet Volt (CC)',
+    }
+    catalog = {choice.platform: choice for choice in self.owner.choices()}
+    for platform, label in expected.items():
+      with self.subTest(platform=platform):
+        self.assertEqual(catalog[platform].make, 'Chevrolet')
+        self.assertEqual(catalog[platform].label, label)
+        original = self.owner.snapshot()
+        self.assertTrue(self.owner.choose(original.raw, str(platform)).verified)
+        self.assertEqual(startup_candidate(self.params), platform)
+
   def test_k4_2026_documentation_keeps_one_manual_platform_and_factory(self):
     from opendbc.car.hyundai.interface import CarInterface
     from opendbc.car.values import PLATFORMS
