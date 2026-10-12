@@ -1189,6 +1189,11 @@ class SelfdriveD:
     source_ns = self.aol_car_state_log_ns
     intent = getattr(self, 'aol_last_intent', None)
     companion = getattr(self, 'aol_intent_companion', None)
+    user_disable = self.events.contains(ET.USER_DISABLE)
+    if user_disable and self.held_axis_override_wait(CS, proof, now_ns)[0]:
+      # A moving held brake repeats pedalPressed while ordinary control is
+      # already disabled. Its existing lateral-only override is not a new edge.
+      user_disable = any(event.userDisable and event.name != EventName.pedalPressed for event in self.events.to_msg())
     if (proof[1] < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS and
         self.conditional_car_state_valid and CS.canValid and not CS.canTimeout and
         intent is not None and intent.carStateLogMonoTime == source_ns and
@@ -1198,7 +1203,7 @@ class SelfdriveD:
         companion is not None and companion.integrity_epoch == proof[5] and
         decision.native_acknowledged and not self.aol_authority_lost and
         getattr(self, 'aol_fault_reason', 'none') == 'none' and
-        not any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) and
+        not user_disable and not any(self.events.contains(kind) for kind in (ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) and
         (not decision.longitudinal_active or self.enabled and self.active)):
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
       prior_native = getattr(self, 'aol_published_input_native', None)

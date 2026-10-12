@@ -189,7 +189,9 @@ def test_final_handoff_full_owner(mode, condition):
            mock.patch.object(sd, 'step', side_effect=run_normal_iterations):
         axis, _, command = step(5, timeout=True, offset_ns=-100_000, intent_message=wire(BASE, 3),
                                 latched=lateral_only, gas=gas, brake=brake)
-      fresh_replacement = condition in ('late', 'processing_late') and not lateral_only
+      # A fresh source may renew the existing held-brake AOL-only override;
+      # neither expiry of its predecessor nor repeated pedalPressed is a new edge.
+      fresh_replacement = condition in ('late', 'processing_late')
       accepted = (condition in ('timely', 'poll', 'same_source_serialization') or fresh_replacement or
                   condition == 'brake_edge' and lateral_only)
       assert len(states) <= 2 and len(samples) <= 2
