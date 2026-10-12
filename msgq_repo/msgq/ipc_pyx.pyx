@@ -7,7 +7,47 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libc cimport errno
 from libc.string cimport strerror
+from libc.stdint cimport int64_t, uint64_t
 from cython.operator import dereference
+
+
+cdef extern from "Python.h":
+  unsigned long PyThread_get_thread_ident() noexcept
+
+
+cdef extern from *:
+  """
+  #include <errno.h>
+  #include <stdint.h>
+  #include <time.h>
+
+  // Diagnostics must neither raise nor disturb the backend's errno.
+  static inline void msgq_receive_clock_pair(int64_t *wall, int64_t *cpu) {
+    const int saved_errno = errno;
+    struct timespec ts;
+    *wall = clock_gettime(CLOCK_MONOTONIC, &ts) == 0
+      ? (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec : -1;
+    *cpu = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0
+      ? (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec : -1;
+    errno = saved_errno;
+  }
+  """
+  void msgq_receive_clock_pair(int64_t *wall, int64_t *cpu) noexcept nogil
+
+
+cdef struct ReceiveTiming:
+  uint64_t sequence
+  bool non_blocking
+  bool returned_message
+  size_t byte_length
+  int64_t before_wall
+  int64_t before_cpu
+  int64_t backend_return_wall
+  int64_t backend_return_cpu
+  int64_t gil_reacquired_wall
+  int64_t gil_reacquired_cpu
+  int64_t python_return_wall
+  int64_t python_return_cpu
 
 
 from .ipc cimport Context as cppContext
@@ -161,6 +201,14 @@ cdef class Poller:
 cdef class SubSocket:
   cdef cppSubSocket * socket
   cdef bool is_owner
+  cdef bool receive_timing_enabled
+  cdef unsigned long receive_timing_owner
+  cdef ReceiveTiming receive_timing_ring[64]
+  cdef unsigned int receive_timing_next
+  cdef unsigned int receive_timing_count
+  cdef uint64_t receive_timing_sequence
+  cdef uint64_t receive_timing_omitted
+  cdef uint64_t receive_timing_generation
 
   def __cinit__(self):
     with nogil:
@@ -198,8 +246,87 @@ cdef class SubSocket:
     with nogil:
       self.socket.setTimeout(timeout)
 
+  cdef check_receive_timing_owner(self):
+    if self.receive_timing_owner != 0 and self.receive_timing_owner != PyThread_get_thread_ident():
+      raise RuntimeError("receive timing must be managed by the thread that enabled it")
+
+  def enable_receive_timing(self, bool enabled):
+    """Opt in on the receiving thread; disabling preserves previous records."""
+    self.check_receive_timing_owner()
+    if enabled:
+      self.receive_timing_owner = PyThread_get_thread_ident()
+    self.receive_timing_enabled = enabled
+
+  def reset_receive_timing(self):
+    """Explicitly clear records and counts, without changing enablement."""
+    self.check_receive_timing_owner()
+    self.receive_timing_next = 0
+    self.receive_timing_count = 0
+    self.receive_timing_sequence = 0
+    self.receive_timing_omitted = 0
+    self.receive_timing_generation += 1
+
+  def take_receive_timing(self):
+    """Return (oldest-to-newest records, overwritten count), without clearing.
+
+    Each record is (sequence, non_blocking, returned_message, byte_length,
+    before_mono_ns, before_thread_cpu_ns, backend_return_mono_ns,
+    backend_return_thread_cpu_ns, gil_reacquired_mono_ns,
+    gil_reacquired_thread_cpu_ns, python_return_mono_ns,
+    python_return_thread_cpu_ns). Failed clocks are -1. The final interval
+    includes the bytes copy and message cleanup; gil_handoff includes scheduling.
+    """
+    self.check_receive_timing_owner()
+    cdef unsigned int i
+    cdef unsigned int start = (self.receive_timing_next + 64 - self.receive_timing_count) % 64
+    cdef ReceiveTiming *record
+    records = []
+    for i in range(self.receive_timing_count):
+      record = &self.receive_timing_ring[(start + i) % 64]
+      records.append((record.sequence, record.non_blocking, record.returned_message, record.byte_length,
+                      record.before_wall, record.before_cpu, record.backend_return_wall, record.backend_return_cpu,
+                      record.gil_reacquired_wall, record.gil_reacquired_cpu, record.python_return_wall, record.python_return_cpu))
+    return tuple(records), self.receive_timing_omitted
+
+  cdef receive_timed(self, bool non_blocking):
+    cdef cppMessage *msg
+    cdef ReceiveTiming record
+    cdef uint64_t generation = self.receive_timing_generation
+    record.non_blocking = non_blocking
+    with nogil:
+      msgq_receive_clock_pair(&record.before_wall, &record.before_cpu)
+      msg = self.socket.receive(non_blocking)
+      msgq_receive_clock_pair(&record.backend_return_wall, &record.backend_return_cpu)
+    msgq_receive_clock_pair(&record.gil_reacquired_wall, &record.gil_reacquired_cpu)
+
+    record.returned_message = msg != NULL
+    record.byte_length = 0
+    if msg == NULL:
+      m = None
+    else:
+      record.byte_length = msg.getSize()
+      m = msg.getData()[:record.byte_length]
+      with nogil:
+        del msg
+
+    msgq_receive_clock_pair(&record.python_return_wall, &record.python_return_cpu)
+    # All shared ring access holds the GIL. Only this stack-local record is
+    # written while nogil; no Python object is created for the receipt here.
+    if generation == self.receive_timing_generation:
+      self.receive_timing_sequence += 1
+      record.sequence = self.receive_timing_sequence
+      self.receive_timing_ring[self.receive_timing_next] = record
+      self.receive_timing_next = (self.receive_timing_next + 1) % 64
+      if self.receive_timing_count < 64:
+        self.receive_timing_count += 1
+      else:
+        self.receive_timing_omitted += 1
+    return m
+
   def receive(self, bool non_blocking=False):
     cdef cppMessage *msg
+    if self.receive_timing_enabled and self.receive_timing_owner == PyThread_get_thread_ident():
+      return self.receive_timed(non_blocking)
     with nogil:
       msg = self.socket.receive(non_blocking)
 

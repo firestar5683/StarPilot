@@ -1,0 +1,58 @@
+{
+  "parent_commit": "e8389b0b7529bad402f1f4e5fbd672ff13d9d382",
+  "expected_branch": "diagnostics/card-stall-build-20261012",
+  "source_whitelist": [
+    {
+      "path": "openpilot/selfdrive/car/card.py",
+      "sha256": "41694a8ca800b0c850cafd18cf902f83a7155d4c15405d0a44bbde3efd8269a2",
+      "git_mode": "100755",
+      "baseline_sha256": "14e2dcc0aa4e4a945677a41b35dd599ea6d9f8bf7c6a449e74b362ef9203045f"
+    },
+    {
+      "path": "openpilot/starpilot/card_stall_timing.py",
+      "sha256": "268d67c8ebdf07a83c254fe4cde04bb3fb56f5cd5bc793da57b6e8c2370a8063",
+      "git_mode": "100644",
+      "baseline_sha256": null
+    },
+    {
+      "path": "openpilot/starpilot/aol/tests/test_card_stall_timing.py",
+      "sha256": "dc56cd86346da6cd790475d055c9f873663ce5342d46cbabda196aa358efccf6",
+      "git_mode": "100644",
+      "baseline_sha256": null
+    },
+    {
+      "path": "msgq_repo/msgq/ipc_pyx.pyx",
+      "sha256": "344491d95253e677b1190d7d9440edbb75d2067bb2c41e1919a21a244566d4ef",
+      "git_mode": "100644",
+      "baseline_sha256": "02cf21d0232967eed7bd68ed0209e55f5f1e3edef3675671bc6524ca64976fa4"
+    },
+    {
+      "path": "msgq_repo/msgq/tests/test_receive_timing.py",
+      "sha256": "88b7f736c7cbd3d0d0c29634df35112f9eca8f10236a3561afce6683e88f7006",
+      "git_mode": "100644",
+      "baseline_sha256": null
+    }
+  ],
+  "baseline_native": {
+    "path": "msgq_repo/msgq/ipc_pyx.so",
+    "git_blob": "3453001a9e283d60ae4489607beafaa6776acd1e",
+    "sha256": "5a50085f727e3b22dcf596cb42be351066b0dcf7db7866fe04be40e69fe57133",
+    "git_mode": "100755"
+  },
+  "python_version": "3.12.13",
+  "cython_version": "3.3.0",
+  "compiler_family_major": "GCC 13",
+  "generic_isa": "armv8-a",
+  "max_symbol_versions": {
+    "GLIBC": "2.34",
+    "GLIBCXX": "3.4.32",
+    "CXXABI": "1.3",
+    "GCC": "3.0"
+  },
+  "baseline_companion": {
+    "path": "msgq_repo/msgq/visionipc/visionipc_pyx.so",
+    "git_blob": "b4f95da4ec84c15a515d56dea0f028c37674d083",
+    "sha256": "d9aee015a9ca9d6d8f4dc54c5bca6a8f3ab24ad9a42477561ea7cc32eebff5a4",
+    "git_mode": "100755"
+  }
+}

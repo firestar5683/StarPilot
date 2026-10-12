@@ -13,6 +13,7 @@ from opendbc.car.structs import car
 
 from openpilot.common.params import Params
 from openpilot.starpilot.card_loop_timing import CardLoopTiming
+from openpilot.starpilot.card_stall_timing import CardStallTiming
 from openpilot.common.realtime import config_realtime_process, drop_realtime, set_core_affinity, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
 
@@ -442,6 +443,12 @@ class Car:
         tracker.claim(gesture, now_ns, key)
 
   def timing_mark(self, name):
+    try:
+      stall = getattr(self, 'stall_timing', None)
+      if stall is not None:
+        stall.mark(name)
+    except Exception:
+      pass  # Observations must never interrupt control or its fail-closed paths.
     timing = getattr(self, 'loop_timing', None)
     if timing is not None and getattr(timing, 'detailed', True):
       timing.mark(name)
@@ -455,6 +462,12 @@ class Car:
     can_received_ns = time.monotonic_ns()
     can_list = can_capnp_to_list(can_strs)
     self.timing_mark('can_decode_end')
+    try:
+      stall = getattr(self, 'stall_timing', None)
+      if stall is not None:
+        stall.observe_can(can_strs, can_list)
+    except Exception:
+      pass
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
@@ -920,6 +933,12 @@ class Car:
     self.timing_mark('car_state_send_start')
     self.pm.send('carState', cs_send)
     self.timing_mark('car_state_send_end')
+    try:
+      stall = getattr(self, 'stall_timing', None)
+      if stall is not None:
+        stall.published(int(cs_send.logMonoTime), self.slc_producer_session)
+    except Exception:
+      pass
     self.timing_source_car_state_ns = int(cs_send.logMonoTime)
     timing = getattr(self, 'loop_timing', None)
     if timing is not None:
@@ -1402,6 +1421,13 @@ class Car:
     set_core_affinity([0, 1, 2, 3])
     next_cruise_read = 0.0
     while not evt.is_set():
+      try:
+        stall = getattr(self, 'stall_timing', None)
+        if stall is not None:
+          stall.worker_mark('settings_start')
+          stall.flush(cloudlog.event)
+      except Exception:
+        pass
       timing = getattr(self, 'loop_timing', None)
       report = timing.take_report() if timing is not None else None
       if report is not None:
@@ -1418,9 +1444,20 @@ class Car:
         self.slc_requested_configuration = self.read_slc_configuration()
         self.v_cruise_helper.intervals = read_cruise_intervals(self.params, pcm_cruise=self.CP.pcmCruise)
         next_cruise_read = now + 1.0
+      try:
+        if stall is not None:
+          stall.worker_mark('settings_end')
+      except Exception:
+        pass
       time.sleep(0.1)
 
   def card_thread(self):
+    self.stall_timing = None
+    try:
+      if self.aol_replay and not REPLAY and ioniq6_long_eligible(self.CP):
+        self.stall_timing = CardStallTiming(self.can_sock)
+    except Exception:
+      pass
     self.loop_timing = (CardLoopTiming(detailed=os.getenv('CARD_PHASE_TIMING') == '1')
                         if self.aol_replay and not REPLAY else None)
     self.timing_thread_id = threading.get_native_id()
@@ -1429,6 +1466,11 @@ class Car:
     try:
       t.start()
       while True:
+        try:
+          if self.stall_timing is not None:
+            self.stall_timing.begin()
+        except Exception:
+          pass
         timing = self.loop_timing
         if timing is not None and timing.detailed:
           timing.begin()
@@ -1436,6 +1478,11 @@ class Car:
         self.timing_mark('startup_check_end')
         self.step()
         self.rk.monitor_time()
+        try:
+          if self.stall_timing is not None:
+            self.stall_timing.finish()
+        except Exception:
+          pass
         if timing is not None and timing.detailed:
           timing.finish({'source_car_state_ns': getattr(self, 'timing_source_car_state_ns', 0),
                          'source_control_ns': int(self.sm.logMonoTime['carControl']),

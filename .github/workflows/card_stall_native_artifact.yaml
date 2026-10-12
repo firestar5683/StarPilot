@@ -1,0 +1,89 @@
+name: Card stall native artifact qualification
+
+on:
+  push:
+    branches: [diagnostics/card-stall-build-20261012]
+    paths:
+      - .github/workflows/card_stall_native_artifact.yaml
+      - tools/ci/card_stall_native_artifact/**
+      - msgq_repo/**
+      - openpilot/selfdrive/car/card.py
+      - openpilot/starpilot/card_stall_timing.py
+      - openpilot/starpilot/aol/tests/test_card_stall_timing.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: card-stall-native-artifact-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native_arm64:
+    if: github.repository == 'firestar5683/StarPilot' && github.ref == 'refs/heads/diagnostics/card-stall-build-20261012'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    env:
+      PYTHONNOUSERSITE: '1'
+      UV_NO_PROGRESS: '1'
+      ARTIFACT_DIR: ${{ runner.temp }}/card-stall-native-artifact
+    steps:
+      - name: Fetch exact public source with no archive fallback
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_LFS_SKIP_SMUDGE: '1'
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = firestar5683/StarPilot
+          test "$GITHUB_REF" = refs/heads/diagnostics/card-stall-build-20261012
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          python3 -c 'import re, subprocess; v = subprocess.check_output(["git", "version"], text=True); m = re.search(r"(\d+)\.(\d+)\.(\d+)", v); assert m and tuple(map(int, m.groups())) >= (2, 28, 0), v; print(v.strip())'
+          test ! -e .git
+          git init
+          git remote add origin https://github.com/firestar5683/StarPilot.git
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git sparse-checkout init --no-cone
+          printf '%s\n' '/msgq_repo/' '/openpilot/selfdrive/car/card.py' '/openpilot/starpilot/card_stall_timing.py' '/openpilot/starpilot/aol/tests/test_card_stall_timing.py' '/tools/ci/card_stall_native_artifact/' '/uv.lock' '/pyproject.toml' '/.github/workflows/card_stall_native_artifact.yaml' | git sparse-checkout set --no-cone --stdin
+          git -c protocol.version=2 fetch --filter=blob:none --depth=2 origin "$GITHUB_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse FETCH_HEAD^)" = e8389b0b7529bad402f1f4e5fbd672ff13d9d382
+          git checkout --detach "$GITHUB_SHA"
+          test ! -e openpilot/selfdrive/modeld/models
+      - name: Verify frozen source and baseline artifacts
+        run: python3 tools/ci/card_stall_native_artifact/verify_source.py "$ARTIFACT_DIR/provenance"
+      - name: Install bounded native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-13 g++-13 binutils libzmq5
+      - name: Install pinned Python environment manager
+        uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          version: '0.12.5'
+          enable-cache: false
+      - name: Qualify source, build and execute native ARM tests
+        shell: bash
+        env:
+          EXPECTED_BASE_COMMIT: e8389b0b7529bad402f1f4e5fbd672ff13d9d382
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+          EXPECTED_GCC_VERSION: '13.3.0'
+          GCC: /usr/bin/gcc-13
+          GXX: /usr/bin/g++-13
+        run: |
+          uv python install 3.12.13
+          uv venv --python 3.12.13 "$RUNNER_TEMP/card-stall-native-venv"
+          export PYTHON="$RUNNER_TEMP/card-stall-native-venv/bin/python"
+          uv pip install --python "$PYTHON" --require-hashes -r tools/ci/card_stall_native_artifact/requirements.lock
+          bash tools/ci/card_stall_native_artifact/build_native.sh "$PWD" "$ARTIFACT_DIR/provenance/baseline-ipc_pyx.so" "$ARTIFACT_DIR/build"
+      - name: Retain artifact and complete qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: card-stall-native-arm64-${{ github.sha }}
+          path: ${{ env.ARTIFACT_DIR }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
