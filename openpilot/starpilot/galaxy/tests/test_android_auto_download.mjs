@@ -113,6 +113,14 @@ fallback.installOpen = true
 const mirror = nodes(fallback).find(node => node.type === "a" && node.props?.href === APKMIRROR_URL)
 assert(mirror, "falls back to APKMirror when the comma has no link")
 assert.equal(mirror.props.target, "_blank")
+// Upload progress uses the software-update bar so both share one palette.
+const sending = page()
+Object.assign(sending, { installOpen: true, installAttempted: true, uploadProgress: { loaded: 25, total: 100 } })
+const fill = nodes(sending).find(node => node.props?.class === "gx-update-progress__fill")
+assert(fill, "upload bar reuses the update progress fill")
+assert.deepEqual(fill.props.style, { width: "25%" })
+assert(!nodes(sending).some(node => node.type === "progress"), "no native progress element")
+assert.equal(page().uploadPercent, 0)
 for (const gone of [/Google Play/, /sign-in/i, /oauth/i, /renew/i, /apkmirror-\d\.svg/, /installMethod/]) assert.doesNotMatch(AndroidAutoPage.template, gone)
 // Phones have no file type for .xapk/.apkm, so a filter would grey out the download; choosePackage checks it instead.
 const picker = (vm) => nodes(vm).find(node => node.type === "input" && node.props?.type === "file")

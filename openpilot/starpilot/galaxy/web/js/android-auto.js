@@ -449,6 +449,10 @@ export const AndroidAutoPage = {
     projecting() { return this.runtime?.state === "streaming" },
     supportReady() { return !!(this.setup?.enabled && this.setup.identity.installed) },
     download() { return downloadLink(this.setup?.download) },
+    uploadPercent() {
+      const { loaded, total } = this.uploadProgress || {}
+      return total > 0 ? Math.min(100, Math.round(100 * loaded / total)) : 0
+    },
     downloadsHint() {
       if (typeof navigator === "undefined") return ""
       if (/iPhone|iPad|iPod/i.test(navigator.userAgent || "") || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return "In Files, open Downloads."
@@ -1002,8 +1006,10 @@ export const AndroidAutoPage = {
                   </button>
                   <small v-if="installState === 'choose' && uploadReason && packageFile && !packageError" class="gx-note" role="status">{{ uploadReason }}</small>
                   <div v-if="installState === 'uploading'" role="status" aria-live="polite" class="gx-aa-progress">
-                    <progress :value="uploadProgress?.loaded || 0" :max="uploadProgress?.total || 1"></progress>
-                    <small>Sending to your comma… {{ uploadProgress ? Math.round(100 * uploadProgress.loaded / uploadProgress.total) : 0 }}%</small>
+                    <div class="gx-update-progress__track" role="progressbar" aria-label="Sending to your comma" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="uploadPercent">
+                      <div class="gx-update-progress__fill" :style="{ width: uploadPercent + '%' }"></div>
+                    </div>
+                    <small>Sending to your comma… {{ uploadPercent }}%</small>
                   </div>
                   <ul v-if="['checking', 'failed'].includes(installState)" class="gx-aa-checks" aria-live="polite">
                     <li v-for="check in checks" :key="check.label" :class="'gx-aa-check--' + check.status">{{ check.label }}</li>

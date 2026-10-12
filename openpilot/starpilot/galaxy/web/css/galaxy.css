@@ -1613,15 +1613,7 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
   color: var(--text-muted);
 }
 
-/* Progress */
-.gx-aa-progress progress {
-  width: 100%;
-  height: 8px;
-  border-radius: var(--radius-full);
-  overflow: hidden;
-  accent-color: var(--primary);
-}
-
+.gx-aa-progress { display: grid; gap: var(--sp-2); }
 .gx-aa-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); width: 100%; }
 .gx-aa-checks li { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-muted); font-size: var(--fs-sm); }
 .gx-aa-checks li::before {
