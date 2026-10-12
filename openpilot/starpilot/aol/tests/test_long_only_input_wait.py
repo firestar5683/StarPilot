@@ -177,7 +177,8 @@ def test_wait_pause_veto_is_axis_scoped_and_preserves_unpause(long_only, transit
           return queue.popleft() if queue else None
         return original_receive(sock)
 
-      with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one_or_none', side_effect=receive):
+      with mock.patch('openpilot.selfdrive.selfdrived.selfdrived.messaging.recv_one_or_none', side_effect=receive), \
+           mock.patch('openpilot.selfdrive.selfdrived.selfdrived.time.monotonic_ns', return_value=now):
         wait = sd.event_input_wait_ns(sd.CS_prev, now)
       assert not queue
       assert wait == (0 if transition in ('new_pause', 'active_pause') else axis.validUntilMonoTime - now)

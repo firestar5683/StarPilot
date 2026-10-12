@@ -824,8 +824,16 @@ class SelfdriveD:
       return 0
     if (session != self.aol_session_id or not 0 < source <= published <= now_ns < deadline or
         published - source > INTENT_MAX_AGE_NS or deadline != published + INTENT_MAX_AGE_NS or
-        intent.producerSessionId != producer or intent.carStateLogMonoTime != source or companion.integrity_epoch != epoch or
-        not companion.drain() or companion.integrity_epoch != epoch):
+        intent.producerSessionId != producer or intent.carStateLogMonoTime != source or companion.integrity_epoch != epoch):
+      return 0
+    wait_origin_ns = now_ns
+    wait_deadline_ns = min(deadline, wait_origin_ns + int(DT_CTRL * 1e9))
+    if not companion.drain() or companion.integrity_epoch != epoch:
+      return 0
+    # Transport may deliver intent published after the caller's clock sample.
+    # Validate it against a post-drain clock without renewing the original wait.
+    now_ns = time.monotonic_ns()
+    if not wait_origin_ns <= now_ns < wait_deadline_ns:
       return 0
     latest = companion.latest
     # An unchanged pause on an unrequested, inactive axis does not revoke the
@@ -853,7 +861,7 @@ class SelfdriveD:
         native.observedMonoTime < previous_native.observedMonoTime or
         bool(native.requestedLateral) != lateral or bool(native.requestedLongitudinal) != longitudinal):
       return 0
-    return min(deadline - now_ns, int(DT_CTRL * 1e9))
+    return wait_deadline_ns - wait_origin_ns
 
   def refresh_event_car_state(self, CS):
     if not getattr(self, 'event_input_refresh_pending', False) or REPLAY or not self.aol_replay or not self.axis_transport_required:
