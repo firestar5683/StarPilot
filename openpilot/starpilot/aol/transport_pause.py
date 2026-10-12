@@ -443,10 +443,28 @@ class TransportPauseFeedback:
       native.observedMonoTime >= self.lateral_native_ns and
       (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) == self.lateral_inventory)
 
+  def _new_expired_combined_source(self, sm, cp, axis, stamp, now_ns, signature):
+    """An established combined producer advanced while Card missed its output lease."""
+    previous = self.signature
+    if (now_ns <= signature[4] or previous is None or self.retention_started_ns or
+        not (sm.seen['aolAxisState'] and sm.valid['aolAxisState'] and sm.alive['aolAxisState']) or
+        not axis.desiredLongitudinal or not axis.longitudinalActive or
+        not all(previous[index] for index in (9, 10, 11, 12, 13)) or previous[5] != 'none' or
+        signature[1] <= self.sequence or stamp <= previous[2] or
+        not 0 < self.lateral_source_ns <= previous[8] < signature[8] <= stamp or
+        stamp - signature[8] > AXIS_MAX_AGE_NS or
+        signature[4] != stamp + AXIS_MAX_AGE_NS):
+      return False
+    # Only this missed, already-expired Ioniq6 combined proof needs the extra
+    # path. Its original source/native retention clocks are checked below and
+    # never advanced; this function supplies no current output or LONG enable.
+    from openpilot.starpilot.car.hyundai.aol import qualified_ioniq6
+    return qualified_ioniq6(cp)
+
   def _source_availability_retention(self, sm, cp, cs, axis, stamp, now_ns, *, latched, continuity, producer, signature):
     # Output freshness withdraws commands, not previously accepted driver intent.
-    # Missing/expired full-LONG output can retain only the exact held identity;
-    # the existing lateral-only source-retention path keeps its original guards.
+    # Held output or a strictly forward, initially fresh combined proof may
+    # retain only an already established intent under its original bounds.
     held = bool(signature == self.signature and not self.retention_started_ns)
     output_missing = not (sm.seen['aolAxisState'] and sm.valid['aolAxisState'] and sm.alive['aolAxisState'])
     if (not latched or self.failed or self.paused or self.pending_event or not self.session or
@@ -454,7 +472,8 @@ class TransportPauseFeedback:
         str(axis.sessionId) != self.session or str(axis.faultSessionId) != self.session or
         str(axis.faultReason) != 'none' or not axis.qualified or not axis.nativeAcknowledged or
         not axis.desiredLateral or not axis.lateralActive or
-        (axis.desiredLongitudinal or axis.longitudinalActive) and not held or
+        (axis.desiredLongitudinal or axis.longitudinalActive) and not held and
+          not self._new_expired_combined_source(sm, cp, axis, stamp, now_ns, signature) or
         (not sm.seen['aolAxisState'] or not sm.valid['aolAxisState']) and not held or
         int(axis.observedMonoTime) != stamp or not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
         not 0 <= axis.validUntilMonoTime - stamp <= AXIS_MAX_AGE_NS or
@@ -481,6 +500,8 @@ class TransportPauseFeedback:
       return False
     native = _healthy_transport_native(sm, cp, cs, self.session, now_ns)
     if (native is None or not native.pandaInventory or not native.requestedLateral or not native.lateralAllowed or
+        (axis.desiredLongitudinal or axis.longitudinalActive) and not held and
+          not (native.requestedLongitudinal and native.longitudinalAllowed) or
         native.observedMonoTime < self.lateral_native_ns or
         (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
       return False
