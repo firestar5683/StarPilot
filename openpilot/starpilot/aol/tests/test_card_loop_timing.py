@@ -203,8 +203,6 @@ def test_actual_params_worker_emits_after_recorder_releases_frame(monkeypatch):
   monkeypatch.setattr(module.cloudlog, 'event', lambda name, **report: emitted.append((name, report)))
   monkeypatch.setattr(module, 'read_cruise_intervals', lambda *a, **k: 'intervals')
   monkeypatch.setattr(module.time, 'sleep', lambda _: None)
-  monkeypatch.setattr(module, 'drop_realtime', lambda: None)
-  monkeypatch.setattr(module, 'set_core_affinity', lambda _: None)
   daemon.params_thread(Once())
   assert len(emitted) == 1 and emitted[0][0] == 'card.loop_late'
   assert emitted[0][1]['frames'][0]['end_ns'] - emitted[0][1]['frames'][0]['start_ns'] == 80_877_165
@@ -260,7 +258,7 @@ def test_actual_recorder_cost_is_bounded_and_report_worker_formatting_is_measure
   assert metrics['worker_payload_bytes'] <= 20_000, metrics
 
 
-def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monkeypatch):
+def test_actual_params_worker_preserves_inherited_scheduling(monkeypatch):
   import os
   import sys
   import threading
@@ -289,6 +287,7 @@ def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monk
   def record(kind, value=None):
     tid = threading.get_native_id()
     assert tid != main_tid
+    assert scheduling() == main_before
     trace.append((kind, tid, value))
 
   def read_bool(key):
@@ -301,14 +300,6 @@ def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monk
     return 'configuration'
   daemon.read_slc_configuration = configuration
 
-  original_drop = module.drop_realtime
-  original_affinity = module.set_core_affinity
-  def drop():
-    record('drop')
-    original_drop()
-  def affine(cores):
-    record('affinity', list(cores))
-    original_affinity(cores)
   def intervals(params, *, pcm_cruise):
     assert params is daemon.params and pcm_cruise is False
     record('intervals')
@@ -318,8 +309,6 @@ def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monk
     record('sleep')
     stopped.set()
 
-  monkeypatch.setattr(module, 'drop_realtime', drop)
-  monkeypatch.setattr(module, 'set_core_affinity', affine)
   monkeypatch.setattr(module, 'read_cruise_intervals', intervals)
   # Only Card's time binding changes; other threads keep their genuine clocks.
   monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=time.monotonic, sleep=sleep))
@@ -342,7 +331,7 @@ def test_actual_params_worker_scheduling_stays_on_worker_and_precedes_reads(monk
   worker_tid = trace[0][1]
   assert worker_tid != main_tid and {row[1] for row in trace} == {worker_tid}
   assert [(kind, value) for kind, _, value in trace] == [
-    ('drop', None), ('affinity', [0, 1, 2, 3]), ('read_bool', 'IsMetric'),
+    ('read_bool', 'IsMetric'),
     ('read_bool', 'ExperimentalMode'), ('configuration', None), ('intervals', None), ('sleep', None),
   ]
   assert scheduling() == main_before
@@ -490,8 +479,6 @@ def test_actual_params_worker_formats_output_snapshot_before_settings_reads(monk
   daemon.read_slc_configuration = lambda: 'configuration'
   monkeypatch.setattr(module, 'read_cruise_intervals', lambda *a, **k: 'intervals')
   monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: 1., sleep=lambda _: stopped.set()))
-  monkeypatch.setattr(module, 'drop_realtime', lambda: None)
-  monkeypatch.setattr(module, 'set_core_affinity', lambda _: None)
   def run():
     try:
       daemon.params_thread(stopped)

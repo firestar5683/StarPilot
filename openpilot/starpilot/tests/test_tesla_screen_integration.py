@@ -140,9 +140,7 @@ class TestTeslaScreenIntegration(unittest.TestCase):
               self.assertIn('aolSafetyWire', selected.sm.data)
               saved.put_bool('AlwaysOnLateral', False, block=True)
               iterations = iter((False, True))
-              with patch('openpilot.selfdrive.car.card.time.sleep'), \
-                   patch('openpilot.selfdrive.car.card.drop_realtime'), \
-                   patch('openpilot.selfdrive.car.card.set_core_affinity'):
+              with patch('openpilot.selfdrive.car.card.time.sleep'):
                 selected.params_thread(SimpleNamespace(is_set=lambda iterations=iterations: next(iterations)))
             else:
               selected = start_card(screen_params(platform, marker, longitudinal=longitudinal, release=release))

@@ -163,8 +163,7 @@ def test_actual_params_thread_continues_after_new_reader_exception(worker):
   card.v_cruise_helper = SimpleNamespace()
   card.read_slc_configuration = lambda: None
   event = SimpleNamespace(is_set=lambda: bool(calls))
-  with patch.object(module, 'drop_realtime'), patch.object(module, 'set_core_affinity'), \
-       patch.object(module, 'read_cruise_intervals'), patch.object(module.time, 'sleep'), \
+  with patch.object(module, 'read_cruise_intervals'), patch.object(module.time, 'sleep'), \
        patch.object(module.time, 'monotonic_ns', return_value=1_000_000_000), \
        patch.object(worker.reader, 'refresh', side_effect=RuntimeError('reader failed')):
     card.params_thread(event)
