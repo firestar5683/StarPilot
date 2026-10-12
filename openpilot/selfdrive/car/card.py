@@ -69,6 +69,7 @@ from openpilot.starpilot.longitudinal.cruise_intervals import read_cruise_interv
 from openpilot.starpilot.conditional_mode.card_input import conditional_manual_candidate, conditional_traffic_candidate
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
+from openpilot.starpilot.conditional_mode.card_settings import CardSettingsWorker
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.feature_runtime import (requested as feature_requested, enabled as feature_enabled,
                                                slc_runtime_settings, slc_transport_capable)
@@ -494,6 +495,9 @@ class Car:
 
     self.slc_receipts = []
     now_ns = int(self.can_log_mono_time) if REPLAY and hasattr(self, 'can_log_mono_time') else time.monotonic_ns()
+    settings_worker = getattr(self, 'conditional_settings_worker', None)
+    if settings_worker is not None:
+      settings_worker.adopt()
     self._aol_can_observation = (CS, can_received_ns,
                                  max((stamp for stamp, _ in can_list), default=0), cancel_boot_ns)
     self.refresh_slc_configuration(now_ns)
@@ -621,8 +625,8 @@ class Car:
     self.traffic_receipt = None
     if (self.conditional_replay and (not REPLAY or hasattr(self, 'can_log_mono_time')) and
         self.manual_button_tracker is not None and self.manual_settings_owner is not None):
-      # Refresh is internally rate-limited to one Params read per second. A
-      # held gesture loses its claim if the drive or saved mode changes.
+      # Live Card uses its worker-verified, frame-local view; replay retains
+      # the source-clock owner. Held gestures lose claims on unavailable settings.
       manual_snapshot = self.manual_settings_owner.refresh(now_ns)
       manual_drive_id = int(self.sm['deviceState'].startedMonoTime)
       manual_verdict = self.manual_settings_owner.verdict(manual_snapshot, now_mono_ns=now_ns, drive_id=manual_drive_id)
@@ -1419,6 +1423,17 @@ class Car:
     self.initialized_prev = initialized
     self.CS_prev = CS
 
+  def configure_conditional_settings_worker(self):
+    self.conditional_settings_worker = None
+    if not REPLAY and (getattr(self, 'manual_settings_owner', None) is not None or
+                       getattr(self, 'switchback_settings_owner', None) is not None):
+      worker = CardSettingsWorker(self.params)
+      self.conditional_settings_worker = worker
+      if getattr(self, 'manual_settings_owner', None) is not None:
+        self.manual_settings_owner = worker.view
+      if getattr(self, 'switchback_settings_owner', None) is not None:
+        self.switchback_settings_owner = worker.view
+
   def params_thread(self, evt):
     # This worker inherits the control thread's FIFO policy and CPU affinity.
     drop_realtime()
@@ -1431,6 +1446,9 @@ class Car:
         timing.flush_reports(cloudlog.event)
         timing.worker_end()
         timing.worker_begin('settings_read')
+      settings_worker = getattr(self, 'conditional_settings_worker', None)
+      if settings_worker is not None:
+        settings_worker.refresh(time.monotonic_ns())
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       if self.aol_card_intent is not None:
@@ -1445,6 +1463,7 @@ class Car:
       time.sleep(0.1)
 
   def card_thread(self):
+    self.configure_conditional_settings_worker()
     self.loop_timing = (CardLoopTiming(detailed=os.getenv('CARD_PHASE_TIMING',
                           '1' if self.aol_qualified and self.CP.carFingerprint == HYUNDAI_CAR.HYUNDAI_IONIQ_6 else '0') == '1',
                           compact=os.getenv('CARD_PHASE_TIMING') != '1')
