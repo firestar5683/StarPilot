@@ -16,6 +16,11 @@ MAGIC = 0x53505250434C4B31
 VALID, PAUSED, SEEKING, BOOT_KNOWN = 1, 2, 4, 8
 RECORD = struct.Struct("=QQIIQQQdqQQ")
 HEARTBEAT_MAX_AGE_NS = 250_000_000
+# Native camerad/pandad envelopes keep their recorded BOOTTIME domain.
+# Python display services retain MONOTONIC; do not fabricate an offset.
+BOOT_TIME_SERVICES = frozenset(('pandaStates', 'narrowRoadCameraState', 'wideRoadCameraState', 'cabinCameraState',
+                                'narrowRoadEncodeIdx', 'wideRoadEncodeIdx', 'cabinEncodeIdx',
+                                'qNarrowRoadEncodeIdx'))
 _PREFIX = re.compile(r"replay-[A-Za-z0-9_-]{1,48}\Z")
 
 
@@ -36,7 +41,7 @@ class DisplayClockReader:
     prefix = env.get("OPENPILOT_PREFIX", "")
     root = Path("/tmp" if sys.platform == "darwin" else "/dev/shm")
     path = root / ("msgq_" + prefix) / "display-clock"
-    return (env.get("SP_HOST_RUNTIME") == "1" and bool(_PREFIX.fullmatch(prefix)) and
+    return ((env.get("SP_HOST_RUNTIME") == "1" or env.get("SP_REPLAY_CONTEXT") == "1") and bool(_PREFIX.fullmatch(prefix)) and
             env.get("SP_REPLAY_CLOCK_PATH") == str(path))
 
   def __init__(self, env=None):
@@ -47,6 +52,13 @@ class DisplayClockReader:
     parent = root / ("msgq_" + prefix)
     if not self.enabled(env):
       return
+    self._parent = parent
+    self._closed = False
+    self._next_open_ns = 0
+    self._open()
+
+  def _open(self):
+    parent = self._parent
     directory = file = None
     try:
       directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -68,6 +80,7 @@ class DisplayClockReader:
         os.close(directory)
 
   def close(self):
+    self._closed = True
     if self._mapping is not None:
       self._mapping.close()
       self._mapping = None
@@ -76,7 +89,12 @@ class DisplayClockReader:
     implicit_host = host_ns is None
     host_ns = time.monotonic_ns() if host_ns is None else host_ns
     missing = ClockSample(None, None, host_ns)
-    if self._mapping is None or type(host_ns) is not int or host_ns <= 0:
+    if type(host_ns) is not int or host_ns <= 0:
+      return missing
+    if self._mapping is None and not getattr(self, "_closed", True) and host_ns >= self._next_open_ns:
+      self._next_open_ns = host_ns + 250_000_000
+      self._open()
+    if self._mapping is None:
       return missing
     for _ in range(4):
       before = struct.unpack_from("=Q", self._mapping)[0]

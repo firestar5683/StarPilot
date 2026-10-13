@@ -73,7 +73,7 @@ def test_custom_path_both_native_profiles_and_rainbow_takes_its_own_mode(module)
   renderer._blend_filter = Mock()
   renderer.road_style = {'pathMode': 'color', 'path': '#12345680'}
   sm = {'longitudinalPlan': NS(allowThrottle=False)}
-  ui = NS(params=Mock())
+  ui = NS(params=Mock(), display_time_ns=lambda: 10_000_000_000)
   with patch.object(module, 'ui_state', ui), patch.object(module, 'draw_polygon') as draw:
     renderer._draw_path(sm)
     assert draw.call_args.kwargs['gradient'] is solid_gradient('#12345680')
@@ -158,7 +158,7 @@ def test_default_gradient_reuses_quantized_colors_and_keeps_filter_cadence(monke
   renderer._rainbow_path = SimpleNamespace(refresh_enabled=Mock(return_value=False))
   renderer._visual_status = Mock(return_value=UIStatus.ENGAGED)
   renderer.road_style = {"pathMode": "acceleration"}
-  monkeypatch.setattr(module, "ui_state", SimpleNamespace(params=object()))
+  monkeypatch.setattr(module, "ui_state", SimpleNamespace(params=object(), display_time_ns=lambda: 10_000_000_000))
   draw = Mock()
   monkeypatch.setattr(module, "draw_polygon", draw)
   blend = Mock(wraps=module.ModelRenderer._blend_colors)
@@ -179,3 +179,44 @@ def test_default_gradient_reuses_quantized_colors_and_keeps_filter_cadence(monke
     previous = gradient
   assert blend.call_count == 2
   assert renderer._blend_filter.update.call_count == draw.call_count == 3
+
+
+@pytest.mark.parametrize('module', [large, compact])
+@pytest.mark.parametrize('missing', ['modelV2', 'extrinsicsCalibration'])
+def test_replay_missing_model_or_calibration_never_paints_cached_geometry(monkeypatch, module, missing):
+  renderer = module.ModelRenderer.__new__(module.ModelRenderer)
+  renderer._torque_filter = Mock()
+  renderer._draw_path = Mock()
+  renderer._draw_lane_lines = Mock()
+  services = ('modelV2', 'extrinsicsCalibration')
+  sm = NS(seen=dict.fromkeys(services, True), valid=dict.fromkeys(services, True), alive=dict.fromkeys(services, True))
+  sm.seen[missing] = False
+  monkeypatch.setattr(module, 'ui_state', NS(sm=sm, replay_clock=object()))
+  renderer._render(rl.Rectangle(0, 0, 476, 240))
+  renderer._draw_path.assert_not_called()
+  renderer._draw_lane_lines.assert_not_called()
+  renderer._torque_filter.update.assert_not_called()
+
+
+@pytest.mark.parametrize('module', [large, compact])
+def test_replay_missing_longitudinal_plan_uses_neutral_path_feedback(monkeypatch, module):
+  class Messages(dict):
+    seen = {'longitudinalPlan': False}
+    valid = {'longitudinalPlan': False}
+    alive = {'longitudinalPlan': False}
+  sm = Messages(longitudinalPlan=NS(allowThrottle=False))
+  ui = NS(sm=sm, replay_clock=object(), display_time_ns=lambda: 10_000_000_000)
+  renderer = module.ModelRenderer.__new__(module.ModelRenderer)
+  renderer._rect = rl.Rectangle(0, 0, 476, 240)
+  renderer._path = NS(projected_points=np.array([[0, 0], [10, 0], [0, 10]], dtype=np.float32))
+  renderer._path_edges = []
+  renderer._longitudinal_control = True
+  renderer._experimental_mode = False
+  renderer._blend_filter = Mock()
+  renderer.road_style = {'pathMode': 'acceleration'}
+  monkeypatch.setattr(module, 'ui_state', ui)
+  draw = Mock()
+  monkeypatch.setattr(module, 'draw_polygon', draw)
+  renderer._draw_path(sm)
+  renderer._blend_filter.update.assert_not_called()
+  assert rgba(draw.call_args.args[2]) == (255, 255, 255, 30)

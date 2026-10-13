@@ -130,7 +130,7 @@ class UnifiedSpeedWidget:
     if not available:
       self.collapse_sources()
       return
-    now = time.monotonic()
+    now = state.observed_ns / 1e9 if state.observed_ns else time.monotonic()
     self._source_drawer.update(state.customization.get('speedSources', False), now)
     left, top, right, bottom = source_toggle_bounds(state)
     if getattr(self, 'source_pressed', lambda: False)():

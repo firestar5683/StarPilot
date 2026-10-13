@@ -10,6 +10,7 @@ import pytest
 from openpilot.starpilot.galaxy.evidence import EvidenceSource
 from openpilot.starpilot.galaxy.settings import LiveContextSource
 from openpilot.starpilot.drive_state.evidence import PhysicalSource
+from openpilot.starpilot.parked_evidence import RESUME_SKEW_NS
 
 
 class Messages:
@@ -106,6 +107,33 @@ def test_short_resume_before_next_poll_rejects_new_lazy_consumers(tmp_path):
   assert not parked.parked()
   tick(clock, messages, source)
   assert parked.parked() and physical.allowed()
+
+
+@pytest.mark.parametrize('operation', ('poll', 'snapshot'))
+def test_preempted_clock_sample_retries_without_discarding_fresh_evidence(tmp_path, operation):
+  clock, messages, source, clients = readers(tmp_path)
+  tick(clock, messages, source)
+  barrier = source.after_mono_ns
+  now = clock['mono']
+  source.mono = mock.Mock(side_effect=(now - 20_000_000, now, now, now))
+  getattr(source, operation)()
+  assert source.mono.call_count == 4
+  source.mono = lambda: clock['mono']
+  assert source.after_mono_ns == barrier
+  assert source.device_offset_ns == clock['boot'] - now
+  assert clients()[0].parked() and clients()[1].allowed()
+
+
+def test_repeatedly_preempted_clock_samples_still_fail_closed(tmp_path):
+  import itertools
+  clock, messages, source, clients = readers(tmp_path)
+  tick(clock, messages, source)
+  source.mono = mock.Mock(side_effect=itertools.count(clock['mono'], RESUME_SKEW_NS + 1))
+  source.poll()
+  assert source.mono.call_count == 6
+  assert source.device_offset_ns is None
+  source.mono = lambda: clock['mono']
+  assert not clients()[0].parked() and not clients()[1].allowed()
 
 
 def test_snapshot_metadata_stays_coherent_and_immutable(tmp_path):

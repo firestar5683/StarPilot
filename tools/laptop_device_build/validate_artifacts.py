@@ -29,6 +29,8 @@ ELF_FILES = (
   "msgq_repo/msgq/ipc_pyx.so",
   "msgq_repo/msgq/visionipc/visionipc_pyx.so",
   "rednose_repo/rednose/helpers/ekf_sym_pyx.so",
+  "openpilot/tools/replay/replay",
+  "openpilot/tools/replay/libmedia_mux.so",
 )
 ARCHIVES = ("openpilot/cereal/libcereal.a", "openpilot/cereal/libsocketmaster.a")
 MODEL_DIR = Path("openpilot/selfdrive/modeld/models")

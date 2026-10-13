@@ -1,6 +1,5 @@
 import colorsys
 import math
-import time
 import numpy as np
 import pyray as rl
 from openpilot.cereal import log, messaging
@@ -145,6 +144,10 @@ class ModelRenderer(Widget):
 
   def _render(self, rect: rl.Rectangle):
     sm = ui_state.sm
+    replay = getattr(ui_state, 'replay_clock', None) is not None
+    if replay and any(not sm.seen[service] or not sm.valid[service] or not sm.alive[service]
+                      for service in ('modelV2', 'extrinsicsCalibration')):
+      return
 
     self._torque_filter.update(-ui_state.sm['carOutput'].actuatorsOutput.torque)
 
@@ -428,7 +431,7 @@ class ModelRenderer(Widget):
   def _draw_lane_lines(self):
     """Draw lane lines and road edges. Two closest lines should be green (lane line or road edges)."""
     offset = np.array([self._rect.x, self._rect.y], dtype=np.float32)
-    self._lane_centering_direction = lane_centering_direction(ui_state.sm, time.monotonic_ns(), ui_state.started_frame)
+    self._lane_centering_direction = lane_centering_direction(ui_state.sm, ui_state.display_time_ns(), ui_state.started_frame)
     if not getattr(self, '_paint', True):
       return
 
@@ -454,10 +457,13 @@ class ModelRenderer(Widget):
     if not self._path.projected_points.size:
       return
 
-    allow_throttle = sm['longitudinalPlan'].allowThrottle or not self._longitudinal_control
-    self._blend_filter.update(int(allow_throttle))
+    replay = getattr(ui_state, 'replay_clock', None) is not None
+    plan_known = not replay or (sm.seen['longitudinalPlan'] and sm.valid['longitudinalPlan'] and sm.alive['longitudinalPlan'])
+    if plan_known:
+      allow_throttle = sm['longitudinalPlan'].allowThrottle or not self._longitudinal_control
+      self._blend_filter.update(int(allow_throttle))
 
-    now_ns = time.monotonic_ns()
+    now_ns = ui_state.display_time_ns()
     style = getattr(self, "road_style", {})
     mode = path_mode(style)
     if mode == "rainbow":
@@ -474,6 +480,10 @@ class ModelRenderer(Widget):
       return
     if mode == "color":
       draw_polygon(self._rect, path_pts, gradient=solid_gradient(style.get("path", ROAD_COLORS["path"])))
+      return
+
+    if not self._experimental_mode and not plan_known:
+      draw_polygon(self._rect, self._path.projected_points, rl.Color(255, 255, 255, 30))
       return
 
     if self._experimental_mode:

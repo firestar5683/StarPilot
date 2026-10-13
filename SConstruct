@@ -330,10 +330,13 @@ SConscript([
   'openpilot/selfdrive/ui/SConscript',
 ])
 
+# Replay is also the isolated on-device viewer engine.
+if GetOption('extras') or arch == "comma_arm64":
+  SConscript(['openpilot/tools/replay/SConscript'])
+
 # Build desktop-only tools
 if GetOption('extras') and arch != "comma_arm64":
   SConscript([
-    'openpilot/tools/replay/SConscript',
     'openpilot/tools/cabana/SConscript',
     'openpilot/tools/jotpluggler/SConscript',
   ])

@@ -58,6 +58,29 @@ class TestReleaseFiles(unittest.TestCase):
     with self.assertRaisesRegex(ValueError, "Cannot package gitlink: panda"):
       release_files(str(self.root))
 
+  def test_prebuilt_replay_requires_tracked_runtime_outputs(self):
+    source = Path(__file__).resolve().parents[3]
+    for name in (".gitignore", "openpilot/tools/replay/.gitignore"):
+      self.track(name, (source / name).read_text())
+    self.track("openpilot/starpilot/replay/owner.py")
+    self.assertIn(b"openpilot/starpilot/replay/owner.py", release_files(str(self.root)))
+    self.track("prebuilt", "")
+    for name in ("openpilot/tools/replay/replay", "openpilot/tools/replay/libmedia_mux.so"):
+      with self.assertRaisesRegex(ValueError, "Prebuilt Replay Git package missing"):
+        release_files(str(self.root))
+      path = self.root / name
+      path.parent.mkdir(parents=True, exist_ok=True)
+      path.write_text("compiled runtime fixture\n")
+      path.chmod(0o755)
+      self.git("add", ".")
+    selected = release_files(str(self.root))
+    self.assertIn(b"openpilot/tools/replay/replay", selected)
+    self.assertIn(b"openpilot/tools/replay/libmedia_mux.so", selected)
+    (self.root / "openpilot/tools/replay/replay").chmod(0o644)
+    self.git("add", ".")
+    with self.assertRaisesRegex(ValueError, "invalid mode"):
+      release_files(str(self.root))
+
   def test_unresolved_merge_cannot_be_packaged(self):
     self.track("main.py")
     blob = self.git("hash-object", "-w", "--stdin", data=b"conflict\n").strip().decode()

@@ -97,8 +97,10 @@ class OnroadView:
 
   def __init__(self, fonts: BitmapFonts, asset_directory: Path, *, camera_layer: CameraLayer | None = None,
                extra_overlays: OverlayLayer | None = None, pip_layer: PipLayer | None = None,
-               background_layer: OverlayLayer | None = None, projection_viewport: tuple[float, float] | None = None):
+               background_layer: OverlayLayer | None = None, projection_viewport: tuple[float, float] | None = None,
+               wall_clock: Callable[[], datetime | None] | None = None):
     self.projection_viewport = projection_viewport
+    self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
     self._corner_cache = CornerHintCache()
     gui_app.add_render_prepare(self._corner_cache.prepare, self._corner_cache.close)
     self.fonts = fonts
@@ -114,7 +116,7 @@ class OnroadView:
     self._stock_confidence_last_source_ns: int | None = None
     self._stock_confidence_last_drive_frame: int | None = None
     self.alert = AlertRenderer(fonts)
-    self.navigation = NavigationCard(fonts)
+    self.navigation = NavigationCard(fonts, clock=self.wall_clock)
     self.navigation_favorites = NavigationFavorites(fonts)
     self.torque_bar = TorqueBarWidget()
     if fonts.profile == Profile.LARGE:
@@ -260,7 +262,10 @@ class OnroadView:
     width, height = widget_size(state.customization, profile, CLOCK_WIDGET)
     size = 42 if profile == Profile.LARGE else 20
     role = FontRole.SEMI_BOLD
-    text = clock_text(use_24_hour=state.customization.get("clock24Hour", False))
+    now = self.wall_clock()
+    if now is None:
+      return
+    text = clock_text(now, use_24_hour=state.customization.get("clock24Hour", False))
     measured = self.fonts.measure(text, role, size)
     x = position["x"] + center_shift + (width - measured.width) / 2
     y = position["y"] + (height - measured.height) / 2
@@ -425,11 +430,11 @@ class OnroadView:
       elif live_reason in ('cem_lead', 'ccm_lead'):
         draw_lead_icon(icon_rect)
     self._traffic_badge(state, 56 + 45 * (int(label is not None) + int(mode is not None)))
-    render_glow(content, state, border_width=30, time_s=rl.get_time())
+    render_glow(content, state, border_width=30, time_s=state.observed_ns / 1e9 if state.observed_ns else rl.get_time())
     rl.draw_rectangle_lines_ex(frame, 30, rl.BLACK)
     rl.draw_rectangle_rounded_lines_ex(content, 0.12, 10, 30, edge)
     if self.projection_viewport:
-      render_large_half_borders(state, rl.get_time(), content, int(height))
+      render_large_half_borders(state, state.observed_ns / 1e9 if state.observed_ns else rl.get_time(), content, int(height))
     self._preview_badge(state)
 
   def _compact(self, state: OnroadState) -> None:
@@ -510,7 +515,7 @@ class OnroadView:
       rl.draw_rectangle_rounded_lines_ex(rl.Rectangle(4, 4, 468, 232), 0.12, 16, 8, color)
     finally:
       clip.end_scissor_mode()
-    render_compact_half_borders(state, rl.get_time())
+    render_compact_half_borders(state, state.observed_ns / 1e9 if state.observed_ns else rl.get_time())
 
   def _stopped_timer(self, state: OnroadState, seconds: int) -> None:
     profile = str(self.fonts.profile)

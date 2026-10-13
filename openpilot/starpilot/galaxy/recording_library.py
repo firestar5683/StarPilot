@@ -1,4 +1,5 @@
 import errno
+import fcntl
 import os
 import shutil
 import stat
@@ -161,6 +162,11 @@ class RecordingLibrary:
         segment_name = segment['segmentName']
         fd = os.open(segment_name, DIR_FLAGS, dir_fd=root)
         opened.append((segment_name, fd))
+        if action == 'delete':
+          try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+          except BlockingIOError:
+            raise ValueError('This route is being replayed; stop replay before deleting it') from None
         if not _same_directory(fd, root, segment_name) or any(n.endswith('.lock') for n in os.listdir(fd)):
           raise ValueError('Recording changed')
       if action == 'preserve' and payload['preserved']:

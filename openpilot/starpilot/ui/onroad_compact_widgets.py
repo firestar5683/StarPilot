@@ -132,7 +132,7 @@ class CompactHudRenderer:
     self.render_steering_wheel(state)
 
   def render_max_speed(self, state: OnroadState) -> None:
-    set_speed_alpha = self._set_speed_opacity(state, time.monotonic_ns())
+    set_speed_alpha = self._set_speed_opacity(state, (state.observed_ns or time.monotonic_ns()))
     cruise = "–" if state.cruise_kph is None else str(round(state.cruise_kph if state.metric else state.cruise_kph * 0.621371))
     mx, my = widget_offset(state.customization, "compact", "max_speed")
     if set_speed_alpha > 0.01 and placement(state.customization, "compact", "max_speed")["enabled"]:
@@ -200,7 +200,7 @@ class CompactHudRenderer:
     observation = state.speed_limit
     visible = placement(state.customization, "compact", "speed_limit")["enabled"] and state.appearance.show_speed_limit_sign
     visible = visible and not compact_sign_obscured_by_actions(state)
-    now = time.monotonic()
+    now = state.observed_ns / 1e9 if state.observed_ns else time.monotonic()
     self._speed_limit_pulse.update(state, now, visible=visible)
     if not visible or observation.kind != ObservationKind.VALID or observation.speed_limit_mps is None:
       return

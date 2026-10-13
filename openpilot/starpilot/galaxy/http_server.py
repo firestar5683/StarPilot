@@ -132,6 +132,20 @@ def static_asset(path: str, identity: tuple[int, int, int]):
 
 
 class _LocalHTTPHandler(BaseHTTPRequestHandler):
+  protocol_version = 'HTTP/1.1'
+
+  def parse_request(self):
+    parsed = super().parse_request()
+    # Rejected writes can leave unread bodies; only bodyless reads are reusable.
+    if parsed and (self.command not in ('GET', 'HEAD') or 'Content-Length' in self.headers or 'Transfer-Encoding' in self.headers):
+      self.close_connection = True
+    return parsed
+
+  def end_headers(self):
+    if self.close_connection:
+      self.send_header('Connection', 'close')
+    super().end_headers()
+
   def log_message(self, format, *args):  # noqa: A002 - Match BaseHTTPRequestHandler's keyword signature.
     pass
 
@@ -145,7 +159,8 @@ class _LocalHTTPHandler(BaseHTTPRequestHandler):
   def respond(self, status, body, content_type='application/json', cookie=None, *, asset_headers=None, cache_control=None):
     self.send_response(status)
     self.send_header('Content-Type', content_type)
-    self.send_header('Content-Length', str(len(body)))
+    if status != 304:
+      self.send_header('Content-Length', str(len(body)))
     self.send_header('Cache-Control', cache_control or ('private, max-age=0, must-revalidate' if asset_headers else 'no-store'))
     for key, value in (asset_headers or {}).items():
       self.send_header(key, value)
@@ -154,7 +169,7 @@ class _LocalHTTPHandler(BaseHTTPRequestHandler):
     if cookie is not None:
       self.send_header('Set-Cookie', cookie)
     self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
-                     "img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+                     "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
     self.end_headers()
     if self.command != 'HEAD':
       self.wfile.write(body)

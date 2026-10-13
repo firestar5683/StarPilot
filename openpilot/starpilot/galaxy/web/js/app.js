@@ -186,7 +186,7 @@ createApp({
         <div class="gx-nav-section"><div class="gx-nav-section__title">Main</div>
           <button v-for="item in NAV.slice(0,3)" :key="item.path" type="button" class="gx-nav-item" :class="{active:isActive(item.path)}" @click="goFromMenu(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button>
         </div>
-        <div class="gx-nav-section"><div class="gx-nav-section__title">Recordings</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Recordings</span></button></div>
+        <div class="gx-nav-section"><div class="gx-nav-section__title">Routes</div><button type="button" class="gx-nav-item" :class="{active:isActive('/recordings')}" @click="goFromMenu('/recordings')"><i class="bi bi-camera-reels"></i><span>Routes</span></button></div>
         <div class="gx-nav-section"><div class="gx-nav-section__title">Tools</div>
           <button v-for="tool in visibleTools.filter(tool => tool.path !== '/galaxy')" :key="tool.path" type="button" class="gx-nav-item" :class="{active:isActive(tool.path)}" @click="goFromMenu(tool.path)"><i class="bi" :class="tool.icon"></i><span>{{ tool.name }}</span></button>
 

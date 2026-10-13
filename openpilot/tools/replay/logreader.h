@@ -17,7 +17,8 @@ public:
     : which(which), mono_time(mono_time), data(data), eidx_segnum(eidx_segnum) {}
 
   bool operator<(const Event &other) const {
-    return mono_time < other.mono_time || (mono_time == other.mono_time && which < other.which);
+    return mono_time < other.mono_time || (mono_time == other.mono_time &&
+           (which < other.which || (which == other.which && eidx_segnum < other.eidx_segnum)));
   }
 
   uint64_t mono_time;
@@ -25,6 +26,21 @@ public:
   kj::ArrayPtr<const capnp::word> data;
   int32_t eidx_segnum;
 };
+
+inline bool boot_clock_event(cereal::Event::Which which) {
+  switch (which) {
+    case cereal::Event::Which::INIT_DATA:
+    case cereal::Event::Which::SENTINEL:
+    case cereal::Event::Which::PANDA_STATES:
+    case cereal::Event::Which::NARROW_ROAD_CAMERA_STATE:
+    case cereal::Event::Which::WIDE_ROAD_CAMERA_STATE:
+    case cereal::Event::Which::CABIN_CAMERA_STATE:
+    case cereal::Event::Which::NARROW_ROAD_ENCODE_IDX:
+    case cereal::Event::Which::WIDE_ROAD_ENCODE_IDX:
+    case cereal::Event::Which::CABIN_ENCODE_IDX: return true;
+    default: return false;
+  }
+}
 
 class LogReader {
 public:
@@ -35,7 +51,8 @@ public:
 
   using ProgressCallback = std::function<void(ProgressStage stage, uint64_t current, uint64_t total)>;
 
-  LogReader(const std::vector<bool> &filters = {}) { filters_ = filters; }
+  LogReader(const std::vector<bool> &filters = {}, size_t max_bytes = 0, int64_t boot_offset = -1)
+      : filters_(filters), max_bytes_(max_bytes), boot_offset_(boot_offset) {}
   bool load(const std::string &url, std::atomic<bool> *abort = nullptr,
             bool local_cache = false, const ProgressCallback &progress = {});
   bool load(const char *data, size_t size, std::atomic<bool> *abort = nullptr,
@@ -47,6 +64,8 @@ public:
   double download_seconds() const { return download_seconds_; }
   double decompress_seconds() const { return decompress_seconds_; }
   double parse_seconds() const { return parse_seconds_; }
+  bool corrupt() const { return corrupt_; }
+  uint64_t lastMonoTime() const { return last_mono_time_; }
 
 private:
   void migrateOldEvents();
@@ -54,6 +73,11 @@ private:
   std::string raw_;
   bool requires_migration = true;
   std::vector<bool> filters_;
+  size_t max_bytes_ = 0;
+  int64_t boot_offset_ = -1;
+  bool corrupt_ = false;
+  uint64_t last_mono_time_ = 0;
+  size_t retained_bytes_ = 0;
   MonotonicBuffer buffer_{1024 * 1024};
   uint64_t compressed_size_ = 0;
   uint64_t decompressed_size_ = 0;

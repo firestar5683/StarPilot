@@ -43,9 +43,11 @@ public:
 
   ReplayDisplayClock() {
     const char *runtime = std::getenv("SP_HOST_RUNTIME");
+    const char *context = std::getenv("SP_REPLAY_CONTEXT");
     const char *prefix_env = std::getenv("OPENPILOT_PREFIX");
     const char *path_env = std::getenv("SP_REPLAY_CLOCK_PATH");
-    if (!runtime || std::string(runtime) != "1" || !prefix_env || !path_env) return;
+    if ((!runtime || std::string(runtime) != "1") && (!context || std::string(context) != "1")) return;
+    if (!prefix_env || !path_env) return;
     std::string prefix(prefix_env);
     if (prefix.rfind("replay-", 0) != 0 || prefix.size() <= 7 || prefix.size() > 55 ||
         prefix.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) return;

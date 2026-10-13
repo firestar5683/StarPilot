@@ -7,6 +7,7 @@ is an inventory snapshot, not a claim that recordings decode or stats exist.
 
 from __future__ import annotations
 
+import fcntl
 import os
 from pathlib import Path
 import re
@@ -194,6 +195,10 @@ def delete_segment_videos(root: Path, name: object) -> dict:
     except FileNotFoundError:
       raise SegmentMissing from None
     try:
+      try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      except BlockingIOError:
+        raise SegmentInUse from None
       if not _same_directory(root_fd, None, root) or not _same_directory(fd, root_fd, name):
         raise SegmentMissing
       with os.scandir(fd) as entries:

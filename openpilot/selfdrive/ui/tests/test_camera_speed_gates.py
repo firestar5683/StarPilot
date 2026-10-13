@@ -5,6 +5,8 @@ import pytest
 
 from openpilot.selfdrive.ui.onroad import augmented_road_view as large
 from openpilot.selfdrive.ui.mici.onroad import augmented_road_view as compact
+from openpilot.selfdrive.ui.onroad import cameraview as large_camera
+from openpilot.selfdrive.ui.mici.onroad import cameraview as compact_camera
 
 
 @pytest.mark.parametrize("module", [large, compact])
@@ -55,3 +57,40 @@ def test_compact_explicit_camera_choice_still_overrides_speed(choice, target):
   sm = {"selfdriveState": SimpleNamespace(experimentalMode=True), "carState": SimpleNamespace(vEgo=30)}
   assert view._switch_stream_if_needed(sm, choice) == target
   assert view.switch_stream.call_count == (target != compact.NARROW_ROAD_CAM)
+
+
+@pytest.mark.parametrize('module', [large_camera, compact_camera])
+@pytest.mark.parametrize('after_failure', [100., 1.])
+def test_connection_retries_advance_when_recorded_clock_is_frozen_or_rewound(module, after_failure, monkeypatch):
+  view = object.__new__(module.CameraView)
+  view.close = Mock()
+  view._initialize_textures = Mock()
+  view._name, view._stream_type = 'camerad', 0
+  view.available_streams = ['stale']
+  view.last_connection_attempt = 0.0
+  view.client = Mock(num_buffers=3)
+  connected = [False]
+  view.client.is_connected.side_effect = lambda: connected[0]
+
+  def connect(_):
+    connected[0] = view.client.connect.call_count > 1
+    return connected[0]
+
+  view.client.connect.side_effect = connect
+  view.client.available_streams.return_value = [0]
+  host, recorded = [10.], [100.]
+  monkeypatch.setattr(module.time, 'monotonic', lambda: host[0])
+  monkeypatch.setattr(module.rl, 'get_time', lambda: recorded[0])
+  assert not view._ensure_connection()
+  view.client.connect.assert_called_once_with(False)
+  recorded[0] = after_failure
+  host[0] = 10.1
+  assert not view._ensure_connection()  # Still respect the host retry interval.
+  assert view.client.connect.call_count == 1
+  for index in range(100):
+    host[0] = 10.1 + index * .01
+    view._ensure_connection()
+  assert connected[0] and view.client.connect.call_count == 2
+  assert view.last_connection_attempt >= 10.2
+  view._initialize_textures.assert_called_once()
+  assert view.available_streams == [0] and recorded[0] == after_failure

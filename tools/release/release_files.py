@@ -47,6 +47,11 @@ def release_files(root: str, include_big_model: bool = False, *, require_provide
 
     modes[tracked_file] = mode
     files.append(tracked_file)
+  if b"prebuilt" in files and b"openpilot/starpilot/replay/owner.py" in files:
+    for name, allowed_modes in ((b"openpilot/tools/replay/replay", (b"100755",)),
+                                (b"openpilot/tools/replay/libmedia_mux.so", (b"100644", b"100755"))):
+      if modes.get(name) not in allowed_modes:
+        raise ValueError(f"Prebuilt Replay Git package missing or invalid mode: {os.fsdecode(name)}; track both Replay runtime outputs")
   if require_provider or b"openpilot/starpilot/maps/shadow_lifecycle.py" in files:
     for name, mode in ((b"openpilot/starpilot/maps/provider/mapd", b"100755"),
                        (b"openpilot/starpilot/maps/provider/manifest.json", b"100644")):

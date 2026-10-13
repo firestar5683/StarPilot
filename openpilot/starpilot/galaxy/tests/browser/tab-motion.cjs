@@ -39,7 +39,7 @@ const assert = require('node:assert/strict')
   }
   await checkSlide('Tools', 1)
   await checkSlide('Home', -1)
-  await checkSlide('Recordings', 1)
+  await checkSlide('Routes', 1)
   await checkSlide('Toggles', -1)
   // Fast changes must leave only one interactive page and the correct selected tab.
   await nav.getByRole('button', { name: 'Tools', exact: true }).click()

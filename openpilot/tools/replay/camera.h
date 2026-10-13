@@ -13,10 +13,11 @@
 
 class CameraServer {
 public:
-  CameraServer(std::pair<int, int> camera_size[MAX_CAMERAS] = nullptr);
+  CameraServer(std::pair<int, int> camera_size[MAX_CAMERAS] = nullptr, int buffer_count = 40);
   ~CameraServer();
   void pushFrame(CameraType type, FrameReader* fr, const Event *event);
-  void waitForSent();
+  bool waitForSent();
+  bool failed() const { return failed_; }
 
 protected:
   struct Camera {
@@ -38,5 +39,9 @@ protected:
       {.type = WideRoadCam, .stream_type = VISION_STREAM_WIDE_ROAD},
   };
   std::atomic<int> publishing_ = 0;
+  std::atomic<bool> failed_ = false;
+  std::mutex sent_mutex_;
+  std::condition_variable sent_cv_;
+  const int buffer_count_;
   std::unique_ptr<VisionIpcServer> vipc_server_;
 };

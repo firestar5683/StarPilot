@@ -3,6 +3,8 @@
 #include <array>
 #include <filesystem>
 #include <regex>
+#include <fcntl.h>
+#include <sys/file.h>
 
 #include "json11/json11.hpp"
 #include "common/hardware/hw.h"
@@ -10,8 +12,26 @@
 #include "tools/replay/replay.h"
 #include "tools/replay/util.h"
 
-Route::Route(const std::string &route, const std::string &data_dir, bool auto_source)
-    : route_string_(route), data_dir_(data_dir), auto_source_(auto_source) {}
+Route::Route(const std::string &route, const std::string &data_dir, bool auto_source, bool local_only)
+    : data_dir_(data_dir), auto_source_(auto_source), local_only_(local_only), route_string_(route) {}
+
+std::shared_ptr<unique_fd> SegmentFile::openLocal(const std::string &path) const {
+  const auto name = std::filesystem::path(path).filename().string();
+  auto expected = identities.find(name);
+  if (!directory || expected == identities.end()) return nullptr;
+  auto fd = std::make_shared<unique_fd>(openat(*directory, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
+  struct stat current = {};
+  const auto &original = expected->second;
+  if (*fd < 0 || fstat(*fd, &current) || !S_ISREG(current.st_mode)) return nullptr;
+#ifdef __APPLE__
+  const bool changed_time = current.st_mtimespec.tv_sec != original.st_mtimespec.tv_sec || current.st_mtimespec.tv_nsec != original.st_mtimespec.tv_nsec;
+#else
+  const bool changed_time = current.st_mtim.tv_sec != original.st_mtim.tv_sec || current.st_mtim.tv_nsec != original.st_mtim.tv_nsec;
+#endif
+  if (current.st_dev != original.st_dev || current.st_ino != original.st_ino || current.st_size != original.st_size ||
+      changed_time) return nullptr;
+  return fd;
+}
 
 RouteIdentifier Route::parseRoute(const std::string &str) {
   RouteIdentifier identifier = {};
@@ -64,6 +84,7 @@ bool Route::load() {
 }
 
 bool Route::loadSegments() {
+  if (local_only_ && (data_dir_.empty() || auto_source_)) return false;
   if (!auto_source_) {
     bool ret = data_dir_.empty() ? loadFromServer() : loadFromLocal();
     if (ret) {
@@ -154,6 +175,46 @@ bool Route::loadFromJson(const json11::Json &json) {
 }
 
 bool Route::loadFromLocal() {
+  if (local_only_) {
+    auto root = std::make_shared<unique_fd>(open(data_dir_.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (*root < 0) return false;
+    const std::string prefix = route_.dongle_id.empty() ? route_.timestamp : route_.dongle_id + "|" + route_.timestamp;
+    try {
+      for (const auto &entry : std::filesystem::directory_iterator(data_dir_)) {
+        std::string name = entry.path().filename().string();
+        std::replace(name.begin(), name.end(), '_', '|');
+        if (name.rfind(prefix + "--", 0) != 0) continue;
+        const auto number = name.substr(prefix.size() + 2);
+        if (number.empty() || number.size() > 6 || number.find_first_not_of("0123456789") != std::string::npos) return false;
+        const int n = std::stoi(number);
+        if (n < route_.begin_segment || (route_.end_segment >= 0 && n > route_.end_segment)) continue;
+        if (segments_.size() >= 512 || segments_.count(n)) return false;
+        auto directory = std::make_shared<unique_fd>(openat(*root, entry.path().filename().c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+        if (*directory < 0 || flock(*directory, LOCK_SH | LOCK_NB)) return false;
+        size_t count = 0;
+        for (const auto &file : std::filesystem::directory_iterator(entry.path())) {
+          const auto filename = file.path().filename().string();
+          if (++count > 32 || util::ends_with(filename, ".lock")) return false;
+          struct stat info = {};
+          if (fstatat(*directory, filename.c_str(), &info, AT_SYMLINK_NOFOLLOW)) return false;
+          if (!S_ISREG(info.st_mode)) continue;
+          const std::set<std::string> recognized = {"rlog", "rlog.zst", "rlog.bz2", "qlog", "qlog.zst", "qlog.bz2",
+                                                   "fcamera.hevc", "dcamera.hevc", "ecamera.hevc", "qcamera.ts"};
+          if (!recognized.count(filename)) continue;
+          addFileToSegment(n, file.path().string());
+          if (segments_.count(n)) {
+            if (info.st_size <= 0 || info.st_size > 512LL * 1024 * 1024) return false;
+            segments_[n].directory = directory;
+            segments_[n].identities[filename] = info;
+          }
+        }
+      }
+    } catch (const std::filesystem::filesystem_error &error) {
+      rError("Local route changed: %s", error.what());
+      return false;
+    }
+    return !segments_.empty();
+  }
   std::string pattern = route_.timestamp + "--";
   for (const auto &entry : std::filesystem::directory_iterator(data_dir_)) {
     if (entry.is_directory() && entry.path().filename().string().find(pattern) != std::string::npos) {
@@ -193,8 +254,8 @@ void Route::addFileToSegment(int n, const std::string &file) {
 // class Segment
 
 Segment::Segment(int n, const SegmentFile &files, uint32_t flags, const std::vector<bool> &filters,
-                 std::function<void(int, bool)> callback)
-    : seg_num(n), flags(flags), filters_(filters), on_load_finished_(callback) {
+                 std::function<void(int, bool)> callback, int64_t boot_offset)
+    : seg_num(n), flags(flags), boot_offset_(boot_offset), filters_(filters), on_load_finished_(callback) {
   // [NarrowRoadCam, CabinCam, WideRoadCam, log]. fallback to qcamera/qlog
   const std::array file_list = {
       (flags & REPLAY_FLAG_QCAMERA) || files.narrow_road_cam.empty() ? files.qcamera : files.narrow_road_cam,
@@ -202,11 +263,24 @@ Segment::Segment(int n, const SegmentFile &files, uint32_t flags, const std::vec
       flags & REPLAY_FLAG_WIDE_ROAD ? files.wide_road_cam : "",
       files.rlog.empty() ? files.qlog : files.rlog,
   };
+  std::vector<std::pair<int, std::string>> jobs;
   for (int i = 0; i < file_list.size(); ++i) {
     if (!file_list[i].empty() && (!(flags & REPLAY_FLAG_NO_VIPC) || i >= MAX_CAMERAS)) {
-      ++loading_;
-      threads_.emplace_back(&Segment::loadFile, this, i, file_list[i]);
+      std::string source = file_list[i];
+      if (flags & REPLAY_FLAG_LOCAL_MACHINE) {
+        auto fd = files.openLocal(source);
+        if (!fd) { abort_ = true; continue; }
+        source = "/proc/self/fd/" + std::to_string(static_cast<int>(*fd));
+        source_fds_.push_back(std::move(fd));
+      }
+      jobs.emplace_back(i, source);
     }
+  }
+  loading_ = jobs.size();
+  if (jobs.empty()) {
+    load_state_ = LoadState::Failed;
+  } else {
+    for (const auto &[id, source] : jobs) threads_.emplace_back(&Segment::loadFile, this, id, source);
   }
 }
 
@@ -228,8 +302,9 @@ void Segment::loadFile(int id, const std::string file) {
     frames[id] = std::make_unique<FrameReader>();
     success = frames[id]->load((CameraType)id, file, flags & REPLAY_FLAG_NO_HW_DECODER, &abort_, local_cache);
   } else {
-    log = std::make_unique<LogReader>(filters_);
+    log = std::make_unique<LogReader>(filters_, flags & REPLAY_FLAG_LOCAL_MACHINE ? 128 * 1024 * 1024 : 0, boot_offset_);
     success = log->load(file, &abort_, local_cache);
+    if ((flags & REPLAY_FLAG_LOCAL_MACHINE) && log->corrupt()) success = false;
   }
 
   if (!success) {

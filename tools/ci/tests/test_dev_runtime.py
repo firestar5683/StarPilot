@@ -61,8 +61,9 @@ class TestDeveloperRuntime(unittest.TestCase):
     self.assertEqual(native.read_bytes(), b'host binary')
 
   def test_sync_skips_tracked_native_outputs_and_preserves_host_builds(self):
-    artifacts = ('native.a', 'native.so', 'native.so.1', 'native.dylib', 'native.o', 'native.os')
+    artifacts = ('native.a', 'native.so', 'native.so.1', 'native.dylib', 'native.o', 'native.os', 'openpilot/tools/replay/replay')
     for name in artifacts:
+      (self.root / name).parent.mkdir(parents=True, exist_ok=True)
       (self.root / name).write_bytes(b'device binary')
     self.git('add', '-f', *artifacts)
     self.runtime.sync()
@@ -70,8 +71,12 @@ class TestDeveloperRuntime(unittest.TestCase):
       self.assertFalse((self.runtime.work / name).exists(), name)
     native = self.runtime.work / 'native.a'
     native.write_bytes(b'host binary')
+    replay = self.runtime.work / 'openpilot/tools/replay/replay'
+    replay.parent.mkdir(parents=True, exist_ok=True)
+    replay.write_bytes(b'host replay')
     self.runtime.sync()
     self.assertEqual(native.read_bytes(), b'host binary')
+    self.assertEqual(replay.read_bytes(), b'host replay')
 
   def test_command_build_prepares_mpc_import_dependency(self):
     solver = 'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so'

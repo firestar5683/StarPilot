@@ -479,7 +479,8 @@ class ArtifactCheckTest(unittest.TestCase):
     for name in ("openpilot/common/libparams_c.so", "openpilot/selfdrive/pandad/pandad",
                  "openpilot/system/loggerd/loggerd", "openpilot/system/loggerd/encoderd",
                  "msgq_repo/msgq/ipc_pyx.so", "msgq_repo/msgq/visionipc/visionipc_pyx.so",
-                 "rednose_repo/rednose/helpers/ekf_sym_pyx.so"):
+                 "rednose_repo/rednose/helpers/ekf_sym_pyx.so", "openpilot/tools/replay/replay",
+                 "openpilot/tools/replay/libmedia_mux.so"):
       self.write(name, self.elf)
     for name in ("openpilot/cereal/libcereal.a", "openpilot/cereal/libsocketmaster.a"):
       self.write(name, archive)
@@ -505,6 +506,15 @@ class ArtifactCheckTest(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stderr)
     (self.root / "openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl").unlink()
     self.assertNotEqual(self.verify().returncode, 0)
+
+  def test_replay_runtime_required_before_prebuilt(self):
+    for name in ("openpilot/tools/replay/replay", "openpilot/tools/replay/libmedia_mux.so"):
+      with self.subTest(name=name):
+        (self.root / name).unlink()
+        result = self.verify()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(name, result.stderr)
+        self.write(name, self.elf)
 
   def test_shipped_driving_model_required_and_pinned(self):
     path = self.root / "openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl"

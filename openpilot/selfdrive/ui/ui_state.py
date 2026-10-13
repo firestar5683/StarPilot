@@ -5,7 +5,9 @@ import threading
 import capnp
 from collections.abc import Callable
 from enum import Enum
+from dataclasses import replace
 from openpilot.cereal import messaging, log
+from openpilot.cereal.services import SERVICE_LIST
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
@@ -18,7 +20,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.usb import cable_connected, get_usb_state, is_chestnut_usb_id
 from openpilot.starpilot.models.manager import ModelManager
-from openpilot.tools.replay.display_clock import DisplayClockReader
+from openpilot.tools.replay.display_clock import BOOT_TIME_SERVICES, DisplayClockReader
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 PARAM_UPDATE_TIME = 1 / 5.0
@@ -90,6 +92,8 @@ class UIState:
     prewarm_cache_contracts()
     self.replay_clock = DisplayClockReader() if DisplayClockReader.enabled() else None
     self.replay_sample = None
+    self._replay_state_epoch = None
+    self.replay_needs_reprime = False
     self.projection_read_only = os.environ.get("STARPILOT_PROJECTION_READ_ONLY") == "1"
     params = Params()
     self.params = ProjectionParams(params) if self.projection_read_only else params
@@ -123,7 +127,8 @@ class UIState:
         "vehicleParameters",
         "testJoystick",
         "rawAudioData",
-        *(["customReserved6"] if self.replay_clock is not None else []),
+        *(["customReserved6", "cabinCameraState", "narrowRoadEncodeIdx", "wideRoadEncodeIdx", "cabinEncodeIdx"]
+          if self.replay_clock is not None else []),
       ],
       ignore_alive=["starpilotSelfdriveState", "starpilotLateralState"], ignore_valid=["starpilotSelfdriveState", "starpilotLateralState"],
       ignore_avg_freq=["starpilotSelfdriveState", "starpilotLateralState"],
@@ -195,12 +200,23 @@ class UIState:
 
   def update(self) -> None:
     if getattr(self, "replay_clock", None) is not None:
+      before = self.replay_clock.sample()
+      cache_epoch = getattr(self, "_replay_state_epoch", self.replay_sample.epoch if self.replay_sample is not None else None)
+      if before.epoch is not None and before.epoch != cache_epoch:
+        self._reset_replay_state()
+        self._replay_state_epoch = before.epoch
       self.sm.update(0)
       sample = self.replay_clock.sample()
-      if sample.epoch is not None and (self.replay_sample is None or sample.epoch != self.replay_sample.epoch):
-        self._reset_replay_state()
+      if sample.epoch is not None and sample.epoch != before.epoch:
+        # A seek straddled this receive. Keep only its eligible new primer, and
+        # withhold this mixed frame until the next coherent clock sample.
+        self._reset_replay_state(retain_sample=sample)
+        self.replay_needs_reprime = not sample.valid
+        self._replay_state_epoch = sample.epoch
+        sample = replace(sample, now_ns=None, boot_ns=None, valid=False)
       self.replay_sample = sample
       self.sm.replay_sample = sample
+      self._update_replay_alive(sample)
       self._update_state()
       self._update_status()
       now = time.monotonic()
@@ -235,9 +251,24 @@ class UIState:
       return sample.now_ns if sample is not None and sample.valid and sample.now_ns is not None else 0
     return time.monotonic_ns()
 
-  def _reset_replay_state(self) -> None:
-    for service, socket in self.sm.sock.items():
-      messaging.drain_sock_raw(socket)
+  def _update_replay_alive(self, sample) -> None:
+    # Receipt timestamps stay on the host clock. Logical freshness follows the
+    # recorded clock, including a paused primer and Panda's boot-time domain.
+    for service in self.sm.static_freq_services:
+      target = sample.boot_ns if service in BOOT_TIME_SERVICES else sample.now_ns
+      stamp = self.sm.logMonoTime[service]
+      self.sm.alive[service] = bool(sample.valid and self.sm.seen[service] and
+                                    type(target) is int and type(stamp) is int and
+                                    0 < stamp <= target and target - stamp < 10e9 / SERVICE_LIST[service].frequency)
+
+  def _reset_replay_state(self, retain_sample=None) -> None:
+    for service in self.sm.sock:
+      target = None if retain_sample is None else retain_sample.boot_ns if service in BOOT_TIME_SERVICES else retain_sample.now_ns
+      stamp = self.sm.logMonoTime[service]
+      if (retain_sample is not None and retain_sample.valid and self.sm.updated[service] and
+          type(target) is int and type(stamp) is int and 0 < stamp <= target):
+        continue
+      # Do not drain sockets: the new epoch's paused primer may already be queued.
       for field in ("seen", "updated", "alive", "valid"):
         getattr(self.sm, field)[service] = False
       for field in ("recv_frame", "recv_time", "logMonoTime"):
@@ -248,7 +279,12 @@ class UIState:
         empty = messaging.new_message(service, 0)
       self.sm.data[service] = getattr(empty.as_reader(), service)
     self.started = self._started_prev = self._engaged_prev = False
-    self.started_frame = self.sm.frame
+    self.started_frame = max(0, self.sm.frame - 1)
+    self.CP = None
+    self.has_longitudinal_control = False
+    self.ignition = False
+    self.light_sensor = -1.0
+    self._projection_params_at = None
     self.chestnut_output_seen = False
     self.chestnut_present = False
     self.status = UIStatus.DISENGAGED
@@ -308,9 +344,13 @@ class UIState:
     # Handle onroad/offroad transition
     if self.started != self._started_prev or self.sm.frame == 1:
       if self.started:
-        self.status = UIStatus.DISENGAGED
+        replay = getattr(self, "replay_clock", None) is not None
+        if not replay:
+          self.status = UIStatus.DISENGAGED
         self.chestnut_output_seen = False
-        self.started_frame = self.sm.frame
+        # A paused replay publishes one atomic primer; its same-frame receipts
+        # are eligible. Live transitions retain their stricter receive boundary.
+        self.started_frame = max(0, self.sm.frame - 1) if replay else self.sm.frame
         self.started_time = time.monotonic()
         self.chestnut_present = self.sm["deviceState"].chestnutPresent or (self.chestnut_compiled and self.usb_connected)
 

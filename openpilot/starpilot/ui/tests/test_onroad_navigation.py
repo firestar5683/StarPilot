@@ -186,3 +186,31 @@ def test_saved_favorite_revision_does_not_expand_navigation_card():
   assert refreshed.navigation.key == observed.navigation.key
   assert card.bounds(refreshed).width == 72
   assert card.collapsed
+
+
+def test_replay_without_wall_anchor_omits_eta_but_keeps_recorded_navigation():
+  fonts = Mock(profile=Profile.LARGE)
+  fonts.measure.side_effect = lambda text, role, size: NS(width=len(text) * size * .48)
+  card = NavigationCard(fonts, clock=lambda: None)
+  with patch.object(card, '_icon', return_value=NS(width=100, height=100)), \
+       patch.object(rl, 'draw_rectangle_rounded'), patch.object(rl, 'draw_rectangle_rounded_lines_ex'), patch.object(rl, 'draw_texture_pro'):
+    card.render(state())
+  text = ' '.join(call.args[0] for call in fonts.draw.call_args_list)
+  assert 'Turn left onto Main Street' in text
+  assert '400 ft' in text
+  assert 'min' in text
+  assert 'ETA' not in text
+
+
+def test_replay_without_wall_anchor_omits_optional_hud_clock():
+  from openpilot.starpilot.ui.onroad import OnroadView
+  from openpilot.starpilot.ui.onroad_customization import CLOCK_WIDGET, default_document
+  observed = state()
+  document = default_document()
+  document['layouts']['large'][CLOCK_WIDGET]['enabled'] = True
+  observed = replace(observed, customization=document)
+  view = OnroadView.__new__(OnroadView)
+  view.fonts = Mock(profile=Profile.LARGE)
+  view.wall_clock = lambda: None
+  view._clock(observed)
+  view.fonts.draw.assert_not_called()

@@ -144,13 +144,14 @@ class NavigationCard:
     self.fonts.draw(distance, FontRole.BOLD, secondary_size, x, rect.y + rect.height - (58 if compact else 85),
                     rl.Color(199, 174, 247, 255))
     if not nav.arrived:
-      eta = arrival_time(nav.remaining_seconds, self.clock())
-      remaining = f'ETA {eta}'
+      now = self.clock()
       font_size = 22 if compact else 32
       y = rect.y + rect.height - (30 if compact else 44)
-      measured = self.fonts.measure(remaining, FontRole.SEMI_BOLD, font_size)
-      self.fonts.draw(remaining, FontRole.SEMI_BOLD, font_size, rect.x + rect.width - padding - measured.width,
-                      y, rl.Color(235, 225, 255, 255))
+      if now is not None:
+        remaining = f'ETA {arrival_time(nav.remaining_seconds, now)}'
+        measured = self.fonts.measure(remaining, FontRole.SEMI_BOLD, font_size)
+        self.fonts.draw(remaining, FontRole.SEMI_BOLD, font_size, rect.x + rect.width - padding - measured.width,
+                        y, rl.Color(235, 225, 255, 255))
       if not compact:
         trip = f'{distance_text(nav.remaining_distance_m, state.metric)} | {max(1, round(nav.remaining_seconds / 60))} min'
         self.fonts.draw(trip, FontRole.NORMAL, 20, rect.x + padding, y + 8, rl.Color(190, 187, 197, 255))

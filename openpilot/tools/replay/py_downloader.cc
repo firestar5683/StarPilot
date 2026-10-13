@@ -13,6 +13,8 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <chrono>
+#include <poll.h>
 
 #include "tools/replay/util.h"
 
@@ -33,7 +35,7 @@ void reportProgress(const char *line) {
 
 // Run a Python command and capture stdout. Stderr is scanned for PROGRESS lines and otherwise passed
 // through to the parent's stderr. Returns stdout content. If abort is signaled, kills the child process.
-std::string runPython(const char *module, const std::vector<std::string> &args, std::atomic<bool> *abort = nullptr) {
+std::string runPython(const char *module, const std::vector<std::string> &args, std::atomic<bool> *abort = nullptr, int source_fd = -1) {
   // Build argv for the Python module
   std::vector<const char *> argv;
   argv.push_back("python3");
@@ -74,8 +76,9 @@ std::string runPython(const char *module, const std::vector<std::string> &args, 
   char **parent_environment = environ;
 #endif
   for (char **entry = parent_environment; *entry; ++entry) {
-    if (strncmp(*entry, "OPENPILOT_PREFIX=", 17) != 0) environment.emplace_back(*entry);
+    if (strncmp(*entry, "OPENPILOT_PREFIX=", 17) != 0 && strncmp(*entry, "SP_REPLAY_HELPER_PARENT=", 24) != 0) environment.emplace_back(*entry);
   }
+  if (source_fd >= 0 || getenv("SP_REPLAY_CONTEXT")) environment.emplace_back("SP_REPLAY_HELPER_PARENT=" + std::to_string(getpid()));
   std::vector<char *> envp;
   for (auto &entry : environment) envp.push_back(entry.data());
   envp.push_back(nullptr);
@@ -89,6 +92,7 @@ std::string runPython(const char *module, const std::vector<std::string> &args, 
   if (!error) error = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
   if (!error) error = posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
   if (!error) error = posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO);
+  if (!error && source_fd >= 0) error = posix_spawn_file_actions_adddup2(&actions, source_fd, source_fd);
   for (int fd : {stdout_pipe[0], stdout_pipe[1], stderr_pipe[0], stderr_pipe[1]}) {
     if (!error) error = posix_spawn_file_actions_addclose(&actions, fd);
   }
@@ -143,6 +147,8 @@ std::string runPython(const char *module, const std::vector<std::string> &args, 
   while (stdout_open) {
     if (abort && *abort) {
       kill(pid, SIGTERM);
+      poll(nullptr, 0, 250);
+      kill(pid, SIGKILL);
       break;
     }
 
@@ -221,8 +227,12 @@ std::string download(const std::string &url, bool use_cache, std::atomic<bool> *
   return runPython(DOWNLOADER_MODULE, args, abort);
 }
 
-std::string decompress(const std::string &path, std::atomic<bool> *abort) {
-  return runPython(DOWNLOADER_MODULE, {"decompress", path}, abort);
+std::string decompress(const std::string &path, std::atomic<bool> *abort, size_t max_bytes) {
+  int source_fd = -1;
+  if (path.rfind("/proc/self/fd/", 0) == 0) source_fd = std::stoi(path.substr(14));
+  std::vector<std::string> args = {"decompress", path};
+  if (max_bytes) args.insert(args.end(), {"--max-bytes", std::to_string(max_bytes)});
+  return runPython(DOWNLOADER_MODULE, args, abort, source_fd);
 }
 
 std::string getRouteFiles(const std::string &route) {

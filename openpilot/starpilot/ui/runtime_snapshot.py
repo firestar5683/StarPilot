@@ -34,6 +34,7 @@ from openpilot.starpilot.ui.live_developer_sidebar import DeveloperMetrics
 
 from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
+from openpilot.tools.replay.display_clock import BOOT_TIME_SERVICES
 from opendbc.car.structs import car as car_schema
 from openpilot.starpilot.ui.device_state import DeviceRequest, DeviceState
 from openpilot.starpilot.ui.home_state import HomeMode, HomeState
@@ -70,8 +71,13 @@ def _message_at_age(sm: Any, service: str, now_ns: int, after_frame: int, max_ag
                     *, recv_now_ns: int | None = None) -> Any | None:
   try:
     replay = getattr(sm, "replay_sample", None)
-    if replay is not None and not replay.valid:
-      return None
+    if replay is not None:
+      if not replay.valid:
+        return None
+      if service in BOOT_TIME_SERVICES:
+        if type(replay.boot_ns) is not int or replay.boot_ns <= 0:
+          return None
+        now_ns = replay.boot_ns
     stamp = int(sm.logMonoTime[service])
     if (not sm.valid[service] or not sm.alive[service] or stamp <= 0 or stamp > now_ns or
         now_ns - stamp > max_age_ns or int(sm.recv_frame[service]) <= after_frame):
@@ -304,6 +310,7 @@ class RuntimeSnapshotAdapter:
     self._traffic_profile_valid = False
     self._personality_notice = PersonalityNotice()
     self._stopped_timer = StoppedTimer()
+    self._replay_stopped_history = False
     self._developer_metrics = DeveloperMetrics()
     self._reverse_driver_camera = ReverseDriverCamera()
     self._slc_sign_cache: tuple[int, tuple[int, int], str, SpeedLimitObservation] | None = None
@@ -459,12 +466,18 @@ class RuntimeSnapshotAdapter:
       enabled=self._appearance_value.driver_camera_on_reverse and self._appearance_value.camera_view != CameraViewChoice.NONE,
       car_fresh=reverse_source_fresh, reverse=timer_reverse,
     )
+    if getattr(ui, "replay_clock", None) is not None:
+      if not timer_car_fresh:
+        self._replay_stopped_history = False
+      elif not timer_standstill or timer_reverse:
+        self._replay_stopped_history = True
+    timer_enabled = (placement(self._customization_value, "compact", STOPPED_TIMER_WIDGET)["enabled"]
+                     if stopped_timer_enabled is None else stopped_timer_enabled)
     stopped_duration = self._stopped_timer.step(
       now_ns=now_ns,
       drive_key=drive_key,
       car_fresh=timer_car_fresh, standstill=timer_standstill, reverse=timer_reverse,
-      enabled=(placement(self._customization_value, "compact", STOPPED_TIMER_WIDGET)["enabled"]
-               if stopped_timer_enabled is None else stopped_timer_enabled),
+      enabled=timer_enabled and (getattr(ui, "replay_clock", None) is None or self._replay_stopped_history),
     )
     border_signals = (BorderSignals(bool(getattr(display_car, 'leftBlinker', False)),
                                     bool(getattr(display_car, 'rightBlinker', False)),
