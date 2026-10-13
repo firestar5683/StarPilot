@@ -23,29 +23,43 @@ def test_actual_isolated_lag_keeps_only_existing_card_intent(full_op, gas, order
     assert card.aol_card_intent.allowed_latch and feedback.session
     with mock.patch.object(type(sd.rk), 'lagging', new_callable=mock.PropertyMock, return_value=True):
       axis, state, command = drive(2, gas=gas, native_request_long=full_op)
-    assert str(axis.faultReason) == 'critical'
-    assert not axis.lateralActive and not axis.longitudinalActive
-    assert not command.latActive and not command.longActive
+    # Already engaged ordinary axes follow the normal SOFT countdown with
+    # fresh inputs/native grants; independent AOL still withdraws commands.
+    assert str(axis.faultReason) == ('none' if full_op else 'critical')
+    assert axis.lateralActive == axis.longitudinalActive == full_op
+    assert command.latActive == command.longActive == full_op
+    assert axis.desiredLateral == axis.desiredLongitudinal == axis.nativeAcknowledged == full_op
     assert sd.events.contains(fixture.ET.SOFT_DISABLE)
     assert log.OnroadEvent.EventName.selfdrivedLagging in sd.events.names
     assert state.enabled == full_op
     if full_op:
       assert state.state == log.SelfdriveState.OpenpilotState.softDisabling
       assert state.alertType == 'selfdrivedLagging/softDisable'
+      assert state.active and sd.state_machine.soft_disable_timer == 300
     proof, event = sd.pm.messages['aolAxisState'], sd.pm.messages['onroadEvents']
     assert proof.aolAxisState.faultEventMonoTime == event.logMonoTime
     deliveries = [{'axis': proof}, {'event': event}] if order == 'axis_first' else \
                  [{'event': event}, {'axis': proof}] if order == 'event_first' else [{'axis': proof, 'event': event}]
-    # All legitimate delivery orders retain only intent; unmatched critical
-    # joins are bounded and every current command remains withdrawn.
+    # Independent critical joins retain only intent under the fixed join.
+    # Ordinary fresh proofs retain their actual current acknowledged axes.
     for index, delivery in enumerate(deliveries):
       latched = receive(10_020_000_000 + index * 100_000, **delivery)
-      if order == 'axis_first' and index == 0:
+      if not full_op and order == 'axis_first' and index == 0:
         assert feedback.pending_event == proof.aolAxisState.faultEventMonoTime
         assert feedback.awaiting
       assert latched and not feedback.failed
-    assert baseline == (feedback.lateral_baseline_ns, feedback.lateral_source_ns,
-                         feedback.lateral_native_ns, feedback.healthy_feedback_ns, feedback.healthy_native_ns)
+    observed = (feedback.lateral_baseline_ns, feedback.lateral_source_ns,
+                feedback.lateral_native_ns, feedback.healthy_feedback_ns, feedback.healthy_native_ns)
+    if full_op:
+      # Only an actually received fresh active proof establishes a new healthy
+      # baseline; duplicate reception does not change its source/native stamps.
+      received_ns = 10_020_000_000 + (len(deliveries) - 1) * 100_000
+      assert observed == (received_ns, axis.sourceCarStateMonoTime, 10_020_000_000,
+                          received_ns, 10_020_000_000)
+      assert all(new >= old for new, old in zip(observed, baseline, strict=True))
+      assert feedback.signature[4] == proof.aolAxisState.validUntilMonoTime
+    else:
+      assert baseline == observed
     assert not feedback.qualified and not feedback.awaiting and not feedback.retention_qualified
     assert proof.aolAxisState.validUntilMonoTime == 10_050_000_000
     # Clearing temporary lag does not supply an ordinary enable or native ACK.
@@ -120,8 +134,18 @@ def test_persistent_lag_keeps_latch_but_ordinary_countdown_still_disables():
     with mock.patch.object(type(sd.rk), 'lagging', new_callable=mock.PropertyMock, return_value=True):
       for tick in range(2, 304):
         axis, state, command = drive(tick, native_request_long=False)
-        assert not axis.lateralActive and not axis.longitudinalActive
-        assert not command.latActive and not command.longActive
+        ordinary_active = tick < 302
+        assert state.enabled == state.active == ordinary_active
+        assert sd.state_machine.soft_disable_timer == max(0, 302 - tick)
+        assert str(axis.faultReason) == ('none' if ordinary_active else 'critical')
+        assert axis.desiredLateral == axis.desiredLongitudinal == axis.nativeAcknowledged == ordinary_active
+        assert axis.lateralActive == command.latActive == ordinary_active
+        # LONG never activates: this fixture deliberately keeps native's
+        # requestedLongitudinal False through the real 300-tick countdown.
+        assert not axis.longitudinalActive and not command.longActive
+        assert axis.sourceCarStateMonoTime == 10_000_000_000 + tick*10_000_000
+        assert axis.validUntilMonoTime == axis.observedMonoTime + 30_000_000
+        assert not sd.events.contains(fixture.ET.ENABLE)
         assert receive(10_000_000_000 + tick*10_000_000,
           axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
     assert not state.enabled and not state.active and sd.state_machine.soft_disable_timer == 0

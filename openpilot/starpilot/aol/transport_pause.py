@@ -83,6 +83,17 @@ def availability_only(events):
                             not event.immediateDisable for event in faults))
 
 
+HOST_SOURCE_AVAILABILITY_EVENTS = (*AVAILABILITY_EVENTS, log.OnroadEvent.EventName.selfdrivedLagging)
+
+
+def host_source_availability_only(events):
+  """Closed host SOFT set for qualified inactive source-zero intent only."""
+  faults = [event for event in events if event.immediateDisable or event.softDisable]
+  return bool(faults and not any(event.userDisable for event in events) and
+              all(event.name in HOST_SOURCE_AVAILABILITY_EVENTS and event.softDisable and
+                  not event.immediateDisable for event in faults))
+
+
 class AvailabilityPause:
   """Retain an accepted armed producer; this proof never enables output."""
   def __init__(self, cp, session):
@@ -448,7 +459,9 @@ class TransportPauseFeedback:
     faults = [event for event in events if event.immediateDisable or event.softDisable]
     live_event = bool(sm.valid['onroadEvents'] and sm.alive['onroadEvents'] and
                       0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000)
-    issue = live_event and availability_only(events)
+    host_source_off = bool(reason == 'availabilityPause' and axis.sourceCarStateMonoTime == 0 and
+                           not axis.lateralActive and not axis.longitudinalActive)
+    issue = live_event and (availability_only(events) or host_source_off and host_source_availability_only(events))
     if reason not in ('none', 'availabilityPause') or faults and not issue:
       return False
     typed = bool(reason == 'availabilityPause' and not axis.lateralActive and not axis.longitudinalActive and
@@ -499,15 +512,35 @@ class TransportPauseFeedback:
         str(getattr(axis, 'intentProducerSessionId', '')) != producer or
         int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch or
         str(axis.faultReason) != 'none' or not axis.nativeAcknowledged or
-        not axis.desiredLateral or not axis.lateralActive or axis.desiredLongitudinal or axis.longitudinalActive or
+        not axis.desiredLateral or not axis.lateralActive or
         not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
         now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
         not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
-        not self.retention_event_ns < event_ns == axis.faultEventMonoTime <= stamp or
-        any(event.userDisable or event.softDisable or event.immediateDisable for event in sm['onroadEvents'])):
+        not 0 < event_ns == axis.faultEventMonoTime <= stamp):
+      return False
+    events = sm['onroadEvents']
+    faults = [event for event in events if event.userDisable or event.softDisable or event.immediateDisable]
+    combined = bool(axis.desiredLongitudinal and axis.longitudinalActive)
+    if combined:
+      # An event-first receiver has already recorded this NEW occurrence while
+      # holding the verified inactive source-zero pause. Close that exact join;
+      # neither the pending deadline nor any old command lease is renewed.
+      previous = self.signature
+      if (previous is None or previous[0] != self.session or previous[5] != 'availabilityPause' or
+          previous[7] != self.session or previous[8] != 0 or previous[9] or previous[10] or
+          not previous[11] or previous[12] or not previous[13] or
+          previous[14] != producer or previous[15] != self.availability_epoch or
+          not 0 < previous[6] < event_ns or self.retention_event_ns != event_ns or
+          len(faults) != 1 or faults[0].name != log.OnroadEvent.EventName.selfdrivedLagging or
+          not faults[0].softDisable or faults[0].userDisable or faults[0].immediateDisable or
+          any(event.noEntry and event.name != log.OnroadEvent.EventName.selfdrivedLagging for event in events)):
+        return False
+    elif (axis.desiredLongitudinal or axis.longitudinalActive or
+          not self.retention_event_ns < event_ns or faults):
       return False
     native = _healthy_transport_native(sm, cp, cs, self.session, now_ns)
     return bool(native is not None and native.requestedLateral and native.lateralAllowed and
+      (not combined or native.requestedLongitudinal and native.longitudinalAllowed) and
       native.observedMonoTime >= self.lateral_native_ns and
       (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) == self.lateral_inventory)
 

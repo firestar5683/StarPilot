@@ -115,11 +115,12 @@ class WheelPublisher:
     media_edge = self.media_audit_needed(media)
     edge = bool(state.buttonEvents) or media_edge
     audit = self.mapping is None or drive_id != self.drive or edge or now_ns - self.checked_ns >= 1_000_000_000
-    mapping = capture(params) if audit else self.mapping
+    source_eligible = bool(eligible(cp) and state.canValid and not state.canTimeout and type(now_ns) is int and
+                           type(drive_id) is int and 0 < drive_id < now_ns)
+    mapping = capture(params) if audit and source_eligible else self.mapping
     if audit:
       self.checked_ns = now_ns
-    if (not eligible(cp) or not state.canValid or state.canTimeout or type(now_ns) is not int or
-        type(drive_id) is not int or not 0 < drive_id < now_ns or mapping is None):
+    if not source_eligible or mapping is None:
       self.tracker = ButtonTracker()
       self.cancel_tracker = ButtonTracker()
       self.main_tracker = ButtonTracker()

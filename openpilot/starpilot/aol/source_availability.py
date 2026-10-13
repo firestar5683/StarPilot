@@ -4,7 +4,8 @@ from openpilot.cereal import log
 from openpilot.selfdrive.selfdrived.events import ET
 from openpilot.starpilot.aol.intent_companion import MAX_COMPANIONS
 from openpilot.starpilot.aol.runtime import INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, current_native
-from openpilot.starpilot.aol.transport_pause import cp_identity, healthy_transport
+from openpilot.starpilot.aol.transport_pause import (cp_identity, healthy_transport, HOST_SOURCE_AVAILABILITY_EVENTS,
+                                                   host_source_availability_only)
 from openpilot.starpilot.nostalgia import physical_cancel
 
 EventName = log.OnroadEvent.EventName
@@ -17,9 +18,9 @@ def ordinary_source_availability(self, CS, now_ns, native=None, *, replay: bool,
   companion = getattr(self, 'aol_intent_companion', None)
   if (replay or not self.aol_replay or not self.axis_transport_required or anchor is None or
       not self.initialized or getattr(self, 'aol_availability_long_inhibit', False) or self.aol_authority_lost or
-      getattr(self, 'aol_fault_reason', 'none') not in ('none', 'availabilityPause') or
+      getattr(self, 'aol_fault_reason', 'none') not in ('none', 'availabilityPause', 'critical') or
       self.events.contains(ET.USER_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE) or
-      any(e.softDisable and e.name not in (EventName.commIssue, EventName.commIssueAvgFreq)
+      any(e.softDisable and e.name not in HOST_SOURCE_AVAILABILITY_EVENTS
           for e in self.events.to_msg()) or self.events.contains(ET.ENABLE) or
       getattr(self, 'car_state_queue_invalid', False) or
       not getattr(self, 'aol_step_intent_drain_ok', True) or
@@ -33,12 +34,43 @@ def ordinary_source_availability(self, CS, now_ns, native=None, *, replay: bool,
   proof, prior_native, accepted, identity, accepted_state = anchor
   if accepted is None:
     return False
+  # A source admitted by normal runtime in THIS step can expire only while
+  # publishing its first host-SOFT fault. It has no prior critical publication.
+  # Require the exact admitted object/state and original completed baseline;
+  # stale historical inputs cannot enter this path or grant a new command.
+  admitted_expiry = bool(getattr(self, 'aol_published_fault_reason', '') == 'none' and
+    getattr(self, 'aol_step_input_proof', None) == proof and
+    getattr(self, 'aol_last_intent', None) is accepted and
+    getattr(self, 'conditional_car_state_valid', False) and CS is accepted_state and
+    self.aol_car_state_log_ns == accepted.carStateLogMonoTime and
+    host_source_availability_only(self.events.to_msg()))
+  if getattr(self, 'aol_fault_reason', 'none') == 'critical' and not admitted_expiry:
+    # A prior OFF/critical proof may describe ordinary SOFT loop lag rather
+    # than an authority fault. Prove that exact published episode; never infer
+    # it from a current healthy native snapshot or clear authority_lost here.
+    published = getattr(self, 'aol_published_fault_proof', None)
+    if (published is None or len(published) != 9 or published[0] != self.aol_session_id or
+        published[1] != 'critical' or published[2] != getattr(self, 'aol_fault_event_ns', 0) or
+        published[3] != tuple(getattr(self, 'events_prev', ()))):
+      return False
+    prior_names = published[3]
+    rules = self.events.event_rules
+    prior_faults = [name for name in prior_names if any(kind in rules.get(name, {})
+                    for kind in (ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE, ET.USER_DISABLE))]
+    if (getattr(self, 'aol_published_fault_reason', '') != 'critical' or
+        not getattr(self, 'aol_fault_event_ns', 0) or
+        EventName.selfdrivedLagging not in prior_faults or
+        not all(name in HOST_SOURCE_AVAILABILITY_EVENTS and
+          not any(kind in rules.get(name, {}) for kind in (ET.IMMEDIATE_DISABLE, ET.USER_DISABLE))
+          for name in prior_faults) or not host_source_availability_only(self.events.to_msg()) or
+        any(published[4:])):
+      return False
   source = self.aol_car_state_log_ns or getattr(self, 'car_state_retained_source_ns', 0)
   held_metadata = bool(not getattr(self, 'car_state_samples', ()) and CS is accepted_state and
                        getattr(self, 'aol_publication_retained_intent', None) is accepted)
   if not source and held_metadata:
     source = int(accepted.carStateLogMonoTime)
-  if (proof[0] != self.aol_session_id or not proof[9] or accepted is None or source != int(accepted.carStateLogMonoTime) or
+  if (proof[0] != self.aol_session_id or not (proof[8] or proof[9]) or accepted is None or source != int(accepted.carStateLogMonoTime) or
       not 0 < source <= now_ns or now_ns - source <= INTENT_MAX_AGE_NS or
       cp_identity(self.CP) != identity or companion.integrity_epoch != proof[5] or
       accepted is None or accepted.producerSessionId != proof[4] or
@@ -91,10 +123,71 @@ def ordinary_source_availability(self, CS, now_ns, native=None, *, replay: bool,
       not valid_metadata(latest[0], raw)):
     return False
   native = native or native_provider(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
-  if (native is None or not healthy_transport(self.sm, self.CP, CS, self.aol_session_id, now_ns, native) or
+  lateral_intent_only = bool(proof[8] and not proof[9] and not self.enabled)
+  if (native is None or lateral_intent_only and not (accepted.allowedLatch and accepted.lateralArmed and
+        not accepted.pauseLateral and not getattr(self, 'aol_dm_lateral_inhibit', False) and
+        native.requestedLateral and native.lateralAllowed) or
+      not healthy_transport(self.sm, self.CP, CS, self.aol_session_id, now_ns, native) or
       native.observedMonoTime < prior_native.observedMonoTime or
       native.pandaSerial != prior_native.pandaSerial or
       tuple(p.hardwareSerial for p in native.pandaInventory) != tuple(p.hardwareSerial for p in prior_native.pandaInventory)):
     return False
   self.aol_ordinary_source_native = native
   return True
+
+
+def fresh_ordinary_lag_continuation(self, CS, intent, native, now_ns):
+  """Continue established standard axes; native/inputs still own every grant."""
+  if (EventName.selfdrivedLagging not in self.events.names or not self.enabled or not self.active or
+      self.state_machine.state != log.SelfdriveState.OpenpilotState.softDisabling or
+      not self.initialized or not self.aol_replay or not self.axis_transport_required or
+      self.aol_authority_lost or getattr(self, 'aol_availability_long_inhibit', False)):
+    return False
+  rules = self.events.event_rules
+  faults = [name for name in self.events.names if any(kind in rules.get(name, {})
+            for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE))]
+  lag_rules = rules.get(EventName.selfdrivedLagging, {})
+  if (faults != [EventName.selfdrivedLagging] or ET.SOFT_DISABLE not in lag_rules or
+      ET.IMMEDIATE_DISABLE in lag_rules or ET.USER_DISABLE in lag_rules or self.events.contains(ET.ENABLE) or
+      self.events.contains(ET.OVERRIDE_LATERAL) or self.events.contains(ET.OVERRIDE_LONGITUDINAL) or
+      any(name != EventName.selfdrivedLagging and ET.NO_ENTRY in self.events.event_rules.get(name, {})
+          for name in self.events.names)):
+    return False
+  anchor = getattr(self, 'aol_ordinary_source_anchor', None)
+  companion = getattr(self, 'aol_intent_companion', None)
+  if (anchor is None or intent is None or companion is None or not (anchor[0][8] or anchor[0][9]) or
+      anchor[0][0] != self.aol_session_id or companion.integrity_epoch != anchor[0][5] or
+      intent != anchor[2] or CS is not anchor[4] or intent.producerSessionId != anchor[0][4] or
+      cp_identity(self.CP) != anchor[3] or not getattr(self, 'conditional_car_state_valid', False) or
+      not 0 < self.aol_car_state_log_ns == intent.carStateLogMonoTime <= now_ns or
+      now_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS or
+      getattr(self, 'car_state_queue_invalid', False) or getattr(self, 'aol_selected_pair_future', False) or
+      not getattr(self, 'aol_step_intent_drain_ok', True) or not companion.last_drain_ok or
+      getattr(self, 'aol_step_intent_drain_count', 0) > MAX_COMPANIONS or
+      not self.sm.all_checks(['modelV2', 'extrinsicsCalibration', 'driverMonitoringState']) or
+      self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated or
+      self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or
+      self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
+      native is None or native is not getattr(self.aol_transport_pause, 'observed_native', None) or
+      native.observedMonoTime < anchor[1].observedMonoTime or native.pandaSerial != anchor[1].pandaSerial or
+      tuple(p.hardwareSerial for p in native.pandaInventory) != tuple(p.hardwareSerial for p in anchor[1].pandaInventory)):
+    return False
+  if intent.pauseLongitudinal or intent.pauseLateral and anchor[0][8]:
+    return False
+  for stamp, (value, epoch, producer) in companion.raw_projections.items():
+    if stamp < anchor[0][1]:
+      continue
+    if (epoch != anchor[0][5] or producer != anchor[0][4] or value is None or
+        value.producerSessionId != anchor[0][4] or not value.settingsQualified or
+        value.allowedLatch != intent.allowedLatch or value.lateralArmed != intent.lateralArmed or
+        value.pauseLongitudinal or value.pauseLateral and (anchor[0][8] or not intent.pauseLateral) or
+        value.carStateLogMonoTime != stamp or not 0 < stamp <= value.observedMonoTime <= now_ns <= value.validUntilMonoTime or
+        not 0 < value.validUntilMonoTime - value.observedMonoTime <= SAFETY_MAX_AGE_NS):
+      return False
+  samples = getattr(self, 'car_state_samples', ()) or ((CS, True),)
+  return not any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultPermanent or
+    sample.steerFaultTemporary or sample.accFaulted or sample.doorOpen or sample.seatbeltUnlatched or
+    sample.brakePressed or sample.regenBraking or sample.gasPressed or physical_cancel(sample) or
+    sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
+                             car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
+    for sample, valid in samples)

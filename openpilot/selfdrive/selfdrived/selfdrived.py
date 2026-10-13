@@ -40,7 +40,7 @@ from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
 from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only, cp_identity, healthy_transport
-from openpilot.starpilot.aol.source_availability import ordinary_source_availability
+from openpilot.starpilot.aol.source_availability import ordinary_source_availability, fresh_ordinary_lag_continuation
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -1153,7 +1153,8 @@ class SelfdriveD:
     native = healthy_native
     anchor = getattr(self, 'aol_ordinary_source_anchor', None)
     companion = getattr(self, 'aol_intent_companion', None)
-    if (anchor is None or not anchor[0][9] or not self.enabled or not self.active or intent is None or
+    if (anchor is None or not (anchor[0][8] or anchor[0][9]) or
+        anchor[0][9] and (not self.enabled or not self.active) or intent is None or
         not 0 < intent.carStateLogMonoTime <= now_ns or now_ns - intent.carStateLogMonoTime > INTENT_MAX_AGE_NS or
         intent.carStateLogMonoTime <= anchor[2].carStateLogMonoTime or
         intent.producerSessionId != anchor[0][4] or companion is None or companion.integrity_epoch != anchor[0][5] or
@@ -1431,6 +1432,12 @@ class SelfdriveD:
       if not axis_deferred:
         self.aol_sequence = next_sequence
         self.pm.send('aolAxisState', axis_msg)
+        # Bind critical history to the actual completed axis publication. The
+        # working decision can change again during later source-expiry checks.
+        self.aol_published_fault_proof = ((str(axis.sessionId), str(axis.faultReason),
+          int(axis.faultEventMonoTime), tuple(self.events.names), bool(axis.desiredLateral),
+          bool(axis.desiredLongitudinal), bool(axis.lateralActive), bool(axis.longitudinalActive),
+          bool(axis.nativeAcknowledged)) if reason == 'critical' else None)
         self.mark_loop_phase('axis_send_return')
         self.aol_published_input_proof = None
         self.aol_published_input_native = None
@@ -1443,7 +1450,7 @@ class SelfdriveD:
             int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal),
             bool(axis.lateralActive), bool(axis.longitudinalActive))
           self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
-          if axis.longitudinalActive and self.enabled and self.active:
+          if axis.lateralActive or axis.longitudinalActive and self.enabled and self.active:
             previous_anchor = getattr(self, 'aol_ordinary_source_anchor', None)
             identity = previous_anchor[3] if previous_anchor is not None else cp_identity(self.CP)
             self.aol_ordinary_source_anchor = (self.aol_published_input_proof,
@@ -1559,7 +1566,7 @@ class SelfdriveD:
     self.conditional_status = result.status
     self.conditional_result = result
 
-  def _decide_aol_axes(self, CS, intent, native, *, now_ns=0):
+  def _decide_aol_axes(self, CS, intent, native, *, now_ns=0, ordinary_lag=False):
     from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
@@ -1567,7 +1574,8 @@ class SelfdriveD:
       intent=intent, native=native, car_state=CS, initialized=self.initialized,
       model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                        self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
-      no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
+      no_entry=aol_no_entry(([name for name in self.events.names if name != EventName.selfdrivedLagging]
+                            if ordinary_lag else self.events.names), CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
                            allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
                                                      and ev6_aol_qualified(self.CP, marked_only=True)) or
                              physical_cancel_lateral_allowed(self.CP, CS, intent, native,
@@ -1823,10 +1831,6 @@ class SelfdriveD:
                                'critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
                                aol_hard_soft_fault and not availability else
                                'availabilityPause' if availability else 'transportPause' if pause else 'none')
-      if self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
-        self.record_aol_authority_loss(now_ns=now_ns, companion=intent_companion, drained=intent_drained, native=native,
-          source_current=source_current, lost_active=lost_active_aol, lost_companion=lost_companion,
-          lost_permission=lost_permission, upgraded=upgraded)
       if self.aol_authority_lost or pause:
         self.events.add(EventName.controlsMismatch)
         lost_active_aol |= pause
@@ -1855,7 +1859,14 @@ class SelfdriveD:
             self.state_machine.soft_disable_timer > 0 and
             ET.SOFT_DISABLE not in self.state_machine.current_alert_types):
           self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
-      self.aol_axis_decision = self._decide_aol_axes(CS, intent, native, now_ns=now_ns)
+      ordinary_lag = bool(not availability and not pause and not self.aol_ordinary_source_pause and
+        fresh_ordinary_lag_continuation(self, CS, intent, native, now_ns))
+      self.aol_axis_decision = (self._decide_aol_axes(CS, intent, native, now_ns=now_ns, ordinary_lag=True)
+        if ordinary_lag else self._decide_aol_axes(CS, intent, native, now_ns=now_ns))
+      if ordinary_lag:
+        # Preserve the exact current SOFT event and normal countdown. A live
+        # standard-axis proof describes healthy current authority, not critical.
+        self.aol_fault_reason = 'none'
       if self.aol_ordinary_source_pause:
         self.aol_axis_decision = self.ordinary_source_withdrawal()
       elif availability:
@@ -1885,6 +1896,10 @@ class SelfdriveD:
     if (getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause' and
         ET.WARNING not in self.state_machine.current_alert_types):
       self.state_machine.current_alert_types.append(ET.WARNING)
+    if self.aol_replay and self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
+      self.record_aol_authority_loss(now_ns=now_ns, companion=intent_companion, drained=intent_drained, native=native,
+        source_current=source_current, lost_active=lost_active_aol, lost_companion=lost_companion,
+        lost_permission=lost_permission, upgraded=upgraded)
     self.mark_loop_phase('axis_decision_return')
     axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if axis_published:
