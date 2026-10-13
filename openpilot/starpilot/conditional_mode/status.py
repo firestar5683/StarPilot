@@ -15,7 +15,8 @@ from openpilot.starpilot.conditional_mode.runtime_settings import (
 )
 
 
-LIFETIME_NS = 100_000_000
+# Proposals reach selfdrived 30-70 ms after observation; 100 ms expired most before their successor arrived.
+LIFETIME_NS = 150_000_000
 MODEL_MAX_AGE_NS = 150_000_000
 CHOICES = {ModeChoice.STOCK: 'stock', ModeChoice.CEM: 'conditionalExperimental', ModeChoice.CCM: 'conditionalChill'}
 _HEX = re.compile(r'[0-9a-f]{64}\Z')

@@ -129,8 +129,9 @@ class TestWaitingBarrier(unittest.TestCase):
 
   def test_original_proposal_expiry_cannot_be_renewed(self):
     event = proposal(T + 50 * MS, T + 49 * MS, T + 55 * MS, 4)
-    now = T + 155 * MS + 1
-    result = self.sample(event, now, model=T + 150 * MS, car=now - MS, receipt=T + 100 * MS)
+    now = T + 55 * MS + LIFETIME_NS + 1
+    result = self.sample(event, now, model=now - 5 * MS, car=now - MS, receipt=T + 100 * MS)
     self.assertFalse(result.accepted)
+    self.assertEqual(self.consumer.rejection, 'proposal_invalid')
     self.assertIsNone(self.consumer.last)
     self.assertEqual(self.consumer.barrier_ns, T)

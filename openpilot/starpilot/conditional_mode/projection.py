@@ -35,6 +35,8 @@ V_CRUISE_UNSET_KPH = 255.0
 FROZEN_CURVE_ACCEL_MPS2 = 1.3
 STANDSTILL_SPEED_NOISE_MPS = 0.01
 STANDSTILL_MODEL_PREFIX_NOISE_M = 0.01
+# Recorded standstill paths dip up to 0.46 m below their running max and 0.15 m below zero.
+STANDSTILL_PATH_JITTER_M = 0.5
 FROZEN_RAW_STOP_DISTANCE_M = 5.0 * ModelConstants.T_IDXS[-1]
 
 
@@ -213,6 +215,26 @@ def _horizon(model) -> float | None:
     if any(b < a for a, b in zip(finite, finite[1:], strict=False)):
       return None
     return finite[-1]
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return None
+
+
+def _standstill_path_extent(model) -> float | None:
+  """Uncommitted standstill hold only; too lenient for stop acquisition or release."""
+  try:
+    distances = normalized_origin(tuple(model.position.x))
+    if len(distances) != ModelConstants.IDX_N:
+      return None
+    parsed = tuple(_number(value, low=-STANDSTILL_PATH_JITTER_M, high=500.0) for value in distances)
+    if any(value is None for value in parsed):
+      return None
+    finite = tuple(value for value in parsed if value is not None)
+    peak = 0.0
+    for value in finite:
+      peak = max(peak, value)
+      if peak - value > STANDSTILL_PATH_JITTER_M:
+        return None
+    return peak
   except (AttributeError, TypeError, ValueError, OverflowError):
     return None
 
@@ -625,6 +647,8 @@ class SceneProjector:
       model_tick_mono_s=model_stamp / 1e9 if model_stamp is not None else None,
       model_should_stop=current_stop,
       stationary_launch_clear=stationary_launch_clear,
+      standstill_path_extent_m=(_standstill_path_extent(model) if model_transport_current and car_valid and
+                                _field(car, 'standstill') is True else None),
     )
     if repeated_model:
       self.stop_detector.commit_clear_since_s = None

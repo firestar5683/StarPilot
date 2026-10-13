@@ -57,6 +57,7 @@ class StopFrame:
   model_tick_mono_s: float | None = None
   model_should_stop: bool | None = None
   stationary_launch_clear: bool = False
+  standstill_path_extent_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -241,6 +242,12 @@ class StopLightDetector:
         self.light_detected = True
         hold, reason = self._standstill(frame, True)
         return StopObservation(True, hold, reason, None)
+      extent = _finite(frame.standstill_path_extent_m, 0.0, 500.0)
+      if horizon is None and frame.standstill is True and frame.pedal_override is False and extent is not None:
+        release_distance = FROZEN_RAW_STOP_DISTANCE_M + (STOP_MODEL_RELEASE_MARGIN_M if self.standstill_model_stopped else 0.0)
+        self.standstill_model_stopped = extent < release_distance
+        hold, reason = self._standstill(frame, self.standstill_model_stopped or forcing_stop)
+        return StopObservation(None, hold, reason, None)
       self.invalidate()
       return unknown
     # At standstill the speed-scaled detector has a zero threshold. Its raw
