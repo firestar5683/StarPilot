@@ -22,7 +22,8 @@ class TestPairedClock(unittest.TestCase):
   def pair(self, now, *, offset=-500, skew=2000):
     before = now - skew // 2
     after = before + skew
-    with patch.object(projection.time, 'monotonic_ns', side_effect=(before, after)), \
+    with patch.object(projection.time, 'CLOCK_BOOTTIME', getattr(projection.time, 'CLOCK_BOOTTIME', 7), create=True), \
+         patch.object(projection.time, 'monotonic_ns', side_effect=(before, after)), \
          patch.object(projection.time, 'clock_gettime_ns', return_value=now + offset):
       result = projection.paired_clocks_ns()
     self.assertIsNotNone(result)

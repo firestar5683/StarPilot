@@ -403,11 +403,16 @@ def starpilot_main():
                            ignore_avg_freq=optional_conditional)
 
   set_core_affinity([3, 5])
+  from openpilot.common.hardware import COMMA_HARDWARE
+  from openpilot.starpilot.planner_phase_timing import PlannerPhaseTiming
+  phase_timing = (PlannerPhaseTiming() if COMMA_HARDWARE and conditional_host is not None and "REPLAY" not in os.environ else None)
 
   try:
     while True:
       sm.update()
       if sm.updated['modelV2']:
+        if phase_timing is not None:
+          phase_timing.begin(tuple(sm.logMonoTime[name] for name in ('modelV2', 'carState', 'selfdriveState', 'carControl')))
         # Only explicit replay uses the recorded model timeline. In a live host,
         # modelV2 may lag newer inputs in the same SubMaster update.
         now_ns = int(sm.logMonoTime['modelV2']) if 'REPLAY' in os.environ else time.monotonic_ns()
@@ -489,8 +494,12 @@ def starpilot_main():
           # A camera episode has no road-location identity for a later drive.
           if history_write is not None and history_write.candidate.source != 'vision':
             params.put("SLCQualifiedHistory", json.loads(slc_history.encode(history_write, time.time_ns())))
+        if phase_timing is not None:
+          phase_timing.mark("before_clock")
         needs_clock = conditional_host is not None or traffic_owner is not None or force_stop_owner is not None or mode_owner is not None
         clock_pair = paired_clocks_ns() if needs_clock and 'REPLAY' not in os.environ else None
+        if phase_timing is not None:
+          phase_timing.mark("clock_complete")
         controller_traffic_toggle = bool(wheel_coast.traffic_toggles % 2)
         wheel_coast.traffic_toggles = 0
         if controller_traffic_toggle and mode_owner is not None:
@@ -564,6 +573,8 @@ def starpilot_main():
               return force_stop_owner.sample(sm, CP, now_ns=clock_pair[0], now_boot_ns=clock_pair[1],
                                               drive_id=current_start_ns, follow_seconds=follow_seconds,
                                               traffic_mode=traffic_mode, takeoff_enabled=faster_lead_takeoff)
+        if phase_timing is not None:
+          phase_timing.mark("profile_preferences_complete")
         curve_result = update_curve_frame(longitudinal_planner, sm, CP, now_ns, host=curve_host,
                                           cruise_ceiling=slc_ceiling, profile_tuning=profile_tuning,
                                           traffic_mode=traffic_mode, lane_change_policy=lane_change_policy,
@@ -572,6 +583,8 @@ def starpilot_main():
                                           lead_approach_key=lead_approach_key, force_stop_provider=force_stop_provider,
                                           drive_id=current_start_ns, event=curve_event,
                                           faster_lead_takeoff=faster_lead_takeoff, wheel_coast=(wheel_coast, params))
+        if phase_timing is not None:
+          phase_timing.mark("planner_update_return")
         if curve_preferences is not None and curve_host is not None and curve_result is not None:
           curve_preferences.persist(curve_host, curve_result, now_ns)
           assert curve_status is not None
@@ -580,6 +593,8 @@ def starpilot_main():
                                                now_ns=now_ns, model_ns=int(sm.logMonoTime['modelV2']),
                                                persistence_status=curve_preferences.status,
                                                road_curvature=curve_geometry[0] if curve_geometry is not None else None)
+        if phase_timing is not None:
+          phase_timing.mark("curve_status_complete")
         if conditional_host is not None and 'REPLAY' not in os.environ:
           if drive_changed:
             conditional_host.reset()
@@ -601,11 +616,15 @@ def starpilot_main():
                                                 int(sm.logMonoTime['carState'])),
               ui_event=current_ui_manual_event(pending_conditional_ui, conditional_now_ns),
             )
+            if phase_timing is not None:
+              phase_timing.mark("conditional_sample_return")
             planner_status = conditional_host.status.attach(
               planner_status, proposal, snapshot, now_ns=conditional_now_ns,
               drive_id=current_start_ns, model_ns=int(sm.logMonoTime['modelV2']),
               car_state_ns=int(sm.logMonoTime['carState']),
             )
+        if phase_timing is not None:
+          phase_timing.mark("conditional_attach_return")
         apply_conditional_stop_hold(conditional_host, longitudinal_planner, sm, CP,
                                     clock_pair[0] if clock_pair is not None else now_ns, current_start_ns,
                                     now_boot_ns=clock_pair[1] if clock_pair is not None else None)
@@ -623,11 +642,18 @@ def starpilot_main():
           planner_status = publish_switchback(planner_status,
             mode_owner.sample('switchback', sm, CP, now_ns=now_ns), session=mode_session,
             sequence=mode_sequence, now_ns=now_ns, source_car_control_ns=int(sm.logMonoTime['carControl']))
+        if phase_timing is not None:
+          phase_timing.mark("sibling_status_complete")
         if planner_status is not None:
           pm.send('slcState', planner_status)
+        if phase_timing is not None:
+          phase_timing.mark("slc_send_return")
         if current_start_ns > 0:
           drive_start_ns = current_start_ns
         longitudinal_planner.publish(sm, pm)
+        if phase_timing is not None:
+          phase_timing.mark("longplan_publish_return")
+          phase_timing.finish(relevant=bool(sm["carControl"].longActive), solver_s=longitudinal_planner.mpc.solve_time)
 
         ldw.update(sm.frame, sm['modelV2'], sm['carState'], sm['carControl'])
         msg = messaging.new_message('driverAssistance')
@@ -637,6 +663,8 @@ def starpilot_main():
         pm.send('driverAssistance', msg)
 
   finally:
+    if phase_timing is not None:
+      phase_timing.close()
     if conditional_host is not None:
       conditional_host.close()
     if curve_preferences is not None:
