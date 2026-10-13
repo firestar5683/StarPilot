@@ -237,8 +237,8 @@ class TestBlendedLifecycle(unittest.TestCase):
       calls.append('ack')
     context.owner = SimpleNamespace(sent=sent)
     car = card.Car.__new__(card.Car)
-    car.vehicle_startup = context
-    car.pm = SimpleNamespace(send=lambda *args: calls.append('published'))
+    vars(car)['vehicle_startup'] = context
+    vars(car)['pm'] = SimpleNamespace(send=lambda *args: calls.append('published'))
     card.Car.publish_sendcan(car, [], valid=True)
     self.assertEqual(calls, ['published', 'ack'])
 
@@ -320,17 +320,23 @@ class TestBlendedLifecycle(unittest.TestCase):
     calls = []
     CS = SimpleNamespace()
     car = card.Car.__new__(card.Car)
-    car.state_update = lambda: (CS, None)
-    car.state_publish = lambda *args: calls.append('state')
+
+    def state_update(*, defer_radar=False):
+      self.assertTrue(defer_radar)
+      return CS, None
+    vars(car)['state_update'] = state_update
+    car._deferred_radar_can = None
+    vars(car)['RI'] = SimpleNamespace(update=lambda can_list: None)
+    vars(car)['state_publish'] = lambda *args: calls.append('state')
     car.CP = SimpleNamespace(passive=False)
     car.ci_initialized = False
 
     class SM(dict):
       seen = {'onroadEvents': False}
-    car.sm = SM(onroadEvents=[])
-    car.vehicle_startup = SimpleNamespace(owner=object(), maintain=lambda **kw: calls.append(('maintain', kw)))
-    car.startup_panda_configured = lambda: True
-    car.controls_update = lambda *args: self.fail('Controls are not initialized')
+    vars(car)['sm'] = SM(onroadEvents=[])
+    vars(car)['vehicle_startup'] = SimpleNamespace(owner=object(), maintain=lambda **kw: calls.append(('maintain', kw)))
+    vars(car)['startup_panda_configured'] = lambda: True
+    vars(car)['controls_update'] = lambda *args: self.fail('Controls are not initialized')
     card.Car.step(car)
     self.assertEqual(calls, [('maintain', {'configured': True}), 'state'])
     self.assertIs(car.CS_prev, CS)

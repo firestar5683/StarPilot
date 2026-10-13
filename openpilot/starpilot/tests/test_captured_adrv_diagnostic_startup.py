@@ -12,6 +12,7 @@ import pytest
 from opendbc.car import CanData, car_helpers, gen_empty_fingerprint, structs
 from opendbc.can.packer import CANPacker
 from opendbc.car.hyundai.ecu_startup import Outcome
+from opendbc.car.hyundai.captured_adrv_startup import CapturedADRVStartup
 from opendbc.car.hyundai.hyundaicanfd import hkg_can_fd_checksum
 from opendbc.car.hyundai.ioniq6_handoff import TimestampedCanPacket
 from opendbc.car.hyundai.interface import CarInterface
@@ -221,6 +222,12 @@ def construct(car, *, dos_can=False, types=('dos', 'redPanda'), external=True, m
       if self.command == b'\x28\x83\x01' and mode == 'restored':
         raise OSError('declared partial ECU-disable transport failure')
       return value
+  stock_checks = []
+  real_sources = CapturedADRVStartup._sources
+  def sources(owner, ci, now, *, floor):
+    current = real_sources(owner, ci, now, floor=floor)
+    stock_checks.append((now, floor, current))
+    return current
   host = Car.__new__(Car)
   try:
     with patch.object(car_helpers, 'fingerprint', return_value=(car, fp, '0' * 17, fw, cp.fingerprintSource, True)), \
@@ -229,8 +236,11 @@ def construct(car, *, dos_can=False, types=('dos', 'redPanda'), external=True, m
          patch('openpilot.selfdrive.car.card.can_comm_callbacks', return_value=(receive, send)), \
          patch('openpilot.cereal.messaging.SubMaster.update', diagnostic), \
          patch('opendbc.car.hyundai.ecu_startup.IsoTpParallelQuery', Query), \
-         patch('opendbc.car.disable_ecu.IsoTpParallelQuery', Query):
+         patch('opendbc.car.disable_ecu.IsoTpParallelQuery', Query), \
+         patch.object(CapturedADRVStartup, '_sources', sources):
       Car.__init__(host)
+    host.test_stock_checks = stock_checks
+    host.test_receive_can = receive
     return host, trace
   except BaseException:
     if getattr(host, 'vehicle_startup', None) is not None:
@@ -278,7 +288,21 @@ def _exercise_factory_transaction(car, case):
       parser = next(p for p in host.CI.can_parsers.values() if p.bus == 5)
       source = parser.message_states[parser.dbc.name_to_msg['SCC_CONTROL'].address]
       assert source.timestamps[-1] > owner.floor_ns
+      # Prove actual startup freshness before resuming the simulated live CAN bank.
+      # Constructor work may outlast source ages while the fixture sends no CAN.
+      assert host.test_stock_checks and host.test_stock_checks[-1][2]
+      checked_ns, checked_floor, _ = host.test_stock_checks[-1]
+      assert checked_floor == owner.floor_ns
+      assert owner._sources(host.CI, checked_ns, floor=owner.floor_ns)
+      packets = host.test_receive_can()
+      host.CI.update([(int(packet.log_mono_time_ns), list(packet)) for packet in packets])
       assert owner._sources(host.CI, time.clock_gettime_ns(time.CLOCK_BOOTTIME), floor=owner.floor_ns)
+      current_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+      assert not owner._sources(host.CI, current_ns, floor=int(source.timestamps[-1]))
+      expired_ns = max(int(item.timestamps[-1]) + int(item.timeout_threshold)
+                       for parser in host.CI.can_parsers.values()
+                       for item in parser.message_states.values() if item.timestamps) + 1
+      assert not owner._sources(host.CI, expired_ns, floor=owner.floor_ns)
     raw = params.get('CarParams')
     assert Path(params.get_param_path('CarParams')).read_bytes() == raw
     with structs.CarParams.from_bytes(raw) as stored:
