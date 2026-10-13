@@ -62,7 +62,8 @@ Panda *connect(std::string serial, uint32_t index) {
     panda->set_can_fd_auto(i, true);
   }
 
-  if (!panda->up_to_date() && !getenv("BOARDD_SKIP_FW_CHECK")) {
+  if (!panda->up_to_date() && (!getenv("BOARDD_SKIP_FW_CHECK") ||
+      getenv("STARPILOT_PANDA_FIRMWARE_MAP") || getenv("STARPILOT_PANDA_FIRMWARE_NAME"))) {
     throw std::runtime_error("Panda firmware out of date. Run pandad.py to update.");
   }
 

@@ -150,6 +150,28 @@ bool Panda::up_to_date() {
     default:
       return false;
   }
+  // The wrapper's selection is per hardware serial; mixed MCUs cannot share an image name.
+  if (getenv("STARPILOT_PANDA_FIRMWARE_NAME")) return false;
+  if (const char *managed = getenv("STARPILOT_PANDA_FIRMWARE_MAP")) {
+    if (std::string(managed) != "1") return false;
+    const std::string serial = hw_serial();
+    if (serial.size() != 24 || serial.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return false;
+    const std::string key = "STARPILOT_PANDA_FIRMWARE_" + serial;
+    const char *selected = getenv(key.c_str());
+    if (!selected) return false;
+    bool allowed = std::string(selected) == filename;
+    // Match the wrapper's existing alternate-image hardware eligibility exactly.
+    if (hw_type == cereal::PandaState::PandaType::DOS || hw_type == cereal::PandaState::PandaType::TRES ||
+        hw_type == cereal::PandaState::PandaType::RED_PANDA) {
+      const std::string prefix = std::string(filename).substr(0, std::string(filename).find(".bin.signed"));
+      for (const char *suffix : {"_remote", "_hkg_remote", "_tesla_wake", "_can_ignition_only",
+                                 "_remote_can_ignition_only", "_hkg_remote_can_ignition_only", "_tesla_wake_can_ignition_only"}) {
+        allowed |= std::string(selected) == prefix + suffix + ".bin.signed";
+      }
+    }
+    if (!allowed) return false;
+    filename = selected;
+  }
   if (auto fw_sig = get_firmware_version()) {
     auto content = util::read_file(std::string("../../../panda/board/obj/") + filename);
     return content.size() >= fw_sig->size() &&

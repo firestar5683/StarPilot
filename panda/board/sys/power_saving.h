@@ -16,7 +16,12 @@ void enable_can_transceivers(bool enabled) {
   // Leave main CAN always on for CAN-based ignition detection
   uint8_t main_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 3U : 1U;
   for(uint8_t i=1U; i<=4U; i++){
-    current_board->enable_can_transceiver(i, (i == main_bus) || enabled);
+    bool transceiver_enabled = (i == main_bus) || enabled;
+    #ifdef PANDA_HKG_REMOTE_START
+    uint8_t hkg_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 4U : 2U;
+    transceiver_enabled = transceiver_enabled || (i == hkg_bus);
+    #endif
+    current_board->enable_can_transceiver(i, transceiver_enabled);
   }
 }
 
@@ -31,7 +36,9 @@ void set_power_save_state(bool enable) {
       } else {
         llcan_irq_disable(cans[2]);
       }
+      #ifndef PANDA_HKG_REMOTE_START
       llcan_irq_disable(cans[1]);
+      #endif
     } else {
       print("disable power savings\n");
 

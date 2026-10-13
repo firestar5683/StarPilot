@@ -4,16 +4,17 @@
 
 bool bootkick_reset_triggered = false;
 
-void bootkick_tick(bool ignition, bool recent_heartbeat) {
+void bootkick_tick(bool ignition, bool recent_heartbeat, bool wake) {
   static uint8_t waiting_to_boot_countdown = 0;
   static uint8_t boot_reset_countdown = 0;
   static uint8_t bootkick_harness_status_prev = HARNESS_STATUS_NC;
   static bool bootkick_ign_prev = false;
+  static bool bootkick_wake_prev = false;
   static BootState boot_state = BOOT_BOOTKICK;
   BootState boot_state_prev = boot_state;
   const bool harness_inserted = (harness.status != bootkick_harness_status_prev) && (harness.status != HARNESS_STATUS_NC);
 
-  if ((ignition && !bootkick_ign_prev) || harness_inserted) {
+  if ((ignition && !bootkick_ign_prev) || harness_inserted || (wake && !bootkick_wake_prev && !ignition)) {
     // bootkick on rising edge of ignition or harness insertion
     boot_state = BOOT_BOOTKICK;
   } else if (recent_heartbeat) {
@@ -56,6 +57,7 @@ void bootkick_tick(bool ignition, bool recent_heartbeat) {
 
   // update state
   bootkick_ign_prev = ignition;
+  bootkick_wake_prev = wake;
   bootkick_harness_status_prev = harness.status;
   if (waiting_to_boot_countdown > 0U) {
     waiting_to_boot_countdown--;

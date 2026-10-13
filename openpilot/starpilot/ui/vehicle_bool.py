@@ -1,13 +1,17 @@
 """Confirmation text for parked vehicle preferences."""
 
 VEHICLE_BOOL_KEYS = frozenset(("GMPedalLongitudinal", "DisableOpenpilotLongitudinal", "LongPitch", "VoltSNG", "GMAutoHold", "VoltOnePedalMode",
-                              "TeslaAOLScreenTap", "TeslaAOLDisengageOnBrake"))
+                              "TeslaAOLScreenTap", "TeslaAOLDisengageOnBrake",
+                              "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "IgnoreIgnitionLine", "TeslaWakeOnCAN"))
 
 
 def confirmation_question(request):
   if request.value not in ("On", "Off"):
     raise ValueError("Unsupported vehicle preference value")
   verb = "Enable" if request.value == "On" else "Disable"
+  from openpilot.starpilot.ui.panda_wake_feature import LABELS
+  if request.key in LABELS:
+    return f"{verb} {LABELS[request.key][0].lower()}? This changes Panda firmware after the next device restart."
   if request.key == "GMPedalLongitudinal":
     return (f"{verb} Pedal Speed Control after the next startup? " +
             "A compatible connected interceptor must be detected before StarPilot can control it.")

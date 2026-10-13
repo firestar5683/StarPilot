@@ -187,6 +187,18 @@ common_flags += [f"-DHEALTH_PACKET_VERSION=0x{hh:08X}U", f"-DCAN_PACKET_VERSION_
 build_project("panda", base_project_f4, "./board/main.c", [])
 build_project("panda_h7", base_project_h7, "./board/main.c", [])
 
+for variant, flags in (
+  ("remote", ["-DPANDA_GM_REMOTE_START_C9"]),
+  ("hkg_remote", ["-DPANDA_HKG_REMOTE_START"]),
+  ("tesla_wake", ["-DPANDA_TESLA_WAKE_ON_CAN"]),
+  ("can_ignition_only", ["-DPANDA_IGNORE_IGNITION_LINE"]),
+  ("remote_can_ignition_only", ["-DPANDA_GM_REMOTE_START_C9", "-DPANDA_IGNORE_IGNITION_LINE"]),
+  ("hkg_remote_can_ignition_only", ["-DPANDA_HKG_REMOTE_START", "-DPANDA_IGNORE_IGNITION_LINE"]),
+  ("tesla_wake_can_ignition_only", ["-DPANDA_TESLA_WAKE_ON_CAN", "-DPANDA_IGNORE_IGNITION_LINE"]),
+):
+  build_project(f"panda_{variant}", base_project_f4, "./board/main.c", flags)
+  build_project(f"panda_h7_{variant}", base_project_h7, "./board/main.c", flags)
+
 # body fw
 build_project("body_h7", base_project_h7, "./board/body/main.c", ["-DPANDA_BODY"])
 

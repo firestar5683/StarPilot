@@ -11,15 +11,22 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.panda_wake import FirmwareChoice, firmware_path, startup_choice
 
 
-def get_expected_signature(mcu_type: McuType) -> bytes:
-  fn = os.path.join(FW_PATH, mcu_type.config.app_fn)
+DEFAULT_FIRMWARE_CHOICE = FirmwareChoice()
+
+
+def get_expected_signature(mcu_type: McuType, choice: FirmwareChoice = DEFAULT_FIRMWARE_CHOICE) -> bytes:
+  fn = firmware_path(FW_PATH, mcu_type.config.app_fn, choice)
   return Panda.get_signature_from_firmware(fn)
 
-def flash_panda(panda_serial: str):
+def flash_panda(panda_serial: str, choice: FirmwareChoice = DEFAULT_FIRMWARE_CHOICE):
   panda = Panda(panda_serial)
-  fw_signature = get_expected_signature(panda.get_mcu_type())
+  if choice.alternate and panda.get_type() not in (Panda.HW_TYPE_DOS, Panda.HW_TYPE_TRES, Panda.HW_TYPE_RED_PANDA):
+    choice = FirmwareChoice()
+  fw_path = firmware_path(FW_PATH, panda.get_mcu_type().config.app_fn, choice)
+  fw_signature = get_expected_signature(panda.get_mcu_type(), choice)
   internal_panda = panda.is_internal()
 
   panda_version = "bootstub" if panda.bootstub else panda.get_version()
@@ -28,7 +35,7 @@ def flash_panda(panda_serial: str):
 
   if panda.bootstub or panda_signature != fw_signature:
     cloudlog.info("Panda firmware out of date, update required")
-    panda.flash()
+    panda.flash(fn=fw_path)
     cloudlog.info("Done flashing")
 
   if panda.bootstub:
@@ -53,6 +60,20 @@ def flash_panda(panda_serial: str):
     raise PandaProtocolMismatch("Panda CAN or health protocol hash mismatch after firmware validation")
 
   panda.close()
+  return os.path.basename(fw_path)
+
+
+def firmware_environment(selected_firmware: dict[str, str]) -> dict[str, str]:
+  # Bind each flashed board's exact image to its hardware serial, including stock images.
+  environment = {key: value for key, value in os.environ.items() if not key.startswith('STARPILOT_PANDA_FIRMWARE')}
+  if not selected_firmware:
+    raise ValueError('Missing Panda firmware selection')
+  for serial, filename in selected_firmware.items():
+    if len(serial) != 24 or any(char not in '0123456789abcdefABCDEF' for char in serial):
+      raise ValueError('Invalid Panda hardware serial')
+    environment['STARPILOT_PANDA_FIRMWARE_' + serial] = filename
+  environment['STARPILOT_PANDA_FIRMWARE_MAP'] = '1'
+  return environment
 
 
 def wait_for_internal_panda(timeout: int = 15) -> bool:
@@ -109,17 +130,22 @@ def main() -> None:
       panda_serials = Panda.list()
       if len(panda_serials):
         cloudlog.info(f"{len(panda_serials)} panda found, connecting - {panda_serials}")
-        for serial in panda_serials:
-          flash_panda(serial)
+        choice = startup_choice(Params())
+        if len(set(panda_serials)) != len(panda_serials):
+          raise ValueError('Duplicate Panda hardware serial')
+        selected_firmware = {serial: flash_panda(serial, choice) for serial in panda_serials}
         ordering = []
         for serial in panda_serials:
           with Panda(serial) as panda:
             ordering.append((not panda.is_internal(), panda.get_type(), panda.get_usb_serial()))
         panda_serials = [serial for _, _, serial in sorted(ordering)]
+        if set(panda_serials) != set(selected_firmware):
+          raise ValueError('Panda hardware identity changed after flashing')
 
         # run real pandad
         os.environ['MANAGER_DAEMON'] = 'pandad'
-        process = subprocess.Popen(["./pandad", *panda_serials], cwd=os.path.join(BASEDIR, "openpilot/selfdrive/pandad"))
+        process = subprocess.Popen(["./pandad", *panda_serials], cwd=os.path.join(BASEDIR, "openpilot/selfdrive/pandad"),
+                                   env=firmware_environment(selected_firmware))
         process.wait()
     # TODO: wrap all panda exceptions in a base panda exception
     except (usb1.USBErrorNoDevice, usb1.USBErrorPipe):

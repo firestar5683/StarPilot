@@ -15,7 +15,7 @@
 
 extern bool bootkick_reset_triggered;
 
-void bootkick_tick(bool ignition, bool recent_heartbeat);
+void bootkick_tick(bool ignition, bool recent_heartbeat, bool wake);
 
 // ******************** can_common ********************
 
