@@ -138,7 +138,20 @@ def test_actual_card_thread_preserves_step_order_and_replay_disables_recorder(mo
     daemon.aol_sequence = 1
     daemon.slc_producer_session = 'session'
     state = object()
-    daemon.state_update = lambda trace=trace, state=state: (trace.append('receive') or state, None)
+    radar_batch, radar_calls = [], []
+
+    def receive(*, defer_radar=False, trace=trace, state=state, daemon=daemon, batch=radar_batch):
+      assert defer_radar
+      daemon._deferred_radar_can = batch
+      return trace.append('receive') or state, None
+
+    def radar_update(batch, trace=trace, expected=radar_batch, calls=radar_calls):
+      assert batch is expected and trace[-1] == 'apply'
+      calls.append(batch)
+      return None
+
+    daemon.state_update = receive
+    daemon.RI = SimpleNamespace(update=radar_update)
     daemon.state_publish = lambda cs, rd, trace=trace: trace.append('publish')
 
     def control(cs, command, *, state=state, trace=trace, daemon=daemon, clock=clock):
@@ -167,6 +180,7 @@ def test_actual_card_thread_preserves_step_order_and_replay_disables_recorder(mo
     else:
       raise AssertionError('loop did not stop')
     assert trace == ['check', 'receive', 'publish', 'apply', 'monitor'] * 2
+    assert len(radar_calls) == 2 and all(batch is radar_batch for batch in radar_calls)
     assert daemon.CS_prev is state and daemon.initialized_prev is True
     assert (daemon.loop_timing is None) is replay
     report = timing.take_report()

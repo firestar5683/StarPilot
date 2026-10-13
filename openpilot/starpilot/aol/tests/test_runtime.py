@@ -1387,6 +1387,24 @@ class IpcAxisContractTests(unittest.TestCase):
           setattr(denied, field, value)
           self.assertFalse(native_bootstrap_supported(denied))
 
+  def _deferred_step(self, card, receive):
+    batch = []
+    calls = [0]
+
+    def state_update(*, defer_radar=False):
+      self.assertTrue(defer_radar)
+      calls[0] += 1
+      card._deferred_radar_can = batch
+      return receive()
+
+    def radar_update(value):
+      self.assertIs(value, batch)
+      return None
+
+    radar = self.enterContext(mock.patch.object(card.RI, 'update', side_effect=radar_update))
+    self.addCleanup(lambda: self.assertEqual(radar.call_count, calls[0]))
+    return mock.patch.object(card, 'state_update', side_effect=state_update)
+
   def test_initialization_waits_for_current_matching_native_receipt(self):
     from dataclasses import replace
     from opendbc.car import gen_empty_fingerprint
@@ -1425,7 +1443,7 @@ class IpcAxisContractTests(unittest.TestCase):
       boot_sm = BootstrapSM(onroadEvents=boot_events.to_msg(), carControl=cc)
       physical = car_state()
       with (mock.patch.object(selected, 'sm', boot_sm),
-            mock.patch.object(selected, 'state_update', return_value=(physical, None)),
+            self._deferred_step(selected, lambda: (physical, None)),
             mock.patch.object(selected, 'state_publish'),
             mock.patch.object(selected.CI, 'init', wraps=selected.CI.init) as initialize,
             mock.patch.object(selected.CI, 'apply') as apply,
@@ -1652,7 +1670,7 @@ class IpcAxisContractTests(unittest.TestCase):
       normal = TestGmAol.card(factory_cp, settings)
       refresh()
       with (mock.patch.object(normal, 'sm', sm),
-            mock.patch.object(normal, 'state_update', side_effect=lambda: parse_state(normal)),
+            self._deferred_step(normal, lambda: parse_state(normal)),
             mock.patch.object(normal, 'state_publish'),
             mock.patch.object(normal.CI, 'init') as initialize,
             mock.patch.object(normal.CI, 'apply') as apply):
@@ -1671,7 +1689,7 @@ class IpcAxisContractTests(unittest.TestCase):
       self.assertEqual(selected.volt_cc_selected, transport)
       self.assertIsNone(selected.vehicle_startup.owner)
       with (mock.patch.object(selected, 'sm', sm),
-            mock.patch.object(selected, 'state_update', side_effect=lambda: parse_state(selected)),
+            self._deferred_step(selected, lambda: parse_state(selected)),
             mock.patch.object(selected, 'state_publish'),
             mock.patch.object(selected.CI, 'init', wraps=selected.CI.init) as initialize,
             mock.patch.object(selected.CI, 'apply') as apply,

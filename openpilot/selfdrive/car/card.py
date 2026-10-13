@@ -447,7 +447,7 @@ class Car:
     if timing is not None and getattr(timing, 'detailed', True):
       timing.mark(name)
 
-  def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
+  def state_update(self, *, defer_radar=False) -> tuple[car.CarState, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
 
     timing = getattr(self, 'loop_timing', None)
@@ -478,10 +478,10 @@ class Car:
     distance_owner = getattr(self, 'gm_distance', None)
     distance_observation = distance_owner.update(can_list) if distance_owner is not None else None
 
-    # Update radar tracks from CAN
-    self.timing_mark('radar_update_start')
-    RD: structs.RadarDataT | None = self.RI.update(can_list)
-    self.timing_mark('radar_update_end')
+    # Direct state_update callers retain eager radar behavior. The production
+    # loop consumes this exact CAN batch after carState and control publication.
+    self._deferred_radar_can = can_list if defer_radar else None
+    RD = None if defer_radar else self.radar_update(can_list)
 
     self.timing_mark('submaster_start')
     self.sm.update(0)
@@ -1052,6 +1052,15 @@ class Car:
 
     self.publish_traffic_receipt(cs_send)
 
+    self.radar_publish(RD)
+
+  def radar_update(self, can_list):
+    self.timing_mark('radar_update_start')
+    RD = self.RI.update(can_list)
+    self.timing_mark('radar_update_end')
+    return RD
+
+  def radar_publish(self, RD):
     if RD is not None:
       tracks_msg = messaging.new_message('radarTracks')
       tracks_msg.valid = not any(RD.errors.to_dict().values())
@@ -1421,7 +1430,7 @@ class Car:
       self.CC_prev = CC
 
   def step(self):
-    CS, RD = self.state_update()
+    CS, RD = self.state_update(defer_radar=True)
     self.timing_mark('state_update_end')
 
     if self.vehicle_startup.owner is not None:
@@ -1440,6 +1449,9 @@ class Car:
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
 
     self.timing_mark('controls_update_end')
+    radar_can = self._deferred_radar_can
+    self._deferred_radar_can = None
+    self.radar_publish(self.radar_update(radar_can))
     self.initialized_prev = initialized
     self.CS_prev = CS
 

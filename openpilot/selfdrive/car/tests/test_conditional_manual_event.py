@@ -142,6 +142,7 @@ class CardManualEventTests(unittest.TestCase):
     initialize_publication_sources(fake)
     fake.loop_timing = None
     fake.timing_mark = MethodType(Car.timing_mark, fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
     fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), state(), None)
     records = [messaging.log_from_bytes(payload).slcCruiseEvent for service, payload in publisher.events
@@ -245,6 +246,7 @@ class CardManualEventTests(unittest.TestCase):
     initialize_publication_sources(fake)
     fake.loop_timing = None
     fake.timing_mark = MethodType(Car.timing_mark, fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
     fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), state(), None)
     published = [messaging.log_from_bytes(payload) for service, payload in publisher.events
@@ -274,6 +276,7 @@ class CardManualEventTests(unittest.TestCase):
     initialize_publication_sources(fake)
     fake.loop_timing = None
     fake.timing_mark = MethodType(Car.timing_mark, fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
     invalid = car.CarState(canValid=False)
     with patch('openpilot.selfdrive.car.card.REPLAY', True):
       fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
@@ -304,6 +307,7 @@ class CardManualEventTests(unittest.TestCase):
     initialize_publication_sources(fake)
     fake.loop_timing = None
     fake.timing_mark = MethodType(Car.timing_mark, fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
     fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), release, None)
     car_events = [messaging.log_from_bytes(payload).carState for service, payload in publisher.events if service == 'carState']

@@ -13,6 +13,23 @@ from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
 
 
 class CardInitLifecycleTest(unittest.TestCase):
+  def defer_radar_fixture(self, card):
+    eager = card.state_update
+    batch = []
+
+    def receive(*, defer_radar=False):
+      self.assertTrue(defer_radar)
+      card._deferred_radar_can = batch
+      return eager()
+
+    def radar_update(value):
+      self.assertIs(value, batch)
+      return None
+
+    card.state_update = Mock(side_effect=receive)
+    card.RI = SimpleNamespace(update=Mock(side_effect=radar_update))
+    self.addCleanup(lambda: self.assertEqual(card.RI.update.call_count, card.state_update.call_count))
+
   def test_bolt_pedal_waits_for_control_then_initializes_once_before_output(self):
     fingerprint = gen_empty_fingerprint()
     fingerprint[0][0x201] = 6
@@ -55,6 +72,7 @@ class CardInitLifecycleTest(unittest.TestCase):
     card.state_publish = Mock(side_effect=lambda *_: order.append('carState'))
     cs = SimpleNamespace(canValid=True, canTimeout=False)
     card.state_update = Mock(return_value=(cs, None))
+    self.defer_radar_fixture(card)
     control = object()
 
     class SubMaster:
@@ -147,6 +165,7 @@ class CardInitLifecycleTest(unittest.TestCase):
     cs, _ = feed_camera(card.CI, packer, 22_000_000_000, active=False)
     self.assertTrue(cs.canValid)
     card.state_update = Mock(return_value=(cs, None))
+    self.defer_radar_fixture(card)
     control = structs.CarControl.new_message().as_reader()
     panda = SimpleNamespace(safetyModel=cp.safetyConfigs[0].safetyModel, safetyParam=0x5007,
                             alternativeExperience=cp.alternativeExperience, safetyRxChecksInvalid=True)
@@ -265,6 +284,7 @@ class CardInitLifecycleTest(unittest.TestCase):
       return state, None
 
     self.enterContext(patch.object(card, 'state_update', state_update))
+    self.defer_radar_fixture(card)
     control = structs.CarControl.new_message().as_reader()
     panda = SimpleNamespace(safetyModel=cp.safetyConfigs[0].safetyModel, safetyParam=word,
                             alternativeExperience=cp.alternativeExperience, safetyRxChecksInvalid=True)
