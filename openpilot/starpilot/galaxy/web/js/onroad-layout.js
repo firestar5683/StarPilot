@@ -1691,10 +1691,10 @@ export const OnroadLayoutPage = {
           </div>
         </template>
       </template>
-      <GxDialog v-if="state.removeConfirm && profile" class="gx-layout__remove-dialog" labelledby="gx-layout-remove-title" describedby="gx-layout-remove-body" alert @close="cancelRemove">
-        <div class="gx-layout__leave-copy"><h3 id="gx-layout-remove-title">Remove {{ profile.widgets[state.removeConfirm]?.label }}?</h3>
+      <GxDialog v-if="state.removeConfirm && profile" labelledby="gx-layout-remove-title" describedby="gx-layout-remove-body" alert @close="cancelRemove">
+        <div><h3 id="gx-layout-remove-title">Remove {{ profile.widgets[state.removeConfirm]?.label }}?</h3>
           <p id="gx-layout-remove-body">Remove this widget from the {{ projection ? 'Android Auto' : state.profile === 'large' ? 'Big' : 'Small' }} layout? You can add it again from Inactive Widgets.</p></div>
-        <div class="gx-layout__remove-actions">
+        <div class="gx-settings__controls gx-actions">
           <button type="button" class="gx-btn gx-btn--tonal" @click="cancelRemove">Cancel</button>
           <button type="button" class="gx-btn gx-btn--danger" @click="confirmRemove">Remove widget</button>
         </div>
