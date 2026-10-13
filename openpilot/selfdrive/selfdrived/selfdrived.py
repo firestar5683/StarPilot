@@ -126,6 +126,9 @@ class SelfdriveD:
     self.conditional_settings = ConditionalSettingsOwner(self.params) if self.conditional_replay else None
     self.conditional_consumer = ModeConsumer() if self.conditional_replay else None
     self.conditional_status = 'disabled'
+    self.conditional_trace = deque(maxlen=512)
+    self.conditional_trace_key = None
+    self.conditional_trace_sequence = 0
     self.controller_action_sock = messaging.sub_sock('slcAction', conflate=False)
     self.controller_action_owner = ModeActionOwner()
     self.switchback_capable = ioniq6_media_eligible(self.CP) and not self.CP.passive and not self.CP.dashcamOnly and not self.CP.notCar
@@ -1538,6 +1541,7 @@ class SelfdriveD:
     if clocks is None:
       self.conditional_consumer.invalidate(time.monotonic_ns())
       self.conditional_status = 'clock_unavailable'
+      self.record_conditional_trace(time.monotonic_ns(), ('clock_unavailable',), ())
       return
     now_ns, boot_ns, skew_ns = clocks
     snapshot = self.conditional_settings.current
@@ -1550,26 +1554,56 @@ class SelfdriveD:
     self.requested_experimental_mode = baseline
     self.experimental_mode = baseline
     required = ('deviceState', 'modelV2', 'carControl')
-    fresh = all(self.sm.seen[service] and self.sm.valid[service] and self.sm.alive[service] and
-                0 < self.sm.logMonoTime[service] <= now_ns and
-                now_ns - self.sm.logMonoTime[service] <= (2_000_000_000 if service == 'deviceState' else 150_000_000)
-                for service in required)
+    def service_fresh(service):
+      return bool(self.sm.seen[service] and self.sm.valid[service] and self.sm.alive[service] and
+                  0 < self.sm.logMonoTime[service] <= now_ns and
+                  now_ns - self.sm.logMonoTime[service] <= (2_000_000_000 if service == 'deviceState' else 150_000_000))
+    fresh = all(service_fresh(service) for service in required)
     axis_active = self.aol_axis_decision.longitudinal_active if self.aol_replay else self.enabled
     authority = bool(configured and fresh and self.initialized and axis_active and
                      not getattr(self, 'aol_axis_publication_deferred', False) and
                      self.CP.openpilotLongitudinalControl and not self.CP.passive and
                      self.conditional_car_state_valid and CS.canValid and not CS.canTimeout and self.sm['deviceState'].started and
                      self.sm['carControl'].longActive and self.sm.seen['slcState'] and self.sm.alive['slcState'])
+    message_ns = int(self.sm.logMonoTime['slcState'])
+    receipt_ns = int(self.sm.recv_time['slcState'] * 1e9)
+    model_ns = int(self.sm.logMonoTime['modelV2'])
+    car_state_ns = self.aol_car_state_log_ns
     result = self.conditional_consumer.sample(
       self.sm['slcState'], now_ns=now_ns, now_boot_ns=boot_ns, sample_skew_ns=skew_ns,
-      message_ns=int(self.sm.logMonoTime['slcState']), receipt_ns=int(self.sm.recv_time['slcState'] * 1e9),
-      drive_id=drive_id, model_ns=int(self.sm.logMonoTime['modelV2']), car_state_ns=self.aol_car_state_log_ns,
+      message_ns=message_ns, receipt_ns=receipt_ns,
+      drive_id=drive_id, model_ns=model_ns, car_state_ns=car_state_ns,
       authority=authority, stock_experimental=baseline,
       choice=verdict.selection.choice if configured else ModeChoice.STOCK,
       settings_fingerprint=settings_fingerprint(snapshot) if configured else None)
     self.experimental_mode = result.experimental
     self.conditional_status = result.status
     self.conditional_result = result
+    consumer = self.conditional_consumer
+    try:
+      current = self.conditional_settings.current
+      car_valid = bool(self.conditional_car_state_valid and CS is not None and CS.canValid and not CS.canTimeout)
+      self.record_conditional_trace(
+        now_ns,
+        (result.accepted, consumer.rejection, verdict.status, configured, tuple(service_fresh(service) for service in required),
+         bool(self.initialized), bool(axis_active),
+         bool(getattr(self, 'aol_axis_publication_deferred', False)), car_valid,
+         bool(self.sm['carControl'].longActive), bool(self.sm.seen['slcState'] and self.sm.alive['slcState'])),
+        (now_ns - model_ns, now_ns - car_state_ns, now_ns - message_ns, now_ns - receipt_ns, now_ns - consumer.barrier_ns,
+         now_ns - snapshot.verified_mono_ns if snapshot is not None else None,
+         now_ns - current.verified_mono_ns if current is not None else None, skew_ns,
+         int(self.sm['slcState'].conditionalMode.sequence), consumer.last.sequence if consumer.last is not None else 0))
+    except Exception:
+      pass
+
+  def record_conditional_trace(self, now_ns, key, detail):
+    # cloudlog JSON formatting is too slow for the 100 Hz loop; params_thread sinks these.
+    trace = getattr(self, 'conditional_trace', None)
+    if trace is None or key == getattr(self, 'conditional_trace_key', None):
+      return
+    self.conditional_trace_key = key
+    self.conditional_trace_sequence = getattr(self, 'conditional_trace_sequence', 0) + 1
+    trace.append((self.conditional_trace_sequence, now_ns, key, detail))
 
   def _decide_aol_axes(self, CS, intent, native, *, now_ns=0, ordinary_lag=False):
     from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
@@ -1941,6 +1975,23 @@ class SelfdriveD:
             cloudlog.event('selfdrived.loop_timing', **timing_report)
         except Exception:
           timing.sink_errors += 1
+      trace = getattr(self, 'conditional_trace', None)
+      if trace:
+        records = []
+        while trace and len(records) < 64:
+          try:
+            records.append(trace.popleft())
+          except IndexError:
+            break
+        try:
+          cloudlog.event('selfdrived.conditional_trace', records=records, columns=(
+            'trace_sequence', 'now_ns',
+            ('accepted', 'rejection', 'settings_status', 'configured', 'fresh_device_model_control', 'initialized',
+             'axis_longitudinal', 'axis_deferred', 'car_state_valid', 'long_active', 'slc_live'),
+            ('model_age_ns', 'car_state_age_ns', 'message_age_ns', 'receipt_age_ns', 'barrier_age_ns',
+             'snapshot_verified_age_ns', 'current_verified_age_ns', 'clock_skew_ns', 'proposal_sequence', 'accepted_sequence')))
+        except Exception:
+          pass
       reports = getattr(self, 'aol_authority_reports', None)
       if reports:
         try:
