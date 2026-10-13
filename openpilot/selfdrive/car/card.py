@@ -450,10 +450,15 @@ class Car:
   def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
 
+    timing = getattr(self, 'loop_timing', None)
+    if timing is not None and timing.detailed:
+      timing.capture_receive(reset=True)
     self.timing_mark('can_receive_start')
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
     self.timing_mark('can_receive_end')
     can_received_ns = time.monotonic_ns()
+    if timing is not None and timing.detailed:
+      timing.capture_receive()
     self.timing_can_packet_count = len(can_strs)
     can_list = can_capnp_to_list(can_strs)
     self.timing_mark('can_decode_end')
@@ -1465,6 +1470,8 @@ class Car:
                           '1' if self.aol_qualified and self.CP.carFingerprint == HYUNDAI_CAR.HYUNDAI_IONIQ_6 else '0') == '1',
                           compact=os.getenv('CARD_PHASE_TIMING') != '1')
                         if self.aol_replay and not REPLAY else None)
+    if self.loop_timing is not None and self.loop_timing.detailed:
+      self.loop_timing.configure_receive(getattr(self, 'can_sock', None))
     self.timing_thread_id = threading.get_native_id()
     e = threading.Event()
     t = threading.Thread(target=self.params_thread, args=(e, ))
@@ -1484,6 +1491,9 @@ class Car:
                          'intent_sequence': self.aol_sequence, 'producer_session': self.slc_producer_session,
                          'thread_id': self.timing_thread_id, 'replay': REPLAY,
                          'can_packet_count': getattr(self, 'timing_can_packet_count', 0),
+                         'can_receive_timing': timing.can_receive_timing,
+                         'can_receive_timing_status': timing.receive_status,
+                         'can_receive_timing_error_stage': timing.receive_error_stage,
                          'can_timeout_count': getattr(self, 'can_rcv_cum_timeout_counter', 0),
                          'can_received_mono_ns': getattr(self, '_aol_can_observation', (None, 0, 0, 0))[1],
                          'source_can_boot_ns': getattr(self, '_aol_can_observation', (None, 0, 0, 0))[2],

@@ -1,6 +1,7 @@
 from collections import deque
 from contextlib import ExitStack
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -17,7 +18,7 @@ from openpilot.starpilot.aol.tests.test_input_deadline_continuity import intent 
 @pytest.mark.parametrize('validation_wait_ns', [0, 4_000_000])
 def test_actual_refresh_preserves_first_late_attempt_but_never_repeats_it(validation_wait_ns):
   state = message(BASE).carState
-  owner = SimpleNamespace(event_input_refresh_pending=True, aol_replay=True, axis_transport_required=True,
+  owner: Any = SimpleNamespace(event_input_refresh_pending=True, aol_replay=True, axis_transport_required=True,
     aol_event_input_reconcile=True, aol_event_input_wait_attempted=False, mark_loop_phase=lambda name: None,
     car_state_envelopes=(), car_state_queue_invalid=False, car_state_last_received_ns=BASE,
     car_state_retained_source_ns=BASE, car_state_sock=object(), aol_car_state_log_ns=BASE,

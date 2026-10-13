@@ -1,5 +1,6 @@
 from collections import deque
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -28,7 +29,7 @@ def test_real_intent_budget_requires_observed_quiescence(count):
 def test_shared_31_then_remaining_one_budget(last_count):
   wires = deque(intent(BASE + index, index + 1).as_reader() for index in range(31))
   companion = IntentCompanion(object())
-  owner = SimpleNamespace(aol_step_intent_drain_count=0, aol_step_intent_drain_ok=True,
+  owner: Any = SimpleNamespace(aol_step_intent_drain_count=0, aol_step_intent_drain_ok=True,
                           mark_loop_phase=lambda name: None)
   with mock.patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none',
                   side_effect=lambda sock: wires.popleft() if wires else None):
@@ -48,7 +49,7 @@ def test_actual_wrapper_failure_stays_sticky_after_fresh_success():
   # the cumulative failure, while preserving each legacy caller's return value.
   wires = deque(intent(BASE + index, index + 1).as_reader() for index in range(32))
   companion = IntentCompanion(object())
-  owner = SimpleNamespace(aol_step_intent_drain_count=0, aol_step_intent_drain_ok=True,
+  owner: Any = SimpleNamespace(aol_step_intent_drain_count=0, aol_step_intent_drain_ok=True,
                           mark_loop_phase=lambda name: None)
   with mock.patch('openpilot.starpilot.aol.intent_companion.messaging.recv_one_or_none',
                   side_effect=lambda sock: wires.popleft() if wires else None):
@@ -56,6 +57,7 @@ def test_actual_wrapper_failure_stays_sticky_after_fresh_success():
     assert not owner.aol_step_intent_drain_ok
     wires.append(intent(BASE + 40, 40).as_reader())
     assert SelfdriveD.drain_axis_intent(owner, companion)
+  assert companion.latest is not None
   assert companion.last_drain_ok and companion.latest[0] == BASE + 40
   assert owner.aol_step_intent_drain_count == 33
   assert not owner.aol_step_intent_drain_ok
@@ -74,7 +76,7 @@ def test_exhausted_budget_reads_no_extra_message_and_fails_closed():
 def test_source_budget_is_shared_and_refresh_never_waits(initial_count, new_count):
   existing = tuple(message(BASE + index) for index in range(initial_count))
   following = deque(message(BASE + initial_count + index) for index in range(new_count))
-  owner = SimpleNamespace(event_input_refresh_pending=True, aol_replay=True, axis_transport_required=True,
+  owner: Any = SimpleNamespace(event_input_refresh_pending=True, aol_replay=True, axis_transport_required=True,
     car_state_envelopes=existing, car_state_queue_invalid=False, car_state_last_received_ns=BASE - 1,
     car_state_retained_source_ns=BASE - 1, car_state_sock=object(), aol_car_state_log_ns=BASE - 1,
     conditional_car_state_valid=True, aol_expired_healthy_source=False)

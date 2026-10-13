@@ -1,5 +1,6 @@
 """Bounded observational Card timing; no logging or I/O on the control thread."""
 from collections import deque
+from collections.abc import Callable
 from functools import wraps
 from itertools import islice
 import time
@@ -35,6 +36,11 @@ class CardLoopTiming:
 
   def __init__(self, clock=None, *, detailed=True, compact=False):
     self.capture_errors = 0
+    self.receive_set: Callable[[bool], None] | None = None
+    self.receive_take: Callable[[], dict] | None = None
+    self.receive_status = 'disabled'
+    self.receive_error_stage = ''
+    self.can_receive_timing = None
     self.capture_error_type = ''
     self.capture_error_reported = (0, 0)
     self.capture_error_report_ns = None
@@ -65,6 +71,71 @@ class CardLoopTiming:
     self.worker_current = None
     self.worker_previous = None
     self.worker_recent = deque(maxlen=2)
+
+  def configure_receive(self, sock):
+    """Optional native CAN capture; enable once before the settings worker."""
+    if not self.detailed:
+      return
+    try:
+      self.receive_set = sock.set_receive_timing
+      self.receive_take = sock.take_receive_timing
+      if not callable(self.receive_set) or not callable(self.receive_take):
+        raise TypeError
+      self.receive_set(True)
+      self.receive_status = 'enabled'
+    except Exception as error:
+      self._receive_error(error, 'setup')
+
+  def _receive_error(self, error, stage):
+    self.capture_errors += 1
+    self.capture_error_type = type(error).__name__
+    self.receive_error_stage = stage
+    self.receive_status = 'error'
+    self.can_receive_timing = None
+    if self.receive_set is not None:
+      try:
+        self.receive_set(False)
+      except Exception as disable_error:
+        self.capture_errors += 1
+        self.capture_error_type = type(disable_error).__name__
+    self.receive_set = self.receive_take = None
+
+  def capture_receive(self, *, reset=False):
+    """One reset before drain and one detached summary after; never receive CAN."""
+    if reset:
+      self.can_receive_timing = None
+    if not self.detailed or self.receive_status != 'enabled':
+      return
+    try:
+      take = self.receive_take
+      if take is None:
+        raise TypeError
+      raw = take()
+      if reset:
+        return
+      # The native API has fixed storage. Reject an incompatible shape rather
+      # than retain an unbounded/mutable object on the control thread.
+      counts = ('blocking_calls', 'nonblocking_calls', 'messages', 'nulls', 'invalid_clock_samples')
+      totals = ('release', 'native', 'reacquire', 'copy', 'delete_release', 'delete_native', 'delete_reacquire')
+      boundaries = ('before_release', 'native_entry', 'native_return', 'after_reacquire',
+                    'before_delete_release', 'delete_entry', 'delete_return', 'after_delete_reacquire')
+      if (not isinstance(raw, dict) or
+          set(raw) != {*counts, 'schema_version', 'clock', 'enabled', 'totals_ns', 'boundary_names',
+                       'slowest_blocking_ns', 'slowest_nonblocking_ns'} or
+          raw['schema_version'] != 1 or raw['clock'] != 'MONOTONIC' or raw['enabled'] is not True or
+          any(type(raw[name]) is not int or raw[name] < 0 for name in counts) or
+          not isinstance(raw['totals_ns'], dict) or set(raw['totals_ns']) != set(totals) or
+          any(type(raw['totals_ns'][name]) is not int or raw['totals_ns'][name] < 0 for name in totals) or
+          tuple(raw['boundary_names']) != boundaries or
+          any(not isinstance(raw[name], (tuple, list)) or len(raw[name]) != 8 or
+              any(type(value) is not int or value < 0 for value in raw[name])
+              for name in ('slowest_blocking_ns', 'slowest_nonblocking_ns'))):
+        raise ValueError
+      self.can_receive_timing = {**raw, 'totals_ns': dict(raw['totals_ns']),
+        'boundary_names': boundaries, 'slowest_blocking_ns': tuple(raw['slowest_blocking_ns']),
+        'slowest_nonblocking_ns': tuple(raw['slowest_nonblocking_ns'])}
+    except Exception as error:
+      self._receive_error(error, 'reset' if reset else 'snapshot')
 
   @staticmethod
   def _clock():
