@@ -1674,9 +1674,12 @@ export const OnroadLayoutPage = {
               <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('signalBorder', value)" />
               <h5 class="gx-layout__display-group">Camera</h5>
-              <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
+              <GalaxySettingRow :row="switchRow('Show camera on blind-spot warning', state.draft.blindSpotCamera === true)" :index="0"
+                :disabled="!editable || !!state.drag || !!state.layerDrag || !projectionHasPipWidget" :save-value="(index, value) => setProjectionDisplay('blindSpotCamera', value)" />
+              <p v-if="!projectionHasPipWidget" class="gx-note">Add a left or right blind-spot camera widget to enable this option.</p>
+              <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="1"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
-              <p class="gx-note">Gamma trial: the large comma UI's road-camera color effect (not shown in the preview).</p>
+              <p class="gx-note">Gamma trial: the large UI road-camera color effect on Android Auto (not shown in the preview).</p>
             </section>
               <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Comma screen options">
                 <div class="gx-layout__subhead"><h4>Comma screen options</h4></div>

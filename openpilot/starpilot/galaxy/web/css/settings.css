@@ -547,8 +547,7 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 
 /* Narrow editors pin the save bar, preview and editor tabs; controls scroll underneath. */
 @container (max-width: 1040px) {
-  .gx-layout__inspector { overflow: clip; }
-  .gx-layout__preview-card { position: sticky; top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px)); z-index: 6; padding: 10px; gap: 8px; margin-bottom: 0; background: var(--layout-solid); }
+  .gx-layout__preview-card { position: sticky; top: calc(var(--layout-sticky-top, 0px) + var(--layout-bar-h, 60px)); z-index: 6; padding: 8px; gap: 6px; margin-bottom: 0; background: var(--layout-solid); }
   .gx-layout__preview-card > .gx-layout__subhead, .gx-layout__device > .gx-layout__subhead { display: none; }
   .gx-layout__preview-card .gx-layout__preview, .gx-layout__device-frame { width: 100%; max-width: calc(var(--layout-pin-max) * var(--layout-ratio, 2)); margin-inline: auto; }
   .gx-layout__device { gap: 8px; }
@@ -560,7 +559,6 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 @container (max-width: 850px) {
   .gx-layout__savebar:not(.gx-layout__savebar--leave) > span { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gx-layout__savebar:not(.gx-layout__savebar--leave) { gap: 4px; }
-  .gx-layout__savebar .gx-layout__more > .gx-btn { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 10px; display: flex; align-items: center; justify-content: center; }
   .gx-layout__savebar > .gx-btn.gx-layout__save:last-child { flex: 0 0 auto; width: auto; padding-inline: 16px; }
   .gx-layout__savebar .gx-layout__save .gx-layout__save-label { display: inline; }
   .gx-layout__savebar .gx-layout__save .gx-layout__action-icon { display: none; }
@@ -606,7 +604,6 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 
 /* Slimmer preview switcher and save bar on narrow editors. */
 @container (max-width: 1040px) {
-  .gx-layout__preview-card { padding: 8px; gap: 6px; }
   .gx-layout__preview-bar .gx-layout__switcher .gx-btn { min-height: 36px; padding-block: 6px; }
   .gx-layout__preview-bar .gx-layout__bar-toggle { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
 }

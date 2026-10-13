@@ -95,7 +95,8 @@ assert.equal(editorSnapshot(olderCameraLayout).document.blindSpotCamera, false)
 for (const value of [1, 0, "true", null, [], {}])
   assert.equal(validDocument({ ...data.document, blindSpotCamera: value }, data.metadata), false)
 assert.equal(validDocument({ ...native.document, blindSpotCamera: true }, native.metadata), false)
-assert.doesNotMatch(OnroadLayoutPage.template, /blindSpotCameraRow|Show Camera on Blind Spot Warning/)
+assert.match(OnroadLayoutPage.template, /Show camera on blind-spot warning/)
+assert.match(OnroadLayoutPage.template, /setProjectionDisplay\('blindSpotCamera', value\)/)
 const cameraChanges = []
 const cameraVm = { projection: true, editable: true,
   state: { draft: { blindSpotCamera: false }, drag: null, layerDrag: null, notice: '' },
