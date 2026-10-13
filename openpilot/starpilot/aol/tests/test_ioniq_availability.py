@@ -81,7 +81,10 @@ class IoniqAvailabilityTests(unittest.TestCase):
     if not genuine_events:
       self.enterContext(mock.patch.object(sd, 'sm', messaging.SubMaster(services, ignore_avg_freq=services), create=True))
     sd.sm.update = mock.Mock()
-    sd.events, sd.state_machine, sd.AM = Events(), StateMachine(), AlertManager()
+    # Preserve the real constructor's CP-qualified family event rules.
+    if not (supplied_cp and genuine_events):
+      sd.events = Events()
+    sd.state_machine, sd.AM = StateMachine(), AlertManager()
     sd.state_machine.state = log.SelfdriveState.OpenpilotState.enabled if full_op else log.SelfdriveState.OpenpilotState.disabled
     sd.enabled = sd.active = full_op
     sd.mismatch_counter = 0

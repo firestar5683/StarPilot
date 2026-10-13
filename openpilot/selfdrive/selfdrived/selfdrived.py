@@ -40,7 +40,9 @@ from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
 from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only, cp_identity, healthy_transport
-from openpilot.starpilot.aol.source_availability import ordinary_source_availability, fresh_ordinary_lag_continuation
+from openpilot.starpilot.aol.source_availability import (
+  ordinary_source_availability, fresh_ordinary_lag_continuation, stock_lateral_role, stock_lateral_fault_proof,
+)
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -1158,7 +1160,8 @@ class SelfdriveD:
         not 0 < intent.carStateLogMonoTime <= now_ns or now_ns - intent.carStateLogMonoTime > INTENT_MAX_AGE_NS or
         intent.carStateLogMonoTime <= anchor[2].carStateLogMonoTime or
         intent.producerSessionId != anchor[0][4] or companion is None or companion.integrity_epoch != anchor[0][5] or
-        self.events.contains(ET.USER_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE) or
+        (self.events.contains(ET.USER_DISABLE) and not stock_lateral_role(self, CS, native, intent)) or
+        self.events.contains(ET.IMMEDIATE_DISABLE) or
         native is None or native is not getattr(self.aol_transport_pause, 'observed_native', None) or
         native.pandaSerial != anchor[1].pandaSerial or native.observedMonoTime < anchor[1].observedMonoTime or
         tuple(p.hardwareSerial for p in native.pandaInventory) != tuple(p.hardwareSerial for p in anchor[1].pandaInventory)):
@@ -1438,6 +1441,8 @@ class SelfdriveD:
           int(axis.faultEventMonoTime), tuple(self.events.names), bool(axis.desiredLateral),
           bool(axis.desiredLongitudinal), bool(axis.lateralActive), bool(axis.longitudinalActive),
           bool(axis.nativeAcknowledged)) if reason == 'critical' else None)
+        self.aol_published_stock_lateral_proof = (
+          stock_lateral_fault_proof(self, CS, axis_msg, time.monotonic_ns()) if source_clock_scoped and reason == 'critical' else None)
         self.mark_loop_phase('axis_send_return')
         self.aol_published_input_proof = None
         self.aol_published_input_native = None

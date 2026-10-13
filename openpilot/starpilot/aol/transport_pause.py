@@ -94,6 +94,26 @@ def host_source_availability_only(events):
                   not event.immediateDisable for event in faults))
 
 
+def stock_lateral_user_event(cp):
+  """Current ordinary-owner USER event for an established stock LAT role."""
+  if not cp.pcmCruise:
+    return None
+  if cp.brand == 'honda':
+    from opendbc.car.honda.stock_aol import qualified
+    return log.OnroadEvent.EventName.cruiseDisabled if qualified(cp, marked_only=True) else None
+  return log.OnroadEvent.EventName.pcmDisable
+
+
+def stock_lateral_off(cp, cs, native):
+  """Physical stock-cruise OFF role; callers still prove accepted LAT identity."""
+  from openpilot.starpilot.nostalgia import physical_cancel
+  return bool(cp.pcmCruise and cs.cruiseState.available and not cs.cruiseState.enabled and
+    cs.canValid and not cs.canTimeout and not cs.steerFaultPermanent and not cs.steerFaultTemporary and
+    not cs.accFaulted and not cs.doorOpen and not cs.seatbeltUnlatched and
+    not cs.brakePressed and not cs.regenBraking and not cs.gasPressed and not physical_cancel(cs) and
+    native is not None and native.requestedLateral and native.lateralAllowed and not native.requestedLongitudinal)
+
+
 class AvailabilityPause:
   """Retain an accepted armed producer; this proof never enables output."""
   def __init__(self, cp, session):
@@ -227,6 +247,7 @@ class TransportPauseFeedback:
     self.awaiting = False
     self.failed = False
     self.lateral_baseline_ns = 0
+    self.lateral_only_baseline = False
     self.lateral_source_ns = 0
     self.lateral_inventory = None
     self.lateral_native_ns = 0
@@ -273,7 +294,7 @@ class TransportPauseFeedback:
     event_ns = int(sm.logMonoTime['onroadEvents'])
     if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
         not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
-        any(event.userDisable for event in events) or joining and
+        joining and
           (axis.faultEventMonoTime != self.pending_event or now_ns - self.pending_event > AXIS_MAX_AGE_NS)):
       return False
     withdrawn = bool(reason == 'critical' and not axis.desiredLateral and not axis.desiredLongitudinal and
@@ -298,6 +319,13 @@ class TransportPauseFeedback:
         native.observedMonoTime < self.lateral_native_ns or
         (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
       return False
+    users = [event for event in events if event.userDisable]
+    if users:
+      stock_user = stock_lateral_user_event(cp)
+      if (not getattr(self, 'lateral_only_baseline', False) or stock_user is None or
+          any(event.name != stock_user or event.softDisable or event.immediateDisable for event in users) or
+          not stock_lateral_off(cp, cs, native)):
+        return False
     if pending:
       if not self.pending_event:
         self.pending_event = int(axis.faultEventMonoTime)
@@ -455,6 +483,36 @@ class TransportPauseFeedback:
         native.observedMonoTime < self.lateral_native_ns or
         (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
       return False
+    # The qualified stock USER event describes the already disabled LONG
+    # owner, not an independent LAT cancellation. Qualify only this inactive source-zero
+    # proof against its accepted LAT-only baseline and current real native grant.
+    previous = self.signature
+    stock_user = stock_lateral_user_event(cp)
+    stock_lateral = bool(reason == 'availabilityPause' and axis.sourceCarStateMonoTime == 0 and
+      not axis.lateralActive and not axis.longitudinalActive and not axis.desiredLongitudinal and
+      stock_lateral_off(cp, cs, native) and previous is not None and
+      previous[0] == self.session and previous[7] == self.session and
+      previous[14] == intent_producer_session and previous[15] == self.availability_epoch and
+      (previous[11] and not previous[12] and previous[13] and not previous[10] and
+       (previous[9] and previous[5] == 'none' or (self.retention_verified or self.retention_started_ns) and
+        previous[5] == 'availabilityPause' and previous[8] == 0 and not previous[9] and
+        previous[6] == axis.faultEventMonoTime) or
+       # Only the matched temporary-lag branch can accept a critical signature.
+       # Unmatched joins retain pending_event; every other critical path fails
+       # and clears the LAT-only baseline before changing the signature.
+       self.lateral_only_baseline and not self.failed and not self.pending_event and
+       previous[5] == 'critical' and previous[1] == self.sequence and not any(previous[9:14]) and
+       0 < previous[6] <= previous[2] <= axis.faultEventMonoTime and
+       0 < self.lateral_source_ns <= previous[8] <= previous[2] and
+       previous[2] - previous[8] <= AXIS_MAX_AGE_NS and
+       0 <= now_ns - previous[8] <= SAFETY_MAX_AGE_NS))
+    if stock_lateral:
+      users = [event for event in events if event.userDisable]
+      if any(event.name != stock_user or event.softDisable or event.immediateDisable
+             for event in users):
+        return False
+      events = [event for event in events if not (event.name == stock_user and
+        event.userDisable and not event.softDisable and not event.immediateDisable)]
     event_ns = int(sm.logMonoTime['onroadEvents'])
     faults = [event for event in events if event.immediateDisable or event.softDisable]
     live_event = bool(sm.valid['onroadEvents'] and sm.alive['onroadEvents'] and
@@ -568,11 +626,19 @@ class TransportPauseFeedback:
     # retain only an already established intent under its original bounds.
     held = bool(signature == self.signature and not self.retention_started_ns)
     output_missing = not (sm.seen['aolAxisState'] and sm.valid['aolAxisState'] and sm.alive['aolAxisState'])
+    # The same exclusive matched-lag signature invariant as typed retention:
+    # unknown critical joins keep pending_event; other critical paths fail.
+    matched_lag = bool(str(axis.faultReason) == 'critical' and signature == self.signature and
+      self.lateral_only_baseline and not self.failed and not self.pending_event and
+      signature[0] == self.session and signature[7] == self.session and signature[1] == self.sequence and
+      signature[14] == producer == self.availability_producer and signature[15] == self.availability_epoch and
+      not any(signature[9:14]) and 0 < signature[6] <= stamp and
+      0 < self.lateral_source_ns <= signature[8] <= stamp and stamp - signature[8] <= AXIS_MAX_AGE_NS)
     if (not latched or self.failed or self.paused or self.pending_event or not self.session or
         cp_identity(cp) != self.cp or not continuity or
         str(axis.sessionId) != self.session or str(axis.faultSessionId) != self.session or
-        str(axis.faultReason) != 'none' or not axis.qualified or not axis.nativeAcknowledged or
-        not axis.desiredLateral or not axis.lateralActive or
+        not axis.qualified or (str(axis.faultReason) != 'none' or not axis.nativeAcknowledged or
+          not axis.desiredLateral or not axis.lateralActive) and not matched_lag or
         (axis.desiredLongitudinal or axis.longitudinalActive) and not held and
           not self._new_expired_combined_source(sm, cp, axis, stamp, now_ns, signature) or
         (not sm.seen['aolAxisState'] or not sm.valid['aolAxisState']) and not held or
@@ -594,10 +660,27 @@ class TransportPauseFeedback:
     if not 0 <= now_ns - self.source_retention_started_ns <= SAFETY_MAX_AGE_NS:
       return False
     event_ns = int(sm.logMonoTime['onroadEvents'])
-    faults = [e for e in sm['onroadEvents'] if e.immediateDisable or e.softDisable]
+    events = sm['onroadEvents']
+    faults = [e for e in events if e.immediateDisable or e.softDisable]
+    users = [e for e in events if e.userDisable]
+    stock_user = stock_lateral_user_event(cp)
+    nominal_users = bool(stock_user is not None and users and all(e.name == stock_user and
+      not e.softDisable and not e.immediateDisable for e in users))
+    host_events = [e for e in events if not (e.name == stock_user and e.userDisable and
+      not e.softDisable and not e.immediateDisable)]
+    stock_event_first = bool(signature == self.signature and
+      not axis.desiredLongitudinal and not axis.longitudinalActive and
+      now_ns > axis.validUntilMonoTime and nominal_users and host_source_availability_only(host_events) and
+      0 < axis.faultEventMonoTime < event_ns <= now_ns and now_ns - event_ns <= AXIS_MAX_AGE_NS)
+    # Once this exact old LAT-only proof is waiting for a newer event's half,
+    # any changed/non-nominal USER/fault vector terminates that fixed join.
+    stock_pending = bool(cp.pcmCruise and self.retention_started_ns and signature == self.signature and
+      not axis.desiredLongitudinal and not axis.longitudinalActive and
+      0 < axis.faultEventMonoTime < self.retention_event_ns)
     if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
         not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
-        bool(faults)):
+        bool(faults) and not stock_event_first or stock_pending and not stock_event_first or
+        matched_lag and not stock_event_first):
       return False
     native = _healthy_transport_native(sm, cp, cs, self.session, now_ns)
     if (native is None or not native.pandaInventory or not native.requestedLateral or not native.lateralAllowed or
@@ -606,6 +689,19 @@ class TransportPauseFeedback:
         native.observedMonoTime < self.lateral_native_ns or
         (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
       return False
+    if stock_event_first:
+      if not stock_lateral_off(cp, cs, native):
+        return False
+      if self.retention_started_ns:
+        if (self.retention_event_ns != event_ns or
+            not 0 <= now_ns - self.retention_started_ns <= AXIS_MAX_AGE_NS):
+          return False
+      else:
+        self.retention_started_ns = now_ns
+        self.retention_event_ns = event_ns
+      self.retention_pending = True
+      # Only receive identity is held. Every original source, native, output
+      # and healthy baseline timestamp remains unchanged until the typed pair.
     return True
 
   def _event_first_retention(self, sm, cp, axis, stamp, now_ns, *, latched, signature, native):
@@ -717,6 +813,7 @@ class TransportPauseFeedback:
         self.retention_started_ns = self.retention_event_ns = 0
         self.retention_verified = False
         self.failed = True
+        self.lateral_only_baseline = False
         return True
       if reason != 'availabilityPause' and not availability_only(sm['onroadEvents']):
         self.retention_started_ns = self.retention_event_ns = 0
@@ -769,6 +866,7 @@ class TransportPauseFeedback:
         self.paused = False
         self.pending_event = 0
         self.failed = hard
+        self.lateral_only_baseline = bool(self.lateral_only_baseline and not hard)
         return hard
       known = bool(self.session)
       if reason == 'none':
@@ -777,6 +875,7 @@ class TransportPauseFeedback:
           self.paused = False
           self.pending_event = 0
           self.failed = hard
+          self.lateral_only_baseline = bool(self.lateral_only_baseline and not hard)
           return hard
         event_ns = int(sm.logMonoTime['onroadEvents'])
         faults = [e for e in sm['onroadEvents'] if e.immediateDisable or e.softDisable]
@@ -792,6 +891,7 @@ class TransportPauseFeedback:
             self.pending_event = 0
             self.paused = False
             self.failed = True
+            self.lateral_only_baseline = False
             return True
           self.awaiting = True
           return False
@@ -799,6 +899,7 @@ class TransportPauseFeedback:
           self.pending_event = 0
           self.paused = False
           self.failed = True
+          self.lateral_only_baseline = False
           return True
         # Remember a real physical occurrence before its native wire arrives.
         # Duplicate Card observations and held/released samples cannot renew it.
@@ -820,6 +921,8 @@ class TransportPauseFeedback:
         self.availability_producer = (str(getattr(axis, 'intentProducerSessionId', '')) if lateral_baseline and
           intent_producer_session and getattr(axis, 'intentProducerSessionId', '') == intent_producer_session else '')
         self.availability_epoch = int(getattr(axis, 'intentIntegrityEpoch', 0)) if self.availability_producer else None
+        self.lateral_only_baseline = bool(lateral_baseline and self.availability_producer and
+          not axis.desiredLongitudinal and not axis.longitudinalActive and not native.requestedLongitudinal)
         if lateral_baseline and native is not None:
           self.lateral_native_ns = int(native.observedMonoTime)
           self.lateral_inventory = (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory))
@@ -841,12 +944,14 @@ class TransportPauseFeedback:
           self.pending_event = 0
           self.paused = False
           self.failed = True
+          self.lateral_only_baseline = False
           return True
         # The producer sends the typed envelope before its event occurrence.
         # Remember that fresh provenance, but exempt no event until the exact
         # occurrence arrives. Missing/old senders cannot establish this pair.
         if not self.qualified and not pending:
           self.failed = True
+          self.lateral_only_baseline = False
           return True
         if self.qualified:
           self.pending_event = 0
@@ -860,4 +965,5 @@ class TransportPauseFeedback:
       self.paused = False
       self.pending_event = 0
       self.failed = hard
+      self.lateral_only_baseline = bool(self.lateral_only_baseline and not hard)
       return hard
