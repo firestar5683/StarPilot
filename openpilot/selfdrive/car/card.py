@@ -546,17 +546,32 @@ class Car:
       self.aol_process_fault_context.observe(self.sm, now_ns)
       if getattr(self, 'aol_transport_feedback', None) is None:
         self.aol_transport_feedback = TransportPauseFeedback(self.CP)
+      cancel_source_ns = self.aol_cancel_source(CS, now_ns)
+      brake_source_ns = self.aol_honda_brake_source(CS, now_ns)
+      gm_withdrawal_source_ns = self.aol_gm_withdrawal_source(CS, now_ns)
       transport_reset = self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
-        latched=self.aol_card_intent.allowed_latch, cancel_source_ns=self.aol_cancel_source(CS, now_ns),
-        brake_source_ns=self.aol_honda_brake_source(CS, now_ns),
-        gm_withdrawal_source_ns=self.aol_gm_withdrawal_source(CS, now_ns),
+        latched=self.aol_card_intent.allowed_latch, cancel_source_ns=cancel_source_ns,
+        brake_source_ns=brake_source_ns,
+        gm_withdrawal_source_ns=gm_withdrawal_source_ns,
         intent_producer_session=getattr(self, 'slc_producer_session', ''))
       fault_active = True if transport_reset else None
       event_ns = int(self.sm.logMonoTime['onroadEvents'])
       if (getattr(self.aol_card_intent, 'requires_fault_observation', self.aol_card_intent.explicit_latch) and
           self.sm.updated['onroadEvents'] and
           self.sm.valid['onroadEvents'] and 0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
-        fault_active = transport_reset or self.aol_disarming_fault(CS, event_ns, now_ns)
+        feedback = self.aol_transport_feedback
+        # Reuse only this call's healthy observation; fault/physical paths reobserve.
+        reuse_transport = bool(not transport_reset and not cancel_source_ns and not brake_source_ns and
+          not gm_withdrawal_source_ns and CS.canValid and not CS.canTimeout and
+          not CS.steerFaultTemporary and not CS.steerFaultPermanent and not CS.accFaulted and
+          feedback.signature is not None and feedback.signature[5] == 'none' and
+          not feedback.source_retention_started_ns and not feedback.longitudinal_cancel_ns and
+          not feedback.honda_brake_ns and not feedback.gm_withdrawal_ns and not feedback.failed and not feedback.paused and
+          not feedback.pending_event and not feedback.awaiting and not feedback.qualified and
+          not feedback.retention_started_ns and not feedback.retention_qualified and not feedback.retention_pending and
+          not any(e.immediateDisable or e.softDisable or e.userDisable for e in self.sm['onroadEvents']))
+        fault_active = transport_reset or self.aol_disarming_fault(CS, event_ns, now_ns,
+          transport_observed_healthy=reuse_transport)
       angle_aol, ford_aol, honda_aol, mazda_aol, preap_aol = self.aol_permission_owners()
       permission_owner = angle_aol or ford_aol or honda_aol or mazda_aol or preap_aol
       angle_panda_ready = not permission_owner or self.startup_panda_configured()
@@ -793,11 +808,11 @@ class Car:
     return physical_longitudinal_withdrawal_source(self.CP, CS, parser,
       getattr(self, '_aol_can_observation', None), now_ns)
 
-  def aol_disarming_fault(self, CS, event_ns: int, now_ns: int) -> bool:
+  def aol_disarming_fault(self, CS, event_ns: int, now_ns: int, *, transport_observed_healthy=False) -> bool:
     from openpilot.starpilot.car.gm.aol import intent_disarming_fault
     if getattr(self, 'aol_transport_feedback', None) is None:
       self.aol_transport_feedback = TransportPauseFeedback(self.CP)
-    if self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
+    if not transport_observed_healthy and self.aol_transport_feedback.observe(self.sm, self.CP, CS, now_ns,
         latched=getattr(getattr(self, 'aol_card_intent', None), 'allowed_latch', True),
         cancel_source_ns=self.aol_cancel_source(CS, now_ns), brake_source_ns=self.aol_honda_brake_source(CS, now_ns),
         gm_withdrawal_source_ns=self.aol_gm_withdrawal_source(CS, now_ns),
@@ -810,7 +825,7 @@ class Car:
                 (event.name in AVAILABILITY_EVENTS and event.softDisable and not event.immediateDisable)]
     return intent_disarming_fault(self.CP, events, CS,
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
-      temporary_selfdrive_lagging=qualified_gm(self.CP),
+      temporary_selfdrive_lagging=(qualified_gm(self.CP) or aol_policy_for(self.CP).intent_supported),
       temporary_source_pause=(self.aol_transport_feedback.qualified or self.aol_transport_feedback.awaiting))
 
   def aol_permission_owners(self) -> tuple[bool, bool, bool, bool, bool]:

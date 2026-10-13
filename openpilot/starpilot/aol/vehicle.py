@@ -52,10 +52,13 @@ def native_latch_rejected(CP, native, *, state=None) -> bool:
   try:
     port = _PORTS.get(CP.brand)
     retain = getattr(port, 'retain_on_native_denial', None)
-    if retain is not None and native_matches_cp(CP, native.safetyModel, native.safetyParam) and retain(CP, native, state):
-      return False
     rejected = getattr(port, 'native_latch_rejected', None)
-    return bool(rejected is not None and native_matches_cp(CP, native.safetyModel, native.safetyParam) and rejected(CP, native))
+    if retain is None and rejected is None:
+      return False
+    matched = native_matches_cp(CP, native.safetyModel, native.safetyParam)
+    if retain is not None and matched and retain(CP, native, state):
+      return False
+    return bool(rejected is not None and matched and rejected(CP, native))
   except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
     return False
 

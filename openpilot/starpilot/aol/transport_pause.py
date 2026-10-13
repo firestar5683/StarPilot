@@ -235,6 +235,66 @@ class TransportPauseFeedback:
     self.healthy_native_ns = 0
     self.healthy_inventory = None
 
+  def _temporary_lag_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
+    """Retain intent only through isolated lag or its bounded critical/event join."""
+    reason = str(axis.faultReason)
+    events = sm['onroadEvents']
+    faults = [event for event in events if event.immediateDisable or event.softDisable]
+    isolated = bool(len(faults) == 1 and faults[0].name == log.OnroadEvent.EventName.selfdrivedLagging and
+                    faults[0].softDisable and not faults[0].immediateDisable)
+    # Healthy cycles never reach policy/native/provenance work. A critical
+    # proof can precede its event, but cannot yet establish a lag exemption.
+    if not isolated and (reason != 'critical' or faults):
+      return False
+    previous = self.signature
+    joining = bool(self.pending_event and previous is not None and previous[5] == 'critical' and
+                   previous[6] == self.pending_event)
+    if (not latched or self.failed or self.paused or self.pending_event and not joining or self.retention_started_ns or
+        not self.session or str(axis.sessionId) != self.session or reason not in ('none', 'critical') or
+        not producer or producer != self.availability_producer or
+        str(getattr(axis, 'intentProducerSessionId', '')) != producer or
+        int(getattr(axis, 'intentIntegrityEpoch', 0)) != self.availability_epoch or
+        not self.lateral_baseline_ns or not self.lateral_inventory or
+        not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent or cs.accFaulted or
+        not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
+        now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
+      return False
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
+        not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
+        any(event.userDisable for event in events) or joining and
+          (axis.faultEventMonoTime != self.pending_event or now_ns - self.pending_event > AXIS_MAX_AGE_NS)):
+      return False
+    withdrawn = bool(reason == 'critical' and not axis.desiredLateral and not axis.desiredLongitudinal and
+                     not axis.lateralActive and not axis.longitudinalActive)
+    matched = bool(withdrawn and isolated and axis.faultEventMonoTime == event_ns <= stamp)
+    held_original = bool(reason == 'none' and isolated and signature == previous and
+      axis.desiredLateral and axis.lateralActive and axis.nativeAcknowledged and
+      0 < axis.faultEventMonoTime < event_ns and now_ns - event_ns <= AXIS_MAX_AGE_NS)
+    known_lag = bool(isolated and previous is not None and previous[5] == 'critical' and previous[6] == event_ns)
+    pending = bool(withdrawn and event_ns < axis.faultEventMonoTime <= stamp and
+      now_ns - axis.faultEventMonoTime <= AXIS_MAX_AGE_NS and
+      (joining or known_lag or not faults and previous is not None and previous[5] == 'none' and
+       0 <= now_ns - self.lateral_baseline_ns <= AXIS_MAX_AGE_NS))
+    if not (matched or held_original or pending):
+      return False
+    from openpilot.starpilot.aol.vehicle import policy_for
+    if not policy_for(cp).intent_supported:
+      return False
+    native = _healthy_transport_native(sm, cp, cs, self.session, now_ns)
+    if (native is None or not native.pandaInventory or
+        held_original and not (native.requestedLateral and native.lateralAllowed) or
+        native.observedMonoTime < self.lateral_native_ns or
+        (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
+      return False
+    if pending:
+      if not self.pending_event:
+        self.pending_event = int(axis.faultEventMonoTime)
+      self.awaiting = True
+    elif joining:
+      self.pending_event = 0
+    return True
+
   def _temporary_steering_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
     """Keep an existing armed intent during isolated temporary EPS withdrawal."""
     if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
@@ -563,6 +623,13 @@ class TransportPauseFeedback:
                      cp_identity(cp) == self.cp)
       continuity = bool(not self.session or axis.sessionId == self.session and
                         (axis.sequence > self.sequence or axis.sequence == self.sequence and signature == self.signature))
+      if current and continuity and (reason == 'critical' or
+          getattr(sm, 'updated', {}).get('onroadEvents', False)) and self._temporary_lag_intent_current(sm, cp, cs, axis, stamp, now_ns,
+          latched=latched, producer=intent_producer_session, signature=signature):
+        # Received identity only; every original permission/output deadline and
+        # healthy baseline timestamp remains unchanged.
+        self.sequence, self.signature = int(axis.sequence), signature
+        return False
       if current and continuity and self._temporary_steering_intent_current(sm, cp, cs, axis, stamp, now_ns,
           latched=latched, producer=intent_producer_session, signature=signature):
         # Advance only received sequence identity; do not renew the prior output,

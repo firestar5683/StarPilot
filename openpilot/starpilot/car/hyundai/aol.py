@@ -240,6 +240,7 @@ def native_latch_rejected(CP, native) -> bool:
   # In this exact native policy a requested lateral axis remains permitted
   # through pedal override; denial means the physical authorization was lost.
   return (
+    native.requestedLateral and not native.lateralAllowed and
     (
       qualified_angle_aol(CP, marked_only=True)
       or qualified_blended_stock(CP, marked_only=True)
@@ -251,8 +252,6 @@ def native_latch_rejected(CP, native) -> bool:
       or qualified_canfd_stock(CP, marked_only=True)
       or qualified_classic_scc(CP, marked_only=True)
     )
-    and native.requestedLateral
-    and not native.lateralAllowed
   )
 
 
