@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass
 from enum import IntEnum
+import math
 import os
 import stat
 from typing import Any
 
+from openpilot.common.constants import CV
 from openpilot.starpilot.saved_source import read_saved
 
 
@@ -27,6 +29,22 @@ class LeadInfoMode(IntEnum):
 
 
 LEAD_INFO_LABELS = ("Off", "Distance", "Speed")
+
+
+def format_lead_info(lead, mode: int, metric: bool | None) -> str:
+  """The lead's distance or speed for the text above the lead marker; empty when there is nothing to show."""
+  if lead is None or not lead.present or mode not in (LeadInfoMode.DISTANCE, LeadInfoMode.SPEED) or metric is None:
+    return ""
+  try:
+    value = float(lead.dRel if mode == LeadInfoMode.DISTANCE else lead.vLead)
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return ""
+  if not math.isfinite(value):
+    return ""
+  value = max(value, 0.0)
+  if mode == LeadInfoMode.DISTANCE:
+    return f"{round(value if metric else value * 3.28084)} {'m' if metric else 'ft'}"
+  return f"{round(value * (CV.MS_TO_KPH if metric else CV.MS_TO_MPH))} {'km/h' if metric else 'mph'}"
 
 
 @dataclass(frozen=True)

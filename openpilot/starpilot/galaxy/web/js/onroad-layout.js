@@ -3,7 +3,7 @@ import { guardUnload } from "./unload-guard.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
 import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
-import { editorSnapshot, projectionPayload } from "./projection-layout.js"
+import { LEAD_INFO, editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
 import { GxDialog } from "./dialog.js"
@@ -789,6 +789,19 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = "Save to apply the screen options on Android Auto."
     },
+    setProjectionLeadInfo(value) {
+      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag ||
+        this.state.draft.leadIndicator !== true || !LEAD_INFO.includes(value)) return
+      const before = clone(this.state.draft)
+      this.state.draft.leadInfo = value
+      this.recordChange(before)
+      this.state.notice = "Save to apply the screen options on Android Auto."
+    },
+    projectionLeadInfoRow() {
+      const marker = this.state.draft.leadIndicator === true
+      return { label: "Lead Info", value: LEAD_INFO.includes(this.state.draft.leadInfo) ? this.state.draft.leadInfo : "Off",
+        choices: LEAD_INFO, available: marker, reason: marker ? "" : "Turn on Lead Indicator first", action: true }
+    },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
         !["words", "icons"].includes(display)) return
@@ -1420,6 +1433,11 @@ export const OnroadLayoutPage = {
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('blindSpotBorder', value)" />
               <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('signalBorder', value)" />
+              <h5 class="gx-layout__display-group">Lead car</h5>
+              <GalaxySettingRow :row="switchRow('Lead Indicator', state.draft.leadIndicator === true)" :index="0"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('leadIndicator', value)" />
+              <GalaxySettingRow :row="projectionLeadInfoRow()" :index="1"
+                :disabled="!editable || !!state.drag || !!state.layerDrag || state.draft.leadIndicator !== true" :save-value="(index, value) => setProjectionLeadInfo(value)" />
               <h5 class="gx-layout__display-group">Camera</h5>
               <GalaxySettingRow :row="switchRow('Show camera on blind-spot warning', state.draft.blindSpotCamera === true)" :index="0"
                 :disabled="!editable || !!state.drag || !!state.layerDrag || !projectionHasPipWidget" :save-value="(index, value) => setProjectionDisplay('blindSpotCamera', value)" />

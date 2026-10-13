@@ -7,11 +7,11 @@ from opendbc.car.structs import car
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from openpilot.common.params import Params
+from openpilot.starpilot.ui.appearance_preferences import format_lead_info
 from openpilot.starpilot.ui.rainbow_path import RainbowPath
 from openpilot.starpilot.ui.road_colors import lane_color, path_mode, solid_gradient
 from openpilot.starpilot.ui.onroad_customization import ROAD_COLORS
 from openpilot.starpilot.lateral.lane_feedback import BLUE, direction as lane_centering_direction
-from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.controls.radard import RADAR_TO_CAMERA
@@ -221,18 +221,7 @@ class ModelRenderer(Widget):
 
   @staticmethod
   def _format_lead_info(lead, mode: int, metric: bool | None) -> str:
-    if lead is None or not lead.present or mode not in (1, 2) or metric is None:
-      return ""
-    try:
-      value = float(lead.dRel if mode == 1 else lead.vLead)
-    except (AttributeError, TypeError, ValueError, OverflowError):
-      return ""
-    if not math.isfinite(value):
-      return ""
-    value = max(value, 0.0)
-    if mode == 1:
-      return f"{round(value if metric else value * 3.28084)} {'m' if metric else 'ft'}"
-    return f"{round(value * (CV.MS_TO_KPH if metric else CV.MS_TO_MPH))} {'km/h' if metric else 'mph'}"
+    return format_lead_info(lead, mode, metric)
 
   @staticmethod
   def _valid_lead_numbers(lead) -> bool:

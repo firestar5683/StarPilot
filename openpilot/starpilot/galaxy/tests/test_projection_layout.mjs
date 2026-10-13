@@ -18,7 +18,7 @@ metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96,
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, leadIndicator: false, leadInfo: "Off", canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-screen-and-layout", editable: true, valid: true,
@@ -70,7 +70,30 @@ for (const blocked of [{ projection: false }, { editable: false }]) {
 assert.equal(data.document.blindSpotBorder, false)
 assert.equal(data.document.signalBorder, false)
 assert.equal(editorSnapshot({ ...raw, document: { ...raw.document, blindSpotBorder: undefined, signalBorder: undefined } }).document.blindSpotBorder, false)
-for (const key of ["blindSpotBorder", "signalBorder", "hidePersonalityAlerts", "wheelPedalFeedback"]) assert.equal(validDocument({ ...data.document, [key]: 1 }, data.metadata), false)
+for (const key of ["blindSpotBorder", "signalBorder", "hidePersonalityAlerts", "wheelPedalFeedback", "leadIndicator"]) assert.equal(validDocument({ ...data.document, [key]: 1 }, data.metadata), false)
+// Android Auto's lead marker and lead info start off and never follow the comma's choices.
+assert.equal(data.document.leadIndicator, false)
+assert.equal(data.document.leadInfo, "Off")
+const legacyLead = editorSnapshot({ ...raw, document: { ...raw.document, leadIndicator: undefined, leadInfo: undefined } }).document
+assert.deepEqual([legacyLead.leadIndicator, legacyLead.leadInfo], [false, "Off"])
+assert.equal(validDocument({ ...data.document, leadInfo: "Speed" }, data.metadata), true)
+assert.equal(validDocument({ ...data.document, leadInfo: "Both" }, data.metadata), false)
+assert.equal(validDocument({ ...native.document, leadIndicator: true }, native.metadata), false, "the comma screen keeps its own lead settings")
+assert.equal(projectionPayload({ document: { ...data.document, leadIndicator: true, leadInfo: "Distance" } }, data.metadata).document.leadInfo, "Distance")
+assert.match(OnroadLayoutPage.template, /'Lead Indicator'/)
+const leadChanges = []
+const leadVm = { projection: true, editable: true, state: { draft: { leadIndicator: false, leadInfo: "Off" }, drag: null, layerDrag: null, notice: '' },
+  recordChange: before => leadChanges.push(before) }
+OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Speed")
+assert.equal(leadVm.state.draft.leadInfo, "Off", "lead info waits for the lead marker")
+assert.equal(OnroadLayoutPage.methods.projectionLeadInfoRow.call(leadVm).available, false)
+OnroadLayoutPage.methods.setProjectionDisplay.call(leadVm, "leadIndicator", "On")
+OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Speed")
+assert.deepEqual([leadVm.state.draft.leadIndicator, leadVm.state.draft.leadInfo], [true, "Speed"])
+assert.deepEqual(OnroadLayoutPage.methods.projectionLeadInfoRow.call(leadVm).choices, ["Off", "Distance", "Speed"])
+OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Both")
+assert.equal(leadVm.state.draft.leadInfo, "Speed")
+assert.equal(leadChanges.length, 2)
 assert.equal(validDocument({ ...native.document, signalBorder: true }, native.metadata), false, "the comma screen keeps its C4 settings")
 assert.match(OnroadLayoutPage.template, /Red blind-spot border/)
 assert.match(OnroadLayoutPage.template, /Amber signal border/)
@@ -193,7 +216,7 @@ draft.layouts.large.current_speed.x += 20
 assert.equal(await feed.save(draft), true)
 assert.equal(requests[0].url, "./api/android-auto/layout")
 assert.equal(requests[1].body.document.version, 2)
-assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "blindSpotCamera", "canvas", "clock24Hour", "hidePersonalityAlerts", "largeUiGammaTrial", "signalBorder", "version", "wheelPedalFeedback", "widgets"])
+assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "blindSpotCamera", "canvas", "clock24Hour", "hidePersonalityAlerts", "largeUiGammaTrial", "leadIndicator", "leadInfo", "signalBorder", "version", "wheelPedalFeedback", "widgets"])
 assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
 feed.stop()

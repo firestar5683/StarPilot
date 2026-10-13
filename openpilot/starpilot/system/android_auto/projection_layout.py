@@ -119,15 +119,23 @@ def layout_metadata_for_viewport(viewport):
 
 # Android Auto display switches, independent of the comma screen's preferences.
 DISPLAY_DEFAULTS = {'blindSpotBorder': False, 'signalBorder': False, 'blindSpotCamera': False,
-                    'hidePersonalityAlerts': False, 'wheelPedalFeedback': False}
+                    'hidePersonalityAlerts': False, 'wheelPedalFeedback': False,
+                    'leadIndicator': False, 'leadInfo': 'Off'}
+# Lead info shown above the lead marker, in LeadInfoMode order.
+LEAD_INFO_CHOICES = ('Off', 'Distance', 'Speed')
 
 
 def projection_appearance(appearance, document):
   """The comma's onroad appearance with every car-screen choice taken from the AA layout instead."""
   from dataclasses import replace
-  from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
+  from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, LeadInfoMode
+  lead_indicator = document.get('leadIndicator', False) is True
+  lead_info = document.get('leadInfo', 'Off')
+  # Like the comma, lead info only shows with the lead marker on.
+  lead_info_mode = LeadInfoMode(LEAD_INFO_CHOICES.index(lead_info)) if lead_indicator and lead_info in LEAD_INFO_CHOICES else LeadInfoMode.OFF
   # The car screen always shows the road camera; the comma's camera choices stay on the comma.
   return replace(appearance,
+                 show_lead_indicator=lead_indicator, lead_info_mode=lead_info_mode,
                  show_blindspot_border=document.get('blindSpotBorder', False) is True,
                  show_signal_border=document.get('signalBorder', False) is True,
                  hide_personality_alerts=document.get('hidePersonalityAlerts', False) is True,
@@ -192,7 +200,8 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
     raise ValueError('Invalid large UI gamma trial')
   result.setdefault('largeUiGammaTrial', False)
   for field, default in DISPLAY_DEFAULTS.items():
-    if field in value and type(value[field]) is not bool:
+    if field in value and (type(value[field]) is not type(default) or
+                           (field == 'leadInfo' and value[field] not in LEAD_INFO_CHOICES)):
       raise ValueError('Invalid projection display setting')
     result.setdefault(field, default)
   for key in set(metadata['widgets']) - set(value['widgets']):

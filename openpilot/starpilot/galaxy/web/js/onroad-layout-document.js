@@ -1,3 +1,5 @@
+import { LEAD_INFO } from "./projection-layout.js"
+
 export const PROFILES = ["large", "compact"]
 const COLORS = ["cardFill", "cardBorder", "text"]
 export const ROAD_COLORS = ["path", "pathEdge", "laneLines"]
@@ -103,18 +105,19 @@ export function previewPoint(event, rect, profile) {
 }
 
 // Android Auto display switches, independent of the comma screen's preferences.
-export const PROJECTION_DISPLAY_SWITCHES = ["blindSpotBorder", "signalBorder", "blindSpotCamera", "hidePersonalityAlerts", "wheelPedalFeedback"]
+export const PROJECTION_DISPLAY_SWITCHES = ["blindSpotBorder", "signalBorder", "blindSpotCamera", "hidePersonalityAlerts", "wheelPedalFeedback", "leadIndicator"]
 
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_DISPLAY_SWITCHES.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_DISPLAY_SWITCHES.filter(key => Object.hasOwn(document, key)) : []), ...(metadata?.projection === true && Object.hasOwn(document, "leadInfo") ? ["leadInfo"] : [])]) || document.version !== 6 ||
     (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
     (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
     (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
     (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
     (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
     PROJECTION_DISPLAY_SWITCHES.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
+    (Object.hasOwn(document, "leadInfo") && !LEAD_INFO.includes(document.leadInfo)) ||
     !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
     !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||

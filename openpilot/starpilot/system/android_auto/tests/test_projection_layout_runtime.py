@@ -285,6 +285,35 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
     self.assertEqual((rendered[-1].appearance.hide_personality_alerts, rendered[-1].appearance.wheel_pedal_feedback), (True, True))
     self.assertIs(adapter.appearance_override(OnroadAppearance()).hide_personality_alerts, True)
 
+  def test_lead_marker_and_info_follow_the_aa_layout_only(self):
+    from openpilot.starpilot.ui.appearance_preferences import LeadInfoMode, OnroadAppearance
+    from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
+    helper = boundary.TestProjectionOnroad()
+    native, _ = helper.dependencies()
+    native.ui_state.started = True
+    comma = OnroadAppearance(show_lead_indicator=True, lead_info_mode=LeadInfoMode.DISTANCE, lead_info_metric=False)
+    state = OnroadState(False, False, None, None, SpeedLimitObservation(), customization=default_document(), appearance=comma)
+    rendered, painted = [], []
+    native.adapter = lambda *_: SimpleNamespace(build=lambda *_a, **_k: SimpleNamespace(onroad=state))
+    layout = default_layout_for_viewport((2880, 1080))
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout)
+    self.addCleanup(view.close)
+    view.onroad.render = rendered.append
+    view.camera.render_camera_model_layer = lambda _rect, **kwargs: painted.append(kwargs['lead_display'])
+    view.camera.stream_type = None
+
+    def lead(document):
+      view.apply_layout(document)
+      view.render()
+      view._camera_layer(None, rendered[-1])
+      return rendered[-1].appearance.show_lead_indicator, rendered[-1].appearance.lead_info_mode, painted[-1]
+
+    self.assertEqual(lead(layout), (False, LeadInfoMode.OFF, (False, 0, False)), 'off on the car even with the comma on')
+    self.assertEqual(lead({**layout, 'leadInfo': 'Speed'}), (False, LeadInfoMode.OFF, (False, 0, False)), 'info needs the marker')
+    self.assertEqual(lead({**layout, 'leadIndicator': True}), (True, LeadInfoMode.OFF, (True, 0, False)))
+    self.assertEqual(lead({**layout, 'leadIndicator': True, 'leadInfo': 'Speed'}), (True, LeadInfoMode.SPEED, (True, 2, False)))
+    self.assertEqual(lead({**layout, 'leadIndicator': True, 'leadInfo': 'Distance'}), (True, LeadInfoMode.DISTANCE, (True, 1, False)))
+
   def test_real_onroad_state_unchanged_without_projection_document(self):
     from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
     helper = boundary.TestProjectionOnroad()

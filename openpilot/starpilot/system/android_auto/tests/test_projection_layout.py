@@ -103,7 +103,7 @@ class TestProjectionLayout(unittest.TestCase):
     document = default_layout(SCREEN)
     self.assertIs(document['blindSpotBorder'], False)
     self.assertIs(document['signalBorder'], False)
-    for key in ('blindSpotBorder', 'signalBorder', 'hidePersonalityAlerts', 'wheelPedalFeedback'):
+    for key in ('blindSpotBorder', 'signalBorder', 'hidePersonalityAlerts', 'wheelPedalFeedback', 'leadIndicator'):
       older = {k: v for k, v in document.items() if k != key}
       self.assertEqual(validate_layout(older, SCREEN)[key], document[key], 'older layouts get the defaults')
       flipped = validate_layout({**document, key: not document[key]}, SCREEN)
@@ -111,6 +111,17 @@ class TestProjectionLayout(unittest.TestCase):
       for value in (1, 0, 'true', None, [], {}):
         with self.subTest(key=key, value=value), self.assertRaises(ValueError):
           validate_layout({**document, key: value}, SCREEN)
+
+  def test_lead_info_starts_off_and_takes_only_known_choices(self):
+    document = default_layout(SCREEN)
+    self.assertEqual((document['leadIndicator'], document['leadInfo']), (False, 'Off'))
+    older = {k: v for k, v in document.items() if k not in ('leadIndicator', 'leadInfo')}
+    self.assertEqual(validate_layout(older, SCREEN), document, 'older layouts get the lead defaults')
+    for choice in ('Off', 'Distance', 'Speed'):
+      self.assertEqual(validate_layout({**document, 'leadInfo': choice}, SCREEN)['leadInfo'], choice)
+    for value in ('speed', 'Both', 1, True, None, [], {}):
+      with self.subTest(value=value), self.assertRaises(ValueError):
+        validate_layout({**document, 'leadInfo': value}, SCREEN)
 
   def test_blind_spot_camera_migrates_and_survives_serialization(self):
     document = default_layout(SCREEN)
