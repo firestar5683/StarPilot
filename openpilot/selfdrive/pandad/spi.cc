@@ -10,6 +10,7 @@
 
 #include "common/util.h"
 #include "common/timing.h"
+#include "selfdrive/pandad/producer_timing.h"
 #include "common/swaglog.h"
 #include "panda/board/comms_definitions.h"
 #include "selfdrive/pandad/panda_comms.h"
@@ -33,8 +34,8 @@ const std::string SPI_DEVICE = "/dev/spidev0.0";
 class LockEx {
 public:
   LockEx(int fd_, std::recursive_mutex &m_) : fd(fd_), m(m_) {
-    m.lock();
-    flock(fd, LOCK_EX);
+    { pandad_timing::Scope timing(pandad_timing::Mutex); m.lock(); }
+    { pandad_timing::Scope timing(pandad_timing::Flock); flock(fd, LOCK_EX); }
   }
 
   ~LockEx() {
@@ -239,6 +240,7 @@ int PandaSpiHandle::spi_transfer_retry(uint8_t endpoint, uint8_t *tx_data, uint1
 }
 
 int PandaSpiHandle::wait_for_ack(uint8_t ack, uint8_t tx, unsigned int timeout, unsigned int length) {
+  pandad_timing::Scope ack_timing(pandad_timing::Ack);
   double start_millis = millis_since_boot();
   if (timeout == 0) {
     timeout = SPI_ACK_TIMEOUT;
@@ -294,7 +296,8 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
     }
   }
 
-  int ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t);
+  int ret;
+  { pandad_timing::Scope timing(pandad_timing::Ioctl); ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t); }
 
   if (err_prob > 0) {
     if ((static_cast<double>(rand()) / RAND_MAX) < err_prob && t.rx_buf != (uint64_t)NULL) {
@@ -313,6 +316,8 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
 int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout) {
   int ret;
   uint16_t rx_data_len;
+  pandad_timing::TransactionScope transaction_timing(endpoint, endpoint == 0 && tx_data && tx_len ? tx_data[0] : 0, tx_len, max_rx_len, hw_serial.c_str());
+  pandad_timing::Scope transfer_timing(pandad_timing::Transfer);
   LockEx lock(spi_fd, hw_lock);
 
   // needs to be less, since we need to have space for the checksum

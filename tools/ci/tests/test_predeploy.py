@@ -1,3 +1,4 @@
+import platform
 import json
 import os
 from pathlib import Path
@@ -91,7 +92,8 @@ class TestPredeploy(unittest.TestCase):
     plan = commands(Path('/results'), Path('/cache'))
     self.assertEqual(plan['build'][0][1][1:], ['-m', 'SCons', '-j4'])
     self.assertEqual([name for name, _ in plan['native']], [
-      'test_panda_usb', 'test_pandad_canprotocol', 'test_aol_protocol', 'test_aol_wire', 'map-ipc'])
+      'test_panda_usb', 'test_pandad_canprotocol', 'test_aol_protocol', 'test_aol_wire',
+      *(['test_producer_timing', 'test_producer_sink'] if platform.system() == 'Linux' else []), 'map-ipc'])
     self.assertIn('-race', plan['native'][-1][1])
 
   def test_full_plan_requires_unfiltered_process_replay(self):

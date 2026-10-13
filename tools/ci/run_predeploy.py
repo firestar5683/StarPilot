@@ -38,6 +38,9 @@ def commands(output, cache, download=False):
               for variant in ('debug', 'release')]
   native = [(name, [str(ROOT / 'openpilot/selfdrive/pandad/tests' / name)])
             for name in ('test_panda_usb', 'test_pandad_canprotocol', 'test_aol_protocol', 'test_aol_wire')]
+  if platform.system() == 'Linux':
+    native.extend((name, [str(ROOT / 'openpilot/selfdrive/pandad/tests' / name)])
+                  for name in ('test_producer_timing', 'test_producer_sink'))
   native.append(('map-ipc', ['go', '-C', str(ROOT / 'mapd_repo'), 'test', '-mod=readonly', '-race',
                             '-run', '^Test(MsgqNativeLayout|Shadow(GoPythonIPC|ExecutableHostGpsIPC))$', '-count=1', '-v']))
   return {'build': [('native-build', [python, '-m', 'SCons', '-j4'])],
