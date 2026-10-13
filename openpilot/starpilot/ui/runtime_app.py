@@ -2100,6 +2100,9 @@ class StarMiciMainLayout(MiciMainLayout):
     panel = self._compact_panels.get(destination)
     if panel is None:
       panel = panel_type()
+      if destination == Destination.DEVICE:
+        from openpilot.starpilot.ui.display_compact import DisplayCompact
+        panel._scroller.add_widgets([DisplayCompact(self.star).entry_button()])
       self._compact_panels[destination] = panel
     gui_app.push_widget(panel)
 

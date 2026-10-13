@@ -9,7 +9,10 @@ from typing import Any
 MASTER = "StarPilotDisplayPreferencesEnabled"
 BRIGHTNESS = ("ScreenBrightness", "ScreenBrightnessOnroad")
 TIMEOUTS = ("ScreenTimeout", "ScreenTimeoutOnroad")
-KEYS = (MASTER, *BRIGHTNESS, *TIMEOUTS)
+SCREEN_OFF = "TurnOffCommaScreen"
+CUSTOM_KEYS = (*BRIGHTNESS, *TIMEOUTS)
+KEYS = (MASTER, *CUSTOM_KEYS, SCREEN_OFF)
+SCREEN_OFF_DESCRIPTION = "Pauses Comma UI rendering to save CPU/GPU. Tap once to wake."
 MAX_RAW_BYTES = 16
 AUTO = 101
 
@@ -27,7 +30,7 @@ class SavedChoice:
 
 
 def default_value(key: str, *, large: bool) -> int:
-  if key == MASTER:
+  if key in (MASTER, SCREEN_OFF):
     return 0
   if key in BRIGHTNESS:
     return AUTO
@@ -60,7 +63,7 @@ def read_choice(params: Any, key: str, *, large: bool) -> SavedChoice:
   if not raw or not raw.isascii() or not raw.isdigit() or (len(raw) > 1 and raw[0] == ord("0")):
     return SavedChoice(raw, None)
   value = int(raw)
-  if key == MASTER:
+  if key in (MASTER, SCREEN_OFF):
     return SavedChoice(raw, value if value in (0, 1) else None)
   if key in BRIGHTNESS:
     return SavedChoice(raw, value if 5 <= value <= 100 or value in (0, AUTO) else None,
@@ -71,6 +74,7 @@ def read_choice(params: Any, key: str, *, large: bool) -> SavedChoice:
 @dataclass(frozen=True)
 class DisplayPreferences:
   enabled: bool = False
+  turn_off_screen: bool = False
   parked_brightness: int = AUTO
   driving_brightness: int = AUTO
   parked_timeout: int = 30
@@ -79,13 +83,15 @@ class DisplayPreferences:
 
 def read_preferences(params: Any, *, large: bool) -> DisplayPreferences:
   master = read_choice(params, MASTER, large=large)
+  screen_off = read_choice(params, SCREEN_OFF, large=large)
+  turn_off_screen = screen_off.valid and screen_off.value == 1
   if not master.valid or master.value != 1:
-    return DisplayPreferences(driving_timeout=default_value("ScreenTimeoutOnroad", large=large))
-  values = {key: read_choice(params, key, large=large) for key in (*BRIGHTNESS, *TIMEOUTS)}
+    return DisplayPreferences(turn_off_screen=turn_off_screen, driving_timeout=default_value("ScreenTimeoutOnroad", large=large))
+  values = {key: read_choice(params, key, large=large) for key in CUSTOM_KEYS}
   def effective(key: str) -> int:
     saved = values[key]
     return saved.value if saved.valid and saved.value is not None else default_value(key, large=large)
-  return DisplayPreferences(enabled=True,
+  return DisplayPreferences(enabled=True, turn_off_screen=turn_off_screen,
                             parked_brightness=effective("ScreenBrightness"),
                             driving_brightness=effective("ScreenBrightnessOnroad"),
                             parked_timeout=effective("ScreenTimeout"),

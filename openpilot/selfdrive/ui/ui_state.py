@@ -426,6 +426,7 @@ class Device:
     self._display_started = False
     self._screen_off = False
     self._screen_off_started = False
+    self._wake_touch_active = False
 
   def invalidate_display_preferences(self) -> None:
     self._display_refresh_time = None
@@ -447,7 +448,7 @@ class Device:
   def toggle_screen_off(self) -> bool:
     if ui_state.projection_read_only or not ui_state.started:
       return False
-    self._screen_off = not self._screen_off
+    self._screen_off = self._awake
     self._screen_off_started = ui_state.started
     self._reset_interactive_timeout()
     self._set_awake(not self._screen_off)
@@ -492,8 +493,8 @@ class Device:
     if self._interaction_time <= 0:
       self._reset_interactive_timeout()
 
-    self._update_brightness()
     self._update_wakefulness()
+    self._update_brightness()
 
   def _start_brightness_thread(self):
     if self._brightness_thread is None or not self._brightness_thread.is_alive():
@@ -545,24 +546,36 @@ class Device:
     ignition_just_turned_off = not ui_state.ignition and self._ignition
     ignition_changed = self._ignition != ui_state.ignition
     self._ignition = ui_state.ignition
+    touched = any(ev.left_down for ev in gui_app.mouse_events)
+    if not self._awake and touched:
+      self._wake_touch_active = True
 
     if (ignition_just_turned_off or (self._display_preferences.enabled and ignition_changed) or
-        any(ev.left_down for ev in gui_app.mouse_events)):
+        touched):
       self._reset_interactive_timeout()
 
     road_changed = ui_state.started != self._screen_off_started
     self._screen_off_started = ui_state.started
     critical = (ui_state.sm.valid.get('selfdriveState', False) and ui_state.sm.alive.get('selfdriveState', False) and
                 ui_state.sm['selfdriveState'].alertStatus == log.SelfdriveState.AlertStatus.critical)
-    if not ui_state.started or road_changed or any(ev.left_down for ev in gui_app.mouse_events) or critical:
+    if not ui_state.started or road_changed or touched or critical:
       self._screen_off = False
+    if critical:
+      self._reset_interactive_timeout()
     interaction_timeout = time.monotonic() > self._interaction_time
     if interaction_timeout and not self._prev_timed_out:
       for callback in self._interactive_timeout_callbacks:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(not self._screen_off and (ui_state.started or not interaction_timeout or PC))
+    auto_screen_off = ui_state.started and self._display_preferences.turn_off_screen and interaction_timeout and not critical
+    self._set_awake(not self._screen_off and not auto_screen_off and (ui_state.started or not interaction_timeout or PC))
+    # The entire wake gesture belongs to the display, including its release.
+    # Widgets were not rendered while asleep, so their touch state can be stale.
+    if self._wake_touch_active:
+      if any(ev.left_released for ev in gui_app.mouse_events):
+        self._wake_touch_active = False
+      gui_app.mouse_events.clear()
 
   def _set_awake(self, on: bool):
     if on != self._awake:

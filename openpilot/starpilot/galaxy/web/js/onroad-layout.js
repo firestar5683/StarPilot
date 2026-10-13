@@ -130,19 +130,25 @@ export function previewPoint(event, rect, profile) {
   }
 }
 
-// Android Auto's own border switches; the comma screen keeps its C4 settings.
-const PROJECTION_BORDERS = ["blindSpotBorder", "signalBorder"]
+// Open maker pages; a route switch briefly mounts the next editor before the last one leaves.
+let makerPagesOpen = 0
+
+// Screen pixels a pointer may wobble before a press on a preview widget becomes a drag.
+const DRAG_SLOP = 6
+
+// Android Auto display switches, independent of the comma screen's preferences.
+const PROJECTION_DISPLAY_SWITCHES = ["blindSpotBorder", "signalBorder", "blindSpotCamera", "hidePersonalityAlerts", "wheelPedalFeedback"]
 
 export function validDocument(document, metadata) {
   if (!object(document)) return false
   const profiles = metadata?.projection === true ? ["large"] : PROFILES
-  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_BORDERS.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
+  if (!keysEqual(document, ["version", "palette", "layouts", "widgetColors", "roadColors", ...(Object.hasOwn(document, "widgetOrder") ? ["widgetOrder"] : []), ...(Object.hasOwn(document, "speedSources") ? ["speedSources"] : []), ...(Object.hasOwn(document, "clock24Hour") ? ["clock24Hour"] : []), ...(Object.hasOwn(document, "showMaxSpeed") ? ["showMaxSpeed"] : []), ...(metadata?.projection !== true && Object.hasOwn(document, "display") ? ["display"] : []), ...(metadata?.projection === true && Object.hasOwn(document, "largeUiGammaTrial") ? ["largeUiGammaTrial"] : []), ...(metadata?.projection === true ? PROJECTION_DISPLAY_SWITCHES.filter(key => Object.hasOwn(document, key)) : [])]) || document.version !== 6 ||
     (Object.hasOwn(document, "speedSources") && typeof document.speedSources !== "boolean") ||
     (Object.hasOwn(document, "clock24Hour") && typeof document.clock24Hour !== "boolean") ||
     (Object.hasOwn(document, "showMaxSpeed") && typeof document.showMaxSpeed !== "boolean") ||
     (Object.hasOwn(document, "display") && (!object(document.display) || !Object.values(document.display).every((value) => typeof value === "string"))) ||
     (Object.hasOwn(document, "largeUiGammaTrial") && typeof document.largeUiGammaTrial !== "boolean") ||
-    PROJECTION_BORDERS.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
+    PROJECTION_DISPLAY_SWITCHES.some(key => Object.hasOwn(document, key) && typeof document[key] !== "boolean") ||
     !keysEqual(document.palette, COLORS) || !COLORS.every((key) => HEX.test(document.palette[key])) ||
     !keysEqual(document.layouts, profiles) || !keysEqual(document.widgetColors, profiles) || !keysEqual(document.roadColors, profiles)) return false
   if (Object.hasOwn(document, "widgetOrder") && (!object(document.widgetOrder) ||
@@ -537,7 +543,8 @@ export const OnroadLayoutPage = {
     const state = reactive({
       status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
-      inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false, preview: { status: "idle", error: "", url: null },
+      inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false,
+      aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, stuck: { leaveBar: false, pinned: false, sections: false }, openColor: null, preview: { status: "idle", error: "", url: null },
       hiddenPreviewWidgets: loadPreviewVisibility(props.projection), history: { undo: [], redo: [], group: null }
     })
     let deferred = null
@@ -617,6 +624,9 @@ export const OnroadLayoutPage = {
     canSavePending() { return this.saveAvailable && !this.busy },
     profile() { return this.state.data?.metadata.profiles[this.state.profile] },
     layout() { return this.state.draft?.layouts[this.state.profile] },
+    projectionHasPipWidget() {
+      return ["pip_left", "pip_right"].some(id => this.state.draft?.layouts?.large?.[id]?.enabled === true)
+    },
     widgets() { return Object.entries(this.profile?.widgets || {}).map(([id, widget]) => ({ id, ...widget })) },
     layerWidgets() {
       return orderedWidgetIds(this.state.draft, this.state.data.metadata, this.state.profile)
@@ -688,8 +698,15 @@ export const OnroadLayoutPage = {
   mounted() {
     if (this.mode === "local") this.feed.start()
     this._stopUnloadGuard = guardUnload(() => this.dirty || this.state.status === "saving")
+    // Double-tap zoom stays off across the whole page, app bar included, while a maker page is open.
+    if (makerPagesOpen++ === 0) document.documentElement.classList.add("gx-maker-open")
+    this.observePinned()
   },
-  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard() },
+  updated() { this.observePinned() },
+  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard(); this._pinObserver?.disconnect(); this.unwatchRelease(); this._closeFloating?.()
+    if (--makerPagesOpen === 0) document.documentElement.classList.remove("gx-maker-open")
+    if (this._onPinScroll) window.removeEventListener("scroll", this._onPinScroll, { capture: true })
+  },
   methods: {
     switchRow,
     previewHidden(id) { return !(this.projection && id === "car_exit") && this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
@@ -702,6 +719,65 @@ export const OnroadLayoutPage = {
     selectWidget(id) {
       this.state.selected = id
       this.state.inspectorPanel = "edit"
+    },
+    toggleColor(key) {
+      this.finishColorEdit()
+      this.state.openColor = this.state.openColor === key ? null : key
+      // Bring an opened color's picker fully into view.
+      if (this.state.openColor) this.$nextTick?.(() => this.$el?.querySelector?.(".gx-layout__color.is-open")?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }))
+    },
+    // The more menu and the widget help close on any press outside them, including the app bar.
+    toggleFloating(key, ref) {
+      this.state[key] = !this.state[key]
+      this._closeFloating?.()
+      if (!this.state[key] || typeof document === "undefined") return
+      const outside = (event) => { if (!this.$refs[ref]?.contains(event.target)) { this.state[key] = false; this._closeFloating?.() } }
+      document.addEventListener("pointerdown", outside, true)
+      this._closeFloating = () => { document.removeEventListener("pointerdown", outside, true); this._closeFloating = null }
+    },
+    closeFloating(key) {
+      this.state[key] = false
+      this._closeFloating?.()
+    },
+    // Keeps a focused editor field clear of the pinned save bar, preview and tabs once the keyboard opens.
+    revealField(event) {
+      const field = event.target
+      if (!field?.matches?.("input:not([type=range]):not([type=checkbox]), .gx-field")) return
+      setTimeout(() => {
+        const tabs = this.$el?.querySelector?.(".gx-layout__sections")?.getBoundingClientRect()
+        const view = window.visualViewport, top = (tabs?.bottom || 0) + 12
+        const rect = field.getBoundingClientRect(), bottom = (view ? view.height + view.offsetTop : window.innerHeight) - 12
+        if (rect.top < top) window.scrollBy(0, rect.top - top)
+        else if (rect.bottom > bottom) window.scrollBy(0, rect.bottom - bottom)
+      }, 350)
+    },
+    // Narrow screens pin the save bar and preview; the editor tabs stick just below their measured height.
+    observePinned() {
+      if (typeof ResizeObserver === "undefined" || !this.$el?.style) return
+      this._pinObserver ||= new ResizeObserver(() => {
+        for (const [name, ref] of [["--layout-bar-h", "leaveBar"], ["--layout-pin-h", "pinned"]])
+          if (this.$refs[ref]) this.$el.style.setProperty(name, this.$refs[ref].getBoundingClientRect().height + "px")
+      })
+      // Page-colored fills only appear while a piece is actually pinned, so they never show over the backdrop otherwise.
+      if (!this._onPinScroll) {
+        this._onPinScroll = () => {
+          for (const ref of ["leaveBar", "pinned", "sections"]) {
+            const element = this.$refs[ref], style = element && getComputedStyle(element)
+            const stuck = style?.position === "sticky" && element.getBoundingClientRect().top <= (parseFloat(style.top) || 0) + 1
+            if (this.state.stuck[ref] !== stuck) this.state.stuck[ref] = stuck
+          }
+        }
+        window.addEventListener("scroll", this._onPinScroll, { passive: true, capture: true })
+        this._onPinScroll()
+      }
+      for (const ref of ["leaveBar", "pinned"]) {
+        const element = this.$refs[ref]
+        if (element && this._pinned?.[ref] !== element) {
+          if (this._pinned?.[ref]) this._pinObserver.unobserve(this._pinned[ref])
+          this._pinObserver.observe(element)
+          this._pinned = { ...this._pinned, [ref]: element }
+        }
+      }
     },
     selectPreview(mode) {
       if (this.state.drag) return
@@ -725,6 +801,7 @@ export const OnroadLayoutPage = {
     startLayerDrag(event, id) {
       if (!this.editable || this.state.drag || this.state.layerDrag || event.button !== 0 || this.profile.widgets[id]?.frontmost) return
       this._suppressLayerClick = false
+      event.preventDefault()
       event.currentTarget.setPointerCapture(event.pointerId)
       const rect = event.currentTarget.closest("[data-layer-id]").getBoundingClientRect()
       this.state.selected = id
@@ -734,6 +811,25 @@ export const OnroadLayoutPage = {
         rows: this.layerWidgets.map(widget => widget.id), before: clone(this.state.draft), moved: false
       }
       this._layerTarget = event.currentTarget
+      this.watchRelease()
+    },
+    // A lost pointerup (capture dropped, native gesture, re-render) must never leave a drag active,
+    // since an active drag disables the tabs, preview switcher and navigation.
+    watchRelease() {
+      if (this._onRelease || typeof window === "undefined") return
+      this._onRelease = (event) => {
+        if (this.state.layerDrag?.pointerId === event.pointerId) this.endLayerDrag(event, event.type === "pointercancel")
+        if (this.state.drag?.pointerId === event.pointerId) event.type === "pointercancel" ? this.cancelDrag() : this.endDrag(event)
+        if (!this.state.drag && !this.state.layerDrag) this.unwatchRelease()
+      }
+      window.addEventListener("pointerup", this._onRelease)
+      window.addEventListener("pointercancel", this._onRelease)
+    },
+    unwatchRelease() {
+      if (!this._onRelease) return
+      window.removeEventListener("pointerup", this._onRelease)
+      window.removeEventListener("pointercancel", this._onRelease)
+      this._onRelease = null
     },
     moveLayerDrag(event) {
       const drag = this.state.layerDrag
@@ -742,7 +838,16 @@ export const OnroadLayoutPage = {
       drag.moved = true
       drag.x = event.clientX - drag.offsetX
       drag.y = event.clientY - drag.offsetY
-      const row = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-layer-id]')
+      this._layerPoint = [event.clientX, event.clientY]
+      this.retargetLayer(event.clientX, event.clientY)
+      this.autoScrollLayer()
+    },
+    retargetLayer(clientX, clientY) {
+      const drag = this.state.layerDrag
+      if (!drag) return
+      // A finger held over the pinned tabs or preview targets the first row visible under them.
+      const tabs = this.$el?.querySelector?.(".gx-layout__sections")?.getBoundingClientRect()
+      const row = document.elementFromPoint(clientX, tabs ? Math.max(clientY, tabs.bottom + 6) : clientY)?.closest('[data-layer-id]')
       const target = row?.dataset.layerId
       if (target && target !== drag.target && !this.profile.widgets[target]?.frontmost) {
         drag.target = target
@@ -754,8 +859,24 @@ export const OnroadLayoutPage = {
         this.state.draft.widgetOrder ||= {}
         this.state.draft.widgetOrder[this.state.profile] = order
       }
-      if (event.clientY < 60) window.scrollBy(0, -16)
-      else if (event.clientY > window.innerHeight - 60) window.scrollBy(0, 16)
+    },
+    // Scrolls while a dragged row is held near the visible edges; the top edge is the bottom of the pinned tabs.
+    autoScrollLayer() {
+      if (this._layerScroll || typeof requestAnimationFrame === "undefined") return
+      const step = () => {
+        this._layerScroll = null
+        const drag = this.state.layerDrag, point = this._layerPoint
+        if (!drag?.moved || !point) return
+        const tabs = this.$el?.querySelector?.(".gx-layout__sections")?.getBoundingClientRect()
+        const top = Math.max(60, tabs ? tabs.bottom : 0) + 40, bottom = window.innerHeight - 60
+        const speed = point[1] < top ? -Math.min(24, 6 + (top - point[1]) / 3) : point[1] > bottom ? Math.min(24, 6 + (point[1] - bottom) / 3) : 0
+        if (!speed) return
+        const before = window.scrollY
+        window.scrollBy(0, speed)
+        if (window.scrollY !== before) this.retargetLayer(point[0], point[1])
+        this._layerScroll = requestAnimationFrame(step)
+      }
+      this._layerScroll = requestAnimationFrame(step)
     },
     endLayerDrag(event, cancel = false) {
       const drag = this.state.layerDrag
@@ -763,6 +884,8 @@ export const OnroadLayoutPage = {
       if (cancel) this.state.draft = drag.before
       else if (drag.moved) this.recordChange(drag.before)
       this.state.layerDrag = null
+      this._layerPoint = null
+      if (this._layerScroll) { cancelAnimationFrame(this._layerScroll); this._layerScroll = null }
       if (this._layerTarget?.hasPointerCapture(event.pointerId)) this._layerTarget.releasePointerCapture(event.pointerId)
       this._layerTarget = null
       this._suppressLayerClick = cancel || drag.moved
@@ -916,12 +1039,13 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = "Save to apply the camera effect on Android Auto."
     },
-    setProjectionBorder(key, value) {
-      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag || !PROJECTION_BORDERS.includes(key)) return
+    setProjectionDisplay(key, value) {
+      if (!this.projection || !this.editable || this.state.drag || this.state.layerDrag || !PROJECTION_DISPLAY_SWITCHES.includes(key)) return
+      if (key === "blindSpotCamera" && !this.projectionHasPipWidget) return
       const before = clone(this.state.draft)
       this.state.draft[key] = value === "On"
       this.recordChange(before)
-      this.state.notice = "Save to apply the border on Android Auto."
+      this.state.notice = "Save to apply the screen options on Android Auto."
     },
     setFavoriteDisplay(display) {
       if (!this.editable || this.state.drag || this.state.layerDrag || !this.selectedWidget?.iconSize ||
@@ -985,11 +1109,13 @@ export const OnroadLayoutPage = {
       this.finishColorEdit()
       this.state.drag = {
         id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
+        startX: event.clientX, startY: event.clientY, moved: false,
         offsetX: fromTray ? width / 2 : point.x - position.x,
         offsetY: fromTray ? height / 2 : point.y - position.y
       }
       this._dragTarget = this.$refs.preview
-      this._dragTarget.setPointerCapture?.(event.pointerId)
+      this.watchRelease()
+      try { this._dragTarget.setPointerCapture?.(event.pointerId) } catch { }
       event.preventDefault()
     },
     startResize(id, event) {
@@ -1005,19 +1131,42 @@ export const OnroadLayoutPage = {
         inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height
       }
       this._dragTarget = this.$refs.preview
-      this._dragTarget.setPointerCapture?.(event.pointerId)
+      this.watchRelease()
+      try { this._dragTarget.setPointerCapture?.(event.pointerId) } catch { }
       event.stopPropagation()
       event.preventDefault()
     },
-    resizeBox(id, width, height) {
+    resizeBox(id, width, height, group = null) {
       if (!this.editable) return false
       const position = this.layout[id], next = clampBox(this.profile, id, position, width, height)
       if (!next) return false
       const before = this.state.drag ? null : clone(this.state.draft)
       Object.assign(position, next)
-      if (before) this.recordChange(before)
+      if (before) this.recordChange(before, group)
       this.state.placementError = this.state.notice = ""
       return true
+    },
+    boxSlider(axis, event) {
+      const number = Number(event.target.value)
+      if (!Number.isFinite(number) || this.state.drag || this.state.layerDrag) return
+      this.resizeBox(this.state.selected, axis === "width" ? number : this.selectedPosition.width,
+        axis === "height" ? number : this.selectedPosition.height, this.state.profile + ":" + this.state.selected + ":" + axis)
+    },
+    sizeSlider(event) {
+      const size = Number(event.target.value), range = this.selectedWidget?.resizable
+      if (!this.editable || this.state.drag || this.state.layerDrag || !range || !Number.isInteger(size) || size < range.min || size > range.max) return
+      const before = clone(this.state.draft), position = this.selectedPosition, previous = position.size
+      position.size = size
+      const next = clampPlacement(this.profile, this.state.selected, position.x, position.y, this.layout)
+      if (next) {
+        Object.assign(position, next)
+        this.recordChange(before, this.state.profile + ":" + this.state.selected + ":size")
+        this.state.placementError = ""
+      } else {
+        position.size = previous
+        event.target.value = previous
+        this.state.placementError = "That size would cover Speed limit actions. The last valid size is kept."
+      }
     },
     boxInput(axis, event) {
       const number = event.target.value.trim() === "" ? NaN : Number(event.target.value)
@@ -1046,6 +1195,9 @@ export const OnroadLayoutPage = {
       const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
       if (!point) return
       if (drag.resize) { this.resizeBox(drag.id, point.x - drag.offsetX, point.y - drag.offsetY); return }
+      // A finger wobbles a few pixels on every tap; only a deliberate move drags the widget.
+      if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < DRAG_SLOP) return
+      drag.moved = true
       drag.inside = point.x >= 0 && point.y >= 0 && point.x <= this.profile.width && point.y <= this.profile.height
       if (!drag.fromTray || drag.inside) {
         const x = point.x - drag.offsetX, y = point.y - drag.offsetY
@@ -1059,7 +1211,8 @@ export const OnroadLayoutPage = {
       if (!drag || drag.pointerId !== event.pointerId) return
       this.moveDrag(event)
       if (drag.fromTray && !drag.inside) Object.assign(this.layout[drag.id], drag.before)
-      const before = drag.historyBefore
+      const before = drag.historyBefore, position = this.layout[drag.id]
+      if (!drag.fromTray && !drag.resize && !drag.moved) this.state.inspectorPanel = "edit"
       this.releaseDrag()
       this.recordChange(before)
     },
@@ -1205,20 +1358,29 @@ export const OnroadLayoutPage = {
   },
   template: `
     <section class="gx-settings gx-layout" aria-label="Colors and layout" :aria-busy="busy || undefined">
-      <div class="gx-settings__header gx-page-header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2>
-        <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
-
+      <div class="gx-settings__header gx-page-header"><div><h2>{{ projection ? 'Android Auto Layout' : 'Colors & Layout' }}</h2></div>
+        <button class="gx-icon-btn gx-layout__info" type="button" :aria-expanded="state.aboutOpen" aria-controls="gx-layout-about" aria-label="About this editor" title="About this editor" @click="state.aboutOpen = !state.aboutOpen"><i class="bi bi-info-circle" aria-hidden="true"></i></button>
       </div>
       <GxNotice v-if="mode === 'local' && state.data && !state.data.editable && !(projection && state.data.reason)" tone="warn">Park the vehicle and reload to edit. If it stays unavailable, reload saved settings.</GxNotice>
-      <nav class="gx-layout__tabs gx-tabs" aria-label="Layout target">
-        <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="!!state.drag" @click="$emit('target', 'device')">Comma</button>
-        <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="!!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
-      </nav>
-      <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels. {{ state.data.reason || '' }}</p>
+      <div class="gx-layout__targets">
+        <nav class="gx-layout__tabs gx-layout__segment" aria-label="Layout target">
+          <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="!!state.drag" @click="$emit('target', 'device')">Comma</button>
+          <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="!!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
+        </nav>
+        <div v-if="mode === 'local' && state.data && state.draft && !projection && availableProfiles.length" class="gx-layout__tabs gx-layout__segment" role="group" aria-label="Layout size">
+          <button v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
+            :aria-pressed="state.profile === tab.id" :disabled="!!state.drag" @click="selectProfile(tab.id)">{{ tab.label }}<span v-if="state.data.activeProfile === tab.id" class="gx-layout__active" title="Active UI on the comma"><span class="gx-sr-only"> (active UI)</span></span></button>
+        </div>
+      </div>
+      <div v-show="state.aboutOpen" id="gx-layout-about" class="gx-layout__about">
+        <p v-if="!projection" class="gx-note">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else class="gx-note">Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p>
+        <p v-if="projection && state.data?.screen" class="gx-note">Last usable screen: {{ state.data.screen.width - state.data.screen.margin_width }} × {{ state.data.screen.height - state.data.screen.margin_height }} pixels.</p>
+      </div>
+      <p v-if="projection && state.data?.reason" class="gx-note">{{ state.data.reason }}</p>
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
-        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt}" :inert="busy">
-          <span role="status">{{ inlineLeavePrompt ? (pendingLeave ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?') : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved changes' : state.notice || 'Saved on this device' }}</span>
+        <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt, 'is-stuck': state.stuck.leaveBar}" :inert="busy">
+          <span role="status" :class="{'is-dirty': dirty && !inlineLeavePrompt && state.status !== 'saving'}">{{ inlineLeavePrompt ? (pendingLeave ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?') : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved' : state.notice || 'Saved' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
             <button class="gx-btn gx-btn--danger" type="button" :aria-label="pendingLeave ? 'Discard and leave' : 'Discard and reload'" :title="pendingLeave ? 'Discard and leave' : 'Discard and reload'" @click="leave(state.discard)"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></svg><span class="gx-layout__action-label">{{ pendingLeave ? 'Discard and leave' : 'Discard and reload' }}</span></button>
@@ -1227,35 +1389,34 @@ export const OnroadLayoutPage = {
           <template v-else>
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !canUndo || !!state.drag || !!state.layerDrag" aria-label="Undo" title="Undo" @click="undo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg><span class="gx-layout__action-label">Undo</span></button>
             <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !canRedo || !!state.drag || !!state.layerDrag" aria-label="Redo" title="Redo" @click="redo"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"/></svg><span class="gx-layout__action-label">Redo</span></button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!!state.drag || !!state.layerDrag" aria-label="Reload saved" title="Reload saved" @click="requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg><span class="gx-layout__action-label">Reload saved</span></button>
-            <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !stockChanged || !!state.drag || !!state.layerDrag" aria-label="Reset to stock StarPilot" title="Reset to stock StarPilot" @click="resetToStock"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="gx-layout__action-label">Reset to stock</span></button>
-            <button class="gx-btn" type="button" :disabled="!editAvailable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label">Save changes</span></button>
+            <div ref="moreMenu" class="gx-layout__more" @keydown.esc="closeFloating('moreOpen')">
+              <button class="gx-btn gx-btn--tonal" type="button" :aria-expanded="state.moreOpen" aria-haspopup="menu" aria-label="More actions" title="More actions" @click="toggleFloating('moreOpen', 'moreMenu')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg><span class="gx-layout__action-label">More</span></button>
+              <template v-if="state.moreOpen">
+                <div class="gx-layout__menu" role="menu" aria-label="More actions">
+                  <button class="gx-layout__menu-item" type="button" role="menuitem" :disabled="!!state.drag || !!state.layerDrag" @click="closeFloating('moreOpen'); requestLeave('reload')"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/></svg>Reload saved</button>
+                  <button class="gx-layout__menu-item" type="button" role="menuitem" :disabled="!editAvailable || !stockChanged || !!state.drag || !!state.layerDrag" @click="closeFloating('moreOpen'); resetToStock()"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg>Reset to stock StarPilot</button>
+                </div>
+              </template>
+            </div>
+            <button class="gx-btn gx-layout__save" type="button" :disabled="!editAvailable || !dirty || !!state.drag || !!state.layerDrag" aria-label="Save changes" title="Save changes" @click="save"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Zm2 0v6h10V3M7 21v-8h10v8"/></svg><span class="gx-layout__action-label gx-layout__save-label">Save<span class="gx-layout__long"> changes</span></span></button>
           </template>
         </div>
         <GxNotice tone="danger" v-if="state.error">{{ state.error }}</GxNotice>
         <template v-if="state.data && state.draft">
-          <section v-if="projection" class="gx-card gx-layout__colors" aria-label="Android Auto display" :inert="busy">
-            <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="0"
-              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
-            <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
-              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('blindSpotBorder', value)" />
-            <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
-              :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionBorder('signalBorder', value)" />
-            <p class="gx-note">Gamma trial: the large comma UI's road-camera color effect (not shown in the preview). Borders are separate from the comma screen's C4 settings. Save to apply.</p>
-          </section>
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
-          <div v-if="!projection && availableProfiles.length" class="gx-layout__tabs gx-tabs" aria-label="Layout size">
-            <button v-if="!projection" v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
-              :aria-pressed="state.profile === tab.id" :disabled="!!state.drag" @click="selectProfile(tab.id)">{{ tab.label }}<span v-if="state.data.activeProfile === tab.id"> · Active UI</span></button>
-          </div>
           <div class="gx-layout__workspace" :inert="busy">
-            <section class="gx-card gx-layout__preview-card" aria-label="Driving screen preview">
+            <section ref="pinned" class="gx-card gx-layout__preview-card" :class="{'is-stuck': state.stuck.pinned}" aria-label="Driving screen preview" :style="{'--layout-ratio': profile.width / profile.height}">
               <div class="gx-layout__subhead"><strong>Layout preview</strong><span>{{ state.layerDrag ? "Adjusting " + selectedWidget.label : profile.width + " × " + profile.height }}</span></div>
-              <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
-                <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')">Arrange widgets</button>
-                <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'device'" :disabled="!!state.drag" @click="selectPreview('device')">Device preview</button>
-              </nav>
-              <label v-if="!projection && profile.inputZones?.length" class="gx-layout__zone-toggle"><input type="checkbox" v-model="state.showFavoriteZones"> Show Favorite tap areas</label>
+              <div class="gx-layout__preview-bar">
+                <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Preview type">
+                  <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')"><span>Arrange<span class="gx-layout__long"> widgets</span></span></button>
+                  <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'device'" :disabled="!!state.drag" @click="selectPreview('device')"><span>Device<span class="gx-layout__long"> preview</span></span></button>
+                </nav>
+                <button v-if="!projection && profile.inputZones?.length" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showFavoriteZones" aria-label="Show Favorite tap areas" title="Show Favorite tap areas" @click="state.showFavoriteZones = !state.showFavoriteZones"><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i></button>
+                <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-expanded="state.tipsOpen" aria-controls="gx-layout-tips" aria-label="Preview tips and display behavior" title="Preview tips and display behavior" @click="state.tipsOpen = !state.tipsOpen"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
+              </div>
+              <div class="gx-layout__stage">
+              <span v-if="!projection && state.showFavoriteZones && state.previewMode === 'layout'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <svg v-show="state.previewMode === 'layout'" ref="preview" class="gx-layout__preview" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
                 @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
                 role="group" :aria-label="projection ? 'Android Auto layout preview' : (state.profile === 'large' ? 'Big' : 'Small') + ' layout preview'">
@@ -1311,6 +1472,7 @@ export const OnroadLayoutPage = {
                 </g>
                 <rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
+              </div>
               <section v-if="state.devicePreviewOpen" class="gx-layout__device" v-show="state.previewMode === 'device'" aria-label="Device preview">
                 <div class="gx-layout__subhead"><strong>{{ projection ? 'Android Auto renderer preview' : 'Device preview' }}</strong><span>Preview scene</span></div>
                 <div class="gx-layout__scenes" aria-label="Device preview scene">
@@ -1318,32 +1480,36 @@ export const OnroadLayoutPage = {
                     :disabled="!!state.drag" @click="state.scene = scene.id">{{ scene.label }}</button>
                 </div>
                 <div class="gx-layout__device-frame" :style="{ aspectRatio: profile.width + ' / ' + profile.height }">
+                  <button class="gx-icon-btn gx-layout__device-stop" type="button" :disabled="!!state.drag" aria-label="Stop Device preview" title="Stop Device preview" @click="hideDevicePreview"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
                   <svg class="gx-layout__device-outline" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" aria-hidden="true"><rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" /></svg>
                   <img v-if="state.preview.url" :src="state.preview.url" alt="Device-rendered sample driving screen" />
                   <span v-else role="status">{{ state.preview.status === 'editing' ? 'Finish moving the widget to refresh Device preview.' : state.preview.status === 'updating' ? 'Updating Device preview…' : state.preview.status === 'unavailable' ? state.preview.error : 'Device preview is waiting.' }}</span>
                 </div>
 
               </section>
-              <details class="gx-layout__help"><summary>Preview tips &amp; display behavior</summary><div>
+              <div v-show="state.tipsOpen" id="gx-layout-tips" class="gx-layout__tips">
                 <p class="gx-note">Drag widgets in Arrange widgets to place them. Readings are samples.</p>
                 <p class="gx-note">Add Stopped timer to preview its minutes and seconds. Device preview renders the same widget as the driving screen; choose Stopped timer for a sample at rest.</p>
               <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>
               <p v-if="!projection && state.showFavoriteZones" class="gx-note">Favorite tap areas apply to enabled slots. Speed-limit controls and the steering wheel take priority when the drawer is closed.</p>
-                <button v-if="state.devicePreviewOpen" class="gx-btn gx-btn--tonal" :disabled="!!state.drag" @click="hideDevicePreview">Stop Device preview</button>
-              </div></details>
+              </div>
               <p v-if="state.placementError" class="gx-note" role="status">{{ state.placementError }}</p>
             </section>
-            <section class="gx-card gx-layout__inspector" aria-label="Widget placement">
-              <nav class="gx-layout__switcher gx-settings-tabs" aria-label="Editor sections">
+            <section class="gx-card gx-layout__inspector" aria-label="Widget placement" @focusin="revealField">
+              <nav ref="sections" class="gx-layout__switcher gx-layout__sections gx-settings-tabs" :class="{'is-stuck': state.stuck.sections}" aria-label="Editor sections">
                 <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'widgets'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'widgets'">Widgets</button>
-                <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'">Edit widget</button>
-                <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'">Road colors</button>
-                <button v-if="!projection && displayGroups.length" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'display'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'display'">Display</button>
+                <button class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'edit'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'edit'"><span>Edit<span class="gx-layout__long"> widget</span></span></button>
+                <button v-if="!projection" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'road'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'road'"><span>Road<span class="gx-layout__long"> colors</span></span></button>
+                <button v-if="projection || displayGroups.length" class="gx-btn gx-btn--tonal" :aria-pressed="state.inspectorPanel === 'display'" :disabled="!!state.drag || !!state.layerDrag" @click="state.inspectorPanel = 'display'">Options</button>
               </nav>
               <div v-show="state.inspectorPanel === 'widgets'" class="gx-layout__panel">
-              <div class="gx-layout__subhead"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span></div>
-              <p class="gx-note">Tap a widget to edit; drag its grip to reorder. Swipe the widget names to scroll. Top is front; bottom is back. Alerts stay above widgets. Use the eye to hide certain widgets while arranging; does not affect driving screen.</p>
+              <div ref="widgetsHelp" class="gx-layout__subhead gx-layout__help-anchor"><h3>Widgets</h3><span>{{ activeWidgets.length }} active</span>
+                <button class="gx-icon-btn gx-layout__info" type="button" :aria-expanded="state.widgetsHelpOpen" aria-controls="gx-layout-widgets-help" aria-label="How the widget list works" title="How the widget list works" @click="toggleFloating('widgetsHelpOpen', 'widgetsHelp')"><i class="bi bi-info-circle" aria-hidden="true"></i></button>
+                <div v-show="state.widgetsHelpOpen" id="gx-layout-widgets-help" class="gx-layout__popover" @click="closeFloating('widgetsHelpOpen')" @keydown.esc="closeFloating('widgetsHelpOpen')">
+                  <p>Tap a widget to edit it.</p><p>Drag ⠿ to reorder. The top row is in front, and alerts stay above all widgets.</p><p>The eye hides a widget in this preview only. The driving screen doesn't change.</p>
+                </div>
+              </div>
               <div class="gx-layout__widget-list"><div v-for="widget in listWidgets" :key="widget.id" class="gx-layout__layer" :data-layer-id="widget.id"
                 :class="{'is-dragging': state.layerDrag?.id === widget.id && state.layerDrag?.moved, 'is-drop-target': state.layerDrag?.target === widget.id && state.layerDrag?.id !== widget.id, 'is-drop-after': state.layerDrag?.after}">
                 <button class="gx-layout__row-grip gx-icon-btn" type="button"
@@ -1369,31 +1535,31 @@ export const OnroadLayoutPage = {
                 :style="{left: state.layerDrag.x + 'px', top: state.layerDrag.y + 'px', width: state.layerDrag.width + 'px'}">
                 <span aria-hidden="true">⠿</span><strong>{{ selectedWidget.label }}</strong><span>↕</span>
               </div></Teleport>
-              <details class="gx-layout__tray"><summary>Inactive Widgets · {{ inactiveWidgets.length }}</summary><p class="gx-note">In Arrange widgets, drag onto the preview, or select Add.</p>
-                <div v-for="widget in inactiveWidgets" :key="widget.id" class="gx-layout__tray-item">
-                  <button class="gx-layout__drag-handle" type="button" :disabled="!editAvailable || state.previewMode !== 'layout'" :aria-label="'Drag ' + widget.label + ' onto preview'"
-                    @pointerdown="startDrag(widget.id, $event, true)"><i class="bi bi-grip-vertical" aria-hidden="true"></i></button><span class="gx-layout__inactive-name">{{ widget.label }}</span>
-                  <button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="add(widget.id)">Add</button>
+              <div class="gx-layout__tray" role="group" aria-labelledby="gx-layout-tray-title">
+                <div class="gx-layout__subhead"><h4 id="gx-layout-tray-title">Inactive widgets</h4><span>{{ inactiveWidgets.length }}</span></div>
+                <p v-if="inactiveWidgets.length" class="gx-note">Drag a widget onto the preview, or tap + to add it.</p>
+                <div v-if="inactiveWidgets.length" class="gx-layout__chips">
+                  <div v-for="widget in inactiveWidgets" :key="widget.id" class="gx-layout__tray-item">
+                    <button class="gx-layout__drag-handle" type="button" :disabled="!editAvailable || state.previewMode !== 'layout'" :aria-label="'Drag ' + widget.label + ' onto preview'"
+                      @pointerdown="startDrag(widget.id, $event, true)"><i class="bi bi-grip-vertical" aria-hidden="true"></i></button><span class="gx-layout__inactive-name">{{ widget.label }}</span>
+                    <button class="gx-icon-btn gx-layout__chip-add" type="button" :aria-label="'Add ' + widget.label" :title="'Add ' + widget.label" :disabled="!editAvailable || !!state.drag" @click="add(widget.id)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
+                  </div>
                 </div>
-                <p v-if="!inactiveWidgets.length" class="gx-note">All available widgets are on this layout.</p>
-              </details>
+                <p v-else class="gx-note">All available widgets are on this layout.</p>
+              </div>
               <button class="gx-btn gx-btn--tonal gx-layout__reset" type="button" :disabled="!editAvailable || !!state.drag" @click="resetLayout">Reset this layout</button>
               </div>
               <div v-show="state.inspectorPanel === 'edit'" class="gx-layout__panel">
-                <label class="gx-layout__widget-picker">Selected widget<GalaxySelect class="gx-field gx-field--full" :value="state.selected" :disabled="!!state.drag" @change="state.selected = $event.target.value">
+                <label class="gx-layout__widget-picker"><span class="gx-layout__picker-head">Selected widget<span v-if="selectedWidget && selectedPosition.enabled" class="gx-note">{{ selectedSize[0] }} × {{ selectedSize[1] + (selectedWidget.box ? 0 : selectedWidget.visualInsetTop || 0) }} px</span></span><GalaxySelect class="gx-field gx-field--full" :value="state.selected" :disabled="!!state.drag" @change="state.selected = $event.target.value">
                   <option v-for="widget in widgets" :key="widget.id" :value="widget.id">{{ widget.label }}{{ layout[widget.id].enabled ? '' : ' · Inactive' }}</option>
                 </GalaxySelect></label>
                 <div v-if="selectedWidget && !selectedPosition.enabled" class="gx-layout__panel"><p class="gx-note">Add this widget to edit its position and colors.</p><button class="gx-btn" :disabled="!editAvailable" @click="add(state.selected)">Add to layout</button></div>
               <div v-if="selectedWidget && selectedPosition.enabled" class="gx-layout__position">
-                <strong>{{ selectedWidget.label }}</strong><span class="gx-note">{{ selectedSize[0] }} × {{ selectedSize[1] + (selectedWidget.box ? 0 : selectedWidget.visualInsetTop || 0) }} pixels</span>
                 <label v-if="selectedWidget.resizable">Size
                   <input class="gx-field" type="number" step="1" :min="selectedWidget.resizable.min" :max="selectedWidget.resizable.max"
                     :value="selectedPosition.size" :disabled="!editAvailable || !!state.drag" @change="resizeSelected($event)"></label>
-                <template v-if="selectedWidget.box">
-                  <div class="gx-layout__coordinates"><label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editAvailable || !!state.drag" @change="boxInput('width', $event)"></label>
-                    <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editAvailable || !!state.drag" @change="boxInput('height', $event)"></label></div>
-                  <span class="gx-note">Lower values let more of the road show through. Drag the corner handle on the preview to resize.</span>
-                </template>
+                <input v-if="selectedWidget.resizable" class="gx-slider" type="range" step="1" aria-label="Size" :min="selectedWidget.resizable.min" :max="selectedWidget.resizable.max"
+                  :value="selectedPosition.size" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="sizeSlider($event)" @change="finishColorEdit" @blur="finishColorEdit">
                 <template v-if="selectedWidget.opacity">
                   <label for="layout-widget-opacity">{{ selectedWidget.box ? 'Map opacity' : 'Opacity' }} · {{ selectedPosition.opacity }}%</label>
                   <input id="layout-widget-opacity" class="gx-slider" type="range" step="1" :min="selectedWidget.opacity.min" :max="selectedWidget.opacity.max"
@@ -1405,6 +1571,8 @@ export const OnroadLayoutPage = {
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
                 <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
+                <label v-if="projection && selectedWidget.kind === 'steering_wheel'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.wheelPedalFeedback === true"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setProjectionDisplay('wheelPedalFeedback', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
                 <label v-if="!projection && selectedWidget.kind === 'steering_wheel' && displayRow('ShowBrakeStatus')" class="gx-layout__clock-format"><input type="checkbox" :checked="displayValue('ShowBrakeStatus') === 'On'"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('ShowBrakeStatus'))" @change="setDisplay('ShowBrakeStatus', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
                 <div v-if="!projection && selectedWidget.kind === 'model_confidence' && displayRow('StockConfidenceBallWidget')" class="gx-layout__favorite-display">
@@ -1428,17 +1596,38 @@ export const OnroadLayoutPage = {
                   </div>
                 </div>
                 <div class="gx-layout__coordinates"><label>X<input class="gx-field" type="number" step="1" :min="limits.minX" :max="limits.maxX" :value="selectedPosition.x" :disabled="!editAvailable || !!state.drag" @change="positionInput('x', $event)"></label>
-                  <label>Y<input class="gx-field" type="number" step="1" :min="limits.minY" :max="limits.maxY" :value="selectedPosition.y" :disabled="!editAvailable || !!state.drag" @change="positionInput('y', $event)"></label></div>
-                <span class="gx-note">Use arrow keys on a preview widget to move 1 pixel, or Shift + arrow for 10.</span>
+                  <label>Y<input class="gx-field" type="number" step="1" :min="limits.minY" :max="limits.maxY" :value="selectedPosition.y" :disabled="!editAvailable || !!state.drag" @change="positionInput('y', $event)"></label><template v-if="selectedWidget.box">
+                  <label>Width<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth" :value="selectedPosition.width" :disabled="!editAvailable || !!state.drag" @change="boxInput('width', $event)"></label>
+                  <label>Height<input class="gx-field" type="number" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight" :value="selectedPosition.height" :disabled="!editAvailable || !!state.drag" @change="boxInput('height', $event)"></label></template></div>
+                <template v-if="selectedWidget.box">
+                  <label :for="'layout-box-width'">Width · {{ selectedPosition.width }}</label>
+                  <input id="layout-box-width" class="gx-slider" type="range" step="10" :min="selectedWidget.box.minWidth" :max="selectedWidget.box.maxWidth"
+                    :value="selectedPosition.width" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="boxSlider('width', $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                  <label :for="'layout-box-height'">Height · {{ selectedPosition.height }}</label>
+                  <input id="layout-box-height" class="gx-slider" type="range" step="10" :min="selectedWidget.box.minHeight" :max="selectedWidget.box.maxHeight"
+                    :value="selectedPosition.height" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @input="boxSlider('height', $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                  <span class="gx-note">Smaller sizes let more of the road show through.</span>
+                </template>
+                <span class="gx-note gx-layout__keys-note">Use arrow keys on a preview widget to move 1 pixel, or Shift + arrow for 10.</span>
                 <section v-if="!projection && colorFields.length" class="gx-layout__colors" :aria-label="selectedWidget.label + ' colors'">
-                  <div class="gx-layout__subhead"><h4>{{ selectedWidget.label }} colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable" @click="resetColors">Reset widget colors</button></div>
-                  <p class="gx-note">Only this widget in the {{ state.profile === 'large' ? 'Big' : 'Small' }} layout changes. Status indicators keep their meaning. Picking a color makes a transparent fill or border visible; use Opacity to fade it.</p>
-                  <div class="gx-layout__palette"><div v-for="field in colorFields" :key="field.id" class="gx-layout__color">
-                    <label :for="'layout-color-' + field.id">{{ field.label }}</label><div class="gx-layout__color-values">
+                  <div class="gx-layout__subhead"><h4>{{ selectedWidget.label }} colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable" @click="resetColors" aria-label="Reset widget colors" title="Reset widget colors">Reset</button></div>
+                  <p class="gx-note">Changes this widget in the {{ state.profile === 'large' ? 'Big' : 'Small' }} layout only. Status indicators keep their meaning.</p>
+                  <div class="gx-layout__palette"><div v-for="field in colorFields" :key="field.id" class="gx-layout__color" :class="{'is-open': state.openColor === 'widget:' + field.id}">
+                    <button class="gx-layout__color-row" type="button" :aria-expanded="state.openColor === 'widget:' + field.id" :aria-controls="'layout-color-panel-' + field.id" @click="toggleColor('widget:' + field.id)">
+                      <span class="gx-layout__swatch" :style="{'--swatch': selectedColors[field.id]}" aria-hidden="true"></span>
+                      <span class="gx-layout__color-name">{{ field.label }}</span>
+                      <span class="gx-layout__color-value">{{ selectedColors[field.id].slice(0,7) }}</span>
+                      <span class="gx-layout__color-alpha">{{ Math.round(alpha(selectedColors[field.id]) / 255 * 100) }}%</span>
+                      <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                    </button>
+                    <div v-if="state.openColor === 'widget:' + field.id" :id="'layout-color-panel-' + field.id" class="gx-layout__color-editor">
+                    <label class="gx-sr-only" :for="'layout-color-' + field.id">{{ field.label }} hex</label><div class="gx-layout__color-values">
                       <input type="color" :aria-label="field.label + ' color'" :value="selectedColors[field.id].slice(0,7)" :disabled="!editAvailable || !!state.drag" @input="colorRgb(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                       <input :id="'layout-color-' + field.id" class="gx-field" type="text" spellcheck="false" maxlength="9" :value="selectedColors[field.id]" :disabled="!editAvailable || !!state.drag" @change="colorText(field.id, $event)"></div>
                     <label :for="'layout-alpha-' + field.id">Opacity · {{ Math.round(alpha(selectedColors[field.id]) / 255 * 100) }}%</label>
                     <input :id="'layout-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(selectedColors[field.id])" :disabled="!editAvailable || !!state.drag" @input="colorAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                    <p v-if="!alpha(selectedColors[field.id])" class="gx-note">Hidden at 0%. Picking a color makes it visible.</p>
+                    </div>
                   </div></div>
                   <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
                 </section>
@@ -1446,28 +1635,55 @@ export const OnroadLayoutPage = {
               </div>
               </div>
               <section v-if="!projection" v-show="state.inspectorPanel === 'road'" class="gx-layout__colors" aria-label="Path and lane colors">
-                <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="resetRoad">Reset road colors</button></div>
+                <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editAvailable || !!state.drag" @click="resetRoad" aria-label="Reset road colors" title="Reset road colors">Reset</button></div>
                 <label>Path style<GalaxySelect class="gx-field gx-field--full" :value="roadMode" :disabled="!editAvailable || !!state.drag" @change="setRoadMode($event.target.value)">
                   <option value="acceleration">Acceleration colors</option>
                   <option value="color">Custom color</option><option value="rainbow">Rainbow Road</option>
                 </GalaxySelect></label>
+                <p class="gx-note">These colors apply to this layout only. The preview uses a sample road.</p>
                 <details class="gx-layout__help"><summary>About path &amp; lane colors</summary><div>
                 <p class="gx-note">Choose how the path is colored. Acceleration colors change with acceleration and braking. Custom color stays one color. Rainbow Road shows a moving rainbow.</p>
                 <p class="gx-note">{{ state.profile === 'large' ? 'Path border colors the strips along the path. Lane lines keep their own color.' : 'Lane marking colors apply to the lines beside your lane and the outer lines separately.' }} Blue lane-centering and orange steering-effort indicators stay blue and orange.</p>
                 </div></details>
-                <div class="gx-layout__palette"><div v-for="field in state.data.metadata.roadColorFields" :key="field.id" class="gx-layout__color">
-                  <label :for="'road-color-' + field.id">{{ roadLabel(field.id) }}</label><div class="gx-layout__color-values">
+                <div class="gx-layout__palette"><div v-for="field in state.data.metadata.roadColorFields" :key="field.id" class="gx-layout__color" :class="{'is-open': state.openColor === 'road:' + field.id}">
+                  <button class="gx-layout__color-row" type="button" :aria-expanded="state.openColor === 'road:' + field.id" :aria-controls="'road-color-panel-' + field.id" @click="toggleColor('road:' + field.id)">
+                    <span class="gx-layout__swatch" :style="{'--swatch': roadColors[field.id]}" aria-hidden="true"></span>
+                    <span class="gx-layout__color-name">{{ roadLabel(field.id) }}</span>
+                    <span class="gx-layout__color-value">{{ roadColors[field.id].slice(0,7) }}</span>
+                    <span class="gx-layout__color-alpha">{{ Math.round(alpha(roadColors[field.id]) / 255 * 100) }}%</span>
+                    <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <div v-if="state.openColor === 'road:' + field.id" :id="'road-color-panel-' + field.id" class="gx-layout__color-editor">
+                  <label class="gx-sr-only" :for="'road-color-' + field.id">{{ roadLabel(field.id) }} hex</label><div class="gx-layout__color-values">
                     <input type="color" :aria-label="roadLabel(field.id) + ' color'" :value="roadColors[field.id].slice(0,7)" :disabled="!editAvailable || !!state.drag" @input="roadRgb(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
                     <input :id="'road-color-' + field.id" class="gx-field" type="text" spellcheck="false" maxlength="9" :value="roadColors[field.id]" :disabled="!editAvailable || !!state.drag" @change="roadColor(field.id, $event.target.value.trim())"></div>
                   <label :for="'road-alpha-' + field.id">Opacity · {{ Math.round(alpha(roadColors[field.id]) / 255 * 100) }}%</label>
                   <input :id="'road-alpha-' + field.id" class="gx-slider" type="range" min="0" max="255" step="1" :value="alpha(roadColors[field.id])" :disabled="!editAvailable || !!state.drag" @input="roadAlpha(field.id, $event)" @change="finishColorEdit" @blur="finishColorEdit">
+                  </div>
                 </div></div>
-                <p class="gx-note">These colors apply to this layout only. The preview uses a sample road.</p>
                 <GxNotice tone="danger" v-if="state.colorError">{{ state.colorError }}</GxNotice>
               </section>
-              <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Display options">
-                <div class="gx-layout__subhead"><h4>Display options</h4></div>
-                <p class="gx-note">These apply to the whole driving screen on both layouts. Save changes to apply them.</p>
+            <section v-if="projection" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Android Auto screen options">
+              <div class="gx-layout__subhead"><h4>Android Auto screen options</h4></div>
+              <p class="gx-note">Only the Android Auto screen uses these. The comma screen has its own options on the Comma tab. Save to apply.</p>
+              <h5 class="gx-layout__display-group">Alerts and borders</h5>
+              <GalaxySettingRow :row="switchRow('Hide Personality Alerts', state.draft.hidePersonalityAlerts === true)" :index="0"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('hidePersonalityAlerts', value)" />
+              <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('blindSpotBorder', value)" />
+              <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('signalBorder', value)" />
+              <h5 class="gx-layout__display-group">Camera</h5>
+              <GalaxySettingRow :row="switchRow('Show camera on blind-spot warning', state.draft.blindSpotCamera === true)" :index="0"
+                :disabled="!editable || !!state.drag || !!state.layerDrag || !projectionHasPipWidget" :save-value="(index, value) => setProjectionDisplay('blindSpotCamera', value)" />
+              <p v-if="!projectionHasPipWidget" class="gx-note">Add a left or right blind-spot camera widget to enable this option.</p>
+              <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="1"
+                :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
+              <p class="gx-note">Gamma trial: the large UI road-camera color effect on Android Auto (not shown in the preview).</p>
+            </section>
+              <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Comma screen options">
+                <div class="gx-layout__subhead"><h4>Comma screen options</h4></div>
+                <p class="gx-note">Only the comma screen uses these, in both the Big and Small layouts unless marked. Android Auto has its own options on the Android Auto tab. Save to apply.</p>
                 <template v-for="group in displayGroups" :key="group.name">
                   <h5 class="gx-layout__display-group">{{ group.name }}</h5>
                   <GalaxySettingRow v-for="(row, index) in group.rows" :key="row.key" :row="displaySettingRow(row)" :index="index"
@@ -1481,7 +1697,7 @@ export const OnroadLayoutPage = {
       <GxDialog v-if="state.removeConfirm && profile" labelledby="gx-layout-remove-title" describedby="gx-layout-remove-body" alert @close="cancelRemove">
         <div><h3 id="gx-layout-remove-title">Remove {{ profile.widgets[state.removeConfirm]?.label }}?</h3>
           <p id="gx-layout-remove-body">Remove this widget from the {{ projection ? 'Android Auto' : state.profile === 'large' ? 'Big' : 'Small' }} layout? You can add it again from Inactive Widgets.</p></div>
-        <div class="gx-settings__controls">
+        <div class="gx-settings__controls gx-actions">
           <button type="button" class="gx-btn gx-btn--tonal" @click="cancelRemove">Cancel</button>
           <button type="button" class="gx-btn gx-btn--danger" @click="confirmRemove">Remove widget</button>
         </div>

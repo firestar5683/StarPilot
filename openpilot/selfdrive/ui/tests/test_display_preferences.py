@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui import ui_state as module
 from openpilot.system.ui.lib.application import MouseEvent, MousePos
-from openpilot.starpilot.ui.display_preferences import read_preferences
+from openpilot.starpilot.ui.display_preferences import SCREEN_OFF, read_preferences
 
 
 class DisplayDeviceTests(unittest.TestCase):
@@ -146,6 +146,94 @@ class DisplayDeviceTests(unittest.TestCase):
     self.assertEqual(saved.driving_brightness, 101)
     self.params.put("ScreenTimeoutOnroad", 999, block=True)
     self.assertEqual(read_preferences(self.params, large=True).driving_timeout, 10)
+
+  def test_screen_off_timeout_single_tap_wake_and_critical_alerts(self):
+    for large in (True, False):
+      with self.subTest(large=large), patch.object(module.gui_app, "big_ui", return_value=large):
+        self.state.sm = NS(valid={}, alive={})
+        self.device = module.Device()
+        self._check_screen_off_timeout_single_tap_wake_and_critical_alerts(large)
+
+  def _check_screen_off_timeout_single_tap_wake_and_critical_alerts(self, large):
+    self.params.put_bool(SCREEN_OFF, True, block=True)
+    self.state.started = self.state.ignition = True
+    with patch.object(self.device, "_start_brightness_thread"), \
+         patch.object(module.gui_app, "_mouse_events", []), \
+         patch.object(module.gui_app, "set_should_render") as render, \
+         patch.object(module.time, "monotonic", return_value=100.) as clock:
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      self.assertEqual(self.device.interactive_timeout, 10 if large else 5)
+      clock.return_value = 106.
+      self.device.update()
+      self.assertEqual(self.device.awake, large)
+      clock.return_value = 111.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.assertEqual(self.device._brightness_target, 0)
+      render.assert_called_with(False)
+      module.HARDWARE.set_display_power.assert_called_with(False)
+      gui_events = module.gui_app.mouse_events
+      gui_events.append(MouseEvent(MousePos(0., 0.), 0, True, False, True, 112.))
+      clock.return_value = 112.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      self.assertGreater(self.device._brightness_target, 0)
+      self.assertEqual(gui_events, [])  # Wake press cannot activate an underlying button.
+      render.assert_called_with(True)
+      gui_events.append(MouseEvent(MousePos(0., 0.), 0, False, True, False, 112.1))
+      clock.return_value = 112.1
+      self.device.update()
+      self.assertEqual(gui_events, [])  # Wake release is consumed too.
+      clock.return_value = 123.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      alert = NS(alertStatus=module.log.SelfdriveState.AlertStatus.critical)
+      class Messages(dict):
+        valid = {"selfdriveState": True}
+        alive = {"selfdriveState": True}
+      self.state.sm = Messages(selfdriveState=alert)
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      alert.alertStatus = module.log.SelfdriveState.AlertStatus.normal
+      clock.return_value = 124.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      clock.return_value = 134.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.assertTrue(self.device.toggle_screen_off())  # Existing controller shortcut also wakes automatic sleep.
+      self.assertTrue(self.device.awake)
+      clock.return_value = 155.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.state.started = False
+      self.device.update()
+      self.assertTrue(self.device.awake)
+
+  def test_screen_off_setting_changes_wake_and_use_saved_driving_timeout(self):
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.params.put("ScreenTimeoutOnroad", 20, block=True)
+    self.params.put_bool(SCREEN_OFF, True, block=True)
+    self.state.started = self.state.ignition = True
+    with patch.object(self.device, "_start_brightness_thread"), \
+         patch.object(module.gui_app, "_mouse_events", []), \
+         patch.object(module.gui_app, "set_should_render"), \
+         patch.object(module.time, "monotonic", return_value=100.) as clock:
+      self.device.update()
+      clock.return_value = 111.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      clock.return_value = 121.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.params.put_bool(SCREEN_OFF, False, block=True)
+      self.device.invalidate_display_preferences()
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      clock.return_value = 200.
+      self.device.update()
+      self.assertTrue(self.device.awake)
 
   def test_started_transition_refreshes_saved_profile_without_worker_restart(self):
     self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)

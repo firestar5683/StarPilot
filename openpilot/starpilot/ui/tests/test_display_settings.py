@@ -12,7 +12,7 @@ import unittest
 from openpilot.common.params import Params
 from openpilot.starpilot.ui import display_compact
 from openpilot.starpilot.ui.display_owner import DisplayOwner
-from openpilot.starpilot.ui.display_preferences import MASTER, read_choice, read_preferences
+from openpilot.starpilot.ui.display_preferences import MASTER, SCREEN_OFF, read_choice, read_preferences
 from openpilot.starpilot.ui.feature_settings_state import (
   FEATURE_CONTROL_LEFT, FEATURE_CONTROL_RIGHT, FEATURE_ROW_HEIGHT, FEATURE_VISIBLE_ROWS,
   FeatureInput, FeatureSettingsRequest, feature_row_top, row_change,
@@ -30,6 +30,7 @@ class DisplaySettingsTests(unittest.TestCase):
   def setUp(self):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
+    self.params_root = temporary.name
     self.params = Params(temporary.name)
     self.parked = True
     self.owner = DisplayOwner(self.params, lambda: self.parked)
@@ -84,7 +85,7 @@ class DisplaySettingsTests(unittest.TestCase):
           session._display_ui(FeatureUiAction("open", rows[2]))
           submenu = session.system_snapshot()
           self.assertEqual(tuple(row.key for row in submenu.rows), (MASTER, "ScreenBrightness", "ScreenBrightnessOnroad",
-                                                                   "ScreenTimeout", "ScreenTimeoutOnroad"))
+                                                                   "ScreenTimeout", "ScreenTimeoutOnroad", SCREEN_OFF))
           self.assertEqual(submenu.rows[1].source, self.row("ScreenBrightness").source)
           self.assertEqual(submenu.rows[1].dependencies, self.row("ScreenBrightness").dependencies)
           session._display_ui(FeatureUiAction("back"))
@@ -148,9 +149,10 @@ class DisplaySettingsTests(unittest.TestCase):
         inputs.release(800, y, root)
         submenu = session.system_snapshot()
         self.assertEqual(submenu.page, "display")
-        self.assertEqual(len(submenu.rows), 5)
+        self.assertEqual(len(submenu.rows), 6)
         self.assertEqual(submenu.rows[0].key, MASTER)
-        self.assertTrue(all(not row.available for row in submenu.rows[1:]))
+        self.assertTrue(all(not row.available for row in submenu.rows[1:] if row.key != SCREEN_OFF))
+        self.assertTrue(submenu.rows[-1].available)
         self.assertFalse(read_preferences(self.params, large=True).enabled)
         session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.CLOSE)))
         self.assertEqual(session.display_page, "system")
@@ -170,7 +172,7 @@ class DisplaySettingsTests(unittest.TestCase):
         session._display_ui(FeatureUiAction("change", session.system_snapshot().rows[0]))
         self.assertEqual(session.system_snapshot().page, "display")
         self.assertFalse(read_preferences(self.params, large=True).enabled)
-        self.assertTrue(all(not row.available for row in session.system_snapshot().rows[1:]))
+        self.assertTrue(all(not row.available for row in session.system_snapshot().rows[1:] if row.key != SCREEN_OFF))
         session._display_ui(FeatureUiAction("back"))
         self.parked = False
         root = session.system_snapshot()
@@ -355,8 +357,51 @@ class DisplaySettingsTests(unittest.TestCase):
     self.assertEqual(self.row("ScreenTimeoutOnroad").value, "10")
     self.assertEqual(self.row("ScreenTimeoutOnroad", Profile.COMPACT).value, "5")
     self.assertEqual(list(Path(self.params.get_param_path(MASTER)).parent.iterdir()), [])
-    for key in (MASTER, "ScreenBrightness", "ScreenBrightnessOnroad", "ScreenTimeout", "ScreenTimeoutOnroad"):
+    for key in (MASTER, "ScreenBrightness", "ScreenBrightnessOnroad", "ScreenTimeout", "ScreenTimeoutOnroad", SCREEN_OFF):
       self.assertIsNone(read_choice(self.params, key, large=True).raw)
+
+  def test_screen_off_is_independent_default_off_persistent_and_source_guarded(self):
+    for profile in Profile:
+      row = self.row(SCREEN_OFF, profile)
+      self.assertEqual((row.value, row.default_value, row.choices, row.step, row.unit), ("Off", "Off", ("Off", "On"), 0, ""))
+      self.assertTrue(row.available)
+      self.assertIn("CPU/GPU", row.reason)
+      self.assertIn("Tap once to wake", row.reason)
+    request = self.request(SCREEN_OFF)
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.owner.apply(request))  # The displayed source is stale.
+    saved = read_preferences(self.params, large=True)
+    self.assertFalse(saved.enabled)
+    self.assertTrue(saved.turn_off_screen)
+    self.assertTrue(Params(self.params_root).get_bool(SCREEN_OFF))
+    self.assertTrue(self.owner.apply(self.request(MASTER)))
+    self.assertTrue(self.owner.apply(self.request(MASTER)))
+    self.assertTrue(read_preferences(self.params, large=True).turn_off_screen)
+    request = self.request(SCREEN_OFF)
+    self.parked = False
+    self.assertFalse(self.owner.apply(request))
+    self.parked = True
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(read_preferences(self.params, large=True).turn_off_screen)
+
+  def test_invalid_screen_off_fails_off_and_can_be_repaired(self):
+    Path(self.params.get_param_path(SCREEN_OFF)).write_bytes(b"2")
+    self.assertFalse(read_preferences(self.params, large=True).turn_off_screen)
+    self.assertEqual(self.row(SCREEN_OFF).repair_value, "Off")
+    self.assertTrue(self.owner.apply(self.request(SCREEN_OFF)))
+    self.assertEqual(self.row(SCREEN_OFF).value, "Off")
+
+  def test_screen_off_toggle_in_display_submenu_refreshes_device_preferences(self):
+    session = self.large_session()
+    session._display_ui(FeatureUiAction("open", session.system_snapshot().rows[2]))
+    state = replace(session.system_snapshot(), scroll=5)
+    inputs = FeatureInput(session._display_ui)
+    with patch("openpilot.starpilot.ui.runtime_app.native_device.invalidate_display_preferences") as refresh:
+      inputs.press(2000, feature_row_top(state) + FEATURE_ROW_HEIGHT / 2, state)
+      self.assertFalse(read_preferences(self.params, large=True).turn_off_screen)
+      inputs.release(2000, feature_row_top(state) + FEATURE_ROW_HEIGHT / 2, state)
+      self.assertTrue(read_preferences(self.params, large=True).turn_off_screen)
+      refresh.assert_called_once()
 
   def test_master_enable_requires_valid_values_but_off_remains_available(self):
     path = Path(self.params.get_param_path("ScreenBrightnessOnroad"))
@@ -517,6 +562,11 @@ class DisplaySettingsTests(unittest.TestCase):
       display_compact.DisplayCompact(Session()).entry_button().click()
       page = shown[0]
       self.assertEqual(page.items[0].label, "display")
+      screen_off = next(item for item in page.items if item.label == "turn off comma screen")
+      self.assertIn("cpu/gpu", screen_off.value)
+      screen_off.click()
+      self.assertTrue(read_preferences(self.params, large=False).turn_off_screen)
+      self.assertFalse(read_preferences(self.params, large=False).enabled)
       page.items[1].click()
       self.assertEqual(page.items[1].value, "on")
       self.assertTrue(read_preferences(self.params, large=False).enabled)

@@ -287,6 +287,8 @@ class RuntimeSnapshotAdapter:
     self._customization_value = default_document()
     self._appearance_value = OnroadAppearance()
     self._appearance_read_ns: int | None = None
+    # A second screen (Android Auto) swaps in its own display choices before anything uses them.
+    self.appearance_override: Callable[[OnroadAppearance], OnroadAppearance] | None = None
     self._last_mode: ShellMode | None = None
     self._onroad_ancillary: tuple[int, tuple[bool, int, bool], ShellSnapshot] | None = None
     self._conditional = ConditionalDisplayProjector()
@@ -378,6 +380,8 @@ class RuntimeSnapshotAdapter:
         now_ns - self._appearance_read_ns >= 1_000_000_000):
       self._customization_value = read_customization(self.ui_state.params)
       self._appearance_value = onroad_appearance(self.ui_state.params)
+      if self.appearance_override is not None:
+        self._appearance_value = self.appearance_override(self._appearance_value)
       self._appearance_read_ns = now_ns
     ui, params = self.ui_state, self.ui_state.params
     if (self._conditional_read_ns is None or now_ns < self._conditional_read_ns or

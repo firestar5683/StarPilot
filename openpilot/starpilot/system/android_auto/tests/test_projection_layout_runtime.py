@@ -256,6 +256,35 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
     view.render()
     self.assertEqual((rendered[-1].appearance.show_blindspot_border, rendered[-1].appearance.show_signal_border), (True, False))
 
+  def test_comma_display_choices_stay_on_the_comma(self):
+    from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice, OnroadAppearance
+    from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
+    helper = boundary.TestProjectionOnroad()
+    native, _ = helper.dependencies()
+    native.ui_state.started = True
+    comma = OnroadAppearance(hide_personality_alerts=True, wheel_pedal_feedback=True, camera_view=CameraViewChoice.DRIVER,
+                             driver_camera_on_reverse=True)
+    state = OnroadState(False, False, None, None, SpeedLimitObservation(), customization=default_document(), appearance=comma,
+                        reverse_driver_camera=True)
+    rendered, invalidated = [], []
+    adapter = SimpleNamespace(build=lambda *_a, **_k: SimpleNamespace(onroad=state), invalidate_appearance=lambda: invalidated.append(1))
+    native.adapter = lambda *_: adapter
+    layout = default_layout_for_viewport((2880, 1080))
+    view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080), customization=layout)
+    self.addCleanup(view.close)
+    view.onroad.render = rendered.append
+    view.render()
+    appearance = rendered[-1].appearance
+    self.assertEqual((appearance.hide_personality_alerts, appearance.wheel_pedal_feedback, appearance.camera_view,
+                      appearance.driver_camera_on_reverse, rendered[-1].reverse_driver_camera),
+                     (False, False, CameraViewChoice.STANDARD, False, False))
+    self.assertIs(adapter.appearance_override(comma).hide_personality_alerts, False, 'the adapter hides notices by AA choice')
+    view.apply_layout({**layout, 'hidePersonalityAlerts': True, 'wheelPedalFeedback': True})
+    self.assertEqual(invalidated, [1])
+    view.render()
+    self.assertEqual((rendered[-1].appearance.hide_personality_alerts, rendered[-1].appearance.wheel_pedal_feedback), (True, True))
+    self.assertIs(adapter.appearance_override(OnroadAppearance()).hide_personality_alerts, True)
+
   def test_real_onroad_state_unchanged_without_projection_document(self):
     from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
     helper = boundary.TestProjectionOnroad()
