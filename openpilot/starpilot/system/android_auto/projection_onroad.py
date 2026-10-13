@@ -11,6 +11,7 @@ from openpilot.starpilot.system.android_auto.projection_exit import ProjectionEx
 from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK_VIEWPORT
 
 CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
+BOOKMARK_NOTICE_NS = 2_000_000_000  # how long "Bookmark Saved" stays after the drive is bookmarked
 DRIVER_MONITOR_HOLD_NS = 350_000_000
 STANDBY_LOGO = Path(__file__).parents[3] / 'selfdrive/assets/images/starpilot_logo.png'
 BUBBLE_REDUNDANT_ALERTS = frozenset(('preLaneChangeLeft', 'preLaneChangeRight', 'laneChange',
@@ -118,6 +119,7 @@ class ProjectionOnroad:
     self.customization = customization
     self._certificate_notice = certificate_notice(certificate_days)
     self._certificate_notice_until_ns: int | None = None
+    self._bookmark_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
     self._base_appearance = None
@@ -293,7 +295,9 @@ class ProjectionOnroad:
       return
     document = self.favorites.document if self.favorites is not None else None
     requested = bool(document['destination']) if document is not None else None
-    data = self.map_feed.read(self.native.ui_state.sm, navigation_requested=requested)
+    from openpilot.starpilot.system.android_auto.projection_favorites import destination_label
+    data = self.map_feed.read(self.native.ui_state.sm, navigation_requested=requested,
+                              destination=destination_label(document) if document is not None else None)
     self.map.prepare(data, placed['width'], placed['height'])
 
   def _map_layer(self, rect, state):
@@ -353,6 +357,21 @@ class ProjectionOnroad:
     return replace(state, alert=self.native.alert(size=sizes.SMALL, text1=self._certificate_notice,
                                                   alert_type='androidAutoCertificate/warning'))
 
+  def bookmark_saved(self, now_ns=None):
+    """A bookmark was published for this drive (from any button): confirm it on the car screen."""
+    self._bookmark_notice_until_ns = (time.monotonic_ns() if now_ns is None else now_ns) + BOOKMARK_NOTICE_NS
+
+  def _with_bookmark_notice(self, state, now_ns):
+    """Show "Bookmark Saved" briefly after a bookmark; a real alert always wins."""
+    until = self._bookmark_notice_until_ns
+    if until is None or now_ns >= until:
+      return state
+    sizes = self.native.alert_size
+    if state.alert.size != sizes.NONE:
+      return state
+    return replace(state, alert=self.native.alert(size=sizes.SMALL, text1='Bookmark Saved',
+                                                  alert_type='androidAutoBookmark/saved'))
+
   def _standby(self):
     rl = self.native.rl
     purple = rl.Color(188, 132, 255, 255)  # StarPilot purple, as on the comma's moon
@@ -408,8 +427,9 @@ class ProjectionOnroad:
           # The car screen's display options live in the AA layout, not the comma's settings.
           self._projection_appearance = self._own_appearance(state.appearance)
           self._base_appearance = state.appearance
-        state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance)
-      self._state = self._with_certificate_notice(state, now_ns)
+        state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance,
+                        reverse_driver_camera=False)
+      self._state = self._with_bookmark_notice(self._with_certificate_notice(state, now_ns), now_ns)
       self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:

@@ -388,6 +388,32 @@ class TestProjectionOnroad(unittest.TestCase):
     self.assertIs(view._with_certificate_notice(state, 0), state)
     view.close()
 
+  def test_bookmark_saved_shows_two_seconds_under_real_alerts(self):
+    native, _ = self.dependencies()
+
+    @dataclass(frozen=True)
+    class Alert:
+      size: str = 'none'
+      text1: str = ''
+      alert_type: str = ''
+
+    @dataclass(frozen=True)
+    class State:
+      alert: Alert = Alert()
+
+    native.alert, native.alert_size = Alert, SimpleNamespace(NONE='none', SMALL='small')
+    view = projection.ProjectionOnroad(dependencies=native)
+    quiet = State()
+    self.assertIs(view._with_bookmark_notice(quiet, 0), quiet, 'nothing until a bookmark is saved')
+    view.bookmark_saved(now_ns=1_000)
+    shown = view._with_bookmark_notice(quiet, 1_000)
+    self.assertEqual((shown.alert.size, shown.alert.text1), ('small', 'Bookmark Saved'))
+    self.assertEqual(view._with_bookmark_notice(quiet, 1_000 + projection.BOOKMARK_NOTICE_NS - 1).alert.text1, 'Bookmark Saved')
+    real = State(Alert(size='full', text1='Take Control'))
+    self.assertIs(view._with_bookmark_notice(real, 2_000), real, 'a real alert wins')
+    self.assertIs(view._with_bookmark_notice(quiet, 1_000 + projection.BOOKMARK_NOTICE_NS), quiet)
+    view.close()
+
   def test_negotiated_viewport_overrides_landscape_fallback(self):
     native, _ = self.dependencies()
     view = projection.ProjectionOnroad(dependencies=native, viewport=(2880, 1080))

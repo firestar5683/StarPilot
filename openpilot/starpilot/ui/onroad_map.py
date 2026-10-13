@@ -42,6 +42,8 @@ TILE_CACHE = 48
 MISSING_RETRY_S = 3.0
 DEAD_RECKON_S = 1.0
 ROUTE_STALE_OVERLAY_SECONDS = 10.0   # a route lost mid-guidance only brings back "Starting navigation" after this long
+STARTING_OVERLAY_MIN_SECONDS = 5.0   # "Starting navigation" stays up at least this long, even when the route loads sooner
+DESTINATION_MAX_CHARS = 32
 CAR_ANCHOR = 0.68            # the car sits below center so more road ahead is visible
 ZOOM_SLOW_M_PER_PX = 0.9     # parking-lot and city detail
 ZOOM_FAST_M_PER_PX = 3.4     # highway overview
@@ -276,6 +278,7 @@ class MapInput:
   navigation_active: bool = False
   satellites: int | None = None
   gps_wait_seconds: float = 0.0
+  destination: str = ''                             # where navigation is going: "Home", "Work" or the place name
 
 
 class TileReader:
@@ -424,6 +427,7 @@ class MapOverlay:
     self._route_key: tuple | None = None
     self._route_world: np.ndarray | None = None
     self._route_last_shown: float | None = None   # clock time the route was last available this navigation session
+    self._starting_since: float | None = None     # clock time "Starting navigation" went up
     self._generation_built = -1
     # Smoothed display state.
     self._world: tuple[float, float] | None = None
@@ -477,11 +481,24 @@ class MapOverlay:
       self._route_last_shown = now
     elif not data.navigation_active:
       self._route_last_shown = None
+    if not data.navigation_active:
+      self._starting_since = None
+    elif self._waiting_for_route(data, now):
+      if self._starting_since is None:
+        self._starting_since = now
+    elif self._starting_since is not None and now - self._starting_since >= STARTING_OVERLAY_MIN_SECONDS:
+      self._starting_since = None
+
+  def _waiting_for_route(self, data: MapInput, now: float) -> bool:
+    """Navigation is active without a route: at once on a fresh start, after a grace period once a route was lost."""
+    return (data.navigation_active and self._route_world is None and
+            (self._route_last_shown is None or now - self._route_last_shown >= ROUTE_STALE_OVERLAY_SECONDS))
 
   def _starting_navigation(self) -> bool:
-    """Navigation is active without a route: at once on a fresh start, after a grace period once a route was lost."""
-    return (self._input.navigation_active and self._route_world is None and
-            (self._route_last_shown is None or self.clock() - self._route_last_shown >= ROUTE_STALE_OVERLAY_SECONDS))
+    """While waiting for the route, and for a short minimum so the card can be read when the route is quick."""
+    now = self.clock()
+    return self._waiting_for_route(self._input, now) or (
+      self._input.navigation_active and self._starting_since is not None and now - self._starting_since < STARTING_OVERLAY_MIN_SECONDS)
 
   # ---- canvas planning
 
@@ -707,7 +724,7 @@ class MapOverlay:
       self._draw_gps_status(rect)
       return
     if self._starting_navigation():
-      self._draw_starting_navigation(rect, opacity)
+      self._draw_starting_navigation(rect)
       return
     text = "" if self.has_roads or self._canvas_request is None else "No map data here yet"
     if text and self.fonts is not None:
@@ -716,25 +733,32 @@ class MapOverlay:
       self.fonts.draw(text, FontRole.MEDIUM, 26, rect.x + (rect.width - measured.width) / 2,
                       rect.y + rect.height * CAR_ANCHOR + 40, rl.Color(225, 228, 238, round(200 * opacity)))
 
-  def _draw_starting_navigation(self, rect: rl.Rectangle, opacity: float) -> None:
-    """Shown while navigation is starting but its route has not arrived to draw yet."""
+  def _draw_starting_navigation(self, rect: rl.Rectangle) -> None:
+    """Shown while navigation is starting; solid whatever the map's opacity so it always reads."""
     if self.fonts is None:
       return
     from openpilot.starpilot.ui.presentation import FontRole
     scale = max(.7, min(1.0, rect.width / 560, rect.height / 420))
     inset, padding = 20 * scale, 14 * scale
     width = rect.width - 2 * inset
-    rows = [('Starting navigation', FontRole.SEMI_BOLD, 26), ('Finding your route…', FontRole.NORMAL, 18)]
+    destination = self._input.destination.strip()
+    if len(destination) > DESTINATION_MAX_CHARS:
+      destination = destination[:DESTINATION_MAX_CHARS - 1].rstrip() + '…'
+    rows = [('Starting navigation', FontRole.SEMI_BOLD, 26)]
+    if destination:
+      rows.append((f'to {destination}', FontRole.MEDIUM, 22))
+    if self._route_world is None:
+      rows.append(('Finding your route…', FontRole.NORMAL, 18))
     scale = min(scale, *(max(1, width - 2 * padding) / self.fonts.measure(text, role, size).width
                          for text, role, size in rows))
     height = (len(rows) * 32 + 22) * scale
     card = rl.Rectangle(rect.x + inset, rect.y + rect.height - inset - height, width, height)
-    rl.draw_rectangle_rounded(card, .2, 8, rl.Color(15, 13, 23, round(235 * opacity)))
+    rl.draw_rectangle_rounded(card, .2, 8, rl.Color(15, 13, 23, 255))
     y = card.y + 10 * scale
     for text, role, size in rows:
       measured = self.fonts.measure(text, role, size * scale)
       self.fonts.draw(text, role, size * scale, card.x + (card.width - measured.width) / 2, y,
-                      rl.Color(225, 228, 238, round(255 * opacity)))
+                      rl.Color(225, 228, 238, 255))
       y += 32 * scale
 
   def _draw_gps_status(self, rect: rl.Rectangle) -> None:
@@ -797,10 +821,11 @@ class MapFeed:
     self._route_valid_until = 0
     self._route: tuple[tuple[float, float], ...] = ()
     self._navigation_active = False
+    self._destination = ''
     self._acquisition = acquisition if acquisition is not None else GpsAcquisition()
     self._acquisition_polled = -math.inf
 
-  def read(self, navigation_sm=None, *, navigation_requested=None) -> MapInput:
+  def read(self, navigation_sm=None, *, navigation_requested=None, destination=None) -> MapInput:
     from openpilot.starpilot.gps.source import bearing, select_location
     self.sm.update(0)
     now = time.monotonic()
@@ -836,6 +861,7 @@ class MapFeed:
           from openpilot.starpilot.navigation.wire import navigation_state
           nav = navigation_state(navigation_sm["starpilotNavigation"]) if navigation_sm.valid["starpilotNavigation"] else None
           active = bool(nav is not None and nav.enabled and nav.destinationName)
+          self._destination = nav.destinationName if active else ''
           self._route_valid_until = 0
           if (nav is not None and nav.enabled and nav.status in ("guiding", "arrived") and
               0 < nav.frameMonoTime <= now_ns <= nav.frameMonoTime + 3_000_000_000):
@@ -856,7 +882,7 @@ class MapFeed:
       acquisition_elapsed = now - acquisition_since
     return MapInput(self._fix, route, active if navigation_requested is None else navigation_requested,
                     None if fresh else self._acquisition.satellites(now),
-                    acquisition_elapsed)
+                    acquisition_elapsed, self._destination if destination is None else destination)
 
 
 # ---------------------------------------------------------------- parked preview

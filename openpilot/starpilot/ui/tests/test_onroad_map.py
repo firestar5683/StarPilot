@@ -329,6 +329,8 @@ def test_map_feed_waiting_tracks_satellites_and_keeps_navigation_requested(monke
   clock[0] += 75
   data = feed.read(navigation_sm)
   assert (data.navigation_active, data.satellites, data.gps_wait_seconds) == (True, 3, 75)
+  assert data.destination == 'Home'
+  assert feed.read(navigation_sm, destination='Work').destination == 'Work'
   assert feed.read(navigation_sm, navigation_requested=False).navigation_active is False
   sm.put('starpilotCarState', int(clock[0] * 1e9))
   data = feed.read(navigation_sm)
@@ -381,9 +383,22 @@ def test_starting_navigation_overlay_until_route_is_drawn(tmp_path):
   try:
     rect = rl.Rectangle(100, 200, 560, 420)
     overlay._input = MapInput(MapFix(*CENTER, 0, 0, 100), navigation_active=True)
-    with patch('pyray.draw_rectangle_rounded'):
-      overlay._draw_starting_navigation(rect, 1.0)
+    with patch('pyray.draw_rectangle_rounded') as card:
+      overlay._draw_starting_navigation(rect)
     assert [call.args[0] for call in fonts.draw.call_args_list] == ['Starting navigation', 'Finding your route…']
+    assert card.call_args.args[3].a == 255, 'solid whatever the map opacity'
+    assert all(call.args[5].a == 255 for call in fonts.draw.call_args_list)
+    fonts.draw.reset_mock()
+    overlay._input = MapInput(MapFix(*CENTER, 0, 0, 100), navigation_active=True, destination='Work')
+    with patch('pyray.draw_rectangle_rounded'):
+      overlay._draw_starting_navigation(rect)
+    assert [call.args[0] for call in fonts.draw.call_args_list] == ['Starting navigation', 'to Work', 'Finding your route…']
+    fonts.draw.reset_mock()
+    overlay._input = MapInput(MapFix(*CENTER, 0, 0, 100), navigation_active=True, destination='A' * 40)
+    overlay._route_world = np.zeros((2, 2))
+    with patch('pyray.draw_rectangle_rounded'):
+      overlay._draw_starting_navigation(rect)
+    assert [call.args[0] for call in fonts.draw.call_args_list] == ['Starting navigation', 'to ' + 'A' * 31 + '…']
   finally:
     overlay.close()
 
@@ -400,11 +415,38 @@ def test_lost_route_only_restores_starting_overlay_after_ten_seconds(tmp_path):
       overlay._track_route(data, clock[0])
       return overlay._starting_navigation()
     assert step(MapInput(fix, (), True))            # never had a route: show immediately
+    clock[0] += 5
     assert not step(MapInput(fix, route, True))
     clock[0] += 5
     assert not step(MapInput(fix, (), True))        # brief gap: no flash
     clock[0] += 6
     assert step(MapInput(fix, (), True))
+  finally:
+    overlay.close()
+
+
+def test_starting_overlay_stays_up_briefly_when_the_route_loads_fast(tmp_path):
+  clock = [100.0]
+  overlay = MapOverlay(tmp_path, clock=lambda: clock[0])
+  try:
+    route = tuple((CENTER[0] + i * 1e-4, CENTER[1]) for i in range(4))
+    fix = MapFix(*CENTER, 0, 0, 100)
+    def step(data):
+      overlay._input = data
+      overlay._route(data.route)
+      overlay._track_route(data, clock[0])
+      return overlay._starting_navigation()
+    assert step(MapInput(fix, (), True))
+    clock[0] += .5
+    assert step(MapInput(fix, route, True)), 'route already loaded, still readable'
+    clock[0] += 4.4
+    assert step(MapInput(fix, route, True))
+    clock[0] += .2
+    assert not step(MapInput(fix, route, True))
+    assert not step(MapInput(fix, (), False))
+    clock[0] += 1
+    assert step(MapInput(fix, (), True)), 'a new navigation starts the card again'
+    assert not step(MapInput(fix, (), False)), 'ending navigation drops it at once'
   finally:
     overlay.close()
 

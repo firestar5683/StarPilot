@@ -7,6 +7,17 @@ from openpilot.starpilot.ui.onroad_customization import widget_order
 from openpilot.starpilot.ui.navigation_favorites_state import favorite_visible
 
 
+def destination_label(document):
+  """"Home" or "Work" when the active destination is that favorite, else its place name; '' when not navigating."""
+  destination = document['destination'] if document is not None else None
+  if destination is None:
+    return ''
+  place = next((row for row in document['favorites'] if row.get('id') == destination['id']), None)
+  if place is not None and place.get('label') in ('home', 'work'):
+    return place['label'].title()
+  return destination.get('name', '')
+
+
 class ProjectionFavorites:
   def __init__(self, authorized, owner=None):
     self.authorized = authorized

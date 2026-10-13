@@ -26,6 +26,14 @@ class BookmarkSender:
     self.sock.close()
 
 
+def request_bookmark(sender, ui_state, display_message, now_ns):
+  """Send a tap while car state is live. Taps are handled after a ~25 ms draw, past current_message's
+  20 ms carState limit, so allow display_message's frame gap; the native UI re-checks before bookmarking."""
+  if not ui_state.started or display_message(ui_state.sm, 'carState', now_ns, after_frame=ui_state.started_frame) is None:
+    return False
+  return sender.send(int(ui_state.sm.logMonoTime['carState']))
+
+
 class BookmarkReceiver:
   def __init__(self, path=DEFAULT_SOCKET):
     self.path = str(path)

@@ -98,3 +98,27 @@ def test_sender_is_best_effort_when_native_ui_unavailable(tmp_path):
     assert not sender.send(50)
   finally:
     sender.close()
+
+
+def test_tap_after_a_frame_draw_still_sends(transport):
+  # The car screen reads car state, draws for ~25 ms, then handles taps: past carState's 20 ms control limit.
+  import time
+  from openpilot.starpilot.system.android_auto.projection_bookmark import request_bookmark
+  from openpilot.starpilot.ui.runtime_snapshot import current_message, display_message
+  receiver, sender = transport
+  now = time.monotonic_ns()
+
+  class SubMaster(NS):
+    def __getitem__(self, service):
+      return f'{service} message'
+
+  def ui(age_ns, *, started=True, valid=True):
+    sm = SubMaster(logMonoTime={'carState': now - age_ns}, valid={'carState': valid}, alive={'carState': True},
+                   recv_frame={'carState': 5})
+    return NS(started=started, started_frame=1, sm=sm)
+  assert current_message(ui(30_000_000).sm, 'carState', now, after_frame=1) is None, 'the old check dropped every tap'
+  assert request_bookmark(sender, ui(30_000_000), display_message, now)
+  assert receiver.drain(time.monotonic_ns(), now - 30_000_000, authorized=True) == 1
+  for state in (ui(300_000_000), ui(30_000_000, started=False), ui(30_000_000, valid=False)):
+    assert not request_bookmark(sender, state, display_message, now)
+  assert receiver.drain(time.monotonic_ns(), now, authorized=True) == 0

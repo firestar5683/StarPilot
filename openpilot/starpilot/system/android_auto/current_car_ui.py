@@ -164,7 +164,7 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
   from openpilot.starpilot.system.android_auto.headless_egl import FrameReadback, HeadlessContext
   from openpilot.starpilot.system.android_auto import gpu_nv12
   from openpilot.starpilot.system.android_auto.projection_control import DEFAULT_CONTROL_SOCKET, NATIVE_FOCUS, ProjectionControlSender
-  from openpilot.starpilot.system.android_auto.projection_bookmark import BookmarkSender
+  from openpilot.starpilot.system.android_auto.projection_bookmark import BookmarkSender, request_bookmark
   from openpilot.starpilot.system.android_auto.projection_onroad import ProjectionOnroad
   from openpilot.starpilot.system.android_auto.touch import TouchReceiver, DEFAULT_TOUCH_SOCKET
   import pyray as rl
@@ -205,13 +205,10 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
     bookmark_sender = BookmarkSender()
     resources.callback(bookmark_sender.close)
 
-    def bookmark():
-      if (not ui_state.started or layout.native.current_message(ui_state.sm, 'carState', time.monotonic_ns(),
-                                                               after_frame=ui_state.started_frame) is None):
-        return False
-      return bookmark_sender.send(int(ui_state.sm.logMonoTime['carState']))
-
-    layout.bookmark = bookmark
+    layout.bookmark = lambda: request_bookmark(bookmark_sender, ui_state, layout.native.display_message, time.monotonic_ns())
+    # Confirm only what was really saved: the bookmark the native UI publishes, whichever button asked for it.
+    from openpilot.cereal import messaging
+    saved_bookmarks = messaging.sub_sock('userBookmark', conflate=True)
     from openpilot.starpilot.system.android_auto.projection_slc_action import SlcActionSender
     slc_sender = SlcActionSender()
     resources.callback(slc_sender.close)
@@ -352,6 +349,8 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
       frame_began = time.monotonic()
       context.begin_frame(now)
       ui_state.update()
+      if messaging.recv_one_or_none(saved_bookmarks) is not None and ui_state.started:
+        layout.bookmark_saved()
       if sampler is not None:
         sampler.onroad = ui_state.started
       layout.prepare()  # offscreen passes (the map) must not run inside the content target

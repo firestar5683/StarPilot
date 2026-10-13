@@ -10,7 +10,7 @@ import pytest
 
 from openpilot.starpilot.navigation.owner import NavigationOwner, destination
 from openpilot.starpilot.system.android_auto.current_car_ui import projected_touches
-from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites
+from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites, destination_label
 from openpilot.starpilot.system.android_auto.projection_geometry import projection_geometry
 from openpilot.starpilot.system.android_auto.projection_layout import (
   BOOKMARK_WIDGET, CAR_EXIT, FAVORITE_WIDGETS, default_layout_for_viewport, layout_metadata_for_viewport, projection_customization,
@@ -35,6 +35,17 @@ def favorites(tmp_path, monkeypatch):
   control.refresh(force=True)
   yield control
   control.close()
+
+
+def test_destination_label_names_home_and_work(favorites):
+  document = favorites.document
+  home, work = document['favorites']
+  assert destination_label(None) == ''
+  assert destination_label(document) == ''
+  assert destination_label({**document, 'destination': home}) == 'Home'
+  assert destination_label({**document, 'destination': work}) == 'Work'
+  other = destination({'name': 'Costco', 'latitude': 36.3, 'longitude': -115.3})
+  assert destination_label({**document, 'destination': other}) == 'Costco'
 
 
 def state(*, ordered=False):
