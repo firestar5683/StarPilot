@@ -656,6 +656,11 @@ input[type="range"].gx-slider:active::-moz-range-thumb {
 /* Tap-area overlay label sits on the preview while the grid toggle is on. */
 .gx-layout__preview-card > .gx-layout__stage { position: relative; margin-inline: 0; min-width: 0; }
 .gx-layout__stage-chip { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #b799ff88; border-radius: var(--radius-full); background: rgba(22, 18, 31, .82); color: #d8c8ff; font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; pointer-events: none; }
+.gx-layout__stage-chip--start { right: auto; left: 6px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; display: block; }
+.gx-layout__stage-chip--with-tap-areas { max-width: calc(100% - 120px); }
+.gx-layout__guide { stroke: #b799ff; stroke-width: 1.5; }
+.gx-layout__guide--center { stroke-dasharray: 6 4; }
+.gx-layout__guide--bounds, .gx-layout__guide--zone { stroke: #8495a8; }
 
 /* On narrow editors a pinned save bar also covers the strip behind the app bar, so the editor never scrolls up
    behind the search. The fill stays inside the editor column and follows the bar's rounded corners. Its outline is

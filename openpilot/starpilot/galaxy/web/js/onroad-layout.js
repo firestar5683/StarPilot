@@ -8,6 +8,7 @@ import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
 import { GxDialog } from "./dialog.js"
 import { GalaxySettingRow, switchRow } from "./galaxy-setting-row.js"
+import { snapTargets, snapMove, snapResize, snapThreshold } from "./layout-snap.js"
 
 import { PROFILES, ROAD_COLORS, PATH_MODES, HEX, PROJECTION_DISPLAY_SWITCHES, layoutDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
 export { layoutDocument, withDisplay, orderedWidgetIds, widgetPalette, withAlpha, widgetSize, placementLimits, clampBox, clampPlacement, overlapsReserved, previewPoint, validDocument, validSnapshot } from "./onroad-layout-document.js"
@@ -29,6 +30,10 @@ function loadPreviewVisibility(projection) {
   return hidden
 }
 const clone = (value) => JSON.parse(JSON.stringify(value))
+const snapPreferenceKey = "gx-layout-snap-v1"
+function loadSnapPreference() {
+  try { return localStorage.getItem(snapPreferenceKey) !== "0" } catch { return true }
+}
 
 // Open maker pages; a route switch briefly mounts the next editor before the last one leaves.
 let makerPagesOpen = 0
@@ -269,7 +274,7 @@ export const OnroadLayoutPage = {
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false,
       aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, stuck: { leaveBar: false, pinned: false, sections: false }, openColor: null, art: { status: "idle", error: "", url: null, sprites: null }, preview: { status: "idle", error: "", url: null },
-      hiddenPreviewWidgets: loadPreviewVisibility(props.projection), history: { undo: [], redo: [], group: null }
+      hiddenPreviewWidgets: loadPreviewVisibility(props.projection), snapEnabled: loadSnapPreference(), snapGuides: [], history: { undo: [], redo: [], group: null }
     })
     let deferred = null
     const apply = (update) => {
@@ -399,6 +404,16 @@ export const OnroadLayoutPage = {
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
     selectedPosition() { return this.layout?.[this.state.selected] },
     selectedSize() { return this.selectedWidget ? widgetSize(this.selectedWidget, this.selectedPosition) : [0, 0] },
+    snapSummary() {
+      const guides = this.state.snapGuides, centred = new Set(guides.filter(guide => guide.kind === "center").map(guide => guide.axis))
+      if (centred.size === 2) return "Centred on the screen"
+      // A centred axis is described once; the other axis still says what it lines up with.
+      const labels = [...new Set(guides.filter(guide => !centred.has(guide.axis)).map(guide => guide.label))]
+      const others = labels.filter(label => label !== "the edge").slice(0, 2)
+      const text = [centred.has("x") ? "centred across" : centred.has("y") ? "centred top to bottom" : "",
+        labels.includes("the edge") ? "at the edge" : "", others.length ? "lined up with " + others.join(" and ") : ""].filter(Boolean).join(", ")
+      return text && text[0].toUpperCase() + text.slice(1)
+    },
     selectedColors() { return this.selectedWidget ? this.widgetColors(this.state.selected) : {} },
     colorFields() {
       return (this.state.data?.metadata.paletteFields || []).filter((field) =>
@@ -446,6 +461,11 @@ export const OnroadLayoutPage = {
   methods: {
     switchRow,
     runtimeWidget(id) { return this.profile?.runtimePreviewWidgets?.includes(id) === true },
+    toggleSnap() {
+      if (this.state.drag || this.state.layerDrag) return
+      this.state.snapEnabled = !this.state.snapEnabled
+      try { localStorage.setItem(snapPreferenceKey, this.state.snapEnabled ? "1" : "0") } catch { }
+    },
     previewHidden(id) { return !(this.projection && id === "car_exit") && this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
     togglePreviewVisibility(id) {
       if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit")) return
@@ -518,6 +538,7 @@ export const OnroadLayoutPage = {
     },
     selectPreview(mode) {
       if (this.state.drag) return
+      this.state.snapGuides = []
       this.state.previewMode = mode
       if (mode === "device") this.showDevicePreview()
     },
@@ -692,6 +713,7 @@ export const OnroadLayoutPage = {
       }
     },
     hideDevicePreview() {
+      this.state.snapGuides = []
       this.state.previewMode = "layout"
       this.state.devicePreviewOpen = false
       if (this.previewFeed.active) this.previewFeed.stop()
@@ -699,6 +721,7 @@ export const OnroadLayoutPage = {
     },
     selectProfile(profile) {
       if (!this.availableProfiles.includes(profile) || this.state.drag) return
+      this.state.snapGuides = []
       this.finishColorEdit()
       this.state.profile = profile
       this.state.selected = Object.keys(this.profile.widgets)[0] || null
@@ -947,17 +970,45 @@ export const OnroadLayoutPage = {
     moveDrag(event) {
       const drag = this.state.drag
       if (!drag || drag.pointerId !== event.pointerId) return
-      const point = previewPoint(event, this.$refs.preview.getBoundingClientRect(), this.profile)
+      const rect = this.$refs.preview.getBoundingClientRect(), point = previewPoint(event, rect, this.profile)
+      this.state.snapGuides = []
       if (!point) return
-      if (drag.resize) { this.resizeBox(drag.id, point.x - drag.offsetX, point.y - drag.offsetY); return }
+      const snapping = this.state.snapEnabled && !event.altKey
+      if (drag.resize) {
+        const raw = { width: point.x - drag.offsetX, height: point.y - drag.offsetY }, position = this.layout[drag.id]
+        if (snapping) {
+          drag.targets ||= snapTargets(this.profile, this.layout, drag.id, id => !this.previewHidden(id))
+          const snapped = snapResize({ x: position.x, y: position.y, ...raw }, drag.targets, snapThreshold(this.profile, rect, event.pointerType))
+          if (this.resizeBox(drag.id, snapped.width, snapped.height)) {
+            if (position.width === snapped.width && position.height === snapped.height) this.state.snapGuides = snapped.guides
+            return
+          }
+        }
+        this.resizeBox(drag.id, raw.width, raw.height)
+        return
+      }
       // A finger wobbles a few pixels on every tap; only a deliberate move drags the widget.
       if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < DRAG_SLOP) return
       drag.moved = true
       drag.inside = point.x >= 0 && point.y >= 0 && point.x <= this.profile.width && point.y <= this.profile.height
       if (!drag.fromTray || drag.inside) {
-        const x = point.x - drag.offsetX, y = point.y - drag.offsetY
-        if (drag.fromTray) drag.inside = clampPlacement(this.profile, drag.id, x, y, this.layout) !== null
-        this.changePosition(drag.id, x, y)
+        const raw = { x: point.x - drag.offsetX, y: point.y - drag.offsetY }
+        let next = raw
+        if (snapping) {
+          const [width, height] = widgetSize(this.profile.widgets[drag.id], this.layout[drag.id])
+          drag.targets ||= snapTargets(this.profile, this.layout, drag.id, id => !this.previewHidden(id))
+          // Pushing past an edge parks the widget on it, so snap from where the clamp will leave it.
+          const { minX, maxX, minY, maxY } = placementLimits(this.profile, drag.id, this.layout)
+          const inside = { x: Math.max(minX, Math.min(maxX, raw.x)), y: Math.max(minY, Math.min(maxY, raw.y)) }
+          const snapped = snapMove({ ...inside, width, height }, drag.targets, snapThreshold(this.profile, rect, event.pointerType))
+          const clamped = clampPlacement(this.profile, drag.id, snapped.x, snapped.y, this.layout)
+          if (clamped) {
+            next = snapped
+            if (clamped.x === Math.round(snapped.x) && clamped.y === Math.round(snapped.y)) this.state.snapGuides = snapped.guides
+          }
+        }
+        if (drag.fromTray) drag.inside = clampPlacement(this.profile, drag.id, next.x, next.y, this.layout) !== null
+        this.changePosition(drag.id, next.x, next.y)
       }
       if (drag.fromTray) this.layout[drag.id].enabled = drag.inside
     },
@@ -973,6 +1024,7 @@ export const OnroadLayoutPage = {
     },
     releaseDrag() {
       const id = this.state.drag?.pointerId
+      this.state.snapGuides = []
       this.state.drag = null
       if (this._dragTarget?.hasPointerCapture?.(id)) this._dragTarget.releasePointerCapture(id)
       this._dragTarget = null
@@ -1167,6 +1219,7 @@ export const OnroadLayoutPage = {
                   <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'layout'" :disabled="!!state.drag" @click="selectPreview('layout')"><span>Arrange<span class="gx-layout__long"> widgets</span></span></button>
                   <button class="gx-btn gx-btn--tonal" :aria-pressed="state.previewMode === 'device'" :disabled="!!state.drag" @click="selectPreview('device')"><span>Device<span class="gx-layout__long"> preview</span></span></button>
                 </nav>
+                <button v-if="state.previewMode === 'layout'" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.snapEnabled" :disabled="!!state.drag || !!state.layerDrag" aria-label="Snap to edges and centres" title="Snap to edges and centres" @click="toggleSnap"><i class="bi bi-magnet" aria-hidden="true"></i></button>
                 <button v-if="!projection && profile.inputZones?.length" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showFavoriteZones" aria-label="Show Favorite tap areas" title="Show Favorite tap areas" @click="state.showFavoriteZones = !state.showFavoriteZones"><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-expanded="state.tipsOpen" aria-controls="gx-layout-tips" aria-label="Preview tips and display behavior" title="Preview tips and display behavior" @click="state.tipsOpen = !state.tipsOpen"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
               </div>
@@ -1176,6 +1229,7 @@ export const OnroadLayoutPage = {
               </div>
               <p v-if="state.previewMode === 'layout' && state.art.status === 'unavailable'" class="gx-note" role="status">Widget preview unavailable. Placement controls remain available.</p>
               <div class="gx-layout__stage">
+              <span v-if="state.snapGuides.length" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones}" aria-hidden="true">{{ snapSummary }}</span>
               <span v-if="!projection && state.showFavoriteZones && state.previewMode === 'layout'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <svg v-show="state.previewMode === 'layout'" ref="preview" class="gx-layout__preview" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
                 @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
@@ -1230,6 +1284,11 @@ export const OnroadLayoutPage = {
                     <path d="M-6 6 L6 -6 M0 6 L6 0" stroke="#16121f" stroke-width="3" stroke-linecap="round" />
                   </g>
                 </g>
+                <g v-if="state.snapGuides.length" class="gx-layout__guides" aria-hidden="true" pointer-events="none">
+                  <line v-for="guide in state.snapGuides" :key="guide.axis + guide.value" :class="'gx-layout__guide gx-layout__guide--' + guide.kind"
+                    :x1="guide.axis === 'x' ? guide.value : 0" :x2="guide.axis === 'x' ? guide.value : profile.width"
+                    :y1="guide.axis === 'y' ? guide.value : 0" :y2="guide.axis === 'y' ? guide.value : profile.height" vector-effect="non-scaling-stroke" />
+                </g>
                 <rect v-if="selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
               </div>
@@ -1249,6 +1308,7 @@ export const OnroadLayoutPage = {
               </section>
               <div v-show="state.tipsOpen" id="gx-layout-tips" class="gx-layout__tips">
                 <p class="gx-note">Drag widgets in Arrange widgets to place them. Readings are samples.</p>
+                <p class="gx-note">Widgets snap to the screen edges, the centre and other widgets. Turn snapping off with the magnet button, or hold Option (Alt) while dragging.</p>
                 <p class="gx-note">Add Stopped timer to preview its minutes and seconds. Device preview renders the same widget as the driving screen; choose Stopped timer for a sample at rest.</p>
               <p class="gx-note">The steering wheel can be resized in each layout{{ projection ? ', and the map overlay takes any size and opacity' : '' }}. Existing display preferences and driving state still control when widgets appear.</p>
               <p v-if="!projection" class="gx-note">Small speed-limit signs can overlap confirmation actions. Live confirmations hide an overlapping sign until the decision ends. Select either widget in the list to edit it.</p>

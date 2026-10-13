@@ -145,6 +145,181 @@ function editor() {
   return { vm, event, emitted, calls, previewCalls, captures, publish }
 }
 
+// Snapping changes pointer placement only; a drag remains one history entry.
+const snappedDrag = editor(), snapVm = snappedDrag.vm
+const largePoint = (x, y, options = {}) => ({ ...snappedDrag.event(100 + x / 2, 100 + y / 2), pointerType: "mouse", ...options })
+snapVm.startDrag("current_speed", largePoint(640, 30))
+snapVm.moveDrag(largePoint(34, 430))
+assert.equal(snapVm.layout.current_speed.x, 30)
+assert.ok(snapVm.state.snapGuides.some(guide => guide.axis === "x" && guide.kind === "bounds"))
+assert.equal(snapVm.snapSummary, "At the edge")
+const cachedTargets = snapVm.state.drag.targets
+snapVm.moveDrag(largePoint(35, 430))
+assert.equal(snapVm.state.drag.targets, cachedTargets)
+snapVm.endDrag(largePoint(34, 430))
+assert.deepEqual(snapVm.state.snapGuides, [])
+assert.equal(snapVm.state.history.undo.length, 1)
+snapVm.undo()
+assert.deepEqual(snapVm.layout.current_speed, snapshot().document.layouts.large.current_speed)
+for (const bypass of ["alt", "disabled"]) {
+  const free = editor().vm
+  if (bypass === "disabled") free.state.snapEnabled = false
+  free.startDrag("current_speed", largePoint(640, 30))
+  free.endDrag(largePoint(34, 430, { altKey: bypass === "alt" }))
+  assert.equal(free.layout.current_speed.x, 34)
+  assert.deepEqual(free.state.snapGuides, [])
+}
+snapVm.startDrag("current_speed", largePoint(640, 30))
+snapVm.moveDrag(largePoint(34, 430))
+assert.ok(snapVm.state.snapGuides.length)
+snapVm.cancelDrag()
+assert.deepEqual(snapVm.layout.current_speed, snapshot().document.layouts.large.current_speed)
+assert.deepEqual(snapVm.state.snapGuides, [])
+snapVm.changePosition("current_speed", 34, 430)
+snapVm.onKey("current_speed", { key: "ArrowLeft", preventDefault() {} })
+assert.equal(snapVm.layout.current_speed.x, 33)
+snapVm.onKey("current_speed", { key: "ArrowRight", shiftKey: true, preventDefault() {} })
+assert.equal(snapVm.layout.current_speed.x, 43)
+assert.deepEqual(snapVm.state.snapGuides, [])
+
+for (const pointerType of ["mouse", "touch"]) {
+  const phone = editor().vm
+  phone.$refs.preview.getBoundingClientRect = () => ({ left: 0, top: 0, width: 360, height: 180 })
+  for (const id of Object.keys(phone.layout)) if (id !== "current_speed") phone.state.hiddenPreviewWidgets.large[id] = true
+  const phonePoint = (x, y) => ({ ...snappedDrag.event(x / 6, y / 6), pointerType })
+  phone.startDrag("current_speed", phonePoint(640, 30))
+  phone.endDrag(phonePoint(75, 430))
+  assert.equal(phone.layout.current_speed.x, pointerType === "touch" ? 30 : 75)
+}
+const targetVisibility = editor().vm
+targetVisibility.profile.widgets.pip = { ...widget("Side camera", "pip_camera", 60, 60, 400, 300), layer: "underlay" }
+targetVisibility.layout.pip = { x: 400, y: 300, enabled: true }
+targetVisibility.startDrag("current_speed", largePoint(640, 30))
+targetVisibility.moveDrag(largePoint(464, 430))
+assert.equal(targetVisibility.layout.current_speed.x, 460)
+assert.ok(targetVisibility.state.snapGuides.some(guide => guide.label === "Side camera"))
+targetVisibility.cancelDrag()
+targetVisibility.togglePreviewVisibility("pip")
+targetVisibility.startDrag("current_speed", largePoint(640, 30))
+targetVisibility.moveDrag(largePoint(464, 430))
+assert.equal(targetVisibility.layout.current_speed.x, 464)
+targetVisibility.cancelDrag()
+targetVisibility.startDrag("current_speed", largePoint(640, 30))
+targetVisibility.moveDrag(largePoint(443, 430))
+assert.equal(targetVisibility.layout.current_speed.x, 443, "torque arc footprint must not attract other widgets")
+targetVisibility.cancelDrag()
+
+const invalidSnap = editor().vm
+invalidSnap.selectProfile("compact")
+invalidSnap.$refs.preview.getBoundingClientRect = () => ({ left: 0, top: 0, width: 536, height: 240 })
+invalidSnap.state.hiddenPreviewWidgets.compact.speed_limit_actions = true
+const smallPoint = (x, y) => ({ ...snappedDrag.event(x, y), pointerType: "mouse" })
+invalidSnap.startDrag("max_speed", smallPoint(0, 0))
+invalidSnap.moveDrag(smallPoint(100, 18)) // Speed limit's top attracts to y=20, overlapping protected actions.
+assert.equal(clampPlacement(invalidSnap.profile, "max_speed", 100, 20, invalidSnap.layout), null)
+assert.deepEqual(invalidSnap.layout.max_speed, { x: 100, y: 18, enabled: true })
+assert.deepEqual(invalidSnap.state.snapGuides, [])
+assert.equal(invalidSnap.state.placementError, "")
+invalidSnap.moveDrag(smallPoint(100, 100))
+assert.deepEqual(invalidSnap.layout.max_speed, { x: 100, y: 18, enabled: true })
+assert.ok(invalidSnap.state.placementError)
+invalidSnap.cancelDrag()
+
+const traySnap = editor().vm
+traySnap.layout.current_speed.enabled = false
+traySnap.startDrag("current_speed", largePoint(2400, 0), true)
+traySnap.moveDrag(largePoint(324, 550)) // Widget centre follows the tray pointer.
+assert.equal(traySnap.layout.current_speed.x, 30)
+assert.equal(traySnap.layout.current_speed.enabled, true)
+assert.ok(traySnap.state.snapGuides.length)
+traySnap.moveDrag(largePoint(2400, 550))
+assert.equal(traySnap.layout.current_speed.enabled, false)
+assert.deepEqual(traySnap.state.snapGuides, [])
+traySnap.cancelDrag()
+assert.equal(traySnap.layout.current_speed.enabled, false)
+
+const clampedSnap = editor().vm
+clampedSnap.profile.widgets.driver_monitor.bounds = { x: 30, y: 30, width: 300, height: 1020 }
+clampedSnap.layout.current_speed.x = 184
+clampedSnap.startDrag("driver_monitor", largePoint(88, 808))
+clampedSnap.moveDrag(largePoint(187, 400)) // Current speed at 184 is beyond the mover's own bounds.
+assert.equal(clampedSnap.layout.driver_monitor.x, 138)
+assert.deepEqual(clampedSnap.state.snapGuides.filter(guide => guide.axis === "x"),
+  [{ axis: "x", value: 330, kind: "bounds", label: "the edge" }], "a clamped widget reports the edge it rests on, not the target it missed")
+clampedSnap.moveDrag(largePoint(400, 400)) // Pushed far past the edge, it still reports resting on it.
+assert.equal(clampedSnap.layout.driver_monitor.x, 138)
+assert.ok(clampedSnap.state.snapGuides.some(guide => guide.axis === "x" && guide.value === 330 && guide.kind === "bounds"))
+clampedSnap.cancelDrag()
+
+const resizeSnap = editor().vm
+resizeSnap.profile.widgets.map = { ...widget("Map", "nav_map", 200, 200, 300, 300),
+  box: { minWidth: 100, maxWidth: 1000, minHeight: 100, maxHeight: 1000 } }
+resizeSnap.layout.map = { x: 300, y: 300, width: 200, height: 200, enabled: true }
+const resizePoint = (x, y, options = {}) => ({ ...largePoint(x, y, options), stopPropagation() {} })
+resizeSnap.startResize("map", resizePoint(500, 500))
+resizeSnap.moveDrag(resizePoint(564, 671))
+assert.deepEqual([resizeSnap.layout.map.width, resizeSnap.layout.map.height], [268, 375])
+assert.deepEqual([resizeSnap.layout.map.x, resizeSnap.layout.map.y], [300, 300])
+assert.equal(resizeSnap.state.snapGuides.length, 2)
+resizeSnap.endDrag(resizePoint(564, 671))
+assert.deepEqual(resizeSnap.state.snapGuides, [])
+assert.equal(resizeSnap.state.history.undo.length, 1)
+resizeSnap.undo()
+resizeSnap.startResize("map", resizePoint(500, 500))
+resizeSnap.moveDrag(resizePoint(564, 671, { altKey: true }))
+assert.deepEqual([resizeSnap.layout.map.width, resizeSnap.layout.map.height], [264, 371])
+assert.deepEqual(resizeSnap.state.snapGuides, [])
+resizeSnap.cancelDrag()
+resizeSnap.profile.widgets.map.box.maxWidth = 250
+resizeSnap.startResize("map", resizePoint(500, 500))
+resizeSnap.moveDrag(resizePoint(564, 671))
+assert.equal(resizeSnap.layout.map.width, 250)
+assert.deepEqual(resizeSnap.state.snapGuides, [])
+resizeSnap.cancelDrag()
+
+const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage"), preferences = new Map()
+try {
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: key => preferences.get(key) ?? null, setItem: (key, value) => preferences.set(key, value)
+  } })
+  const preference = editor().vm
+  assert.equal(preference.state.snapEnabled, true)
+  preference.toggleSnap()
+  assert.equal(preferences.get("gx-layout-snap-v1"), "0")
+  assert.equal(editor().vm.state.snapEnabled, false)
+  assert.equal(OnroadLayoutPage.setup({ projection: true }).state.snapEnabled, false)
+  preference.toggleSnap()
+  assert.equal(preferences.get("gx-layout-snap-v1"), "1")
+  assert.equal(editor().vm.state.snapEnabled, true)
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("Storage blocked") } })
+  const blocked = editor().vm
+  assert.equal(blocked.state.snapEnabled, true)
+  blocked.toggleSnap()
+  assert.equal(blocked.state.snapEnabled, false)
+} finally {
+  if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage)
+  else delete globalThis.localStorage
+}
+for (const [guides, expected] of [
+  [[{ axis: "x", kind: "center" }, { axis: "y", kind: "center" }], "Centred on the screen"],
+  [[{ axis: "x", kind: "center" }], "Centred across"],
+  [[{ axis: "y", kind: "center" }], "Centred top to bottom"],
+  [[{ label: "Home" }, { label: "Home" }, { label: "Work" }], "Lined up with Home and Work"],
+  [[{ label: "the edge" }, { label: "Home" }], "At the edge, lined up with Home"],
+  [[{ axis: "x", kind: "center", label: "the centre" }, { axis: "y", kind: "bounds", label: "the edge" }], "Centred across, at the edge"],
+  [[{ axis: "y", kind: "center", label: "the centre" }, { axis: "x", kind: "widget", label: "Home" }, { axis: "y", kind: "widget", label: "Work" }],
+    "Centred top to bottom, lined up with Home"],
+]) {
+  snapVm.state.snapGuides = guides
+  assert.equal(snapVm.snapSummary, expected)
+}
+for (const clear of [() => snapVm.selectProfile("compact"), () => snapVm.selectPreview("device"), () => snapVm.hideDevicePreview()]) {
+  snapVm.state.snapGuides = [{ axis: "x", value: 30, kind: "bounds", label: "the edge" }]
+  clear()
+  assert.deepEqual(snapVm.state.snapGuides, [])
+}
+console.log("Layout snapping integration: drag, touch, targets, fallback, resize, history, preference and keyboard passed")
+
 // Layer visibility is local to the arrangement preview, including required widgets.
 for (const projection of [false, true]) {
   const visibility = editor().vm
