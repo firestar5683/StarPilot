@@ -82,11 +82,11 @@ class ModeConsumer:
     ):
       return self._reject('settings', fallback, now_ns)
     if not self.barrier_ns < model_ns:
-      return self._reject('model_barrier', fallback, now_ns)
+      return self._reject('model_barrier', fallback)
     if model_ns > now_ns or now_ns - model_ns > MODEL_MAX_AGE_NS:
       return self._reject('model_age', fallback, now_ns)
     if not self.barrier_ns < car_state_ns:
-      return self._reject('car_state_barrier', fallback, now_ns)
+      return self._reject('car_state_barrier', fallback)
     if car_state_ns > now_ns or now_ns - car_state_ns > LIFETIME_NS:
       return self._reject('car_state_age', fallback, now_ns)
     value = observation(state, now_ns)
