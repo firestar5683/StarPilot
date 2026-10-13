@@ -179,7 +179,7 @@ def conditional_handoff_for_frame(host: ConditionalPlannerHost | None, sm, CP, n
   return snapshot.owner_token, snapshot.revision, drive_id, verdict.selection.choice.value
 
 
-def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: int, *, now_boot_ns: int | None = None) -> bool:
+def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: int, *, now_boot_ns: int | None = None, sample_skew_ns: int = 0) -> bool:
   if (host is None or not CP.openpilotLongitudinalControl or CP.passive or CP.dashcamOnly or
       not 0 < drive_id <= now_ns or host.mode.drive_id != drive_id or
       not host.mode.projector.stop_detector.standstill_committed):
@@ -200,7 +200,9 @@ def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: in
     return False
   if not host._fresh_service(sm, 'modelV2', drive_id, now_ns):
     return False
-  if (now_boot_ns is None or now_boot_ns < now_ns or not sm.all_checks(NATIVE_PLAN_INPUTS) or
+  if (type(now_boot_ns) is not int or type(sample_skew_ns) is not int or
+      now_boot_ns <= 0 or not 0 <= sample_skew_ns <= 1_000_000 or
+      now_boot_ns < now_ns - sample_skew_ns // 2 or not sm.all_checks(NATIVE_PLAN_INPUTS) or
       not 0 < sm['modelV2'].timestampEof <= now_boot_ns or
       now_boot_ns - sm['modelV2'].timestampEof > 150_000_000):
     return False
@@ -627,7 +629,8 @@ def starpilot_main():
           phase_timing.mark("conditional_attach_return")
         apply_conditional_stop_hold(conditional_host, longitudinal_planner, sm, CP,
                                     clock_pair[0] if clock_pair is not None else now_ns, current_start_ns,
-                                    now_boot_ns=clock_pair[1] if clock_pair is not None else None)
+                                    now_boot_ns=clock_pair[1] if clock_pair is not None else None,
+                                    sample_skew_ns=clock_pair[2] if clock_pair is not None else 0)
         if traffic_owner is not None:
           traffic_profile_ready, traffic_profile_reason = traffic_profile_status(
             traffic_mode, profile_tuning, longitudinal_planner.last_profile,
