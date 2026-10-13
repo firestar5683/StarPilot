@@ -1537,6 +1537,7 @@ class SelfdriveD:
     if not self.conditional_replay:
       return
     assert self.conditional_settings is not None and self.conditional_consumer is not None
+    snapshot = self.conditional_settings.current
     clocks = paired_clocks_ns() if not REPLAY else None
     if clocks is None:
       self.conditional_consumer.invalidate(time.monotonic_ns())
@@ -1544,7 +1545,6 @@ class SelfdriveD:
       self.record_conditional_trace(time.monotonic_ns(), ('clock_unavailable',), ())
       return
     now_ns, boot_ns, skew_ns = clocks
-    snapshot = self.conditional_settings.current
     drive_id = int(self.sm['deviceState'].startedMonoTime)
     verdict = self.conditional_settings.verdict(snapshot, now_mono_ns=now_ns, drive_id=drive_id)
     configured = (verdict.status == 'ready' and verdict.selection is not None and

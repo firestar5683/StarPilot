@@ -336,7 +336,7 @@ class TransportPauseFeedback:
 
   def _temporary_steering_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
     """Keep an existing armed intent during isolated temporary EPS withdrawal."""
-    if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
+    if (not latched or self.failed or self.paused or self.retention_started_ns or
         not self.session or str(axis.sessionId) != self.session or not cs.steerFaultTemporary or
         cs.steerFaultPermanent or not cs.canValid or cs.canTimeout or
         str(axis.faultReason) != 'none' or
@@ -348,11 +348,33 @@ class TransportPauseFeedback:
         now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
       return False
     withdrawn = not axis.desiredLateral and not axis.lateralActive
-    # Card can parse the first temporary EPS sample before SD publishes its
-    # withdrawal. Retain only the already accepted original proof, still inside
-    # its original source/output lease; never synthesize a new output grant.
+    previous = self.signature
+    pending = bool(self.pending_event)
+    all_off = bool(withdrawn and not axis.desiredLongitudinal and not axis.longitudinalActive and str(axis.mode) == 'off')
+    if pending and (not all_off or previous is None or previous[5] != 'none' or
+        previous[0] != self.session or previous[7] != self.session or
+        previous[1] != self.sequence or previous[6] != self.pending_event or
+        previous[9] or previous[10] or previous[11] or previous[12] or
+        previous[14] != producer or previous[15] != self.availability_epoch or
+        axis.faultEventMonoTime != self.pending_event or
+        axis.sourceCarStateMonoTime < previous[8] or stamp < previous[2] or
+        not 0 < self.pending_event <= now_ns or now_ns - self.pending_event > AXIS_MAX_AGE_NS):
+      return False
+    # A fresh ACTIVE proof from the preceding healthy sample can arrive in
+    # Card's first temporary-EPS cycle. Accept its identity only while the
+    # previously accepted ACTIVE proof still has its original source/output
+    # lease. No permission deadline or healthy baseline is renewed here.
+    fresh_active_successor = bool(previous is not None and axis.sequence > self.sequence and
+      previous[5] == 'none' and previous[9] and previous[11] and previous[13] and
+      previous[6] == axis.faultEventMonoTime and previous[14] == producer and
+      previous[15] == self.availability_epoch and
+      axis.sourceCarStateMonoTime >= previous[8] and stamp >= previous[2] and
+      0 < previous[8] <= previous[2] <= now_ns <= previous[4] and
+      now_ns - previous[8] <= AXIS_MAX_AGE_NS and
+      0 < self.lateral_source_ns <= now_ns and
+      now_ns - self.lateral_source_ns <= AXIS_MAX_AGE_NS)
     held_original = bool(axis.desiredLateral and axis.lateralActive and axis.nativeAcknowledged and
-                         signature == self.signature)
+                         (signature == previous or fresh_active_successor))
     if not withdrawn and not held_original:
       return False
     event_ns = int(sm.logMonoTime['onroadEvents'])
@@ -361,10 +383,22 @@ class TransportPauseFeedback:
                        log.OnroadEvent.EventName.steerTempUnavailableSilent)
     if (not sm.seen['onroadEvents'] or not sm.valid['onroadEvents'] or not sm.alive['onroadEvents'] or
         not 0 < event_ns <= now_ns or now_ns - event_ns > 1_500_000_000 or
-        any(event.immediateDisable or event.softDisable and event.name != temporary_names[0] for event in events)):
+        any(event.immediateDisable or event.softDisable and event.name != temporary_names[0] for event in events) or
+        pending and any(event.userDisable for event in events)):
       return False
     temporary_event = any(event.name in temporary_names for event in events)
-    if withdrawn and not (temporary_event and axis.faultEventMonoTime == event_ns <= stamp):
+    matched_withdrawal = bool(temporary_event and axis.faultEventMonoTime == event_ns <= stamp)
+    original_active = bool(previous is not None and previous[0] == self.session and
+      previous[7] == self.session and previous[5] == 'none' and
+      previous[9] and previous[11] and previous[13] and previous[6] == event_ns and
+      axis.sourceCarStateMonoTime >= previous[8] and stamp >= previous[2] and
+      previous[14] == producer and previous[15] == self.availability_epoch and
+      0 < self.lateral_source_ns <= now_ns and now_ns - self.lateral_source_ns <= AXIS_MAX_AGE_NS)
+    pending_withdrawal = bool(all_off and not any(event.softDisable or event.userDisable for event in events) and
+      not temporary_event and 0 < event_ns < axis.faultEventMonoTime <= stamp and
+      now_ns - axis.faultEventMonoTime <= AXIS_MAX_AGE_NS and
+      (pending or original_active and axis.sequence > self.sequence))
+    if withdrawn and not (matched_withdrawal or pending_withdrawal):
       return False
     if held_original and not (
         axis.faultEventMonoTime == event_ns <= stamp and not any(event.softDisable for event in events) or
@@ -379,6 +413,14 @@ class TransportPauseFeedback:
         native.observedMonoTime < self.lateral_native_ns or
         (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) != self.lateral_inventory):
       return False
+    if pending_withdrawal:
+      # Keep only intent while this exact physical-EPS occurrence awaits its
+      # event socket. Duplicate/newer proofs cannot move the original anchor.
+      if not pending:
+        self.pending_event = int(axis.faultEventMonoTime)
+      self.awaiting = True
+    elif pending:
+      self.pending_event = 0
     return True
 
   def _honda_brake_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, brake_source_ns):

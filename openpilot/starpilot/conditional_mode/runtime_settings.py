@@ -7,7 +7,7 @@ neither this owner nor the codec writes Params or adopts legacy keys.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 import fcntl
 import os
@@ -188,13 +188,18 @@ class ConditionalSettingsOwner:
   def affirm(self, snapshot: SettingsSnapshot | None, *, now_mono_ns: int) -> bool:
     """Validate the current owner revision without another Params read."""
     current = self.current
+    verified = (current.verified_mono_ns if current is not None and type(now_mono_ns) is int and
+                current.verified_mono_ns <= now_mono_ns else
+                snapshot.verified_mono_ns if type(snapshot) is SettingsSnapshot else 0)
     return bool(
       type(snapshot) is SettingsSnapshot and current is not None and
       snapshot.owner_token == self.owner_token and snapshot.revision == current.revision and
       snapshot.observed_mono_ns == current.observed_mono_ns and
       current.document_state in (DocumentState.ABSENT, DocumentState.VALID) and
       current.safe_mode_state in (SafeModeState.ABSENT_FALSE, SafeModeState.FALSE) and
-      type(now_mono_ns) is int and current.verified_mono_ns <= now_mono_ns <= current.verified_mono_ns + REFRESH_NS
+      snapshot.verified_mono_ns <= current.verified_mono_ns and
+      replace(snapshot, verified_mono_ns=current.verified_mono_ns) == current and
+      type(now_mono_ns) is int and verified <= now_mono_ns <= verified + REFRESH_NS
     )
 
   def verdict(self, snapshot: SettingsSnapshot | None, *, now_mono_ns: int, drive_id: int) -> SettingsVerdict:
