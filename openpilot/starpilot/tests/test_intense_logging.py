@@ -1,4 +1,8 @@
 import gc
+from types import SimpleNamespace
+from unittest import mock
+
+import pytest
 
 from openpilot.starpilot import intense_logging
 
@@ -82,3 +86,72 @@ def test_set_enabled_round_trip(monkeypatch, tmp_path):
   intense_logging.set_enabled(False)
   intense_logging.set_enabled(False)
   assert not intense_logging.enabled()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_selfdrive_run_preserves_upstream_timing_with_optional_intense_logger(enabled):
+  from openpilot.selfdrive.selfdrived import selfdrived
+  from openpilot.starpilot.selfdrive_loop_timing import SelfdriveLoopTiming
+
+  owner = selfdrived.SelfdriveD.__new__(selfdrived.SelfdriveD)
+  upstream = mock.create_autospec(SelfdriveLoopTiming, instance=True)
+  intense = mock.create_autospec(intense_logging.CardLoopTiming, instance=True) if enabled else None
+  owner.loop_timing = upstream
+  owner.params_thread = mock.Mock()
+  owner.rk = mock.Mock()
+  owner.enabled = owner.initialized = True
+
+  def step():
+    owner.mark_loop_phase('control')
+    owner.timing_mark('intense')
+
+  # Run one full control iteration, then leave through the ordinary cleanup.
+  def first_step_then_stop():
+    if owner.step.call_count > 1:
+      raise StopIteration
+    step()
+  owner.step = mock.Mock(side_effect=first_step_then_stop)
+  with (mock.patch.object(selfdrived, 'REPLAY', False),
+        mock.patch.object(selfdrived.threading, 'Thread') as thread,
+        mock.patch.object(intense_logging, 'loop_timing', return_value=intense),
+        mock.patch.object(intense_logging, 'start') as logger):
+    with pytest.raises(StopIteration):
+      owner.run()
+    thread.return_value.start.assert_called_once()
+    thread.return_value.join.assert_called_once()
+    logger.return_value.stop.assert_called_once()
+  assert owner.loop_timing is upstream
+  assert upstream.begin.call_count == 2
+  upstream.finish.assert_called_once_with(owner, owner.rk)
+  upstream.mark.assert_any_call('control')
+  if intense is not None:
+    assert intense.begin.call_count == 2
+    intense.mark.assert_called_once_with('intense')
+    intense.finish.assert_called_once_with({'thread_id': selfdrived.threading.get_native_id(), 'enabled': True}, enabled=True)
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_card_intense_logging_retains_upstream_settings_worker_and_receive_timing(enabled):
+  from openpilot.selfdrive.car import card
+
+  owner = card.Car.__new__(card.Car)
+  owner.aol_qualified = owner.aol_replay = True
+  owner.CP = SimpleNamespace(carFingerprint=card.HYUNDAI_CAR.HYUNDAI_IONIQ_6)
+  owner.can_sock = object()
+  owner.configure_conditional_settings_worker = mock.Mock()
+  owner.vehicle_startup = mock.Mock()
+  owner.params_thread = mock.Mock()
+  owner.ioniq6_keepalive = None
+  owner.step = mock.Mock(side_effect=StopIteration)
+  with (mock.patch.object(card, 'REPLAY', False), mock.patch.dict(card.os.environ, {}, clear=True),
+        mock.patch.object(card.threading, 'Thread'),
+        mock.patch.object(card.CardLoopTiming, 'configure_receive') as receive,
+        mock.patch.object(intense_logging, 'enabled', return_value=enabled),
+        mock.patch.object(intense_logging, 'start') as logger):
+    with pytest.raises(StopIteration):
+      owner.card_thread()
+    owner.configure_conditional_settings_worker.assert_called_once()
+    receive.assert_called_once_with(owner.can_sock)
+    logger.return_value.stop.assert_called_once()
+  assert owner.loop_timing.detailed
+  assert owner.loop_timing.compact == (not enabled)
