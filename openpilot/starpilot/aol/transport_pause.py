@@ -454,7 +454,15 @@ class TransportPauseFeedback:
     typed = bool(reason == 'availabilityPause' and not axis.lateralActive and not axis.longitudinalActive and
                  0 < axis.faultEventMonoTime <= stamp)
     source_expired = bool(typed and axis.sourceCarStateMonoTime == 0)
-    if source_expired and not 0 < self.lateral_source_ns <= now_ns <= self.lateral_source_ns + SAFETY_MAX_AGE_NS:
+    # The 200ms original source bound admits an initial episode, never an
+    # active command. Once its exact event/proof pair was verified, continuing
+    # fresh OFF source-zero proofs may retain driver intent with a CURRENT real
+    # native LAT grant and the same producer/epoch/configuration/inventory.
+    # Missing/mismatched events still use the unchanged fixed 30ms join below;
+    # every other output/source/native deadline and branch remains unchanged.
+    continuing_intent = bool(source_expired and self.retention_verified and issue)
+    if source_expired and not (0 < self.lateral_source_ns <= now_ns and
+        (now_ns <= self.lateral_source_ns + SAFETY_MAX_AGE_NS or continuing_intent)):
       return False
     baseline_age_limit = SAFETY_MAX_AGE_NS if source_expired else AXIS_MAX_AGE_NS
     matched = typed and issue and axis.faultEventMonoTime == event_ns

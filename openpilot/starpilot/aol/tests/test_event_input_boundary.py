@@ -168,9 +168,16 @@ def test_true_producer_gap_wait_never_extends_original_output_proof(outcome):
         assert sd.aol_last_intent.allowedLatch == latched and sd.aol_last_intent.lateralArmed == latched
       else:
         assert not failed_axis.lateralActive and not failed_axis.longitudinalActive
-        assert not failed_command.latActive and not failed_command.longActive and not sd.enabled
-        recovered, _, recovered_command = step(7, native_request_long=True)
-        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+        assert not failed_command.latActive and not failed_command.longActive
+        if outcome in ('deadline', 'validation_crosses_deadline'):
+          fixture.assert_ordinary_source_pause(sd)
+          recovered, _, recovered_command = step(7, native_request_long=True)
+          fixture.assert_fresh_ordinary_recovery(sd, recovered, recovered_command, BASE + 50_000_000)
+          assert axis.validUntilMonoTime == deadline
+        else:
+          assert not sd.enabled
+          recovered, _, recovered_command = step(7, native_request_long=True)
+          assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
 
 
 def test_fresh_late_source_expiring_during_remaining_event_work_still_withdraws():

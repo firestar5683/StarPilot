@@ -644,16 +644,19 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_compact_galaxy_is_on_main_menu_and_device_keeps_native_rows(self):
     from openpilot.selfdrive.ui.mici.layouts.settings.device import device_layout as compact_device
+    from openpilot.starpilot.ui import display_compact
+    display_entry = object()
     panel = NS(_scroller=NS(add_widgets=Mock()))
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
     object.__setattr__(layout, "_compact_panels", {})
     galaxy = NS(open_compact=Mock())
     object.__setattr__(layout, "star", NS(galaxy_flow=galaxy))
     with patch.object(compact_device, "DeviceLayoutMici", return_value=panel) as built, \
+         patch.object(display_compact.DisplayCompact, "entry_button", return_value=display_entry), \
          patch.object(runtime_app.gui_app, "push_widget") as pushed:
       layout._open_compact_destination(Destination.DEVICE)
     built.assert_called_once_with()
-    panel._scroller.add_widgets.assert_not_called()
+    panel._scroller.add_widgets.assert_called_once_with([display_entry])
     pushed.assert_called_once_with(panel)
     layout._open_compact_destination(Destination.GALAXY)
     galaxy.open_compact.assert_called_once_with()
@@ -679,15 +682,16 @@ class TestRuntimePanelActions(unittest.TestCase):
     self.assertEqual([call.args[0] for call in pushed.call_args_list], panels)
 
   def test_compact_model_visuals_and_pair_use_existing_owners(self):
-    from openpilot.starpilot.ui import appearance_compact, models_compact
+    from openpilot.starpilot.ui import appearance_compact, models_compact, display_compact
     from openpilot.selfdrive.ui.mici.layouts.settings.device import device_layout as compact_device
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
     object.__setattr__(layout, "_compact_panels", {})
     object.__setattr__(layout, "star", NS())
-    panel = NS(scroll_to_pairing=Mock())
+    panel = NS(scroll_to_pairing=Mock(), _scroller=NS(add_widgets=Mock()))
     with patch.object(models_compact.ModelsCompact, "open") as model_open, \
          patch.object(appearance_compact.AppearanceCompact, "open") as visuals_open, \
          patch.object(compact_device, "DeviceLayoutMici", return_value=panel), \
+         patch.object(display_compact.DisplayCompact, "entry_button", return_value="display entry"), \
          patch.object(runtime_app.gui_app, "push_widget") as pushed:
       layout._open_compact_destination(Destination.DRIVING_MODEL)
       layout._open_compact_destination(Destination.APPEARANCE)
@@ -696,6 +700,7 @@ class TestRuntimePanelActions(unittest.TestCase):
     visuals_open.assert_called_once_with()
     pushed.assert_called_once_with(panel)
     panel.scroll_to_pairing.assert_called_once_with()
+    panel._scroller.add_widgets.assert_called_once_with(["display entry"])
 
   def test_compact_connection_can_be_viewed_while_started_but_not_mutated(self):
     with tempfile.TemporaryDirectory() as directory:

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict"
+import * as documentHelpers from "../web/js/onroad-layout-document.js"
+import * as layoutModule from "../web/js/onroad-layout.js"
 import { readFileSync } from "node:fs"
 import { LayoutWidgetPreview, OnroadLayoutFeed, OnroadLayoutPage, validSnapshot, validDocument, clampPlacement, previewPoint, withAlpha, widgetPalette,
   withDisplay, layoutDocument } from "../web/js/onroad-layout.js"
@@ -55,6 +57,10 @@ export function snapshot() {
         { ...definition.default, ...(definition.resizable ? { size: definition.resizable.default } : {}) }]))])) }
   return { document, defaults: copy(document), metadata, revision: "saved-revision", editable: true, valid: true, activeProfile: null }
 }
+
+// The editor keeps its public API while sharing the pure document helpers.
+for (const name of ["layoutDocument", "withDisplay", "orderedWidgetIds", "widgetPalette", "withAlpha", "widgetSize", "placementLimits", "clampBox", "clampPlacement", "overlapsReserved", "previewPoint", "validDocument", "validSnapshot"])
+  assert.equal(layoutModule[name], documentHelpers[name], name)
 
 const data = snapshot()
 const withMode = copy(data)

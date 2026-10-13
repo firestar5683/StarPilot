@@ -170,6 +170,9 @@ def test_carstate_arriving_during_final_intent_drain_reaches_owners(full_op, lat
             assert log.OnroadEvent.EventName.buttonCancel in sd.events.names and not sd.events.contains(fixture.ET.ENABLE)
           if pulse in ('brake_then_clear', 'regen_then_clear', 'gas_then_clear'):
             assert log.OnroadEvent.EventName.pedalPressed in sd.events.names
+        if full_op and pulse == 'missing_source':
+          fixture.assert_ordinary_source_pause(sd)
+          assert axis.sourceCarStateMonoTime == 0
         assert old.validUntilMonoTime == BASE + 34_497_535
         feedback(now, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
         card.sm.update_msgs(now / 1e9, [controls.pm.messages['carControl']])
@@ -191,5 +194,9 @@ def test_carstate_arriving_during_final_intent_drain_reaches_owners(full_op, lat
         fresh_after_disable = BASE + 50_000_000
         next_axis, next_state, next_command = step(7, state_stamp=fresh_after_disable,
                                                 intent_message=intent(fresh_after_disable, 40, latched=latched))
-        assert not next_axis.longitudinalActive and not next_command.longActive and not next_state.enabled
+        if pulse == 'missing_source':
+          fixture.assert_fresh_ordinary_recovery(sd, next_axis, next_command, fresh_after_disable)
+          assert next_state.enabled
+        else:
+          assert not next_axis.longitudinalActive and not next_command.longActive and not next_state.enabled
         assert not sd.events.contains(fixture.ET.ENABLE)

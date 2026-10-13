@@ -138,9 +138,12 @@ def test_last_refresh_intent_wait_uses_post_drain_clock(condition):
         assert not expired.latActive and not expired.longActive
         missing, _, missing_command = step(6, timeout=True, intent_message=intent(BASE, 3),
           latched=False, pause=True, native_request_lat=False, allowed=False)
-        assert not missing.longitudinalActive and not missing_command.longActive and not sd.enabled
+        assert not missing.longitudinalActive and not missing_command.longActive
+        assert not missing.lateralActive and not missing_command.latActive
+        fixture.assert_ordinary_source_pause(sd)
         recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
-        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+        fixture.assert_fresh_ordinary_recovery(sd, recovered, recovered_command, BASE + 50_000_000)
+        assert original.validUntilMonoTime == deadline
         return
       # A new valid source renews an existing engagement even if the prior output
       # expired; the original bounded wait still cannot extend that old lease.
@@ -154,7 +157,13 @@ def test_last_refresh_intent_wait_uses_post_drain_clock(condition):
       else:
         assert not axis.longitudinalActive and not command.longActive
         assert not axis.lateralActive and not command.latActive
-        assert not sd.enabled and not sd.active
+        if condition in ('drain_at_deadline', 'drain_after_deadline', 'native_deadline'):
+          fixture.assert_ordinary_source_pause(sd)
+          recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
+          fixture.assert_fresh_ordinary_recovery(sd, recovered, recovered_command, BASE + 50_000_000)
+          assert original.validUntilMonoTime == deadline
+        else:
+          assert not sd.enabled and not sd.active
 
 
 @pytest.mark.parametrize('boundary', ['cap_inside', 'cap_at', 'cap_after', 'rollback', 'deadline_inside', 'deadline_at'])

@@ -711,7 +711,7 @@ class IpcAxisContractTests(unittest.TestCase):
         self.assertEqual(str(axis.faultReason), 'availabilityPause')
         self.assertEqual(axis.sourceCarStateMonoTime, 0)
         self.assertFalse(axis.lateralActive or axis.longitudinalActive or axis.desiredLongitudinal)
-        self.assertFalse(sd.enabled or sd.active)
+        availability_fixture.assert_ordinary_source_pause(sd, publication_only=True)
         controls.sm.update_msgs(published / 1e9, [proof])
         # A fresh output lease does not make stale input eligible for actuation.
         self.assertIsNotNone(current_axis(controls.sm, now_ns=published))
@@ -719,6 +719,9 @@ class IpcAxisContractTests(unittest.TestCase):
           command, _ = controls.state_control()
         self.assertFalse(command.latActive or command.longActive)
         self.assertIsNone(current_axis(controls.sm, now_ns=published + 30_000_001))
+        recovered, _, recovered_command = step(6)
+        availability_fixture.assert_fresh_ordinary_recovery(sd, recovered, recovered_command, 10_060_000_000)
+        self.assertEqual(axis.validUntilMonoTime, published + 30_000_000)
 
   def test_publication_lease_preserves_ioniq_fault_denial(self):
     for fault in ('native_missing', 'native_denied', 'can_invalid', 'permanent_eps'):
@@ -820,6 +823,8 @@ class IpcAxisContractTests(unittest.TestCase):
     sd, controls, step = self._authority_callers(True, cp=cp)
     card = Car.__new__(Car)
     card.CP = cp.as_reader()
+    # Match the actual Card producer behind this fixture's raw intent wire.
+    card.slc_producer_session = 'authority-card'
     services = ['aolAxisState', 'aolSafetyWire', 'pandaStates', 'onroadEvents']
     self.enterContext(mock.patch.object(card, 'sm', messaging.SubMaster(services, ignore_avg_freq=services), create=True))
     card.aol_process_fault_context = AolProcessFaultContext()

@@ -137,9 +137,12 @@ def test_long_only_wait_keeps_original_deadline_and_restrictions(timing):
         assert not expired.latActive and not expired.longActive
         missing, _, missing_command = step(6, timeout=True, intent_message=latest,
           latched=False, pause=True, native_request_lat=False, allowed=False)
-        assert not missing.longitudinalActive and not missing_command.longActive and not sd.enabled
+        assert not missing.longitudinalActive and not missing_command.longActive
+        assert not missing.lateralActive and not missing_command.latActive
+        fixture.assert_ordinary_source_pause(sd)
         recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
-        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+        fixture.assert_fresh_ordinary_recovery(sd, recovered, recovered_command, BASE + 50_000_000)
+        assert original.validUntilMonoTime == deadline
         return
       assert transition.call_count == 1
       if timing in ('native_denied', 'pause_set', 'pause_long', 'native_invalid', 'panda_fault', 'session_change', 'producer_change', 'pre_refresh_cutoff'):
@@ -160,9 +163,15 @@ def test_long_only_wait_keeps_original_deadline_and_restrictions(timing):
           assert fixture.log.OnroadEvent.EventName.steerTempUnavailableSilent in sd.events.names
       else:
         assert not axis.lateralActive and not axis.longitudinalActive and not command.latActive and not command.longActive
-        assert not sd.enabled and not sd.active
-        recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
-        assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
+        if timing == 'missing':
+          fixture.assert_ordinary_source_pause(sd)
+          recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
+          fixture.assert_fresh_ordinary_recovery(sd, recovered, recovered_command, BASE + 50_000_000)
+          assert original.validUntilMonoTime == deadline
+        else:
+          assert not sd.enabled and not sd.active
+          recovered, _, recovered_command = step(7, latched=False, pause=True, native_request_lat=False, allowed=False)
+          assert not recovered.longitudinalActive and not recovered_command.longActive and not sd.enabled
 
 
 @pytest.mark.parametrize('long_only', [False, True])

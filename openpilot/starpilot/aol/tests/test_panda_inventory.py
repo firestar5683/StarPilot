@@ -162,7 +162,7 @@ def test_actual_sd_controls_card_inventory_callers(failure):
         assert not feedback(NOW, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
         assert card.aol_card_intent.allowed_latch
         corrupt[0] = True
-        axis, _, command = step(8 if failure == 'transport_pause' else 4 if failure == 'stale_intent' else 1,
+        axis, driver_state, command = step(8 if failure == 'transport_pause' else 4 if failure == 'stale_intent' else 1,
                                 old_intent=failure == 'stale_intent', timeout=failure == 'transport_pause',
                                 critical_event=log.OnroadEvent.EventName.canError if failure == 'critical' else None)
         now = int(sd.pm.messages['aolAxisState'].logMonoTime)
@@ -173,7 +173,13 @@ def test_actual_sd_controls_card_inventory_callers(failure):
         elif failure == 'transport_pause':
           assert not axis.lateralActive and not axis.longitudinalActive and not command.latActive and not command.longActive
           assert not fault and card.aol_card_intent.allowed_latch
-          assert str(axis.faultReason) == 'transportPause'
+          # Coherent inventory qualifies ordinary host-loss soft disable;
+          # active commands stay OFF and only exact armed intent is retained.
+          assert str(axis.faultReason) == 'availabilityPause'
+          assert axis.sourceCarStateMonoTime == 0 and not sd.conditional_car_state_valid
+          assert driver_state.enabled and driver_state.state == log.SelfdriveState.OpenpilotState.softDisabling
+          assert log.OnroadEvent.EventName.commIssue in sd.events.names
+          assert not sd.aol_authority_lost and not getattr(sd, 'aol_availability_long_inhibit', False)
         else:
           assert not axis.lateralActive and not axis.longitudinalActive and not command.latActive and not command.longActive
           assert fault and not card.aol_card_intent.allowed_latch

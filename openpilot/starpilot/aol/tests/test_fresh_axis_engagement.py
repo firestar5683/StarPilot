@@ -120,7 +120,11 @@ def test_gap_owner_boundaries(case):
     elif case == 'source_zero':
       with mock.patch.object(owner.time, 'monotonic_ns', return_value=BASE + 49_000_000):
         sd._expire_axis_source(state, BASE + 49_000_000)
-      assert not sd.enabled
+      fixture.assert_ordinary_source_pause(sd, publication_only=True)
+      assert old.validUntilMonoTime == BASE + 50_000_000
+      with mock.patch.object(owner.time, 'monotonic_ns', return_value=old.validUntilMonoTime + 1):
+        expired, _ = controls.state_control()
+      assert not expired.latActive and not expired.longActive
     elif case == 'producer':
       w = wire(FRESH_SOURCE, 4, producerSessionId='new-card')
     elif case == 'sequence':
@@ -138,7 +142,7 @@ def test_gap_owner_boundaries(case):
     elif case == 'critical':
       kwargs['critical_event'] = log.OnroadEvent.EventName.controlsMismatch
     axis, pub, cmd = step(5, state_stamp=FRESH_SOURCE, intent_message=w, offset_ns=1_614_499, latched=False, observed_state=state, **kwargs)
-    healthy = case == 'healthy'
+    healthy = case in ('healthy', 'source_zero')
     assert cmd.longActive == healthy, (case, pub.to_dict(), axis.to_dict())
     assert axis.longitudinalActive == healthy
     if case in (
@@ -156,7 +160,6 @@ def test_gap_owner_boundaries(case):
       'can_timeout',
       'disabled',
       'inhibited',
-      'source_zero',
       'producer',
       'sequence',
       'future_intent',
@@ -167,6 +170,7 @@ def test_gap_owner_boundaries(case):
       again, _, cmd2 = step(6, intent_message=wire(BASE + 60_000_000, 5), latched=False)
       assert not again.longitudinalActive and not cmd2.longActive, (case, again.to_dict())
     if healthy:
+      fixture.assert_fresh_ordinary_recovery(sd, axis, cmd, FRESH_SOURCE)
       assert not sd.aol_authority_lost and not getattr(sd, 'aol_availability_long_inhibit', False)
       assert axis.sourceCarStateMonoTime == FRESH_SOURCE and axis.validUntilMonoTime == RENEWAL_TIME + 30_000_000
       assert old.validUntilMonoTime == BASE + 50_000_000

@@ -52,11 +52,25 @@ def test_source_cutoff_during_empty_drain_retains_only_original_output(full_op, 
         axis, state, command = step(6, timeout=True, latched=latched,
                                    intent_message=intent(BASE, 3, latched=latched))
         assert not sd.aol_axis_publication_deferred
-        assert not state.enabled and not axis.lateralActive and not axis.longitudinalActive
+        assert not axis.lateralActive and not axis.longitudinalActive
         assert not command.latActive and not command.longActive
-        # Fresh input cannot restore ordinary LONG after a real disable.
+        if full_op:
+          fixture.assert_ordinary_source_pause(sd)
+          assert axis.sourceCarStateMonoTime == 0
+        else:
+          assert not state.enabled
+        # New input alone has no native LONG grant; only a subsequent current
+        # source with a real ACK resumes the engagement still in its countdown.
         axis, state, command = step(7, latched=latched, native_request_long=False)
-        assert not state.enabled and not axis.longitudinalActive and not command.longActive
+        assert not axis.longitudinalActive and not command.longActive
+        if full_op:
+          assert state.enabled and axis.desiredLongitudinal
+          assert not sd.events.contains(fixture.ET.ENABLE)
+          axis, state, command = step(8, latched=latched, native_request_long=True)
+          fixture.assert_fresh_ordinary_recovery(sd, axis, command, BASE + 60_000_000)
+        else:
+          assert not state.enabled
+        assert old.validUntilMonoTime == deadline
       else:
         next_source = BASE + 31_546_896
         decision = BASE + (32_000_000 if successor == 'fresh_before_deadline' else 36_068_506)

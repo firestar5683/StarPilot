@@ -40,6 +40,7 @@ from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
 from openpilot.starpilot.aol.intent_companion import IntentCompanion
 from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only, cp_identity, healthy_transport
+from openpilot.starpilot.aol.source_availability import ordinary_source_availability
 from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
                                             ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
@@ -1143,12 +1144,63 @@ class SelfdriveD:
       requested_until_ns=getattr(self, 'aol_availability_chime_until_ns', 0))
     recovery.selected(self.AM.current_alert)
 
+  def ordinary_source_availability(self, CS, now_ns, native=None):
+    """Classify lost host source; never renew a command or change engagement."""
+    return ordinary_source_availability(self, CS, now_ns, native, replay=REPLAY, native_provider=current_native)
+
+  def observe_ordinary_source_metadata(self, CS, intent, healthy_native, now_ns):
+    """Reuse this call's exact transport validation; retain the original proof."""
+    native = healthy_native
+    anchor = getattr(self, 'aol_ordinary_source_anchor', None)
+    companion = getattr(self, 'aol_intent_companion', None)
+    if (anchor is None or not anchor[0][9] or not self.enabled or not self.active or intent is None or
+        not 0 < intent.carStateLogMonoTime <= now_ns or now_ns - intent.carStateLogMonoTime > INTENT_MAX_AGE_NS or
+        intent.carStateLogMonoTime <= anchor[2].carStateLogMonoTime or
+        intent.producerSessionId != anchor[0][4] or companion is None or companion.integrity_epoch != anchor[0][5] or
+        self.events.contains(ET.USER_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE) or
+        native is None or native is not getattr(self.aol_transport_pause, 'observed_native', None) or
+        native.pandaSerial != anchor[1].pandaSerial or native.observedMonoTime < anchor[1].observedMonoTime or
+        tuple(p.hardwareSerial for p in native.pandaInventory) != tuple(p.hardwareSerial for p in anchor[1].pandaInventory)):
+      return
+    # The originally published command proof, deadline and CP identity remain
+    # unchanged. Only an input already admitted by normal runtime is remembered.
+    self.aol_ordinary_source_anchor = (anchor[0], native, intent, anchor[3], CS)
+
+  def ordinary_source_withdrawal(self):
+    accepted = self.aol_ordinary_source_anchor[2]
+    native = self.aol_ordinary_source_native
+    lateral_grant = bool(accepted.allowedLatch and accepted.lateralArmed and not accepted.pauseLateral and
+                         not getattr(self, 'aol_dm_lateral_inhibit', False) and
+                         native.requestedLateral and native.lateralAllowed)
+    # Both commands remain inactive. This ACK describes only an actual native
+    # lateral grant supporting separately retained armed intent; none is invented.
+    return AxisDecision(desired_lateral=lateral_grant, native_acknowledged=lateral_grant)
+
+  def retain_ordinary_source_state(self, CS, now_ns):
+    """Publication-time expiry withdraws commands; StateMachine owns countdown."""
+    if not self.ordinary_source_availability(CS, now_ns):
+      return False
+    self.aol_ordinary_source_pause = True
+    self.aol_publication_retained_intent = self.aol_ordinary_source_anchor[2]
+    self.events.add(EventName.commIssue)
+    self.aol_axis_decision = self.ordinary_source_withdrawal()
+    self.aol_fault_reason = 'availabilityPause'
+    self.aol_car_state_log_ns = 0
+    self.conditional_car_state_valid = False
+    # If publication crosses the cutoff after StateMachine ran, emit the fault
+    # now; its existing next-cycle transition owns the timer and driver state.
+    if self.enabled and ET.SOFT_DISABLE not in self.state_machine.current_alert_types:
+      self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
+    return True
+
   def _expire_axis_source(self, CS, now_ns):
     if REPLAY or not self.aol_replay or not self.axis_transport_required:
       return
     source_ns = self.aol_car_state_log_ns
     if 0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS:
       self.aol_publication_retained_intent = None
+      return
+    if self.retain_ordinary_source_state(CS, now_ns):
       return
     pause = getattr(self, 'aol_transport_pause', None)
     if (getattr(self, 'aol_fault_reason', 'none') == 'transportPause' and pause is not None and
@@ -1262,6 +1314,10 @@ class SelfdriveD:
         # The old lease still expires at consumers. A newly validated source
         # supplies its own permission without restoring a disengaged state.
         return False
+    # The expired command still withdraws; host loss need not revoke a healthy
+    # driver's ordinary engagement before the existing soft-disable countdown.
+    if self.retain_ordinary_source_state(CS, now_ns):
+      return True
     # A retained source cannot renew an expired output lease.
     self.aol_axis_decision = AxisDecision()
     was_enabled = self.enabled
@@ -1387,6 +1443,11 @@ class SelfdriveD:
             int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal),
             bool(axis.lateralActive), bool(axis.longitudinalActive))
           self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
+          if axis.longitudinalActive and self.enabled and self.active:
+            previous_anchor = getattr(self, 'aol_ordinary_source_anchor', None)
+            identity = previous_anchor[3] if previous_anchor is not None else cp_identity(self.CP)
+            self.aol_ordinary_source_anchor = (self.aol_published_input_proof,
+              self.aol_published_input_native, accepted_intent, identity, CS)
     if not defer_events:
       if ce_send is not None:
         self.aol_fault_event_ns = int(ce_send.logMonoTime)
@@ -1587,6 +1648,7 @@ class SelfdriveD:
     self.aol_event_input_reconcile = False
     self.aol_event_input_wait_attempted = False
     previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
+    self.aol_ordinary_source_pause = False
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
     self.mark_loop_phase('data_sample_return')
@@ -1690,6 +1752,8 @@ class SelfdriveD:
         model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
           self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
         user_disable=self.events.contains(ET.USER_DISABLE))
+      if source_current:
+        self.observe_ordinary_source_metadata(CS, intent, self.aol_transport_pause.observed_native, now_ns)
       if not hasattr(self, 'aol_availability_pause'):
         self.aol_availability_pause = AvailabilityPause(self.CP, self.aol_session_id)
       retained_intent = getattr(self, 'aol_publication_retained_intent', None)
@@ -1714,6 +1778,17 @@ class SelfdriveD:
         hard_fault=bool(self.aol_selected_pair_future or self.aol_authority_lost or lost_active_aol or
           lost_companion and not publication_expiry or lost_permission or upgraded),
         healthy_native=self.aol_transport_pause.observed_native)
+      ordinary_availability = bool(not source_current and not lost_active_aol and not lost_permission and not upgraded and
+        self.ordinary_source_availability(CS, now_ns, native))
+      if ordinary_availability:
+        self.aol_ordinary_source_pause = True
+        self.aol_publication_retained_intent = self.aol_ordinary_source_anchor[2]
+        self.events.add(EventName.commIssue)
+        lost_companion = False
+        self.aol_transport_pause.active = pause = False
+        # Preserve the normal state machine and SOFT_DISABLE countdown. The
+        # independent armed-LAT retention must not disable ordinary engagement.
+        availability = False
       if publication_expiry and (availability or not pause) and EventName.commIssue not in self.events.names:
         self.events.add(EventName.commIssue)
       if availability:
@@ -1744,7 +1819,8 @@ class SelfdriveD:
         seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
           source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id))
         for event in self.events.to_msg())
-      self.aol_fault_reason = ('critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
+      self.aol_fault_reason = ('availabilityPause' if ordinary_availability else
+                               'critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
                                aol_hard_soft_fault and not availability else
                                'availabilityPause' if availability else 'transportPause' if pause else 'none')
       if self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
@@ -1780,7 +1856,9 @@ class SelfdriveD:
             ET.SOFT_DISABLE not in self.state_machine.current_alert_types):
           self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
       self.aol_axis_decision = self._decide_aol_axes(CS, intent, native, now_ns=now_ns)
-      if availability:
+      if self.aol_ordinary_source_pause:
+        self.aol_axis_decision = self.ordinary_source_withdrawal()
+      elif availability:
         self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
       elif getattr(self, 'aol_availability_long_inhibit', False):
         decision = self.aol_axis_decision

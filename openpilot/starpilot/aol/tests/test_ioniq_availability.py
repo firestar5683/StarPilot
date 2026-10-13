@@ -19,6 +19,38 @@ def car_state(*, brake=False):
                       vEgo=20.0, brakePressed=brake)
 
 
+def assert_ordinary_source_pause(sd, *, publication_only=False):
+  """Host loss withdraws commands while the existing state machine owns life."""
+  assert sd.enabled and sd.active
+  if publication_only:
+    assert sd.state_machine.state == log.SelfdriveState.OpenpilotState.enabled
+    assert sd.state_machine.soft_disable_timer == 0
+  else:
+    assert sd.state_machine.state == log.SelfdriveState.OpenpilotState.softDisabling
+    assert 0 < sd.state_machine.soft_disable_timer <= 300
+  assert log.OnroadEvent.EventName.commIssue in sd.events.names
+  assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names
+  assert not sd.events.contains(ET.ENABLE)
+  assert not sd.aol_authority_lost and not getattr(sd, 'aol_availability_long_inhibit', False)
+  assert sd.aol_fault_reason == 'availabilityPause'
+  assert sd.aol_car_state_log_ns == 0 and not sd.conditional_car_state_valid
+  assert not sd.aol_axis_decision.lateral_active and not sd.aol_axis_decision.longitudinal_active
+
+
+def assert_fresh_ordinary_recovery(sd, axis, command, source):
+  """Only a fresh exact input plus its current native grant resumes commands."""
+  assert sd.enabled and sd.active
+  assert sd.state_machine.state == log.SelfdriveState.OpenpilotState.enabled
+  assert axis.sourceCarStateMonoTime == source
+  assert 0 <= axis.observedMonoTime - source <= 30_000_000
+  assert axis.validUntilMonoTime == axis.observedMonoTime + 30_000_000
+  assert axis.longitudinalActive and command.longActive
+  native = current_native(sd.sm, sd.CP, now_ns=axis.observedMonoTime, axis_session_id=sd.aol_session_id)
+  assert native is not None and native.requestedLongitudinal and native.longitudinalAllowed
+  assert not sd.events.contains(ET.ENABLE)
+  assert not sd.aol_authority_lost and not getattr(sd, 'aol_availability_long_inhibit', False)
+
+
 class IoniqAvailabilityTests(unittest.TestCase):
   def _authority_callers(self, full_op, *, cp=None, intent_companion=None, genuine_events=False):
     self.enterContext(mock.patch('openpilot.selfdrive.selfdrived.selfdrived.REPLAY', False))
