@@ -61,7 +61,8 @@ class ModeConsumer:
     if (
       any(type(value) is not int for value in (now_ns, now_boot_ns, sample_skew_ns, message_ns, receipt_ns, drive_id, model_ns, car_state_ns))
       or now_ns <= 0
-      or now_boot_ns < now_ns
+      or now_boot_ns <= 0
+      or now_boot_ns < now_ns - sample_skew_ns // 2
       or not 0 <= sample_skew_ns <= CLOCK_PAIR_MAX_SKEW_NS
     ):
       return self._reject('clock_inputs', fallback, self.last_now_ns)

@@ -4,7 +4,9 @@
 
 using namespace pandad_timing;
 static Tick next{1, 1};
-Tick pandad_timing::test_clock() noexcept { return next; }
+namespace pandad_timing {
+Tick test_clock() noexcept { return next; }
+}
 
 int main() {
   Recorder collector(false);
