@@ -5,7 +5,7 @@ from dataclasses import replace
 import math
 
 from openpilot.starpilot.ui.display_preferences import (
-  AUTO, BRIGHTNESS, CUSTOM_KEYS, KEYS, MASTER, SCREEN_OFF, SCREEN_OFF_DESCRIPTION, default_value, read_choice,
+  AUTO, GPU_LOADING, BRIGHTNESS, CUSTOM_KEYS, KEYS, MASTER, SCREEN_OFF, SCREEN_OFF_DESCRIPTION, default_value, read_choice,
 )
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, FeatureSettingsState
 from openpilot.starpilot.ui.presentation import Profile
@@ -18,6 +18,7 @@ LABELS = {
   "ScreenTimeout": "Parked Screen Timeout",
   "ScreenTimeoutOnroad": "Driving Interaction Timeout",
   SCREEN_OFF: "Turn Off Comma Screen",
+  GPU_LOADING: "Keep Screen On While eGPU Loads",
 }
 AUTO_PREFIX = "display:auto:"
 BRIGHTNESS_CHOICES = ("Auto",) + tuple(f"{number}%" for number in range(5, 101))
@@ -29,7 +30,7 @@ def _display(key: str, value: int | None, valid: bool, unsupported: bool) -> str
     return "Saved Off (unsupported)"
   if not valid or value is None:
     return "Invalid saved choice"
-  if key in (MASTER, SCREEN_OFF):
+  if key in (MASTER, SCREEN_OFF, GPU_LOADING):
     return "On" if value else "Off"
   if key in BRIGHTNESS:
     return "Auto" if value == AUTO else str(value)
@@ -37,7 +38,9 @@ def _display(key: str, value: int | None, valid: bool, unsupported: bool) -> str
 
 
 class DisplayOwner:
-  def __init__(self, params, parked: Callable[[], bool]):
+  def __init__(self, params, parked: Callable[[], bool], *, gpu_capable=None):
+    from openpilot.common.hardware import HARDWARE
+    self.gpu_capable = HARDWARE.get_device_type() in ("tici", "mici") if gpu_capable is None else bool(gpu_capable)
     self.params = params
     self.parked = parked
 
@@ -48,6 +51,8 @@ class DisplayOwner:
     master = saved[MASTER]
     rows = []
     for key in KEYS:
+      if key == GPU_LOADING and not self.gpu_capable:
+        continue
       choice = saved[key]
       valid = choice.valid
       value = _display(key, choice.value, valid, choice.unsupported)
@@ -57,18 +62,19 @@ class DisplayOwner:
         reason = "Choose Auto before enabling custom display"
       elif not valid:
         reason = "Choose default to repair"
-      elif key == SCREEN_OFF:
-        reason = SCREEN_OFF_DESCRIPTION
+      elif key in (SCREEN_OFF, GPU_LOADING):
+        reason = (SCREEN_OFF_DESCRIPTION if key == SCREEN_OFF else
+                  "Keep the driving screen awake while an eGPU model loads. Manual Screen Off still takes priority.")
       elif key != MASTER and master.value != 1:
         reason = "Saved; custom display is off"
       elif key == "ScreenTimeoutOnroad":
         reason = "Returns to driving view; turns off screen if Turn Off Comma Screen is on"
       else:
         reason = ""
-      boolean = key in (MASTER, SCREEN_OFF)
+      boolean = key in (MASTER, SCREEN_OFF, GPU_LOADING)
       repair = "Off" if boolean else "Auto" if key in BRIGHTNESS else "30 s" if key == "ScreenTimeout" else \
         "10 s" if large else "5 s"
-      dependencies = (() if key == SCREEN_OFF else tuple((name, saved[name].raw) for name in CUSTOM_KEYS) if key == MASTER else
+      dependencies = (() if key in (SCREEN_OFF, GPU_LOADING) else tuple((name, saved[name].raw) for name in CUSTOM_KEYS) if key == MASTER else
                       ((MASTER, master.raw),))
       editable = parked and choice.readable and (boolean or master.valid and master.value == 1 or not valid)
       numeric = valid and not boolean and choice.value != AUTO
@@ -85,7 +91,7 @@ class DisplayOwner:
         rows.append(FeatureRow(AUTO_PREFIX + key, "Use Auto " + LABELS[key], "Fixed level saved",
                                source=choice.raw, available=editable,
                                repair_value="Auto", dependencies=((MASTER, master.raw),)))
-    defaults = {key: ('Off' if key in (MASTER, SCREEN_OFF) else 'Auto' if key in BRIGHTNESS else str(default_value(key, large=large)))
+    defaults = {key: ('Off' if key in (MASTER, SCREEN_OFF, GPU_LOADING) else 'Auto' if key in BRIGHTNESS else str(default_value(key, large=large)))
                 for key in KEYS}
     rows = tuple(replace(row, default_value=defaults[row.key]) if row.key in defaults else row for row in rows)
     return FeatureSettingsState(page="display", title="Display", subtitle="Saved brightness and interaction timing.",
@@ -93,11 +99,11 @@ class DisplayOwner:
 
   def apply(self, request: FeatureSettingsRequest) -> bool:
     key = request.key.removeprefix(AUTO_PREFIX)
-    if key not in KEYS or not self.parked():
+    if key not in KEYS or not self.parked() or key == GPU_LOADING and not self.gpu_capable:
       return False
     if request.key.startswith(AUTO_PREFIX) and key not in BRIGHTNESS:
       return False
-    if key in (MASTER, SCREEN_OFF):
+    if key in (MASTER, SCREEN_OFF, GPU_LOADING):
       if request.value not in ("Off", "On"):
         return False
       desired = int(request.value == "On")
@@ -128,7 +134,7 @@ class DisplayOwner:
         return False
       # Turning the master off stays available even when other saved choices
       # are corrupt or have changed while the user was viewing the page.
-      if key != SCREEN_OFF and not (key == MASTER and desired == 0):
+      if key not in (SCREEN_OFF, GPU_LOADING) and not (key == MASTER and desired == 0):
         expected = dict(request.dependencies)
         required = set(CUSTOM_KEYS) if key == MASTER else {MASTER}
         if set(expected) != required:
@@ -142,7 +148,7 @@ class DisplayOwner:
       if not final:
         continue
     try:
-      if key in (MASTER, SCREEN_OFF):
+      if key in (MASTER, SCREEN_OFF, GPU_LOADING):
         self.params.put_bool(key, bool(desired), block=True)
       else:
         self.params.put(key, desired, block=True)

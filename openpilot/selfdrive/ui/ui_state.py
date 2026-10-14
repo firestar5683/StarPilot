@@ -607,13 +607,16 @@ class Device:
       self._screen_off = False
     if critical:
       self._reset_interactive_timeout()
+    gpu_loading = (ui_state.started and self._display_preferences.keep_screen_on_gpu_loading and ui_state.chestnut_loading)
+    if gpu_loading:
+      self._reset_interactive_timeout()
     interaction_timeout = time.monotonic() > self._interaction_time
     if interaction_timeout and not self._prev_timed_out:
       for callback in self._interactive_timeout_callbacks:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    auto_screen_off = ui_state.started and self._display_preferences.turn_off_screen and interaction_timeout and not critical
+    auto_screen_off = ui_state.started and self._display_preferences.turn_off_screen and interaction_timeout and not critical and not gpu_loading
     self._set_awake(not self._screen_off and not auto_screen_off and (ui_state.started or not interaction_timeout or PC))
     # The entire wake gesture belongs to the display, including its release.
     # Widgets were not rendered while asleep, so their touch state can be stale.
