@@ -21,3 +21,7 @@ The vehicle strategy and CAN/native owners preserve that attribution while adapt
 ## Optional Ford angle controller
 
 The vendored `opendbc_repo/opendbc/bluepilot_lateral` angle core, codecs and Ford-only safety hooks are adapted directly from [BluePilot bp-7.0 e1d051d7ba270261b4455068bd68f1a58db15a4a](https://github.com/BluePilotDev/bluepilot/commit/e1d051d7ba270261b4455068bd68f1a58db15a4a), principally by Alan Polk, with John Christman, Jacob Neulight, Nathan Ingraham, Praeuner and other BluePilot, sunnypilot and comma contributors. Exact source paths and intentionally stricter safety checks are recorded in that folder. Both upstream `LICENSE` and `LICENSE.md` notices are retained. Its layout follows Alan Polk's September 2026 library proposal; this is a StarPilot adapter, not a published BluePilot library release.
+
+## RAV4 Continental ARS510 receiver
+
+The optional ACC-target and fused-track receivers and DBC preserve firestar5683's Dom integration from `b220a37f4bd119e402225a7aa16a7cd84878d0af` (Sea Turtles, 2026-10-13) and its ARS510 source attribution to ds-sebastian/ars510-radar `fb5b29c2b5999f34afeb6f7ac494a73949d66c67`, copyright 2026 ARS510 radar contributors. The complete MIT permission and warranty notice is retained in THIRD_PARTY_NOTICES.md. Startup/settings ownership is adapted to the current StarPilot architecture; no original firmware binaries or safety permissions are copied.

@@ -582,21 +582,23 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "LateralControllerSelection"))))
     fonts = Fonts()
     state = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
-    state = replace(state, scroll=next(i for i, row in enumerate(state.rows) if row.label == "Automatic Steering Learning"))
+    state = replace(state, scroll=next(i for i, row in enumerate(state.rows) if row.label == "Use StarPilot Auto Learn"))
     with (patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.rl, "draw_line"),
           patch.object(large, "draw_rounded_stroke"), patch.object(large, "draw_aether_toggle"),
           patch.object(large, "draw_settings_header"),
           patch.object(large.clip, "begin_scissor_mode"), patch.object(large.clip, "end_scissor_mode")):
       large.FeatureSettingsView(Mock(spec=BitmapFonts, profile=Profile.LARGE, measure=fonts.measure,
                                      draw=fonts.draw, vertical_ink=fonts.vertical_ink)).render(state)
-    self.assertIn("Automatic Steering Learning", fonts.text)
+    self.assertIn("Use StarPilot Auto Learn", fonts.text)
     controller = self.row("torque", "LateralControllerSelection")
     self.assertIn("https://firestar.link/discord", controller.reason)
-    self.assertIn("Stock Controller", state.rows[state.scroll].reason)
+    self.assertEqual(state.rows[state.scroll].reason,
+                     "StarPilot’s FLM tuning will attempt to automatically correct torque profiles as you drive.")
+    self.assertTrue(state.rows[state.scroll].available)
     self.assertEqual(FeatureInput.target(650, 300, state).row, state.rows[state.scroll])
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "LateralControllerSelection"))))
     standard = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
-    self.assertTrue(any(row.label == "Automatic Steering Learning" for row in standard.rows))
+    self.assertTrue(any(row.label == "Use StarPilot Auto Learn" for row in standard.rows))
 
 
 if __name__ == "__main__":

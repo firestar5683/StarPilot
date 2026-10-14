@@ -64,6 +64,8 @@ class ToyotaFlags(IntFlag):
   HYBRID = 1
   HAS_BSM = 2  # blind spot monitoring
   LONG_FILTER = 8192
+  ARS510_RADAR = 16384
+  ARS510_FUSED = 32768
   DISABLE_RADAR = 4
 
   # Static flags
@@ -629,3 +631,5 @@ def stopping_decel_rate(CP):
       CP.openpilotLongitudinalControl and not CP.passive and not CP.dashcamOnly and not CP.notCar):
     return 0.3
   return None
+
+ARS510_RADAR_CAR = {CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_RAV4_TSS2_2023}

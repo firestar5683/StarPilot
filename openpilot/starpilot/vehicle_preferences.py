@@ -33,10 +33,12 @@ class VehicleStartupPreferences:
   ford_lateral_mode: int = 0
   toyota_lock_doors: bool = False
   toyota_unlock_doors: bool = False
+  toyota_radar_mode: int = 0
 
   @classmethod
   def read(cls, params, *, enabled: bool):
     from openpilot.starpilot.car.ford.lateral_preferences import selected as ford_mode
+    from openpilot.starpilot.car.toyota.radar_preferences import selected as toyota_radar_mode
     from openpilot.starpilot.car.gm.tune_preferences import selected_tune
     from openpilot.starpilot.car.tesla.preap_preferences import stock_configuration
     preap_stock = stock_configuration(params)
@@ -77,7 +79,9 @@ class VehicleStartupPreferences:
                   read_saved(params, 'AlwaysOnLateral', 8) == (b'1', True) and
                   read_saved(params, 'TeslaAOLScreenTap', 8) == (b'1', True))
     screen_brake = read_saved(params, 'TeslaAOLDisengageOnBrake', 8) == (b'1', True)
-    return cls(ford_lateral_mode=ford_mode(params, enabled=enabled), tesla_screen=screen, tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
+    return cls(toyota_radar_mode=toyota_radar_mode(params, enabled=enabled),
+               ford_lateral_mode=ford_mode(params, enabled=enabled), tesla_screen=screen,
+               tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
                gm_longitudinal_tune=selected_tune(params, enabled=enabled),
                toyota_lock_doors=bool(enabled and readable and safe in (None, b"0") and
                                      read_saved(params, "LockDoors", 8) == (b"1", True)),
@@ -152,6 +156,8 @@ class VehicleStartupPreferences:
     apply_volt_one_pedal(cp, self.volt_one_pedal and not self.disable_bolt_long, self.gm_auto_hold)
     if cp.brand == "toyota":
       apply_toyota_auto_hold(cp, self.toyota_auto_hold)
+      from opendbc.car.toyota.ars510_preferences import apply_radar_mode
+      apply_radar_mode(cp, self.toyota_radar_mode)
     from opendbc.bluepilot_lateral.hosts.starpilot import select as select_ford_lateral
     select_ford_lateral(cp, self.ford_lateral_mode)
     return cp
@@ -176,6 +182,8 @@ class VehicleStartupPreferences:
     if cp.brand == "toyota":
       admitted = bool(cp.flags & ToyotaFlags.AUTO_BRAKE_HOLD)
       apply_toyota_auto_hold(cp, self.toyota_auto_hold and admitted)
+      from opendbc.car.toyota.ars510_preferences import apply_radar_mode
+      apply_radar_mode(cp, self.toyota_radar_mode)
 
   def configure_controller(self, ci) -> None:
     from opendbc.car.gm.values import (CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_gm_auto_hold,
