@@ -316,13 +316,14 @@ export const APKMIRROR_URL = "https://www.apkmirror.com/apk/google-inc/android-a
 export const DOWNLOAD_LINK = /^https:\/\/download\.pureapk\.com\/b\/X?APK\/[!-~]+$/
 const WRONG_DOWNLOAD = "That’s not the Android Auto download. Download it again in step 1."
 
-export function downloadLink(release) {
+// While the comma is still trying APKPure, wait instead of sending people to APKMirror.
+export function downloadLink(release, pending = false) {
   if (typeof release?.url === "string" && DOWNLOAD_LINK.test(release.url) && typeof release.version === "string" &&
     release.version.length <= 128 && /^[0-9]+(?:\.[0-9]+)+-release$/.test(release.version) &&
     Number.isSafeInteger(release.size) && release.size > 0) {
     return { direct: true, url: release.url, version: release.version.replace(/-release$/, ""), megabytes: Math.ceil(release.size / 1048576) }
   }
-  return { direct: false, url: APKMIRROR_URL }
+  return pending ? { direct: false, pending: true, url: "" } : { direct: false, url: APKMIRROR_URL }
 }
 const STAGES = ["reading", "searching", "decrypting", "verifying", "installing", "done"]
 const CHECKS = [
@@ -454,7 +455,7 @@ export const AndroidAutoPage = {
     supportReady() { return !!(this.setup?.enabled && this.setup.identity.installed) },
     // Returning drivers see a status card; the setup steps fold away below it.
     setupDone() { return !!(this.supportReady && this.selected && !this.pairing?.active) },
-    download() { return downloadLink(this.setup?.download) },
+    download() { return downloadLink(this.setup?.download, this.setup?.downloadPending === true) },
     uploadPercent() {
       const { loaded, total } = this.uploadProgress || {}
       return total > 0 ? Math.min(100, Math.round(100 * loaded / total)) : 0
@@ -655,7 +656,7 @@ export const AndroidAutoPage = {
             :index="0" :busy="busy" :disabled="!setup.enabled || !setup.parked || !!pairing?.active"
             :save-value="(index, value) => control('auto_connect', { enabled: value === 'On' })" />
           <div class="gx-actions">
-            <a class="gx-btn gx-btn--tonal" href="#/theme_maker/android_auto"><i class="bi bi-layout-text-window" aria-hidden="true"></i> Customize Dashboard</a>
+            <a class="gx-btn gx-btn--tonal" href="#/theme_maker/android_auto"><i class="bi bi-layout-text-window" aria-hidden="true"></i> Customize Layout</a>
             <button type="button" class="gx-btn gx-btn--tonal" :aria-expanded="showSteps" aria-controls="gx-aa-steps" @click="showSteps = !showSteps">
               <i :class="showSteps ? 'bi bi-chevron-up' : 'bi bi-gear'" aria-hidden="true"></i> {{ showSteps ? 'Hide Setup' : 'Setup and Pairing' }}</button>
           </div>
@@ -964,16 +965,26 @@ export const AndroidAutoPage = {
                   <span class="gx-aa-step__num gx-aa-step-card__num">1</span>
                   <div class="gx-aa-step-card__title">
                     <strong>Download Android Auto</strong>
-                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : 'Get the newest release from APKMirror' }}<template v-if="installedVersion"> · You have {{ installedVersion }}</template></small>
+                    <small>{{ download.direct ? 'Saves the app to this ' + (onPhone ? 'phone' : 'computer') : download.pending ? 'Looking up the newest release…' : 'Get the newest release from APKMirror' }}<template v-if="installedVersion"> · You have {{ installedVersion }}</template></small>
                   </div>
                 </div>
                 <div class="gx-aa-step-card__body">
                   <a v-if="download.direct" class="gx-btn gx-btn--tonal" :href="download.url" rel="noreferrer" download @click="markDownloadStarted">
                     <i class="bi bi-download" aria-hidden="true"></i> Download Android Auto {{ download.version }} · {{ download.megabytes }} MB
                   </a>
+                  <button v-else-if="download.pending" class="gx-btn gx-btn--tonal" type="button" disabled>
+                    <i class="bi bi-hourglass-split" aria-hidden="true"></i> Finding the newest Android Auto…
+                  </button>
                   <a v-else class="gx-btn gx-btn--tonal" :href="download.url" target="_blank" rel="noopener noreferrer" @click="markDownloadStarted">
                     <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open APKMirror
                   </a>
+                  <ol v-if="!download.direct && !download.pending" class="gx-note gx-aa-mirror-steps">
+                    <li>Open <strong>Android Auto</strong> on APKMirror, then open the <strong>All versions</strong> list and click through the versions to compare their release dates.</li>
+                    <li>Open the version with the <strong>newest release date</strong>.</li>
+                    <li>Scroll down to <strong>Available downloads</strong>. Under <strong>Variant</strong>, click the <strong>17.x.xxxx‑release</strong> or <strong>18.x.xxxx‑release</strong> entry.</li>
+                    <li>Click <strong>Download APK Bundle</strong> (or <strong>Download APK</strong>). You get an <strong>.apk</strong>, <strong>.xapk</strong> or <strong>.apkm</strong> file. Leave it zipped.</li>
+                  </ol>
+                  <small v-if="!download.direct && !download.pending" class="gx-note">You don’t need the APKMirror Installer app.</small>
                   <small v-if="download.direct" class="gx-note">From APKPure, a third-party mirror (<a class="gx-link" href="https://apkpure.com/terms.html" target="_blank" rel="noopener noreferrer">terms</a>). Don’t unzip it.</small>
                 </div>
               </li>

@@ -69,6 +69,7 @@ class AndroidAutoSetup:
       'identity': {key: ident[key] for key in ('installed', 'expires', 'days_left', 'warning', 'message', 'expired', 'error', 'app_version') if key in ident},
       'import': self.job.status(),
       'download': apkpure.download_status(),
+      'downloadPending': apkpure.lookup_pending(),
       'maxUploadBytes': apk_identity.MAX_FILE_BYTES,
       'wiredAvailable': False,
       'steps': [

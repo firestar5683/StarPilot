@@ -24,13 +24,15 @@ VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)+-release", re.ASCII)
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_DEPTH = 8
 SUCCESS_TTL = 6 * 3600
-FAILURE_TTL = 15 * 60
+FAILURE_TTL = 60  # a failed lookup (e.g. at boot before the clock syncs) retries soon
+RETRY_DELAYS = (3, 8)  # three tries before the page falls back to APKMirror
 LINK_MARGIN = 3600  # never hand out a link that expires within the hour
 
 _lock = threading.Lock()
 _cache: dict | None = None
 _refresh_after = 0.0
 _in_flight = False
+_sleep = time.sleep
 
 
 def _now() -> float:
@@ -156,7 +158,10 @@ def start_background_refresh(now=time.monotonic) -> None:
       global _cache, _in_flight, _refresh_after
       result = None
       try:
-        result = fetch_latest()
+        for delay in (*RETRY_DELAYS, None):
+          if (result := fetch_latest()) is not None or delay is None:
+            break
+          _sleep(delay)
       except Exception:
         pass  # The upload path must keep working when the hint is unavailable.
       finally:
@@ -171,6 +176,13 @@ def start_background_refresh(now=time.monotonic) -> None:
     with _lock:
       _in_flight = False
       _refresh_after = time.monotonic() + FAILURE_TTL
+
+
+def lookup_pending() -> bool:
+  """True while a lookup is still trying and there's no usable link to show yet."""
+  with _lock:
+    in_flight = _in_flight
+  return in_flight and download_status() is None
 
 
 def download_status(now: float | None = None) -> dict | None:

@@ -1422,8 +1422,9 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
 .gx-aa-wiki[open] > summary::before { transform: rotate(90deg); }
 .gx-aa-wiki > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: var(--radius-sm); }
 .gx-aa-wiki p, .gx-aa-wiki ol, .gx-aa-wiki ul { margin: var(--sp-3) 0 0; }
-.gx-aa-wiki ol, .gx-aa-wiki ul { padding-left: 1.3em; display: grid; gap: var(--sp-1); }
+.gx-aa-wiki ol, .gx-aa-wiki ul, .gx-aa-mirror-steps { padding-left: 1.3em; display: grid; gap: var(--sp-1); }
 .gx-aa-wiki ul { list-style: disc; }
+.gx-aa-mirror-steps { margin: 0; }
 .gx-aa-faq { margin-top: var(--sp-4); padding: var(--panel-padding); display: grid; gap: var(--sp-3); min-width: 0; overflow-wrap: anywhere; }
 .gx-aa-faq__head h3 { margin: 0 0 var(--sp-1); }
 .gx-aa-faq__head p { margin: 0; color: var(--on-surface-variant); }
