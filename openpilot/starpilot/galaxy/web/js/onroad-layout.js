@@ -404,6 +404,8 @@ export const OnroadLayoutPage = {
     selectedWidget() { return this.profile?.widgets[this.state.selected] },
     selectedPosition() { return this.layout?.[this.state.selected] },
     selectedSize() { return this.selectedWidget ? widgetSize(this.selectedWidget, this.selectedPosition) : [0, 0] },
+    // A finger covers the preview chip, so touch drags show the alignment in the sticky save bar.
+    snapInBar() { return !!(this.state.drag?.touch && this.state.snapGuides.length) },
     snapSummary() {
       const guides = this.state.snapGuides, centred = new Set(guides.filter(guide => guide.kind === "center").map(guide => guide.axis))
       if (centred.size === 2) return "Centred on the screen"
@@ -886,7 +888,7 @@ export const OnroadLayoutPage = {
       this.state.selected = id
       this.finishColorEdit()
       this.state.drag = {
-        id, pointerId: event.pointerId, fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
+        id, pointerId: event.pointerId, touch: event.pointerType === "touch", fromTray, before: { ...position }, historyBefore: clone(this.state.draft), inside: !fromTray,
         startX: event.clientX, startY: event.clientY, moved: false,
         offsetX: fromTray ? width / 2 : point.x - position.x,
         offsetY: fromTray ? height / 2 : point.y - position.y
@@ -905,7 +907,7 @@ export const OnroadLayoutPage = {
       this.state.selected = id
       this.finishColorEdit()
       this.state.drag = {
-        id, pointerId: event.pointerId, resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
+        id, pointerId: event.pointerId, touch: event.pointerType === "touch", resize: true, before: { ...position }, historyBefore: clone(this.state.draft),
         inside: true, offsetX: point.x - position.width, offsetY: point.y - position.height
       }
       this._dragTarget = this.$refs.preview
@@ -1187,6 +1189,7 @@ export const OnroadLayoutPage = {
       <GxState v-if="mode !== 'local'">Connect to local Galaxy to edit this device’s colors and layouts.</GxState>
       <template v-else>
         <div ref="leaveBar" class="gx-layout__savebar" :class="{'gx-layout__savebar--leave': inlineLeavePrompt, 'is-stuck': state.stuck.leaveBar}" :inert="busy">
+          <div v-if="snapInBar && !inlineLeavePrompt" class="gx-layout__savebar-snap" aria-hidden="true"><i class="bi bi-magnet" aria-hidden="true"></i>{{ snapSummary }}</div>
           <span role="status" :class="{'is-dirty': dirty && !inlineLeavePrompt && state.status !== 'saving'}">{{ inlineLeavePrompt ? (pendingLeave ? 'Leave without saving your changes?' : 'Discard your edits and reload the saved colors and layouts?') : state.status === 'saving' ? 'Saving…' : state.status === 'loading' ? 'Loading…' : !state.data ? 'No saved layout loaded' : dirty ? 'Unsaved' : state.notice || 'Saved' }}</span>
           <template v-if="inlineLeavePrompt">
             <button class="gx-btn gx-btn--tonal" type="button" aria-label="Keep editing" title="Keep editing" @click="cancelLeave"><svg class="gx-layout__action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6M4 4v6h6"/></svg><span class="gx-layout__action-label">Keep editing</span></button>
@@ -1229,7 +1232,7 @@ export const OnroadLayoutPage = {
               </div>
               <p v-if="state.previewMode === 'layout' && state.art.status === 'unavailable'" class="gx-note" role="status">Widget preview unavailable. Placement controls remain available.</p>
               <div class="gx-layout__stage">
-              <span v-if="state.snapGuides.length" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones}" aria-hidden="true">{{ snapSummary }}</span>
+              <span v-if="state.snapGuides.length && !snapInBar" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones}" aria-hidden="true">{{ snapSummary }}</span>
               <span v-if="!projection && state.showFavoriteZones && state.previewMode === 'layout'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <svg v-show="state.previewMode === 'layout'" ref="preview" class="gx-layout__preview" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
                 @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
