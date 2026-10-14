@@ -14,6 +14,7 @@ import threading
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from openpilot.starpilot.galaxy.batch_routes import change_drive_state, delete_records, non_default_settings, preview_layout
 from openpilot.starpilot.galaxy.access import AccessStatus, default_owner
 from openpilot.starpilot.galaxy.auth import LocalSessions
 from openpilot.starpilot.galaxy.http_server import (_LocalHTTPHandler, _LocalHTTPServer, allowed_authority,
@@ -39,10 +40,7 @@ from openpilot.starpilot.galaxy.software_status import SoftwareStatus, SoftwareU
 from openpilot.starpilot.galaxy.software_operations import SoftwareOperations, SoftwareOperationError
 from openpilot.starpilot.galaxy.settings import SettingsGateway, SettingsChanged, SettingsUnavailable
 from openpilot.starpilot.galaxy.onroad_layout import LayoutChanged, OnroadLayoutOwner
-from openpilot.starpilot.ui.layout_preview_transport import (PreviewBusy, PreviewDenied, PreviewInvalid, PreviewUnavailable,
-                                                              PROFILES as PREVIEW_PROFILES, SCENES as PREVIEW_SCENES,
-                                                              request_preview, request_profile)
-from openpilot.starpilot.ui.onroad_customization import validate_document
+from openpilot.starpilot.ui.layout_preview_transport import (request_profile)
 from openpilot.starpilot.favorites.owner import FavoritesChanged
 from openpilot.starpilot.galaxy.favorites import FavoritesGateway
 from openpilot.starpilot.galaxy.system_monitor import SystemMonitor
@@ -1254,23 +1252,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
       elif path == '/api/settings/non-defaults':
-        if not self.require_session():
-          return
-        identity = self.settings_session()
-        if identity is None:
-          self.json(401, {'error': 'Sign in to Galaxy'})
-          return
-        try:
-          result = settings_recovery().snapshot(*identity)
-        except SettingsChanged:
-          self.json(409, {'error': 'Saved settings changed; refresh the page'})
-        except (SettingsUnavailable, OSError, ValueError, RuntimeError):
-          self.json(503, {'error': 'Saved settings are unavailable'})
-        else:
-          if self.settings_session() == identity:
-            self.json(200, result)
-          else:
-            self.json(401, {'error': 'Sign in to Galaxy'})
+        non_default_settings(self, settings_recovery)
       elif path.startswith('/api/settings/pages/'):
         if not self.require_session():
           return
@@ -1749,45 +1731,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
       elif path in ('/api/sentry/events/delete', '/api/crash-reports/delete'):
-        identity = self.settings_session()
-        if identity is None:
-          self.json(401, {'error': 'Sign in to Galaxy'})
-          return
-        sentry = path == '/api/sentry/events/delete'
-        key = 'eventId' if sentry else 'id'
-        try:
-          if type(payload) is not dict:
-            raise ValueError('Invalid deletion selection')
-          if set(payload) == {'all', 'confirmed'} and payload['all'] is True and payload['confirmed'] is True:
-            selected = None
-          elif set(payload) == {key} and type(payload[key]) is str and payload[key]:
-            selected = payload[key]
-          else:
-            raise ValueError('Confirm deleting all stored records')
-
-          def permitted():
-            return self.settings_session() == identity
-
-          with sentry_events_lock if sentry else crash_reports_lock:
-            if not permitted():
-              raise PermissionError('Galaxy session expired')
-            if sentry and notification_owner is not None:
-              result = notification_owner.delete_events(lambda: motion_events.delete(selected, permitted=permitted), selected)
-            else:
-              result = (motion_events if sentry else reports).delete(selected, permitted=permitted)
-        except (ValueError, CrashMissing):
-          self.json(400, {'error': 'Invalid deletion selection or confirmation'})
-        except PermissionError:
-          self.json(401, {'error': 'Sign in to Galaxy'})
-        except CrashChanged:
-          self.json(409, {'error': 'Report changed; refresh before deleting'})
-        except (OSError, CrashUnavailable, SentryEventsUnavailable, NotificationUnavailable):
-          self.json(503, {'error': 'Stored records could not be fully deleted; refresh and retry'})
-        else:
-          if permitted():
-            self.json(200, result)
-          else:
-            self.json(401, {'error': 'Sign in to Galaxy'})
+        delete_records(self, path, payload, sentry_events_lock, crash_reports_lock, notification_owner, motion_events, reports)
       elif path == '/api/recordings/delete-videos':
         identity = self.settings_session()
         if identity is None:
@@ -1908,75 +1852,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(401, {'error': 'Sign in to Galaxy'})
         return
       if path == '/api/ui/layout/preview':
-        identity = self.settings_session()
-        if identity is None:
-          self.json(401, {'error': 'Sign in to Galaxy'})
-          return
-        if (type(payload) is not dict or set(payload) not in ({'document', 'profile', 'scene'}, {'document', 'profile', 'scene', 'art'}) or
-            ('art' in payload and payload['art'] is not True) or
-            type(payload['profile']) is not str or payload['profile'] not in (PREVIEW_PROFILES | {'projection'}) or
-            type(payload['scene']) is not str or payload['scene'] not in PREVIEW_SCENES):
-          self.json(400, {'error': 'Invalid layout preview request'})
-          return
-        try:
-          if payload['profile'] == 'projection':
-            from openpilot.starpilot.system.android_auto.projection_layout import validate_layout
-            from openpilot.starpilot.ui.onroad_customization import read_customization
-            snapshot = projection_layout_owner().snapshot()
-            if not snapshot['available']:
-              self.json(409, {'error': snapshot['reason'] or 'Connect Android Auto before previewing'})
-              return
-            document = {'layout': validate_layout(payload['document'], snapshot['screen']),
-                        'base': read_customization(layout_owner().params)}
-          else:
-            document = validate_document(payload['document'])
-        except (ValueError, TypeError, OverflowError, RecursionError):
-          self.json(400, {'error': 'Invalid layout document'})
-          return
-        try:
-          if not layout_owner().parked():
-            self.json(403, {'error': 'Turn off the vehicle to preview this layout'})
-            return
-          image = request_preview({'document': document, 'profile': payload['profile'], 'scene': payload['scene'],
-                                   **({'art': True} if payload.get('art') is True else {})},
-                                  layout_preview_socket)
-          if self.settings_session() != identity:
-            self.json(401, {'error': 'Sign in to Galaxy'})
-          elif not layout_owner().parked():
-            self.json(403, {'error': 'Turn off the vehicle to preview this layout'})
-          else:
-            self.respond(200, image, 'image/png')
-        except PreviewDenied:
-          self.json(403, {'error': 'Turn off the vehicle to preview this layout'})
-        except PreviewBusy:
-          self.json(429, {'error': 'Preview is busy; try again shortly'})
-        except (PreviewInvalid, PreviewUnavailable, OSError, RuntimeError):
-          self.json(503, {'error': 'Onroad UI preview is unavailable'})
+        preview_layout(self, payload, projection_layout_owner, layout_owner, layout_preview_socket)
         return
       if path == '/api/drive-state/action':
-        identity = self.settings_session()
-        if identity is None:
-          self.json(401, {'error': 'Sign in to Galaxy'})
-          return
-        if (type(payload) is not dict or set(payload) != {'mode', 'revision'} or
-            type(payload['mode']) is not str or type(payload['revision']) is not str or
-            len(payload['revision']) != 32):
-          self.json(400, {'error': 'Invalid drive state request'})
-          return
-        from openpilot.starpilot.drive_state.owner import Rejected
-        try:
-          with effect_lock:
-            drive_owner().change(payload['mode'], payload['revision'], lambda: self.settings_session() == identity)
-          result = drive_owner().snapshot()
-        except Rejected as error:
-          self.json(409, {'error': str(error)})
-        except (OSError, RuntimeError):
-          self.json(503, {'error': 'Drive state is unavailable'})
-        else:
-          if self.settings_session() == identity:
-            self.json(200, result)
-          else:
-            self.json(401, {'error': 'Sign in to Galaxy'})
+        change_drive_state(self, payload, effect_lock, drive_owner)
         return
       if path.startswith('/api/sounds/'):
         identity = self.settings_session()

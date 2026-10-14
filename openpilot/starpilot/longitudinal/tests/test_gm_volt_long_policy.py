@@ -14,6 +14,8 @@ from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.tests.extension_helpers import extension_state
 from openpilot.starpilot.longitudinal.tests.extension_helpers import attach_inputs
 import os
+from tempfile import TemporaryDirectory
+from weakref import finalize
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import patch
@@ -28,7 +30,8 @@ from opendbc.car.vehicle_model import VehicleModel
 from openpilot.cereal import messaging
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
-from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy
+from openpilot.common.params import Params
+from openpilot.starpilot.lateral.lane_change_preferences import LiveLaneChangePolicy
 from openpilot.starpilot.lateral.lane_change_smoothing import LaneChangeSmoother
 
 
@@ -93,7 +96,11 @@ def controls_fixture(alpha=False):
   controls.torque_host = controls.lane_centering_host = None
   controls.torque_learning_allowed = False
   controls.lane_centering_controller = Mock(spec=LaneCenteringController, reset=lambda: None)
-  controls.lane_change_policy = LaneChangePolicy()
+  saved = TemporaryDirectory()
+  finalize(controls, saved.cleanup)
+  controls.params = Params(saved.name)
+  controls.lane_change_preferences = LiveLaneChangePolicy(controls.params, now_ns=now)
+  controls.lane_change_policy = controls.lane_change_preferences.applied
   controls.lane_change_smoother = LaneChangeSmoother()
   controls.curvature = controls.desired_curvature = 0.0
   controls.steer_limited_by_safety = False

@@ -101,7 +101,7 @@ class FeatureSnapshotReadTests(unittest.TestCase):
       self.assertEqual(self.owner.apply(FeatureSettingsRequest("AlwaysOnLateral", b"0", "On")), b"1")
       self.assertEqual(self.owner._raw("AlwaysOnLateral"), b"0")
     with patch.object(self.owner, "_build_snapshot", side_effect=assembly), \
-         patch.object(self.owner, "_apply", side_effect=lambda request: self.owner._raw(request.key)):
+         patch.object(self.owner, "_apply", side_effect=lambda request, *, reset_default=False: self.owner._raw(request.key)):
       self.snapshot()
     self.assertEqual(self.owner._raw("AlwaysOnLateral"), b"1")
 

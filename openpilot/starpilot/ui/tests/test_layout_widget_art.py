@@ -1,3 +1,4 @@
+from typing import cast
 import json
 import struct
 import zlib
@@ -62,11 +63,12 @@ def test_static_compact_sample_settles_actual_hud_without_changing_live_blink_po
   from openpilot.starpilot.ui.layout_preview_renderer import _Canvas, sample_state
   from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
   from openpilot.starpilot.ui.presentation import Profile
+  from openpilot.starpilot.ui.onroad import OnroadView
 
   hud = CompactHudRenderer(Mock(), Path('/unused-assets'))
   canvas = _Canvas.__new__(_Canvas)
   canvas.profile = Profile.COMPACT
-  canvas.view = NS(compact_hud=hud, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0)))
+  canvas.view = cast(OnroadView, NS(compact_hud=hud, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0))))
   sample = sample_state('engaged', default_document())
   for _ in range(2):
     canvas._settle(sample)

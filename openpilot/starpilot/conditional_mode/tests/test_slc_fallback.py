@@ -21,6 +21,7 @@ class ReplaySM:
     self.data['slcDashboardObservation'] = messaging.new_message('slcDashboardObservation').slcDashboardObservation
     self.valid = dict.fromkeys(self.data, True)
     self.alive = dict.fromkeys(self.data, True)
+    self.updated = dict.fromkeys(self.data, True)
     self.logMonoTime = dict.fromkeys(self.data, NOW)
     self.data['carControl'].enabled = True
     self.data['carControl'].longActive = True

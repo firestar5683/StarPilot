@@ -103,7 +103,7 @@ def test_hidden_settings_still_updates_navigation_but_does_not_project(lifecycle
   ("auto", True, "Force Off-road", "offroad"),
   ("offroad", True, "Force On-road", "onroad"),
   ("onroad", True, "Return to Auto", "auto"),
-  ("offroad", False, "Return to Auto", "auto"),
+  ("offroad", False, "Force On-road", "onroad"),
 ])
 def test_force_menu_names_requested_action_with_supported_glyphs(lifecycle, mode, allowed, label, target):
   from pathlib import Path

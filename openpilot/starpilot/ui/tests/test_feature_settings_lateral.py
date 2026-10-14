@@ -47,6 +47,8 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.temp = tempfile.TemporaryDirectory()
     self.addCleanup(self.temp.cleanup)
     self.params = Params(self.temp.name)
+    # These action/repair cases start from an explicit saved Off preference.
+    self.params.put_bool("AlwaysOnLateral", False, block=True)
     self.parked = True
     self.cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.parked,
@@ -107,7 +109,7 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.assertIsNone(after.user_factor)
     self.assertEqual(after.user_friction, before.user_friction)
     self.assertFalse(self.owner.apply(request))
-    self.assertEqual(self.row("torque", "torque:factor:value").reason, "Supplied tune; edits saved for the next drive")
+    self.assertEqual(self.row("torque", "torque:factor:value").reason, "Uses the supplied vehicle tune")
 
   def test_torque_custom_values_and_learning_preference_are_independent(self):
     rows = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False).rows
@@ -196,7 +198,7 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.params.put("SteerLatAccel", self.cp.lateralTuning.torque.latAccelFactor * 1.1, block=True)
     old = Path(self.params.get_param_path("SteerLatAccel")).read_bytes()
     factor = self.row("torque", "torque:factor:value")
-    self.assertIn("Custom", factor.reason)
+    self.assertEqual(factor.reason, "Uses your custom value")
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:friction:value"))))
     profile = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())[str(self.cp.carFingerprint)]
     self.assertEqual(profile.factor.mode, "custom")

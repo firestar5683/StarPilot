@@ -22,6 +22,7 @@ def probe(output, reference_method=None):
     raise RuntimeError("Native lane-host probe requires isolated IPC without simulation flags")
   from openpilot.cereal import messaging
   from openpilot.common.realtime import DT_CTRL
+  from openpilot.common.params import Params
   from openpilot.selfdrive.controls.controlsd import Controls
   from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
   from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
@@ -30,7 +31,7 @@ def probe(output, reference_method=None):
   from openpilot.starpilot.longitudinal.tests.extension_helpers import attach_inputs
   from openpilot.starpilot.lateral.lane_centering import ControlMode, LaneCenteringController, LaneCenteringRequest, LaneCenteringSettings
   from openpilot.starpilot.lateral.tests.test_lane_centering import model
-  from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy
+  from openpilot.starpilot.lateral.lane_change_preferences import LiveLaneChangePolicy
   from openpilot.starpilot.lateral.lane_change_smoothing import LaneChangeSmoother
   from opendbc.car.car_helpers import interfaces
   from opendbc.car.toyota.values import CAR
@@ -58,7 +59,9 @@ def probe(output, reference_method=None):
     control.curvature = control.desired_curvature = 0.0
     control.steer_limited_by_safety = False
     control.lane_centering_controller = LaneCenteringController()
-    control.lane_change_policy = LaneChangePolicy()
+    control.params = Params()
+    control.lane_change_preferences = LiveLaneChangePolicy(control.params, now_ns=1_000_000_000)
+    control.lane_change_policy = control.lane_change_preferences.applied
     control.lane_change_smoother = LaneChangeSmoother()
     control.torque_host = None  # Explicit feature-off state for the manually constructed Controls fixture.
     control.torque_learning_allowed = False

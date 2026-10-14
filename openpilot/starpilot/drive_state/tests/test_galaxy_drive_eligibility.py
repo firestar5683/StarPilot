@@ -1,5 +1,6 @@
 from types import SimpleNamespace as NS
 from unittest.mock import Mock
+from typing import cast
 
 import pytest
 
@@ -27,7 +28,9 @@ def test_force_onroad_never_uses_park_admission(tmp_path):
   owner = DriveStateOwner(params, tmp_path / 'owner', alive=lambda _: True)
   owner.initialize(pid=1, birth=2, boot=BOOT)
   physical = Mock(side_effect=AssertionError('Onroad does not require Park'))
-  state = owner.request('onroad', expected_revision=owner.snapshot().revision,
+  revision = owner.snapshot().revision
+  assert revision is not None
+  state = owner.request('onroad', expected_revision=revision,
                         authorized=lambda: True, override_allowed=physical)
   assert state.mode == Mode.ONROAD
   physical.assert_not_called()
@@ -38,13 +41,17 @@ def test_force_offroad_rechecks_actual_park_before_commit(tmp_path):
   owner = DriveStateOwner(params, tmp_path / 'owner', alive=lambda _: True)
   owner.initialize(pid=1, birth=2, boot=BOOT)
   baseline = list(params.writes)
+  revision = owner.snapshot().revision
+  assert revision is not None
   with pytest.raises(Rejected, match='Park'):
-    owner.request('offroad', expected_revision=owner.snapshot().revision,
+    owner.request('offroad', expected_revision=revision,
                   authorized=lambda: True, override_allowed=lambda: False)
   assert params.writes == baseline
   values = iter((True, False))
+  revision = owner.snapshot().revision
+  assert revision is not None
   with pytest.raises(Rejected):
-    owner.request('offroad', expected_revision=owner.snapshot().revision,
+    owner.request('offroad', expected_revision=revision,
                   authorized=lambda: True, override_allowed=lambda: next(values))
   assert params.writes == baseline
 
@@ -136,7 +143,7 @@ def test_update_snapshot_keeps_one_admission_and_matching_reason():
     case.setUp()
     context = NS(update_status=Mock(side_effect=[{'allowed': False, 'reason': 'Current Panda status is stale'},
                                                {'allowed': True, 'reason': None}]), close=Mock())
-    case.owner.context = context
+    case.owner.context = cast(PhysicalSource, context)
     case.owner.parked = lambda: context.update_status(True)['allowed']
     view = case.owner.snapshot(include_history=False)
     assert not view['parked'] and not view['canFastUpdate'] and not view['canInstall']

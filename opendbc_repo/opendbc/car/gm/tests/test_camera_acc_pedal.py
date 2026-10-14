@@ -74,6 +74,7 @@ class TestCameraAccPedal(unittest.TestCase):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1'}):
       settings = Params()
       settings.put_bool('OpenpilotEnabledToggle', True, block=True)
+      settings.put_bool('AlwaysOnLateral', False, block=True)
       for identity in CAMERA_IDS:
         for camera in (False, True):
           for be in (False, True):

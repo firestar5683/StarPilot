@@ -164,7 +164,7 @@ class TestGmVisionSource(unittest.TestCase):
       state = owner.snapshot('slc', parked=True, system_long=False, lateral_context=True, metric=False)
       row = next(row for row in state.rows if row.key == 'SLCPriority1')
       self.assertTrue(row.available)
-      self.assertIn('factory cruise', row.reason)
+      self.assertEqual(row.reason, 'Use this source first; try the secondary source when it is unavailable')
       request = row_change(row)
       assert request is not None
       self.assertTrue(owner.apply(request))

@@ -1,6 +1,7 @@
 """Real v2 cereal packets through the Maps consumer and actual saved owners."""
 from dataclasses import replace
 from pathlib import Path
+import os
 import tempfile
 from types import SimpleNamespace as NS
 from unittest.mock import patch
@@ -164,9 +165,12 @@ def test_shared_settings_owner_maps_labels_both_slots_defaults_and_ready_change_
     for key in ('SLCPriority1', 'SLCPriority2'):
       assert 'Maps' in row(key).choices
       while row(key).value != 'Maps':
-        assert owner.apply(row_change(row(key)))
+        request = row_change(row(key))
+        assert request is not None
+        assert owner.apply(request)
       assert params.get(key) == 'Map Data'
     request = row_change(row('SLCPriority1'))
+    assert request is not None
     ready = False
     assert not owner.apply(request)
     assert params.get('SLCPriority1') == 'Map Data'
@@ -192,8 +196,7 @@ def test_manager_default_demand_does_not_read_full_slc_settings():
 
 def test_cached_provider_verification_invalidates_on_replacement_and_source_addition():
   from openpilot.starpilot.maps.operation_owner import _PackageReadinessCache
-  # Exercise Linux inode/metadata invalidation on Linux-local storage, not
-  # the Mac Docker shared mount whose metadata publication is asynchronous.
+  # Exercise real file identity changes on Linux-local storage.
   with tempfile.TemporaryDirectory(dir='/tmp') as directory:
     root = Path(directory)
     binary, source = root / 'provider', root / 'source'
@@ -213,7 +216,13 @@ def test_cached_provider_verification_invalidates_on_replacement_and_source_addi
     replacement.replace(binary)
     assert not ready() and len(calls) == 2
     assert not ready() and len(calls) == 2
+    prior = binary.stat()
     binary.write_bytes(b'qualified')
+    # Equal-length writes in one filesystem timestamp tick may retain every
+    # watched metadata field. This tests metadata invalidation, so publish a
+    # distinct mtime explicitly rather than depending on clock resolution.
+    os.utime(binary, ns=(prior.st_atime_ns, prior.st_mtime_ns + 1_000_000_000))
+    assert binary.stat().st_mtime_ns != prior.st_mtime_ns
     assert ready() and len(calls) == 3
     (source / 'new.go').write_bytes(b'package main')
     assert not ready() and len(calls) == 4

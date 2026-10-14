@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 from unittest import mock
 
@@ -109,7 +110,9 @@ def test_road_download_bytes_are_current_before_next_five_minute_trim(tmp_path):
   assert d.sizes['driven'] == 0
   assert d.step(env) == 0
   d.status(env, force=True)
-  stored = OfflineState(tmp_path).status()['bytes']['driven']
+  saved_status = OfflineState(tmp_path).status()
+  assert saved_status is not None
+  stored = saved_status['bytes']['driven']
   assert stored == d.store.size('driven') and stored > 0
   reloaded = TileDaemon(store=TileStore(tmp_path, min_free_bytes=0), clock=clock)
   reloaded.maintain()
@@ -120,7 +123,9 @@ def test_road_download_bytes_are_current_before_next_five_minute_trim(tmp_path):
   key_path = next((tmp_path / 'driven').rglob('*.rt'))
   z, x = (int(value) for value in key_path.parts[-3:-1])
   key = TileKey(z, x, int(key_path.stem))
-  assert not decode_road_tile(key, reloaded.store.read(key)).empty
+  saved_tile = reloaded.store.read(key)
+  assert saved_tile is not None
+  assert not decode_road_tile(key, saved_tile).empty
 
 
 def test_promotion_keeps_storage_totals_exact_and_uses_saved_tile_first(tmp_path):
@@ -162,7 +167,10 @@ def test_status_reuses_verified_index_and_invalidates_changed_directory(tmp_path
       for _ in range(6):
         assert owner.snapshot()['selectedSnapshot']['generation'] == generation
       assert inspect.call_count == 1
+      prior = tile.parent.stat()
       tile.unlink()
+      os.utime(tile.parent, ns=(prior.st_atime_ns, prior.st_mtime_ns + 1_000_000_000))
+      assert tile.parent.stat().st_mtime_ns != prior.st_mtime_ns
       status = owner.snapshot()
       assert inspect.call_count == 2
       assert status['state'] == 'unavailable' and status['selectedSnapshot'] is None

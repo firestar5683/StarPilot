@@ -1607,15 +1607,8 @@ class SelfdriveD:
 
   def _decide_aol_axes(self, CS, intent, native, *, now_ns=0, ordinary_lag=False):
     from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
-    from openpilot.starpilot.aol.dm import armed_lateral_current
-    retained_dm_lateral = bool(intent is not None and
-      getattr(self, 'aol_dm_retained_owner', None) == (intent.producerSessionId, self.aol_session_id) and
-      self.sm.all_checks(['driverMonitoringState']) and
-      armed_lateral_current(self.CP, CS, intent, native, source_ns=self.aol_car_state_log_ns,
-                            now_ns=now_ns, axis_session_id=self.aol_session_id))
-    lateral_events = [name for name in self.events.names if not (
-      name == EventName.selfdrivedLagging and ordinary_lag or
-      name == EventName.tooDistracted and retained_dm_lateral)]
+    from openpilot.starpilot.aol.dm import lateral_event_context
+    retained_dm_lateral, lateral_events = lateral_event_context(self, CS, intent, native, now_ns, ordinary_lag)
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
         not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
@@ -1776,17 +1769,8 @@ class SelfdriveD:
       intent = self.reconciled_intent(intent, previous_intent, reconciled_pairs, reconciled_epoch, now_ns)
       self.mark_loop_phase('intent_admission_return')
       self.aol_last_intent = intent
-      if (intent is None or not intent.allowedLatch or previous_intent is None or
-          intent.producerSessionId != previous_intent.producerSessionId):
-        self.aol_dm_retained_owner = None
-      elif self.aol_axis_decision.lateral_active and previous_intent.allowedLatch:
-        self.aol_dm_retained_owner = (intent.producerSessionId, self.aol_session_id)
-      if (self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or
-          self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout):
-        self.aol_availability_long_inhibit = True
-        self.aol_dm_lateral_inhibit = False
-      elif intent is not None and not intent.allowedLatch:
-        self.aol_dm_lateral_inhibit = False
+      from openpilot.starpilot.aol.dm import dm_clear, observe_owner
+      observe_owner(self, intent, previous_intent)
       previous = self.aol_axis_decision
       requested = self._decide_aol_axes(CS, intent, native, now_ns=now_ns)
       source_current = bool(intent is not None and getattr(self, 'conditional_car_state_valid', False) and
@@ -1900,8 +1884,7 @@ class SelfdriveD:
       self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     if self.aol_replay:
       if (not availability and source_current and self.enabled and self.events.contains(ET.ENABLE) and
-          self.sm['driverMonitoringState'].alertLevel != AlertLevel.three and
-          not self.sm['driverMonitoringState'].lockout and not self.sm['driverMonitoringState'].alwaysOnLockout and
+          dm_clear(self) and
           not self.events.contains(ET.NO_ENTRY) and not self.events.contains(ET.IMMEDIATE_DISABLE) and
           not self.events.contains(ET.SOFT_DISABLE)):
         self.aol_availability_long_inhibit = False

@@ -1,3 +1,4 @@
+from typing import cast
 from dataclasses import replace
 from unittest import TestCase
 from openpilot.starpilot.galaxy.defaults_recovery import DefaultsRecovery
@@ -7,7 +8,7 @@ from openpilot.starpilot.galaxy.tests import test_settings as fixtures
 
 class TestCanonicalRecovery(TestCase):
   def setUp(self):
-    fixtures.SettingsGatewayTest.setUp(self)
+    fixtures.SettingsGatewayTest.setUp(cast(fixtures.SettingsGatewayTest, self))
     from opendbc.car.car_helpers import interfaces
     from opendbc.car.toyota.values import CAR
     cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)

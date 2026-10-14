@@ -1,10 +1,12 @@
 """EV6 physical authorization and button intent."""
 import unittest
 from types import SimpleNamespace
+from typing import cast
 
 from opendbc.car import Bus, structs
 from opendbc.car.hyundai.ev6_aol import Ev6PhysicalAuthorization, qualified
 from opendbc.car.hyundai.interface import CarInterface
+from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import Buttons, CAR, DBC, HyundaiFlags
 from opendbc.can.packer import CANPacker
@@ -282,7 +284,7 @@ class TestEv6ConfiguredDesire(unittest.TestCase):
       params.put('MainCruiseButtonControl', 0, block=True)
       card = Car.__new__(Car)
       card.params, card.CP = params, ev6_params()
-      card.CI = SimpleNamespace(CP=card.CP, CC=None)
+      card.CI = cast(CarInterfaceBase, SimpleNamespace(CP=card.CP, CC=None))
       card.slc_transport_available = False
       card.v_cruise_helper = VCruiseHelper(card.CP)
       card.aol_card_intent = Ev6CardIntent(read_settings(params))

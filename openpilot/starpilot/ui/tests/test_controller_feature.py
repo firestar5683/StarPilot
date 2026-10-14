@@ -222,7 +222,7 @@ class TestControllerFeature(unittest.TestCase):
       return gateway.preview(page['view'], index, 0, 'session', b'generation', value='Stock Controller')
 
     intent = preview()
-    self.assertIn('next drive', intent['question'])
+    self.assertIn('created when the driving process starts', intent['question'])
     self.assertTrue(gateway.confirm(intent['intent'], 'session', b'generation'))
     self.assertEqual(read_selection(self.params, self.cp).mode, ControllerMode.STANDARD)
     self.assertFalse(current.parked)  # Saved preference did not require a Park state.
@@ -261,7 +261,8 @@ class TestControllerFeature(unittest.TestCase):
         self.assertTrue(row.available)
         self.assertEqual(row.value, 'On')
         self.assertEqual(row.reason, f'Saved for this vehicle and next drive. {label} applies compatible, qualified learning results.')
-        self.assertEqual(_projection(row, 'torque')['reason'], row.reason)
+        from openpilot.starpilot.galaxy.setting_descriptions import description
+        self.assertEqual(_projection(row, 'torque')['reason'], description(row))
 
 if __name__ == '__main__':
   unittest.main()

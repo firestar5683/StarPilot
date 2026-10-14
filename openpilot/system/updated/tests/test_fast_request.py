@@ -8,6 +8,7 @@ from unittest import mock
 from unittest.mock import Mock, patch
 
 from openpilot.system.updated.tests.test_vendored_update import load_updater
+from openpilot.starpilot.drive_state.evidence import PhysicalSource
 
 
 class StopLoop(Exception):
@@ -203,6 +204,9 @@ class TestFastAdapter(unittest.TestCase):
       source = Mock()
       source.allowed.return_value = True
       source.effective.return_value = False
+      source.status.side_effect = lambda source=source: {'allowed': source.allowed(), 'reason': None}
+      source.update_status.side_effect = lambda manager_offroad, source=source: PhysicalSource.update_status(source, manager_offroad)
+      source.update_ready.side_effect = lambda manager_offroad, source=source: PhysicalSource.update_ready(source, manager_offroad)
       physical = ModuleType('openpilot.starpilot.drive_state.evidence')
       physical.PhysicalSource = Mock(return_value=source)
       owner = ModuleType('openpilot.starpilot.software.fast_update')
@@ -220,6 +224,7 @@ class TestFastAdapter(unittest.TestCase):
       with patch.dict(sys.modules, {physical.__name__: physical, owner.__name__: owner}):
         self.assertEqual(updater.fast_update('SecretGoodStarPilot', 'b' * 40), 'reboot-requested')
       source.close.assert_called_once()
+      source.update_ready.assert_called_once_with(True)
       self.assertEqual(updater.params.get_bool.call_args_list, [mock.call('IsOffroad')])
       updater.params.put_bool.assert_called_once_with('UpdateAvailable', False, block=True)
 
@@ -238,6 +243,9 @@ class TestFastAdapter(unittest.TestCase):
         source = Mock()
         source.allowed.return_value = allowed
         source.effective.return_value = effective
+        source.status.side_effect = lambda source=source: {'allowed': source.allowed(), 'reason': None}
+        source.update_status.side_effect = lambda manager_offroad, source=source: PhysicalSource.update_status(source, manager_offroad)
+        source.update_ready.side_effect = lambda manager_offroad, source=source: PhysicalSource.update_ready(source, manager_offroad)
         physical = ModuleType('openpilot.starpilot.drive_state.evidence')
         physical.PhysicalSource = Mock(return_value=source)
         owner = ModuleType('openpilot.starpilot.software.fast_update')
@@ -249,6 +257,11 @@ class TestFastAdapter(unittest.TestCase):
              patch.object(updated.time, 'monotonic', side_effect=(0, 1)):
           self.assertEqual(updater.fast_update('SecretGoodStarPilot', 'b' * 40), 'denied')
         source.close.assert_called_once()
+        source.update_ready.assert_called_once_with(offroad)
+        if not offroad:
+          source.status.assert_not_called()
+        else:
+          source.status.assert_called_once()
 
 
 if __name__ == '__main__':

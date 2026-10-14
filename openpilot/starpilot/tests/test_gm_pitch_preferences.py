@@ -157,7 +157,7 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
     from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsGateway
     current = SimpleNamespace(parked=True, cp=self.cp() if cp is None else cp, raw=b'current-car')
-    owner = FeatureSettingsOwner(self.saved, lambda group: current.parked and group == 'parked_preferences',
+    owner = FeatureSettingsOwner(self.saved, lambda group: current.parked and group in ('parked_preferences', 'preferences'),
       vehicle_fingerprint=lambda: current.cp.carFingerprint if current.cp is not None else None,
       vehicle_params=lambda: current.cp)
     class TestContext:
@@ -197,7 +197,7 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     current, owner, _ = self.settings()
     toggle = self.row(owner)
     self.assertEqual((toggle.value, toggle.source, toggle.available), ('On', None, True))
-    self.assertIn('next startup', toggle.reason)
+    self.assertIn('Refreshes during the drive', toggle.reason)
     self.assertTrue(any(row.page == FeaturePage.VEHICLE for row in owner.snapshot(
       FeaturePage.HUB, parked=True, system_long=True, lateral_context=True, metric=False).rows))
     request = replace(self.change(toggle), confirmation=True)
@@ -249,7 +249,7 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
         index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Grade Compensation')
         self.assertTrue(page['rows'][index]['available'])
         intent = gateway.preview(page['view'], index, 0, 'session', b'generation', value='Off')
-        self.assertIn('next startup', intent['question'])
+        self.assertIn('refreshes during the drive', intent['question'])
         if revoke == 'parked':
           current.parked = False
         if revoke == 'cp':
@@ -257,17 +257,15 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
         if revoke == 'bytes':
           self.path.write_bytes(b'1')
         if revoke == 'parked':
-          # The saved preference can be previewed onroad, but final owner still
-          # refuses a write after parked authority is withdrawn.
-          self.assertFalse(gateway.confirm(intent['intent'], 'session', b'generation'))
-          self.assertFalse(self.path.exists())
+          self.assertTrue(gateway.confirm(intent['intent'], 'session', b'generation'))
+          self.assertEqual(self.path.read_bytes(), b'0')
         elif revoke in ('cp', 'session'):
           with self.assertRaises(SettingsChanged):
             gateway.confirm(intent['intent'], 'session', b'generation', session_valid=lambda revoke=revoke: revoke != 'session')
         else:
           self.assertEqual(gateway.confirm(intent['intent'], 'session', b'generation'), revoke is None)
         self.assertEqual(self.path.read_bytes() if self.path.exists() else None,
-                         b'0' if revoke is None else b'1' if revoke == 'bytes' else None)
+                         b'0' if revoke in (None, 'parked') else b'1' if revoke == 'bytes' else None)
 
   def test_suburban_gateway_setting_reaches_controller_and_rechecks_permission(self):
     from dataclasses import replace

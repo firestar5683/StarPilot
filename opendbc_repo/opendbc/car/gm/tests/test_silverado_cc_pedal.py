@@ -108,6 +108,7 @@ class TestSilveradoCcPedal(unittest.TestCase):
         with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
           store = Params()
           store.put_bool('OpenpilotEnabledToggle', True, block=True)
+          store.put_bool('AlwaysOnLateral', False, block=True)
           store.put_bool('DisableOpenpilotLongitudinal', disabled, block=True)
           fp = fingerprint(removed=removed)
           cp = CarInterface.get_params(IDENTITY, fp, [], False, False, False)

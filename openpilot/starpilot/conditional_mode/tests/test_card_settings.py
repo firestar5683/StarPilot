@@ -158,6 +158,7 @@ def test_actual_params_thread_continues_after_new_reader_exception(worker):
   calls = []
   card.params = SimpleNamespace(get_bool=lambda key: calls.append(key) or False)
   card.CP = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False)
+  card.CI = SimpleNamespace(CP=card.CP, CC=None)
   card.aol_card_intent = None
   card.conditional_settings_worker = worker
   card.v_cruise_helper = SimpleNamespace()

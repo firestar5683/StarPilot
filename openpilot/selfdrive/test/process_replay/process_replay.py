@@ -720,6 +720,8 @@ def generate_params_config(lr=None, CP=None, fingerprint=None, custom_params=Non
     "OpenpilotEnabledToggle": True,
     "DisengageOnAccelerator": True,
     "DisableLogging": False,
+    # Reviewed historical replays predate the new-install AOL default. Explicit scenarios override this below.
+    "AlwaysOnLateral": False,
   }
 
   if custom_params is not None:

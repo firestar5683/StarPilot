@@ -34,7 +34,7 @@ class DrawerNativeTest(unittest.TestCase):
       self.assertAlmostEqual(rows['dashboard'].speed_mps, 25)
       self.assertTrue(rows['dashboard'].enabled)
       self.assertTrue(rows['map'].enabled)
-      self.assertEqual(rows['map'].kind, 'unknown')
+      self.assertEqual(rows['map'].kind, 'stale')
       self.assertIsNone(rows['map'].speed_mps)
       self.assertFalse(rows['online'].enabled)
       self.assertEqual(obs.source, 'dashboard')

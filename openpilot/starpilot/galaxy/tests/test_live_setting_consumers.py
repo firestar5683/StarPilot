@@ -3,6 +3,7 @@ from dataclasses import replace
 import inspect
 import json
 from pathlib import Path
+from typing import cast
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -37,7 +38,8 @@ def test_actual_modeld_and_controls_consume_same_live_document(tmp_path):
   save(params, initial)
   dh = DesireHelper()
   model_cache = LiveLaneChangePolicy(params, now_ns=1_000_000_000)
-  controls = SimpleNamespace(lane_change_preferences=LiveLaneChangePolicy(params, now_ns=1_000_000_000))
+  controls = Controls.__new__(Controls)
+  controls.lane_change_preferences = LiveLaneChangePolicy(params, now_ns=1_000_000_000)
   cs = car.CarState.new_message(vEgo=20., leftBlinker=True)
   model = SimpleNamespace(meta=SimpleNamespace(laneChangeState=log.LaneChangeState.off))
 
@@ -151,6 +153,9 @@ def test_actual_card_worker_publishes_grade_without_controller_params_reads(tmp_
   from opendbc.car.gm.tests.test_ascm_intercept import params as vehicle_params
   from opendbc.car.gm.values import CAR, DBC
   from openpilot.selfdrive.car import card
+  from opendbc.car.interfaces import CarInterfaceBase
+  from openpilot.common.params import Params
+  from openpilot.selfdrive.car.cruise import VCruiseHelper
   from openpilot.starpilot.car.gm.tune_preferences import GradeCompensationPreference
   saved = PathParams(tmp_path)
   saved.put('OpenpilotEnabledToggle', b'1')
@@ -159,10 +164,10 @@ def test_actual_card_worker_publishes_grade_without_controller_params_reads(tmp_
   cc = CarController(DBC[cp.carFingerprint], cp)
   cc.long_pitch_input = GradeCompensationPreference(saved)
   worker = card.Car.__new__(card.Car)
-  worker.CP, worker.CI = cp, SimpleNamespace(CC=cc)
-  worker.params = SimpleNamespace(get_bool=lambda key: False)
+  worker.CP, worker.CI = cp, cast(CarInterfaceBase, SimpleNamespace(CC=cc))
+  worker.params = cast(Params, SimpleNamespace(get_bool=lambda key: False))
   worker.aol_card_intent = None
-  worker.v_cruise_helper = SimpleNamespace(intervals=None)
+  worker.v_cruise_helper = cast(VCruiseHelper, SimpleNamespace(intervals=None))
   event = threading.Event()
 
   def publish(now_ns):

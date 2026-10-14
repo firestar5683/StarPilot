@@ -27,6 +27,7 @@ def test_generic_actual_card_publication_reaches_blend_settings(identity, monkey
   with OpenpilotPrefix():
     saved = Params()
     saved.put_bool('OpenpilotEnabledToggle', True, block=True)
+    saved.put_bool('AlwaysOnLateral', False, block=True)
     saved.put_bool('AlphaLongitudinalEnabled', alpha, block=True)
     saved.put_bool('IsReleaseBranch', release, block=True)
     saved.put_bool('DisableOpenpilotLongitudinal', disable, block=True)

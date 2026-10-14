@@ -124,6 +124,7 @@ def test_saved_learning_roundtrip_galaxy_progress_automatic_use_and_reset(tmp_pa
     assert owner.status == 'saved' and not host.runtime.curve.dirty
     saved = learning_snapshot(params)
     # This is the SAME canonical progress source consumed by the Galaxy row.
+    assert saved.progress is not None
     assert saved.progress == pytest.approx(host.runtime.curve.progress) and saved.progress > .1
     document = json.loads(Path(params.get_param_path(DOCUMENT_KEY)).read_bytes())
     assert document == host.runtime.curve.document()
