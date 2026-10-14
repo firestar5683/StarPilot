@@ -37,7 +37,7 @@ it labels its sample System Monitor data and cannot edit a device.
 | --- | --- |
 | Home and Tools | Local status cards, navigation, theme, drawer, pinned tiles, and hash routes. |
 | System Monitor and Plots | Bounded local process/device and driving-message samples. Unavailable data stays unknown; leaving a page stops its polling. |
-| Logs and Recordings | Current crash-report previews, closed local segment inventory, one-segment summary, and Quick road playback from a closed `qcamera.ts`. |
+| Logs and Routes | Current crash-report previews, closed local segment inventory, one-segment summary, and Quick road playback from a closed `qcamera.ts`. |
 | Software & Updates | Read-only installed and updater status. Refresh rereads reported Params; it does not check, download, switch branches, install, roll back, or reboot. |
 | Driving and Device Preferences | Saved settings through typed owners shared with native controls, including SLC, lateral and longitudinal tuning, conditional modes, display, cameras, and sounds. |
 | Vehicle Controls | One saved manual vehicle choice for the next start, or Auto for normal detection. |

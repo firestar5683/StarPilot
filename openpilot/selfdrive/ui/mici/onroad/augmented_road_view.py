@@ -231,7 +231,7 @@ class AugmentedRoadView(CameraView):
                                 lead_info_mode: int = 0, lead_info_metric: bool | None = None,
                                 lateral_active: bool = False, road_style: dict | None = None, paint: bool = True) -> None:
     """Draw the existing calibrated camera/model without stock HUD or alert."""
-    if not ui_state.started:
+    if not ui_state.started and ui_state.replay_clock is None:
       return
     if camera_view == CAMERA_VIEW_DRIVER or reverse_driver:
       self._ensure_connection()

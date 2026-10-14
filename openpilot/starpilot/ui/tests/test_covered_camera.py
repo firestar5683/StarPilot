@@ -109,9 +109,8 @@ def test_covered_model_keeps_filters_geometry_leads_and_reveal_pixels(monkeypatc
                 longitudinalPlan=NS(allowThrottle=False, longitudinalPlanSource="lead0"),
                 radarState=NS(leadOne=NS(present=True, dRel=25., yRel=0., vRel=-1., vLead=19.), leadTwo=NS(present=False)))
   clock = [1_000_000_000]
-  ui = NS(sm=sm, started_frame=1, status=module.UIStatus.ENGAGED, params=Mock())
+  ui = NS(sm=sm, started_frame=1, status=module.UIStatus.ENGAGED, params=Mock(), display_time_ns=lambda: clock[0])
   monkeypatch.setattr(module, 'ui_state', ui)
-  monkeypatch.setattr(module.time, 'monotonic_ns', lambda: clock[0])
   monkeypatch.setattr(module, 'lane_centering_direction', lambda *_: -1)
   draw = Mock()
   monkeypatch.setattr(module, 'draw_polygon', draw)

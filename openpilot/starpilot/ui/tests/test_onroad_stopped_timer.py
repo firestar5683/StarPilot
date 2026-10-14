@@ -113,3 +113,29 @@ class StoppedTimerTests(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+def test_replay_seek_during_standstill_does_not_invent_duration():
+  from unittest.mock import Mock
+  from openpilot.tools.replay.display_clock import ClockSample
+  ui = ui_fake()
+  ui.replay_clock = Mock()
+  car = ui.sm.messages['carState']
+  car.canValid, car.canTimeout, car.standstill = True, False, True
+  car.gearShifter = car_schema.CarState.GearShifter.drive
+  adapter = RuntimeSnapshotAdapter(ui)
+  def step(second, epoch=1):
+    now = NOW + second * SECOND
+    ui.replay_sample = ui.sm.replay_sample = ClockSample(now, None, now, epoch=epoch, paused=True, valid=True)
+    for name in ('deviceState', 'carState'):
+      ui.sm.logMonoTime[name] = now
+    return adapter.build(ShellMode.ONROAD, stopped_timer_enabled=True).onroad.stopped_duration_s
+  assert step(0) is None
+  assert step(61) is None
+  car.standstill = False
+  assert step(62) is None
+  car.standstill = True
+  assert step(63) is None
+  assert step(65) == 2
+  assert step(100, epoch=2) is None
+  assert step(161, epoch=2) is None

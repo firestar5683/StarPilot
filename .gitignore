@@ -43,6 +43,7 @@ bin/
 *.os
 *.os-*
 *.so
+!openpilot/tools/replay/libmedia_mux.so
 *.a
 st[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]
 *.unchunked

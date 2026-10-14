@@ -175,7 +175,7 @@ globalThis.document = priorDocument
 
 // A selected segment is immediately visible, and retired media errors cannot act on a new video.
 const controls = LocalRecordingsPage.methods
-const player = { mode: 'local', status: 'ready', playing: null, playerError: '', playerGeneration: 0,
+const player = { mode: 'local', status: 'ready', replayRoute: null, playing: null, playerError: '', playerGeneration: 0,
   sessionProbe: null, $refs: {}, $nextTick(callback) { callback() }, unauthorized() { this.revoked = true } }
 for (const [name, method] of Object.entries(controls)) player[name] = method
 player.openPlayer(history.routes[0], history.routes[0].segments[0])
@@ -291,6 +291,14 @@ player.selectCamera("dcamera")
 assert.equal(player.playing.camera, "dcamera")
 assert.equal(player.playing.segments[0].number, 2)
 player.closePlayer()
+for (const segment of history.routes[0].segments) {
+  player.watchRoute(history.routes[0], segment)
+  assert.equal(player.playing.segments[player.playing.index].number, segment.number, 'Play video starts at the selected segment')
+  assert.equal(player.replayRoute, null, 'plain video does not launch UI replay')
+  player.closePlayer()
+}
+assert.match(LocalRecordingsPage.template, /@click="watchRoute\(logsRoute, segment\)">Play video/)
+assert.match(LocalRecordingsPage.template, /<h2>Routes<\/h2>/)
 
 // Confirmation has no side effects; errors stay in the dialog, and success refreshes inventory.
 const deletePage = { ...LocalRecordingsPage.data(), mode: 'local', status: 'ready', routeCards: [],
@@ -316,3 +324,13 @@ try {
   assert.equal(deletePage.loads, 1)
   assert.equal(deletePage.deleting, null)
 } finally { globalThis.fetch = realFetch }
+
+const replayPage = { closePlayer() { this.playing = null }, playing: {} }
+LocalRecordingsPage.methods.openReplay.call(replayPage, history.routes[0], 0)
+assert.deepEqual(replayPage.replayRoute, { routeId: current, segment: 0 })
+assert.equal(replayPage.playing, null)
+LocalRecordingsPage.methods.openReplay.call(replayPage, history.routes[0])
+assert.deepEqual(replayPage.replayRoute, { routeId: current, segment: null }, 'full route does not retain a prior selected segment')
+assert.match(LocalRecordingsPage.template, /@click="openLogs\(route\)">\{\{ route.segmentCount \}\}/)
+assert.match(LocalRecordingsPage.template, /:disabled="!replayableSegment\(segment\)" @click="openReplay\(logsRoute, segment.number\)"/)
+assert.match(LocalRecordingsPage.template, /:start-segment="replayRoute.segment"/)

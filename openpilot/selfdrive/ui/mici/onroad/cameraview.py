@@ -1,4 +1,5 @@
 import platform
+import time
 import numpy as np
 import pyray as rl
 
@@ -342,8 +343,8 @@ class CameraView(Widget):
       self.frame = None
       self.available_streams.clear()
 
-      # Throttle connection attempts
-      current_time = rl.get_time()
+      # Retry scheduling must advance while recorded presentation is paused.
+      current_time = time.monotonic()
       if current_time - self.last_connection_attempt < CONNECTION_RETRY_INTERVAL:
         return False
       self.last_connection_attempt = current_time

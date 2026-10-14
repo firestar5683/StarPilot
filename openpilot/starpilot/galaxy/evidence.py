@@ -37,6 +37,14 @@ class EvidenceSource:
     self.polls = 0
     self.observations = dict.fromkeys(('deviceState', 'pandaStates'), 0)
 
+  def _clock_pair(self):
+    # Discard preempted measurements before deciding whether the device resumed.
+    for _ in range(3):
+      before, boot, now = self.mono(), self.boot(), self.mono()
+      if 0 <= now - before <= RESUME_SKEW_NS:
+        break
+    return before, boot, now
+
   def poll(self):
     with self.lock:
       if self.closed:
@@ -49,7 +57,7 @@ class EvidenceSource:
         self.changed.notify_all()
         return
       self.failed = False
-      before, boot, now = self.mono(), self.boot(), self.mono()
+      before, boot, now = self._clock_pair()
       offset = boot - (before + now) // 2
       if not 0 <= now - before <= RESUME_SKEW_NS or self.offset is not None and abs(offset - self.offset) > RESUME_SKEW_NS:
         self.after_mono_ns, self.device_offset_ns = now, None
@@ -66,7 +74,7 @@ class EvidenceSource:
     with self.changed:
       if self.closed or self.thread is None or not self.thread.is_alive():
         return False
-      before, boot, now = self.mono(), self.boot(), self.mono()
+      before, boot, now = self._clock_pair()
       if not 0 <= now - before <= RESUME_SKEW_NS:
         return False
       offset = boot - (before + now) // 2
@@ -121,7 +129,7 @@ class EvidenceSource:
     with self.lock:
       if self.closed or self.failed:
         return None
-      before, boot, now = self.mono(), self.boot(), self.mono()
+      before, boot, now = self._clock_pair()
       offset = boot - (before + now) // 2
       if (not 0 <= now - before <= RESUME_SKEW_NS or self.offset is None or
           abs(offset - self.offset) > RESUME_SKEW_NS):

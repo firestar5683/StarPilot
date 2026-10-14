@@ -80,5 +80,7 @@ def send_recording(self, lease, content_type='video/mp4'):
         break
       self.wfile.write(chunk)
       cursor += len(chunk)
+    if cursor <= end:
+      self.close_connection = True
   finally:
     lease.close()

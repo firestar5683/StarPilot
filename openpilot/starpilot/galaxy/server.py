@@ -29,6 +29,7 @@ from openpilot.starpilot.galaxy.drive_history import DriveHistory, DriveHistoryU
 from openpilot.starpilot.galaxy.drive_stats import DriveStatsOwner
 from openpilot.starpilot.galaxy.recording_media import RecordingMedia, RecordingMediaUnavailable
 from openpilot.starpilot.galaxy.recording_http import camera_video, send_recording
+from openpilot.starpilot.galaxy.replay_http import ReplayHTTP
 from openpilot.starpilot.galaxy.segment_summary import SegmentSummary, SegmentSummaryChanged, SegmentSummaryUnavailable
 from openpilot.starpilot.galaxy.flm_operations import FlmOperations, FlmOperationError, error_status, validate_action as validate_flm_action
 from openpilot.starpilot.galaxy.sentry_events import SentryEvents, SentryEventsUnavailable
@@ -63,7 +64,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None):
+                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None, replay_client=None, replay_root=None):
   cloud = cloud_provider
   hotspot_source = hotspot
   hotspot_source_lock = threading.Lock()
@@ -106,6 +107,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   operations = map_operations if map_operations is not None else MapOperations()
   drive_control = drive_state
   drive_lock = threading.Lock()
+  replay_api = ReplayHTTP(replay_client, replay_root)
   history = recordings if recordings is not None else DriveHistory()
   drive_stats_source = drive_stats
   drive_stats_lock = threading.Lock()
@@ -574,6 +576,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if not self.local_request():
         return
       path = urlsplit(self.path).path
+      if path.startswith('/api/replay/'):
+        replay_api.get(self, path)
+        return
       if path.startswith('/api/recordings/route/'):
         if urlsplit(self.path).query:
           self.json(400, {'error': 'Unexpected media query'})
@@ -1349,6 +1354,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
+                      '/api/replay/start', '/api/replay/control', '/api/replay/stop',
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/galaxy/hotspot', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
                       '/api/android-auto/pairing/response', '/api/android-auto/pairing/cancel', '/api/android-auto/pairing/select',
@@ -1365,7 +1371,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
-      if (path.startswith(('/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
+      if (path.startswith(('/api/replay/', '/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
                            '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
                            '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
@@ -1395,6 +1401,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         payload = json.loads(self.rfile.read(size), object_pairs_hook=unique_object)
       except (ValueError, UnicodeError, RecursionError):
         self.json(400, {'error': 'Invalid request'})
+        return
+      if path.startswith('/api/replay/'):
+        replay_api.post(self, path, payload)
         return
       if path == '/api/galaxy/hotspot':
         identity = self.settings_session()

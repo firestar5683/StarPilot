@@ -26,6 +26,7 @@ enum REPLAY_FLAGS {
   REPLAY_FLAG_NO_VIPC = 0x0400,
   REPLAY_FLAG_ALL_SERVICES = 0x0800,
   REPLAY_FLAG_BENCHMARK = 0x1000,
+  REPLAY_FLAG_LOCAL_MACHINE = LOCAL_MACHINE_FLAG,
 };
 
 struct BenchmarkStats {
@@ -47,12 +48,15 @@ public:
   void seekTo(double seconds, bool relative);
   inline bool isPaused() const { return user_paused_; }
   inline int segmentCacheLimit() const { return seg_mgr_->segment_cache_limit_; }
-  inline void setSegmentCacheLimit(int n) { seg_mgr_->segment_cache_limit_ = std::max(MIN_SEGMENTS_CACHE, n); }
+  inline void setSegmentCacheLimit(int n) { seg_mgr_->segment_cache_limit_ = std::max(hasFlag(REPLAY_FLAG_LOCAL_MACHINE) ? 2 : MIN_SEGMENTS_CACHE, n); }
   inline bool hasFlag(REPLAY_FLAGS flag) const { return flags_ & flag; }
   void setLoop(bool loop) { loop ? flags_ &= ~REPLAY_FLAG_NO_LOOP : flags_ |= REPLAY_FLAG_NO_LOOP; }
   bool loop() const { return !(flags_ & REPLAY_FLAG_NO_LOOP); }
   const Route &route() const { return seg_mgr_->route_; }
-  inline double currentSeconds() const { return double(cur_mono_time_ - route_start_ts_) / 1e9; }
+  inline double currentSeconds() const {
+    const uint64_t now = cur_mono_time_, origin = route_start_ts_;
+    return now >= origin ? double(now - origin) / 1e9 : 0.0;
+  }
   inline std::time_t routeDateTime() const { return route_date_time_; }
   inline uint64_t routeStartNanos() const { return route_start_ts_; }
   inline double toSeconds(uint64_t mono_time) const { return (mono_time - route_start_ts_) / 1e9; }
@@ -66,6 +70,16 @@ public:
   const std::shared_ptr<SegmentManager::EventData> getEventData() const { return seg_mgr_->getEventData(); }
   void installEventFilter(std::function<bool(const Event *)> filter) { event_filter_ = filter; }
   void waitForFinished();
+  std::string state() const;
+  std::string error() const;
+  uint64_t epoch() const { return epoch_; }
+  uint64_t appliedEpoch() const { return applied_epoch_; }
+  bool canSeek(double seconds) const;
+  struct SeekRange { int segment; double begin, end; };
+  const std::vector<SeekRange> &seekRanges() const { return seek_ranges_; }
+  int64_t wallMinusMonoNanos() const { return wall_minus_mono_ns_; }
+  bool legacyClock() const { return legacy_clock_; }
+  void setLoadAbort(std::atomic<bool> *abort) { load_abort_ = abort; }
   const BenchmarkStats &getBenchmarkStats() const { return benchmark_stats_; }
 
   // Event callback functions
@@ -88,6 +102,10 @@ private:
   bool publishMessage(const Event *e);
   void publishFrame(const Event *e);
   void checkSeekProgress();
+  bool publishSnapshot();
+  void fail(const std::string &message);
+  bool loadMachineRoute();
+  int segmentAt(double seconds) const;
 
   std::unique_ptr<SegmentManager> seg_mgr_;
   Timeline timeline_;
@@ -96,19 +114,30 @@ private:
   pthread_t stream_thread_id = 0;
   std::thread stream_thread_;
   std::mutex stream_lock_;
-  bool user_paused_ = false;
+  std::atomic<bool> user_paused_ = false;
   std::condition_variable stream_cv_;
   std::atomic<int> current_segment_ = 0;
   std::atomic<double> seeking_to_ = -1.0;
   std::atomic<bool> exit_ = false;
+  std::atomic<bool> *load_abort_ = nullptr;
   std::atomic<bool> interrupt_requested_ = false;
+  enum class State {Preparing, Paused, Playing, Seeking, Buffering, Ended, Failed};
+  std::atomic<State> state_ = State::Preparing;
+  std::atomic<uint64_t> epoch_ = 0;
+  std::atomic<uint64_t> applied_epoch_ = 0;
+  mutable std::mutex error_lock_;
+  std::string error_;
+  std::vector<SeekRange> seek_ranges_;
+  int64_t boot_offset_ns_ = -1;
+  bool legacy_clock_ = false;
+  std::atomic<int64_t> wall_minus_mono_ns_ = 0;
   bool events_ready_ = false;
   std::time_t route_date_time_ = 0;
-  uint64_t route_start_ts_ = 0;
+  std::atomic<uint64_t> route_start_ts_ = 0;
   std::atomic<uint64_t> cur_mono_time_ = 0;
   cereal::Event::Which cur_which_ = cereal::Event::Which::INIT_DATA;
-  double min_seconds_ = 0;
-  double max_seconds_ = 0;
+  std::atomic<double> min_seconds_ = 0;
+  std::atomic<double> max_seconds_ = 0;
   SubMaster *sm_ = nullptr;
   std::vector<const char *> active_services_;
   std::unique_ptr<PubMaster> pm_;

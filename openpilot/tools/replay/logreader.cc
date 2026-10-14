@@ -25,7 +25,7 @@ bool LogReader::load(const std::string &url, std::atomic<bool> *abort, bool loca
     });
   }
   const auto download_start = Clock::now();
-  std::string data = FileReader(local_cache).read(url, abort);
+  std::string data = FileReader(local_cache, max_bytes_).read(url, abort);
   const auto download_end = Clock::now();
   if (progress) {
     installDownloadProgressHandler(nullptr);
@@ -57,6 +57,7 @@ bool LogReader::load(const char *data, size_t size, std::atomic<bool> *abort,
       capnp::FlatArrayMessageReader reader(words);
       auto event = reader.getRoot<cereal::Event>();
       auto which = event.which();
+      last_mono_time_ = std::max(last_mono_time_, event.getLogMonoTime());
       auto event_data = kj::arrayPtr(words.begin(), reader.getEnd());
       words = kj::arrayPtr(reader.getEnd(), words.end());
       if (which == cereal::Event::Which::SELFDRIVE_STATE) {
@@ -66,13 +67,24 @@ bool LogReader::load(const char *data, size_t size, std::atomic<bool> *abort,
       if (!filters_.empty()) {
         if (which >= filters_.size() || !filters_[which])
           continue;
+        if (max_bytes_ && retained_bytes_ + event_data.size() * sizeof(capnp::word) > 32 * 1024 * 1024) {
+          rError("Retained log exceeds replay memory limit");
+          corrupt_ = true;
+          return false;
+        }
+        retained_bytes_ += event_data.size() * sizeof(capnp::word);
         auto buf = buffer_.allocate(event_data.size() * sizeof(capnp::word));
         memcpy(buf, event_data.begin(), event_data.size() * sizeof(capnp::word));
         event_data = kj::arrayPtr((const capnp::word *)buf, event_data.size());
       }
 
       uint64_t mono_time = event.getLogMonoTime();
+      if (boot_offset_ >= 0 && boot_clock_event(which)) {
+        if (mono_time < uint64_t(boot_offset_)) { corrupt_ = true; return false; }
+        mono_time -= boot_offset_;
+      }
       const Event &evt = events.emplace_back(which, mono_time, event_data);
+      if (max_bytes_ && events.size() > 250000) { corrupt_ = true; return false; }
       // Add encodeIdx packet again as a frame packet for the video stream
       if (evt.which == cereal::Event::NARROW_ROAD_ENCODE_IDX ||
           evt.which == cereal::Event::CABIN_ENCODE_IDX ||
@@ -80,7 +92,7 @@ bool LogReader::load(const char *data, size_t size, std::atomic<bool> *abort,
         auto idx = capnp::AnyStruct::Reader(event).getPointerSection()[0].getAs<cereal::EncodeIndex>();
         if (idx.getType() == cereal::EncodeIndex::Type::FULL_H_E_V_C) {
           uint64_t sof = idx.getTimestampSof();
-          events.emplace_back(which, sof ? sof : mono_time, event_data, idx.getSegmentNum());
+          events.emplace_back(which, max_bytes_ ? mono_time : (sof ? sof : mono_time), event_data, idx.getSegmentNum());
         }
       }
 
@@ -94,6 +106,7 @@ bool LogReader::load(const char *data, size_t size, std::atomic<bool> *abort,
       }
     }
   } catch (const kj::Exception &e) {
+    corrupt_ = true;
     rWarning("Failed to parse log : %s.\nRetrieved %zu events from corrupt log", e.getDescription().cStr(), events.size());
   }
 

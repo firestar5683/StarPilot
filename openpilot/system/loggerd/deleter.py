@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import fcntl
 import os
 import shutil
+import stat
 import threading
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
@@ -78,15 +80,37 @@ def deleter_step() -> tuple[bool, str | None]:
   for delete_dir in sorted(dirs, key=lambda d: (d in DELETE_LAST, d in preserved_dirs)):
     delete_path = os.path.join(Paths.log_root(), delete_dir)
 
-    if any(name.endswith(".lock") for name in os.listdir(delete_path)):
-      continue
-
+    root_fd = fd = -1
     try:
+      flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+      root_fd = os.open(Paths.log_root(), flags)
+      fd = os.open(delete_dir, flags, dir_fd=root_fd)
+      try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      except BlockingIOError:
+        continue
+      if any(name.endswith(".lock") for name in os.listdir(fd)):
+        continue
+      opened = os.fstat(fd)
+      current = os.stat(delete_dir, dir_fd=root_fd, follow_symlinks=False)
+      root = os.fstat(root_fd)
+      current_root = os.stat(Paths.log_root(), follow_symlinks=False)
+      if (root.st_dev, root.st_ino) != (current_root.st_dev, current_root.st_ino):
+        continue
+      if not stat.S_ISDIR(current.st_mode) or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+        continue
       cloudlog.info(f"deleting {delete_path}")
-      shutil.rmtree(delete_path)
+      shutil.rmtree(delete_dir, dir_fd=root_fd)
       return True, delete_path
+    except FileNotFoundError:
+      continue
     except OSError:
       cloudlog.exception(f"issue deleting {delete_path}")
+    finally:
+      if fd >= 0:
+        os.close(fd)
+      if root_fd >= 0:
+        os.close(root_fd)
   return True, None
 
 

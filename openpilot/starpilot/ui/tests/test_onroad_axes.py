@@ -64,7 +64,7 @@ class TestOnroadAxes(unittest.TestCase):
         with patch.object(compact, "prepare"), patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_texture_pro"), \
              patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
           compact.render(state)
-          compact.render(state)
+          compact.render(replace(state, observed_ns=state.observed_ns + 20_000_000))
         self.assertEqual(compact._wheel_alpha.x > 0, lateral)
         self.assertEqual(compact._set_speed_alpha.x > 0, longitudinal)
 
@@ -202,7 +202,7 @@ class TestOnroadAxes(unittest.TestCase):
     compact = CompactHudRenderer(fonts, Path("/unused"))
     with patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
       compact.render(state)
-      compact.render(state)
+      compact.render(replace(state, observed_ns=state.observed_ns + 20_000_000))
     self.assertGreater(compact._set_speed_alpha.x, 0)
     self.assertEqual(compact._wheel_alpha.x, 0)
     self.ui.sm["carState"].canValid = False
@@ -231,10 +231,10 @@ class TestOnroadAxes(unittest.TestCase):
     with patch.object(compact, "prepare"), patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_texture_pro"), \
          patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
       compact.render(active)
-      compact.render(active)
+      compact.render(replace(active, observed_ns=active.observed_ns + 20_000_000))
       self.assertGreater(compact._wheel_alpha.x, 0)
       self.assertGreater(compact._set_speed_alpha.x, 0)
-      compact.render(stale)
+      compact.render(replace(stale, observed_ns=active.observed_ns + 40_000_000))
     self.assertEqual(compact._wheel_alpha.x, 0)
     assert compact._last_cruise_ns is not None
     self.assertEqual(compact._set_speed_opacity(stale, compact._last_cruise_ns + 1), 0)

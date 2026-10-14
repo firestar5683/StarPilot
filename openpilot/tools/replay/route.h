@@ -1,12 +1,17 @@
 #pragma once
 
 #include <ctime>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+#include <sys/stat.h>
+#include <set>
+
+#include "common/util.h"
 
 #include "json11/json11.hpp"
 #include "tools/replay/framereader.h"
@@ -21,6 +26,8 @@ enum class RouteLoadError {
   FileNotFound,
   UnknownError
 };
+
+constexpr uint32_t LOCAL_MACHINE_FLAG = 0x2000;
 
 struct RouteIdentifier {
   std::string dongle_id;
@@ -37,11 +44,14 @@ struct SegmentFile {
   std::string cabin_cam;
   std::string wide_road_cam;
   std::string qcamera;
+  std::shared_ptr<unique_fd> directory;
+  std::map<std::string, struct stat> identities;
+  std::shared_ptr<unique_fd> openLocal(const std::string &path) const;
 };
 
 class Route {
 public:
-  Route(const std::string &route, const std::string &data_dir = {}, bool auto_source = false);
+  Route(const std::string &route, const std::string &data_dir = {}, bool auto_source = false, bool local_only = false);
   bool load();
   RouteLoadError lastError() const { return err_; }
   inline const std::string &name() const { return route_.str; }
@@ -65,6 +75,7 @@ protected:
   std::time_t date_time_ = 0;
   RouteLoadError err_ = RouteLoadError::None;
   bool auto_source_ = false;
+  bool local_only_ = false;
   std::string route_string_;
 };
 
@@ -73,9 +84,10 @@ public:
   enum class LoadState {Loading, Loaded, Failed};
 
   Segment(int n, const SegmentFile &files, uint32_t flags, const std::vector<bool> &filters,
-          std::function<void(int, bool)> callback);
+          std::function<void(int, bool)> callback, int64_t boot_offset = -1);
   ~Segment();
   LoadState getState();
+  void cancel() { abort_ = true; }
 
   const int seg_num = 0;
   std::unique_ptr<LogReader> log;
@@ -88,8 +100,10 @@ protected:
   std::atomic<int> loading_ = 0;
   std::mutex mutex_;
   std::vector<std::thread> threads_;
+  std::vector<std::shared_ptr<unique_fd>> source_fds_;
   std::function<void(int, bool)> on_load_finished_ = nullptr;
   uint32_t flags;
+  int64_t boot_offset_;
   std::vector<bool> filters_;
   LoadState load_state_  = LoadState::Loading;
 };

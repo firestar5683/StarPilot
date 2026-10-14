@@ -45,7 +45,7 @@ recommends a tune, or claims vehicle qualification.
 
 ## Parked Galaxy analysis
 
-The newest Vue Galaxy exposes Offline tracking under Tuning and Recordings.
+The newest Vue Galaxy exposes Offline tracking under Tuning and Routes.
 Select up to five closed full-rlog segments from the local inventory. Exact
 segment basenames survive older route-name normalization and are revalidated
 when read. The report includes desired/actual plots with explicit gaps, source

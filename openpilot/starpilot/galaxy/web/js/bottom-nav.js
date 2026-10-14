@@ -2,7 +2,7 @@ export const NAV = Object.freeze([
   { name: "Home", path: "/", icon: "bi-house-fill" },
   { name: "Toggles", path: "/settings", icon: "bi-toggle-on" },
   { name: "Tools", path: "/tools", icon: "bi-tools" },
-  { name: "Recordings", path: "/recordings", icon: "bi-camera-reels" },
+  { name: "Routes", path: "/recordings", icon: "bi-camera-reels" },
 ])
 
 export function primaryTab(path) {

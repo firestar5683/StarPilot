@@ -1662,3 +1662,26 @@ progress { max-width: 100%; accent-color: var(--primary); }
 
 /* Descriptions are ordinary page content; notices communicate changing state. */
 .gx-settings-tabs > button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+
+.gx-card.gx-replay { width: min(calc(100% - 2rem), 72rem); max-height: 94dvh; overflow: auto; display: grid; gap: var(--sp-3); }
+.gx-replay:not([open]) { display: none; }
+.gx-replay__player { --replay-accent: #8b5cf6; position: relative; background: #000; border-radius: var(--radius-md); overflow: hidden; }
+.gx-replay__video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 65dvh; background: #000; }
+.gx-replay__loading { position: absolute; inset: 0; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: transparent; border: 0; color: #fff; }
+.gx-replay__media-controls { position: absolute; inset: auto 0 0; padding: var(--sp-2) clamp(8px, 4.6%, 48px); background: rgb(8 8 10 / 75%); color: #ecf2fa; }
+.gx-replay__controls { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: clamp(4px, 1.8vw, 20px); }
+.gx-replay__controls .gx-btn, .gx-replay__fullscreen { min-width: 0; min-height: var(--touch-target); padding: 8px 2px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 9px; background: rgb(255 255 255 / 4%); color: #ecf2fa; box-shadow: none; font-size: clamp(12px, 1.8vw, 20px); font-weight: 500; }
+.gx-replay__controls .gx-btn:hover:not(:disabled) { background: rgb(255 255 255 / 8%); }
+.gx-replay__controls .gx-btn:active:not(:disabled), .gx-replay__fullscreen:active { background: #2f2151; border-color: var(--replay-accent); }
+.gx-replay__controls .gx-btn:disabled { color: #a0aab9; }
+.gx-replay__controls .gx-btn:focus-visible, .gx-replay__fullscreen:focus-visible { outline: 2px solid var(--replay-accent); outline-offset: 2px; }
+.gx-replay__fullscreen { position: absolute; top: 8px; right: 8px; width: var(--touch-target); background: rgb(8 8 10 / 82%); }
+.gx-replay__timeline { display: grid; gap: 0; font-size: clamp(12px, 1.3vw, 16px); }
+.gx-replay__timeline input { width: 100%; min-height: var(--touch-target); accent-color: var(--replay-accent); color-scheme: dark; margin: 0; }
+.gx-replay__player:fullscreen { display: flex; flex-direction: column; justify-content: center; border-radius: 0; }
+.gx-replay__player:fullscreen .gx-replay__video { max-height: 100dvh; }
+@media (max-width: 600px) {
+  .gx-replay__media-controls { position: static; padding-inline: 4px; }
+  .gx-replay__controls { gap: 4px; }
+  .gx-replay__player:fullscreen .gx-replay__video { min-height: 0; flex: 1; }
+}

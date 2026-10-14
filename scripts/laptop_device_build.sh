@@ -374,7 +374,8 @@ sync_sysroot_from_device() {
   [[ -n "${host}" ]] || err "setup-sysroot requires <device-host>."
 
   require_cmd rsync
-  mkdir -p "${SYSROOT_DIR}"
+  mkdir -p "${SYSROOT_DIR}/usr/local" "${SYSROOT_DIR}/lib" \
+    "${SYSROOT_DIR}/usr/lib" "${SYSROOT_DIR}/system/vendor"
   local ssh_cmd="ssh -p ${port} -o StrictHostKeyChecking=accept-new"
 
   rsync -a --delete -e "${ssh_cmd}" "${user}@${host}:/usr/local/lib/" "${SYSROOT_DIR}/usr/local/lib/"

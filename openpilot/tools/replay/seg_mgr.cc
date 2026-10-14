@@ -1,6 +1,7 @@
 #include "tools/replay/seg_mgr.h"
 
 #include <algorithm>
+#include "tools/replay/replay.h"
 
 SegmentManager::~SegmentManager() {
   stop();
@@ -13,6 +14,7 @@ void SegmentManager::stop() {
   }
   cv_.notify_one();
   if (thread_.joinable()) thread_.join();
+  for (auto &[_, segment] : segments_) if (segment) segment->cancel();
 }
 
 bool SegmentManager::load() {
@@ -37,12 +39,13 @@ bool SegmentManager::load() {
   return true;
 }
 
-void SegmentManager::setCurrentSegment(int seg_num) {
+void SegmentManager::setCurrentSegment(int seg_num, bool seeking) {
   {
     std::unique_lock lock(mutex_);
-    if (cur_seg_num_ == seg_num) return;
+    if (cur_seg_num_ == seg_num && prefer_previous_ == seeking) return;
 
     cur_seg_num_ = seg_num;
+    prefer_previous_ = seeking;
     needs_update_ = true;
   }
   cv_.notify_one();
@@ -60,13 +63,19 @@ void SegmentManager::manageSegmentCache() {
     if (cur == segments_.end()) continue;
 
     // Calculate the range of segments to load
-    auto begin = std::prev(cur, std::min<int>(segment_cache_limit_ / 2, std::distance(segments_.begin(), cur)));
+    const int previous = flags_ & REPLAY_FLAG_LOCAL_MACHINE ? int(prefer_previous_) : segment_cache_limit_ / 2;
+    auto begin = std::prev(cur, std::min<int>(previous, std::distance(segments_.begin(), cur)));
     auto end = std::next(begin, std::min<int>(segment_cache_limit_, std::distance(begin, segments_.end())));
     begin = std::prev(end, std::min<int>(segment_cache_limit_, std::distance(segments_.begin(), end)));
 
     lock.unlock();
 
     loadSegmentsInRange(begin, cur, end);
+    for (auto it = begin; it != end; ++it) {
+      if ((flags_ & REPLAY_FLAG_LOCAL_MACHINE) && it->second && it->second->getState() == Segment::LoadState::Failed && onFailure_) {
+        onFailure_(it->first);
+      }
+    }
     bool merged = mergeSegments(begin, end);
 
     // Free segments outside the current range
@@ -157,7 +166,7 @@ void SegmentManager::loadSegmentsInRange(SegmentMap::iterator begin, SegmentMap:
               std::unique_lock lock(mutex_);
               needs_update_ = true;
               cv_.notify_one();
-            });
+            }, boot_offset_);
       }
 
       if (segment_ptr->getState() == Segment::LoadState::Loading) {

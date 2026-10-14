@@ -6,6 +6,7 @@ import { GxNotice } from "./notice.js"
 import { SnapshotFeed } from "./snapshot-feed.js"
 import { RecordingActions } from "./recording-actions.js"
 import { GalaxySelect } from "./galaxy-select.js"
+import { ReplayViewer, replayableSegment } from "./replay.js"
 
 // Local recording inventory and closed camera playback.
 const LOCAL = /^(?:[a-f0-9]{8}--[a-f0-9]{10}|[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}|[a-f0-9]{16}\|(?:[a-f0-9]{8}--[a-f0-9]{10}|[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}))$/
@@ -109,9 +110,9 @@ export class LocalHistoryFeed extends SnapshotFeed {
 
 export const LocalRecordingsPage = {
   name: "LocalRecordingsPage",
-  components: { GxState, GxIconButton, GxNotice, RecordingActions, GalaxySelect, GxDialog },
+  components: { GxState, GxIconButton, GxNotice, RecordingActions, GalaxySelect, GxDialog, ReplayViewer },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ sortOrder: "newest", logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
+  data: () => ({ sortOrder: "newest", replayRoute: null, logsRoute: null, query: "", preservedOnly: false, status: "idle", data: null, error: "", playing: null, playerError: "", playerGeneration: 0,
     details: null, detailsName: null, detailsStatus: "idle", detailsError: "", detailsGeneration: 0,
     deleting: null, deleteSelection: null, deleteError: "" }),
   computed: {
@@ -130,14 +131,16 @@ export const LocalRecordingsPage = {
   },
   created() { this.feed = new LocalHistoryFeed({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
   mounted() {
-    this.visibility = () => { if (document.hidden) { this.closePlayer(); this.closeDetails(); this.logsRoute = null; this.feed.stop() } else if (this.mode === "local") this.feed.start() }
+    this.visibility = () => { if (document.hidden) { this.replayRoute = null; this.closePlayer(); this.closeDetails(); this.logsRoute = null; this.feed.stop() } else if (this.mode === "local") this.feed.start() }
     document.addEventListener("visibilitychange", this.visibility)
     if (this.mode === "local" && !document.hidden) this.feed.start()
   },
   beforeUnmount() { this.deleteRequest?.abort(); document.removeEventListener("visibilitychange", this.visibility); this.closePlayer(); this.closeDetails(); this.logsRoute = null; this.feed.stop() },
-  watch: { mode(value) { if (value !== "local") { this.closePlayer(); this.closeDetails() } } },
+  watch: { mode(value) { if (value !== "local") { this.replayRoute = null; this.closePlayer(); this.closeDetails() } } },
   methods: {
     availableFiles,
+    replayableSegment,
+    openReplay(route, segment = null) { this.closePlayer(); this.replayRoute = { routeId: route.routeId, segment } },
     hasVideo,
     quickRoadUrl,
     recordingUrl,
@@ -148,9 +151,10 @@ export const LocalRecordingsPage = {
       `./api/recordings/files/${encodeURIComponent(segmentName)}/${filename}` : null,
     detailMetric,
     refresh() { this.closePlayer(); this.closeDetails(); this.logsRoute = null; return this.feed.load() },
-    watchRoute(route) {
-      const camera = ["fcamera", "ecamera", "dcamera", "qcamera"].find(camera => route.segments.some(segment => segment.files[camera]))
-      if (camera) this.openPlayer(route, route.segments.find(segment => segment.files[camera]), camera)
+    watchRoute(route, segment = null) {
+      const segments = segment ? [segment] : route.segments
+      const camera = ["fcamera", "ecamera", "dcamera", "qcamera"].find(camera => segments.some(segment => segment.files[camera]))
+      if (camera) this.openPlayer(route, segments.find(segment => segment.files[camera]), camera)
     },
     openLogs(route) { this.logsRoute = route; this.$nextTick?.(() => this.$refs.logsPanel?.scrollIntoView?.({ behavior: "smooth", block: "nearest" })) },
     logArchiveUrl(routeId) { return LOCAL.test(routeId) ? `./api/recordings/logs/${encodeURIComponent(routeId)}` : null },
@@ -309,7 +313,7 @@ export const LocalRecordingsPage = {
   },
   template: `
     <div class="gx-view gx-recordings">
-      <h2>Recordings</h2>
+      <h2>Routes</h2>
       <GxState v-if="mode !== 'local'">Local recordings are unavailable in the offline preview.</GxState>
       <template v-else>
         <section class="gx-card gx-recordings__library">
@@ -317,11 +321,11 @@ export const LocalRecordingsPage = {
             <span class="gx-section__count">{{ stats.count }} drives · ~{{ formatDuration(stats.minutes) }}</span>
             </header>
           <div class="gx-recordings__filters">
-            <input class="gx-field" type="search" aria-label="Search recordings" placeholder="Search drives, dates or IDs…" v-model="query" />
-            <GalaxySelect class="gx-field" aria-label="Sort recordings" :value="sortOrder" @change="sortOrder=$event.target.value">
+            <input class="gx-field" type="search" aria-label="Search routes" placeholder="Search drives, dates or IDs…" v-model="query" />
+            <GalaxySelect class="gx-field" aria-label="Sort routes" :value="sortOrder" @change="sortOrder=$event.target.value">
               <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="longest">Longest duration</option><option value="shortest">Shortest duration</option>
             </GalaxySelect>
-            <div class="gx-recordings__tabs gx-tabs" aria-label="Filter recordings"><button class="gx-btn gx-btn--tonal" :aria-pressed="!preservedOnly" @click="preservedOnly=false">All</button><button class="gx-btn gx-btn--tonal" :aria-pressed="preservedOnly" @click="preservedOnly=true">Preserved · {{ stats.preserved }}</button></div>
+            <div class="gx-recordings__tabs gx-tabs" aria-label="Filter routes"><button class="gx-btn gx-btn--tonal" :aria-pressed="!preservedOnly" @click="preservedOnly=false">All</button><button class="gx-btn gx-btn--tonal" :aria-pressed="preservedOnly" @click="preservedOnly=true">Preserved · {{ stats.preserved }}</button></div>
           </div>
         </section>
         <GxState v-if="status === 'loading'" loading>Finding local drives…</GxState><GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
@@ -332,20 +336,23 @@ export const LocalRecordingsPage = {
             <article v-for="route in routeCards" :key="route.routeId" class="gx-recordings__row" :class="{'gx-recordings__row--preserved': route.preserved}">
               <button class="gx-recordings__drive" :disabled="!route.segments.some(segment => segment.files.fcamera || segment.files.ecamera || segment.files.dcamera || segment.files.qcamera)" :aria-label="'Watch ' + (route.displayName !== route.routeId ? route.displayName : route.date.label)" @click="watchRoute(route)">
                 <span class="gx-row__label">{{ route.displayName !== route.routeId ? route.displayName : route.date.label }}</span>
-                <span class="gx-row__desc"><template v-if="route.displayName !== route.routeId">{{ route.date.label }} · </template>~{{ formatDuration(route.segmentCount) }} · {{ route.segmentCount }} saved {{ route.segmentCount === 1 ? "segment" : "segments" }}</span>
+                <span class="gx-row__desc"><template v-if="route.displayName !== route.routeId">{{ route.date.label }} · </template>~{{ formatDuration(route.segmentCount) }}</span>
                 <span v-if="route.preserved" class="gx-chip">Preserved</span>
               </button>
-              <RecordingActions :recording="route" :unauthorized="unauthorized" @changed="refresh"><button class="gx-icon-btn" aria-label="View drive logs" title="Logs and files" @click="openLogs(route)"><i class="bi bi-file-earmark-arrow-down"></i></button></RecordingActions>
+              <button type="button" class="gx-btn gx-btn--tonal" :aria-label="'Choose a segment for ' + (route.displayName || route.routeId)" @click="openLogs(route)">{{ route.segmentCount }} {{ route.segmentCount === 1 ? "segment" : "segments" }}</button>
+              <button class="gx-btn gx-btn--tonal" :disabled="!route.segments.some(replayableSegment)" @click="openReplay(route)"><i class="bi bi-play-circle" aria-hidden="true"></i>Replay with UI</button>
+              <RecordingActions :recording="route" :unauthorized="unauthorized" @changed="refresh" />
             </article>
           </section>
           <section v-if="logsRoute" ref="logsPanel" class="gx-card gx-recordings__logs">
-            <header class="gx-section__header"><i class="bi bi-file-earmark-arrow-down"></i><span class="gx-section__title">{{ logsRoute.displayName !== logsRoute.routeId ? logsRoute.displayName : logsRoute.date.label }} · Logs and files</span><button class="gx-icon-btn" aria-label="Close logs" @click="logsRoute=null"><i class="bi bi-x-lg"></i></button></header>
+            <header class="gx-section__header"><i class="bi bi-file-earmark-arrow-down"></i><span class="gx-section__title">{{ logsRoute.displayName !== logsRoute.routeId ? logsRoute.displayName : logsRoute.date.label }} · Segments and files</span><button class="gx-icon-btn" aria-label="Close segments and files" @click="logsRoute=null"><i class="bi bi-x-lg"></i></button></header>
             <div class="gx-recordings__actions gx-recordings__log-toolbar gx-actions"><a v-if="logsRoute.segments.some(segment => segment.logFiles?.length)" class="gx-btn gx-btn--tonal" :href="logArchiveUrl(logsRoute.routeId)" :download="logsRoute.routeId + '-logs.tar'"><i class="bi bi-download"></i>Download all logs (.tar)</a><a class="gx-btn gx-btn--tonal" href="#/tuning/flm">Analyze driving logs</a><a v-if="logsRoute.connect" class="gx-btn gx-btn--tonal" :href="logsRoute.connect" target="_blank" rel="noopener noreferrer">Open in comma connect</a></div>
             <ul class="gx-recordings__segments"><li v-for="segment in logsRoute.segments" :key="segment.number">
               <div class="gx-recordings__segment-info"><strong>Segment {{ segment.number }}</strong><ul class="gx-recordings__files"><li v-for="file in availableFiles(segment.files)" :key="file">{{ file }}</li></ul></div>
               <div class="gx-recordings__actions gx-actions"><a v-for="filename in segment.logFiles || []" :key="filename" class="gx-btn gx-btn--tonal" :href="logUrl(segment.segmentName, filename)" :download="segment.segmentName + '-' + filename">{{ filename }}<span v-if="segment.logBytes?.[filename]"> · {{ formatBytes(segment.logBytes[filename]) }}</span><i class="bi bi-download"></i></a>
+                <button type="button" class="gx-btn gx-btn--tonal" :disabled="!hasVideo(segment.files)" @click="watchRoute(logsRoute, segment)">Play video</button>
+                <button type="button" class="gx-btn gx-btn--tonal" :disabled="!replayableSegment(segment)" @click="openReplay(logsRoute, segment.number)">Replay with UI</button>
                 <button v-if="segment.files.rlog" class="gx-btn gx-btn--tonal" @click="openDetails(segment)">Details</button>
-                <button v-for="camera in ['fcamera', 'ecamera', 'dcamera', 'qcamera'].filter(camera => segment.files[camera])" :key="camera" class="gx-btn gx-btn--tonal" @click="openPlayer(logsRoute, segment, camera)">Play {{ cameraLabel(camera) }}</button>
                 <button v-if="hasVideo(segment.files)" type="button" class="gx-btn gx-btn--tonal gx-recordings__danger" :disabled="deleting !== null" @click="confirmDeleteVideos(segment)"><i aria-hidden="true" class="bi bi-trash"></i> {{ deleting === segment.segmentName ? 'Deleting…' : 'Delete videos' }}</button>
               </div>
             </li></ul>
@@ -385,6 +392,7 @@ export const LocalRecordingsPage = {
 
         </template>
       </template>
+      <ReplayViewer v-if="replayRoute" :route-id="replayRoute.routeId" :start-segment="replayRoute.segment" :unauthorized="unauthorized" @close="replayRoute=null" />
       <GxDialog v-if="deleteSelection" :inert="deleting !== null" labelledby="gx-delete-videos-title" describedby="gx-delete-videos-body" alert
         @close="deleting === null && (deleteSelection = null)">
         <h3 id="gx-delete-videos-title">Delete segment videos?</h3>

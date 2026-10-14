@@ -24,6 +24,20 @@ def set_time(new_time):
     cloudlog.exception("timed.failed_setting_time")
 
 
+def clock_message():
+  msg = messaging.new_message('clocks')
+  msg.valid = system_time_valid()
+  mono = time.monotonic_ns()
+  boot = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+  if time.monotonic_ns() - mono <= 1_000_000:
+    # Retain the existing wire fields for replay's clock pair, independently of wall-clock corrections.
+    msg.logMonoTime = mono
+    msg.clocks.deprecated.monotonicNanos = mono
+    msg.clocks.deprecated.bootTimeNanos = boot
+  msg.clocks.wallTimeNanos = time.time_ns()
+  return msg
+
+
 def main() -> NoReturn:
   """
     timed has two responsibilities:
@@ -41,10 +55,7 @@ def main() -> NoReturn:
   while True:
     sm.update(1000)
 
-    msg = messaging.new_message('clocks')
-    msg.valid = system_time_valid()
-    msg.clocks.wallTimeNanos = time.time_ns()
-    pm.send('clocks', msg)
+    pm.send('clocks', clock_message())
 
     gps = sm[gps_location_service]
     gps_time = datetime.datetime.fromtimestamp(gps.unixTimestampMillis / 1000., datetime.UTC).replace(tzinfo=None)

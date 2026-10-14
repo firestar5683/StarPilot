@@ -35,6 +35,139 @@ Replay::Replay(const std::string &route, std::vector<std::string> allow, std::ve
   }
   setupServices(allow, block);
   setupSegmentManager(!allow.empty() || !block.empty());
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+    user_paused_ = true;
+    epoch_ = 1;
+    display_clock_.pause(true);
+    seg_mgr_->setFailureCallback([this](int n) { fail("Recording segment " + std::to_string(n) + " is unavailable or corrupt"); });
+  }
+}
+
+std::string Replay::state() const {
+  switch (state_.load()) {
+    case State::Preparing: return "preparing";
+    case State::Paused: return "paused";
+    case State::Playing: return "playing";
+    case State::Seeking: return "seeking";
+    case State::Buffering: return "buffering";
+    case State::Ended: return "ended";
+    case State::Failed: return "failed";
+  }
+  return "failed";
+}
+
+std::string Replay::error() const { std::lock_guard lock(error_lock_); return error_; }
+
+void Replay::fail(const std::string &message) {
+  { std::lock_guard lock(error_lock_); if (state_ != State::Failed || error_.empty()) error_ = message; }
+  state_ = State::Failed;
+  interruptStream([this]() { exit_ = true; return false; });
+}
+
+bool Replay::canSeek(double seconds) const {
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) return std::isfinite(seconds) && segmentAt(seconds) >= 0;
+  return std::isfinite(seconds) && seconds >= minSeconds() && seconds <= maxSeconds() &&
+         seg_mgr_->hasSegment(std::max(0, int((seconds == maxSeconds() ? std::nextafter(seconds, minSeconds()) : seconds) / 60)));
+}
+
+int Replay::segmentAt(double seconds) const {
+  for (size_t i = 0; i < seek_ranges_.size(); ++i) {
+    const auto &range = seek_ranges_[i];
+    if (seconds >= range.begin && (seconds < range.end || seconds == range.end &&
+        (i + 1 == seek_ranges_.size() || seek_ranges_[i + 1].begin > seconds))) return range.segment;
+  }
+  return -1;
+}
+
+bool Replay::loadMachineRoute() {
+  struct Coverage { int segment; uint64_t begin, end; };
+  std::vector<Coverage> coverage;
+  std::vector<int64_t> offsets;
+  uint64_t origin_boot = 0, origin_wall = 0;
+  std::vector<bool> filters(sockets_.size(), false);
+  for (auto which : {cereal::Event::Which::INIT_DATA, cereal::Event::Which::CLOCKS,
+                     cereal::Event::Which::SPOT_MONITOR_STATE, cereal::Event::Which::NARROW_ROAD_ENCODE_IDX,
+                     cereal::Event::Which::WIDE_ROAD_ENCODE_IDX}) filters[which] = true;
+  for (const auto &[n, files] : route().segments()) {
+    const bool narrow = !files.narrow_road_cam.empty() || !files.qcamera.empty();
+    const bool wide = hasFlag(REPLAY_FLAG_WIDE_ROAD) && !files.wide_road_cam.empty();
+    if ((!narrow && !wide) || (files.rlog.empty() && files.qlog.empty())) continue;
+    std::shared_ptr<LogReader> metadata;
+    for (const auto &path : {files.qlog, files.rlog}) {
+      if (path.empty()) continue;
+      auto fd = files.openLocal(path);
+      auto candidate = std::make_shared<LogReader>(filters, 128 * 1024 * 1024);
+      if (fd && candidate->load("/proc/self/fd/" + std::to_string(static_cast<int>(*fd)), load_abort_ ? load_abort_ : &exit_) && !candidate->corrupt()) {
+        metadata = std::move(candidate); break;
+      }
+    }
+    if (!metadata) continue;
+    for (const auto &e : metadata->events) {
+      if (e.which != cereal::Event::Which::INIT_DATA) continue;
+      capnp::FlatArrayMessageReader reader(e.data);
+      const auto wall = reader.getRoot<cereal::Event>().getInitData().getWallTimeNanos();
+      if (!origin_boot) { origin_boot = e.mono_time; origin_wall = wall; }
+      else if (origin_boot != e.mono_time || origin_wall != wall) { fail("Conflicting route origin metadata"); return false; }
+    }
+    uint64_t begin = UINT64_MAX, end = 0;
+    for (const auto &e : metadata->events) {
+      capnp::FlatArrayMessageReader reader(e.data);
+      const auto event = reader.getRoot<cereal::Event>();
+      if (e.which == cereal::Event::Which::CLOCKS) {
+        const auto clocks = event.getClocks();
+        const uint64_t mono = clocks.getDeprecated().getMonotonicNanos(), boot = clocks.getDeprecated().getBootTimeNanos();
+        if (mono == e.mono_time && mono > 0 && boot >= mono && boot - mono <= INT64_MAX) offsets.push_back(boot - mono);
+      } else if (e.which == cereal::Event::Which::SPOT_MONITOR_STATE && event.getValid()) {
+        const auto pair = event.getSpotMonitorState().getObservation();
+        const auto mono = pair.getObservedMonoTime(), boot = pair.getObservedBootTime(), eof = pair.getSourceFrameEofBootTime();
+        if (pair.getVersion() == 1 && pair.getSequence() > 0 && mono == e.mono_time && mono > 0 && boot >= mono &&
+            boot - mono <= INT64_MAX && eof > 0 && eof <= boot && boot - eof <= 500000000ULL &&
+            eof <= UINT64_MAX - 500000000ULL && pair.getValidUntilBootTime() == eof + 500000000ULL) {
+          offsets.push_back(boot - mono);
+        }
+      }
+      if (e.eidx_segnum == n && e.which == (narrow ? cereal::Event::Which::NARROW_ROAD_ENCODE_IDX :
+                                                  cereal::Event::Which::WIDE_ROAD_ENCODE_IDX)) {
+        begin = std::min(begin, e.mono_time);
+        end = std::max<uint64_t>(end, e.mono_time + 50000000ULL);
+      }
+    }
+    if (end > begin) coverage.push_back({n, begin, end});
+  }
+  for (const auto offset : offsets) {
+    if (boot_offset_ns_ >= 0 && std::abs(offset - boot_offset_ns_) > 5000000) {
+      fail("Recorded clock correlation is inconsistent"); return false;
+    }
+    if (boot_offset_ns_ < 0) boot_offset_ns_ = offset;
+  }
+  legacy_clock_ = offsets.empty();
+  // shortcut: unpaired legacy recordings retain their original timeline; precise alignment requires recorded clock pairs.
+  if (legacy_clock_) boot_offset_ns_ = 0;
+  if (!origin_boot || origin_boot <= uint64_t(boot_offset_ns_)) {
+    fail("Recorded clock correlation is unavailable"); return false;
+  }
+  route_start_ts_ = origin_boot - boot_offset_ns_;
+  std::sort(coverage.begin(), coverage.end(), [](const auto &a, const auto &b) { return a.begin < b.begin; });
+  std::set<int> playable;
+  for (size_t i = 0; i < coverage.size(); ++i) {
+    const auto &item = coverage[i];
+    auto end = item.end;
+    if (i + 1 < coverage.size()) {
+      const auto &next = coverage[i + 1];
+      // Adjacent segments can have a small encoder cadence gap at rollover.
+      // Hold the last frame until the next one; a missing segment remains a gap.
+      if (next.segment == item.segment + 1 && next.begin > end && next.begin - end <= 250000000ULL) end = next.begin;
+      else end = std::min(end, next.begin);
+    }
+    if (item.begin < origin_boot || end <= item.begin) continue;
+    seek_ranges_.push_back({item.segment, (item.begin - origin_boot) / 1e9, (end - origin_boot) / 1e9});
+    playable.insert(item.segment);
+  }
+  if (seek_ranges_.empty()) { fail("No closed recorded camera intervals are available"); return false; }
+  min_seconds_ = seek_ranges_.front().begin;
+  max_seconds_ = seek_ranges_.back().end;
+  seg_mgr_->setPlayable(playable, boot_offset_ns_);
+  return true;
 }
 
 void Replay::setupServices(const std::vector<std::string> &allow, const std::vector<std::string> &block) {
@@ -80,6 +213,7 @@ Replay::~Replay() {
 void Replay::stop() {
   // Merge callbacks access both Replay and its owner. Join them while all objects
   // and their owning pointers are still alive, before stopping the playback thread.
+  interruptStream([this]() { exit_ = true; return false; });
   seg_mgr_->stop();
   if (stream_thread_.joinable()) {
     rInfo("shutdown: in progress...");
@@ -96,14 +230,22 @@ void Replay::stop() {
 bool Replay::load() {
   rInfo("loading route %s", seg_mgr_->route_.name().c_str());
 
-  if (!seg_mgr_->load()) return false;
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && !display_clock_.active()) { fail("Private replay clock is unavailable"); return false; }
+  if (!seg_mgr_->load()) {
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) fail("Local recording is unavailable, active, or changed");
+    return false;
+  }
 
   if (hasFlag(REPLAY_FLAG_BENCHMARK)) {
     benchmark_stats_.timeline.emplace_back(nanos_since_boot(), "route metadata loaded");
   }
 
-  min_seconds_ = seg_mgr_->route_.segments().begin()->first * 60;
-  max_seconds_ = (seg_mgr_->route_.segments().rbegin()->first + 1) * 60;
+  const auto &segments = route().segments();
+  auto first = std::find_if(segments.begin(), segments.end(), [](const auto &s) { return !s.second.rlog.empty() || !s.second.qlog.empty(); });
+  auto last = std::find_if(segments.rbegin(), segments.rend(), [](const auto &s) { return !s.second.rlog.empty() || !s.second.qlog.empty(); });
+  min_seconds_ = first->first * 60;
+  max_seconds_ = (last->first + 1) * 60;
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && !loadMachineRoute()) return false;
   return true;
 }
 
@@ -115,7 +257,7 @@ void Replay::interruptStream(const std::function<bool()> &update_fn) {
     interrupt_requested_ = true;
     std::unique_lock lock(stream_lock_);
     events_ready_ = update_fn();
-    interrupt_requested_ = user_paused_;
+    interrupt_requested_ = user_paused_.load();
   }
   stream_cv_.notify_one();
 }
@@ -123,7 +265,8 @@ void Replay::interruptStream(const std::function<bool()> &update_fn) {
 void Replay::seekTo(double seconds, bool relative) {
   double target_time = relative ? seconds + currentSeconds() : seconds;
   target_time = std::max(0.0, target_time);
-  int target_segment = target_time / 60;
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) target_time = std::clamp(target_time, minSeconds(), std::nextafter(maxSeconds(), minSeconds()));
+  int target_segment = hasFlag(REPLAY_FLAG_LOCAL_MACHINE) ? segmentAt(target_time) : int(target_time / 60);
   if (!seg_mgr_->hasSegment(target_segment)) {
     rWarning("Invalid seek to %.2f s (segment %d)", target_time, target_segment);
     return;
@@ -131,22 +274,33 @@ void Replay::seekTo(double seconds, bool relative) {
 
   rInfo("Seeking to %d s, segment %d", (int)target_time, target_segment);
   notifyEvent(onSeeking, target_time);
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+    { std::lock_guard lock(error_lock_); error_.clear(); }
+    state_ = State::Seeking; ++epoch_;
+  }
 
   interruptStream([&]() {
     current_segment_.store(target_segment);
     cur_mono_time_ = route_start_ts_ + target_time * 1e9;
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) wall_minus_mono_ns_ = 0;
     display_clock_.seek(cur_mono_time_);
     cur_which_ = cereal::Event::Which::INIT_DATA;
     seeking_to_.store(target_time, std::memory_order_relaxed);
     return false;
   });
 
-  seg_mgr_->setCurrentSegment(target_segment);
+  seg_mgr_->setCurrentSegment(target_segment, hasFlag(REPLAY_FLAG_LOCAL_MACHINE));
   checkSeekProgress();
 }
 
 void Replay::checkSeekProgress() {
   if (!seg_mgr_->getEventData()->isSegmentLoaded(current_segment_.load())) return;
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+    const int previous = seg_mgr_->previousSegment(current_segment_);
+    if (seeking_to_ >= 0 && previous >= 0 && !seg_mgr_->getEventData()->isSegmentLoaded(previous)) return;
+    interruptStream([]() { return true; });
+    return;
+  }
 
   double seek_to = seeking_to_.exchange(-1.0, std::memory_order_acquire);
   if (seek_to >= 0 && onSeekedTo) {
@@ -164,11 +318,15 @@ void Replay::seekToFlag(FindFlag flag) {
 }
 
 void Replay::pause(bool pause) {
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && !pause && (state_ == State::Ended || state_ == State::Buffering && error() == "recording_gap")) return;
   if (user_paused_ != pause) {
     interruptStream([=]() {
       rWarning("%s at %.2f s", pause ? "paused..." : "resuming", currentSeconds());
       user_paused_ = pause;
       display_clock_.pause(pause);
+      if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && state_ != State::Seeking && state_ != State::Preparing && state_ != State::Ended) {
+        state_ = pause ? State::Paused : State::Playing;
+      }
       return !pause;
     });
   }
@@ -199,8 +357,10 @@ void Replay::handleSegmentMerge() {
 
 void Replay::startStream(const std::shared_ptr<Segment> segment) {
   const auto &events = segment->log->events;
-  route_start_ts_ = events.front().mono_time;
-  cur_mono_time_ += route_start_ts_ - 1;
+  if (!hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+    route_start_ts_ = events.front().mono_time;
+    cur_mono_time_ += route_start_ts_ - 1;
+  }
 
   // get datetime from INIT_DATA, fallback to datetime in the route name
   route_date_time_ = route().datetime();
@@ -247,23 +407,38 @@ void Replay::startStream(const std::shared_ptr<Segment> segment) {
         camera_size[type] = {fr->width, fr->height};
       }
     }
-    camera_server_ = std::make_unique<CameraServer>(camera_size);
+    camera_server_ = std::make_unique<CameraServer>(camera_size, hasFlag(REPLAY_FLAG_LOCAL_MACHINE) ? 8 : 40);
   }
 
-  timeline_.initialize(seg_mgr_->route_, route_start_ts_, !(flags_ & REPLAY_FLAG_NO_FILE_CACHE),
-                       [this](std::shared_ptr<LogReader> log) { notifyEvent(onQLogLoaded, log); });
+  if (!hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+    timeline_.initialize(seg_mgr_->route_, route_start_ts_, !(flags_ & REPLAY_FLAG_NO_FILE_CACHE),
+                         [this](std::shared_ptr<LogReader> log) { notifyEvent(onQLogLoaded, log); });
+  }
 
   stream_thread_ = std::thread(&Replay::streamThread, this);
 }
 
 bool Replay::publishMessage(const Event *e) {
   if (event_filter_ && event_filter_(e)) return false;
+  if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && e->which == cereal::Event::Which::CLOCKS) {
+    capnp::FlatArrayMessageReader reader(e->data);
+    const auto event = reader.getRoot<cereal::Event>();
+    const uint64_t wall = event.getClocks().getWallTimeNanos();
+    wall_minus_mono_ns_ = event.getValid() && wall >= 946684800ULL * 1000000000ULL && wall <= 4102444800ULL * 1000000000ULL &&
+                         e->mono_time < INT64_MAX ? int64_t(wall) - int64_t(e->mono_time) : 0;
+  }
 
   if (!sm_) {
     if (!pm_) pm_ = std::make_unique<PubMaster>(active_services_);  // consumers with an event filter never need one
     auto bytes = e->data.asBytes();
     int ret = pm_->send(sockets_[e->which], (capnp::byte *)bytes.begin(), bytes.size());
     if (ret == -1) {
+      if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+        { std::lock_guard lock(error_lock_); error_ = "Private replay publisher conflict"; }
+        state_ = State::Failed;
+        exit_ = true;
+        return false;
+      }
       rWarning("stop publishing %s due to multiple publishers error", sockets_[e->which]);
       sockets_[e->which] = nullptr;
       return false;
@@ -305,16 +480,29 @@ void Replay::streamThread() {
   bool streaming_started = false;
 
   while (true) {
-    stream_cv_.wait(lk, [this]() { return exit_ || (events_ready_ && !interrupt_requested_); });
+    stream_cv_.wait(lk, [this]() { return exit_ || (events_ready_ && (!interrupt_requested_ ||
+                               (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && seeking_to_ >= 0))); });
 
     if (exit_) break;
 
     event_data_ = seg_mgr_->getEventData();
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && seeking_to_ >= 0) {
+      if (!publishSnapshot()) { lk.unlock(); fail("Camera decoder could not prepare the requested frame"); lk.lock(); continue; }
+      if (user_paused_) { events_ready_ = false; continue; }
+    }
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && !user_paused_) state_ = State::Playing;
     const auto &events = event_data_->events;
     auto first = std::upper_bound(events.cbegin(), events.cend(), Event(cur_which_, cur_mono_time_, {}));
     if (first == events.cend()) {
       rInfo("waiting for events...");
       events_ready_ = false;
+      if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+        if (event_data_->isSegmentLoaded(seek_ranges_.back().segment)) {
+          user_paused_ = true;
+          state_ = State::Ended;
+          display_clock_.pause(true);
+        } else if (state_ != State::Ended) state_ = State::Buffering;
+      }
       continue;
     }
 
@@ -327,7 +515,25 @@ void Replay::streamThread() {
 
     // Ensure frames are sent before unlocking to prevent race conditions
     if (camera_server_) {
-      camera_server_->waitForSent();
+      if (!camera_server_->waitForSent() || (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && camera_server_->failed())) {
+        lk.unlock(); fail("Recorded camera decoding failed"); lk.lock(); continue;
+      }
+    }
+
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && it == events.cend()) {
+      const int last_segment = seek_ranges_.back().segment;
+      if (currentSeconds() >= maxSeconds() || event_data_->isSegmentLoaded(last_segment) && it == events.cend()) {
+        user_paused_ = true;
+        interrupt_requested_ = true;
+        events_ready_ = false;
+        state_ = State::Ended;
+        display_clock_.published(cur_mono_time_, speed_);
+        display_clock_.pause(true);
+      } else {
+        state_ = State::Buffering;
+        events_ready_ = false;
+      }
+      continue;
     }
 
     if (it == events.cend() && !hasFlag(REPLAY_FLAG_NO_LOOP) && !hasFlag(REPLAY_FLAG_BENCHMARK)) {
@@ -356,6 +562,33 @@ void Replay::streamThread() {
   }
 }
 
+bool Replay::publishSnapshot() {
+  const double target = currentSeconds();
+  wall_minus_mono_ns_ = 0;
+  std::vector<const Event *> messages(sockets_.size(), nullptr);
+  std::array<const Event *, MAX_CAMERAS> frames = {};
+  for (const auto &e : event_data_->events) {
+    if (e.mono_time > cur_mono_time_) break;
+    if (!sockets_[e.which]) continue;
+    if (e.eidx_segnum < 0) messages[e.which] = &e;
+    else if (e.which == cereal::Event::Which::NARROW_ROAD_ENCODE_IDX) frames[NarrowRoadCam] = &e;
+    else if (e.which == cereal::Event::Which::WIDE_ROAD_ENCODE_IDX) frames[WideRoadCam] = &e;
+    else if (e.which == cereal::Event::Which::CABIN_ENCODE_IDX) frames[CabinCam] = &e;
+  }
+  for (const auto *message : messages) if (message) publishMessage(message);
+  for (const auto *frame : frames) if (frame && camera_server_) publishFrame(frame);
+  if (camera_server_ && (!camera_server_->waitForSent() || camera_server_->failed())) return false;
+  display_clock_.published(cur_mono_time_, speed_);
+  display_clock_.observe_boot_pair(cur_mono_time_, cur_mono_time_ + boot_offset_ns_);
+  display_clock_.pause(user_paused_);
+  seeking_to_ = -1;
+  applied_epoch_ = epoch_.load();
+  state_ = user_paused_ ? State::Paused : State::Playing;
+  seg_mgr_->setCurrentSegment(current_segment_, false);
+  notifyEvent(onSeekedTo, target);
+  return true;
+}
+
 std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::const_iterator first,
                                                          std::vector<Event>::const_iterator last,
                                                          int &last_processed_segment,
@@ -367,7 +600,25 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
   for (; !interrupt_requested_ && first != last; ++first) {
     const Event &evt = *first;
 
-    int segment = toSeconds(evt.mono_time) / 60;
+    int segment = hasFlag(REPLAY_FLAG_LOCAL_MACHINE) ? segmentAt(toSeconds(evt.mono_time)) : int(toSeconds(evt.mono_time) / 60);
+    bool crossed_gap = false;
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && segment != current_segment_) {
+      const auto current = std::find_if(seek_ranges_.begin(), seek_ranges_.end(), [this](const auto &range) { return range.segment == current_segment_; });
+      const auto next = std::find_if(seek_ranges_.begin(), seek_ranges_.end(), [segment](const auto &range) { return range.segment == segment; });
+      crossed_gap = current != seek_ranges_.end() && next != seek_ranges_.end() && next->begin > current->end;
+    }
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE) && (segment < 0 || crossed_gap)) {
+      double boundary = maxSeconds();
+      for (const auto &range : seek_ranges_) if (range.segment == current_segment_) boundary = range.end;
+      cur_mono_time_ = route_start_ts_ + boundary * 1e9;
+      user_paused_ = true;
+      interrupt_requested_ = true;
+      state_ = boundary >= maxSeconds() ? State::Ended : State::Buffering;
+      if (state_ == State::Buffering) { std::lock_guard lock(error_lock_); error_ = "recording_gap"; }
+      display_clock_.published(cur_mono_time_, speed_);
+      display_clock_.pause(true);
+      break;
+    }
     if (current_segment_.load(std::memory_order_relaxed) != segment) {
       current_segment_.store(segment, std::memory_order_relaxed);
       seg_mgr_->setCurrentSegment(segment);
@@ -390,11 +641,12 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
       last_processed_segment = segment;
     }
 
-    cur_mono_time_ = evt.mono_time;
-    cur_which_ = evt.which;
-
     // Skip events if socket is not present
-    if (!sockets_[evt.which]) continue;
+    if (!sockets_[evt.which]) {
+      cur_mono_time_ = evt.mono_time;
+      cur_which_ = evt.which;
+      continue;
+    }
 
     const uint64_t current_nanos = nanos_since_boot();
     const int64_t time_diff = (evt.mono_time - evt_start_ts) / speed_ - (current_nanos - loop_start_ts);
@@ -413,12 +665,19 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
 
     if (interrupt_requested_) break;
 
+    cur_mono_time_ = evt.mono_time;
+    cur_which_ = evt.which;
+
+    // Consumers must never receive recorded data ahead of the display clock.
+    if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) display_clock_.published(evt.mono_time, speed_);
+
     if (evt.eidx_segnum == -1) {
       bool published = publishMessage(&evt);
       if (published && display_clock_.active()) {
         // These Python publishers use CLOCK_MONOTONIC; native envelopes can use CLOCK_BOOTTIME.
-        if (evt.which == cereal::Event::Which::SELFDRIVE_STATE || evt.which == cereal::Event::Which::CAR_CONTROL ||
-            evt.which == cereal::Event::Which::MODEL_V2) {
+        if (!hasFlag(REPLAY_FLAG_LOCAL_MACHINE) &&
+            (evt.which == cereal::Event::Which::SELFDRIVE_STATE || evt.which == cereal::Event::Which::CAR_CONTROL ||
+             evt.which == cereal::Event::Which::MODEL_V2)) {
           display_clock_.published(evt.mono_time, speed_);
         }
         if (evt.which == cereal::Event::Which::SPOT_MONITOR_STATE) {
@@ -432,8 +691,8 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
               mono > 0 && mono == evt.mono_time && eof > 0 && eof <= boot && boot - eof <= 500000000ULL &&
               eof <= std::numeric_limits<uint64_t>::max() - 500000000ULL &&
               pair.getValidUntilBootTime() == eof + 500000000ULL) {
-            display_clock_.published(mono, speed_);
-            display_clock_.observe_boot_pair(mono, boot);
+            if (!hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) display_clock_.published(mono, speed_);
+            display_clock_.observe_boot_pair(mono, hasFlag(REPLAY_FLAG_LOCAL_MACHINE) ? mono + boot_offset_ns_ : boot);
           }
         }
       }
@@ -441,7 +700,12 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
       if (speed_ > 1.0) {
         camera_server_->waitForSent();
       }
+      if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) display_clock_.pause(true);
       publishFrame(&evt);
+      if (hasFlag(REPLAY_FLAG_LOCAL_MACHINE)) {
+        if (!camera_server_->waitForSent() || camera_server_->failed()) break;
+        display_clock_.pause(user_paused_);
+      }
     }
   }
 

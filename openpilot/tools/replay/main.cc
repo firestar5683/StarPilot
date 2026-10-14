@@ -1,11 +1,23 @@
 #include <getopt.h>
 
 #include <cstdlib>
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
+#include <poll.h>
+#include <fcntl.h>
+#include <filesystem>
+#include <regex>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
+
+#include "json11/json11.hpp"
 
 #include "common/prefix.h"
 #include "common/timing.h"
@@ -36,6 +48,8 @@ Options:
       --all          Output all messages including bookmarkButton, uiDebug, userBookmark
       --benchmark    Run in benchmark mode (process all events then exit with stats)
   -h, --help         Show this help message
+      --machine      Isolated local replay controlled by newline JSON on stdin
+      --start-segment Start machine replay at a recorded segment boundary
 )";
 
 struct ReplayConfig {
@@ -47,8 +61,10 @@ struct ReplayConfig {
   uint32_t flags = REPLAY_FLAG_NONE;
   bool auto_source = false;
   int start_seconds = 0;
+  int start_segment = -1;
   int cache_segments = -1;
   float playback_speed = -1;
+  bool machine = false;
 };
 
 bool parseArgs(int argc, char *argv[], ReplayConfig &config) {
@@ -73,6 +89,8 @@ bool parseArgs(int argc, char *argv[], ReplayConfig &config) {
       {"no-vipc", no_argument, nullptr, 0},
       {"all", no_argument, nullptr, 0},
       {"benchmark", no_argument, nullptr, 0},
+      {"machine", no_argument, nullptr, 0},
+      {"start-segment", required_argument, nullptr, 0},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},  // Terminating entry
   };
@@ -110,6 +128,11 @@ bool parseArgs(int argc, char *argv[], ReplayConfig &config) {
         std::string name = cli_options[option_index].name;
         if (name == "demo") config.route = DEMO_ROUTE;
         else if (name == "auto") config.auto_source = true;
+        else if (name == "machine") config.machine = true;
+        else if (name == "start-segment") {
+          if (!std::regex_match(optarg, std::regex("[0-9]{1,6}"))) return false;
+          config.start_segment = std::atoi(optarg);
+        }
         else config.flags |= flag_map.at(name);
         break;
       }
@@ -127,8 +150,127 @@ bool parseArgs(int argc, char *argv[], ReplayConfig &config) {
     std::cerr << "No route provided. Use --help for usage information.\n";
     return false;
   }
+  if (config.start_segment >= 0 && !config.machine) return false;
 
   return true;
+}
+
+bool privateDirectory(const char *path) {
+  if (!path || path[0] != '/') return false;
+  struct stat info = {};
+  if (lstat(path, &info) || !S_ISDIR(info.st_mode) || info.st_uid != getuid() || (info.st_mode & 07777) != 0700) return false;
+  std::error_code error;
+  const auto resolved = std::filesystem::canonical(path, error).string();
+  if (error) return false;
+  return resolved != "/data/params" && resolved.rfind("/data/params/", 0) != 0;
+}
+
+bool machineContext(const ReplayConfig &config) {
+  const std::string prefix = util::getenv("OPENPILOT_PREFIX", "");
+  const std::string clock = util::getenv("SP_REPLAY_CLOCK_PATH", "");
+  return util::getenv("SP_REPLAY_CONTEXT", "") == "1" &&
+         std::regex_match(prefix, std::regex("replay-[A-Za-z0-9_-]{1,48}")) &&
+         privateDirectory(getenv("PARAMS_ROOT")) && privateDirectory(getenv("COMMA_CACHE")) &&
+         clock == "/dev/shm/msgq_" + prefix + "/display-clock" &&
+         !config.data_dir.empty() && config.data_dir.front() == '/' && config.prefix.empty() &&
+         !config.auto_source && config.allow.empty() && config.block.empty() &&
+         !(config.flags & (REPLAY_FLAG_ALL_SERVICES | REPLAY_FLAG_BENCHMARK));
+}
+
+static std::atomic<bool> machine_exit = false;
+
+int runMachine(Replay &replay, int output, int start_segment) {
+  auto interrupted = [](int) { machine_exit = true; };
+  std::signal(SIGTERM, interrupted);
+  std::signal(SIGINT, interrupted);
+  std::signal(SIGHUP, interrupted);
+  replay.setLoadAbort(&machine_exit);
+  std::signal(SIGPIPE, SIG_IGN);
+  fcntl(output, F_SETFL, fcntl(output, F_GETFL) | O_NONBLOCK);
+  std::string input, last_request, pending_request, command_error;
+  uint64_t pending_epoch = 0;
+  auto report = [&]() {
+    json11::Json::array ranges;
+    for (const auto &range : replay.seekRanges()) ranges.emplace_back(json11::Json::array{range.begin, range.end});
+    json11::Json::array warnings;
+    if (replay.legacyClock()) warnings.emplace_back("Legacy recording uses original timestamps; exact camera/HUD clock alignment is unavailable.");
+    const auto value = json11::Json::object{
+      {"event", "status"}, {"state", replay.state()}, {"position", replay.currentSeconds()},
+      {"start", replay.minSeconds()}, {"end", replay.maxSeconds()}, {"rate", replay.getSpeed()},
+      {"paused", replay.isPaused()}, {"epoch", double(replay.epoch())},
+      {"routeStartNs", double(replay.routeStartNanos())}, {"wallMinusMonoNs", std::to_string(replay.wallMinusMonoNanos())},
+      {"seekRanges", ranges}, {"sourceWarnings", warnings}, {"lastRequestId", last_request},
+      {"error", command_error.empty() ? replay.error() : command_error}};
+    const auto line = json11::Json(value).dump() + "\n";
+    return write(output, line.data(), line.size()) == ssize_t(line.size());
+  };
+  if (!report() || !replay.load()) { report(); return 2; }
+  if (start_segment < 0) {
+    replay.start();
+  } else {
+    const auto &ranges = replay.seekRanges();
+    auto selected = std::find_if(ranges.begin(), ranges.end(), [start_segment](const auto &range) { return range.segment == start_segment; });
+    if (selected == ranges.end()) {
+      command_error = "Selected segment has no playable footage";
+      report();
+      return 2;
+    }
+    replay.seekTo(selected->begin, false);
+  }
+  while (!machine_exit) {
+    if (!pending_request.empty() && replay.appliedEpoch() >= pending_epoch) {
+      last_request = std::move(pending_request);
+      pending_request.clear();
+    }
+    if (!report()) break;
+    if (replay.state() == "failed") return 2;
+    pollfd source = {.fd = STDIN_FILENO, .events = POLLIN};
+    const int ready = poll(&source, 1, 50);
+    if (ready < 0) { if (errno == EINTR) continue; break; }
+    if (!ready) continue;
+    if (source.revents & (POLLERR | POLLNVAL)) break;
+    char chunk[4096];
+    const auto count = read(STDIN_FILENO, chunk, sizeof(chunk));
+    if (count <= 0) break;
+    input.append(chunk, count);
+    if (input.size() > 4096) { std::cerr << "Machine command exceeds limit\n"; return 2; }
+    size_t newline;
+    while ((newline = input.find('\n')) != std::string::npos) {
+      std::string error;
+      auto command = json11::Json::parse(input.substr(0, newline), error);
+      input.erase(0, newline + 1);
+      const auto op = command["op"].string_value(), request = command["requestId"].string_value();
+      if (!error.empty() || !command.is_object() || !std::regex_match(request, std::regex("[a-fA-F0-9]{1,64}"))) return 2;
+      const size_t expected = op == "stop" ? 2 : 3;
+      if (command.object_items().size() != expected) return 2;
+      command_error.clear();
+      if (op == "stop") {
+        replay.stop();
+        replay.pause(true);
+        last_request = request;
+        report();
+        return 0;
+      } else if (op == "pause" && command["paused"].is_bool()) {
+        replay.pause(command["paused"].bool_value());
+        last_request = request;
+      } else if (op == "rate" && command["rate"].is_number() &&
+                 (command["rate"].number_value() == .5 || command["rate"].number_value() == 1 || command["rate"].number_value() == 2)) {
+        replay.setSpeed(command["rate"].number_value());
+        last_request = request;
+      } else if (op == "seek" && command["position"].is_number()) {
+        if (replay.canSeek(command["position"].number_value())) {
+          replay.seekTo(command["position"].number_value(), false);
+          pending_request = request;
+          pending_epoch = replay.epoch();
+        } else {
+          command_error = "invalid_position";
+          last_request = request;
+        }
+      } else return 2;
+    }
+  }
+  replay.stop();
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -145,6 +287,38 @@ int main(int argc, char *argv[]) {
 
   if (!parseArgs(argc, argv, config)) {
     return 1;
+  }
+
+  int machine_output = -1;
+  if (config.machine) {
+    machine_output = dup(STDOUT_FILENO);
+    dup2(STDERR_FILENO, STDOUT_FILENO);  // Native libraries may print diagnostics to stdout.
+    if (!machineContext(config)) {
+      std::cerr << "Machine replay requires an owned private local replay context\n";
+      return 2;
+    }
+#ifdef __linux__
+    const auto parent = util::getenv("SP_REPLAY_PARENT_PID", "");
+    if (parent != std::to_string(getppid()) || prctl(PR_SET_PDEATHSIG, SIGKILL) || parent != std::to_string(getppid())) {
+      std::cerr << "Machine replay parent is unavailable\n";
+      return 2;
+    }
+#else
+    return 2;
+#endif
+    config.flags |= REPLAY_FLAG_LOCAL_MACHINE | REPLAY_FLAG_NO_LOOP | REPLAY_FLAG_NO_FILE_CACHE;
+    config.allow = {"modelV2", "controlsState", "lateralDelay", "lateralTorqueParameters", "onroadEvents", "extrinsicsCalibration",
+                    "radarState", "deviceState", "pandaStates", "carParams", "driverMonitoringState", "carState", "driverStateV2",
+                    "narrowRoadCameraState", "wideRoadCameraState", "cabinCameraState", "managerState", "selfdriveState", "starpilotSelfdriveState",
+                    "starpilotLateralState", "starpilotNavigation", "longitudinalPlan", "gpsLocationExternal", "carOutput", "carControl",
+                    "slcState", "vehicleParameters", "customReserved6", "spotMonitorState", "clocks", "narrowRoadEncodeIdx", "wideRoadEncodeIdx", "cabinEncodeIdx"};
+    try {
+      Replay replay(config.route, config.allow, {}, nullptr, config.flags, config.data_dir, false);
+      return runMachine(replay, machine_output, config.start_segment);
+    } catch (const std::exception &error) {
+      std::cerr << "Machine replay failed: " << error.what() << '\n';
+      return 2;
+    }
   }
 
   std::unique_ptr<OpenpilotPrefix> op_prefix;

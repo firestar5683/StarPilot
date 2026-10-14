@@ -1766,6 +1766,9 @@ class StarMainLayout(MainLayout):
     device_scroller.add_widget(
       button_item("Galaxy", "OPEN", callback=self.star.galaxy_flow.open_large))
     device_scroller._items.insert(0, device_scroller._items.pop())
+    from openpilot.starpilot.ui.replay_settings import open_replay
+    device_scroller.add_widget(button_item("Replay", "OPEN", callback=lambda: open_replay(self.star)))
+    device_scroller._items.insert(1, device_scroller._items.pop())
     toggle_items = self._large_panels[Destination.TOGGLES]._scroller._items
     toggle_items.insert(2, text_item("Safe Mode", "N/A"))
     toggle_items.insert(7, text_item("Right Hand Driving", "N/A"))
@@ -2093,7 +2096,8 @@ class StarMiciMainLayout(MiciMainLayout):
       panel = panel_type()
       if destination == Destination.DEVICE:
         from openpilot.starpilot.ui.display_compact import DisplayCompact
-        panel._scroller.add_widgets([DisplayCompact(self.star).entry_button()])
+        from openpilot.starpilot.ui.replay_settings import replay_entry
+        panel._scroller.add_widgets([DisplayCompact(self.star).entry_button(), replay_entry(self.star)])
       self._compact_panels[destination] = panel
     gui_app.push_widget(panel)
 

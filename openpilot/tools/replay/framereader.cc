@@ -4,6 +4,7 @@
 #include <memory>
 #include <tuple>
 #include <utility>
+#include <chrono>
 
 #include "common/util.h"
 #include "common/yuv.h"
@@ -32,32 +33,36 @@ enum AVPixelFormat get_hw_format(AVCodecContext *ctx, const enum AVPixelFormat *
 }
 
 struct DecoderManager {
-  VideoDecoder *acquire(CameraType type, AVCodecParameters *codecpar, bool hw_decoder) {
-    auto key = std::tuple(type, codecpar->width, codecpar->height);
+  std::shared_ptr<VideoDecoder> acquire(CameraType type, AVCodecParameters *codecpar, bool hw_decoder) {
+    auto key = std::tuple(type, codecpar->width, codecpar->height, codecpar->codec_id, hw_decoder);
     std::unique_lock lock(mutex_);
+    for (auto it = decoders_.begin(); it != decoders_.end();) {
+      if (it->second.expired()) it = decoders_.erase(it);
+      else ++it;
+    }
     if (auto it = decoders_.find(key); it != decoders_.end()) {
-      return it->second.get();
+      if (auto decoder = it->second.lock()) return decoder;
     }
 
-    std::unique_ptr<VideoDecoder> decoder;
+    std::shared_ptr<VideoDecoder> decoder;
     #ifndef __APPLE__
-    if (!Hardware::PC() && hw_decoder) {
-      decoder = std::make_unique<V4LVideoDecoder>();
+    if (!Hardware::PC() && hw_decoder && codecpar->codec_id == AV_CODEC_ID_HEVC) {
+      decoder = std::make_shared<V4LVideoDecoder>();
     } else
     #endif
     {
-      decoder = std::make_unique<FFmpegVideoDecoder>();
+      decoder = std::make_shared<FFmpegVideoDecoder>();
     }
 
-    if (!decoder->open(codecpar, hw_decoder)) {
-      decoder.reset(nullptr);
+    if (!decoder->open(codecpar, hw_decoder && (Hardware::PC() || codecpar->codec_id == AV_CODEC_ID_HEVC))) {
+      return nullptr;
     }
-    decoders_[key] = std::move(decoder);
-    return decoders_[key].get();
+    decoders_[key] = decoder;
+    return decoder;
   }
 
   std::mutex mutex_;
-  std::map<std::tuple<CameraType, int, int>, std::unique_ptr<VideoDecoder>> decoders_;
+  std::map<std::tuple<CameraType, int, int, AVCodecID, bool>, std::weak_ptr<VideoDecoder>> decoders_;
 };
 
 DecoderManager decoder_manager;
@@ -69,6 +74,10 @@ FrameReader::FrameReader() {
 }
 
 FrameReader::~FrameReader() {
+  if (decoder_) {
+    std::lock_guard lock(decoder_->lock_);
+    if (decoder_->active_reader_ == this) decoder_->active_reader_ = nullptr;
+  }
   if (input_ctx) avformat_close_input(&input_ctx);
 }
 
@@ -84,6 +93,7 @@ bool FrameReader::load(CameraType type, const std::string &url, bool no_hw_decod
 }
 
 bool FrameReader::loadFromFile(CameraType type, const std::string &file, bool no_hw_decoder, std::atomic<bool> *abort) {
+  abort_ = abort;
   if (avformat_open_input(&input_ctx, file.c_str(), nullptr, nullptr) != 0 ||
       avformat_find_stream_info(input_ctx, nullptr) < 0) {
     rError("Failed to open input file or find video stream");
@@ -97,18 +107,23 @@ bool FrameReader::loadFromFile(CameraType type, const std::string &file, bool no
     return false;
   }
 
-  decoder_ = decoder_manager.acquire(type, input_ctx->streams[video_stream_idx_]->codecpar, !no_hw_decoder);
+  auto *codecpar = input_ctx->streams[video_stream_idx_]->codecpar;
+  if (getenv("SP_REPLAY_CONTEXT") && (codecpar->width <= 0 || codecpar->height <= 0 ||
+      codecpar->width > 2048 || codecpar->height > 1536 || codecpar->width % 2 || codecpar->height % 2)) return false;
+  decoder_ = decoder_manager.acquire(type, codecpar, !no_hw_decoder);
   if (!decoder_) {
     return false;
   }
   width = decoder_->width;
   height = decoder_->height;
+  if (getenv("SP_REPLAY_CONTEXT") && (width <= 0 || height <= 0 || width > 2048 || height > 1536 || width % 2 || height % 2)) return false;
 
   AVPacket pkt;
   packets_info.reserve(60 * 20);  // 20fps, one minute
   while (!(abort && *abort) && av_read_frame(input_ctx, &pkt) == 0) {
     if (pkt.stream_index == video_stream_idx_) {
       packets_info.emplace_back(PacketInfo{.flags = pkt.flags, .pos = pkt.pos});
+      if (getenv("SP_REPLAY_CONTEXT") && packets_info.size() > 5000) { av_packet_unref(&pkt); return false; }
     }
     av_packet_unref(&pkt);
   }
@@ -117,9 +132,11 @@ bool FrameReader::loadFromFile(CameraType type, const std::string &file, bool no
 }
 
 bool FrameReader::get(int idx, VisionBuf *buf) {
-  if (!buf || idx < 0 || idx >= packets_info.size()) {
+  if (!buf || buf->width != width || buf->height != height || buf->stride < width ||
+      (abort_ && *abort_) || idx < 0 || idx >= packets_info.size()) {
     return false;
   }
+  std::lock_guard lock(decoder_->lock_);
   return decoder_->decode(this, idx, buf);
 }
 
@@ -146,7 +163,7 @@ bool FFmpegVideoDecoder::open(AVCodecParameters *codecpar, bool hw_decoder) {
     rError("Failed to allocate or initialize codec context");
     return false;
   }
-  width = (decoder_ctx->width + 3) & ~3;
+  width = decoder_ctx->width;
   height = decoder_ctx->height;
 
   if (hw_decoder && !initHardwareDecoder(HW_DEVICE_TYPE)) {
@@ -188,7 +205,7 @@ bool FFmpegVideoDecoder::initHardwareDecoder(AVHWDeviceType hw_device_type) {
 
 bool FFmpegVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
   int current_idx = idx;
-  if (idx != reader->prev_idx + 1) {
+  if (active_reader_ != reader || idx != reader->prev_idx + 1) {
     // seeking to the nearest key frame
     for (int i = idx; i >= 0; --i) {
       if (reader->packets_info[i].flags & AV_PKT_FLAG_KEY) {
@@ -206,9 +223,10 @@ bool FFmpegVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
     avcodec_flush_buffers(decoder_ctx);
   }
   reader->prev_idx = idx;
+  active_reader_ = reader;
 
   AVPacket pkt;
-  while (av_read_frame(reader->input_ctx, &pkt) >= 0) {
+  while (!(reader->abort_ && *reader->abort_) && av_read_frame(reader->input_ctx, &pkt) >= 0) {
     // Skip non-video packets
     if (pkt.stream_index != reader->video_stream_idx_) {
       av_packet_unref(&pkt);
@@ -251,6 +269,7 @@ AVFrame *FFmpegVideoDecoder::decodeFrame(AVPacket *pkt) {
 }
 
 bool FFmpegVideoDecoder::copyBuffer(AVFrame *f, VisionBuf *buf) {
+  if (f->width != width || f->height != height) return false;
   if (hw_pix_fmt == HW_PIX_FMT) {
     for (int i = 0; i < height/2; i++) {
       memcpy(buf->y + (i*2 + 0)*buf->stride, f->data[0] + (i*2 + 0)*f->linesize[0], width);
@@ -276,13 +295,22 @@ bool V4LVideoDecoder::open(AVCodecParameters *codecpar, bool hw_decoder) {
   }
   width = codecpar->width;
   height = codecpar->height;
-  v4l_decoder.init(V4LDecoder::DEVICE, width, height, V4L2_PIX_FMT_HEVC);
-  return true;
+  v4l_decoder = std::make_unique<V4LDecoder>();
+  return v4l_decoder->init(V4LDecoder::DEVICE, width, height, V4L2_PIX_FMT_HEVC);
 }
 
 bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
   int from_idx = idx;
-  if (idx != reader->prev_idx + 1) {
+  const bool reset = active_reader_ != reader || idx != reader->prev_idx + 1;
+  const bool next_segment = active_reader_ && active_reader_ != reader && idx == 0 &&
+                            size_t(active_reader_->prev_idx + 1) == active_reader_->getFrameCount() &&
+                            (reader->packets_info[0].flags & AV_PKT_FLAG_KEY);
+  if (reset) {
+    // A drained decoder accepts the new file's keyframe without reallocating its capture buffers.
+    if (decoded_ && !next_segment) {
+      v4l_decoder = std::make_unique<V4LDecoder>();
+      if (!v4l_decoder->init(V4LDecoder::DEVICE, width, height, V4L2_PIX_FMT_HEVC)) return false;
+    }
     // seeking to the nearest key frame
     for (int i = idx; i >= 0; --i) {
       if (reader->packets_info[i].flags & AV_PKT_FLAG_KEY) {
@@ -299,12 +327,47 @@ bool V4LVideoDecoder::decode(FrameReader *reader, int idx, VisionBuf *buf) {
     }
   }
   reader->prev_idx = idx;
+  active_reader_ = reader;
+  decoded_ = true;
   bool result = false;
   AVPacket pkt;
-  v4l_decoder.avctx = reader->input_ctx;
+  v4l_decoder->avctx = reader->input_ctx;
   for (int i = from_idx; i <= idx; ++i) {
+    if (reader->abort_ && *reader->abort_) return false;
     if (av_read_frame(reader->input_ctx, &pkt) == 0) {
-      result = v4l_decoder.decodeFrame(&pkt, buf) && (i == idx);
+      if (reset && i == from_idx) {
+        // Loggerd writes HEVC headers once per segment; a fresh decoder needs them after a seek.
+        const auto *codec = reader->input_ctx->streams[reader->video_stream_idx_]->codecpar;
+        if (codec->extradata_size > 0) {
+          const int size = pkt.size;
+          if (av_grow_packet(&pkt, codec->extradata_size) < 0) { av_packet_unref(&pkt); return false; }
+          memmove(pkt.data + codec->extradata_size, pkt.data, size);
+          memcpy(pkt.data, codec->extradata, codec->extradata_size);
+        }
+      }
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+      bool queued = false;
+      V4LDecodedFrame frame;
+      while (!(reader->abort_ && *reader->abort_) && std::chrono::steady_clock::now() < deadline) {
+        if (!queued) queued = v4l_decoder->queuePacket(&pkt, 0);
+        if (!v4l_decoder->pump(frame, 50)) break;
+        if (frame.buf) break;
+      }
+      if (frame.buf) {
+        // Qualcomm capture surfaces include alignment padding; retain the recorded visible dimensions.
+        if (frame.buf->width < buf->width || frame.buf->height < buf->height || frame.buf->stride < buf->width) {
+          rError("Hardware decoder surface %zux%zu cannot cover recorded frame %zux%zu", frame.buf->width, frame.buf->height, buf->width, buf->height);
+          v4l_decoder->releaseFrame(frame.buf); av_packet_unref(&pkt); return false;
+        }
+        for (size_t row = 0; row < buf->height; ++row) memcpy(buf->y + row * buf->stride, frame.buf->y + row * frame.buf->stride, buf->width);
+        for (size_t row = 0; row < buf->height / 2; ++row) memcpy(buf->uv + row * buf->stride, frame.buf->uv + row * frame.buf->stride, buf->width);
+        v4l_decoder->releaseFrame(frame.buf);
+        result = i == idx;
+      } else {
+        rError("Hardware decoder produced no frame for packet %d", i);
+        av_packet_unref(&pkt);
+        return false;
+      }
       av_packet_unref(&pkt);
     }
   }

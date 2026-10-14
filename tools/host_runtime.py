@@ -195,7 +195,7 @@ class HostRuntime:
   def source_paths(self, *pathspec):
     # Include uncommitted development, exclude ignored native/device outputs.
     listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', *pathspec).split('\0')
-    return {Path(name) for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
+    return {Path(name) for name in listed if name and name != 'openpilot/tools/replay/replay' and not (set(Path(name).parts) & EXCLUDE_DIRS)
             and not (set(Path(name).suffixes) & NATIVE_SUFFIXES) and (self.root / name).is_file()}
 
   def source_lock(self):
