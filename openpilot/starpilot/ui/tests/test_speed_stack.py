@@ -53,7 +53,7 @@ def test_v4_migration_preserves_settings_and_clamps_only_enlarged_widgets():
   doc['layouts']['large']['speed_limit_actions'].update(x=1654, y=500)
   old_speed = dict(doc['layouts']['large']['current_speed'])
   migrated = validate_document(doc)
-  assert migrated['version'] == 6
+  assert migrated['version'] == 7
   assert migrated['layouts']['large']['cruise_limits']['x'] == 1510
   assert migrated['layouts']['large']['speed_limit_actions'] == {'x': 1510, 'y': 567, 'enabled': True}
   assert migrated['layouts']['large']['current_speed'] == old_speed

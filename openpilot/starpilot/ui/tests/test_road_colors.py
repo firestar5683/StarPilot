@@ -24,10 +24,12 @@ def rgba(color):
 def test_old_documents_preserve_widgets_and_have_no_new_road_override():
   old = default_document()
   old['version'] = 2
+  del old['layouts']['large']['cem_gauge']  # Version 2 predates the CEM gauge.
   del old['roadColors']
   old['widgetColors']['compact']['conditional_mode'] = {'cardFill': '#12345680'}
   old['layouts']['large']['current_speed']['enabled'] = False
   expected_layouts = copy.deepcopy(old['layouts'])
+  expected_layouts['large']['cem_gauge'] = default_document()['layouts']['large']['cem_gauge']
   for layout in old['layouts'].values():
     del layout['steering_wheel']['size']
   before = copy.deepcopy(old)

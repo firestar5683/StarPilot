@@ -70,7 +70,7 @@ def test_v5_geometry_migrates_and_keeps_custom_actions_independent():
   doc['layouts']['large']['cruise_limits'].update(x=1550, y=638)
   doc['layouts']['large']['speed_limit_actions'].update(x=1550, y=954)
   migrated = validate_document(doc)
-  assert migrated['version'] == 6
+  assert migrated['version'] == 7
   assert migrated['layouts']['large']['cruise_limits'] == {'x': 1510, 'y': 580, 'enabled': True}
   assert migrated['layouts']['large']['speed_limit_actions'] == {'x': 1510, 'y': 942, 'enabled': True}
   assert migrated['speedSources'] is True
@@ -101,7 +101,7 @@ def test_projection_v1_layout_migrates_without_losing_other_widgets():
   doc['widgets']['speed_limit_actions'].update(x=88, y=447)
   doc['widgets']['current_speed'].update(x=1400, y=100)
   migrated = validate_layout_for_viewport(doc, viewport)
-  assert migrated['version'] == 2
+  assert migrated['version'] == 3
   assert migrated['widgets']['speed_limit_actions']['y'] == 567
   assert migrated['widgets']['current_speed'] == doc['widgets']['current_speed']
   assert validate_layout_for_viewport(migrated, viewport) == migrated

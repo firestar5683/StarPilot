@@ -46,6 +46,7 @@ class TestOnroadLayoutOwner(unittest.TestCase):
   def test_v1_read_is_non_mutating_and_widget_colors_save_with_source_revision(self):
     old = default_document()
     old['version'] = 1
+    del old['layouts']['large']['cem_gauge']  # Version 1 predates the CEM gauge.
     del old['widgetColors']
     del old['roadColors']
     for profile in old['layouts'].values():
@@ -59,6 +60,7 @@ class TestOnroadLayoutOwner(unittest.TestCase):
     self.assertTrue(snapshot['valid'])
     self.assertEqual(path.read_bytes(), raw)
     expected_layouts = copy.deepcopy(old['layouts'])
+    expected_layouts['large']['cem_gauge'] = default_document()['layouts']['large']['cem_gauge']
     for profile, placements in expected_layouts.items():
       placements['steering_wheel']['size'] = default_document()['layouts'][profile]['steering_wheel']['size']
     self.assertEqual(snapshot['document']['layouts'], expected_layouts)

@@ -51,7 +51,7 @@ export function snapshot() {
   metadata.roadColorFields = [{ id: 'path', label: 'Path', default: '#30FF9CFF' },
     { id: 'pathEdge', label: 'Path edges', default: '#00FF40FF' }, { id: 'laneLines', label: 'Lane lines', default: '#FFFFFFFF' }]
   metadata.profiles.compact.widgets.speed_limit_actions.visualInsetTop = 32
-  const document = { version: 6, roadColors: { large: {}, compact: {} }, widgetColors: { large: {}, compact: {} }, palette: Object.fromEntries(metadata.paletteFields.map((field) => [field.id, field.default])),
+  const document = { version: 7, roadColors: { large: {}, compact: {} }, widgetColors: { large: {}, compact: {} }, palette: Object.fromEntries(metadata.paletteFields.map((field) => [field.id, field.default])),
     layouts: Object.fromEntries(Object.entries(metadata.profiles).map(([id, profile]) => [id,
       Object.fromEntries(Object.entries(profile.widgets).map(([key, definition]) => [key,
         { ...definition.default, ...(definition.resizable ? { size: definition.resizable.default } : {}) }]))])) }
@@ -481,6 +481,8 @@ assert.equal(vm.selectedColors.text, "#FFFFFFFF")
 vm.colorRgb("text", { target: { value: "#abcdef" } })
 vm.colorAlpha("text", { target: { value: "128" } })
 assert.equal(vm.selectedColors.text, "#ABCDEF80")
+// The CEM gauge is marked outside CEM scenes, as an editing aid only.
+assert.match(OnroadLayoutPage.template, /v-if="widget\.kind === 'cem_gauge' && state\.showEditingAids && !state\.scene\.startsWith\('cem_'\)"/)
 // One scene dropdown, grouped, with every scene exactly once.
 assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Driving", "Conditional experimental", "Speed limit"])
 assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id)).sort(), vm.scenes.map(scene => scene.id).sort())

@@ -116,7 +116,8 @@ def test_custom_placement_disable_layer_migration_preserve_existing_widgets():
   sample = state(customization=migrated)
   with patch.object(gauge, '_render_unified_road') as draw:
     gauge.render(sample)
-    assert draw.call_args.args[1:3] == (1132., 685.)
+    # The saved box is inset 44 x 24 inside the gauge's drawing frame, which is centred at (172, 145 - 60).
+    assert draw.call_args.args[1:3] == (960. - 44 + 172, 600. - 24 + 85)
     migrated['layouts']['large'][CEM_GAUGE_WIDGET]['enabled'] = False
     draw.reset_mock()
     gauge.render(sample)
@@ -216,31 +217,31 @@ def test_numeric_caption_declared_footprint_fits_actual_bottom_content_edge(proj
     document = default_layout_for_viewport(viewport)
     metadata = layout_metadata_for_viewport(viewport)
     placed = document['widgets'][CEM_GAUGE_WIDGET]
-    placed.update(x=980, y=750, enabled=True)
+    placed.update(x=980, y=774, enabled=True)
     validated = validate_layout_for_viewport(document, viewport)
     customization = projection_customization(validated, default_document())
   else:
     document = default_document()
     metadata = customization_metadata()['profiles']['large']
     placed = document['layouts']['large'][CEM_GAUGE_WIDGET]
-    placed.update(x=980, y=750, enabled=True)
+    placed.update(x=980, y=774, enabled=True)
     customization = validate_document(document)
-  assert metadata['widgets'][CEM_GAUGE_WIDGET]['height'] == 300
+  assert metadata['widgets'][CEM_GAUGE_WIDGET]['height'] == 276
   # Both screens clip the onroad content 30 pixels above the physical bottom.
   assert metadata['bounds']['y'] + metadata['bounds']['height'] == 1050
-  assert placed['y'] + 300 == 1050
+  assert placed['y'] + 276 == 1050
   fonts = Mock(spec=BitmapFonts)
   fonts.measure.side_effect = lambda _text, _role, size: NS(width=80., height=size * Profile.LARGE.font_scale)
   gauge = AetherGauge(fonts)
   with patch.object(rl, 'draw_line_ex'):
     sample = state('cem_curve', customization=customization)
-    gauge._draw_mini_cradle(1152., placed['y'] + 145, gauge_data(sample))
+    gauge._draw_mini_cradle(1152., placed['y'] - 24 + 145, gauge_data(sample))
   unit_calls = [call.args for call in fonts.draw.call_args_list if call.args[0] == 'mph']
   assert len(unit_calls) == 5
   unit_size = unit_calls[-1][2]
   assert unit_calls[-1][1] is FontRole.MEDIUM
   assert max(call[4] for call in unit_calls) + unit_size * Profile.LARGE.font_scale <= 1050
-  for invalid_y in (751, 780):
+  for invalid_y in (775, 800):
     placed['y'] = invalid_y
     with pytest.raises(ValueError):
       if projection:
@@ -273,3 +274,36 @@ def test_gauge_draws_only_for_visible_reasons(projection, kind):
   visible = kind in ('cem_stop', 'cem_lead', 'cem_curve', 'curve_control')
   assert (gauge_data(sample) is not None) is visible
   assert draw.called is visible
+
+
+def test_gauge_box_shrinks_to_its_content_and_saved_positions_keep_the_drawing_in_place():
+  from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, validate_layout_for_viewport
+  from openpilot.starpilot.ui.onroad_customization import CEM_GAUGE_FRAME, CEM_GAUGE_INSET, CEM_GAUGE_SIZE, customization_metadata
+  widget = customization_metadata()['profiles']['large']['widgets'][CEM_GAUGE_WIDGET]
+  assert (widget['width'], widget['height']) == CEM_GAUGE_SIZE == (256, 276)
+  # The box stays inside the frame the gauge draws in, so content that fit before still fits.
+  assert CEM_GAUGE_INSET[0] + CEM_GAUGE_SIZE[0] <= CEM_GAUGE_FRAME[0]
+  assert CEM_GAUGE_INSET[1] + CEM_GAUGE_SIZE[1] == CEM_GAUGE_FRAME[1]
+  # A version 6 layout saved the frame's corner; it moves by the inset once, then stays put.
+  old = default_document()
+  old['version'] = 6
+  old['layouts']['large'][CEM_GAUGE_WIDGET].update(x=436, y=75, enabled=True)
+  migrated = validate_document(old)
+  assert migrated['layouts']['large'][CEM_GAUGE_WIDGET] == {'x': 480, 'y': 99, 'enabled': True}
+  assert validate_document(migrated) == migrated
+  # An old gauge flush with the bottom edge is still valid and lands flush with it again.
+  old['layouts']['large'][CEM_GAUGE_WIDGET].update(x=1486, y=750)
+  assert validate_document(old)['layouts']['large'][CEM_GAUGE_WIDGET] == {'x': 1530, 'y': 774, 'enabled': True}
+  gauge = AetherGauge(Mock())
+  with patch.object(gauge, '_render_unified_road') as draw:
+    gauge.render(state('cem_stop', customization=migrated))
+  assert draw.call_args.args[1:3] == (436. + 172, 75. + 85)  # Same spot the version 6 layout drew at.
+  # Android Auto version 2 layouts move the same way.
+  viewport = (2880, 1080)
+  aa = default_layout_for_viewport(viewport)
+  assert aa['version'] == 3
+  aa['version'] = 2
+  aa['widgets'][CEM_GAUGE_WIDGET].update(x=900, y=200)
+  moved = validate_layout_for_viewport(aa, viewport)
+  assert moved['version'] == 3 and (moved['widgets'][CEM_GAUGE_WIDGET]['x'], moved['widgets'][CEM_GAUGE_WIDGET]['y']) == (944, 224)
+  assert validate_layout_for_viewport(moved, viewport) == moved

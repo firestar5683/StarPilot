@@ -145,7 +145,13 @@ PROFILES["compact"]["widgets"][STOPPED_TIMER_WIDGET] = _timer_widget
 # Restore the Dom road graphic in the gap between the speed card and main speed.
 # It has no background and appears only with a current selected source.
 CEM_GAUGE_WIDGET = 'cem_gauge'
-PROFILES['large']['widgets'][CEM_GAUGE_WIDGET] = _widget('CEM road gauge', CEM_GAUGE_WIDGET, 344, 300, 436, 75)
+# The gauge draws centred in a 344 x 300 frame; its box is the part it can actually fill, at this offset inside
+# that frame. Version 6 and older layouts saved the frame's corner and move by this offset when they load.
+CEM_GAUGE_FRAME = (344, 300)
+CEM_GAUGE_INSET = (44, 24)
+CEM_GAUGE_SIZE = (256, 276)
+PROFILES['large']['widgets'][CEM_GAUGE_WIDGET] = _widget('CEM road gauge', CEM_GAUGE_WIDGET, *CEM_GAUGE_SIZE,
+                                                         436 + CEM_GAUGE_INSET[0], 75 + CEM_GAUGE_INSET[1])
 # Older documents retain every saved placement and gain this independent widget.
 OPTIONAL_WIDGETS = frozenset({MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET, CEM_GAUGE_WIDGET})
 
@@ -233,7 +239,7 @@ def customization_metadata():
 
 
 def default_document():
-  return {"version": 6, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
+  return {"version": 7, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
     profile: {key: {**widget["default"], **({"size": WHEEL_SIZES[profile][1]} if key == "steering_wheel" else {})}
               for key, widget in data["widgets"].items()}
@@ -241,7 +247,7 @@ def default_document():
 
 
 def validate_document(value, *, _legacy_geometry=False):
-  if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in (1, 2, 3, 4, 5, 6):
+  if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in (1, 2, 3, 4, 5, 6, 7):
     raise ValueError("Invalid customization version")
   if value['version'] < 6 and not _legacy_geometry:
     result = validate_document(value, _legacy_geometry=True)
@@ -395,6 +401,9 @@ def validate_document(value, *, _legacy_geometry=False):
         minimum, _, maximum = WHEEL_SIZES[profile]
         if type(size) is not int or not minimum <= size <= maximum:
           raise ValueError("Invalid steering wheel size")
+      # Only a gauge the saved layout actually placed moves; one filled in from defaults is already in the new box.
+      saved_layout = value.get("layouts", {}).get(profile) if type(value.get("layouts")) is dict else None
+      old_gauge = key == CEM_GAUGE_WIDGET and value["version"] < 7 and type(saved_layout) is dict and key in saved_layout
       for axis, extent in (("x", "width"), ("y", "height")):
         number = placement[axis]
         legacy = ({'cruise_limits': (176, 483), 'speed_limit_actions': (176, 58)} if value['version'] < 5 else
@@ -402,9 +411,13 @@ def validate_document(value, *, _legacy_geometry=False):
         dimensions = legacy.get(key) if _legacy_geometry and profile == 'large' else None
         dimension = (dimensions[0 if axis == 'x' else 1] if dimensions else
                      size if key == 'steering_wheel' else widget[extent])
+        if old_gauge:
+          dimension = CEM_GAUGE_FRAME[0 if axis == 'x' else 1]
         if type(number) not in (int, float) or not math.isfinite(number) or not bounds[axis] <= number <= bounds[axis] + bounds[extent] - dimension:
           raise ValueError("Widget outside profile bounds")
       result["layouts"][profile][key] = {**placement, **({"size": size} if key == "steering_wheel" else {})}
+      if old_gauge:
+        result["layouts"][profile][key].update(x=placement["x"] + CEM_GAUGE_INSET[0], y=placement["y"] + CEM_GAUGE_INSET[1])
     if profile == "compact":
       actions = result["layouts"][profile]["speed_limit_actions"]
       area = data["widgets"]["speed_limit_actions"]

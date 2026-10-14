@@ -139,13 +139,14 @@ def test_saved_valid_layouts_survive_independently():
 def test_v3_layout_migrates_wheel_size_without_changing_saved_placement_or_color():
   document = default_document()
   document["version"] = 3
+  del document["layouts"]["large"]["cem_gauge"]  # Version 3 predates the CEM gauge.
   document["palette"]["text"] = "#ABCDEF80"
   document["layouts"]["large"]["steering_wheel"].update(x=1300, y=100, enabled=False)
   document["layouts"]["compact"]["steering_wheel"].update(x=90, y=150)
   for profile in ("large", "compact"):
     del document["layouts"][profile]["steering_wheel"]["size"]
   migrated = validate_document(document)
-  assert migrated["version"] == 6
+  assert migrated["version"] == 7
   assert migrated["palette"] == document["palette"]
   assert migrated["layouts"]["large"]["steering_wheel"] == {"x": 1300, "y": 100, "enabled": False, "size": 192}
   assert migrated["layouts"]["compact"]["steering_wheel"] == {"x": 90, "y": 150, "enabled": True, "size": 50}
@@ -155,6 +156,7 @@ def test_v3_layout_migrates_wheel_size_without_changing_saved_placement_or_color
 def test_pre_action_saved_layout_migrates_without_losing_positions_or_palette(removed):
   document = default_document()
   document["version"] = 1
+  del document["layouts"]["large"]["cem_gauge"]  # Version 1 predates the CEM gauge.
   del document["widgetColors"]
   del document["roadColors"]
   document["palette"]["cardFill"] = "#12345678"
@@ -193,7 +195,7 @@ def test_malformed_pre_action_cruise_placement_is_rejected():
 def test_duplicate_key_cannot_apply_otherwise_valid_placement():
   document = default_document()
   document["layouts"]["large"]["current_speed"]["x"] = 100
-  raw = json.dumps(document).replace('"version": 6', '"version": 6, "version": 6').encode()
+  raw = json.dumps(document).replace('"version": 7', '"version": 7, "version": 7').encode()
   with patch("openpilot.starpilot.ui.onroad_customization.read_saved", return_value=(raw, True)):
     assert read_customization(Mock()) == default_document()
 
@@ -477,6 +479,7 @@ def test_v1_palette_positions_and_visibility_migrate_without_mutating_source():
 
   old = default_document()
   old['version'] = 1
+  del old['layouts']['large']['cem_gauge']  # Version 1 predates the CEM gauge.
   del old['widgetColors']
   del old['roadColors']
   old['palette'].update(cardFill='#12345678', text='#AABBCCDD')
@@ -487,7 +490,7 @@ def test_v1_palette_positions_and_visibility_migrate_without_mutating_source():
   original = copy.deepcopy(old)
   result = decode_document(json.dumps(old).encode())
   assert old == original
-  assert result['version'] == 6
+  assert result['version'] == 7
   assert result['palette'] == old['palette']
   for profile, layout in old['layouts'].items():
     for key, position in layout.items():

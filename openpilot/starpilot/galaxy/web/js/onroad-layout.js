@@ -1300,6 +1300,12 @@ export const OnroadLayoutPage = {
                   @pointerdown="startDrag(widget.id, $event)">
                   <rect class="gx-layout__hit" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="transparent" />
                   <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" :clock24-hour="!!state.draft.clock24Hour" :native="runtimeWidget(widget.id)" :art="state.art" />
+                  <!-- The car draws the CEM gauge only in Conditional Experimental scenes; mark where it sits otherwise. -->
+                  <g v-if="widget.kind === 'cem_gauge' && state.showEditingAids && !state.scene.startsWith('cem_')" class="gx-layout__hint" data-preview-source="cem-hint" pointer-events="none">
+                    <rect x="2" y="2" :width="widget.width - 4" :height="widget.height - 4" rx="16" fill="#0c182066" stroke="#a6dfbe88" stroke-width="3" stroke-dasharray="10 8" />
+                    <text :x="widget.width / 2" :y="widget.height / 2 - 6" text-anchor="middle" font-size="30" font-weight="600" fill="#ffffffd9">{{ widget.label }}</text>
+                    <text :x="widget.width / 2" :y="widget.height / 2 + 30" text-anchor="middle" font-size="22" fill="#a6dfbe">Shows in CEM scenes</text>
+                  </g>
                   <rect class="gx-layout__selection" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="none" stroke="#b799ff" :stroke-width="state.profile === 'large' ? 5 : 1.5" stroke-dasharray="6 4" />
                   <g v-if="widget.box && state.selected === widget.id && editable" class="gx-layout__resize" role="button" :aria-label="'Resize ' + widget.label"
                     :transform="'translate(' + widget.width + ' ' + widget.height + ')'" @pointerdown="startResize(widget.id, $event)">

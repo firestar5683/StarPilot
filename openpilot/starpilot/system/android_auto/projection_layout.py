@@ -7,7 +7,7 @@ from pathlib import Path
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
 from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
-                                                         SPEED_ALIGNMENTS, customization_metadata, validate_widget_order)
+                                                         CEM_GAUGE_FRAME, CEM_GAUGE_INSET, SPEED_ALIGNMENTS, customization_metadata, validate_widget_order)
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
@@ -166,7 +166,7 @@ def default_layout(screen, display=None):
 def default_layout_for_viewport(viewport, display=None):
   metadata = layout_metadata_for_viewport(viewport)
   display = {**DISPLAY_DEFAULTS, **{key: value for key, value in (display or {}).items() if key in DISPLAY_DEFAULTS}}
-  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, **display, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  return {'version': 3, 'clock24Hour': False, 'largeUiGammaTrial': False, **display, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 
@@ -203,7 +203,7 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   if type(value) is dict:
     fields |= {field for field in ('widgetOrder', 'clock24Hour', 'largeUiGammaTrial', *DISPLAY_DEFAULTS) if field in value}
   if (type(value) is not dict or set(value) != fields or
-      type(value['version']) is not int or value['version'] not in (1, 2) or
+      type(value['version']) is not int or value['version'] not in (1, 2, 3) or
       value['canvas'] != {key: metadata[key] for key in ('width', 'height')} or
       type(value['widgets']) is not dict or not set(value['widgets']) <= set(metadata['widgets']) or
       not set(metadata['widgets']) - set(value['widgets']) <= {CEM_GAUGE_WIDGET, MODE_WIDGET, CLOCK_WIDGET, *PROJECTION_WIDGETS}):
@@ -269,6 +269,10 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
           type(placement['opacity']) is not int or not opacity['min'] <= placement['opacity'] <= opacity['max']):
         raise ValueError('Invalid map overlay size or opacity')
     dimensions = placement_size(key, widget, placement)
+    # Version 2 and older saved the CEM gauge's full drawing frame; check that, then move to the inset box.
+    old_gauge = key == CEM_GAUGE_WIDGET and value['version'] < 3 and key in value['widgets']
+    if old_gauge:
+      dimensions = CEM_GAUGE_FRAME
     if _legacy_geometry and key in ('cruise_limits', 'speed_limit_actions'):
       historic = {'cruise_limits': ((176, 483), (280, 412)), 'speed_limit_actions': ((176, 58), (280, 96))}
       # Both shapes were published as v1; validate the whole footprint before migrating.
@@ -281,6 +285,10 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
       if (type(number) not in (int, float) or not math.isfinite(number) or
           not bounds[axis] <= number <= bounds[axis] + bounds[extent] - dimension):
         raise ValueError('Projection widget outside screen')
+    if old_gauge and not _legacy_geometry:
+      placement.update(x=placement['x'] + CEM_GAUGE_INSET[0], y=placement['y'] + CEM_GAUGE_INSET[1])
+  if not _legacy_geometry:
+    result['version'] = 3
   if len(json.dumps(result, separators=(',', ':'), allow_nan=False).encode()) > MAX_BYTES:
     raise ValueError('Projection layout too large')
   return result

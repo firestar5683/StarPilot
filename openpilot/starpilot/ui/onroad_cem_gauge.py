@@ -13,7 +13,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 from openpilot.starpilot.ui.onroad_conditional import reason, status
 from openpilot.starpilot.ui.onroad_curve import controlling, glow_color, intensity
-from openpilot.starpilot.ui.onroad_customization import placement
+from openpilot.starpilot.ui.onroad_customization import CEM_GAUGE_FRAME, CEM_GAUGE_INSET, placement
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole
 
@@ -194,7 +194,8 @@ class AetherGauge:
       return
     self._lead_stopped = data.indicator_extra == 'stopped'
     self._speed_mps = state.speed_mps or 0.0
-    rect = rl.Rectangle(saved['x'], saved['y'], 344, 300)
+    # Draw in the gauge's full frame; the saved box is the inset part it actually fills.
+    rect = rl.Rectangle(saved['x'] - CEM_GAUGE_INSET[0], saved['y'] - CEM_GAUGE_INSET[1], *CEM_GAUGE_FRAME)
     self._render_unified_road(rect, rect.x + rect.width / 2, rect.y + 145 - ROAD_HALF_SIZE, data)
 
   def _render_unified_road(self, rect, icx, icy, data, alpha=1.0):
