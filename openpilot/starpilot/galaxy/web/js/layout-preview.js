@@ -23,8 +23,8 @@ const SCENES = PREVIEW_SCENES.map(({ id }) => id)
 export class LayoutPreviewFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id),
-                urls = URL, art = false }) {
-    Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer, urls, art })
+                urls = URL, art = false, backdrop = false }) {
+    Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer, urls, art, backdrop })
     this.active = false
     this.version = 0
     this.timer = null
@@ -67,9 +67,10 @@ export class LayoutPreviewFeed {
 
   start() { if (this.art) this.pause(); else this.stop(); this.active = true }
 
-  update(document, profile, scene, dragging = false) {
+  // `key` stands in for the document when only part of it changes the image (the backdrop ignores positions).
+  update(document, profile, scene, dragging = false, key = document) {
     if (!this.active || !document || !["large", "compact", "projection"].includes(profile) || !SCENES.includes(scene)) return
-    const inputKey = JSON.stringify({ document, profile, scene, dragging })
+    const inputKey = JSON.stringify({ key, profile, scene, dragging })
     if (inputKey === this.inputKey) return
     this.inputKey = inputKey
     this.version++
@@ -78,7 +79,7 @@ export class LayoutPreviewFeed {
     this.pending = null
     this.request?.abort()
     if (dragging) { this.publish({ status: "editing", error: "" }); return }
-    const renderKey = JSON.stringify({ document, profile, scene })
+    const renderKey = JSON.stringify({ key, profile, scene })
     if (renderKey !== this.failureKey) { this.failureKey = renderKey; this.failures = 0 }
     if (this.art) {
       const cached = this.artCache.get(profile)
@@ -89,7 +90,7 @@ export class LayoutPreviewFeed {
         return
       }
     }
-    this.pending = { document: JSON.parse(JSON.stringify(document)), profile, scene, version: this.version, renderKey }
+    this.pending = { document: JSON.parse(JSON.stringify(document)), key, profile, scene, version: this.version, renderKey }
     // Once a real outage is reported, keep the message stable through retries.
     if (!this.art || this.failures < 2) this.publish({ status: "updating", error: "" })
     this.timer = this.later(() => { this.timer = null; this.dispatch() }, 200)
@@ -98,7 +99,7 @@ export class LayoutPreviewFeed {
   retry() {
     if (!this.active || !this.last) return
     this.inputKey = null
-    this.update(this.last.document, this.last.profile, this.last.scene)
+    this.update(this.last.document, this.last.profile, this.last.scene, false, this.last.key)
   }
 
   async dispatch() {
@@ -118,7 +119,7 @@ export class LayoutPreviewFeed {
       await Promise.race([aborted, (async () => {
         const response = await this.fetcher("./api/ui/layout/preview", { method: "POST", credentials: "same-origin",
           cache: "no-store", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene, ...(this.art ? {art: true} : {}) }), signal: request.signal })
+          body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene, ...(this.art ? {art: true} : this.backdrop ? {art: "backdrop"} : {}) }), signal: request.signal })
         if (!this.active || item.version !== this.version || request.signal.aborted) return
         if (response.status === 401) { this.stop(); this.unauthorized(); return }
         if (response.status === 403) { denied = true; failure = "Turn off the vehicle to preview this layout."; throw new Error() }

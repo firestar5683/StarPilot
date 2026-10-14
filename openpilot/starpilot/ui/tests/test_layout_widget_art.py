@@ -13,7 +13,8 @@ from openpilot.starpilot.ui.onroad_customization import RUNTIME_PREVIEW_WIDGETS,
 def test_widget_art_request_uses_same_validated_document_and_scene():
   request = {'document': default_document(), 'profile': 'compact', 'scene': 'cem_curve', 'art': True}
   assert _payload(request) == request
-  for art in (False, None, 1, 'yes'):
+  assert _payload({**request, 'art': 'backdrop'}) == {**request, 'art': 'backdrop'}
+  for art in (False, None, 1, 'yes', 'Backdrop'):
     with pytest.raises(PreviewInvalid):
       _payload({**request, 'art': art})
   with pytest.raises(PreviewInvalid):

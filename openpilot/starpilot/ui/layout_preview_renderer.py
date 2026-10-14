@@ -281,7 +281,7 @@ class _Canvas:
       finally:
         rl.rl_pop_matrix()
 
-  def render(self, state: OnroadState, scene: str) -> bytes:
+  def render(self, state: OnroadState, scene: str, *, label: bool = True) -> bytes:
     if self.view is None or self.fonts is None or self.target is None:
       raise RuntimeError("Layout preview resources are closed")
     self._settle(state)
@@ -299,7 +299,8 @@ class _Canvas:
         self.fonts.draw('StarPilot', FontRole.BRAND, 30, width - 210, height - 90)
       if self.profile == Profile.LARGE and self.viewport is None:
         render_sidebar(self.fonts, rl.Rectangle(width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, height))
-      self._label(scene)
+      if label:
+        self._label(scene)
     finally:
       rl.end_texture_mode()
     image = rl.load_image_from_texture(self.target.texture)
@@ -437,7 +438,7 @@ class LayoutPreviewRenderer:
   def __call__(self, payload: dict) -> bytes:
     if type(payload) is not dict or set(payload) not in ({"document", "profile", "scene"}, {"document", "profile", "scene", "art"}):
       raise ValueError("Invalid layout preview request")
-    if "art" in payload and payload["art"] is not True:
+    if "art" in payload and not (payload["art"] is True or payload["art"] == "backdrop"):
       raise ValueError("Invalid widget art request")
     viewport = None
     if payload['profile'] == 'projection':
@@ -465,6 +466,11 @@ class LayoutPreviewRenderer:
     if payload.get('art') is True:
       positions = payload['document']['layout']['widgets'] if viewport else document['layouts'][str(profile)]
       return self._canvas.render_widget_art(state, positions)
+    if payload.get('art') == 'backdrop':
+      # Everything the car draws except the movable widgets, which the editor places over it.
+      # A non-empty order that names no widget keeps the ordered path and draws none of them.
+      order = {**state.customization.get('widgetOrder', {}), str(profile): ['backdrop']}
+      return self._canvas.render(replace(state, customization={**state.customization, 'widgetOrder': order}), scene, label=False)
     return self._canvas.render(state, scene)
 
   def expire(self) -> None:

@@ -109,6 +109,24 @@ class LayoutPreviewRendererTests(unittest.TestCase):
       renderer.expire()
       second.close.assert_called_once()
 
+  def test_backdrop_draws_the_real_screen_without_movable_widgets(self):
+    renderer = LayoutPreviewRenderer()
+    document = default_document()
+    with patch("openpilot.starpilot.ui.layout_preview_renderer.rl.is_window_ready", return_value=True), \
+         patch("openpilot.starpilot.ui.layout_preview_renderer._Canvas") as canvas_type:
+      canvas = Mock(profile=Profile.COMPACT, viewport=None)
+      canvas.render.return_value = b"png"
+      canvas_type.return_value = canvas
+      self.assertEqual(renderer({"document": document, "profile": "compact", "scene": "braking", "art": "backdrop"}), b"png")
+    state, scene = canvas.render.call_args.args
+    self.assertEqual(scene, "braking")
+    self.assertEqual(canvas.render.call_args.kwargs, {"label": False})
+    # An order naming no widget keeps the ordered path, so no movable widget is drawn.
+    self.assertEqual(state.customization["widgetOrder"]["compact"], ["backdrop"])
+    self.assertEqual(state.customization["layouts"], document["layouts"])
+    with self.assertRaises(ValueError):
+      renderer({"document": document, "profile": "compact", "scene": "braking", "art": "widgets"})
+
   def test_png_encoder_preserves_rgba_pixels(self):
     pixels = bytes((255, 0, 0, 255, 0, 255, 0, 128))
     png = _png_rgba(2, 1, pixels)

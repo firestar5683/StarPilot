@@ -57,7 +57,7 @@ def preview_layout(self, payload, projection_layout_owner, layout_owner, layout_
     self.json(401, {'error': 'Sign in to Galaxy'})
     return
   if (type(payload) is not dict or set(payload) not in ({'document', 'profile', 'scene'}, {'document', 'profile', 'scene', 'art'}) or
-      ('art' in payload and payload['art'] is not True) or
+      ('art' in payload and not (payload['art'] is True or payload['art'] == 'backdrop')) or
       type(payload['profile']) is not str or payload['profile'] not in (PREVIEW_PROFILES | {'projection'}) or
       type(payload['scene']) is not str or payload['scene'] not in PREVIEW_SCENES):
     self.json(400, {'error': 'Invalid layout preview request'})
@@ -82,7 +82,7 @@ def preview_layout(self, payload, projection_layout_owner, layout_owner, layout_
       self.json(403, {'error': 'Turn off the vehicle to preview this layout'})
       return
     image = request_preview({'document': document, 'profile': payload['profile'], 'scene': payload['scene'],
-                             **({'art': True} if payload.get('art') is True else {})},
+                             **({'art': payload['art']} if 'art' in payload else {})},
                             layout_preview_socket)
     if self.settings_session() != identity:
       self.json(401, {'error': 'Sign in to Galaxy'})

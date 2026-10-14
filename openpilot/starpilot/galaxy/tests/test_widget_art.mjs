@@ -63,7 +63,7 @@ assert.equal(updates.at(-1).status,'ready');assert.equal(feed.currentUrl,'blob:3
 assert.deepEqual(revoked,['blob:2'],'Only a successfully replaced sheet is released')
 feed.pause();assert.equal(feed.active,false);assert.equal(feed.currentUrl,'blob:3')
 feed.start();feed.update(document,'large','braking')
-assert.equal(feed.currentUrl,'blob:3');assert.equal(timers.size,0,'Returning from Device preview reuses matching artwork')
+assert.equal(feed.currentUrl,'blob:3');assert.equal(timers.size,0,'Returning to a profile reuses matching artwork')
 const edited={...document,palette:{text:'#FF0000FF'}}
 feed.update(edited,'large','braking');tick()
 assert.equal(feed.currentUrl,'blob:3','Draft edits keep artwork while rendering the new colors')
@@ -103,6 +103,7 @@ stalled.feed.stop()
 
 // Exercise the real page watchers when changing preview modes and parked authority.
 const page=OnroadLayoutPage.setup({mode:'local',projection:false,unauthorized(){}})
+Object.assign(page.backdropFeed,{start(){},update(){},stop(){}})
 const pageFeed=fixture()
 Object.assign(page.artFeed,pageFeed.options,{publish:update=>{Object.assign(page.state.art,update);pageFeed.updates.push(update)}})
 page.state.data={editable:true,revision:1,metadata:{profiles:{large:{widgets:{conditional_mode:{}}},compact:{widgets:{conditional_mode:{}}}}}}
@@ -110,14 +111,9 @@ page.state.draft=document
 pageFeed.tick();await pageFeed.answer(0)
 const artUrl=page.state.art.url
 assert(artUrl)
-page.state.previewMode='device'
-page.previewFeed.stop()
-assert.equal(page.artFeed.active,false);assert.equal(page.state.art.url,artUrl,'Page mode watcher pauses without clearing artwork')
-page.state.previewMode='layout'
-assert.equal(page.state.art.url,artUrl);assert.equal(page.state.art.status,'ready');assert.equal(pageFeed.timers.size,0)
-page.state.previewMode='device';page.previewFeed.stop();page.state.data.editable=false
-assert.equal(page.state.art.url,null,'Parked authority changes also clear paused artwork')
-page.artFeed.stop();page.previewFeed.stop()
+page.state.data.editable=false
+assert.equal(page.artFeed.active,false);assert.equal(page.state.art.url,null,'Parked authority changes clear artwork')
+page.artFeed.stop()
 assert.equal(OnroadLayoutPage.methods.runtimeWidget.call({profile:{runtimePreviewWidgets:['conditional_mode']}},'conditional_mode'),true)
 assert.equal(OnroadLayoutPage.methods.runtimeWidget.call({profile:{}},'conditional_mode'),false)
 assert.match(LayoutWidgetPreview.template,/data-preview-source="runtime"/)

@@ -60,7 +60,7 @@ class _Job:
 def _payload(value: object) -> dict:
   if not isinstance(value, dict) or type(value) is not dict or set(value) not in ({'document', 'profile', 'scene'}, {'document', 'profile', 'scene', 'art'}):
     raise PreviewInvalid('Invalid preview request')
-  if 'art' in value and value['art'] is not True:
+  if 'art' in value and not (value['art'] is True or value['art'] == 'backdrop'):
     raise PreviewInvalid('Invalid widget art request')
   if type(value['profile']) is not str or type(value['scene']) is not str or \
      value['profile'] not in RENDER_PROFILES or value['scene'] not in SCENES:
@@ -79,7 +79,7 @@ def _payload(value: object) -> dict:
   except (ValueError, TypeError, OverflowError, RecursionError) as error:
     raise PreviewInvalid('Invalid layout document') from error
   return {'document': document, 'profile': value['profile'], 'scene': value['scene'],
-          **({'art': True} if value.get('art') is True else {})}
+          **({'art': value['art']} if 'art' in value else {})}
 
 
 def validate_png(value: object) -> bytes:

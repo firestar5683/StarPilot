@@ -125,7 +125,7 @@ assert.equal(clampPlacement(data.metadata.profiles.large, "current_speed", NaN, 
 assert.deepEqual(previewPoint({ clientX: 316, clientY: 200 }, { left: 100, top: 92, width: 432, height: 216 }, data.metadata.profiles.large), { x: 1080, y: 540 })
 
 function editor() {
-  const emitted = [], calls = [], previewCalls = [], captures = new Set()
+  const emitted = [], calls = [], backdropCalls = [], captures = new Set()
   const target = { setPointerCapture(id) { captures.add(id) }, hasPointerCapture(id) { return captures.has(id) }, releasePointerCapture(id) { captures.delete(id) } }
   const vm = { ...OnroadLayoutPage.setup({ mode: "local", unauthorized() {} }), $emit: (...args) => emitted.push(args),
     $refs: { preview: { ...target, getBoundingClientRect: () => ({ left: 100, top: 100, width: 1080, height: 540 }) } } }
@@ -136,14 +136,14 @@ function editor() {
   vm.artFeed.update = () => {}
   vm.artFeed.stop = () => { vm.artFeed.active = false }
   vm.artFeed.pause = () => { vm.artFeed.active = false }
+  vm.backdropFeed.start = () => { vm.backdropFeed.active = true; backdropCalls.push("start") }
+  vm.backdropFeed.update = (...args) => backdropCalls.push(["update", ...args])
+  vm.backdropFeed.stop = () => { vm.backdropFeed.active = false; backdropCalls.push("stop") }
   vm.state.data = snapshot(); vm.state.data.supportedProfiles = ['large', 'compact']; vm.state.draft = copy(vm.state.data.document); vm.state.status = "ready"; vm.state.selected = "current_speed"
   const publish = vm.feed.publish
   vm.feed = { load: () => calls.push("load"), save: (document) => calls.push(copy(document)) }
-  vm.previewFeed.start = () => { vm.previewFeed.active = true; previewCalls.push("start") }
-  vm.previewFeed.update = (...args) => previewCalls.push(["update", ...args])
-  vm.previewFeed.stop = () => { vm.previewFeed.active = false; previewCalls.push("stop") }
   const event = (x, y, pointerId = 1) => ({ clientX: x, clientY: y, pointerId, button: 0, currentTarget: { setPointerCapture() { throw new Error("Capture must belong to the stable preview") } }, preventDefault() {} })
-  return { vm, event, emitted, calls, previewCalls, captures, publish }
+  return { vm, event, emitted, calls, backdropCalls, captures, publish }
 }
 
 // Snapping changes pointer placement only; a drag remains one history entry.
@@ -321,7 +321,7 @@ for (const [guides, expected] of [
   snapVm.state.snapGuides = guides
   assert.equal(snapVm.snapSummary, expected)
 }
-for (const clear of [() => snapVm.selectProfile("compact"), () => snapVm.selectPreview("device"), () => snapVm.hideDevicePreview()]) {
+for (const clear of [() => snapVm.selectProfile("compact")]) {
   snapVm.state.snapGuides = [{ axis: "x", value: 30, kind: "bounds", label: "the edge" }]
   clear()
   assert.deepEqual(snapVm.state.snapGuides, [])
@@ -414,8 +414,10 @@ torqueEditor.remove("torque_bar")
 assert.equal(torqueEditor.layout.torque_bar.enabled, false)
 torqueEditor.add("torque_bar")
 assert.equal(torqueEditor.layout.torque_bar.enabled, true)
-const { vm, event, emitted, calls, previewCalls, captures } = editor()
-assert.equal(vm.state.devicePreviewOpen, false)
+const { vm, event, emitted, calls, backdropCalls, captures } = editor()
+// The comma's real screen loads behind the arrangement with the editor.
+assert.deepEqual(backdropCalls.map((call) => Array.isArray(call) ? call[0] : call).slice(-2), ["start", "update"])
+assert.deepEqual(backdropCalls.at(-1).slice(2, 5), ["large", "engaged", false])
 assert.equal(vm.dirty, false)
 vm.changePosition("current_speed", 700, 200)
 vm.selectProfile("compact")
@@ -479,41 +481,30 @@ assert.equal(vm.selectedColors.text, "#FFFFFFFF")
 vm.colorRgb("text", { target: { value: "#abcdef" } })
 vm.colorAlpha("text", { target: { value: "128" } })
 assert.equal(vm.selectedColors.text, "#ABCDEF80")
-assert.deepEqual(previewCalls, []) // Editing does not select or request Device preview.
-const draftBeforePreview = copy(vm.state.draft)
-vm.mode = "local"
-vm.showDevicePreview()
-assert.equal(vm.state.devicePreviewOpen, true)
-assert.equal(vm.state.previewMode, "device")
-assert.deepEqual(previewCalls.map((call) => Array.isArray(call) ? call[0] : call), ["start", "update"])
-assert.deepEqual(previewCalls[1].slice(1), [draftBeforePreview, "large", "engaged", false])
+// Moving or removing widgets keeps the same backdrop; scene and size changes replace it.
+const backdropCount = backdropCalls.length
+vm.changePosition("current_speed", 720, 220)
+vm.changePosition("current_speed", 510, 250)
+vm.remove("current_speed")
+vm.add("current_speed")
+assert.equal(backdropCalls.length, backdropCount)
 vm.selectProfile("compact")
-assert.equal(previewCalls.at(-1)[2], "compact")
+assert.equal(backdropCalls.at(-1)[2], "compact")
 vm.state.scene = "braking"
-assert.equal(previewCalls.at(-1)[3], "braking")
+assert.equal(backdropCalls.at(-1)[3], "braking")
 vm.selectProfile("large")
-vm.hideDevicePreview()
-assert.equal(vm.state.devicePreviewOpen, false)
-assert.equal(vm.previewFeed.active, false)
-assert.equal(previewCalls.at(-1), "stop")
-assert.deepEqual(copy(vm.state.draft), draftBeforePreview)
-const previewCount = previewCalls.length
 vm.state.scene = "engaged"
 vm.color("text", "#ABCDEF81")
-assert.equal(previewCalls.length, previewCount)
+assert.equal(backdropCalls.length, backdropCount + 5) // Colour edits change the real screen too.
 vm.color("text", "#ABCDEF80")
-const deviceEditor = editor()
-deviceEditor.vm.mode = "local"
-deviceEditor.vm.showDevicePreview()
-const beforeDeviceDrag = copy(deviceEditor.vm.layout.current_speed)
-deviceEditor.vm.startDrag("current_speed", deviceEditor.event(500, 200))
-assert.equal(deviceEditor.vm.state.devicePreviewOpen, true)
-assert.equal(deviceEditor.previewCalls.at(-1).at(-1), true)
-deviceEditor.vm.moveDrag(deviceEditor.event(700, 250))
-deviceEditor.vm.cancelDrag()
-assert.deepEqual(copy(deviceEditor.vm.layout.current_speed), beforeDeviceDrag)
-assert.equal(deviceEditor.vm.state.devicePreviewOpen, true)
-deviceEditor.vm.hideDevicePreview()
+const draggingCount = backdropCalls.length
+vm.startDrag("current_speed", event(500, 200))
+vm.moveDrag(event(700, 250))
+vm.cancelDrag()
+assert.equal(backdropCalls.length, draggingCount)
+vm.state.data.editable = false
+assert.equal(backdropCalls.at(-1), "stop")
+vm.state.data.editable = true
 vm.requestLeave("reload")
 assert.equal(vm.state.discard, "reload")
 assert.equal(calls.length, 0)
@@ -762,14 +753,14 @@ assert.match(appSource, /requestLeave\(proceed, presentation\)/)
 assert.match(appSource, /@click="goFromMenu\(item\.path\)"/)
 assert.match(editorSource, /<LayoutWidgetPreview :widget="widget"/)
 assert.doesNotMatch(editorSource, /<LayoutWidgetPreview v-if="!state\.preview\.url"/)
-assert.match(editorSource, /<section v-if="state\.devicePreviewOpen" class="gx-layout__device"/)
-assert.match(editorSource, /<img v-if="state\.preview\.url"/)
+assert.match(editorSource, /<image v-if="state\.backdrop\.url" :href="state\.backdrop\.url"/)
+assert.doesNotMatch(editorSource, /devicePreviewOpen|gx-layout__device|selectPreview/)
 const loadedCatalog = await loadCatalog({ fetcher: async (url) => ({ ok: true,
   json: async () => url.endsWith("catalog.json") ? catalog : { schemaVersion: 1, monitor: "local" },
 }) })
 assert.ok(loadedCatalog.tools.some(tool => tool.path === "/theme_maker"))
 assert.equal(catalog.tools.find((tool) => tool.path === "/theme_maker")?.availability, "local-only")
-console.log("Colors and layout: stable editor, explicit Device preview, placement, drag/cancel, resets, save races, errors, auth and Visual navigation passed")
+console.log("Colors and layout: stable editor, device backdrop, placement, drag/cancel, resets, save races, errors, auth and Visual navigation passed")
 
 const railEditor = editor().vm
 railEditor.selectProfile("compact")
