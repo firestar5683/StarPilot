@@ -79,6 +79,10 @@ def source_panel_bounds(state, height, viewport):
     if saved is None:
       continue
     if saved['enabled']:
+      if key == 'cem_gauge':
+        from openpilot.starpilot.ui.onroad_cem_gauge import gauge_data
+        if gauge_data(state) is None:
+          continue
       width, widget_height = (placement_size(key, widget, saved) if projected else widget_size(state.customization, 'large', key))
       native = PROFILES['large']['widgets'].get(key)
       dx = widget['default']['x'] - native['default']['x'] if projected and native else 0

@@ -138,9 +138,9 @@ class BitmapFonts:
     if fallback:
       return 1., 0.
     if self.profile == Profile.LARGE and role == FontRole.SPEED:
-      return 1.04, .6
+      return 1.04, .85
     if self.profile == Profile.COMPACT and role == FontRole.SET_SPEED:
-      return 1., .45
+      return 1., .65
     return 1., 0.
 
   def measure(self, text: str, role: FontRole, size: float, *, spacing: float = 0, fallback: bool = False) -> TextSize:

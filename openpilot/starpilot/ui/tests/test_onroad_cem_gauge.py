@@ -247,3 +247,47 @@ def test_numeric_caption_declared_footprint_fits_actual_bottom_content_edge(proj
         validate_layout_for_viewport(document, viewport)
       else:
         validate_document(document)
+
+
+@pytest.mark.parametrize('projection', [False, True])
+@pytest.mark.parametrize('kind', [None, 'scene_unavailable', 'unavailable', 'no_trigger', 'manual_chill',
+                                'manual_experimental', 'unknown_wire_reason', 'cem_signal', 'cem_speed',
+                                'cem_stop', 'cem_lead', 'cem_curve', 'curve_control'])
+def test_source_drawer_reserves_gauge_only_when_actual_renderer_draws(projection, kind):
+  from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, projection_customization
+  from openpilot.starpilot.ui.large_speed_geometry import source_panel_bounds
+  from openpilot.starpilot.ui.tests.test_speed_stack import road
+
+  viewport = (2160, 1080)
+  document = default_document()
+  document['layouts']['large']['speed_limit_actions']['y'] = 750
+  if projection:
+    projected = default_layout_for_viewport(viewport)
+    projected['widgets']['speed_limit_actions']['y'] = 750
+    document = projection_customization(projected, document)
+  sample = replace(state(kind if kind and kind != 'curve_control' else 'no_trigger'), customization=document,
+                   longitudinal_active=True, slc_system_long_available=True, speed_limit=road().speed_limit)
+  if kind is None:
+    sample = replace(sample, conditional_perception=None)
+  elif kind == 'curve_control':
+    curve = CurveObservation(True, 15., 15., True, True, False, 100., 2., 30., 'curve', 'selected', 'saved', True, False, .005)
+    sample = replace(sample, curve=curve)
+  content = NS(x=30, y=30, width=1800, height=1020)
+  bounds = source_panel_bounds(sample, 200, content)
+  disabled = copy.deepcopy(document)
+  disabled['layouts']['large'][CEM_GAUGE_WIDGET]['enabled'] = False
+  disabled_bounds = source_panel_bounds(replace(sample, customization=disabled), 200, content)
+  gauge = AetherGauge(Mock())
+  with patch.object(gauge, '_render_unified_road') as draw:
+    gauge.render(sample)
+  visible = kind in ('cem_stop', 'cem_lead', 'cem_curve', 'curve_control')
+  assert (gauge_data(sample) is not None) is visible
+  assert draw.called is visible
+  assert bounds is not None and disabled_bounds is not None
+  if not visible:
+    assert bounds == disabled_bounds  # A blank gauge consumes exactly the disabled footprint.
+  else:
+    placed = document['layouts']['large'][CEM_GAUGE_WIDGET]
+    x, y, width, height = bounds
+    assert (x + width <= placed['x'] or x >= placed['x'] + 344 or
+            y + height <= placed['y'] or y >= placed['y'] + 300)

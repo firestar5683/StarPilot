@@ -125,10 +125,14 @@ def test_sources_popup_moves_past_gauge_and_keeps_enabled_widget_footprints_clea
   from openpilot.starpilot.ui.large_speed_geometry import GAP
   from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, CEM_GAUGE_WIDGET, PROFILES, widget_size
 
+  from openpilot.starpilot.conditional_mode.policy import ModeChoice
+  from openpilot.starpilot.ui.conditional_status import ConditionalDisplay
+
   viewport = N(x=30, y=30, width=1800, height=1020)
   doc = default_document()
   doc['layouts']['large']['speed_limit_actions']['y'] = 750
-  state = road(validate_document(doc))
+  state = replace(road(validate_document(doc)), conditional_configured=ModeChoice.CEM,
+                  conditional_perception=ConditionalDisplay(ModeChoice.CEM, False, 'cem_stop', 8, 'planner', 1))
   bounds = source_panel_bounds(state, 200, viewport)
   assert bounds is not None
   x, y, width, height = bounds
