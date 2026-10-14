@@ -391,10 +391,18 @@ class HardwareComma(HardwareBase):
       affine_irq(3, "xhci-hcd:usb3")
       affine_irq(3, "xhci-hcd:usb1")
     try:
-      pid = subprocess.check_output(["pgrep", "-f", "spi0"], encoding='utf8').strip()
-      subprocess.call(["sudo", "chrt", "-f", "-p", "1", pid])
-      subprocess.call(["sudo", "taskset", "-pc", "3", pid])
-    except subprocess.CalledProcessError as e:
+      pid = subprocess.check_output(["pgrep", "-x", "spi0"], encoding='utf8').strip()
+      if not pid.isdecimal():
+        raise ValueError("Expected one SPI worker")
+      status = dict(line.split(':', 1) for line in Path(f"/proc/{pid}/status").read_text().splitlines())
+      if status.get("Name", "").strip() != "spi0" or status.get("PPid", "").strip() != "2":
+        raise ValueError("Expected a kernel SPI worker")
+      # Keep the transport on Pandad's core. Deferred SPI work must outrank
+      # its FIFO54 clients and StarPilot's FIFO51 planner on this core.
+      priority = "55" if self.get_device_type() in ("tizi", "mici") else "1"
+      subprocess.check_call(["sudo", "taskset", "-pc", "3", pid])
+      subprocess.check_call(["sudo", "chrt", "-f", "-p", priority, pid])
+    except (subprocess.CalledProcessError, OSError, ValueError) as e:
       print(str(e))
 
   def get_modem_data_usage(self):
