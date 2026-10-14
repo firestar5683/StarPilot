@@ -67,10 +67,13 @@ def test_route_rows_prioritize_dates_preserve_names_and_keep_route_identity(utc,
 def test_route_rows_show_newest_first_without_reordering_catalog(profile):
   page, owner = page_for_input()
   page.profile = profile
-  owner.routes = [{**ROUTE, 'routeId': f'{number:08d}--0123456789'} for number in (1, 2, 3)]
+  owner.routes = [{**ROUTE, 'routeId': '00000001--0123456789', 'startTime': STAMP, 'fileTime': STAMP + 120},
+                  {**ROUTE, 'routeId': '00000002--0123456789', 'startTime': STAMP + 60},
+                  {**ROUTE, 'routeId': '00000003--0123456789', 'fileTime': STAMP - 60},
+                  {**ROUTE, 'routeId': '00000004--0123456789'}]
   identifiers = [route['routeId'] for route in owner.routes]
   rows = page._rows()
-  assert [row.key for row in rows] == identifiers[::-1]
+  assert [row.key for row in rows] == [identifiers[1], identifiers[0], identifiers[2], identifiers[3]]
   assert [route['routeId'] for route in owner.routes] == identifiers
   assert page._rows() is rows
 
