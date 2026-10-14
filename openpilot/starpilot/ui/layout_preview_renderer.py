@@ -93,7 +93,7 @@ def sample_state(scene: str, document: dict) -> OnroadState:
                      longitudinal_active=longitudinal, stock_cruise_active=False,
                      slc_system_long_available=longitudinal, torque_utilization=0.78 if lateral else 0.0,
                      customization=document,
-                     visual_preview=OnroadVisualPreview(cem_reason=CEM_SCENE_REASONS[scene]) if scene in CEM_SCENE_REASONS else None)
+                     visual_preview=OnroadVisualPreview(cem_reason=CEM_SCENE_REASONS[scene], layout_sample=True) if scene in CEM_SCENE_REASONS else None)
 
   if scene == 'cem_lead':
     state = replace(state, conditional_lead=ConditionalLead(12.0, 0.0))
@@ -281,7 +281,7 @@ class _Canvas:
       finally:
         rl.rl_pop_matrix()
 
-  def render(self, state: OnroadState, scene: str, *, label: bool = True) -> bytes:
+  def render(self, state: OnroadState, scene: str) -> bytes:
     if self.view is None or self.fonts is None or self.target is None:
       raise RuntimeError("Layout preview resources are closed")
     self._settle(state)
@@ -299,8 +299,6 @@ class _Canvas:
         self.fonts.draw('StarPilot', FontRole.BRAND, 30, width - 210, height - 90)
       if self.profile == Profile.LARGE and self.viewport is None:
         render_sidebar(self.fonts, rl.Rectangle(width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, height))
-      if label:
-        self._label(scene)
     finally:
       rl.end_texture_mode()
     image = rl.load_image_from_texture(self.target.texture)
@@ -393,21 +391,6 @@ class _Canvas:
     self.view.torque_bar._torque_filter.x = state.torque_utilization if state.lateral_active else 0.0
     self.view.torque_bar._alpha_filter.x = 1.0 if state.lateral_active else 0.0
 
-  def _label(self, scene: str) -> None:
-    if self.fonts is None:
-      return
-    large = self.profile == Profile.LARGE
-    names = {"experimental": "MANUAL EXPERIMENTAL", "cem_stop_light": "CEM TRAFFIC LIGHT",
-             "cem_lead": "CEM STOPPED LEAD", "cem_curve": "CEM CURVE"}
-    label = "SAMPLE: " + names.get(scene, scene.replace("_", " ").upper())
-    size = 27 if large else 14
-    measured = self.fonts.measure(label, FontRole.SEMI_BOLD, size)
-    x = (1860 if large else 476) - measured.width - (38 if large else 8)
-    y = 1000 if large else 213
-    rl.draw_rectangle_rounded(rl.Rectangle(x - 8, y - 3, measured.width + 16, measured.height + 6),
-                              0.2, 4, rl.Color(0, 0, 0, 220))
-    self.fonts.draw(label, FontRole.SEMI_BOLD, size, x, y, rl.Color(255, 255, 255, 255))
-
   def close(self) -> None:
     if self.map is not None:
       self.map.close()
@@ -470,7 +453,7 @@ class LayoutPreviewRenderer:
       # Everything the car draws except the movable widgets, which the editor places over it.
       # A non-empty order that names no widget keeps the ordered path and draws none of them.
       order = {**state.customization.get('widgetOrder', {}), str(profile): ['backdrop']}
-      return self._canvas.render(replace(state, customization={**state.customization, 'widgetOrder': order}), scene, label=False)
+      return self._canvas.render(replace(state, customization={**state.customization, 'widgetOrder': order}), scene)
     return self._canvas.render(state, scene)
 
   def expire(self) -> None:

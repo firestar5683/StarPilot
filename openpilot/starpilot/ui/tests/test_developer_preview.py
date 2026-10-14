@@ -32,7 +32,7 @@ class DeveloperPreviewTests(unittest.TestCase):
     value = preview_at(frozenset(("cem", "csc")), 3.0)
     with self.assertRaises(FrozenInstanceError):
       value.__setattr__("cem_reason", "ACTUAL")
-    self.assertEqual(set(vars(value)), {"cem_reason", "curve_curvature", "label"})
+    self.assertEqual(set(vars(value)), {"cem_reason", "curve_curvature", "label", "layout_sample"})
 
   def test_invalid_or_duplicate_flags_and_time_rejected(self):
     for raw in ("cem,cem", "csc,bogus", "CEM", ",cem"):

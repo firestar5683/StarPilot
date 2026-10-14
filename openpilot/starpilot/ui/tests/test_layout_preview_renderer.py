@@ -80,7 +80,12 @@ class LayoutPreviewRendererTests(unittest.TestCase):
         self.assertTrue(sample.experimental_enabled)
         self.assertEqual(sample.visual_preview.cem_reason, reason)
         self.assertIsNone(sample.conditional_effective)
-        self.assertEqual(sample.visual_preview.label, "SYNTHETIC REPLAY PREVIEW")
+        self.assertTrue(sample.visual_preview.layout_sample)  # Drawn as the car would, without replay labels.
+        from openpilot.starpilot.ui.onroad_conditional import status
+        # The gauge still reads the real reason, but the mode caption itself is not drawn in the editor.
+        family, detail, _ = status(sample)
+        self.assertEqual(family, "CEM")
+        self.assertFalse(detail.startswith("PREVIEW"))
     self.assertEqual(sample_state("cem_lead", document).speed_mps, 0.0)
     with self.assertRaises(ValueError):
       sample_state("live", document)
@@ -120,7 +125,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
       self.assertEqual(renderer({"document": document, "profile": "compact", "scene": "braking", "art": "backdrop"}), b"png")
     state, scene = canvas.render.call_args.args
     self.assertEqual(scene, "braking")
-    self.assertEqual(canvas.render.call_args.kwargs, {"label": False})
+    self.assertEqual(canvas.render.call_args.kwargs, {})
     # An order naming no widget keeps the ordered path, so no movable widget is drawn.
     self.assertEqual(state.customization["widgetOrder"]["compact"], ["backdrop"])
     self.assertEqual(state.customization["layouts"], document["layouts"])
@@ -200,7 +205,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
          patch("openpilot.starpilot.ui.layout_preview_sidebar.rl.draw_rectangle_rounded_lines_ex"):
       render_sidebar(fonts, rl.Rectangle(1860, 0, 300, 1080), metric)
     labels = [call.args[0] for call in fonts.draw.call_args_list]
-    self.assertEqual(labels, ["ACCEL", "1.08 ft/s²", "SAMPLE DATA"])
+    self.assertEqual(labels, ["ACCEL", "1.08 ft/s²"])
 
 
 if __name__ == "__main__":

@@ -198,7 +198,7 @@ class OnroadView:
   def _preview_badge(self, state: OnroadState) -> None:
     """Keep synthetic replay visibly identified even over a full alert."""
     preview = state.visual_preview
-    if preview is None:
+    if preview is None or preview.layout_sample:
       return
     flags = []
     if preview.cem_reason is not None:
@@ -422,7 +422,9 @@ class OnroadView:
       self.fonts.draw(label, FontRole.SEMI_BOLD, 29, 1390 + right_shift, 56,
                       curve_color)
     mode = conditional_status(state)
-    if mode is not None and state.alert.size != AlertSize.FULL:
+    # The layout editor leaves out the mode caption; its CEM scenes are named in the editor itself.
+    sample = state.visual_preview is not None and state.visual_preview.layout_sample
+    if mode is not None and state.alert.size != AlertSize.FULL and not sample:
       family, reason, mode_color = mode
       mode_y = 101 if label is not None else 56
       self.fonts.draw(f'{family} {reason}', FontRole.SEMI_BOLD, 25, 1390 + right_shift, mode_y, mode_color)

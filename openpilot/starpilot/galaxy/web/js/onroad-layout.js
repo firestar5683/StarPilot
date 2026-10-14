@@ -1249,8 +1249,8 @@ export const OnroadLayoutPage = {
               <p v-if="state.backdrop.status === 'unavailable'" class="gx-note" role="status">{{ state.backdrop.url ? 'The comma screen could not refresh. Showing the last one.' : 'The comma screen is unavailable. Showing a sketch.' }}</p>
               <p v-if="state.art.status === 'unavailable'" class="gx-note" role="status">{{ state.art.url ? 'Widget preview could not refresh. Showing the last preview.' : 'Widget preview unavailable. Placement controls remain available.' }}</p>
               <div class="gx-layout__stage">
-              <span v-if="state.showEditingAids && state.snapGuides.length && !snapInBar" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones}" aria-hidden="true">{{ snapSummary }}</span>
-              <span v-if="!projection && state.showFavoriteZones && state.showEditingAids" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
+              <span v-if="state.showEditingAids && state.snapGuides.length && !snapInBar" class="gx-layout__stage-chip gx-layout__stage-chip--start" :class="{'gx-layout__stage-chip--with-tap-areas': !projection && state.showFavoriteZones && state.profile !== 'compact'}" aria-hidden="true">{{ snapSummary }}</span>
+              <span v-if="!projection && state.showFavoriteZones && state.showEditingAids && state.profile !== 'compact'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <svg ref="preview" class="gx-layout__preview" :style="{'--layout-glow': state.profile === 'compact' ? '4px' : '14px'}" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
                 @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
                 role="group" :aria-label="projection ? 'Android Auto layout preview' : (state.profile === 'large' ? 'Big' : 'Small') + ' layout preview'">
@@ -1275,7 +1275,6 @@ export const OnroadLayoutPage = {
                   opacity=".7" :stroke-width="state.profile === 'compact' ? 2 : 5" />
                 <rect v-if="!projection" :x="state.profile === 'large' ? 1860 : 476" y="0" :width="state.profile === 'large' ? 300 : 60" :height="profile.height" fill="#090c10" />
                 <g v-if="!projection && state.profile === 'large'" aria-hidden="true" pointer-events="none">
-                  <text x="1874" y="17" font-size="14" font-weight="600" fill="#ffffffd2">SAMPLE DATA</text>
                   <g v-for="(sample, index) in [{label:'ACCEL',value:'1.08 ft/s²',accent:'#ffffff'}, {label:'STEER DELAY',value:'0.15000',accent:'#3b82f6'}, {label:'FRICTION',value:'0.12000',accent:'#22c55e'}, {label:'LAT ACCEL',value:'2.50000',accent:'#3b82f6'}, {label:'LATERAL %',value:'78.00%',accent:'#ffffff'}, {label:'TORQUE %',value:'42%',accent:'#ffffff'}, {label:'CHESTNUT',value:'',accent:'#ffffff'}]" :key="sample.label" :transform="'translate(1873 ' + (24 + index * 150) + ')'">
                     <rect width="275" height="126" rx="16" fill="#000000" stroke="#ffffff55" stroke-width="2" />
                     <rect x="253" y="4" width="18" height="118" rx="4" :fill="sample.accent" />
@@ -1328,6 +1327,8 @@ export const OnroadLayoutPage = {
                 <rect v-if="state.showEditingAids && selectionBox" class="gx-layout__outline" :x="selectionBox.x" :y="selectionBox.y" :width="selectionBox.width" :height="selectionBox.height" rx="4" fill="none" stroke="#d4baff" stroke-width="2" vector-effect="non-scaling-stroke" />
               </svg>
               </div>
+              <!-- The Small screen is too short to carry the chip over the layout; it sits underneath instead. -->
+              <span v-if="!projection && state.showFavoriteZones && state.showEditingAids && state.profile === 'compact'" class="gx-layout__stage-chip gx-layout__stage-chip--below" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <div v-show="state.tipsOpen" id="gx-layout-tips" class="gx-layout__tips">
                 <p class="gx-note">Drag widgets to place them. Behind them is the comma's own screen for the chosen scene, including its border, road and alerts. Readings are samples.</p>
                 <p class="gx-note">Widgets snap to the screen edges, the centre and other widgets. Turn snapping off with the magnet button, or hold Option (Alt) while dragging.</p>

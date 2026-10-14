@@ -483,6 +483,9 @@ vm.colorAlpha("text", { target: { value: "128" } })
 assert.equal(vm.selectedColors.text, "#ABCDEF80")
 // The CEM gauge is marked outside CEM scenes, as an editing aid only.
 assert.match(OnroadLayoutPage.template, /v-if="widget\.kind === 'cem_gauge' && state\.showEditingAids && !state\.scene\.startsWith\('cem_'\)"/)
+// The Small screen shows the tap-areas chip under the layout instead of over it.
+assert.match(OnroadLayoutPage.template, /state\.profile !== 'compact'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"><\/i>Tap areas/)
+assert.match(OnroadLayoutPage.template, /state\.profile === 'compact'" class="gx-layout__stage-chip gx-layout__stage-chip--below"/)
 // One scene dropdown, grouped, with every scene exactly once.
 assert.deepEqual(vm.sceneGroups.map(group => group.label), ["Driving", "Conditional experimental", "Speed limit"])
 assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene.id)).sort(), vm.scenes.map(scene => scene.id).sort())

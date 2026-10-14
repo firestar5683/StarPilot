@@ -48,6 +48,10 @@ def status(state: OnroadState) -> tuple[str, str, rl.Color] | None:
   if preview is not None and preview.cem_reason in ('CURVE', 'LEAD', 'STOP LIGHT', 'SPEED'):
     if state.alert.size == AlertSize.FULL:
       return None
+    if preview.layout_sample:
+      # The layout editor's sample keeps the car's own reason (the gauge draws from it), not replay wording.
+      detail = _REASONS.get(reason(state))
+      return ('CEM', detail, rl.Color(112, 192, 216, 255)) if detail else None
     return 'CEM', f'PREVIEW {preview.cem_reason}', rl.Color(112, 192, 216, 255)
   value = (state.conditional_effective if state.longitudinal_active else None) or getattr(state, 'conditional_perception', None)
   if value is None or value.choice not in (ModeChoice.CEM, ModeChoice.CCM):
