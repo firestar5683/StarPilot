@@ -341,11 +341,17 @@ def _projection(row: FeatureRow, page: str) -> dict:
           "page": row.page if row.page in PAGES else "", "action": bool(row.key and row.available and not row.page),
           "confirm": bool(row.key in CONFIRM_ACTIONS or is_long_confirm_action(row.key) or
                           row.key in (PIP_RESET, PIP_EDITOR, VASM_RESET, VASM_ANNOTATION) or row.key.startswith(PIP_FORMAT_PREFIX)),
-          "repairValue": row.repair_value, "defaultValue": row.default_value, "resetAvailable": row_default(row) is not None}
+          "repairValue": row.repair_value, "defaultValue": row.default_value, "resetAvailable": row_default(row) is not None,
+          "displayScale": "lane-strength" if row.key == "LaneCenteringStrength" else None}
 
 
 def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
   key = request.key
+  if key == "LaneCenteringStrength":
+    raw = float(request.value)
+    level = (1 + (raw - row.minimum) * 4 / (100 - row.minimum) if raw <= 100 else
+             5 + (raw - 100) * 5 / (row.maximum - 100))
+    return f"Set lane centering strength to {level:.2f}? 5 is normal."
   if key == "UseStarPilotLongitudinalPlanner":
     return f"Select {request.value} for {row.label.lower()}? The selected planner starts with the next driving process."
   if key in ("CustomCruise", "CustomCruiseLong"):

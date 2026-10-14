@@ -35,6 +35,27 @@ export function settingControl(row) {
   return "readout"
 }
 
+
+export function laneStrengthDisplay(value, row) {
+  const raw = Number(value), min = Number(row.minimum), max = Number(row.maximum)
+  if (!Number.isFinite(raw) || min >= 100 || max <= 100) return value
+  return Number((raw <= 100 ? 1 + (raw - min) * 4 / (100 - min) : 5 + (raw - 100) * 5 / (max - 100)).toFixed(2))
+}
+
+export function laneStrengthSaved(value, row) {
+  const display = Number(value), min = Number(row.minimum), max = Number(row.maximum)
+  if (!Number.isFinite(display) || display < 1 || display > 10) return null
+  return Math.round(display <= 5 ? min + (display - 1) * (100 - min) / 4 : 100 + (display - 5) * (max - 100) / 5)
+}
+
+export function presentedSetting(row) {
+  if (row.displayScale !== "lane-strength") return row
+  return { ...row, value: laneStrengthDisplay(row.value, row),
+    defaultValue: row.defaultValue == null ? row.defaultValue : laneStrengthDisplay(row.defaultValue, row),
+    minimum: 1, maximum: 10, step: row.step > 0 ? 1 : 0, unit: "",
+    reason: row.available ? "1–10; 5 is normal. Lower values reduce centering and higher values strengthen it" : row.reason }
+}
+
 export const GalaxySettingRow = {
   name: "GalaxySettingRow",
   components: { GalaxySelect },
@@ -48,34 +69,37 @@ export const GalaxySettingRow = {
   emits: ["open", "review", "reset-default"],
   data() { return { preview: undefined, interacting: false, fineScrub: null, isFineScrubbing: false, updating: false } },
   computed: {
+    presentedRow() { return presentedSetting(this.row) },
     control() { return settingControl(this.row) },
     showDefault() {
-      const value = this.row.value, initial = this.row.defaultValue
+      const value = this.presentedRow.value, initial = this.presentedRow.defaultValue
       if (initial === null || initial === undefined || this.row.page) return false
       return Number.isFinite(Number(value)) && Number.isFinite(Number(initial)) ? Number(value) !== Number(initial) : String(value) !== String(initial)
     },
     bounds() {
-      const bounds = numericBounds(this.row)
+      const bounds = numericBounds(this.presentedRow)
       if (!bounds || !this.row.choices?.includes("Auto")) return bounds
       const numericMax = snapNumeric(bounds.max, bounds)
       return { ...bounds, numericMax, max: Number((numericMax + bounds.step).toFixed(8)), auto: true }
     },
     locked() { return this.busy || this.updating || this.dimmed },
     dimmed() { return this.disabled || !this.row.available || (!this.row.action && !this.row.page) },
-    currentValue() { return this.preview !== undefined ? this.preview : this.row.value },
+    currentValue() { return this.preview !== undefined ? this.preview : this.presentedRow.value },
     sliderValue() { return this.currentValue === "Auto" && this.bounds?.auto ? this.bounds.max : this.currentValue },
     displayValue() {
       return this.currentValue === "Auto" || (this.bounds?.auto && Number(this.currentValue) === this.bounds.max)
-        ? "Auto" : `${this.currentValue}${this.row.unit ? " " + this.row.unit : ""}`
+        ? "Auto" : `${this.currentValue}${this.presentedRow.unit ? " " + this.presentedRow.unit : ""}`
     },
   },
   methods: {
     async commit(value) {
       if (this.locked) return
-      if (String(value) === String(this.row.value)) { this.preview = undefined; return }
+      if (String(value) === String(this.presentedRow.value)) { this.preview = undefined; return }
+      const savedValue = this.row.displayScale === "lane-strength" ? laneStrengthSaved(value, this.row) : value
+      if (savedValue === null) return
       this.preview = value
       this.updating = true
-      try { await this.saveValue(this.index, value) }
+      try { await this.saveValue(this.index, savedValue) }
       finally { this.preview = undefined; this.updating = false }
     },
     onSwitch(event) {
@@ -90,7 +114,7 @@ export const GalaxySettingRow = {
       const numeric = snapNumeric(raw, this.bounds)
       const next = numeric !== null && this.bounds?.auto && numeric === this.bounds.max ? "Auto" : numeric
       this.preview = undefined
-      if (next !== null && String(next) !== String(this.row.value)) return this.commit(next)
+      if (next !== null && String(next) !== String(this.presentedRow.value)) return this.commit(next)
     },
     clearHoldTimer() {
       if (this._holdTimer !== undefined) clearTimeout(this._holdTimer)
@@ -181,12 +205,12 @@ export const GalaxySettingRow = {
     <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' }" :inert="busy || updating" :aria-busy="busy || updating || undefined">
       <div class="gx-row__info">
         <span class="gx-row__label">{{ row.label }}</span>
-        <span v-if="row.reason" class="gx-row__desc">{{ row.reason.replace('https://firestar.link/discord', '') }}<a v-if="row.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
-        <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ row.value }}</span>
+        <span v-if="presentedRow.reason" class="gx-row__desc">{{ presentedRow.reason.replace('https://firestar.link/discord', '') }}<a v-if="presentedRow.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>
+        <span v-if="control === 'group' || control === 'action'" class="gx-row__desc">{{ presentedRow.value }}</span>
       </div>
       <button v-if="control !== 'slider' && showDefault" type="button"
           class="gx-btn gx-btn--tonal gx-setting-default" :disabled="dimmed || !row.resetAvailable"
-          :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
+          :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + presentedRow.defaultValue"
           @click="$emit('reset-default', index)">Default</button>
       <label v-if="control === 'switch'" class="gx-switch">
         <input type="checkbox" role="switch" :aria-label="row.label" :checked="currentValue === 'On'" :disabled="dimmed" @change="onSwitch">
@@ -197,14 +221,14 @@ export const GalaxySettingRow = {
           <span v-if="interacting" class="gx-slider-hint">{{ isFineScrubbing ? 'Fine scrubbing' : 'Hold to fine scrub' }}</span>
           <button v-if="showDefault" type="button"
           class="gx-btn gx-btn--tonal gx-setting-default" :disabled="dimmed || !row.resetAvailable"
-          :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + row.defaultValue"
+          :aria-label="'Reset ' + row.label + ' to default'" :title="'Default: ' + presentedRow.defaultValue"
           @click="$emit('reset-default', index)">Default</button></div>
         <input ref="slider" type="range" class="gx-slider" :aria-label="row.label" :aria-valuetext="displayValue"
           :min="bounds.min" :max="bounds.max" :step="bounds.step" :value="sliderValue" :disabled="dimmed"
           @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"
           @pointerdown="onSliderPointerDown" @pointermove="onSliderPointerMove" @pointerup="onSliderPointerEnd"
           @pointercancel="onSliderCancel" @lostpointercapture="onSliderCancel" @keydown="beginInteract">
-        <div class="gx-slider-meta"><span>{{ bounds.min }} to {{ bounds.numericMax ?? bounds.max }} {{ row.unit }}<template v-if="bounds.auto"> · Auto at right</template></span><span>Step: {{ bounds.step }} {{ row.unit }}</span></div>
+        <div class="gx-slider-meta"><span>{{ bounds.min }} to {{ bounds.numericMax ?? bounds.max }} {{ presentedRow.unit }}<template v-if="bounds.auto"> · Auto at right</template></span><span>Step: {{ bounds.step }} {{ presentedRow.unit }}</span></div>
       </div>
       <GalaxySelect v-else-if="control === 'select'" class="gx-field" :aria-label="row.label" :value="currentValue" :disabled="dimmed" @change="onSelect">
         <option v-for="choice in row.choices" :key="choice" :value="choice">{{ choice }}</option>
