@@ -239,8 +239,50 @@ int PandaSpiHandle::spi_transfer_retry(uint8_t endpoint, uint8_t *tx_data, uint1
   return ret;
 }
 
+// Scope lives inside existing hw_lock; destruction precedes LockEx unlock.
+class HolderReceiptScope {
+  spi_holder_timing::Receipt row{};
+  pandad_timing::Tick start{};
+public:
+  HolderReceiptScope(unsigned ep, unsigned request, unsigned tx, unsigned rx, const char *serial) noexcept {
+    start = pandad_timing::clock_now();
+    row.acquired = start.wall;
+    row.thread = uint64_t(syscall(SYS_gettid));
+    row.role = pandad_timing::capturing ? 1U : 2U; // main / concurrent-or-startup
+    row.endpoint = ep; row.request = request; row.tx = tx; row.rx = rx;
+    if (serial) std::strncpy(row.serial, serial, 32);
+    spi_holder_timing::active = &row;
+  }
+  ~HolderReceiptScope() noexcept {
+    auto end = pandad_timing::clock_now();
+    row.released = end.wall;
+    if (start.wall && end.wall >= start.wall && start.cpu && end.cpu >= start.cpu) {
+      row.cpu = end.cpu - start.cpu;
+    } else { row.invalid_clock = true; }
+    spi_holder_timing::history.append(row);
+    spi_holder_timing::active = nullptr;
+  }
+};
+class HolderPhaseScope {
+  pandad_timing::Tick start{};
+  bool ack;
+public:
+  explicit HolderPhaseScope(bool is_ack) noexcept : ack(is_ack) {
+    if (spi_holder_timing::active) start = pandad_timing::clock_now();
+  }
+  ~HolderPhaseScope() noexcept {
+    auto *row = spi_holder_timing::active;
+    if (!row) return;
+    auto end = pandad_timing::clock_now();
+    if (!start.wall || !end.wall || end.wall < start.wall || !start.cpu || !end.cpu || end.cpu < start.cpu) { row->invalid_clock = true; return; }
+    if (ack) { row->ack_wall += end.wall-start.wall; row->ack_cpu += end.cpu-start.cpu; }
+    else { row->ioctl_wall += end.wall-start.wall; row->ioctl_cpu += end.cpu-start.cpu; }
+  }
+};
+
 int PandaSpiHandle::wait_for_ack(uint8_t ack, uint8_t tx, unsigned int timeout, unsigned int length) {
   pandad_timing::Scope ack_timing(pandad_timing::Ack);
+  HolderPhaseScope holder_ack(true);
   double start_millis = millis_since_boot();
   if (timeout == 0) {
     timeout = SPI_ACK_TIMEOUT;
@@ -297,7 +339,7 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
   }
 
   int ret;
-  { pandad_timing::Scope timing(pandad_timing::Ioctl); ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t); }
+  { pandad_timing::Scope timing(pandad_timing::Ioctl); HolderPhaseScope holder_ioctl(false); ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t); }
 
   if (err_prob > 0) {
     if ((static_cast<double>(rand()) / RAND_MAX) < err_prob && t.rx_buf != (uint64_t)NULL) {
@@ -318,7 +360,15 @@ int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint8_t *tx_data, uint16_t tx
   uint16_t rx_data_len;
   pandad_timing::TransactionScope transaction_timing(endpoint, endpoint == 0 && tx_data && tx_len ? tx_data[0] : 0, tx_len, max_rx_len, hw_serial.c_str());
   pandad_timing::Scope transfer_timing(pandad_timing::Transfer);
+  const auto wait_start = pandad_timing::clock_now(false).wall;
   LockEx lock(spi_fd, hw_lock);
+  const auto acquired = pandad_timing::clock_now(false).wall;
+  if (pandad_timing::capturing && endpoint == 0x81) {
+    spi_holder_timing::select_wait(spi_holder_timing::history, wait_start, acquired,
+                                  pandad_timing::frame.holders, pandad_timing::frame.invalid);
+  }
+  HolderReceiptScope holder(endpoint, endpoint == 0 && tx_data && tx_len ? tx_data[0] : 0,
+                            tx_len, max_rx_len, hw_serial.c_str());
 
   // needs to be less, since we need to have space for the checksum
   assert(tx_len < SPI_BUF_SIZE);

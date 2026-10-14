@@ -1,4 +1,5 @@
 #pragma once
+#include "selfdrive/pandad/spi_holder_timing.h"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -71,6 +72,7 @@ struct Frame {
   uint64_t can_boot = 0, can_pub = 0, can_send_boot = 0, can_count = 0, invalid = 0;
   std::array<Stat, Count> phases{};
   Transaction slowest{};
+  spi_holder_timing::Matches holders{};
 };
 struct Pair { Frame before{}, current{}; uint64_t gap = 0; };
 inline thread_local Frame frame{};
@@ -156,7 +158,18 @@ class Recorder {
                                           double(s.max_wall), double(s.calls)});
     }
     const auto &t = f.slowest;
+    json11::Json::array holders;
+    for (unsigned i = 0; i < f.holders.count; ++i) {
+      const auto &h = f.holders.rows[i];
+      holders.push_back(json11::Json::array{double(h.sequence),double(h.thread),double(h.role),
+        double(h.endpoint),double(h.request),double(h.tx),double(h.rx),h.serial,
+        double(h.acquired),double(h.released),double(h.cpu),double(h.ioctl_wall),
+        double(h.ioctl_cpu),double(h.ack_wall),double(h.ack_cpu)});
+    }
     return json11::Json::object{
+      {"spi_holders", holders},
+      {"spi_holder_wait", json11::Json::array{double(f.holders.wait_start),double(f.holders.acquired),
+        double(f.holders.overwritten),double(f.holders.omitted),double(f.holders.invalid_clocks)}},
       {"thread", double(f.thread)}, {"start_ns", double(f.start.wall)},
       {"end_ns", double(f.end.wall)}, {"start_cpu_ns", double(f.start.cpu)},
       {"end_cpu_ns", double(f.end.cpu)}, {"start_boot_ns", double(f.start_boot)},

@@ -211,3 +211,23 @@ class SelfdriveLoopTiming:
                                'desired_lateral', 'desired_longitudinal', 'active_lateral', 'active_longitudinal')
     report['phase_columns'] = ('from_to', 'wall_ns', 'main_thread_cpu_ns')
     return report
+
+
+_PARAM_PHASES = {
+  'ChestnutLoading': ('chestnut_loading_start', 'chestnut_loading_return'),
+  'ChestnutActive': ('chestnut_active_start', 'chestnut_active_return'),
+  'PrimeType': ('bookmark_prime_start', 'bookmark_prime_return'),
+}
+
+
+def timed_params_read(owner, key, boolean=False):
+  """Observe one existing Params read without changing its value or failure."""
+  read = owner.params.get_bool if boolean else owner.params.get
+  timing = getattr(owner, 'loop_timing', None)
+  phases = _PARAM_PHASES.get(key) if timing is not None else None
+  if phases is None:
+    return read(key)
+  timing.mark(phases[0])
+  value = read(key)
+  timing.mark(phases[1])
+  return value

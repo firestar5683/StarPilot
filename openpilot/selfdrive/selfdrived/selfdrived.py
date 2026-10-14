@@ -22,7 +22,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
-from openpilot.starpilot.selfdrive_loop_timing import SelfdriveLoopTiming
+from openpilot.starpilot.selfdrive_loop_timing import SelfdriveLoopTiming, timed_params_read
 from openpilot.starpilot.gps.source import observation as gps_observation
 
 from openpilot.selfdrive.car.car_events import CarEvents
@@ -268,7 +268,7 @@ class SelfdriveD:
     return False
 
   def update_big_model_status(self) -> bool:
-    big_active = self.params.get("ChestnutActive")
+    big_active = timed_params_read(self, "ChestnutActive")
     fresh = self.sm.seen['modelV2'] and self.sm.alive['modelV2'] and self.sm.valid['modelV2']
     published_big = fresh and self.sm['modelV2'].big
     if published_big and (big_active is True or self.sm['deviceState'].chestnutPresent):
@@ -372,7 +372,7 @@ class SelfdriveD:
       self.events.add(EventName.joystickDebug)
       self.startup_event = None
 
-    loading = self.params.get_bool("ChestnutLoading")
+    loading = timed_params_read(self, "ChestnutLoading", True)
     if self.big_model_loading and not loading:
       self.big_model_ready_t = time.monotonic()
     self.big_model_loading = loading
@@ -401,7 +401,7 @@ class SelfdriveD:
 
     # Check for user bookmark press
     if self.sm.updated['userBookmark']:
-      prime_type = self.params.get("PrimeType")
+      prime_type = timed_params_read(self, "PrimeType")
       paired = prime_type is not None and int(prime_type) >= 0
       self.events.add(EventName.userBookmark if paired else EventName.userBookmarkNotPaired)
 
