@@ -1,3 +1,4 @@
+import { widgetArtMetadata } from "./widget-art.js"
 export const PREVIEW_SCENES = [
   { id: "engaged", label: "Engaged" },
   { id: "aol", label: "Lateral only" },
@@ -22,8 +23,8 @@ const SCENES = PREVIEW_SCENES.map(({ id }) => id)
 export class LayoutPreviewFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id),
-                urls = URL }) {
-    Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer, urls })
+                urls = URL, art = false }) {
+    Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer, urls, art })
     this.active = false
     this.version = 0
     this.timer = null
@@ -47,7 +48,7 @@ export class LayoutPreviewFeed {
   clearImage() {
     if (this.currentUrl) this.urls.revokeObjectURL(this.currentUrl)
     this.currentUrl = null
-    this.publish({ url: null })
+    this.publish({ url: null, ...(this.art ? {sprites: null} : {}) })
   }
 
   start() { this.stop(); this.active = true }
@@ -63,6 +64,7 @@ export class LayoutPreviewFeed {
     this.pending = null
     this.request?.abort()
     if (dragging) { this.publish({ status: "editing", error: "" }); return }
+    if (this.art) this.clearImage()
     this.pending = { document: JSON.parse(JSON.stringify(document)), profile, scene, version: this.version }
     this.publish({ status: "updating" })
     this.timer = this.later(() => { this.timer = null; this.dispatch() }, 200)
@@ -90,7 +92,7 @@ export class LayoutPreviewFeed {
       await Promise.race([aborted, (async () => {
         const response = await this.fetcher("./api/ui/layout/preview", { method: "POST", credentials: "same-origin",
           cache: "no-store", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene }), signal: request.signal })
+          body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene, ...(this.art ? {art: true} : {}) }), signal: request.signal })
         if (!this.active || item.version !== this.version || request.signal.aborted) return
         if (response.status === 401) { this.stop(); this.unauthorized(); return }
         if (response.status === 403) { failure = "Turn off the vehicle to preview this layout."; throw new Error() }
@@ -100,14 +102,17 @@ export class LayoutPreviewFeed {
         const blob = await response.blob()
         if (!this.active || item.version !== this.version || request.signal.aborted) return
         if (!blob.size || blob.size > 4 * 1024 * 1024) throw new Error("Preview is unavailable. Reconnecting automatically…")
+        const sprites = this.art ? await widgetArtMetadata(blob) : null
+        if (!this.active || item.version !== this.version || request.signal.aborted) return
         const previousUrl = this.currentUrl
         this.currentUrl = this.urls.createObjectURL(blob)
-        this.publish({ status: "ready", error: "", url: this.currentUrl })
+        this.publish({ status: "ready", error: "", url: this.currentUrl, ...(this.art ? {sprites} : {}) })
         if (previousUrl) this.urls.revokeObjectURL(previousUrl)
       })()])
     } catch {
       if (this.active && item.version === this.version) {
         this.inputKey = null
+        if (this.art) this.clearImage()
         this.publish({ status: "unavailable", error: failure })
         this.timer = this.later(() => { this.timer = null; this.retry() }, 5000)
       }

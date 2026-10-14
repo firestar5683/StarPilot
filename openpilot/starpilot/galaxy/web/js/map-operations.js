@@ -52,6 +52,9 @@ export function validSetup(value) {
     integer(value.maxTransferBytes) && integer(value.maxNewDiskBytes)
 }
 
+const validSnapshot = (value, generation) => Boolean(value && value.generation === generation &&
+  integer(value.storedBytes) && value.storedBytes > 0 && integer(value.tileCount) && value.tileCount > 0 && value.bounds !== null && bounds(value.bounds))
+
 export function validOperation(value) {
   return value?.schemaVersion === 1 && STATES.has(value.state) &&
     typeof value.ownerSession === "string" && value.ownerSession.length <= 128 &&
@@ -60,10 +63,12 @@ export function validOperation(value) {
     integer(value.transferredBytes) && integer(value.transferBudgetBytes) &&
     nullableText(value.preparedGeneration) && GENERATION.test(value.selectedGeneration ?? "!") &&
     nullableText(value.errorCode) && typeof value.selectedForNextShadowStart === "boolean" &&
-    (!value.selectedForNextShadowStart || value.state === "completed" && value.selectedGeneration !== "")
+    (value.selectedSnapshot == null || validSnapshot(value.selectedSnapshot, value.selectedGeneration)) &&
+    (!value.selectedForNextShadowStart || value.state === "completed" && validSnapshot(value.selectedSnapshot, value.selectedGeneration))
 }
 
-export const formatBytes = (value) => !integer(value) ? "Unavailable" : value < 1024 ** 2 ? `${value} B` :
+export const formatBytes = (value) => !integer(value) ? "Unavailable" : value < 1024 ? `${value} B` :
+  value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` :
   value < 1024 ** 3 ? `${(value / (1024 ** 2)).toFixed(1)} MiB` : `${(value / (1024 ** 3)).toFixed(1)} GiB`
 export const formatBounds = (value) => bounds(value) && value !== null ?
   `latitude ${value[0]}°–${value[2]}°, longitude ${value[1]}°–${value[3]}°` : "extent unavailable"
@@ -309,7 +314,7 @@ export const MapOperationsPanel = {
         <p class="gx-note">Speed-limit and curve data for a whole region, used by the map provider. Choose a region to download for offline use. Downloading another region replaces the selected map.</p>
         <p v-if="mode !== 'local'">Parked map management is unavailable in the offline preview.</p>
         <template v-else>
-          <template v-if="setup"><p role="status">{{ setup.packageReady ? 'Map service ready.' : 'Map service setup required.' }} {{ setup.snapshotReady ? 'A downloaded map is selected.' : setup.packageReady ? 'Choose a region to download its maps.' : 'Update device software to set up offline maps.' }}</p>
+          <template v-if="setup"><p role="status">{{ setup.packageReady ? 'Map service ready.' : 'Map service setup required.' }} {{ setup.snapshotReady ? 'An offline map database is saved and selected for the next Maps service start.' : setup.packageReady ? 'Choose a region to download its maps.' : 'Update device software to set up offline maps.' }}</p>
             <p v-if="!setup.packageReady" class="gx-note">The offline map service is unavailable. Update device software, then retry maps. Your saved map selection is retained.</p>
             <p class="gx-note">{{ formatBytes(setup.freeDiskBytes) }} available storage. {{ setup.parked ? 'Parked downloads available.' : 'Park to download maps.' }}</p></template>
           <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
@@ -321,8 +326,11 @@ export const MapOperationsPanel = {
               <dt v-if="operation.regionToken">Region</dt><dd v-if="operation.regionToken">{{ operation.regionToken }}</dd>
               <dt v-if="running">Progress</dt><dd v-if="running">{{ operation.completedGroups }} of {{ operation.totalGroups }} areas prepared</dd>
               <dt v-if="running">Transferred</dt><dd v-if="running">{{ formatBytes(operation.transferredBytes) }} of {{ formatBytes(operation.transferBudgetBytes) }} cap</dd></dl>
-            <p v-if="operation.selectedForNextShadowStart" class="gx-note">Download complete. This map will be used the next time Maps starts.</p>
-            <p v-if="operation.selectedGeneration && !operation.selectedForNextShadowStart" class="gx-note">A downloaded map is selected.</p>
+            <dl v-if="operation.selectedSnapshot" class="gx-details"><dt>Offline map database</dt><dd>{{ formatBytes(operation.selectedSnapshot.storedBytes) }} · {{ operation.selectedSnapshot.tileCount.toLocaleString() }} tiles</dd>
+              <dt>Package</dt><dd>{{ operation.selectedGeneration.slice(0, 12) }}</dd>
+              <dt>Coverage</dt><dd>{{ formatBounds(operation.selectedSnapshot.bounds) }}</dd></dl>
+            <p v-if="operation.selectedForNextShadowStart" class="gx-note">Download complete and saved on this comma. The map database is selected for the next Maps service start.</p>
+            <p v-if="operation.selectedGeneration && !operation.selectedForNextShadowStart" class="gx-note">An offline map database is saved and selected for the next Maps service start.</p>
             <p v-if="operation.errorCode" class="gx-note">{{ errorLabel(operation.errorCode) }}.</p>
             <button v-if="running" type="button" class="gx-btn gx-btn--tonal" @click="client.cancel()">Cancel operation</button>
           </template>

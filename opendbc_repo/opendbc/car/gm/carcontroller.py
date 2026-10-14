@@ -262,6 +262,7 @@ class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
     self.long_pitch = True
+    self.long_pitch_input = None
     self.bolt_removed_cancel_credit_used = 0
     self.bolt_pedal_removed = is_bolt_pedal_removed_profile(CP) or is_bolt_pedal_removed_profile(CP, stock_only=True)
     self.bolt_present_no_acc_stock = is_bolt_present_no_acc_pedal_profile(CP, stock_only=True)
@@ -439,6 +440,7 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
+    long_pitch = self.long_pitch
     if ((self.camera_pedal_profile is not None and self.camera_pedal_profile.volt or self.volt_cc_pedal_profile is not None)
         and self.frame % 25 == 0):
       self.longitudinal_maneuver_mode = bool(self.longitudinal_maneuver_input is not None and
@@ -625,7 +627,7 @@ class CarController(CarControllerBase):
           pedal = self.hybrid_command.update(
             actuators.accel, CC.enabled and CC.longActive, CS.out,
             stopping=actuators.longControlState == LongCtrlState.stopping, resume=CC.cruiseControl.resume,
-            orientation=CC.orientationNED if self.long_pitch else None, acc_tune=self.gm_acc_tune)
+            orientation=CC.orientationNED if long_pitch else None, acc_tune=self.gm_acc_tune)
         else:
           self.hybrid_command.withdraw()
           pedal = 0.
@@ -678,7 +680,7 @@ class CarController(CarControllerBase):
         ready = runtime_allowed and physical and source_current and sensor_current
         pedal = 0.
         if ready:
-          gas, _ = volt_demands(actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+          gas, _ = volt_demands(actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None,
                                 .75, self.CP.mass, self.CP.wheelbase, -4., 2., 400)
           pedal = self.volt_cc_pedal_command.update(
             actuators.accel, CC.enabled and CC.longActive, CS.out,
@@ -715,7 +717,7 @@ class CarController(CarControllerBase):
         if ready:
           pedal, self.apply_gas, self.apply_brake = self.silverado_pedal_command.update(
             actuators.accel, CC.longActive, CS.out, stopping=actuators.longControlState == LongCtrlState.stopping,
-            resume=CC.cruiseControl.resume, orientation=CC.orientationNED if self.long_pitch else None)
+            resume=CC.cruiseControl.resume, orientation=CC.orientationNED if long_pitch else None)
         else:
           if not sources_ready:
             self.silverado_pedal_command.prime_recovery()
@@ -735,7 +737,7 @@ class CarController(CarControllerBase):
         if ready:
           pedal, self.apply_gas, self.apply_brake = self.conventional_pedal_command.update(
             actuators.accel, CC.longActive and CC.enabled, CS.out, stopping=actuators.longControlState == LongCtrlState.stopping,
-            resume=CC.cruiseControl.resume, orientation=CC.orientationNED if self.long_pitch else None)
+            resume=CC.cruiseControl.resume, orientation=CC.orientationNED if long_pitch else None)
         else:
           if not sources_ready:
             self.conventional_pedal_command.prime_recovery()
@@ -803,7 +805,7 @@ class CarController(CarControllerBase):
               0 < gear_stamp <= now_nanos and now_nanos - gear_stamp <= 100_000_000 and
               (CS.out.standstill or math.isfinite(CS.out.vEgo) and CS.out.vEgo < cutoff) and
               actuators.longControlState != LongCtrlState.stopping and
-              bolt_pedal_launch_gas(actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+              bolt_pedal_launch_gas(actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None,
                                     self.CP, acc_tune=self.gm_acc_tune)):
             pedal = 18. / 255.
         can_sends.append(gmcan.create_pedal_command(self.packer_pt, pedal, (self.frame // 4) % 16))
@@ -878,10 +880,10 @@ class CarController(CarControllerBase):
           else:
             if self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN:
               self.apply_gas, self.apply_brake = suburban_gateway_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP, acc_tune=self.gm_acc_tune)
+                actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None, self.CP, acc_tune=self.gm_acc_tune)
             elif self.ordinary_camera_long:
               self.apply_gas, self.apply_brake = ascm_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP,
+                actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None, self.CP,
                 min_gas=-540, max_gas=2698, inactive_gas=-500, brake_threshold=0.0, acc_tune=self.gm_acc_tune,
                 truck_tuning=self.truck_tuning, lead_visible=CC.hudControl.leadVisible,
                 set_speed_error=max(CC.hudControl.setSpeed - CS.out.vEgo, 0.0), stopping=stopping)
@@ -892,14 +894,14 @@ class CarController(CarControllerBase):
                 stop_speed=0.35 if self.CP.carFingerprint == CAR.CHEVROLET_BLAZER else 0.25, acc_tune=self.gm_acc_tune)
             elif self.ordinary_ascm_long:
               self.apply_gas, self.apply_brake = ascm_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None, self.CP, acc_tune=self.gm_acc_tune)
+                actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None, self.CP, acc_tune=self.gm_acc_tune)
             elif self.bolt_euv_long:
               self.apply_gas, self.apply_brake = bolt_euv_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+                actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None,
                 self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE, acc_tune=self.gm_acc_tune)
             elif self.volt_gateway_long or self.volt_ascm_long or self.volt_camera_long or self.volt_sdgm_long:
               self.apply_gas, self.apply_brake = volt_demands(
-                actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+                actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None,
                 VOLT_CAMERA_GRADE_STOP_SPEED if self.volt_ascm_long or self.volt_camera_long or self.volt_sdgm_long else VOLT_GATEWAY_GRADE_STOP_SPEED,
                 self.CP.mass, self.CP.wheelbase, self.params.ACCEL_MIN, self.params.ACCEL_MAX, self.params.MAX_BRAKE,
                 min_gas=-540 if self.volt_camera_long or self.volt_sdgm_long else -650,
@@ -910,7 +912,7 @@ class CarController(CarControllerBase):
                                            if self.gm_acc_tune else actuators.accel)
               if self.CP.carFingerprint in VOLT_GRADE_CAR:
                 gas_demand, brake_demand = volt_grade_demands(
-                  actuators.accel, CS.out.vEgo, CC.orientationNED if self.long_pitch else None,
+                  actuators.accel, CS.out.vEgo, CC.orientationNED if long_pitch else None,
                   VOLT_GATEWAY_GRADE_STOP_SPEED if self.CP.networkLocation == NetworkLocation.gateway else VOLT_CAMERA_GRADE_STOP_SPEED,
                   self.params.ACCEL_MIN, self.params.ACCEL_MAX)
               self.apply_gas = float(np.interp(gas_demand, self.params.GAS_LOOKUP_BP, self.params.GAS_LOOKUP_V))

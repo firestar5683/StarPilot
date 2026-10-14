@@ -144,9 +144,10 @@ class SoftwareOperations:
     self.params = params if params is not None else Params()
     self.status = status if status is not None else SoftwareStatus(self.params)
     if parked is None:
-      from openpilot.starpilot.galaxy.settings import LiveContextSource
-      self.context = LiveContextSource(self.params)
-      self.parked = self.context.parked
+      from openpilot.starpilot.drive_state.evidence import PhysicalSource
+      self.context = PhysicalSource()
+      physical = self.context
+      self.parked = lambda: physical.update_ready(self._flag('IsOffroad') is True)
     else:
       self.context = None
       self.parked = parked
@@ -300,7 +301,14 @@ class SoftwareOperations:
         fresh = self.refresh is None or self.refresh() is True
       except (OSError, RuntimeError, ValueError, TypeError):
         fresh = False
-      parked = fresh and self._parked()
+      if not fresh:
+        admission = {'allowed': False, 'reason': 'Current vehicle status refresh failed'}
+      elif self.context is not None:
+        admission = self.context.update_status(self._flag('IsOffroad') is True)
+      else:
+        admission = {'allowed': self._parked(),
+                     'reason': 'Switch the device Offroad and confirm the vehicle is parked before updating'}
+      parked = bool(admission['allowed'])
       branches = self._branches()
       updater_idle = status["updater"]["state"] == "idle"
       pending = self.request is not None and self.request["state"] == "pending"
@@ -312,8 +320,7 @@ class SoftwareOperations:
       selected = target is not None and target in branches and status["updater"]["targetBranch"] == target
       reason = None
       if not parked:
-        reason = ("Waiting for current offroad status before allowing updates" if not fresh or self._flag("IsOffroad") is True
-                  else "Park the vehicle to manage updates")
+        reason = admission['reason']
       elif disabled:
         reason = "Updates are disabled"
       elif reboot:

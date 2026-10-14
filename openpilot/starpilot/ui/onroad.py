@@ -271,7 +271,7 @@ class OnroadView:
     self.fonts.draw(text, role, size, x + offset_px, y + offset_px, rl.Color(0, 0, 0, min(color.a, 170)))
     self.fonts.draw(text, role, size, x, y, color)
 
-  def _ordered_widgets(self, content, state, *, driver_camera=False, stock_layer=None):
+  def _ordered_widgets(self, content, state, *, driver_camera=False, stock_layer=None, only_widget=None):
     profile = str(self.fonts.profile)
     large = profile == "large"
     width = self.projection_viewport[0] if self.projection_viewport else state.viewport_width
@@ -331,6 +331,8 @@ class OnroadView:
     submit(MODE_WIDGET, lambda: self._driving_mode(state, (width - 1860) / 2 if large else 0))
     submit(CLOCK_WIDGET, lambda: self._clock(state, (width - 1860) / 2 if large else 0))
     for key in widget_order(state.customization, profile):
+      if only_widget is not None and key != only_widget:
+        continue
       if draw := callbacks.get(key):
         draw()
 

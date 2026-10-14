@@ -35,7 +35,7 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
-from openpilot.starpilot.lateral.lane_change_preferences import effective as effective_lane_change, read_saved as read_lane_change
+from openpilot.starpilot.lateral.lane_change_preferences import LiveLaneChangePolicy
 from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, paired_clocks_ns, session_policy, steering_capable
 from openpilot.starpilot.lateral.lane_change_status_wire import (
   Direction as StatusDirection, LaneChangeStatus, Phase as StatusPhase, encode_optional as encode_lane_status,
@@ -249,6 +249,14 @@ class ModelState:
     self.prev_desire[:] = 0
 
 
+def refresh_lane_change_policy(preferences, desire_helper, carstate, now_ns, vehicle_capable):
+  policy = session_policy(preferences.sample(now_ns,
+    signaling=bool(carstate.leftBlinker or carstate.rightBlinker),
+    maneuver_active=desire_helper.lane_change_state != log.LaneChangeState.off), vehicle_capable)
+  desire_helper.policy = policy
+  return policy
+
+
 def main(demo=False):
   cloudlog.warning("modeld init")
 
@@ -408,7 +416,8 @@ def main(demo=False):
   long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
   prev_action = log.ModelDataV2.Action()
 
-  saved_lane_policy = effective_lane_change(read_lane_change(params))
+  lane_preferences = LiveLaneChangePolicy(params, now_ns=time.monotonic_ns())
+  saved_lane_policy = lane_preferences.applied
   auto_vehicle_capable = steering_capable(CP)
   runtime_lane_policy = session_policy(saved_lane_policy, auto_vehicle_capable)
   initial_mono_ns, initial_boot_ns, initial_skew_ns = paired_clocks_ns()
@@ -565,6 +574,7 @@ def main(demo=False):
       car_state = sm['carState']
       direction = -1 if car_state.leftBlinker and not car_state.rightBlinker else (1 if car_state.rightBlinker and not car_state.leftBlinker else 0)
       mono_now_ns, boot_now_ns, clock_skew_ns = paired_clocks_ns()
+      runtime_lane_policy = refresh_lane_change_policy(lane_preferences, DH, car_state, mono_now_ns, auto_vehicle_capable)
       auto_ready = (runtime_lane_policy.auto_lane_change and direction != 0 and
                     lane_clock_guard.ready(sm, mono_now_ns, boot_now_ns, clock_skew_ns) and
                     auto_evidence(sm, modelv2_send.modelV2, direction, runtime_lane_policy.minimum_lane_width_m,

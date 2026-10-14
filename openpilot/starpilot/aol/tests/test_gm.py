@@ -424,6 +424,7 @@ class TestGmAol(unittest.TestCase):
   def test_actual_card_startup_default_off_and_main_cycle_fault_recovery(self):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
       settings = Params()
+      settings.put_bool('AlwaysOnLateral', False, block=True)  # Explicit Off survives new-install On enrollment.
       cp = factory_params(alpha=False)
       ordinary = self.card(cp, settings)
       self.assertIsNone(ordinary.aol_card_intent)
@@ -621,6 +622,7 @@ class TestGmAol(unittest.TestCase):
       with self.subTest(identity=identity, held=held, disabled=disabled), OpenpilotPrefix(), \
            patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0'}):
         settings = Params()
+        settings.put_bool('AlwaysOnLateral', False, block=True)  # Test the preserved explicit-Off startup branch.
         settings.put_bool('GMAutoHold', held, block=True)
         settings.put_bool('DisableOpenpilotLongitudinal', disabled, block=True)
         factory = ordinary_params(identity, radar=True)

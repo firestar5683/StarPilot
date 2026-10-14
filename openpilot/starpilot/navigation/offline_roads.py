@@ -57,15 +57,37 @@ def _wall() -> float:
 
 
 def write_json(path: Path, value: Any) -> None:
-  path.parent.mkdir(parents=True, exist_ok=True)
+  _mkdir_durable(path.parent)
   fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
   try:
     with os.fdopen(fd, "w") as handle:
       json.dump(value, handle, separators=(",", ":"), allow_nan=False)
+      handle.flush()
+      os.fsync(handle.fileno())
     os.replace(temp, path)
+    _sync_directory(path.parent)
   except BaseException:
     Path(temp).unlink(missing_ok=True)
     raise
+
+
+def _mkdir_durable(path: Path) -> None:
+  missing = []
+  ancestor = path
+  while not ancestor.exists():
+    missing.append(ancestor)
+    ancestor = ancestor.parent
+  path.mkdir(parents=True, exist_ok=True)
+  for created in reversed(missing):
+    _sync_directory(created.parent)
+
+
+def _sync_directory(path: Path) -> None:
+  fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+  try:
+    os.fsync(fd)
+  finally:
+    os.close(fd)
 
 
 def read_json(path: Path, limit: int = 1 << 20) -> Any:
@@ -89,16 +111,32 @@ class TileStore:
   def __init__(self, root: Path | None = None, min_free_bytes: int = MIN_FREE_BYTES):
     self.root = Path(root) if root is not None else roads_root()
     self.min_free_bytes = min_free_bytes
+    self._pending_sync: dict[Path, tuple[Path, ...]] = {}
 
   def path(self, kind: str, key: TileKey) -> Path:
     assert kind in KINDS
     return self.root / kind / key.path()
 
+  def _complete_sync(self, path: Path) -> bool:
+    pending = self._pending_sync.get(path)
+    if pending is None:
+      return True
+    try:
+      for directory in pending:
+        _sync_directory(directory)
+    except OSError:
+      return False
+    self._pending_sync.pop(path, None)
+    return True
+
   def find(self, key: TileKey) -> Path | None:
     for kind in KINDS:
       path = self.path(kind, key)
-      if path.is_file():
-        return path
+      try:
+        if path.is_file() and path.stat().st_size > 0 and self._complete_sync(path):
+          return path
+      except OSError:
+        continue
     return None
 
   def read(self, key: TileKey) -> bytes | None:
@@ -111,25 +149,44 @@ class TileStore:
       return None
 
   def has(self, kind: str, key: TileKey) -> bool:
-    return self.path(kind, key).is_file()
+    path = self.path(kind, key)
+    try:
+      return path.is_file() and path.stat().st_size > 0 and self._complete_sync(path)
+    except OSError:
+      return False
 
   def age(self, kind: str, key: TileKey) -> float | None:
     try:
-      return max(0.0, _wall() - self.path(kind, key).stat().st_mtime)
+      path = self.path(kind, key)
+      if not self._complete_sync(path):
+        return None
+      info = path.stat()
+      return max(0.0, _wall() - info.st_mtime) if info.st_size > 0 else None
     except OSError:
       return None
 
   def write(self, kind: str, key: TileKey, data: bytes) -> bool:
     path = self.path(kind, key)
+    temp = None
     try:
-      if not self.has_space(len(data)):
+      if not data or not self.has_space(len(data)):
         return False
-      path.parent.mkdir(parents=True, exist_ok=True)
+      _mkdir_durable(path.parent)
       fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tile-")
       with os.fdopen(fd, "wb") as handle:
         handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
       os.replace(temp, path)
+      self._pending_sync[path] = (path.parent,)
+      if not self._complete_sync(path):
+        return False
     except OSError:
+      if temp is not None:
+        try:
+          Path(temp).unlink(missing_ok=True)
+        except OSError:
+          pass
       return False
     if kind != "cache":
       self.path("cache", key).unlink(missing_ok=True)
@@ -141,15 +198,16 @@ class TileStore:
   def promote(self, kind: str, key: TileKey) -> bool:
     """Move a tile already on disk into a longer-lived directory without downloading it."""
     target = self.path(kind, key)
-    if target.is_file():
+    if self.has(kind, key):
       return True
     for source_kind in KINDS[KINDS.index(kind) + 1:]:
       source = self.path(source_kind, key)
-      if source.is_file():
+      if self.has(source_kind, key):
         try:
-          target.parent.mkdir(parents=True, exist_ok=True)
+          _mkdir_durable(target.parent)
           os.replace(source, target)
-          return True
+          self._pending_sync[target] = (target.parent, source.parent)
+          return self._complete_sync(target)
         except OSError:
           return False
     return False
@@ -206,7 +264,7 @@ class TileStore:
       if source.is_file():
         target = self.path("cache", key)
         try:
-          target.parent.mkdir(parents=True, exist_ok=True)
+          _mkdir_durable(target.parent)
           os.replace(source, target)
         except OSError:
           source.unlink(missing_ok=True)
@@ -254,7 +312,7 @@ class OfflineState:
 
   @contextmanager
   def _exclusive(self):
-    self.root.mkdir(parents=True, exist_ok=True)
+    _mkdir_durable(self.root)
     with (self.root / ".areas.lock").open("a") as lock:
       fcntl.flock(lock, fcntl.LOCK_EX)
       yield

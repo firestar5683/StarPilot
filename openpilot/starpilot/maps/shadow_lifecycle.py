@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -83,8 +84,8 @@ def _invalid_json_constant(_value):
   raise ValueError('nonfinite snapshot JSON number')
 
 
-def _selected_snapshot(root: Path) -> bool:
-  """Check bounded receipt identity; Go checks each requested tile lazily."""
+def _selected_receipt(root: Path):
+  """Read the bounded, content-addressed receipt selected by Go."""
   try:
     with _open_regular(root / 'current.json', max_bytes=MAX_SELECTOR_BYTES) as file:
       selector = json.loads(file.read(MAX_SELECTOR_BYTES + 1), object_pairs_hook=_unique_object,
@@ -92,15 +93,15 @@ def _selected_snapshot(root: Path) -> bool:
     if (type(selector) is not dict or set(selector) != {'version', 'generation'} or
         type(selector['version']) is not int or selector['version'] != 1 or
         type(selector['generation']) is not str or re.fullmatch(r'[0-9a-f]{64}', selector['generation']) is None):
-      return False
+      return None
     generations = root / 'generations'
     generation = generations / selector['generation']
     if not stat.S_ISDIR(generations.lstat().st_mode) or not stat.S_ISDIR(generation.lstat().st_mode):
-      return False
+      return None
     with _open_regular(generation / 'receipt.json', max_bytes=MAX_RECEIPT_BYTES) as file:
       raw = file.read(MAX_RECEIPT_BYTES + 1)
     if hashlib.sha256(raw).hexdigest() != selector['generation']:
-      return False
+      return None
     receipt = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_invalid_json_constant)
     if (type(receipt) is not dict or receipt.get('version') != 1 or type(receipt.get('version')) is not int or
         receipt.get('tileSchema') != 'offline.capnp:0xda3a0d9284ca402f' or
@@ -109,10 +110,56 @@ def _selected_snapshot(root: Path) -> bool:
         receipt.get('sourceKind') not in ('local-pbf', 'provided-group-archives') or
         type(receipt.get('tiles')) is not list or not 0 < len(receipt['tiles']) <= 65536 or
         type(receipt.get('inputs')) is not list or not receipt['inputs']):
-      return False
-    return True
+      return None
+    return selector['generation'], receipt, len(raw)
   except (OSError, ValueError, TypeError, OverflowError, RecursionError):
-    return False
+    return None
+
+
+
+def _selected_snapshot(root: Path) -> bool:
+  """Check bounded receipt identity; Go checks each requested tile lazily."""
+  return _selected_receipt(root) is not None
+
+
+def selected_snapshot_info(root: Path) -> dict | None:
+  """Disk inventory of the selected package; Go verifies tile content at selection/use."""
+  selected = _selected_receipt(root)
+  if selected is None:
+    return None
+  generation_id, receipt, receipt_size = selected
+  generation = root / 'generations' / generation_id
+  total = receipt_size
+  seen = set()
+  try:
+    if not stat.S_ISDIR(root.lstat().st_mode):
+      return None
+    for tile in receipt['tiles']:
+      if (type(tile) is not dict or type(tile.get('path')) is not str or type(tile.get('size')) is not int or
+          not 0 < tile['size'] <= 73 << 20 or type(tile.get('sha256')) is not str or
+          re.fullmatch(r'[0-9a-f]{64}', tile['sha256']) is None):
+        return None
+      relative = Path(tile['path'])
+      if (relative.is_absolute() or len(relative.parts) != 3 or '..' in relative.parts or
+          '\\' in tile['path'] or tile['path'] in seen or relative.as_posix() != tile['path']):
+        return None
+      seen.add(tile['path'])
+      for parent in (generation / relative.parts[0], generation / relative.parts[0] / relative.parts[1]):
+        if not stat.S_ISDIR(parent.lstat().st_mode):
+          return None
+      with _open_regular(generation / relative) as file:
+        info = os.fstat(file.fileno())
+        if info.st_size != tile['size']:
+          return None
+      total += info.st_size
+    bounds = receipt.get('bounds')
+    if (type(bounds) is not list or len(bounds) != 4 or
+        any(type(value) not in (int, float) or not math.isfinite(value) for value in bounds) or
+        not -90 <= bounds[0] < bounds[2] <= 90 or not -180 <= bounds[1] < bounds[3] <= 180):
+      return None
+    return {'generation': generation_id, 'storedBytes': total, 'tileCount': len(seen), 'bounds': bounds}
+  except (OSError, ValueError, TypeError):
+    return None
 
 
 def preflight(binary: Path = PROVIDER_BINARY, manifest_path: Path = PROVIDER_MANIFEST,
@@ -164,9 +211,32 @@ def enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
     return False
   try:
     with _open_regular(Path(params.get_param_path(OPT_IN_KEY)), max_bytes=1) as file:
-      return file.read(2) == b'1'
+      if file.read(2) == b'1':
+        return True
   except (OSError, ValueError):
+    pass
+  # Selecting Maps owns producer demand directly. Do not rewrite the separate
+  # diagnostic opt-in, and do not start control inside the Go shadow provider.
+  from openpilot.starpilot.saved_source import read_saved
+  from openpilot.starpilot.speed_limits.runtime_settings import LABELS, read_params
+  from openpilot.starpilot.speed_limits.selection import SelectionMode, Source
+  # Default Vision/Dashboard needs no Maps producer or full settings scan.
+  # These bounded reads are demand hints only; canonical parsing below owns
+  # the enabled/display state and rejects malformed complete preferences.
+  labels = []
+  for key in ('SLCPriority1', 'SLCPriority2'):
+    raw, readable = read_saved(params, key, 32)
+    if not readable:
+      return False
+    try:
+      labels.append(raw.decode('utf-8') if raw is not None else None)
+    except UnicodeError:
+      return False
+  if not any(LABELS.get(label) is Source.MAP for label in labels) and labels[0] not in ('Highest', 'Lowest'):
     return False
+  settings = read_params(params)
+  return bool(not settings.errors and (settings.enabled or settings.display) and
+              (Source.MAP in settings.selection.slots or settings.selection.mode is not SelectionMode.ORDERED))
 
 
 class MapdShadowProcess(NativeProcess):

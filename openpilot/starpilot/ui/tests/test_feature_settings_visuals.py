@@ -132,13 +132,13 @@ class FeatureVisualTests(unittest.TestCase):
     for expanded in (True, False):
       rows = (FeatureRow("EngageVolume", "Engagement Chime", "40", source=b"40", unit="%", presets=(("25", "25%"),), step=5,
                          minimum=0, maximum=100, available=True, page="EngageVolume"),
-              FeatureRow("SoundPack", "Sound Pack", "StarPilot (Built-in)", available=True, page="SoundPack"))
+              FeatureRow("SoundPack", "Sound Pack", "StarPilot Sounds", available=True, page="SoundPack"))
       state = FeatureSettingsState(page="sounds:overview", rows=rows, sidebar_expanded=expanded)
       fonts = fake_fonts()
       view.FeatureSettingsView(fonts).render(state)
       text = [call.args[0] for call in fonts.draw.call_args_list]
       self.assertIn("40%", text)
-      self.assertIn("StarPilot (Built-in)", text)
+      self.assertIn("StarPilot Sounds", text)
       self.assertNotIn("Mute", text)
       self.assertNotIn("+", text)
       self.assertNotIn("-", text)

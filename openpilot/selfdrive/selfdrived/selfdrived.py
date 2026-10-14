@@ -1607,14 +1607,22 @@ class SelfdriveD:
 
   def _decide_aol_axes(self, CS, intent, native, *, now_ns=0, ordinary_lag=False):
     from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
+    from openpilot.starpilot.aol.dm import armed_lateral_current
+    retained_dm_lateral = bool(intent is not None and
+      getattr(self, 'aol_dm_retained_owner', None) == (intent.producerSessionId, self.aol_session_id) and
+      self.sm.all_checks(['driverMonitoringState']) and
+      armed_lateral_current(self.CP, CS, intent, native, source_ns=self.aol_car_state_log_ns,
+                            now_ns=now_ns, axis_session_id=self.aol_session_id))
+    lateral_events = [name for name in self.events.names if not (
+      name == EventName.selfdrivedLagging and ordinary_lag or
+      name == EventName.tooDistracted and retained_dm_lateral)]
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
         not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
       intent=intent, native=native, car_state=CS, initialized=self.initialized,
       model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                        self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
-      no_entry=aol_no_entry(([name for name in self.events.names if name != EventName.selfdrivedLagging]
-                            if ordinary_lag else self.events.names), CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
+      no_entry=aol_no_entry(lateral_events, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
                            allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
                                                      and ev6_aol_qualified(self.CP, marked_only=True)) or
                              physical_cancel_lateral_allowed(self.CP, CS, intent, native,
@@ -1624,8 +1632,9 @@ class SelfdriveD:
                                                        not self.CP.flags & GMFlags.PEDAL_LONG)),
       immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
       dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
-                      self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
-                      self.sm['driverMonitoringState'].alertLevel == AlertLevel.three),
+                      not retained_dm_lateral and (self.sm['driverMonitoringState'].lockout or
+                        self.sm['driverMonitoringState'].alwaysOnLockout or
+                        self.sm['driverMonitoringState'].alertLevel == AlertLevel.three)),
       pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
       lateral_inhibit=self.aol_dm_lateral_inhibit or any(
         sample.steerFaultTemporary or sample.brakePressed and not sample.standstill and
@@ -1767,8 +1776,15 @@ class SelfdriveD:
       intent = self.reconciled_intent(intent, previous_intent, reconciled_pairs, reconciled_epoch, now_ns)
       self.mark_loop_phase('intent_admission_return')
       self.aol_last_intent = intent
-      if self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or self.sm['driverMonitoringState'].lockout:
-        self.aol_dm_lateral_inhibit = True
+      if (intent is None or not intent.allowedLatch or previous_intent is None or
+          intent.producerSessionId != previous_intent.producerSessionId):
+        self.aol_dm_retained_owner = None
+      elif self.aol_axis_decision.lateral_active and previous_intent.allowedLatch:
+        self.aol_dm_retained_owner = (intent.producerSessionId, self.aol_session_id)
+      if (self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or
+          self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout):
+        self.aol_availability_long_inhibit = True
+        self.aol_dm_lateral_inhibit = False
       elif intent is not None and not intent.allowedLatch:
         self.aol_dm_lateral_inhibit = False
       previous = self.aol_axis_decision
@@ -1860,7 +1876,7 @@ class SelfdriveD:
         self.aol_authority_lost = False
       # Temporary EPS withdraws steering commands without revoking the armed
       # latch. Keep the event and ordinary soft-disable behavior unchanged.
-      from openpilot.starpilot.car.gm.aol import seatbelt_lateral_soft_event_allowed
+      from openpilot.starpilot.aol.seatbelt import seatbelt_lateral_soft_event_allowed
       aol_hard_soft_fault = any(event.softDisable and not (
         event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
         seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
@@ -1884,6 +1900,8 @@ class SelfdriveD:
       self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     if self.aol_replay:
       if (not availability and source_current and self.enabled and self.events.contains(ET.ENABLE) and
+          self.sm['driverMonitoringState'].alertLevel != AlertLevel.three and
+          not self.sm['driverMonitoringState'].lockout and not self.sm['driverMonitoringState'].alwaysOnLockout and
           not self.events.contains(ET.NO_ENTRY) and not self.events.contains(ET.IMMEDIATE_DISABLE) and
           not self.events.contains(ET.SOFT_DISABLE)):
         self.aol_availability_long_inhibit = False

@@ -139,19 +139,19 @@ class DriveStateOwner:
         raise Rejected('Drive state changed; refresh and try again')
       if not authorized():
         raise Rejected('Drive state changes are unavailable')
+      if desired == Mode.OFFROAD and not override_allowed():
+        raise Rejected('Park the vehicle and disengage before forcing Offroad')
       if desired == current.mode:
         return current
-      if desired == Mode.ONROAD and not override_allowed():
-        raise Rejected('Park and disengage before changing drive state')
       # These callbacks recheck the authenticated caller and physical source,
       # rather than relying on the state that produced the button.
-      if not authorized() or (desired == Mode.ONROAD and not override_allowed()) or not self.alive(session):
+      if not authorized() or (desired == Mode.OFFROAD and not override_allowed()) or not self.alive(session):
         raise Rejected('Drive state changes are unavailable')
       observed_session, observed = self._read()
       if observed_session != session or observed != current:
         raise Rejected('Drive state changed; refresh and try again')
       record = self._record(session, desired)
-      if not authorized() or (desired == Mode.ONROAD and not override_allowed()):
+      if not authorized() or (desired == Mode.OFFROAD and not override_allowed()):
         raise Rejected('Drive state changes are unavailable')
       self.params.put(REQUEST_KEY, record, block=True)
       return request_state(record, session)

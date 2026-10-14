@@ -186,7 +186,7 @@ class TestVision(unittest.TestCase):
       self.assertEqual(secondary.default_value, 'Dashboard')
       params.put('SLCPriority2', 'Map Data', block=True)
       secondary = row('SLCPriority2')
-      self.assertEqual(secondary.value, 'Map Data')
+      self.assertEqual(secondary.value, 'Maps')
       request = row_change(secondary, -1)
       assert request is not None
       self.assertEqual(request.value, 'Vision')

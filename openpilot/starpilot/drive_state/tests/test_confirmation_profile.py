@@ -11,6 +11,8 @@ import types
 import pytest
 
 from openpilot.starpilot.drive_state.owner import Mode, Rejected
+from openpilot.starpilot.drive_state.evidence import PhysicalSource
+from openpilot.starpilot.drive_state.tests.test_evidence import Messages
 from openpilot.starpilot.drive_state.tests.test_transport import fixture as fixture
 
 
@@ -52,9 +54,19 @@ def test_force_offroad_uses_profile_dialog_and_submits_once(fixture, profile):
     assert fixture.owner.snapshot().mode == Mode.AUTO
     native._drive_change('offroad', revision)
     dialog = gui.push_widget.call_args.args[0]
-    writes = len(fixture.owner.params.writes)
     dialog.confirm()
-    assert fixture.owner.snapshot().mode == Mode.OFFROAD
-    assert len(fixture.owner.params.writes) == writes + 1
-    dialog.confirm()
-    assert len(fixture.owner.params.writes) == writes + 1
+    assert fixture.owner.snapshot().mode == Mode.AUTO
+    now = [1_000_000_000]
+    physical = PhysicalSource(Messages(), mono=lambda: now[0], boot=lambda: now[0] + 10_000_000_000)
+    now[0] = 2_100_000_000
+    try:
+      assert physical.allowed()
+      fixture.control.physical = physical
+      writes = len(fixture.owner.params.writes)
+      dialog.confirm()
+      assert fixture.owner.snapshot().mode == Mode.OFFROAD
+      assert len(fixture.owner.params.writes) == writes + 1
+      dialog.confirm()
+      assert len(fixture.owner.params.writes) == writes + 1
+    finally:
+      physical.close()

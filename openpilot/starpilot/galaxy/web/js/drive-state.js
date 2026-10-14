@@ -35,7 +35,7 @@ export const DriveStatePanel = {
     },
     async change(mode) {
       if (this.busy || !this.state?.available) return
-      if (mode === "onroad" && !this.state.overrideAllowed) { this.error = "Park and disengage, then retry. The device can stay on-road."; return }
+      if (mode === "offroad" && !this.state.overrideAllowed) { this.error = "Park the vehicle and disengage before forcing Offroad."; return }
       if (mode === "offroad" && this.state.effective === "onroad" &&
           !window.confirm("Switch to Offroad and stop driving services? Disengage and stop safely first. Stay stopped until you return to Auto.")) return
       const revision = this.state.revision
@@ -61,11 +61,11 @@ export const DriveStatePanel = {
     <GxNotice tone="danger" v-if="state && !state.available">The drive-state manager is unavailable. Reconnect to check again.</GxNotice>
     <GxNotice v-if="pending" tone="info">Waiting for the device to switch {{ state.mode }}…</GxNotice>
     <p>Device: {{ state?.effective === "onroad" ? "Onroad" : state?.effective === "offroad" ? "Offroad" : "Checking…" }}</p>
-    <p>Auto follows the car. Force Offroad stops driving services even when the device is on-road. Disengage and stop safely before forcing Offroad; Force Onroad requires Park and valid vehicle data. Return to Auto restores normal operation.</p>
-    <p v-if="state?.available && !state.overrideAllowed" role="status">Force Onroad needs fresh parked, disengaged vehicle data. Force Offroad remains available to stop driving services.</p>
+    <p>Auto follows the car. Force Onroad starts driving services at any time. Force Offroad stops them when the vehicle is parked and disengaged. Return to Auto restores normal operation.</p>
+    <p v-if="state?.available && !state.overrideAllowed" role="status">{{ state.reason || "Park the vehicle and disengage to use Force Offroad." }}</p>
     <div class="gx-force-drive__actions gx-actions"><button v-for="mode in ['offroad', 'onroad', 'auto']" :key="mode" type="button"
       class="gx-btn" :class="state?.mode === mode ? '' : 'gx-btn--tonal'"
-      :disabled="!state?.available || (mode === 'onroad' && !state.overrideAllowed)"
+      :disabled="!state?.available || (mode === 'offroad' && !state.overrideAllowed)"
       :aria-pressed="state?.mode === mode" @click="change(mode)">{{ mode === 'auto' ? 'Return to Auto' : mode === 'onroad' ? 'Onroad' : 'Offroad' }}</button></div>
     </section>`,
 }

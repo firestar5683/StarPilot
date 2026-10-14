@@ -69,11 +69,14 @@ class VehicleSelectionGateway:
     parked = self.context.parked()
     reported = None
     try:
-      cp = self.context.sample().cp
+      runtime_vehicle = getattr(self.context, 'runtime_vehicle', None)
+      cp = runtime_vehicle()[0] if callable(runtime_vehicle) else self.context.sample().cp
       platform = str(cp.carFingerprint) if cp is not None else ''
       if not cp.notCar and platform in self.by_platform:
         choice = self.by_platform[platform]
-        reported = {'platform': platform, 'make': str(choice.make), 'label': str(choice.label)}
+        origin = str(getattr(cp, 'fingerprintSource', 'unknown'))
+        reported = {'platform': platform, 'make': str(choice.make), 'label': str(choice.label),
+                    'origin': 'manual' if origin == 'fixed' else 'detected' if origin in ('can', 'fw') else 'unknown'}
     except (AttributeError, TypeError, ValueError, OSError, RuntimeError):
       pass
     view = None
@@ -89,6 +92,8 @@ class VehicleSelectionGateway:
             'selected': str(saved.platform) if selected is not None else None,
             'selectedLabel': str(selected.label) if selected is not None else 'Auto detection' if saved.valid else
                              'Needs review' if saved.readable else 'Unavailable',
+            'selectionMode': 'manual' if selected is not None else 'auto' if saved.valid else
+                             'invalid' if saved.readable else 'unavailable',
             'reported': reported, 'view': view,
             'choices': [{'platform': str(choice.platform), 'make': str(choice.make), 'label': str(choice.label)}
                         for choice in self.catalog]}

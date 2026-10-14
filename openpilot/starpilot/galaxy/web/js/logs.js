@@ -4,6 +4,7 @@ import { TroubleshootPage, TmuxPage } from "./diagnostic-tools.js"
 import { navigate } from "./router.js"
 import { SystemMonitor } from "./system-monitor.js"
 import { CrashReportsFeed } from "./crash-reports.js"
+import { storedSize } from "./record-deletion.js"
 import { AndroidAutoLogsFeed, BUNDLE_URL, fileUrl, outcomeLabel } from "./android-auto-logs.js"
 import { MenuTile } from "./menu-tile.js"
 
@@ -11,7 +12,7 @@ export const Logs = {
   name: "Logs",
   components: { GxState, GxNotice, SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
   props: { path: { type: String, required: true }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
-  data: () => ({ crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle" }, search: "",
+  data: () => ({ crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle", deleting: false, storageBytes: 0, reportCount: 0 }, search: "",
     aaLogs: { sessions: [], others: [], status: "idle", error: "" } }),
   computed: {
     visibleReports() { return this.crashes.reports.filter((item) => item.name.toLowerCase().includes(this.search.toLowerCase())) },
@@ -34,6 +35,7 @@ export const Logs = {
     },
   },
   methods: {
+    storedSize,
     go: navigate,
     openTroubleshoot() { navigate("/logs/troubleshoot") },
     openTmux() { navigate("/logs/tmux") },
@@ -72,14 +74,14 @@ export const Logs = {
         <h2>Crash Reports</h2>
         <p class="gx-note">Local reports saved when a process stops unexpectedly.</p>
         <GxNotice tone="danger" v-if="crashes.error">{{ crashes.error }}</GxNotice>
-        <div class="gx-crash-controls"><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"></div>
+        <div class="gx-crash-controls"><button type="button" class="gx-btn" :disabled="crashes.deleting" @click="crashFeed.remove(null)">Delete All</button><span>{{ crashes.scanIncomplete ? 'At least ' : '' }}{{ crashes.reportCount }} reports · {{ crashes.storageIncomplete ? 'At least ' : '' }}{{ storedSize(crashes.storageBytes) }} stored</span><input class="gx-field" type="search" v-model="search" placeholder="Search report names" aria-label="Search crash reports"></div>
         <p v-if="crashes.scanIncomplete" class="gx-note">Directory scan is incomplete; newer reports may be omitted.</p>
         <p v-else-if="crashes.listLimited" class="gx-note">Showing the 200 newest reports; older reports are omitted.</p>
         <GxState v-if="crashes.status === 'loading'" loading>Loading crash reports…</GxState>
         <GxNotice tone="danger" v-else-if="crashes.status === 'unavailable' && !crashes.error">Crash reports are unavailable.</GxNotice>
         <GxState v-else-if="crashes.status === 'ready' && !visibleReports.length">{{ search ? 'No matching reports.' : 'No crash reports.' }}</GxState>
         <div v-if="crashes.status === 'ready'" class="gx-crash-list">
-          <button v-for="report in visibleReports" :key="report.id" type="button" class="gx-card gx-crash-row gx-panel" @click="crashFeed.open(report)"><strong>{{ report.name }}</strong><span>{{ reportDate(report.modifiedAt) }} · {{ reportSize(report.size) }}</span></button>
+          <article v-for="report in visibleReports" :key="report.id" class="gx-card gx-crash-row gx-panel"><button type="button" class="gx-btn" @click="crashFeed.open(report)"><strong>{{ report.name }}</strong><span>{{ reportDate(report.modifiedAt) }} · {{ reportSize(report.size) }}</span></button><button type="button" class="gx-btn" :disabled="crashes.deleting" @click="crashFeed.remove(report.id)">Delete</button></article>
         </div>
         <GxState v-if="crashes.previewStatus === 'loading'" loading>Loading report…</GxState>
         <section v-else-if="crashes.preview" class="gx-card gx-crash-preview gx-panel"><div class="gx-crash-preview__head"><strong>{{ crashes.preview.name }}</strong><button type="button" class="gx-btn gx-btn--tonal" @click="copyPreview">Copy visible text</button></div><p v-if="crashes.preview.truncated" class="gx-note">Preview truncated to the first 256 KiB.</p><pre>{{ crashes.preview.text }}</pre></section>

@@ -6,7 +6,7 @@ from opendbc.car.structs import CarParams
 from opendbc.car.gm.values import CAR, control_flags, camera_acc_pedal_profile, is_volt_ascm_longitudinal
 from opendbc.car.gm.aol import GM_AOL_ALTERNATIVE_EXPERIENCE, GM_AOL_WORDS, qualified_gm
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
-from openpilot.starpilot.aol.intent import AolCardIntent
+from openpilot.starpilot.aol.intent import AOL_TOGGLE, AolCardIntent
 
 
 def policy_for(cp) -> AolVehiclePolicy:
@@ -30,10 +30,13 @@ def native_accepts_cp(cp, model: int, param: int) -> bool:
 class GmAolCardIntent(AolCardIntent):
   """Main-following intent with explicit main-cycle recovery after fatal faults."""
 
-  def __init__(self, settings):
+  def __init__(self, settings, cp=None):
     super().__init__(settings, lkas_button_supported=False)
+    self.cp = cp
     self.requires_fault_observation = True
     self._main_cycle_required = False
+    self.startup_calibration_pending = True
+    self._startup_incomplete = False
 
   def update(self, CS, *, consumed_buttons=frozenset(), fault_active=None,
              now_ns=0, native_rejection_ns=0, standard_enabled=False):
@@ -47,10 +50,43 @@ class GmAolCardIntent(AolCardIntent):
                    standard_enabled=standard_enabled)
     if self._main_cycle_required:
       self.allowed_latch = False
+      self.startup_calibration_pending = False
+
+  def observe_calibration(self, CS, *, events=None, standard_enabled=False):
+    from openpilot.cereal import log
+    # Cold calibration readiness is not a previously revoked driver gesture.
+    # The original calibration inhibit still withdraws all optional output.
+    prior_incomplete = self._startup_incomplete
+    cold_safe = True
+    if events is not None:
+      from openpilot.starpilot.aol.intent import disarming_fault
+      remaining = [event for event in _intent_fault_events(self.cp, events) if
+        event.name != log.OnroadEvent.EventName.calibrationIncomplete or event.immediateDisable]
+      cold_safe = not disarming_fault(remaining, CS,
+        temporary_selfdrive_lagging=qualified_gm(self.cp))
+      self._startup_incomplete = bool(cold_safe and
+        any(event.name == log.OnroadEvent.EventName.calibrationIncomplete for event in events))
+    cold_readiness = bool(self.startup_calibration_pending and cold_safe and
+      (prior_incomplete or self._startup_incomplete) and
+      self.settings.enabled and self.settings.main_action != AOL_TOGGLE and
+      not CS.steerFaultPermanent and not self._main_cycle_required)
+    if cold_readiness:
+      self._calibration_rearm_required = False
+    super().observe_calibration(CS, events=events, standard_enabled=standard_enabled)
+    if cold_readiness:
+      self._calibration_rearm_required = False
+    if (events is not None and CS.canValid and not CS.canTimeout and not self._startup_incomplete and
+        not any(event.name == log.OnroadEvent.EventName.selfdriveInitializing for event in events)):
+      self.startup_calibration_pending = False
+
+  def output(self, CS):
+    allowed, pause_lateral, pause_longitudinal = super().output(CS)
+    return (bool(allowed and not CS.canTimeout and CS.cruiseState.available),
+            pause_lateral, pause_longitudinal)
 
 
 def create_intent(cp, settings):
-  return GmAolCardIntent(settings) if qualified_gm(cp) else None
+  return GmAolCardIntent(settings, cp) if qualified_gm(cp) else None
 
 
 def configuration_settings_policy(cp):
@@ -79,18 +115,26 @@ def configuration_settings_policy(cp):
     return None
 
 
-def intent_disarming_fault(cp, events, state, **context):
-  """An ASCM Volt ACC fault withdraws axes without erasing main-armed intent."""
+def _intent_fault_events(cp, events):
   from openpilot.cereal import log
-  from openpilot.starpilot.aol.intent import disarming_fault
   if qualified_gm(cp):
     availability = (log.OnroadEvent.EventName.commIssue, log.OnroadEvent.EventName.commIssueAvgFreq)
-    # Availability withdraws current axes; only critical faults erase main-following intent.
     events = [event for event in events if not
               (event.name in availability and event.softDisable and not event.immediateDisable)]
   if qualified_gm(cp) and camera_acc_pedal_profile(cp) is None and is_volt_ascm_longitudinal(cp):
     events = [event for event in events if event.name != log.OnroadEvent.EventName.accFaulted]
-  return disarming_fault(events, state, **context)
+  return events
+
+
+def intent_disarming_fault(cp, events, state, **context):
+  """An ASCM Volt ACC fault withdraws axes without erasing main-armed intent."""
+  from openpilot.cereal import log
+  from openpilot.starpilot.aol.intent import disarming_fault
+  cold_calibration = context.pop('startup_calibration_pending', False)
+  if qualified_gm(cp) and cold_calibration and not state.steerFaultPermanent:
+    events = [event for event in events if not (
+      event.name == log.OnroadEvent.EventName.calibrationIncomplete and not event.immediateDisable)]
+  return disarming_fault(_intent_fault_events(cp, events), state, **context)
 
 
 def physical_longitudinal_withdrawal_source(cp, cs, parser, observation, now_ns) -> int:

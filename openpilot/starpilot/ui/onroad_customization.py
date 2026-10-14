@@ -58,6 +58,7 @@ class LayoutProfile(TypedDict):
   inputZones: NotRequired[list[dict[str, Any]]]
   inputZonePriority: NotRequired[str]
   widgetOrder: NotRequired[list[str]]
+  runtimePreviewWidgets: NotRequired[list[str]]
 
 
 def _widget(label: str, kind: str, width: float, height: float, x: float, y: float) -> Widget:
@@ -146,6 +147,12 @@ PROFILES['large']['widgets'][CEM_GAUGE_WIDGET] = _widget('CEM road gauge', CEM_G
 # Older documents retain every saved placement and gain this independent widget.
 OPTIONAL_WIDGETS = frozenset({MODE_WIDGET, CLOCK_WIDGET, STOPPED_TIMER_WIDGET, CEM_GAUGE_WIDGET})
 
+# These editor sprites use the runtime components and their canonical assets/fonts.
+RUNTIME_PREVIEW_WIDGETS = {
+  "large": ("current_speed", "cruise_limits", CEM_GAUGE_WIDGET, "steering_wheel", "driver_monitor"),
+  "compact": ("max_speed", "steering_wheel", "conditional_mode", "following_distance", "model_confidence", "driver_monitor"),
+}
+
 _FRAME_COLORS = {"cardFill": "#00000000", "cardBorder": "#00000000"}
 _ACTION_COLORS = {"cardFill": "#0C1820EB", "cardBorder": "#A6DFBEFF", "text": "#FFFFFFFF"}
 WIDGET_COLORS = {
@@ -213,6 +220,7 @@ def customization_metadata():
       "min": WHEEL_SIZES[name][0], "default": WHEEL_SIZES[name][1], "max": WHEEL_SIZES[name][2]}
   for profile, data in profiles.items():
     data["widgetOrder"] = list(DEFAULT_WIDGET_ORDER[profile])
+    data["runtimePreviewWidgets"] = list(RUNTIME_PREVIEW_WIDGETS[profile])
   return {"profiles": profiles, "roadColorFields": [
     {"id": key, "label": label, "default": ROAD_COLORS[key]}
     for key, label in (("path", "Path"), ("pathEdge", "Path edges"), ("laneLines", "Outer lane lines"))], "paletteFields": [

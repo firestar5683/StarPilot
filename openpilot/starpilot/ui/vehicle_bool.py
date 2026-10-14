@@ -27,7 +27,7 @@ def confirmation_question(request):
   if request.key == "VoltOnePedalMode":
     return f"{verb} Volt one-pedal driving after the next startup? Lifting off the accelerator can apply the brakes with cruise disengaged and cruise main on."
   if request.key == "LongPitch":
-    return f"{verb} Grade Compensation after the next startup?"
+    return f"{verb} compensation for road grade? This refreshes during the drive."
   if request.key == "TeslaAOLScreenTap":
     return f"{verb} three-finger screen taps for Always On Lateral after the next startup? Cruise control stays independent."
   if request.key == "TeslaAOLDisengageOnBrake":

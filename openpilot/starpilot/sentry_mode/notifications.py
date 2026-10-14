@@ -336,6 +336,22 @@ class NotificationOwner:
                                   'created': event['wallTimeNs'] / 1e9, 'next': now, 'attempts': 0,
                                   'state': 'queued', 'error': ''}
 
+  def delete_events(self, remove, event_id=None):
+    with self.lock:
+      if not self.available:
+        raise NotificationUnavailable('Sentry notifications are unavailable')
+      original_jobs = self.state['jobs']
+      if event_id is None:
+        self.state['jobs'] = {key: job for key, job in original_jobs.items() if job['kind'] == 'test'}
+      else:
+        self.state['jobs'] = {key: job for key, job in original_jobs.items() if job['eventId'] != event_id}
+      try:
+        self._save()  # Durable pruning precedes any event/media removal.
+      except BaseException:
+        self.state['jobs'] = original_jobs
+        raise
+      return remove()
+
   def tick(self) -> None:
     with self.lock:
       if not self.available:
@@ -350,6 +366,8 @@ class NotificationOwner:
         if 0 <= now - event['wallTimeNs'] / 1e9 <= MAX_AGE:
           self._enqueue(event)
       for key, job in self.state['jobs'].items():
+        if key not in self.state['jobs']:
+          continue
         if job['state'] not in ('queued', 'sending'):
           continue
         cfg = self.state['channels'][job['channel']]
@@ -376,7 +394,10 @@ class NotificationOwner:
             code = self.transport(job['channel'], dict(cfg), sub, dict(job), key, self.state['vapid'])
           finally:
             self.lock.acquire()
-            job = self.state['jobs'].get(key, job)
+          current_job = self.state['jobs'].get(key)
+          if current_job is None:
+            continue
+          job = current_job
           if 200 <= code < 300:
             job['state'], job['error'] = 'sent', ''
           elif code in (404, 410) and job['channel'] == 'webPush':

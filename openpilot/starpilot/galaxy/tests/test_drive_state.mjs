@@ -34,6 +34,8 @@ globalThis.window={confirm:()=>false}
 const before=requests.length
 await onroad.change('offroad');assert.equal(requests.length,before)
 window.confirm=()=>true
+await onroad.change('offroad');assert.equal(requests.length,before)
+onroad.state.overrideAllowed=true
 const stop=onroad.change('offroad')
 assert.equal(requests.length,before+1)
 assert.deepEqual(JSON.parse(requests.at(-1).options.body),{mode:'offroad',revision:'a'.repeat(32)})

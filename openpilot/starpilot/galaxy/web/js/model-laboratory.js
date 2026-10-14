@@ -161,7 +161,7 @@ export const LaboratoryPage = {
   template: `
     <div class="gx-settings gx-models" :inert="busy" :aria-busy="busy || undefined">
       <header class="gx-settings__header gx-page-header"><div><h2>Model Laboratory</h2>
-        <p>Pair lateral judgment from one model with longitudinal judgment from another, then enable the pair for the next drive.</p></div>
+        <p>Pair lateral judgment from one model with longitudinal judgment from another. Enabling applies when modeld next starts, when it loads and verifies the model weights, input tensors and GPU state.</p></div>
         <div class="gx-actions"><span class="gx-chip">{{ status ? (status.chestnutReady ? 'Chestnut ready' : 'Chestnut required') : 'Waiting for device status' }}</span><span v-if="status" class="gx-chip">{{ status.isOnroad ? 'Onroad' : 'Parked' }}</span></div></header>
       <GxState v-if="mode !== 'local'">Model Laboratory is available on the device. Preview does not configure a pair.</GxState>
       <GxState v-else-if="loading" loading>Loading Model Laboratory…</GxState>

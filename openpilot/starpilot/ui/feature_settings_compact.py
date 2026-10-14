@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from openpilot.starpilot.ui.lane_change_feature import confirm_question as lane_change_question
+
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Protocol
@@ -129,17 +131,7 @@ class FeatureSettingsCompact:
   def _confirm_lane_change(self, request: FeatureSettingsRequest, refresh: Callable[[], None], page: NavScroller) -> None:
     if gui_app.get_active_widget() is not page:
       return
-    if request.key == LANE_CHANGE_RESET:
-      question = "Restore stock driver-nudged lane-change settings for the next drive?"
-    elif request.key == "lane_change:speed":
-      question = f"Save a {request.value} {request.display_unit} minimum for the next drive? Blindspot checks remain required."
-    elif request.key == "lane_change:auto":
-      question = f"Save Automatic Lane Changes {request.value} for the next drive? Vehicle support, lane and blindspot checks remain required."
-    elif request.key in ("lane_change:delay", "lane_change:width"):
-      unit = "seconds" if request.key == "lane_change:delay" else "feet"
-      question = f"Save {request.value} {unit} for automatic lane changes on the next drive? Lane and blindspot checks remain required."
-    else:
-      question = f"Save {request.value} for the next drive? Blindspot checks remain required."
+    question = lane_change_question(request)
     def confirmed(result: DialogResult) -> None:
       if (result == DialogResult.CONFIRM and gui_app.get_active_widget() is page and
           self.session.feature_request(replace(request, confirmation=True))):

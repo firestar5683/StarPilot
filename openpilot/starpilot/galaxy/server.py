@@ -65,7 +65,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
                 remote_pairing=None, parked=None, camera_snapshot=None, clock=time.monotonic, android_auto_setup=None,
                 android_auto_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
-                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None):
+                local_access=None, tmux_live=None, android_auto_logs=None, hotspot=None, toyota_tools=None):
   cloud = cloud_provider
   hotspot_source = hotspot
   hotspot_source_lock = threading.Lock()
@@ -90,6 +90,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   console_source = tmux_live if tmux_live is not None else TmuxLive()
   monitor_source = monitor if monitor is not None else SystemMonitor()
   reports = crashes if crashes is not None else CrashReports()
+  crash_reports_lock = threading.Lock()
   aa_logs_source = android_auto_logs
 
   def aa_logs():
@@ -161,7 +162,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   settings_lock = threading.Lock()
   models_lock = threading.Lock()
   settings_gateway = settings
+  recovery_gateway = None
   vehicle_gateway = vehicle_selection
+  toyota_source = toyota_tools
   model_source = models
   model_manager_source = model_manager
   plot_source = plots
@@ -397,6 +400,26 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         settings_gateway = SettingsGateway(params, context_source(params))
         server.settings_source = settings_gateway
       return settings_gateway
+
+  def settings_recovery():
+    nonlocal recovery_gateway
+    gateway = feature_settings()
+    with settings_lock:
+      if recovery_gateway is None:
+        from openpilot.starpilot.galaxy.defaults_recovery import DefaultsRecovery
+        recovery_gateway = DefaultsRecovery(gateway)
+      return recovery_gateway
+
+  def toyota_owner():
+    nonlocal toyota_source
+    with settings_lock:
+      if toyota_source is None:
+        from openpilot.common.params import Params
+        from openpilot.starpilot.galaxy.toyota_tools import ToyotaTools
+        params = Params()
+        toyota_source = ToyotaTools(params, context_source(params))
+        server.toyota_tools_source = toyota_source
+      return toyota_source
 
   def vehicle_choices():
     nonlocal vehicle_gateway
@@ -903,6 +926,19 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, result)
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path == '/api/toyota-tools':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          result = toyota_owner().page(*identity)
+        except (OSError, RuntimeError, ValueError):
+          self.json(503, {'error': 'Toyota settings are unavailable'})
+        else:
+          self.json(200, result) if self.settings_session() == identity else self.json(401, {'error': 'Sign in to Galaxy'})
       elif path == '/api/vehicle-selection':
         if not self.require_session():
           return
@@ -1217,6 +1253,24 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, result)
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path == '/api/settings/non-defaults':
+        if not self.require_session():
+          return
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          result = settings_recovery().snapshot(*identity)
+        except SettingsChanged:
+          self.json(409, {'error': 'Saved settings changed; refresh the page'})
+        except (SettingsUnavailable, OSError, ValueError, RuntimeError):
+          self.json(503, {'error': 'Saved settings are unavailable'})
+        else:
+          if self.settings_session() == identity:
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
       elif path.startswith('/api/settings/pages/'):
         if not self.require_session():
           return
@@ -1311,6 +1365,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.connection.settimeout(old_timeout)
         return
       if path not in ('/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
+                      '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
                       '/api/galaxy/pair', '/api/galaxy/unpair', '/api/galaxy/device-name', '/api/galaxy/hotspot', '/api/cameras/snapshot',
                       '/api/android-auto/layout', '/api/android-auto/enable', '/api/android-auto/control', '/api/android-auto/pairing',
@@ -1323,15 +1378,15 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                       '/api/models/cancel', '/api/models/delete', '/api/models/refresh_manifest', '/api/models/jetlink',
                       '/api/models/laboratory', '/api/models/laboratory/download', '/api/models/laboratory/delete',
                       '/api/sounds/download', '/api/sounds/cancel', '/api/software/action', '/api/drives/ignore',
-                      '/api/recordings/delete-videos', '/api/sentry/notifications',
+                      '/api/recordings/delete-videos', '/api/sentry/notifications', '/api/sentry/events/delete', '/api/crash-reports/delete',
                       '/api/navigation/search', '/api/navigation/action', '/api/navigation/offline', '/api/drive-state/action',
-                      '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
+                      '/api/toyota-tools/action', '/api/vehicle-selection/preview', '/api/vehicle-selection/confirm'):
         self.json(405, {'error': 'Method unavailable'})
         return
       if (path.startswith(('/api/recordings/', '/api/connect/', '/api/cameras/', '/api/settings/', '/api/maps/', '/api/flm/', '/api/bluetooth/',
-                           '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/',
+                           '/api/android-auto/', '/api/controllers/', '/api/vehicle-selection/', '/api/toyota-tools/',
                            '/api/models/', '/api/ui/', '/api/favorites/', '/api/sounds/', '/api/software/',
-                           '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/')) and
+                           '/api/drives/', '/api/navigation/', '/api/drive-state/', '/api/sentry/', '/api/crash-reports/')) and
           not self.require_session()):
         return
       if self.headers.get('Transfer-Encoding') is not None or \
@@ -1693,6 +1748,46 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(200, result)
           else:
             self.json(401, {'error': 'Sign in to Galaxy'})
+      elif path in ('/api/sentry/events/delete', '/api/crash-reports/delete'):
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        sentry = path == '/api/sentry/events/delete'
+        key = 'eventId' if sentry else 'id'
+        try:
+          if type(payload) is not dict:
+            raise ValueError('Invalid deletion selection')
+          if set(payload) == {'all', 'confirmed'} and payload['all'] is True and payload['confirmed'] is True:
+            selected = None
+          elif set(payload) == {key} and type(payload[key]) is str and payload[key]:
+            selected = payload[key]
+          else:
+            raise ValueError('Confirm deleting all stored records')
+
+          def permitted():
+            return self.settings_session() == identity
+
+          with sentry_events_lock if sentry else crash_reports_lock:
+            if not permitted():
+              raise PermissionError('Galaxy session expired')
+            if sentry and notification_owner is not None:
+              result = notification_owner.delete_events(lambda: motion_events.delete(selected, permitted=permitted), selected)
+            else:
+              result = (motion_events if sentry else reports).delete(selected, permitted=permitted)
+        except (ValueError, CrashMissing):
+          self.json(400, {'error': 'Invalid deletion selection or confirmation'})
+        except PermissionError:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+        except CrashChanged:
+          self.json(409, {'error': 'Report changed; refresh before deleting'})
+        except (OSError, CrashUnavailable, SentryEventsUnavailable, NotificationUnavailable):
+          self.json(503, {'error': 'Stored records could not be fully deleted; refresh and retry'})
+        else:
+          if permitted():
+            self.json(200, result)
+          else:
+            self.json(401, {'error': 'Sign in to Galaxy'})
       elif path == '/api/recordings/delete-videos':
         identity = self.settings_session()
         if identity is None:
@@ -1817,7 +1912,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if identity is None:
           self.json(401, {'error': 'Sign in to Galaxy'})
           return
-        if (type(payload) is not dict or set(payload) != {'document', 'profile', 'scene'} or
+        if (type(payload) is not dict or set(payload) not in ({'document', 'profile', 'scene'}, {'document', 'profile', 'scene', 'art'}) or
+            ('art' in payload and payload['art'] is not True) or
             type(payload['profile']) is not str or payload['profile'] not in (PREVIEW_PROFILES | {'projection'}) or
             type(payload['scene']) is not str or payload['scene'] not in PREVIEW_SCENES):
           self.json(400, {'error': 'Invalid layout preview request'})
@@ -1841,7 +1937,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           if not layout_owner().parked():
             self.json(403, {'error': 'Turn off the vehicle to preview this layout'})
             return
-          image = request_preview({'document': document, 'profile': payload['profile'], 'scene': payload['scene']},
+          image = request_preview({'document': document, 'profile': payload['profile'], 'scene': payload['scene'],
+                                   **({'art': True} if payload.get('art') is True else {})},
                                   layout_preview_socket)
           if self.settings_session() != identity:
             self.json(401, {'error': 'Sign in to Galaxy'})
@@ -2127,6 +2224,24 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             aa_source_registry().revoke_source(source)
           self.json(200, {'ok': True})
         return
+      if path == '/api/toyota-tools/action':
+        from openpilot.starpilot.galaxy.toyota_tools import ToyotaToolsChanged
+        identity = self.settings_session()
+        if identity is None:
+          self.json(401, {'error': 'Sign in to Galaxy'})
+          return
+        try:
+          with effect_lock:
+            result = toyota_owner().action(payload, *identity, session_valid=lambda: self.settings_session() == identity)
+        except ValueError:
+          self.json(400, {'error': 'Invalid Toyota request'})
+        except ToyotaToolsChanged:
+          self.json(409, {'error': 'Toyota settings changed; refresh saved values'})
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Toyota settings are unavailable'})
+        else:
+          self.json(200, result) if self.settings_session() == identity else self.json(401, {'error': 'Sign in to Galaxy'})
+        return
       if path.startswith('/api/vehicle-selection/'):
         identity = self.settings_session()
         if identity is None:
@@ -2345,6 +2460,22 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             with effect_lock:
               result = ToggleBackup(feature_settings(), layout_owner()).restore(
                 payload, identity, authorized=lambda: self.settings_session() == identity)
+          elif path == '/api/settings/recovery/preview':
+            if (not isinstance(payload, dict) or set(payload) != {'view', 'selected'} or
+                not isinstance(payload['view'], str) or len(payload['view']) > 64 or
+                not isinstance(payload['selected'], list) or not 1 <= len(payload['selected']) <= 128 or
+                any(type(index) is not int for index in payload['selected'])):
+              raise ValueError('Invalid settings recovery selection')
+            result = settings_recovery().preview(payload['view'], payload['selected'], *identity)
+          elif path == '/api/settings/recovery/confirm':
+            if (not isinstance(payload, dict) or set(payload) != {'intent', 'confirmed'} or
+                not isinstance(payload['intent'], str) or len(payload['intent']) > 64 or payload['confirmed'] is not True):
+              raise ValueError('Invalid settings recovery confirmation')
+            with effect_lock:
+              if self.settings_session() != identity:
+                raise SettingsChanged('Session changed')
+              result = settings_recovery().confirm(payload['intent'], *identity,
+                                                   session_valid=lambda: self.settings_session() == identity)
           elif path == '/api/settings/reset-default':
             if not isinstance(payload, dict) or set(payload) != {'view', 'row'} or \
                not isinstance(payload['view'], str) or len(payload['view']) > 64 or type(payload['row']) is not int:
@@ -2486,6 +2617,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.plots_source = plot_source
   if settings_gateway is not None:
     server.settings_source = settings_gateway
+  if toyota_source is not None:
+    server.toyota_tools_source = toyota_source
   if bluetooth_source is not None:
     server.bluetooth_source = bluetooth_source
   if aa_setup_source is not None:

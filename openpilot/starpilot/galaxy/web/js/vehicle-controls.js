@@ -5,6 +5,7 @@ import { connectionError } from "./polling.js"
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsPage } from "./settings.js"
 import { GalaxySelect } from "./galaxy-select.js"
+import { ToyotaToolsPage } from "./toyota-tools.js"
 
 export function validVehiclePage(data) {
   return data?.version === 1 && typeof data.parked === "boolean" && typeof data.readable === "boolean" &&
@@ -162,7 +163,7 @@ export class VehicleSelectionFeed {
 }
 
 export const VehicleControlsPage = {
-  components: { GxDialog, GxState, GxNotice, SettingsPage, GalaxySelect },
+  components: { ToyotaToolsPage, GxDialog, GxState, GxNotice, SettingsPage, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, busy: false, error: "", query: "", make: "" })
@@ -191,13 +192,17 @@ export const VehicleControlsPage = {
           </GxNotice>
         <GxState v-if="state.status === 'loading'" loading>Loading vehicle selection…</GxState>
         <article v-if="state.data" class="gx-card gx-vehicle__body">
-          <div class="gx-vehicle__summary"><div><small>Saved for next start</small><strong>{{ state.data.selectedLabel }}</strong>
-              <p v-if="!state.data.valid">Saved choice needs review. Only Auto can repair it.</p></div>
-            <div><small>Last identified vehicle</small><strong>{{ state.data.reported?.label || 'Not available' }}</strong>
-              <p>This is a cached report, not current vehicle confirmation.</p></div></div>
+          <div class="gx-vehicle__summary"><div><small>Configured selection mode</small>
+              <strong>{{ state.data.valid ? (state.data.selected === null ? 'Auto Detection' : 'Manually Selected') : state.data.selectedLabel }}</strong>
+              <p v-if="state.data.selected !== null">{{ state.data.selectedLabel }}</p>
+              <p>Saved for the next start.</p><p v-if="!state.data.valid">Saved choice needs review. Only Auto can repair it.</p></div>
+            <div><small>{{ state.data.reported?.origin === 'detected' ? 'Last auto-detected vehicle' : 'Last runtime vehicle' }}</small>
+              <strong>{{ state.data.reported?.label || 'Not available' }}</strong>
+              <p v-if="state.data.reported?.origin === 'manual'">This runtime used a manual selection, not automatic detection.</p>
+              <p>This is the last runtime report, not current physical vehicle confirmation.</p></div></div>
           <p v-if="!state.data.parked" class="gx-note">Changes require fresh parked vehicle evidence.</p>
           <div class="gx-vehicle__actions gx-actions">
-            <button type="button" class="gx-btn" :disabled="!state.data.parked || !state.data.readable" @click="choose(null)">Choose Auto detection</button></div>
+            <button type="button" class="gx-btn" :disabled="!state.data.parked || !state.data.readable" @click="choose(null)">Switch to Auto Detection</button></div>
           <template v-if="state.data.valid">
             <h3>Choose a Vehicle</h3>
             <div class="gx-vehicle__filters gx-actions"><GalaxySelect v-model="state.make" class="gx-field gx-field--full" aria-label="Vehicle make">
@@ -210,6 +215,7 @@ export const VehicleControlsPage = {
                 <strong>{{ item.label }}</strong><small>{{ item.make }}</small></button></div>
           </template>
         </article>
+        <ToyotaToolsPage :mode="mode" :unauthorized="unauthorized" />
         <SettingsPage :mode="mode" :unauthorized="unauthorized" initial-page="vehicle" title="Vehicle settings" />
         <GxDialog v-if="state.pending" labelledby="gx-vehicle-controls-confirm-title" @close="feed.cancel()"><h3 id="gx-vehicle-controls-confirm-title">Confirm Vehicle Selection</h3><p>{{ state.pending.question }}</p>
             <p>The choice takes effect after the next start.</p>

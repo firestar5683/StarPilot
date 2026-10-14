@@ -56,8 +56,8 @@ def test_shared_owner_idempotence_atomic_mode_and_manager_reset(fixture):
 def test_only_deliberate_override_requires_physical_admission(fixture):
   f = fixture
   with pytest.raises(Rejected):
-    request(f, 'onroad', override_allowed=lambda: False)
-  request(f, 'offroad')
+    request(f, 'offroad', override_allowed=lambda: False)
+  request(f, 'onroad')
   assert request(f, 'auto', override_allowed=lambda: False).mode == Mode.AUTO
   assert not any(key in f.params.values for key in ('ForceOffroad', 'ForceOnroad'))
 
@@ -75,7 +75,7 @@ def test_revocation_before_commit_never_writes_request(fixture, change):
     return calls[0] < 2
 
   with pytest.raises(Rejected):
-    request(f, 'onroad', authorized=checked if change == 'permission' else lambda: True,
+    request(f, 'offroad', authorized=checked if change == 'permission' else lambda: True,
             override_allowed=checked if change in ('physical', 'manager') else lambda: True)
   assert len(f.params.writes) == writes
 
@@ -278,11 +278,11 @@ def test_empty_real_native_registry_resolves_auto_and_unsupported_key_is_explici
   assert DriveStateOwner(Unsupported(), tmp_path / 'unsupported').snapshot() == State()
 
 
-def test_force_offroad_withdraws_authority_without_healthy_can(fixture):
+def test_force_onroad_requires_no_park_proof_but_offroad_does(fixture):
   f = fixture
-  assert request(f, 'offroad', override_allowed=lambda: False).mode == Mode.OFFROAD
+  assert request(f, 'onroad', override_allowed=lambda: False).mode == Mode.ONROAD
   with pytest.raises(Rejected):
-    request(f, 'onroad', override_allowed=lambda: False)
+    request(f, 'offroad', override_allowed=lambda: False)
   with pytest.raises(Rejected):
     request(f, 'auto', authorized=lambda: False, override_allowed=lambda: False)
-  assert f.owner.snapshot().mode == Mode.OFFROAD
+  assert f.owner.snapshot().mode == Mode.ONROAD

@@ -127,7 +127,8 @@ class FeatureSettingsOwner:
                show_cruise_intervals: bool = False,
                configuration_longitudinal: Callable[[], bool] = lambda: False,
                configuration_vehicle: Callable[[], bool] = lambda: False,
-               galaxy: Callable[[], bool] = lambda: False):
+               galaxy: Callable[[], bool] = lambda: False,
+               maps_available: Callable[[], bool] | None = None):
     self.params = params
     self._snapshot_reads: ContextVar[dict[tuple[str, int], tuple[bytes | None, bool]] | None] = ContextVar(
       "feature_snapshot_reads", default=None)
@@ -136,6 +137,10 @@ class FeatureSettingsOwner:
     self._vehicle_params_source = vehicle_params or (lambda: None)
     self._snapshot_vehicle: ContextVar[tuple[Any] | None] = ContextVar("feature_snapshot_vehicle", default=None)
     self.vision_development = vision_development or (lambda: False)
+    if maps_available is None:
+      from openpilot.starpilot.maps.operation_owner import maps_slc_available
+      maps_available = maps_slc_available
+    self.maps_available = maps_available
     self.show_cruise_intervals = show_cruise_intervals
     self.configuration_longitudinal = configuration_longitudinal
     self.configuration_vehicle = configuration_vehicle
@@ -156,6 +161,13 @@ class FeatureSettingsOwner:
                                           configuration_longitudinal=self.configuration_longitudinal)
     self.conditional = ConditionalFeature(self)
     self.wheel = WheelFeature(self)
+
+  def _source_capability(self) -> tuple[bool, bool]:
+    return bool(self.vision_development()), bool(self.maps_available())
+
+  def _source_choices(self, capability: tuple[bool, bool] | None = None) -> tuple[str, ...]:
+    vision, maps = self._source_capability() if capability is None else capability
+    return ("Dashboard",) + (("Vision",) if vision else ()) + (("Maps",) if maps else ())
 
   def longitudinal_available(self) -> bool:
     cp = self.vehicle_params()
@@ -271,7 +283,7 @@ class FeatureSettingsOwner:
     def authorized() -> bool:
       return (bool(request.vehicle_fingerprint) and self.vehicle_fingerprint() == request.vehicle_fingerprint and
               request.capability is not None and request.capability == self._long_pitch_capability() and
-              self.authority("parked_preferences") and request.expected in (None, b"0", b"1"))
+              self.authority("preferences") and request.expected in (None, b"0", b"1"))
     return commit_exact(self.params, key="LongPitch", max_bytes=128, raw=b"1" if request.value == "On" else b"0",
                         expected=request.expected, authorized=authorized, temp_prefix=".gm-long-pitch-").verified
 
@@ -474,6 +486,9 @@ class FeatureSettingsOwner:
     return self._read_saved(key, limit)[1]
 
   def _default(self, key: str) -> str:
+    if key == "AlwaysOnLateral":
+      from openpilot.starpilot.aol.defaults import default_enabled
+      return "1" if default_enabled(self.vehicle_params()) else "0"
     if key in BOOL_DEFAULTS:
       return "1" if BOOL_DEFAULTS[key] else "0"
     if key in ("CustomCruise", "CustomCruiseLong"):
@@ -532,7 +547,7 @@ class FeatureSettingsOwner:
       return row
     try:
       value = self._default(row.key)
-      if row.key in (SLC_PRIORITY, SLC_SECONDARY) and value not in (("Dashboard", "Vision") if self.vision_development() else ("Dashboard",)):
+      if row.key in (SLC_PRIORITY, SLC_SECONDARY) and value not in self._source_choices():
         return row
       if value in ("0", "1") and row.choices == ("Off", "On"):
         value = "On" if value == "1" else "Off"
@@ -669,12 +684,12 @@ class FeatureSettingsOwner:
       rows = [self._bool_row("AlwaysAllowUploads", "Always Allow Uploads", self.authority("preferences"),
                              "Allow queued full logs and videos on metered networks. Uses mobile data.")]
     elif page == FeaturePage.HUB:
-      rows = [FeatureRow("", "Speed Limit Controller", "Choose speed-limit sources, offsets, and confirmation behavior", page=FeaturePage.SLC, available=True),
+      rows = [FeatureRow("", "Curve Speed Controller", "Adjust how speed is reduced for curves ahead", page=FeaturePage.CURVE, available=True),
+              FeatureRow("", "Speed Limit Controller", "Choose speed-limit sources, offsets, and confirmation behavior", page=FeaturePage.SLC, available=True),
               FeatureRow("", "Lane Centering", "Adjust lane positioning, lane detection, and steering alerts", page=FeaturePage.LANE, available=True),
               FeatureRow("", "Lane Changes", "Configure lane-change speed, automatic timing, and driver nudges", page=FeaturePage.LANE_CHANGE, available=True),
               FeatureRow("", "Long Planner", "Tune acceleration, braking, and following distances", page=FeaturePage.PROFILES, available=True),
               FeatureRow("", "Conditional Driving Modes", "Choose when to switch between Chill and Experimental", page=FeaturePage.CONDITIONAL, available=True),
-              FeatureRow("", "Curve Speed Controller", "Adjust how speed is reduced for curves ahead", page=FeaturePage.CURVE, available=True),
               FeatureRow("", "Steering and Torque", "Select the steering controller and tune its response", page=FeaturePage.TORQUE, available=True),
               FeatureRow("", "Always On Lateral", "Keep steering assistance active independently of cruise control", page=FeaturePage.AOL, available=True),
               FeatureRow("", "Wheel Controls", "Assign steering-wheel buttons and cruise behavior", page=FeaturePage.WHEEL, available=True)]
@@ -743,8 +758,8 @@ class FeatureSettingsOwner:
         rows.append(replace(row, available=row.available and self._readable("GMAutoHold"), capability=gm_hold_capability))
       pitch_capability = self._long_pitch_capability()
       if pitch_capability is not None:
-        row = self._bool_row("LongPitch", "Grade Compensation", parked and self.authority("parked_preferences"),
-                             "Compensates acceleration and braking for road grade. Applies after the next startup")
+        row = self._bool_row("LongPitch", "Grade Compensation", configurable and self.authority("preferences"),
+                             "Compensates acceleration and braking for road grade. Refreshes during the drive.")
         rows.append(replace(row, available=row.available and self._readable("LongPitch"), capability=pitch_capability))
       cp = self.vehicle_params()
       policy = self.aol_settings_policy(cp)
@@ -786,15 +801,16 @@ class FeatureSettingsOwner:
       rows.append(replace(no_lead_row, dependencies=dependencies,
                           reason=no_lead_row.reason if no_lead_row.value not in ("On", "Off") else
                                  "Invalid saved learning" if not learning.valid else
-                                 "Pauses curve speed adjustments while following a lead vehicle; saved for the next drive" if allowed else
+                                 "Pauses curve speed adjustments while following a lead vehicle" if allowed else
                                  "Unavailable with the current vehicle or feature settings"))
       rows.append(self._bool_row("ShowCSCStatus", "Show Curve status", allowed,
                                  reason="Display preference only; it does not enable control"))
       rows.append(FeatureRow("", "Saved learning", "Valid" if learning.valid else "Unavailable",
-                             reason="Stored calibration is read only here" if learning.valid else
+                             reason="Used automatically when Curve Speed Controller is on" if learning.valid else
                                     "Saved data remains untouched; runtime control is disabled"))
       rows.append(FeatureRow("", "Learning progress", f"{learning.progress:.1f}%" if learning.progress is not None else "Unavailable",
-                             reason="Saved calibration, not a live reading" if learning.progress is not None else learning.reason))
+                             reason="Saved coverage across curve types, learned while you control speed without a lead vehicle"
+                                    if learning.progress is not None else learning.reason))
       rows.append(FeatureRow("", "Saved cornering comfort",
                              f"{learning.comfort:.2f} m/s²" if learning.has_samples and learning.comfort is not None else
                              "No learned samples" if learning.valid else "Unavailable",
@@ -887,33 +903,31 @@ class FeatureSettingsOwner:
                                  reason="Display signs independently of Speed Limit Controller; does not change cruise speed"))
       rows.append(self._bool_row("SLCConfirmation", "Require confirmation", allowed))
       confirmation, _, _ = self._value("SLCConfirmation")
-      rows.extend(self._bool_row(key, label, allowed and confirmation == "1") for key, label in (
+      rows.extend(replace(self._bool_row(key, label, allowed and confirmation == "1"),
+                          default_reset_available=allowed and parked and self._value(key)[2] and
+                          self._value(key)[0] in ("0", "1")) for key, label in (
         ("SLCConfirmationLower", "Confirm lower limits"), ("SLCConfirmationHigher", "Confirm higher limits")))
-      priority, raw, valid = self._value(SLC_PRIORITY)
-      vision_dev = self.vision_development()
+      source_capability = self._source_capability()
+      vision_dev, maps_available = source_capability
       source_allowed = configurable and self.authority("preferences")
-      source_help = ("Camera signs require your confirmation before changing cruise speed" if system_long else
-                     "Choose signs to display; factory cruise speed stays unchanged")
-      primary_choices = ("Dashboard", "Vision") if vision_dev else ("Dashboard",)
-      primary_readable = self._readable(SLC_PRIORITY)
-      rows.append(FeatureRow(SLC_PRIORITY, "Primary source", priority if primary_readable else "Unavailable saved source", raw,
-                             (priority, *primary_choices) if valid and priority not in primary_choices else primary_choices,
-                             available=source_allowed and valid and primary_readable and (vision_dev or priority != "Dashboard"),
-                             reason="Saved source unreadable or too large" if not primary_readable else
-                             source_help if vision_dev else
-                             "Only dashboard observations are connected; tap to select Dashboard" if priority != "Dashboard" else "",
-                             capability=(vision_dev,)))
-      secondary, raw, secondary_valid = self._value(SLC_SECONDARY)
-      secondary_choices = ("Dashboard", "Vision") if vision_dev else ("Dashboard",)
-      secondary_readable = self._readable(SLC_SECONDARY)
-      rows.append(FeatureRow(SLC_SECONDARY, "Secondary source", "Unavailable saved source" if not secondary_readable else
-                             secondary if vision_dev else f"Unavailable (saved: {secondary})", raw,
-                             (secondary, *secondary_choices) if secondary_valid and secondary not in secondary_choices else secondary_choices,
-                             available=source_allowed and secondary_valid and secondary_readable and (vision_dev or secondary != "Dashboard"),
-                             reason="Saved source unreadable or too large" if not secondary_readable else
-                             source_help if vision_dev else
-                             "No secondary source provider is connected; tap to save Dashboard",
-                             capability=(vision_dev,)))
+      choices = self._source_choices(source_capability)
+      for key, label, help_text in (
+          (SLC_PRIORITY, "Primary source", "Use this source first; try the secondary source when it is unavailable"),
+          (SLC_SECONDARY, "Secondary source", "Use this source when the primary source is unavailable")):
+        source, raw, valid = self._value(key)
+        source = "Maps" if source == "Map Data" else source
+        readable = self._readable(key)
+        reason = "Saved source unreadable or too large" if not readable else help_text
+        if readable and vision_dev and system_long:
+          reason += "; camera signs require your confirmation before changing cruise speed"
+        if source == "Maps" and not maps_available:
+          reason = "Maps needs a verified provider and an installed offline map package"
+        elif source == "Vision" and not vision_dev:
+          reason = "Camera signs are unavailable; choose a connected source"
+        rows.append(FeatureRow(key, label, source if readable else "Unavailable saved source", raw,
+          (source, *choices) if valid and source not in choices else choices,
+          available=source_allowed and valid and readable and (vision_dev or maps_available or source != "Dashboard"),
+          reason=reason, capability=source_capability))
       fallback, raw, valid = self._value(SLC_FALLBACK)
       rows.append(FeatureRow(SLC_FALLBACK, "Previous accepted limit", "On" if fallback == "2" else
                              "Off (saved mode 0 or 1)" if fallback in ("0", "1") else "Invalid saved value", raw,
@@ -927,7 +941,9 @@ class FeatureSettingsOwner:
       strength_supported = runtime_supported(self.vehicle_params())
       lane_enabled, _, _ = self._value("LaneCentering")
       rows.extend((self._bool_row("LaneCentering", "Enable Lane Centering", allowed),
-                   self._bool_row("LaneCenteringPauseOnSignal", "Pause on signal", allowed and lane_enabled == "1"),
+                   replace(self._bool_row("LaneCenteringPauseOnSignal", "Pause on signal", allowed and lane_enabled == "1"),
+                           default_reset_available=allowed and parked and self._value("LaneCenteringPauseOnSignal")[2] and
+                           self._value("LaneCenteringPauseOnSignal")[0] in ("0", "1")),
                    self._number_row("LaneCenterOffset", "Lane offset", allowed),
                    replace(self._number_row("LaneCenteringE2EAuthority", "Model path preference", allowed, scale=100, unit="%"),
                            reason="Higher values let a confident model path reduce lane-centering correction when it differs from the lane center")))
@@ -954,8 +970,8 @@ class FeatureSettingsOwner:
       rows.append(self._bool_row("ForceStops", "Force Stop", allowed or
                                  (force_enabled == "1" and self.authority("preferences")),
                                  reason="Commit to detected model stops; press the accelerator to continue"))
-      rows.append(replace(self._number_row("ForceStopDistanceOffset", "Stop Distance Adjustment",
-                                           allowed and force_enabled == "1"),
+      offset_row = self._number_row("ForceStopDistanceOffset", "Stop Distance Adjustment", allowed and force_enabled == "1")
+      rows.append(replace(offset_row, default_reset_available=allowed and parked and offset_row.step > 0,
                           reason="Positive values stop farther forward; negative values stop earlier"))
       approach_row = self._bool_row(LEAD_APPROACH_KEY, "Approaching lead buffer",
                                     self.authority("preferences"),
@@ -1081,7 +1097,7 @@ class FeatureSettingsOwner:
                     row.key.startswith('conditional:') and not row.key.startswith(BUTTON_PREFIX) else fingerprint)
             for row in rows]
     subtitle = (
-        "Saved. Changes take effect after the next restart."
+        "Configure features supported by this vehicle. Restart requirements are shown with each setting."
         if page == FeaturePage.VEHICLE else
         "Configure automatic Chill and Experimental switching."
         if page in (
@@ -1089,24 +1105,26 @@ class FeatureSettingsOwner:
             FeaturePage.CONDITIONAL_CEM,
             FeaturePage.CONDITIONAL_CCM,
         ) else
-        "Saved. Changes take effect after the next restart. Lane and blindspot checks remain required."
+        "Changes apply during this drive. Pace and trigger changes wait until the current signal and maneuver end."
         if page == FeaturePage.LANE_CHANGE else
-        "Saved preferences. Some changes take effect after the next restart."
+        "Adjust these preferences for your vehicle."
     )
     return FeatureSettingsState(page, title, subtitle, tuple(self._with_default(row) for row in rows), parked)
 
-  def apply(self, request: FeatureSettingsRequest) -> bool:
+  def apply(self, request: FeatureSettingsRequest, *, reset_default: bool = False) -> bool:
+    if reset_default and not self.authority("parked_preferences"):
+      return False
     # A request may arrive through a callback during assembly. Its compare and
     # authorization checks must still observe current sources independently.
     token = self._snapshot_reads.set(None)
     vehicle_token = self._snapshot_vehicle.set(None)
     try:
-      return self._apply(request)
+      return self._apply(request, reset_default=reset_default)
     finally:
       self._snapshot_vehicle.reset(vehicle_token)
       self._snapshot_reads.reset(token)
 
-  def _apply(self, request: FeatureSettingsRequest) -> bool:
+  def _apply(self, request: FeatureSettingsRequest, *, reset_default: bool = False) -> bool:
     key = request.key
     if key == "AlwaysOnLateral" and request.value == "Off":
       def authorized_off():
@@ -1242,17 +1260,19 @@ class FeatureSettingsOwner:
           return False
         if (key != CURVE_MASTER_KEY or request.value != "Off") and not read_learning(self.params).valid:
           return False
-      if key in ("SLCConfirmationLower", "SLCConfirmationHigher") and self._value("SLCConfirmation")[0] != "1":
+      if (key in ("SLCConfirmationLower", "SLCConfirmationHigher") and self._value("SLCConfirmation")[0] != "1" and
+          not (reset_default and request.value == "Off")):
         return False
-      if key in (SLC_PRIORITY, SLC_SECONDARY) and request.capability != (self.vision_development(),):
+      if key in (SLC_PRIORITY, SLC_SECONDARY) and request.capability != self._source_capability():
         return False
       if key == "LaneCenteringStrength":
         from openpilot.starpilot.lateral.lane_runtime import runtime_supported
         if not runtime_supported(self.vehicle_params()):
           return False
-      if key == "LaneCenteringPauseOnSignal" and self._value("LaneCentering")[0] != "1":
+      if (key == "LaneCenteringPauseOnSignal" and self._value("LaneCentering")[0] != "1" and
+          not (reset_default and request.value == ("On" if self._default(key) == "1" else "Off"))):
         return False
-      if key == "ForceStopDistanceOffset" and self._value("ForceStops")[0] != "1":
+      if key == "ForceStopDistanceOffset" and self._value("ForceStops")[0] != "1" and not (reset_default and float(request.value) == float(self._default(key))):
         return False
       if key == "reset_profiles":
         if not request.confirmation or self._document()[2]:
@@ -1366,9 +1386,9 @@ class FeatureSettingsOwner:
           return False
         encoded = "2" if request.value == "On" else "0"
       else:
-        if request.value not in (("Dashboard", "Vision") if self.vision_development() else ("Dashboard",)):
+        if request.value not in self._source_choices():
           return False
-        encoded = request.value
+        encoded = "Map Data" if request.value == "Maps" else request.value
       if key == "LaneCenteringStrength":
         from openpilot.starpilot.lateral.lane_runtime import runtime_supported
         if not runtime_supported(self.vehicle_params()):
@@ -1381,7 +1401,7 @@ class FeatureSettingsOwner:
         return False
       if key == "SpeedLimitController" and request.value == "On" and not self.slc_offsets.ready_to_enable():
         return False
-      if key in (SLC_PRIORITY, SLC_SECONDARY) and request.capability != (self.vision_development(),):
+      if key in (SLC_PRIORITY, SLC_SECONDARY) and request.capability != self._source_capability():
         return False
       if group in ("torque", "aol", "aol_wheel"):
         if request.capability != self._capability(group) or \

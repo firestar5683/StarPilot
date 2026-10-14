@@ -402,15 +402,14 @@ export const SettingsPage = {
         <div v-if="mode === 'local' && initialPage === 'hub' && atSectionRoot" class="gx-settings-tabs" aria-label="Settings sections">
           <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" @click="selectSection(section)">{{ section.label }}</button>
         </div>
-      <GxNotice v-if="!state.developerOpen && state.data && state.data.page !== 'hub' && !state.data.parked && state.data.rows.some(row => !row.available)" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
-      <p class="gx-page-description" v-if="state.developerOpen">Choose where cloud accounts and uploads go. Older comma recordings keep their comma links.</p>
+      <p class="gx-page-description" v-if="state.developerOpen">Choose where cloud accounts and uploads go.</p>
       <p class="gx-page-description" v-else-if="initialPage === 'pip'">Choose when to show the camera and adjust its saved crop. Use the crop editor for a live preview.</p>
       <p class="gx-page-description" v-else-if="(state.data?.page || initialPage) === 'sounds'">Adjust alert and chime volumes. Immediate warnings keep their safety volume ramp.</p>
       <p class="gx-page-description" v-else-if="(state.data?.page || initialPage) === 'display'">Adjust brightness and screen timing when custom display settings are on.</p>
-      <p class="gx-page-description" v-else-if="initialPage === 'lane_change'">Close gap adjusts following distance during a lane change when StarPilot controls acceleration and braking. It is Off by default.</p>
+      <p class="gx-page-description" v-else-if="initialPage === 'lane_change'">Configure lane-change assistance, signal timing, steering pace and following gap.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'conditional' || state.data?.page.startsWith('conditional/')">Choose when to switch between Chill and Experimental. Applies on supported vehicles when StarPilot controls acceleration and braking.</p>
-      <p class="gx-page-description" v-else-if="state.data?.page === 'profiles'">Braking response works without saved personality curves. A selected personality braking preset or Traffic takes priority.</p>
-      <p class="gx-page-description" v-else-if="state.data?.page === 'traffic'">Traffic follow and jerk blend toward saved Relaxed values at higher speeds. Saved curves require Use saved profiles and the Traffic profile switch.</p>
+      <p class="gx-page-description" v-else-if="state.data?.page === 'profiles'">Adjust acceleration, braking and following for each driving personality.</p>
+      <p class="gx-page-description" v-else-if="state.data?.page === 'traffic'">Tune low-speed following and jerk, blending toward Relaxed at higher speeds.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'aol'">Keep steering assistance active independently of cruise control.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'torque'">Tune how StarPilot applies steering torque.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'lane'">Choose lane-centering behavior and alerts.</p>
@@ -418,7 +417,7 @@ export const SettingsPage = {
       <p class="gx-page-description" v-else-if="state.data?.page === 'slc'">Control how speed limits change your set speed.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'wheel'">Assign what the steering-wheel controls do.</p>
       <p class="gx-page-description" v-else-if="state.data?.page === 'data'">Choose what uploads when the vehicle uses mobile data.</p>
-      <p class="gx-page-description" v-else-if="['aggressive','standard','relaxed'].includes(state.data?.page)">Saved personality curve for this driving style.</p>
+      <p class="gx-page-description" v-else-if="['aggressive','standard','relaxed'].includes(state.data?.page)">Adjust acceleration, braking and following for this driving style.</p>
       <p class="gx-page-description" v-else-if="initialPage === 'sentry'">{{ state.data?.subtitle || "Checking motion monitor…" }}</p>
       <GxState v-if="mode !== 'local'">Local settings are unavailable in preview.</GxState>
       <template v-else>

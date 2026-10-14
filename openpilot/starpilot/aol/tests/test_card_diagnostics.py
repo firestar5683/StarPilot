@@ -262,6 +262,7 @@ def test_real_settings_worker_continues_after_diagnostic_sink_failure(monkeypatc
   reads = []
   daemon.params = SimpleNamespace(get_bool=lambda key: reads.append(key) or True)
   daemon.CP = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False)
+  daemon.CI = SimpleNamespace(CP=daemon.CP, CC=None)
   daemon.aol_card_intent = None
   daemon.v_cruise_helper = SimpleNamespace(intervals=None)
   daemon.read_slc_configuration = lambda: 'settings'

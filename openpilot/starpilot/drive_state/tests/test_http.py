@@ -44,11 +44,13 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.assertEqual(self.drive_action('offroad', remote=True)[0], 200)
     self.assertEqual(self.drive_action('auto', revision=result[1]['revision'])[0], 409)
 
-  def test_physical_loss_blocks_override_but_auto_and_same_request_remain_recoverable(self):
+  def test_physical_loss_blocks_offroad_but_onroad_and_auto_remain_recoverable(self):
     self.assertEqual(self.drive_action('offroad')[0], 200)
     self.allowed = False
-    self.assertEqual(self.drive_action('onroad')[0], 409)
-    self.assertEqual(self.drive.snapshot().mode, Mode.OFFROAD)
+    self.assertEqual(self.drive_action('onroad')[0], 200)
+    self.assertEqual(self.drive.snapshot().mode, Mode.ONROAD)
+    self.assertEqual(self.drive_action('offroad')[0], 409)
+    self.assertEqual(self.drive.snapshot().mode, Mode.ONROAD)
     self.assertEqual(self.drive_action('auto', remote=True)[0], 200)
     self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
 
@@ -67,7 +69,7 @@ class ForceHttpTest(helpers.NavigationHttpTest):
       return True
 
     self.physical.allowed = revoke
-    self.assertEqual(self.drive_action('onroad', remote=True)[0], 409)
+    self.assertEqual(self.drive_action('offroad', remote=True)[0], 409)
     self.assertEqual(self.params.writes, before)
 
   def test_authenticated_force_offroad_from_live_onroad_state(self):
@@ -96,10 +98,15 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.assertEqual(status[1]['effective'], 'onroad')
     self.assertEqual(status[1]['overrideAllowed'], can_valid)
     result = self.drive_action('offroad', remote=True)
-    self.assertEqual(result[0], 200)
-    self.assertEqual(result[1]['mode'], 'offroad')
+    self.assertEqual(result[0], 200 if can_valid else 409)
+    if can_valid:
+      self.assertEqual(result[1]['mode'], 'offroad')
+    else:
+      self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
+      self.assertIn('Park', result[1]['error'])
     # hardwared consumes this same owner request through the actual resolver.
     messages.values['deviceState'].started = should_start(self.drive.snapshot().mode,
       {'ignition': True}, {'ready': True}, already_started=True)
-    self.assertFalse(messages.values['deviceState'].started)
-    self.assertEqual(self.request('/api/drive-state/status', remote=True, cookie=self.remote_cookie)[1]['effective'], 'offroad')
+    self.assertEqual(messages.values['deviceState'].started, not can_valid)
+    self.assertEqual(self.request('/api/drive-state/status', remote=True, cookie=self.remote_cookie)[1]['effective'],
+                     'offroad' if can_valid else 'onroad')

@@ -2,11 +2,11 @@
 import datetime
 import os
 import re
-import shutil
 import signal
 import subprocess
 import time
 import glob
+from pathlib import Path
 from typing import NoReturn
 
 from openpilot.common.hardware import PC
@@ -14,6 +14,7 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.version import get_build_metadata
 from openpilot.system import sentry
+from openpilot.system.crash_storage import writer, copy_report
 
 MAX_SIZE = 1_000_000 * 100  # allow up to 100M
 MAX_TOMBSTONE_FN_LEN = 62  # 85 - 23 ("<dongle id>/crash/")
@@ -123,10 +124,8 @@ def report_tombstone_apport(fn):
   new_fn = f"{date}_{(build_metadata.openpilot.git_commit or 'nocommit')[:8]}_{safe_fn(clean_path)}"[:MAX_TOMBSTONE_FN_LEN]
 
   crashlog_dir = os.path.join(Paths.log_root(), "crash")
-  os.makedirs(crashlog_dir, exist_ok=True)
-
-  # Files could be on different filesystems, copy, then delete
-  shutil.copy(fn, os.path.join(crashlog_dir, new_fn))
+  with writer(Path(crashlog_dir)) as directory:
+    copy_report(directory, new_fn, fn)
   sentry.report_tombstone(fn, message, contents)
 
   try:

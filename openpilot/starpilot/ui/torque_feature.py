@@ -133,12 +133,13 @@ class TorqueFeature:
                              default_value="Vehicle/learned", default_key=f"torque:{field}:mode",
                              reason=("Selected controller uses a fixed torque conversion; factor does not change its output" if not editable else
                                      "Saved choice temporarily ignored while Force auto is ON" if force_auto else
-                                     "Supplied tune; edits saved for the next drive" if active is None else "Custom value; saved for the next drive")))
+                                     "Uses the supplied vehicle tune" if active is None else "Uses your custom value")))
       rows.append(FeatureRow(f"torque:{field}:reset", label + " — Reset to Default", "", raw,
                              available=allowed and active is not None, repair_value="Reset",
                              capability=capability, dependencies=dependencies))
     if bolt:
-      rows.insert(0, FeatureRow("", "Manual friction", "Enable manual adjustments before the next drive. Saved friction changes then apply during that drive."))
+      rows.insert(0, FeatureRow("", "Manual friction", "Compensates steering friction. First manual activation requires " +
+                               "a driving-process restart; an active tuning owner refreshes changes during the drive."))
     if fingerprint in GM_VEHICLES:
       from openpilot.starpilot.ui.gain_feature import GainFeature
       rows.extend(GainFeature(self.owner).rows(capability, profiles, raw, allowed, repair_allowed))
@@ -175,7 +176,8 @@ class TorqueFeature:
     rows.append(FeatureRow("torque:learning:value", "Automatic torque learning", learning_labels[geometry.learning], raw,
                            choices=tuple(learning_labels.values()), available=allowed, capability=capability,
                            related_source=token, dependencies=dependencies,
-                           reason="Applies at next startup. Force off takes priority; Force auto temporarily ignores saved factor, friction and ratio."))
+                           reason="Chooses vehicle learning or a manual override. Force off takes priority; " +
+                                  "Force auto temporarily ignores saved factor, friction and ratio."))
     rows.append(FeatureRow("torque:automatic_delay:value", "Steering delay source", "Learned" if geometry.automatic_delay else "Vehicle/custom", raw,
                            choices=("Learned", "Vehicle/custom"), available=allowed, capability=capability,
                            related_source=token, dependencies=dependencies,

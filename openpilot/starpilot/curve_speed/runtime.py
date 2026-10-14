@@ -60,6 +60,7 @@ class Result:
   training: bool
   progress: float
   dirty_revision: int | None
+  learning_reason: str = ''
 
 
 class Runtime:
@@ -329,25 +330,38 @@ class Runtime:
                  frame.ego_mps > CRUISING_SPEED and frame.tracking_lead is False and not frame.blinker and
                  now - self.last_lead_ns >= LEAD_CLEAR_NS and
                  now >= self.quiet_until_ns and finite_number(measured_accel) and
-                 in_curve and not controlling)
+                 not controlling)
     learned = False
     if trainable:
       if not self.last_training_ns:
         self.last_training_ns = now
-      if now - self.last_training_ns >= TRAINING_SETTLE_NS:
+      if now - self.last_training_ns >= TRAINING_SETTLE_NS and in_curve:
         self.curve.observe(abs(frame.measured_curvature), measured_accel)
         learned = True
     else:
       self.last_training_ns = 0
+    learning_reason = ('learning_disabled' if not self.enabled else
+                       'invalid_learning_document' if not self.document_valid else
+                       'learning_requires_system_longitudinal' if not frame.system_longitudinal else
+                       'learning_requires_driver_speed' if not manual else
+                       'learning_requires_cruising_speed' if frame.ego_mps <= CRUISING_SPEED else
+                       'learning_lead_unknown' if frame.tracking_lead is None else
+                       'learning_following_lead' if frame.tracking_lead else
+                       'learning_lead_clear_wait' if now - self.last_lead_ns < LEAD_CLEAR_NS else
+                       'learning_indicator_active' if frame.blinker else
+                       'learning_feedback_quiet_wait' if now < self.quiet_until_ns else
+                       'learning_controller_active' if controlling else
+                       'learning_settling' if now - self.last_training_ns < TRAINING_SETTLE_NS else
+                       'learning' if learned else 'learning_waiting_for_curve')
     self.was_long_active = frame.long_active
     self.was_gas = frame.gas_pressed
     self.was_brake = frame.brake_pressed
     reason = ('available' if controlling else 'not_binding' if allowed else
               'invalid_learning_document' if not self.document_valid else 'not_eligible')
-    return self._result(candidate, ceiling, envelope.binding_distance_m, reason, learned, now)
+    return self._result(candidate, ceiling, envelope.binding_distance_m, reason, learned, now, learning_reason)
 
   def _result(self, candidate: float | None, ceiling: float | None, distance: float,
-              reason: str, training: bool, now_ns: int) -> Result:
+              reason: str, training: bool, now_ns: int, learning_reason: str | None = None) -> Result:
     revision = (self.curve.revision if self.document_valid and self.curve.dirty and
                 (not training or now_ns - self.last_persist_ns >= PERSIST_INTERVAL_NS) else None)
-    return Result(candidate, ceiling, distance, reason, training, self.curve.progress, revision)
+    return Result(candidate, ceiling, distance, reason, training, self.curve.progress, revision, learning_reason or reason)

@@ -16,13 +16,6 @@
       "sha256": "2fff703ee69452789ec7884e6447c146a0f45c6fa39c70455fd9db88e15ebb54"
     },
     {
-      "id": "stalin",
-      "name": "Stalin",
-      "path": "theme/Themes/stalin/sounds.zip",
-      "size": 1443422,
-      "sha256": "52f07cf7456a3eed2435a6a5ec46b6a0a99fa9714b0ddb3a1d46bf940117ee59"
-    },
-    {
       "id": "tesla",
       "name": "Tesla",
       "path": "theme/Themes/tesla/sounds.zip",

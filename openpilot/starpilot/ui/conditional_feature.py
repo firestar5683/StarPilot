@@ -37,9 +37,8 @@ MODES = ("Chill", "Experimental", "Conditional Experimental", "Conditional Chill
 SIGNAL_LANE_FIELDS = frozenset(("signal_lane_detection", "signal_lane_width_m"))
 SIGNAL_LANE_HELP = {
   "signal_lane_detection": "Distinguish a turn from a lane change using the space beside your car. With this on, a turn signal requests " +
-                           "Experimental only when there is no adjacent lane. Automatic Lane Changes is a separate setting.",
-  "signal_lane_width_m": "Minimum width of the space beside your car that counts as a lane, rather than a turn. " +
-                         "This does not change the clearance required for an automatic lane change.",
+                           "Experimental only when there is no adjacent lane.",
+  "signal_lane_width_m": "Minimum width of the space beside your car that counts as a lane, rather than a turn.",
 }
 MEDIA_LABELS = ("MODE press", "MODE long press", "MODE very long press",
                 "Star button", "Star button long press", "Star button very long press")

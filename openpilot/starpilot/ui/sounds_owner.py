@@ -12,7 +12,7 @@ from openpilot.starpilot.audio.alert_volume import AUTO, MAX_RAW_BYTES, SPECS, V
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, FeatureSettingsState
 
 AUTO_PREFIX = "sounds:auto:"
-PACK_LABELS = {"starpilot": "StarPilot (Built-in)", "stock": "Stock (openpilot)"}
+PACK_LABELS = {"starpilot": "StarPilot Sounds", "stock": "Stock Sounds"}
 
 
 def choices(key: str) -> tuple[str, ...]:
@@ -33,7 +33,7 @@ class SoundsOwner:
     valid = readable and selected in packs and (raw is None or raw == selected.encode())
     pack_row = FeatureRow("SoundPack", "Sound Pack", PACK_LABELS.get(selected, selected) if valid else "Unavailable Saved Pack", source=raw,
                           choices=tuple(PACK_LABELS.get(pack, pack) for pack in packs), available=parked and readable,
-                          reason="Installed packs only; missing clips use stock sounds",
+                          reason="Choose the sounds played for driving alerts",
                           repair_value=DEFAULT_PACK if not valid and readable else "")
     rows = []
     for key, label, _ in VOLUMES:

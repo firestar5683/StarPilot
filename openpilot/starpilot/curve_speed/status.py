@@ -53,7 +53,8 @@ class StatusPublisher:
       'applied': bool(planner.last_curve_ceiling_applied), 'controlling': bool(runtime.was_controlling),
       'training': bool(result.training), 'calibrationProgress': float(result.progress),
       'comfortAccel': float(runtime.curve.average_comfort), 'bindingDistance': float(result.binding_distance_m),
-      'reason': result.reason, 'plannerStatus': planner.last_curve_ceiling_status,
+      'reason': result.reason if result.ceiling_mps is not None else result.learning_reason,
+      'plannerStatus': planner.last_curve_ceiling_status,
       'persistenceStatus': persistence_status, 'glow': bool(runtime.glow), 'curveOnly': curve_only,
       'hasRoadCurvature': road_curvature is not None, 'roadCurvature': float(road_curvature or 0.0),
     }

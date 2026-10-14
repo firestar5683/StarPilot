@@ -223,6 +223,15 @@ class Car:
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
     startup_preferences = VehicleStartupPreferences.read(self.params, enabled=openpilot_enabled_toggle)
 
+    def initialize_aol_preference(cp):
+      from openpilot.starpilot.aol.defaults import enroll_missing_preference
+      enroll_missing_preference(self.params, cp)
+      if not self.aol_replay and feature_requested(self.params, 'aol'):
+        self.aol_replay = True
+        subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
+        self.sm = messaging.SubMaster(subscribed_services)
+        self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
+
     if CI is None:
       # wait for one pandaState and one CAN packet
       print("Waiting for CAN messages...")
@@ -240,6 +249,7 @@ class Car:
           cached_params = _cached_params
 
       def pre_create_hook(cp, candidate, fingerprints, car_fw):
+        initialize_aol_preference(cp)
         if candidate == HYUNDAI_CAR.HYUNDAI_IONIQ_6:
           # This decision must precede CarInterface parser/controller construction
           # and the first CarParams publication below. The exact opt-in is
@@ -255,6 +265,8 @@ class Car:
             cloudlog.event('ioniq6_long_preflight', reason=preflight.reason)
             if preflight.source_period is None:
               long_cp = None
+          if long_cp is not None:
+            initialize_aol_preference(long_cp)
           if long_cp is not None and self.aol_replay and independent_axis_requested(read_settings(self.params)):
             # Bit 11 is AOL only inside the exact Ioniq 6 bit-15 namespace.
             # This immutable choice precedes the ECU transaction and CP publish.
@@ -314,15 +326,17 @@ class Car:
       try:
         with open("/cache/params/SecOCKey") as f:
           user_key = f.readline().strip()
-          if len(user_key) == 32:
+          from openpilot.starpilot.car.toyota.security_key import decode_key
+          if decode_key(user_key) is not None:
             self.params.put("SecOCKey", user_key, block=True)
       except Exception:
         pass
 
+      from openpilot.starpilot.car.toyota.security_key import decode_key
       secoc_key = self.params.get("SecOCKey")
       if secoc_key is not None:
-        saved_secoc_key = bytes.fromhex(secoc_key.strip())
-        if len(saved_secoc_key) == 16:
+        saved_secoc_key = decode_key(secoc_key)
+        if saved_secoc_key is not None:
           self.CP.secOcKeyAvailable = True
           self.CI.CS.secoc_key = saved_secoc_key
           if controller_available:
@@ -339,6 +353,7 @@ class Car:
       subscribed_services.extend(('aolSafetyWire', 'managerState', 'aolAxisState'))
       self.sm = messaging.SubMaster(subscribed_services)
       self.pm.sock['aolIntentWire'] = messaging.pub_sock('aolIntentWire')
+    initialize_aol_preference(self.CP)
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
     self.aol_qualified = bool(self.aol_settings is not None and
                               (aol_policy.full_axis_runtime_required or aol_policy.physical_stalk_owner or independent_axis_requested(self.aol_settings,
@@ -827,6 +842,8 @@ class Car:
       events = [event for event in events if not (event.name == log.OnroadEvent.EventName.locationdTemporaryError and
                 event.softDisable and not event.immediateDisable)]
     return intent_disarming_fault(self.CP, events, CS,
+      startup_calibration_pending=bool(getattr(self.aol_card_intent, 'startup_calibration_pending', False) and
+        self.aol_card_intent.settings.enabled and self.aol_card_intent.settings.main_action != 9),
       temporary_ui_process_failure=self.aol_process_fault_context.temporary_ui_failure(event_ns, now_ns),
       temporary_selfdrive_lagging=(qualified_gm(self.CP) or aol_policy_for(self.CP).intent_supported),
       temporary_source_pause=(self.aol_transport_feedback.qualified or self.aol_transport_feedback.awaiting))
@@ -1489,6 +1506,9 @@ class Car:
       if now >= next_cruise_read:
         self.slc_requested_configuration = self.read_slc_configuration()
         self.v_cruise_helper.intervals = read_cruise_intervals(self.params, pcm_cruise=self.CP.pcmCruise)
+        pitch_input = getattr(self.CI.CC, 'long_pitch_input', None)
+        if pitch_input is not None:
+          self.CI.CC.long_pitch = pitch_input.update(time.monotonic_ns())
         next_cruise_read = now + 1.0
       if timing is not None:
         timing.worker_end()

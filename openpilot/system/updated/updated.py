@@ -460,8 +460,7 @@ class Updater:
     def parked():
       deadline = time.monotonic() + 0.75
       while True:
-        if (self.params.get_bool("IsOffroad") and
-            source.allowed() and source.effective() is False):
+        if source.update_ready(self.params.get_bool("IsOffroad")):
           return True
         if time.monotonic() >= deadline:
           return False

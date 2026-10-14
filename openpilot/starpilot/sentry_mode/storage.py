@@ -13,6 +13,7 @@ import time
 import uuid
 
 from openpilot.starpilot.storage import starpilot_storage_root
+from openpilot.starpilot.stored_artifacts import DeletionLimit, remove_entry, usage
 
 
 MAX_EVENTS = 512
@@ -192,8 +193,47 @@ class EventStore:
       raise StorageUnavailable(str(error)) from error
     return RecordReceipt(event_id, durable=True)
 
+  def delete(self, event_id=None, *, permitted=lambda: True):
+    if event_id is not None and (type(event_id) is not str or ID.fullmatch(event_id) is None):
+      raise ValueError('Invalid event selection')
+    if not permitted():
+      raise PermissionError('Galaxy session expired')
+    more = False
+    try:
+      with self._directory() as directory:
+        lock = os.open('.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+        try:
+          if not _private(os.fstat(lock)):
+            raise StorageUnavailable('Event lock is unavailable')
+          fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+          if not permitted():
+            raise PermissionError('Galaxy session expired')
+          budget = [4096]
+          if event_id is None:
+            with os.scandir(directory) as entries:
+              for entry in entries:
+                if entry.name != '.lock':
+                  try:
+                    remove_entry(directory, entry.name, budget)
+                  except DeletionLimit:
+                    more = True
+                    break
+          else:
+            for name in (event_id, '.' + event_id + '.tmp', event_id + '.json'):
+              remove_entry(directory, name, budget)
+          if not self._same_directory(directory):
+            raise StorageUnavailable('Event directory changed')
+          os.fsync(directory)
+        finally:
+          os.close(lock)
+    except FileNotFoundError:
+      pass
+    except (OSError, DeletionLimit) as error:
+      raise StorageUnavailable('Event cleanup could not be completed') from error
+    return {'more': more}
+
   def snapshot(self) -> dict:
-    result: dict = {"version": 1, "events": [], "incomplete": False, "capacity": MAX_EVENTS}
+    result: dict = {"version": 1, "events": [], "incomplete": False, "capacity": MAX_EVENTS, "storageBytes": 0, "storageIncomplete": False}
     try:
       with self._directory() as directory:
         with os.scandir(directory) as entries:
@@ -225,6 +265,7 @@ class EventStore:
               result["events"].append(value)
             except (OSError, ValueError, TypeError, RecursionError):
               result["incomplete"] = True
+        result["storageBytes"], result["storageIncomplete"] = usage(directory)
         if not self._same_directory(directory):
           raise StorageUnavailable("Event directory changed")
     except FileNotFoundError:

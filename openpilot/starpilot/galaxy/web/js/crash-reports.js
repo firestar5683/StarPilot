@@ -1,6 +1,15 @@
 import { PollTimer, connectionError } from "./polling.js"
 import { requestJson } from "./startup.js"
-// Read-only local crash reports. State is cleared on navigation and sign-out.
+import { deleteRecords } from "./record-deletion.js"
+export function validCrashReports(data) {
+  return data?.schemaVersion === 1 && Array.isArray(data.reports) && data.reports.length <= 200 &&
+    typeof data.scanIncomplete === "boolean" && typeof data.listLimited === "boolean" &&
+    data.reports.every(item => typeof item.id === "string" && item.id && typeof item.name === "string" && item.name &&
+      typeof item.size === "number" && Number.isFinite(item.size) && item.size >= 0 &&
+      typeof item.modifiedAt === "number" && Number.isFinite(item.modifiedAt))
+}
+
+// Local stored crash reports. State is cleared on navigation and sign-out.
 export class CrashReportsFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args), later = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id) }) {
     Object.assign(this, { publish, unauthorized, fetcher })
@@ -14,7 +23,8 @@ export class CrashReportsFeed {
 
   clear() {
     this.reports = []
-    this.publish({ reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle" })
+    this.deleting = false
+    this.publish({ deleting: false, storageBytes: 0, reportCount: 0, reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle" })
   }
 
   stop() {
@@ -54,21 +64,22 @@ export class CrashReportsFeed {
     try {
       const data = await this.requestJson("./api/crash-reports", generation, request)
       if (!data) return
-      if (data.schemaVersion !== 1 || !Array.isArray(data.reports) || data.reports.length > 200 ||
-          typeof data.scanIncomplete !== "boolean" || typeof data.listLimited !== "boolean" ||
-          data.reports.some((item) => typeof item.id !== "string" || !item.id ||
-            typeof item.name !== "string" || !item.name ||
-            typeof item.size !== "number" || !Number.isFinite(item.size) || item.size < 0 ||
-            typeof item.modifiedAt !== "number" || !Number.isFinite(item.modifiedAt))) {
-        throw new Error("Invalid crash report list")
-      }
+      if (!validCrashReports(data)) throw new Error("Invalid crash report list")
       this.reports = data.reports
-      this.publish({ reports: data.reports, scanIncomplete: data.scanIncomplete, listLimited: data.listLimited, status: "ready", error: "" })
+      this.publish({ reports: data.reports, scanIncomplete: data.scanIncomplete, listLimited: data.listLimited, reportCount: data.reportCount, storageBytes: data.storageBytes, storageIncomplete: data.storageIncomplete, status: "ready", error: "" })
     } catch (error) {
       if (this.active && generation === this.generation) this.publish({ reports: [], scanIncomplete: false, listLimited: false, status: "unavailable", error: connectionError(error), selected: null, preview: null, previewStatus: "idle" })
     } finally {
       if (generation === this.generation) this.request = null
     }
+  }
+
+  remove(id, confirm) {
+    return deleteRecords(this, "./api/crash-reports/delete", id == null ? { all: true, confirmed: true } : { id }, {
+      confirm, subject: "crash reports", valid: data => validCrashReports(data) &&
+        Number.isSafeInteger(data.storageBytes) && data.storageBytes >= 0 && Number.isSafeInteger(data.reportCount) && data.reportCount >= 0 && typeof data.storageIncomplete === "boolean",
+      accept: data => { this.reports = data.reports; this.publish({ ...data, status: "ready", error: "" }) },
+    })
   }
 
   async open(report) {

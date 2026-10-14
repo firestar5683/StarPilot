@@ -1,6 +1,8 @@
 """Parked onroad layout preview using the same native view as the driving UI."""
 
 from pathlib import Path
+import json
+import math
 import struct
 import time
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -13,7 +15,7 @@ import pyray as rl
 
 from openpilot.starpilot.ui.layout_preview_transport import SCENES
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
-from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, PROFILES, placement, validate_document
+from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, PROFILES, RUNTIME_PREVIEW_WIDGETS, placement, validate_document, widget_size
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.curve_speed.status import CurveObservation
 from openpilot.starpilot.ui.onroad_state import ConditionalLead
@@ -122,12 +124,22 @@ def _chunk(kind: bytes, data: bytes) -> bytes:
   return struct.pack(">I", len(data)) + payload + struct.pack(">I", zlib.crc32(payload) & 0xffffffff)
 
 
-def _png_rgba(width: int, height: int, pixels: bytes) -> bytes:
+def _straight_rgba(pixels: bytes) -> bytes:
+  """PNG uses straight alpha; the transparent GL scratch target stores premultiplied RGB."""
+  values = np.frombuffer(pixels, dtype=np.uint8).reshape(-1, 4).astype(np.uint16)
+  alpha = values[:, 3:4]
+  values[:, :3] = np.where(alpha > 0, np.minimum(255, (values[:, :3] * 255 + alpha // 2) // np.maximum(alpha, 1)), 0)
+  return values.astype(np.uint8).tobytes()
+
+
+def _png_rgba(width: int, height: int, pixels: bytes, *, widget_art: dict | None = None) -> bytes:
   if len(pixels) != width * height * 4:
     raise ValueError("Invalid layout preview pixel buffer")
   stride = width * 4
   rows = b"".join(b"\0" + pixels[y * stride:(y + 1) * stride] for y in range(height))
   return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
+          (_chunk(b"tEXt", b"starpilot-widget-art\0" + json.dumps(widget_art, separators=(",", ":"), allow_nan=False).encode())
+           if widget_art is not None else b"") +
           _chunk(b"IDAT", zlib.compress(rows, 3)) + _chunk(b"IEND", b""))
 
 
@@ -299,11 +311,77 @@ class _Canvas:
     finally:
       rl.unload_image(image)
 
+  def render_widget_art(self, state: OnroadState, positions: dict) -> bytes:
+    """Transparent arrangement art from the same widgets/fonts as the live view."""
+    if self.view is None or self.fonts is None or self.target is None:
+      raise RuntimeError("Layout preview resources are closed")
+    self._settle(state)
+    canvas_width, canvas_height = self.viewport or self.profile.size
+    content = (rl.Rectangle(30, 30, canvas_width - 60, canvas_height - 60) if self.profile == Profile.LARGE
+               else rl.Rectangle(0, 0, 476, 240))
+    sprites = {}
+    # A bounded subset covers the edited widgets without adding an onroad render loop.
+    x = y = row_height = 0
+    captures = []
+    for key in RUNTIME_PREVIEW_WIDGETS[str(self.profile)]:
+      logical_width, logical_height = widget_size(state.customization, self.profile, key)
+      position = positions[key]
+      crop_x, crop_y = math.floor(position['x']), math.floor(position['y'])
+      offset_x, offset_y = crop_x - position['x'], crop_y - position['y']
+      width, height = math.ceil(logical_width - offset_x), math.ceil(logical_height - offset_y)
+      if x + width > 1024:
+        x, y, row_height = 0, y + row_height, 0
+      sprites[key] = {'x': x, 'y': y, 'width': width, 'height': height, 'offsetX': offset_x, 'offsetY': offset_y}
+      x += width
+      row_height = max(row_height, height)
+      if not (0 <= crop_x <= canvas_width - width and 0 <= crop_y <= canvas_height - height):
+        raise ValueError("Widget art crop lies outside the canvas")
+      rl.begin_texture_mode(self.target)
+      try:
+        rl.clear_background(rl.BLANK)
+        # Match the runtime's transparent cache coverage before exporting straight-alpha PNG.
+        rl.rl.rlSetBlendFactorsSeparate(0x0302, 0x0303, 1, 0x0303, 0x8006, 0x8006)
+        rl.begin_blend_mode(rl.BlendMode.BLEND_CUSTOM_SEPARATE)
+        try:
+          self.view._ordered_widgets(content, state, only_widget=key)
+        finally:
+          rl.end_blend_mode()
+      finally:
+        rl.end_texture_mode()
+      image = rl.load_image_from_texture(self.target.texture)
+      try:
+        rl.image_format(image, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+        rl.image_flip_vertical(image)
+        rl.image_crop(image, rl.Rectangle(crop_x, crop_y, width, height))
+        captures.append((key, _straight_rgba(bytes(rl.ffi.buffer(image.data, width * height * 4)))))
+      finally:
+        rl.unload_image(image)
+    sheet_width = max(slot['x'] + slot['width'] for slot in sprites.values())
+    sheet_height = y + row_height
+    if not (0 < sheet_width <= 1024 and 0 < sheet_height <= 1440):
+      raise ValueError("Widget art sheet exceeds preview bounds")
+    pixels = bytearray(sheet_width * sheet_height * 4)
+    for key, data in captures:
+      slot = sprites[key]
+      for row in range(slot['height']):
+        start = ((slot['y'] + row) * sheet_width + slot['x']) * 4
+        pixels[start:start + slot['width'] * 4] = data[row * slot['width'] * 4:(row + 1) * slot['width'] * 4]
+    return _png_rgba(sheet_width, sheet_height, bytes(pixels),
+                     widget_art={'version': 1, 'width': sheet_width, 'height': sheet_height, 'sprites': sprites})
+
   def _settle(self, state: OnroadState) -> None:
     if self.view is None:
       return
     if self.profile == Profile.COMPACT:
       hud = self.view.compact_hud
+      # Freeze the synthetic sample inside the normal post-change set-speed blink.
+      # Otherwise the first frame/reset or an old cached scene can hide its glyphs.
+      now_ns = time.monotonic_ns()
+      hud._cruise_drive_frame = state.drive_frame
+      hud._last_cruise_display = (round(state.cruise_kph * (1 if state.metric else .621371))
+                                  if state.cruise_active and state.cruise_kph is not None else None)
+      hud._last_cruise_ns = now_ns if state.cruise_active else None
+      hud._set_speed_changed_ns = now_ns - 1_000_000_000 if state.cruise_active else None
       hud._was_cruise_active = state.cruise_active
       hud._set_speed_alpha.x = 1.0 if state.cruise_active else 0.0
       hud._wheel_alpha.x = 255 * 0.9 if state.lateral_active else 0.0
@@ -354,8 +432,10 @@ class LayoutPreviewRenderer:
     return self._canvas is not None
 
   def __call__(self, payload: dict) -> bytes:
-    if type(payload) is not dict or set(payload) != {"document", "profile", "scene"}:
+    if type(payload) is not dict or set(payload) not in ({"document", "profile", "scene"}, {"document", "profile", "scene", "art"}):
       raise ValueError("Invalid layout preview request")
+    if "art" in payload and payload["art"] is not True:
+      raise ValueError("Invalid widget art request")
     viewport = None
     if payload['profile'] == 'projection':
       from openpilot.starpilot.system.android_auto.projection_layout import projection_customization
@@ -379,6 +459,9 @@ class LayoutPreviewRenderer:
       self.close()
       self._canvas = _Canvas(profile, viewport)
     self._last_use = time.monotonic()
+    if payload.get('art') is True:
+      positions = payload['document']['layout']['widgets'] if viewport else document['layouts'][str(profile)]
+      return self._canvas.render_widget_art(state, positions)
     return self._canvas.render(state, scene)
 
   def expire(self) -> None:

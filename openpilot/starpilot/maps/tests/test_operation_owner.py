@@ -38,7 +38,9 @@ class TestMapSnapshotOperationOwner(unittest.TestCase):
     owner = ops.MapSnapshotOperationOwner(root=self.root, marker=self.base / 'operation.json',
                                           catalog=lambda: [REGION], parked=lambda: self.parked,
                                           selected=lambda: self.current, execute=execute,
-                                          package_ready=lambda: True, **kwargs)
+                                          package_ready=lambda: True,
+                                          snapshot_info=lambda: {'generation': self.current, 'storedBytes': 32,
+                                                                 'tileCount': 1, 'bounds': REGION['bounds']}, **kwargs)
     self.addCleanup(owner.close)
     return owner
 

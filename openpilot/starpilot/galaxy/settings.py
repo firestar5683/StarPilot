@@ -1,5 +1,7 @@
 """Authenticated local projection of the shared saved-feature owner."""
 
+from openpilot.starpilot.ui.lane_change_feature import confirm_question as lane_change_question
+
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 import hashlib
@@ -12,6 +14,7 @@ import time
 from typing import Protocol, cast
 
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
+from openpilot.starpilot.galaxy.setting_descriptions import description
 from openpilot.starpilot.ui.controller_feature import SETUP_ACTION, SETUP_QUESTION
 from openpilot.starpilot.ui.vehicle_bool import VEHICLE_BOOL_KEYS, confirmation_question as vehicle_question
 from openpilot.starpilot.ui.conditional_feature import confirmation_question as conditional_question
@@ -275,8 +278,7 @@ class LiveContextSource:
       except (OSError, RuntimeError, AttributeError, KeyError, TypeError, ValueError):
         return False
 
-  def sample(self) -> AuthorityContext:
-    parked = self.configuration_allowed()
+  def runtime_vehicle(self):
     cp_raw, readable = read_saved(self.params, "CarParamsPersistent", self.MAX_CP_BYTES)
     cp = None
     if readable and cp_raw is not None:
@@ -289,6 +291,12 @@ class LiveContextSource:
           cp = messaging.log_from_bytes(inspected.payload, car.CarParams)
       except (OSError, RuntimeError, TypeError, ValueError, OverflowError):
         cp = None
+    return cp, cp_raw if readable else None
+
+  def sample(self) -> AuthorityContext:
+    parked = self.configuration_allowed()
+    cp, cp_raw = self.runtime_vehicle()
+    readable = True
     editing_saved = configurable_long = configuration_vehicle = False
     if parked and self.offroad():
       from openpilot.starpilot.galaxy.vehicle_configuration import settings_configuration
@@ -319,6 +327,7 @@ class _Intent:
   cp_raw: bytes | None
   expires: float
   reset_row: FeatureRow | None = None
+  recovery_default: bool = False
 
 
 def _session_key(token: str) -> bytes:
@@ -328,7 +337,7 @@ def _session_key(token: str) -> bytes:
 def _projection(row: FeatureRow, page: str) -> dict:
   return {"label": row.label, "value": row.value, "choices": list(row.choices), "step": row.step,
           "minimum": row.minimum, "maximum": row.maximum, "unit": row.unit,
-          "available": row.available, "reason": row.reason,
+          "available": row.available, "reason": description(row),
           "page": row.page if row.page in PAGES else "", "action": bool(row.key and row.available and not row.page),
           "confirm": bool(row.key in CONFIRM_ACTIONS or is_long_confirm_action(row.key) or
                           row.key in (PIP_RESET, PIP_EDITOR, VASM_RESET, VASM_ANNOTATION) or row.key.startswith(PIP_FORMAT_PREFIX)),
@@ -338,12 +347,12 @@ def _projection(row: FeatureRow, page: str) -> dict:
 def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
   key = request.key
   if key == "UseStarPilotLongitudinalPlanner":
-    return f"Save {row.label} as {request.value}? This applies on the next drive; supported longitudinal control stays active."
+    return f"Select {request.value} for {row.label.lower()}? The selected planner starts with the next driving process."
   if key in ("CustomCruise", "CustomCruiseLong"):
     if row.capability and row.capability[0] == "toyota":
       return f"Save {row.label.lower()} as {request.value}? Toyota cruise preferences refresh while this compatible drive is active."
     value = f"{request.value} {row.unit}" if row.unit else request.value
-    return f"Save {row.label.lower()} as {value}? This applies on the next drive when StarPilot controls cruise speed."
+    return f"Set {row.label.lower()} to {value}? Cruise-button increments refresh during the drive."
   if key in SOUND_SPECS:
     value = request.value + ("%" if request.value != "Auto" and not request.value.endswith("%") else "")
     return f"Save {row.label.lower()} as {value}? The normal alert sound still decides when it plays."
@@ -396,7 +405,7 @@ def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
   if key == "torque_rebase":
     return f"Reapply saved torque values ({row.value}) with the current vehicle tune?"
   if key == "LateralControllerSelection":
-    return f"Save {request.value} for the next drive? Manual torque adjustments are separate."
+    return f"Select {request.value}? The controller and its feedback state are created when the driving process starts."
   if key == SETUP_ACTION:
     return SETUP_QUESTION
   if key.startswith("torque_"):
@@ -405,15 +414,11 @@ def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
     from openpilot.starpilot.ui.long_profile_feature import long_confirm_question
     return long_confirm_question(row)
   if key.startswith("lane_change:"):
-    if key == "lane_change:reset":
-      return "Restore stock driver-nudged lane-change settings for the next drive?"
-    unit = request.display_unit or row.unit
-    value = f"{request.value} {unit}" if unit else request.value
-    return f"Save {row.label.lower()} as {value} for the next drive? Blindspot checks remain required."
+    return lane_change_question(request)
   if key in VEHICLE_BOOL_KEYS:
     return vehicle_question(request)
   if key == "ToyotaAutoHold":
-    return f"Save automatic brake hold as {request.value} for the next startup?"
+    return f"Set automatic brake hold to {request.value}? The next startup configures the required brake-hold safety permissions."
   value = f"{request.value} {row.unit}".rstrip()
   return f"Set {row.label.lower()} to {value}?"
 
@@ -593,7 +598,7 @@ class SettingsGateway:
     return result
 
   def preview(self, view_id: str, index: int, direction: int, token: str, generation: bytes,
-              *, draft: dict | None = None, value: str | int | float | None = None, reset_default: bool = False) -> dict:
+              *, draft: dict | None = None, value: str | int | float | None = None, reset_default: bool = False, recovery_default: bool = False) -> dict:
     with self.lock:
       self._clean()
       view = self.views.get(view_id)
@@ -607,7 +612,9 @@ class SettingsGateway:
     if state.rows != view.rows:
       raise SettingsChanged("Saved settings changed")
     row = state.rows[index]
-    if not row.available or not (ctx.parked or _onroad_preference(view.page, row.key)):
+    if ((not row.available and not (reset_default and recovery_default and ctx.parked and
+                                    row_default(row, allow_inactive=True) is not None)) or
+        not (ctx.parked or _onroad_preference(view.page, row.key))):
       raise SettingsChanged("Settings are unavailable")
     if draft is not None and not ((view.page == "vasm" and row.key == VASM_ANNOTATION) or
                                  (view.page == "pip" and row.key == PIP_EDITOR)):
@@ -617,7 +624,7 @@ class SettingsGateway:
     if reset_default:
       if direction != 0 or value is not None or draft is not None:
         raise SettingsChanged("Invalid default reset")
-      request = row_default(row)
+      request = row_default(row, allow_inactive=recovery_default)
       if request is None:
         raise SettingsChanged("Default is unavailable")
     elif value is not None:
@@ -683,7 +690,7 @@ class SettingsGateway:
         self.intents.pop(next(iter(self.intents)))
       intent_id = secrets.token_urlsafe(24)
       self.intents[intent_id] = _Intent(_session_key(token), generation, view.page, request, ctx.cp_raw, self.clock() + TTL,
-                                         row if reset_default else None)
+                                         row if reset_default else None, recovery_default)
     question = _question(row, request)
     if reset_default:
       question = f"Reset {row.label} to its default? " + question
@@ -702,7 +709,7 @@ class SettingsGateway:
       raise SettingsChanged("Vehicle changed or this operation requires offroad mode")
     if intent.reset_row is not None:
       fresh_rows = self._state(intent.page, ctx).rows
-      if intent.reset_row not in fresh_rows or row_default(intent.reset_row) != intent.request:
+      if intent.reset_row not in fresh_rows or row_default(intent.reset_row, allow_inactive=intent.recovery_default) != intent.request:
         raise SettingsChanged("Default or saved settings changed")
     if intent.page == "pip":
       return self._pip_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
@@ -716,4 +723,5 @@ class SettingsGateway:
       return self._sentry_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
     if intent.page == "vasm":
       return self._vasm_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
-    return self._owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
+    owner = self._owner(ctx, live=True, session_valid=session_valid)
+    return owner.apply(intent.request, reset_default=True) if intent.recovery_default else owner.apply(intent.request)

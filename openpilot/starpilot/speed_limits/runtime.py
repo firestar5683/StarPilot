@@ -13,6 +13,7 @@ from openpilot.starpilot.speed_limits import lead_relaxation as lr
 from openpilot.starpilot.speed_limits import selection as sel
 from openpilot.starpilot.speed_limits import speed_domain as sd
 from openpilot.starpilot.speed_limits.runtime_settings import Settings
+from openpilot.starpilot.speed_limits.map_observation import MapSource, copy_frame
 from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns, vision_observation
 
 
@@ -128,6 +129,7 @@ class Runtime:
   def __init__(self, settings: Settings, *, session_id: str | None = None, vision_enabled: bool = False,
                vision_control_qualified: bool = False, vision_display_qualified: bool = False):
     self.settings = settings
+    self.map_source = MapSource()
     self.vision_enabled = vision_enabled
     # Exact saved Vision opt-in may grant control; source identity and current
     # driver confirmation remain independent requirements for each episode.
@@ -156,6 +158,7 @@ class Runtime:
     self.command_card_producer = ''
 
   def reset(self) -> None:
+    self.map_source.reset()
     self.vision_diagnostic = acc.Observation(acc.ObservationKind.UNKNOWN)
     self._last_vision_producer = ''
     self._last_vision_frame = 0
@@ -298,7 +301,23 @@ class Runtime:
       self.vision_diagnostic = acc.Observation(acc.ObservationKind.STALE)
     else:
       self.vision_diagnostic = acc.Observation(acc.ObservationKind.UNKNOWN)
-    # An unqualified producer stays diagnostic even with a valid observation.
+    if (sel.Source.MAP in self.settings.selection.slots or
+        self.settings.selection.mode is not sel.SelectionMode.ORDERED):
+      pair = clock_pair_ns() if now_boot_ns is None else (now_ns, now_boot_ns)
+      if pair is not None:
+        received = bool(sm.updated.get('mapdOut', False))
+        try:
+          frame = (copy_frame(sm['mapdOut'], event_valid=bool(sm.valid.get('mapdOut', False)),
+                              event_boot_ns=int(sm.logMonoTime.get('mapdOut', 0))) if received else None)
+        except (AttributeError, ValueError, TypeError, OverflowError):
+          frame = None  # malformed current message revokes held map evidence
+        values[sel.Source.MAP] = self.map_source.step(frame, received=received,
+          now_boot_ns=pair[1], transport_alive=bool(sm.alive.get('mapdOut', False)),
+          drive_session=self.session_id, car_fingerprint=str(CP.carFingerprint))
+      else:
+        self.map_source.reset()
+        values[sel.Source.MAP] = acc.Observation(acc.ObservationKind.STALE)
+    # Vision still requires its independent source-specific qualification.
     return values
 
   def _frame(self, sm, CP, now_ns: int, now_boot_ns: int | None, action: acc.DriverAction | None, adopt: acc.AdoptRequest | None,

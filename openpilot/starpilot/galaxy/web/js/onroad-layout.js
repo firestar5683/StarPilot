@@ -131,7 +131,7 @@ export class OnroadLayoutFeed {
 }
 
 export const LayoutWidgetPreview = {
-  props: ["widget", "palette", "profile", "scene", "clock24Hour"],
+  props: ["widget", "palette", "profile", "scene", "clock24Hour", "native", "art"],
   methods: {
     withAlpha,
     modeLines(scene, profile) {
@@ -143,14 +143,21 @@ export const LayoutWidgetPreview = {
   },
   template: `
     <g aria-hidden="true" class="gx-layout-widget-art" :fill="palette.text || '#ffffff'">
-      <rect v-if="['driver_monitor', 'model_confidence', 'conditional_mode', 'following_distance'].includes(widget.kind)"
-        x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" :rx="Math.min(widget.width, widget.height) * .1"
-        :fill="palette.cardFill" :stroke="palette.cardBorder" :stroke-width="profile === 'large' ? 4 : 2" />
-      <template v-if="widget.kind === 'current_speed'">
-        <text x="290" y="205" text-anchor="middle" font-size="176" font-weight="500">65</text>
-        <text x="290" y="265" text-anchor="middle" font-size="44" font-weight="400" :fill="withAlpha(palette.text, 200 / 255)">mph</text>
+      <template v-if="native">
+        <svg v-if="art?.url && art.sprites?.sprites?.[widget.id]"
+          :x="art.sprites.sprites[widget.id].offsetX || 0" :y="art.sprites.sprites[widget.id].offsetY || 0"
+          :width="art.sprites.sprites[widget.id].width" :height="art.sprites.sprites[widget.id].height"
+          :viewBox="[art.sprites.sprites[widget.id].x, art.sprites.sprites[widget.id].y, art.sprites.sprites[widget.id].width, art.sprites.sprites[widget.id].height].join(' ')"
+          preserveAspectRatio="xMinYMin meet" data-preview-source="runtime">
+          <image :href="art.url" :width="art.sprites.width" :height="art.sprites.height" />
+        </svg>
+        <g v-else data-preview-source="placeholder">
+          <rect x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" fill="#0c182044" stroke="#a6dfbe66" stroke-dasharray="5 5" />
+          <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" :font-size="Math.min(24, widget.width / 10)">{{ widget.label }}</text>
+        </g>
       </template>
-      <template v-else-if="widget.kind === 'driving_mode_descriptions'">
+      <template v-else>
+      <template v-if="widget.kind === 'driving_mode_descriptions'">
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" dominant-baseline="middle"
           :font-size="profile === 'large' ? 48 : 21" font-weight="600" style="filter: drop-shadow(2px 2px 1px #000000aa)">
           <tspan v-for="(line, index) in modeLines(scene, profile)" :key="index" :x="widget.width / 2"
@@ -168,24 +175,6 @@ export const LayoutWidgetPreview = {
           :font-size="profile === 'large' ? 48 : 21" font-weight="600"
           style="filter: drop-shadow(2px 2px 1px #000000aa)">{{ clock24Hour ? '18:00' : '12:00 PM' }}</text>
       </template>
-      <template v-else-if="widget.kind === 'cruise_limits'">
-        <rect x="1" y="1" :width="widget.width - 2" height="468" rx="18" fill="#10191f" stroke="#35434d" />
-        <line x1="1" :x2="widget.width - 1" y1="210" y2="210" stroke="#35434d" />
-        <g v-for="(label, index) in ['MAX SET', 'SLC LIMIT']" :key="label" :transform="'translate(24 ' + (index ? 210 : 0) + ')'">
-          <text y="50" font-size="40" font-weight="500" :fill="index ? '#c5a3ff' : '#acbecb'">{{ label }}</text>
-          <text y="160" font-size="138" font-weight="500">{{ index ? '49' : '65' }}</text>
-          <text x="190" y="160" font-size="35" font-weight="400" fill="#acbecb">mph</text>
-          <text v-if="index" y="208" font-size="37" font-weight="400" fill="#c5a3ff">Using speed limit</text>
-          <text :y="index ? 249 : 198" font-size="37" font-weight="400" fill="#acbecb">{{ index ? 'Road limit 45 +4' : 'Your ceiling' }}</text>
-        </g>
-        <text x="24" y="518" font-size="37" font-weight="400" fill="#acbecb">View sources</text>
-      </template>
-      <template v-else-if="widget.kind === 'max_speed'">
-        <defs><radialGradient id="gx-layout-speed-shadow"><stop offset="0" stop-color="#00000080" /><stop offset="1" stop-color="#00000000" /></radialGradient></defs>
-        <circle cx="81" cy="81" r="81" fill="url(#gx-layout-speed-shadow)" />
-        <text x="17" y="102" font-size="112" font-weight="700" :fill="withAlpha(palette.text, .9)">65</text>
-        <text x="25" y="142" font-size="36" font-weight="600" :fill="withAlpha(palette.text, .9)">MAX</text>
-      </template>
       <template v-else-if="widget.kind === 'speed_limit'">
         <rect x="10" y="8" width="100" height="116" rx="14" fill="none" stroke="white" stroke-width="2" />
         <text x="60" y="18" dominant-baseline="text-before-edge" text-anchor="middle" font-size="20" font-weight="600" fill="white">SPEED</text>
@@ -200,46 +189,6 @@ export const LayoutWidgetPreview = {
           <text :x="widget.width / 4 - 2" :y="(profile === 'large' ? widget.height - 44 : widget.height) / 2 + 7" text-anchor="middle" :font-size="profile === 'large' ? 40 : 20" :font-weight="profile === 'large' ? 500 : 600" :fill="palette.text">{{ label }}</text>
         </g>
       </template>
-      <g v-else-if="widget.kind === 'model_confidence'">
-        <circle cx="30" cy="40" r="18" fill="#32bc82" />
-      </g>
-      <g v-else-if="widget.kind === 'conditional_mode'">
-        <g v-if="scene === 'cem_stop_light'">
-          <rect x="17" y="11" width="26" height="58" rx="8" fill="#14181b" stroke="white" stroke-width="2" />
-          <circle cx="30" cy="22" r="7" fill="#070c10" /><circle cx="30" cy="22" r="5" fill="#e63442" /><circle cx="28" cy="20" r="2" fill="#ffb6b9" />
-          <circle cx="30" cy="40" r="7" fill="#070c10" /><circle cx="30" cy="40" r="5" fill="#45361e" />
-          <circle cx="30" cy="58" r="7" fill="#070c10" /><circle cx="30" cy="58" r="5" fill="#1c3f2c" />
-        </g>
-        <g v-else-if="scene === 'cem_lead'">
-          <path d="M13 18 H6 V25 M47 18 H54 V25 M13 62 H6 V55 M47 62 H54 V55" fill="none" stroke="#70c0d8" stroke-width="3" />
-          <path d="M15 39 L20 27 H40 L45 39" fill="none" stroke="white" stroke-width="3" />
-          <rect x="14" y="37" width="32" height="18" rx="4" fill="white" />
-          <path d="M18 53 V59 M42 53 V59" stroke="white" stroke-width="4" />
-          <path d="M18 43 H23 M37 43 H42" stroke="#c82030" stroke-width="3" />
-          <path d="M26 49 H34" stroke="#14181b" stroke-width="2" />
-        </g>
-        <g v-else-if="scene === 'cem_curve'" fill="none">
-          <path d="M12 64 C11 49 13 31 18 16 M44 64 C43 49 45 31 50 16" stroke="white" stroke-width="3" stroke-linecap="round" />
-          <path d="M28 64 C27 49 29 31 34 16" stroke="#70c0d8" stroke-width="4" stroke-dasharray="5 6" stroke-linecap="round" />
-        </g>
-        <g v-else>
-          <circle cx="30" cy="40" r="18" fill="#70c0d8" />
-          <text x="30" y="47" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">{{ scene === 'experimental' ? 'E' : 'C' }}</text>
-        </g>
-      </g>
-      <g v-else-if="widget.kind === 'following_distance'">
-        <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 64 L17 16 M55 64 L43 16" :stroke="palette.text" stroke-width="3" />
-          <path d="M9 59 L12 52 H48 L51 59 M13 46 L16 39 H44 L47 46" stroke="#70c0d8" stroke-width="4" />
-        </g>
-      </g>
-      <g v-else-if="widget.kind === 'steering_wheel'" :transform="'scale(' + widget.width / 192 + ')'">
-        <circle v-if="profile === 'large'" cx="96" cy="96" r="96" :fill="palette.cardFill" />
-        <circle v-if="profile === 'large'" cx="96" cy="96" r="94.5" fill="none" :stroke="palette.cardBorder" stroke-width="3" />
-        <g fill="none" stroke="white" stroke-width="12" stroke-linecap="round">
-          <circle cx="96" cy="96" r="61" /><path d="M38 78 Q96 107 154 78 M96 103 V155" />
-        </g>
-      </g>
       <g v-else-if="widget.kind === 'torque_bar'" fill="none" stroke="white" stroke-linecap="round">
         <path :d="'M 12 ' + widget.height * .8 + ' Q ' + widget.width / 2 + ' ' + widget.height * .55 + ' ' + (widget.width - 12) + ' ' + widget.height * .8" :stroke-width="widget.height * .18" opacity=".3" />
         <path :d="'M ' + widget.width / 2 + ' ' + widget.height * .68 + ' Q ' + widget.width * .65 + ' ' + widget.height * .68 + ' ' + widget.width * .8 + ' ' + widget.height * .74" :stroke-width="widget.height * .18" opacity=".9" />
@@ -247,12 +196,6 @@ export const LayoutWidgetPreview = {
       <g v-else-if="widget.kind === 'pip_camera'">
         <circle :cx="widget.width / 2" :cy="widget.height / 2" :r="widget.width / 2 - 3" fill="#152c39" stroke="#5ee5ee" stroke-width="3" />
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" :font-size="widget.height / 10">{{ widget.label }}</text>
-      </g>
-      <g v-else-if="widget.kind === 'driver_monitor'" :transform="'translate(' + (widget.width - (profile === 'large' ? 128 : 60)) / 2 + ' ' + (widget.height - (profile === 'large' ? 128 : 60)) / 2 + ') scale(' + (profile === 'large' ? 128 : 60) / 60 + ')'">
-        <circle cx="30" cy="30" r="30" fill="#000000a6" />
-        <path d="M30 30 L8 12 A29 29 0 0 1 52 12 Z" fill="#00ff40" />
-        <circle cx="30" cy="31" r="6" fill="white" />
-        <path d="M20 47 Q20 38 30 38 Q40 38 40 47 Z" fill="white" />
       </g>
       <g v-else-if="['nav_home', 'nav_work', 'bookmark'].includes(widget.kind)" :opacity="(widget.opacity ?? 100) / 100">
         <rect v-if="widget.background !== false" x="1" y="1" :width="widget.width - 2" :height="widget.height - 2" rx="17" fill="#0f0d17f5" stroke="#c7aef7" stroke-width="3" />
@@ -309,6 +252,7 @@ export const LayoutWidgetPreview = {
         <rect :width="widget.width" :height="widget.height" :fill="palette.cardFill" :stroke="palette.cardBorder" />
         <text :x="widget.width / 2" :y="widget.height / 2" text-anchor="middle" :font-size="Math.min(32, widget.width / 10)">{{ widget.label }}</text>
       </template>
+      </template>
     </g>`,
 }
 
@@ -324,7 +268,7 @@ export const OnroadLayoutPage = {
       status: "idle", data: null, draft: null, needsReload: false, error: "", notice: "",
       profile: "large", scene: "engaged", selected: null, layerDrag: null, drag: null, discard: null, leavePresentation: null, removeConfirm: null, colorError: "", placementError: "",
       inspectorPanel: ["widgets", "edit", "road", "display"].includes(props.initialPanel) && !props.projection ? props.initialPanel : "widgets", previewMode: "layout", showFavoriteZones: false, devicePreviewOpen: false,
-      aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, stuck: { leaveBar: false, pinned: false, sections: false }, openColor: null, preview: { status: "idle", error: "", url: null },
+      aboutOpen: false, tipsOpen: false, moreOpen: false, widgetsHelpOpen: false, stuck: { leaveBar: false, pinned: false, sections: false }, openColor: null, art: { status: "idle", error: "", url: null, sprites: null }, preview: { status: "idle", error: "", url: null },
       hiddenPreviewWidgets: loadPreviewVisibility(props.projection), history: { undo: [], redo: [], group: null }
     })
     let deferred = null
@@ -373,21 +317,33 @@ export const OnroadLayoutPage = {
       unauthorized: props.unauthorized,
       publish: (update) => Object.assign(state.preview, update)
     })
-    watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag, state.data?.revision],
-      () => {
-        if (props.projection && state.draft && props.mode === 'local' && !state.devicePreviewOpen) {
-          state.devicePreviewOpen = true
-          previewFeed.start()
-        }
-        if (state.devicePreviewOpen && props.mode === "local") {
-          const document = props.projection ? projectionPayload({ document: state.draft }, state.data.metadata).document : layoutDocument(state.draft)
-          previewFeed.update(document, props.projection ? 'projection' : state.profile, state.scene, !!state.drag)
-        }
-      }, { flush: "sync" })
+    const artFeed = new LayoutPreviewFeed({ art: true, unauthorized: props.unauthorized,
+      publish: update => Object.assign(state.art, update) })
+    watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag,
+                 !!state.layerDrag, state.data?.revision, state.previewMode, state.data?.editable], () => {
+      if (props.mode !== "local" || state.previewMode !== "layout" || !state.data?.editable || !state.draft) {
+        if (artFeed.active) artFeed.stop()
+        return
+      }
+      if (!artFeed.active) artFeed.start()
+      const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : layoutDocument(state.draft)
+      artFeed.update(document, props.projection ? "projection" : state.profile, state.scene, !!state.drag || !!state.layerDrag)
+    }, {flush: "sync"})
+    watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag,
+                 state.data?.revision, state.previewMode], () => {
+      if (props.mode !== "local" || state.previewMode !== "device" || !state.draft) {
+        if (previewFeed.active) previewFeed.stop()
+        return
+      }
+      state.devicePreviewOpen = true
+      if (!previewFeed.active) previewFeed.start()
+      const document = props.projection ? projectionPayload({document: state.draft}, state.data.metadata).document : layoutDocument(state.draft)
+      previewFeed.update(document, props.projection ? 'projection' : state.profile, state.scene, !!state.drag)
+    }, {flush: "sync"})
     watch(() => props.mode, (mode) => {
-      if (mode !== "local") { state.devicePreviewOpen = false; previewFeed.stop() }
+      if (mode !== "local") { state.devicePreviewOpen = false; previewFeed.stop(); artFeed.stop() }
     })
-    return { state, feed, previewFeed, scenes: PREVIEW_SCENES }
+    return { state, feed, previewFeed, artFeed, scenes: PREVIEW_SCENES }
   },
   computed: {
     busy() { return ["loading", "saving"].includes(this.state.status) },
@@ -483,12 +439,13 @@ export const OnroadLayoutPage = {
     this.observePinned()
   },
   updated() { this.observePinned() },
-  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this._stopUnloadGuard(); this._pinObserver?.disconnect(); this.unwatchRelease(); this._closeFloating?.()
+  beforeUnmount() { this.cancelDrag(); this.feed.stop(); this.previewFeed.stop(); this.artFeed.stop(); this._stopUnloadGuard(); this._pinObserver?.disconnect(); this.unwatchRelease(); this._closeFloating?.()
     if (--makerPagesOpen === 0) document.documentElement.classList.remove("gx-maker-open")
     if (this._onPinScroll) window.removeEventListener("scroll", this._onPinScroll, { capture: true })
   },
   methods: {
     switchRow,
+    runtimeWidget(id) { return this.profile?.runtimePreviewWidgets?.includes(id) === true },
     previewHidden(id) { return !(this.projection && id === "car_exit") && this.state.hiddenPreviewWidgets[this.state.profile]?.[id] === true },
     togglePreviewVisibility(id) {
       if (this.state.drag || this.state.layerDrag || (this.projection && id === "car_exit")) return
@@ -726,13 +683,18 @@ export const OnroadLayoutPage = {
     showDevicePreview() {
       if (this.mode !== "local" || !this.state.data || !this.state.draft || this.state.drag || this.state.devicePreviewOpen) return
       this.state.devicePreviewOpen = true
-      this.previewFeed.start()
-      this.previewFeed.update(this.projection ? projectionPayload({ document: this.state.draft }, this.state.data.metadata).document : layoutDocument(this.state.draft), this.projection ? 'projection' : this.state.profile, this.state.scene)
+      this.state.previewMode = "device"
+      if (this.artFeed.active) this.artFeed.stop()
+      // The synchronous mode watcher starts the selected feed; avoid starting it twice.
+      if (!this.previewFeed.active) {
+        this.previewFeed.start()
+        this.previewFeed.update(this.projection ? projectionPayload({ document: this.state.draft }, this.state.data.metadata).document : layoutDocument(this.state.draft), this.projection ? 'projection' : this.state.profile, this.state.scene)
+      }
     },
     hideDevicePreview() {
       this.state.previewMode = "layout"
       this.state.devicePreviewOpen = false
-      this.previewFeed.stop()
+      if (this.previewFeed.active) this.previewFeed.stop()
       Object.assign(this.state.preview, { status: "idle", error: "", url: null })
     },
     selectProfile(profile) {
@@ -1195,6 +1157,11 @@ export const OnroadLayoutPage = {
                 <button v-if="!projection && profile.inputZones?.length" class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-pressed="state.showFavoriteZones" aria-label="Show Favorite tap areas" title="Show Favorite tap areas" @click="state.showFavoriteZones = !state.showFavoriteZones"><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i></button>
                 <button class="gx-icon-btn gx-layout__bar-toggle" type="button" :aria-expanded="state.tipsOpen" aria-controls="gx-layout-tips" aria-label="Preview tips and display behavior" title="Preview tips and display behavior" @click="state.tipsOpen = !state.tipsOpen"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
               </div>
+              <div v-if="state.previewMode === 'layout'" class="gx-layout__scenes" aria-label="Arrangement sample scene">
+                <button v-for="scene in scenes" :key="scene.id" class="gx-btn gx-btn--tonal" type="button" :aria-pressed="state.scene === scene.id"
+                  :disabled="!!state.drag || !!state.layerDrag" @click="state.scene = scene.id">{{ scene.label }}</button>
+              </div>
+              <p v-if="state.previewMode === 'layout' && state.art.status === 'unavailable'" class="gx-note" role="status">Widget preview unavailable. Placement controls remain available.</p>
               <div class="gx-layout__stage">
               <span v-if="!projection && state.showFavoriteZones && state.previewMode === 'layout'" class="gx-layout__stage-chip" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i>Tap areas</span>
               <svg v-show="state.previewMode === 'layout'" ref="preview" class="gx-layout__preview" :viewBox="'0 0 ' + profile.width + ' ' + profile.height" :width="profile.width" :height="profile.height"
@@ -1242,7 +1209,7 @@ export const OnroadLayoutPage = {
                   :aria-pressed="state.selected === widget.id" @focus="state.selected = widget.id" @keydown="onKey(widget.id, $event)"
                   @pointerdown="startDrag(widget.id, $event)">
                   <rect class="gx-layout__hit" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="transparent" />
-                  <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" :clock24-hour="!!state.draft.clock24Hour" />
+                  <LayoutWidgetPreview :widget="widget" :palette="widgetColors(widget.id)" :profile="state.profile" :scene="state.scene" :clock24-hour="!!state.draft.clock24Hour" :native="runtimeWidget(widget.id)" :art="state.art" />
                   <rect class="gx-layout__selection" :y="-(widget.visualInsetTop || 0)" :width="widget.width" :height="widget.height + (widget.visualInsetTop || 0) + (widget.visualInsetBottom || 0)" fill="none" stroke="#b799ff" :stroke-width="state.profile === 'large' ? 5 : 1.5" stroke-dasharray="6 4" />
                   <g v-if="widget.box && state.selected === widget.id && editable" class="gx-layout__resize" role="button" :aria-label="'Resize ' + widget.label"
                     :transform="'translate(' + widget.width + ' ' + widget.height + ')'" @pointerdown="startResize(widget.id, $event)">

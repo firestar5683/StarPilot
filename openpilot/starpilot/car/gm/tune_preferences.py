@@ -84,3 +84,27 @@ class TruckTuningPreference:
       except (OSError, RuntimeError, TypeError, ValueError):
         self.enabled = False
     return self.enabled
+
+
+class GradeCompensationPreference:
+  """Worker-side live input selection; no CP/safety/tune/limiter mutation."""
+  def __init__(self, params):
+    self.params = params
+    self.read_ns = 0
+    self.enabled = True
+
+  def update(self, now_ns):
+    if type(now_ns) is not int or now_ns <= 0:
+      return self.enabled
+    if self.read_ns and 0 <= now_ns - self.read_ns < 1_000_000_000:
+      return self.enabled
+    self.read_ns = now_ns
+    try:
+      choice, readable = read_saved(self.params, 'LongPitch', 8)
+      safe, safe_readable = read_saved(self.params, 'SafeMode', 8)
+      master, master_readable = read_saved(self.params, 'OpenpilotEnabledToggle', 8)
+      self.enabled = not (readable and choice == b'0' and master_readable and master == b'1' and
+                          safe_readable and safe in (None, b'0'))
+    except (OSError, RuntimeError, TypeError, ValueError):
+      self.enabled = True
+    return self.enabled

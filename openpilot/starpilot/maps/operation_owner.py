@@ -197,6 +197,84 @@ def _package_ready() -> bool:
     return False
 
 
+
+class _PackageReadinessCache:
+  """Verify package bytes once per source/package/index metadata identity."""
+
+  def __init__(self, validate, watch):
+    self._validate, self._watch = validate, watch
+    self._paths: tuple[Path, ...] | None = None
+    self._identity: tuple | None = None
+    self._ready = False
+    self._lock = threading.RLock()
+
+  @staticmethod
+  def _stamp(paths: tuple[Path, ...]) -> tuple:
+    result = []
+    for path in paths:
+      try:
+        info = path.lstat()
+      except FileNotFoundError:
+        result.append((str(path), None))
+      else:
+        result.append((str(path), info.st_dev, info.st_ino, info.st_size,
+                       info.st_mtime_ns, info.st_ctime_ns, info.st_mode))
+    return tuple(result)
+
+  def __call__(self) -> bool:
+    with self._lock:
+      try:
+        if self._paths is not None and self._stamp(self._paths) == self._identity:
+          return self._ready
+        self._ready = False
+        paths = self._watch()
+        before = self._stamp(paths)
+        ready = bool(self._validate())
+        after = self._stamp(paths)
+        if before != after:
+          self._paths, self._identity = None, None
+          return False
+        self._paths, self._identity, self._ready = paths, after, ready
+        return ready
+      except (OSError, ValueError):
+        self._paths, self._identity, self._ready = None, None, False
+        return False
+
+
+def _package_watch_paths() -> tuple[Path, ...]:
+  checkout = Path(BASEDIR)
+  source = checkout / 'mapd_repo'
+  paths = {shadow.PROVIDER_DIR, shadow.PROVIDER_BINARY, shadow.PROVIDER_MANIFEST,
+           checkout / 'upstream-sync.json', source, checkout / '.git'}
+  git = checkout / '.git'
+  if git.is_file():
+    with shadow._open_regular(git, max_bytes=4096) as file:
+      value = file.read(4097).decode('utf-8').strip()
+    if not value.startswith('gitdir: '):
+      raise ValueError('invalid Git directory identity')
+    git = (checkout / value[8:]).resolve()
+  paths.add(git / 'index')
+  # Cache all source directory and file identities: existing-file edits as well
+  # as additions/removals invalidate the full sourceDigest verification. Warm
+  # reads stat these known paths; they do not rehash/re-enumerate the source.
+  if source.exists():
+    for path in source.rglob('*'):
+      if path.name == '.DS_Store' or path.relative_to(source).parts[0] in ('.git', 'build', 'media', 'offline'):
+        continue
+      if path.is_symlink():
+        raise ValueError('provider source symlink is not cacheable')
+      paths.add(path)
+      if len(paths) > 4096:
+        raise ValueError('provider source inventory exceeds bound')
+  return tuple(sorted(paths))
+
+
+_PACKAGE_READY_CACHE = _PackageReadinessCache(_package_ready, _package_watch_paths)
+
+
+def cached_package_ready() -> bool:
+  return _PACKAGE_READY_CACHE()
+
 def _catalog() -> list[dict]:
   try:
     completed = subprocess.run([str(shadow.PROVIDER_BINARY), '--snapshot-catalog'], capture_output=True,
@@ -257,14 +335,16 @@ class MapSnapshotOperationOwner:
   """One active prepare/select transaction with independent parked authority."""
 
   def __init__(self, *, root: Path | None = None, marker: Path | None = None, catalog=None,
-               parked=None, selected=None, execute=None, package_ready=None):
+               parked=None, selected=None, execute=None, package_ready=None, snapshot_info=None):
     self.root = offline_root() if root is None else root
     self.marker = marker
     self._catalog_loader = _catalog if catalog is None else catalog
     self._parked = (lambda: False) if parked is None else parked
-    self._selected = (lambda: _selected_generation(self.root)) if selected is None else selected
+    self._inventory = None
+    self._selected = self._disk_generation if selected is None else selected
+    self._snapshot_info = self._disk_snapshot_info if snapshot_info is None else snapshot_info
     self._execute = self._run_go if execute is None else execute
-    self._package_ready = _package_ready if package_ready is None else package_ready
+    self._package_ready = cached_package_ready if package_ready is None else package_ready
     self._lock = threading.RLock()
     self._session = uuid.uuid4().hex
     self._sequence = 0
@@ -360,15 +440,72 @@ class MapSnapshotOperationOwner:
       self._status = self._fresh_status('unavailable')
       self._status['errorCode'] = 'unavailable'
 
+  @staticmethod
+  def _disk_identity(paths: tuple[Path, ...]) -> tuple:
+    return tuple((info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+                 for info in (path.lstat() for path in paths))
+
+  def _disk_snapshot_info(self) -> dict | None:
+    try:
+      with shadow._open_regular(self.root / 'current.json', max_bytes=shadow.MAX_SELECTOR_BYTES) as file:
+        selector = _parse(file.read(shadow.MAX_SELECTOR_BYTES + 1), shadow.MAX_SELECTOR_BYTES)
+      generation = selector.get('generation')
+      if (set(selector) != {'version', 'generation'} or type(selector['version']) is not int or
+          selector['version'] != 1 or type(generation) is not str or GENERATION.fullmatch(generation) is None):
+        self._inventory = None
+        return None
+      saved = self._inventory
+      if saved is not None and saved[0]['generation'] == generation and self._disk_identity(saved[1]) == saved[2]:
+        return dict(saved[0])
+      self._inventory = None
+      info = shadow.selected_snapshot_info(self.root)
+      receipt = shadow._selected_receipt(self.root)
+      if info is None or receipt is None or receipt[0] != generation:
+        return None
+      directory = self.root / 'generations' / generation
+      # Go installs immutable generations. Watch their receipt and directory
+      # index identities; do not rescan/hash every tile on each HTTP poll.
+      paths = {self.root, self.root / 'current.json', self.root / 'generations',
+               directory, directory / 'receipt.json'}
+      for tile in receipt[1]['tiles']:
+        parent = directory / Path(tile['path']).parent
+        paths.update((parent, parent.parent))
+      ordered = tuple(sorted(paths))
+      identity = self._disk_identity(ordered)
+      self._inventory = info, ordered, identity
+      return dict(info)
+    except (OSError, ValueError, TypeError, OperationError):
+      self._inventory = None
+      return None
+
+  def _disk_generation(self) -> str:
+    info = self._disk_snapshot_info()
+    if info is None and (self.root / 'current.json').exists():
+      raise OperationError('unavailable')
+    return info['generation'] if info is not None else ''
+
+  def _selected_info(self, generation: str) -> dict | None:
+    if not generation:
+      return None
+    info = self._snapshot_info()
+    if (type(info) is not dict or info.get('generation') != generation or
+        type(info.get('storedBytes')) is not int or info['storedBytes'] <= 0 or
+        type(info.get('tileCount')) is not int or info['tileCount'] <= 0):
+      raise OperationError('unavailable')
+    return info
+
   def snapshot(self) -> dict:
     self._parked()
     with self._lock:
       result = dict(self._status)
     try:
       result['selectedGeneration'] = self._selected()
+      result['selectedSnapshot'] = self._selected_info(result['selectedGeneration'])
     except (OSError, ValueError, OperationError):
       result['state'] = 'unavailable'
       result['errorCode'] = 'unavailable'
+      result['selectedSnapshot'] = None
+      result['selectedGeneration'] = ''
     result['selectedForNextShadowStart'] = bool(result['state'] == 'completed' and
                                                  result['preparedGeneration'] == result['selectedGeneration'])
     return result
@@ -380,8 +517,9 @@ class MapSnapshotOperationOwner:
                                   'missing_manifest' if not shadow.PROVIDER_MANIFEST.exists() else 'invalid_package')
     try:
       generation = self._selected()
+      info = self._selected_info(generation)
     except (OSError, ValueError, OperationError):
-      generation = ''
+      generation, info = '', None
     ancestor = self.root
     while not ancestor.exists() and ancestor != ancestor.parent:
       ancestor = ancestor.parent
@@ -390,7 +528,7 @@ class MapSnapshotOperationOwner:
     except OSError:
       free = 0
     return {'schemaVersion': 1, 'packageReady': ready, 'packageState': state,
-            'snapshotReady': bool(generation), 'selectedGeneration': generation,
+            'snapshotReady': info is not None, 'selectedGeneration': generation, 'selectedSnapshot': info,
             'parked': bool(self._parked()), 'freeDiskBytes': free,
             'maxTransferBytes': MAX_TRANSFER_BYTES, 'maxNewDiskBytes': MAX_NEW_DISK_BYTES}
 
@@ -625,6 +763,7 @@ class MapSnapshotOperationOwner:
       selection_acknowledged = True
       if self._selected() != prepared:
         raise OperationError('selection_changed')
+      self._selected_info(prepared)
       with self._lock:
         self._status.update(state='completed', selectedGeneration=prepared, errorCode=None)
         self._persist()
@@ -632,6 +771,7 @@ class MapSnapshotOperationOwner:
       code = error.code if isinstance(error, OperationError) else 'process_failed'
       try:
         selected = self._selected()
+        self._selected_info(selected)
       except (OSError, ValueError, OperationError):
         selected = None
       if selection_acknowledged and prepared is not None and selected == prepared:
@@ -725,6 +865,26 @@ def serve(owner: MapSnapshotOperationOwner, *, socket_path: Path = SOCKET_PATH,
   finally:
     os.close(lock_fd)
 
+
+
+_SLC_READINESS_OWNER: MapSnapshotOperationOwner | None = None
+_SLC_READINESS_LOCK = threading.RLock()
+
+
+def maps_slc_available() -> bool:
+  """Settings-only readiness using the canonical package and snapshot caches."""
+  global _SLC_READINESS_OWNER
+  with _SLC_READINESS_LOCK:
+    if _SLC_READINESS_OWNER is None:
+      # No marker, transfer, process, parked authority or worker is created.
+      _SLC_READINESS_OWNER = MapSnapshotOperationOwner()
+    owner = _SLC_READINESS_OWNER
+    if not owner._package_ready():
+      return False
+    try:
+      return bool(owner._selected())
+    except (OSError, ValueError, OperationError):
+      return False
 
 def main() -> None:
   if sys.platform != 'linux':

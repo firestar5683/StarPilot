@@ -282,6 +282,7 @@ class TestEv6ConfiguredDesire(unittest.TestCase):
       params.put('MainCruiseButtonControl', 0, block=True)
       card = Car.__new__(Car)
       card.params, card.CP = params, ev6_params()
+      card.CI = SimpleNamespace(CP=card.CP, CC=None)
       card.slc_transport_available = False
       card.v_cruise_helper = VCruiseHelper(card.CP)
       card.aol_card_intent = Ev6CardIntent(read_settings(params))

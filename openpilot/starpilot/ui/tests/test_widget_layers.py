@@ -148,6 +148,13 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   namespace['_ordered_widgets'](view, NS(x=30, y=30, width=1800, height=1020), state)
   assert seen == order
   view.pip_layer.assert_called_once()  # Acquire the camera frame once, then draw each side at its layer.
+  for selected in order:
+    seen.clear()
+    namespace['_ordered_widgets'](view, NS(x=30, y=30, width=1800, height=1020), state, only_widget=selected)
+    assert seen == [selected]
+  seen.clear()
+  namespace['_ordered_widgets'](view, NS(x=30, y=30, width=1800, height=1020), state, only_widget='not_a_widget')
+  assert seen == []
   seen.clear()
   state.alert.size = 'full'
   namespace['_ordered_widgets'](view, NS(x=30, y=30, width=1800, height=1020), state)

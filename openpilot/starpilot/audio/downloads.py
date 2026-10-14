@@ -14,7 +14,7 @@ import urllib.request
 import uuid
 import zipfile
 
-from openpilot.starpilot.audio.sound_pack import LEGACY_NAMES, MAX_WAV_BYTES, PACK_ROOT, pack_directory, read_wav
+from openpilot.starpilot.audio.sound_pack import REMOVED_PACKS, cleanup_removed_packs, LEGACY_NAMES, MAX_WAV_BYTES, PACK_ROOT, pack_directory, read_wav
 
 
 ORIGIN = "https://huggingface.co/buckets/StarPilot-Driving/StarPilot-Resources/resolve/"
@@ -63,7 +63,7 @@ class SoundDownloads:
       packs = {}
       for pack in catalog["packs"]:
         slug = pack["id"]
-        if (not isinstance(slug, str) or not SLUG.fullmatch(slug) or slug == "stock" or slug in packs or
+        if (not isinstance(slug, str) or not SLUG.fullmatch(slug) or slug == "stock" or slug in REMOVED_PACKS or slug in packs or
             pack["path"] != f"theme/Themes/{slug}/sounds.zip" or
             not isinstance(pack["name"], str) or not 0 < len(pack["name"]) <= 128 or
             type(pack["size"]) is not int or not 0 < pack["size"] <= MAX_ARCHIVE_BYTES or
@@ -71,6 +71,7 @@ class SoundDownloads:
           raise ValueError("invalid catalog entry")
         packs[slug] = pack
       self._packs = packs
+      cleanup_removed_packs(self.root, parked=self._safe_parked)
     except (OSError, ValueError, KeyError, TypeError) as exc:
       raise SoundDownloadError("sound catalog unavailable", 503) from exc
 
@@ -91,6 +92,7 @@ class SoundDownloads:
     }
 
   def action(self, command: str, data: dict) -> dict:
+    cleanup_removed_packs(self.root, parked=self._safe_parked)
     if not isinstance(data, dict):
       raise SoundDownloadError("invalid request")
     with self._lock:

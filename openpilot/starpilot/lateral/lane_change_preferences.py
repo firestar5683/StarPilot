@@ -164,3 +164,41 @@ def read_saved(params: Any) -> SavedLaneChange:
 def effective(saved: SavedLaneChange) -> LaneChangePolicy:
   policy = saved.policy if saved.readable and saved.valid else LaneChangePolicy()
   return replace(policy, minimum_speed_mps=max(MINIMUM_SPEED_MPS, policy.minimum_speed_mps))
+
+
+class LiveLaneChangePolicy:
+  """One canonical document, bounded refresh, safe per-maneuver adoption.
+
+  Disabling assistance is immediate on the next successful refresh. Enabling
+  it, or changing maneuver parameters, cannot turn a held signal into a newly
+  authorized maneuver or alter an already committed maneuver's pace.
+  """
+  REFRESH_NS = 1_000_000_000
+
+  def __init__(self, params, *, now_ns=0):
+    self.params = params
+    saved = read_saved(params)
+    self.requested = effective(saved) if saved.readable and saved.valid else self._disabled()
+    self.applied = self.requested
+    self.last_read_ns = now_ns if type(now_ns) is int and now_ns > 0 else 0
+
+  @staticmethod
+  def _disabled():
+    return replace(LaneChangePolicy(), enabled=False, auto_lane_change=False)
+
+  def sample(self, now_ns, *, signaling=False, maneuver_active=False):
+    if type(now_ns) is not int or now_ns <= 0 or now_ns < self.last_read_ns:
+      self.last_read_ns = 0
+      self.requested = self.applied = self._disabled()
+      return self.applied
+    if not self.last_read_ns or now_ns - self.last_read_ns >= self.REFRESH_NS:
+      saved = read_saved(self.params)
+      self.requested = effective(saved) if saved.readable and saved.valid else self._disabled()
+      self.last_read_ns = now_ns
+    if not self.requested.enabled:
+      self.applied = replace(self.applied, enabled=False, auto_lane_change=False)
+    elif not self.requested.auto_lane_change and self.applied.auto_lane_change:
+      self.applied = replace(self.applied, auto_lane_change=False)
+    if not signaling and not maneuver_active:
+      self.applied = self.requested
+    return self.applied

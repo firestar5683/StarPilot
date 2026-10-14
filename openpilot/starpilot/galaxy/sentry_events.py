@@ -1,4 +1,4 @@
-"""Bounded, read-only projection of local Sentry motion metadata."""
+"""Bounded projection of local Sentry motion metadata."""
 
 import json
 import re
@@ -18,6 +18,10 @@ class SentryEventsUnavailable(Exception):
 
 class EventSnapshotSource(Protocol):
   def snapshot(self) -> dict: ...
+
+
+class EventDeletionSource(Protocol):
+  def delete(self, event_id: str | None = None, *, permitted: Callable[[], bool]) -> dict: ...
 
 
 class SentryEvents:
@@ -42,7 +46,8 @@ class SentryEvents:
                        "systemTimeMs": value["wallTimeNs"] // 1_000_000,
                        "images": cast(Callable[[str], list], self.store.images)(value["eventId"]) if hasattr(self.store, "images") else []})
       result = {"schemaVersion": 1, "source": "local", "scanIncomplete": source["incomplete"],
-                "capacity": source["capacity"], "events": events}
+                "capacity": source["capacity"], "events": events,
+                "storageBytes": source.get("storageBytes", 0), "storageIncomplete": source.get("storageIncomplete", False)}
       if len(json.dumps(result, separators=(",", ":")).encode()) > MAX_RESPONSE_BYTES:
         raise ValueError("Motion response exceeds limit")
       return result
@@ -53,4 +58,11 @@ class SentryEvents:
     try:
       return self.store.image(event_id, camera)
     except (OSError, StorageUnavailable, AttributeError) as error:
+      raise SentryEventsUnavailable from error
+
+  def delete(self, event_id=None, *, permitted=lambda: True):
+    try:
+      result = cast(EventDeletionSource, self.store).delete(event_id, permitted=permitted)
+      return {**self.snapshot(), **result}
+    except (StorageUnavailable, OSError, AttributeError) as error:
       raise SentryEventsUnavailable from error

@@ -22,7 +22,7 @@ Wireless Android Auto can remain enabled.
 
 Use a USB 3 data cable and separate power, and set up both devices online while
 parked. Keep the computer awake; keep the iPhone app open and unlocked. Follow
-[Jetlink's setup guides](https://github.com/zoompilot/jetlink/blob/c17cd5c/docs/README.md)
+[the StarPilot JetLink setup guide](JETLINK.md)
 for the host installation and model preparation. Galaxy shows connection and
 preparation progress; **prepared** does not mean the remote model is driving.
 Small/Chestnut catalog selections and their defaults remain separate. Phone

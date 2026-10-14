@@ -75,7 +75,7 @@ def test_daemon_uses_configuration_authority_and_cleans_up_after_bind_failure(bi
       resource.close.assert_called_once()
 
 
-def test_force_offroad_accepts_onroad_but_force_onroad_rejects_movement(tmp_path):
+def test_force_offroad_requires_park_but_force_onroad_accepts_movement(tmp_path):
   from openpilot.starpilot.drive_state.evidence import PhysicalSource
   from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode, Rejected
   from openpilot.starpilot.drive_state.tests.test_owner import Params, BOOT
@@ -98,11 +98,12 @@ def test_force_offroad_accepts_onroad_but_force_onroad_rejects_movement(tmp_path
   messages.values['carState'].standstill = False
   revision = owner.snapshot().revision
   assert revision is not None
-  state = owner.request('offroad', expected_revision=revision,
-                        authorized=lambda: True, override_allowed=physical.allowed)
-  assert state.mode == Mode.OFFROAD
-  assert state.revision is not None
   with pytest.raises(Rejected):
-    owner.request('onroad', expected_revision=state.revision,
+    owner.request('offroad', expected_revision=revision,
                   authorized=lambda: True, override_allowed=physical.allowed)
+  assert owner.snapshot().mode == Mode.AUTO
+  state = owner.request('onroad', expected_revision=revision,
+                        authorized=lambda: True, override_allowed=physical.allowed)
+  assert state.mode == Mode.ONROAD
+  assert state.revision is not None
   physical.close()

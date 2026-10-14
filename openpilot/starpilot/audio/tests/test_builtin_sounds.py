@@ -28,7 +28,7 @@ def test_default_builtin_assets_flow_through_soundd_callback(tmp_path):
   assert BUILTIN_FILES[sound_list[AudibleAlert.warningImmediate][0]] == 'warning_3.wav'
 
 
-@pytest.mark.parametrize('name', ['frog', 'Frog', 'frogpilot'])
+@pytest.mark.parametrize('name', ['frog', 'Frog', 'frogpilot', 'stalin', 'STALIN'])
 def test_removed_choice_migrates_without_loading_old_pack(tmp_path, name):
   params = Params(str(tmp_path / 'params'))
   params.put('SoundPack', name, block=True)
@@ -51,7 +51,7 @@ def test_explicit_user_choice_is_preserved(tmp_path, name):
 
 
 def test_removed_and_builtin_packs_cannot_be_shadowed(tmp_path):
-  for name in ('starpilot', 'stock', 'frog', 'Frog', 'custom'):
+  for name in ('starpilot', 'stock', 'frog', 'Frog', 'stalin', 'STALIN', 'custom'):
     (tmp_path / name / 'sounds').mkdir(parents=True, exist_ok=True)
   assert installed_packs(tmp_path) == ('starpilot', 'stock', 'custom')
 
@@ -62,9 +62,9 @@ def test_builtin_labels_keep_persisted_sound_selection_stable(tmp_path):
   params = Params(str(tmp_path / 'params'))
   owner = SoundsOwner(params, lambda: True, tmp_path / 'packs')
   row = owner.snapshot().rows[-1]
-  assert row.value == 'StarPilot (Built-in)'
-  assert row.choices == ('StarPilot (Built-in)', 'Stock (openpilot)')
-  assert owner.apply(FeatureSettingsRequest(key='SoundPack', expected=None, value='Stock (openpilot)'))
+  assert row.value == 'StarPilot Sounds'
+  assert row.choices == ('StarPilot Sounds', 'Stock Sounds')
+  assert owner.apply(FeatureSettingsRequest(key='SoundPack', expected=None, value='Stock Sounds'))
   assert params.get('SoundPack') == 'stock'
-  assert owner.apply(FeatureSettingsRequest(key='SoundPack', expected=b'stock', value='StarPilot (Built-in)'))
+  assert owner.apply(FeatureSettingsRequest(key='SoundPack', expected=b'stock', value='StarPilot Sounds'))
   assert params.get('SoundPack') == 'starpilot'

@@ -245,7 +245,7 @@ class SettingsGatewayTest(unittest.TestCase):
   def test_all_saved_groups_are_display_only_projection(self):
     hub = self.page("hub")
     self.assertEqual([row["page"] for row in hub["rows"]],
-                     ["slc", "lane", "lane_change", "profiles", "conditional", "curve", "torque", "aol", "wheel",
+                     ["curve", "slc", "lane", "lane_change", "profiles", "conditional", "torque", "aol", "wheel",
                       "aggressive", "standard", "relaxed", "traffic"])
     for page in ("slc", "lane", "lane_change", "profiles", "conditional", "conditional/cem", "conditional/ccm",
                  "curve", "torque", "aol", "appearance", "display", "sounds", "pip", "sentry", "aggressive/following"):
@@ -326,13 +326,13 @@ class SettingsGatewayTest(unittest.TestCase):
         saved = Path(self.params.get_param_path("SoundPack"))
         self.assertEqual(saved.read_bytes(), b"custom_pack")
 
-        intent = preview("Stock (openpilot)")
+        intent = preview("Stock Sounds")
         saved.write_bytes(b"custom_pack ")
         self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
         self.assertEqual(saved.read_bytes(), b"custom_pack ")
 
         saved.write_bytes(b"custom_pack")
-        intent = preview("Stock (openpilot)")
+        intent = preview("Stock Sounds")
         self.context.value = AuthorityContext(False, None, None)
         self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
         self.assertEqual(saved.read_bytes(), b"stock")
@@ -741,7 +741,8 @@ class SettingsGatewayTest(unittest.TestCase):
     page = self.page("lane_change")
     auto = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Automatic Lane Changes")
     intent = self.gateway.preview(page["view"], auto, 1, self.session, self.generation)
-    self.assertIn("next drive", intent["question"].lower())
+    self.assertIn("after the current signal and maneuver end", intent["question"].lower())
+    self.assertNotIn("next drive", intent["question"].lower())
     self.assertIn("blindspot checks remain required", intent["question"].lower())
     self.assertNotIn("development", intent["question"].lower())
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
@@ -764,12 +765,14 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertEqual((page["rows"][gap]["minimum"], page["rows"][gap]["maximum"], page["rows"][gap]["step"]),
                      (0.75, 1.0, 0.05))
     intent = self.gateway.preview(page["view"], close, 1, self.session, self.generation)
-    self.assertIn("as On for the next drive", intent["question"])
+    self.assertIn("to On", intent["question"])
+    self.assertIn("Changes refresh during this drive", intent["question"])
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
     self.assertTrue(read_lane_change(self.params).policy.close_gap)
     page = self.page("lane_change")
     intent = self.gateway.preview(page["view"], gap, 1, self.session, self.generation)
-    self.assertIn("as 0.8 s for the next drive", intent["question"])
+    self.assertIn("to 0.8 seconds", intent["question"])
+    self.assertIn("Changes refresh during this drive", intent["question"])
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
     self.assertEqual(read_lane_change(self.params).policy.close_gap_seconds, 0.8)
     self.assertEqual(self.page("lane_change")["rows"][gap]["value"], "0.8")

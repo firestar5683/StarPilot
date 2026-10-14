@@ -34,7 +34,7 @@ from openpilot.starpilot.lateral.lane_centering import (
   LaneCenteringController, LaneCenteringInput, LaneCenteringRequest, LaneCenteringResult,
 )
 from openpilot.starpilot.lateral.lane_feedback import feedback_message
-from openpilot.starpilot.lateral.lane_change_preferences import read_saved as read_lane_change, effective as lane_change_policy
+from openpilot.starpilot.lateral.lane_change_preferences import LiveLaneChangePolicy
 from openpilot.starpilot.lateral.lane_change_smoothing import LaneChangeSmoother, limit_rate
 from openpilot.starpilot.lateral.lane_runtime import LaneCenteringHost, runtime_supported as lane_runtime_supported
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, runtime_enabled as torque_runtime_enabled
@@ -86,7 +86,9 @@ class Controls:
     self.model_turn_assist = ModelTurnAssist()
     self.lane_centering_controller = LaneCenteringController()
     self.lateral_pause = LateralPause(read_lateral_pause(self.params), self.params)
-    self.lane_change_policy = lane_change_policy(read_lane_change(self.params))
+    self.lane_change_preferences = LiveLaneChangePolicy(self.params,
+      now_ns=0 if os.getenv('REPLAY') == '1' else time.monotonic_ns())
+    self.lane_change_policy = self.lane_change_preferences.applied
     self.lane_change_smoother = LaneChangeSmoother()
     self.lane_centering_host = LaneCenteringHost(self.params) if lane_runtime_supported(self.CP) else None
     self.torque_host = (TorqueHost(self.params, self.CP, allow_learning=(self.torque_learning_allowed
@@ -135,6 +137,12 @@ class Controls:
     if self.sm.updated["deviceMotion"]:
       device_motion = Pose.from_device_motion(self.sm['deviceMotion'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_motion)
+
+  def refresh_lane_change_policy(self, carstate, model_v2, now_ns):
+    self.lane_change_policy = self.lane_change_preferences.sample(now_ns,
+      signaling=bool(carstate.leftBlinker or carstate.rightBlinker),
+      maneuver_active=model_v2.meta.laneChangeState != LaneChangeState.off)
+    return self.lane_change_policy
 
   def state_control(self, *, lane_centering: LaneCenteringRequest | None = None):
     CS = self.sm['carState']
@@ -308,6 +316,8 @@ class Controls:
       if result.candidate_curvature is not None:
         new_desired_curvature = result.candidate_curvature
     previous_curvature = self.desired_curvature
+    lane_policy_now_ns = int(self.sm.logMonoTime['carState']) if os.getenv('REPLAY') == '1' else time.monotonic_ns()
+    self.refresh_lane_change_policy(CS, model_v2, lane_policy_now_ns)
     factor = self.lane_change_smoother.factor(
       active=bool(CC.latActive and CS.canValid and not CS.canTimeout and self.sm.all_checks(['modelV2']) and
                   self.lane_change_policy.enabled), lane_change_state=model_v2.meta.laneChangeState,

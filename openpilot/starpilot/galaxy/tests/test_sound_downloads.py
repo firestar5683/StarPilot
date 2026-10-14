@@ -92,7 +92,7 @@ class SoundDownloadsHttpTest(unittest.TestCase):
           status, page = request('/api/settings/pages/sounds')
           self.assertEqual(status, 200)
           row = next(item for item in page['rows'] if item['label'] == 'Sound Pack')
-          self.assertEqual(row['value'], 'Stock (openpilot)')
+          self.assertEqual(row['value'], 'Stock Sounds')
           self.assertIn('test', row['choices'])
         self.assertEqual(Path(params.get_param_path('SoundPack')).read_bytes(), b'stock')
         self.assertEqual(request('/api/sounds/download', {'pack': 'test'})[0], 409)

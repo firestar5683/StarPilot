@@ -161,7 +161,11 @@ def test_fresh_lag_does_not_waive_fault_dm_or_native_gates(fault):
          mock.patch.object(sd.rk.avg_dt, 'get_average', return_value=0.02):
       axis, _, command = drive(5, state_stamp=stamp, observed_state=observed, **options)
     if fault in ('dm_three', 'dm_lockout'):
-      assert delivered == [stamp] and sd.aol_dm_lateral_inhibit
+      assert delivered == [stamp] and sd.aol_availability_long_inhibit
+      assert not sd.aol_dm_lateral_inhibit and not sd.enabled
+      assert sd.aol_dm_retained_owner == (sd.aol_last_intent.producerSessionId, sd.aol_session_id)
+      expected = log.OnroadEvent.EventName.driverDistracted3 if fault == 'dm_three' else log.OnroadEvent.EventName.tooDistracted
+      assert expected in sd.events.names
     assert not axis.lateralActive and not axis.longitudinalActive
     assert not command.latActive and not command.longActive
     assert not sd.events.contains(fixture.ET.ENABLE)

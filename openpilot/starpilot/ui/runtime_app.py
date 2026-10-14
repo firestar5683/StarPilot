@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from openpilot.starpilot.ui.lane_change_feature import confirm_question as lane_change_question
+
 from collections import deque
 from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
@@ -1142,18 +1144,7 @@ class StarShellSession:
     from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
     from openpilot.system.ui.widgets import DialogResult
     epoch = self._lane_change_request_epoch
-    if request.key == LANE_CHANGE_RESET:
-      question = "Restore StarPilot driver-nudged lane-change settings for the next drive?"
-    elif request.key == "lane_change:speed":
-      question = f"Save a {request.value} {request.display_unit} lane-change minimum for the next drive? Blindspot checks remain required."
-    elif request.key == "lane_change:auto":
-      question = (f"Save Automatic Lane Changes {request.value} for the next drive? " +
-                  "Vehicle support, lane and blindspot checks remain required.")
-    elif request.key in ("lane_change:delay", "lane_change:width"):
-      unit = "seconds" if request.key == "lane_change:delay" else "feet"
-      question = f"Save {request.value} {unit} for automatic lane changes on the next drive? Lane and blindspot checks remain required."
-    else:
-      question = f"Save {request.value} for the next drive? Blindspot checks remain required."
+    question = lane_change_question(request)
     def confirmed(result: DialogResult) -> None:
       if (result == DialogResult.CONFIRM and self._mode == ShellMode.SETTINGS and
           self.selected == Destination.DRIVING_CONTROLS and self.feature_page == FeaturePage.LANE_CHANGE and

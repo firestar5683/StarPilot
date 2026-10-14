@@ -9,6 +9,7 @@ from opendbc.car.secoc import add_mac, build_sync_mac
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota import prius_longitudinal
+from opendbc.car.toyota.door_locks import DoorLocks
 from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.can import CANPacker
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -69,6 +70,7 @@ def get_long_tune(CP, params):
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
+    self.door_locks = DoorLocks()
     self.reverse_cruise_input = None
     self.prius_filter_input = None
     self.params = CarControllerParams(self.CP)
@@ -385,6 +387,11 @@ class CarController(CarControllerBase):
     # keep radar disabled
     if self.frame % 20 == 0 and self.CP.flags & ToyotaFlags.DISABLE_RADAR.value:
       can_sends.append(make_tester_present_msg(0x750, 0, 0xF))
+
+    door_command = self.door_locks.update(CS.out)
+    if door_command is not None:
+      from opendbc.car import CanData
+      can_sends.append(CanData(0x750, door_command, 0))
 
     new_actuators = actuators.as_builder()
     new_actuators.torque = apply_torque / self.params.STEER_MAX

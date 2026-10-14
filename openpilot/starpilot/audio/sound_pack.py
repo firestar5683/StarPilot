@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import re
+import os
+import stat
 import wave
 
 import numpy as np
@@ -13,7 +15,7 @@ BUILTIN_FILES = {
   "refuse.wav": "warning_1.wav", "warning.wav": "warning_1.wav", "pre_alert.wav": "warning_1.wav",
   "dm_warning.wav": "warning_2.wav", "critical.wav": "warning_2.wav", "dm_critical.wav": "warning_3.wav",
 }
-REMOVED_PACKS = frozenset(("frog", "frogpilot"))
+REMOVED_PACKS = frozenset(("frog", "frogpilot", "stalin"))
 MAX_WAV_BYTES = 48000 * 2 * 30 + 4096
 LEGACY_NAMES = {
   "warning.wav": "prompt.wav", "dm_warning.wav": "prompt_distracted.wav",
@@ -73,6 +75,141 @@ def migrate_removed_selection(params, root: Path = PACK_ROOT) -> bool:
     return False
   return commit_exact(params, key="SoundPack", max_bytes=128, raw=DEFAULT_PACK.encode(), expected=raw,
                       authorized=lambda: True, temp_prefix=".sound-pack-migration-").verified
+
+
+def cleanup_removed_packs(root: Path = PACK_ROOT, *, parked) -> tuple[str, ...]:
+  """Bounded parked migration over captured directory descriptors.
+
+  Enumerate at most 256 root entries and 64 pack entries, depth 4 / 96 MiB.
+  Keep captured descriptors, never follow links, and check entry identities
+  before mutations. External renames between check and syscall remain a POSIX
+  race; symlink targets are never traversed.
+  Concurrent growth/revocation leaves remaining obsolete files for a later retry.
+  """
+  def safe():
+    try:
+      return bool(parked())
+    except Exception:
+      return False
+
+  def inode(value):
+    return value.st_dev, value.st_ino
+
+  def revision(value):
+    return inode(value), value.st_mtime_ns, value.st_ctime_ns
+
+  removed, opened = [], []
+  try:
+    if not safe() or root.is_symlink():
+      return ()
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    opened.append(root_fd)
+    root_identity = inode(os.fstat(root_fd))
+    names = []
+    with os.scandir(root_fd) as entries:
+      for entry in entries:
+        if len(names) == 256:
+          return ()
+        names.append(entry.name)
+    for name in names:
+      if name.casefold() not in REMOVED_PACKS or not safe():
+        continue
+      expected = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+
+      def guard(name=name, expected=expected):
+        return (safe() and inode(root.lstat()) == root_identity and
+                inode(os.stat(name, dir_fd=root_fd, follow_symlinks=False)) == inode(expected))
+
+      if stat.S_ISLNK(expected.st_mode):
+        if guard():
+          os.unlink(name, dir_fd=root_fd)
+          removed.append(name)
+        continue
+      if not stat.S_ISDIR(expected.st_mode):
+        continue
+      pack_fds, budget = [], [0, 0]
+      try:
+        pack_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+        pack_fds.append(pack_fd)
+        if inode(os.fstat(pack_fd)) != inode(expected):
+          continue
+
+        def plan(directory_fd, depth, *, budget=budget, pack_fds=pack_fds, guard=guard):
+          if depth > 4 or not guard():
+            raise ValueError('cleanup depth or authority')
+          node = [directory_fd, revision(os.fstat(directory_fd)), []]
+          with os.scandir(directory_fd) as entries:
+            for entry in entries:
+              budget[0] += 1
+              if budget[0] > 64:
+                raise ValueError('cleanup entry bound')
+              saved = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
+              child = None
+              if stat.S_ISDIR(saved.st_mode):
+                child_fd = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+                pack_fds.append(child_fd)
+                if inode(os.fstat(child_fd)) != inode(saved):
+                  raise ValueError('cleanup inode changed')
+                child = plan(child_fd, depth + 1)
+              elif not (stat.S_ISREG(saved.st_mode) or stat.S_ISLNK(saved.st_mode)):
+                raise ValueError('cleanup unexpected entry')
+              else:
+                budget[1] += saved.st_size
+                if budget[1] > 96 * 1024 * 1024:
+                  raise ValueError('cleanup byte bound')
+              node[2].append((entry.name, saved, child))
+          if revision(os.fstat(directory_fd)) != node[1]:
+            raise ValueError('cleanup directory changed')
+          return node
+
+        tree = plan(pack_fd, 1)
+
+        def same_entries(directory_fd, expected_names):
+          observed = set()
+          with os.scandir(directory_fd) as entries:
+            for entry in entries:
+              if len(observed) == 64:
+                return False
+              observed.add(entry.name)
+          return observed == expected_names
+
+        def remove(node, *, guard=guard):
+          directory_fd, _, children = node
+          for index, (entry_name, saved, child) in enumerate(children):
+            expected_names = {item[0] for item in children[index:]}
+            if (not guard() or not same_entries(directory_fd, expected_names) or
+                revision(os.fstat(directory_fd)) != node[1]):
+              raise ValueError('cleanup authority or growth')
+            current = os.stat(entry_name, dir_fd=directory_fd, follow_symlinks=False)
+            if revision(current) != revision(saved):
+              raise ValueError('cleanup replacement entry')
+            if child is not None:
+              remove(child)
+              if not guard() or inode(os.stat(entry_name, dir_fd=directory_fd, follow_symlinks=False)) != inode(saved):
+                raise ValueError('cleanup replacement directory')
+              os.rmdir(entry_name, dir_fd=directory_fd)
+            else:
+              os.unlink(entry_name, dir_fd=directory_fd)
+            node[1] = revision(os.fstat(directory_fd))
+          if (not guard() or not same_entries(directory_fd, set()) or
+              revision(os.fstat(directory_fd)) != node[1]):
+            raise ValueError('cleanup authority or growth')
+
+        remove(tree)
+        if guard():
+          os.rmdir(name, dir_fd=root_fd)
+          removed.append(name)
+      except (OSError, ValueError):
+        pass
+      finally:
+        for descriptor in reversed(pack_fds):
+          os.close(descriptor)
+  except (OSError, TypeError, ValueError):
+    pass
+  finally:
+    for descriptor in reversed(opened):
+      os.close(descriptor)
+  return tuple(removed)
 
 
 def read_wav(path: Path) -> np.ndarray:

@@ -1,0 +1,28 @@
+name: simulator driving (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CI: 1
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  simulator_driving:
+    name: simulator driving
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v7
+    - run: ./tools/op.sh setup
+    - name: Build openpilot
+      run: scons
+    - name: Driving test
+      timeout-minutes: 2
+      env:
+        # MetaDrive renders offscreen through panda3d's EGL pipe on llvmpipe
+        EGL_PLATFORM: surfaceless
+      run: python openpilot/tools/sim/tests/test_metadrive_bridge.py

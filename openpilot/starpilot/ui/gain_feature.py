@@ -45,10 +45,8 @@ class GainFeature:
                          choices=("Selected controller",), available=allowed, capability=capability, dependencies=dependencies,
                          default_value="Selected controller"))
     rows = [FeatureRow("", "Manual steering response",
-                       ("Enable before the next drive. Higher values respond more strongly; lower values respond more gently."
-                        if capability[0] in BOLT_VEHICLES else
-                        ("Changes apply to the selected controller during the next drive. " +
-                         "Higher values respond more strongly; lower values respond more gently.")))]
+                       "Higher values respond more strongly; lower values respond more gently. First manual activation " +
+                       "requires a driving-process restart; an active tuning owner refreshes changes during the drive.")]
     rows.append(FeatureRow("torque:gain:mode", "Steering response source",
                            "Custom" if choice.mode == "custom" else "Selected controller", raw,
                            choices=("Selected controller", "Custom"), available=allowed, capability=capability, dependencies=dependencies,

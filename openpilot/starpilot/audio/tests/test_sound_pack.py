@@ -100,7 +100,7 @@ class SoundPackTests(unittest.TestCase):
     parked = [True]
     owner = SoundsOwner(self.params, lambda: parked[0], self.root)
     row = owner.snapshot().rows[-1]
-    self.assertEqual(row.choices, ("StarPilot (Built-in)", "Stock (openpilot)", "custom"))
+    self.assertEqual(row.choices, ("StarPilot Sounds", "Stock Sounds", "custom"))
     request = FeatureSettingsRequest("SoundPack", row.source, "custom")
     self.assertTrue(owner.apply(request))
     self.assertFalse(owner.apply(request))

@@ -31,6 +31,8 @@ class VehicleStartupPreferences:
   toyota_filter: bool = True
   gm_longitudinal_tune: int = 0
   ford_lateral_mode: int = 0
+  toyota_lock_doors: bool = False
+  toyota_unlock_doors: bool = False
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -77,6 +79,10 @@ class VehicleStartupPreferences:
     screen_brake = read_saved(params, 'TeslaAOLDisengageOnBrake', 8) == (b'1', True)
     return cls(ford_lateral_mode=ford_mode(params, enabled=enabled), tesla_screen=screen, tesla_screen_brake=screen_brake, toyota_auto_hold=toyota,
                gm_longitudinal_tune=selected_tune(params, enabled=enabled),
+               toyota_lock_doors=bool(enabled and readable and safe in (None, b"0") and
+                                     read_saved(params, "LockDoors", 8) == (b"1", True)),
+               toyota_unlock_doors=bool(enabled and readable and safe in (None, b"0") and
+                                       read_saved(params, "UnlockDoors", 8) == (b"1", True)),
                volt_sng=volt_sng, gm_auto_hold=gm_auto_hold, volt_one_pedal=volt_one_pedal,
                gm_camera_pedal=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                toyota_filter=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
@@ -175,6 +181,9 @@ class VehicleStartupPreferences:
     from opendbc.car.gm.values import (CAR, is_bolt_euv_longitudinal, is_volt_longitudinal, is_gm_auto_hold,
                                      is_volt_one_pedal, camera_acc_pedal_profile, volt_cc_pedal_profile)
     cp = ci.CP
+    if ci.CC is not None and cp.brand == "toyota" and not cp.passive and not cp.dashcamOnly and not cp.notCar:
+      ci.CC.door_locks.lock = self.toyota_lock_doors
+      ci.CC.door_locks.unlock = self.toyota_unlock_doors
     if ci.CC is not None and is_volt_longitudinal(cp):
       ci.CC.volt_sng = self.volt_sng
     if ci.CC is not None and cp.brand == "gm":

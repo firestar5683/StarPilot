@@ -6,6 +6,7 @@
 // Stock longitudinal
 #define TOYOTA_BASE_TX_MSGS \
   {0x191, 0, 8, .check_relay = true}, {0x412, 0, 8, .check_relay = true}, {0x1D2, 0, 8, .check_relay = false},  /* LKAS + LTA + PCM cancel cmd */  \
+  {0x750, 0, 8, .check_relay = false},  /* literal stationary body commands, restricted below */ \
 
 #define TOYOTA_COMMON_TX_MSGS \
   TOYOTA_BASE_TX_MSGS \
@@ -27,8 +28,6 @@
   {0x470, 1, 4, .check_relay = false}, \
   /* PCS_HUD */                        \
   {0x411, 0, 8, .check_relay = false}, \
-  /* radar diagnostic address */       \
-  {0x750, 0, 8, .check_relay = false}, \
   /* ACC */                            \
   {0x343, 0, 8, .check_relay = true},  \
 
@@ -72,6 +71,7 @@ static bool toyota_secoc = false;
 static bool toyota_alt_brake = false;
 static bool toyota_stock_longitudinal = false;
 static bool toyota_lta = false;
+static bool toyota_radar_diagnostics_allowed = false;
 static int toyota_dbc_eps_torque_factor = 100;   // conversion factor for STEER_TORQUE_EPS in %: see dbc file
 
 static bool toyota_hold_main_on = false;
@@ -88,9 +88,7 @@ static bool toyota_hold_main_seen = false;
 static bool toyota_hold_speed_seen = false;
 static bool toyota_hold_gas_seen = false;
 
-static bool toyota_hold_ready(int permission) {
-  const int hold_mask = ALT_EXP_TOYOTA_AUTO_HOLD | ALT_EXP_TOYOTA_AEB_HOLD;
-  const uint32_t now = microsecond_timer_get();
+static bool toyota_rx_ready(uint32_t now) {
   bool rx_valid = true;
   for (int i = 0; i < current_safety_config.rx_checks_len; i++) {
     const RxStatus *status = &current_safety_config.rx_checks[i].status;
@@ -98,7 +96,13 @@ static bool toyota_hold_ready(int permission) {
                 (status->wrong_counters < MAX_WRONG_COUNTERS) && !status->lagging &&
                 (safety_get_ts_elapsed(now, status->last_timestamp) <= 1000000U);
   }
-  return rx_valid && ((alternative_experience & hold_mask) == permission) && !toyota_stock_longitudinal && !toyota_secoc &&
+  return rx_valid;
+}
+
+static bool toyota_hold_ready(int permission) {
+  const int hold_mask = ALT_EXP_TOYOTA_AUTO_HOLD | ALT_EXP_TOYOTA_AEB_HOLD;
+  const uint32_t now = microsecond_timer_get();
+  return toyota_rx_ready(now) && ((alternative_experience & hold_mask) == permission) && !toyota_stock_longitudinal && !toyota_secoc &&
          toyota_hold_config_valid && !safety_rx_checks_invalid && !relay_malfunction && !vehicle_moving && !gas_pressed && toyota_hold_main_on &&
          toyota_hold_main_seen && toyota_hold_speed_seen && toyota_hold_gas_seen &&
          (safety_get_ts_elapsed(now, toyota_hold_main_ts) <= 1000000U) &&
@@ -175,7 +179,8 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
       toyota_hold_speed_seen = true;
       toyota_hold_speed_ts = microsecond_timer_get();
     }
-    if ((msg_matches(msg, 0x1D2U, 0U)) && (GET_LEN(msg) == 8U)) {
+    if ((((msg_matches(msg, 0x1D2U, 0U)) && !toyota_secoc) ||
+         ((msg_matches(msg, 0x116U, 0U)) && toyota_secoc)) && (GET_LEN(msg) == 8U)) {
       toyota_hold_gas_seen = true;
       toyota_hold_gas_ts = microsecond_timer_get();
     }
@@ -441,12 +446,19 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // UDS: Only tester present ("\x0F\x02\x3E\x00\x00\x00\x00\x00") allowed on diagnostics address
   if (msg->addr == 0x750U) {
-    // this address is sub-addressed. only allow tester present to radar (0xF)
-    bool invalid_uds_msg = GET_BYTES_64_LE(msg, 0, 8) != 0x00000000003E020FULL;
-    if (invalid_uds_msg) {
-      tx = false;
+    uint64_t payload = GET_BYTES_64_LE(msg, 0, 8);
+    bool body_command = (payload == 0x0000800011300540ULL) || (payload == 0x0000400011300540ULL);
+    if (body_command) {
+      // Never admit arbitrary UDS, an unobserved/stale stop, or a moving car.
+      const uint32_t now = microsecond_timer_get();
+      tx &= toyota_rx_ready(now) && toyota_hold_speed_seen && toyota_hold_gas_seen &&
+            !vehicle_moving && !gas_pressed && !safety_rx_checks_invalid && !relay_malfunction &&
+            (safety_get_ts_elapsed(now, toyota_hold_speed_ts) <= 100000U) &&
+            (safety_get_ts_elapsed(now, toyota_hold_gas_ts) <= 100000U);
+    } else {
+      // Preserve the original radar-only tester-present allowance and configuration scope.
+      tx &= toyota_radar_diagnostics_allowed && (payload == 0x00000000003E020FULL);
     }
   }
 
@@ -502,6 +514,7 @@ static safety_config toyota_init(uint16_t param) {
 
   toyota_alt_brake = GET_FLAG(param, TOYOTA_PARAM_ALT_BRAKE);
   toyota_stock_longitudinal = GET_FLAG(param, TOYOTA_PARAM_STOCK_LONGITUDINAL);
+  toyota_radar_diagnostics_allowed = !toyota_stock_longitudinal && !toyota_secoc && (param != 0x1049U);
   toyota_lta = GET_FLAG(param, TOYOTA_PARAM_LTA);
   toyota_dbc_eps_torque_factor = param & TOYOTA_EPS_FACTOR;
 

@@ -357,3 +357,16 @@ bool safety_test_hyundai_angle_invalid_capacity(unsigned int count) {
   const bool bounded = hyundai_canfd_angle_aol_capacity(&fixture);
   return !bounded && (fixture.rx_checks_len == 0) && (fixture.tx_msgs_len == 0);
 }
+
+// Toyota's actual required-RxStatus guard, exercised without a periodic safety tick.
+bool safety_test_toyota_rx_summary_invalid(void) {
+  return safety_rx_checks_invalid;
+}
+
+bool safety_test_toyota_invalid_counter_status(void) {
+  if ((current_safety_mode != SAFETY_TOYOTA) || (current_safety_config.rx_checks_len <= 0)) {
+    return false;
+  }
+  current_safety_config.rx_checks[0].status.wrong_counters = MAX_WRONG_COUNTERS;
+  return !safety_rx_checks_invalid;
+}

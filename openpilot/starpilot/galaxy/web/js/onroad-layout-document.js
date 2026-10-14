@@ -171,6 +171,9 @@ export function validSnapshot(data) {
       new Set(profile.widgetOrder).size !== profile.widgetOrder.length ||
       !profile.widgetOrder.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)) ||
       !frontmostOrder(profile.widgetOrder, profile))) return false
+    if (profile.runtimePreviewWidgets != null && (!Array.isArray(profile.runtimePreviewWidgets) ||
+      new Set(profile.runtimePreviewWidgets).size !== profile.runtimePreviewWidgets.length ||
+      !profile.runtimePreviewWidgets.every(id => typeof id === "string" && Object.hasOwn(profile.widgets, id)))) return false
     const bounds = profile.bounds
     if (projection && (profile.widgets?.car_exit?.kind !== "car_exit" || profile.widgets.car_exit.required !== true)) return false
     if (profile.protectedWidget != null && (profile.protectedWidget !== "speed_limit_actions" ||

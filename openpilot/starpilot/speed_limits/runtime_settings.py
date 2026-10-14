@@ -15,7 +15,7 @@ MPH_TO_MPS = od.MPH_TO_MPS
 KPH_TO_MPS = od.KPH_TO_MPS
 IMPERIAL_BOUNDS = od.IMPERIAL_BOUNDS
 METRIC_BOUNDS = od.METRIC_BOUNDS
-LABELS = {"Dashboard": sel.Source.DASHBOARD, "Map Data": sel.Source.MAP, "Vision": sel.Source.VISION}
+LABELS = {"Dashboard": sel.Source.DASHBOARD, "Map Data": sel.Source.MAP, "Maps": sel.Source.MAP, "Vision": sel.Source.VISION}
 
 
 @dataclass(frozen=True)

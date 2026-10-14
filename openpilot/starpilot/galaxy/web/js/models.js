@@ -479,7 +479,7 @@ export const ModelsPage = {
               <button class="gx-btn gx-btn--tonal" type="button" :aria-pressed="status.jetlink.chargePhone" :disabled="!actionAvailable('jetlink')" @click="configureJetlink(status.jetlink.mode, !status.jetlink.chargePhone)">{{ status.jetlink.chargePhone ? 'On' : 'Off' }}</button>
             </div>
             <p class="gx-model-reason">Set up parked with a USB 3 data cable and separate power. Keep the computer awake; keep the iPhone app open and unlocked.</p>
-            <a href="https://github.com/zoompilot/jetlink/blob/c17cd5c/docs/README.md" target="_blank" rel="noopener noreferrer">Jetlink setup guides</a>
+            <a href="https://github.com/firestar5683/StarPilot/blob/StarPilot/openpilot/starpilot/models/JETLINK.md" target="_blank" rel="noopener noreferrer">Jetlink setup guides</a>
           </div>
         </section>
 

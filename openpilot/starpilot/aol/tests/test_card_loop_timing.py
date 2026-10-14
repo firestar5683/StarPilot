@@ -210,6 +210,7 @@ def test_actual_params_worker_emits_after_recorder_releases_frame(monkeypatch):
   daemon.loop_timing = timing
   daemon.params = SimpleNamespace(get_bool=lambda key: False)
   daemon.CP = SimpleNamespace(openpilotLongitudinalControl=False, pcmCruise=False)
+  daemon.CI = SimpleNamespace(CP=daemon.CP, CC=None)
   daemon.aol_card_intent = None
   daemon.v_cruise_helper = SimpleNamespace(intervals=None)
   daemon.read_slc_configuration = lambda: 'configuration'
@@ -294,6 +295,7 @@ def test_actual_params_worker_preserves_inherited_scheduling(monkeypatch):
   daemon: Any = module.Car.__new__(module.Car)
   daemon.loop_timing = None
   daemon.CP = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False)
+  daemon.CI = SimpleNamespace(CP=daemon.CP, CC=None)
   cp_before = dict(vars(daemon.CP))
   daemon.aol_card_intent = None
   daemon.v_cruise_helper = SimpleNamespace(intervals=None)
@@ -488,6 +490,7 @@ def test_actual_params_worker_formats_output_snapshot_before_settings_reads(monk
     return False
   daemon.params = SimpleNamespace(get_bool=read_bool)
   daemon.CP = SimpleNamespace(openpilotLongitudinalControl=False, pcmCruise=False)
+  daemon.CI = SimpleNamespace(CP=daemon.CP, CC=None)
   daemon.aol_card_intent = None
   daemon.v_cruise_helper = SimpleNamespace(intervals=None)
   daemon.read_slc_configuration = lambda: 'configuration'

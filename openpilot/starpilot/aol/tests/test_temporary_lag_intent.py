@@ -202,7 +202,7 @@ def test_axis_first_critical_join_never_masks_missing_or_hard_occurrence(failure
 
 
 @pytest.mark.parametrize('dm', ['alert_three', 'lockout'])
-def test_dm_inhibits_actual_lateral_output_during_and_after_lag(dm):
+def test_dm_preserves_armed_lateral_after_lag_but_long_remains_disabled(dm):
   case = fixture.IoniqAvailabilityTests(methodName='runTest')
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
@@ -244,19 +244,20 @@ def test_dm_inhibits_actual_lateral_output_during_and_after_lag(dm):
         assert sd.sm['driverMonitoringState'].lockout
       assert not axis.lateralActive and not axis.longitudinalActive
       assert not command.latActive and not command.longActive
-      assert sd.aol_dm_lateral_inhibit
+      assert sd.aol_availability_long_inhibit and not sd.aol_dm_lateral_inhibit
       expected = log.OnroadEvent.EventName.driverDistracted3 if dm == 'alert_three' else log.OnroadEvent.EventName.tooDistracted
       assert expected in sd.events.names
       assert receive(10_050_000_000, axis=sd.pm.messages['aolAxisState'], event=sd.pm.messages['onroadEvents'])
       assert card.aol_card_intent.allowed_latch
       dm_current[0] = False
       # DM remains current until its next cadence sample; neither clearing lag
-      # nor a new positive native ACK removes the independent lateral inhibit.
+      # nor a new positive native ACK reenables ordinary LONG.
       for tick in range(6, 11):
         axis, state, command = drive(tick, native_request_long=False)
-        assert sd.aol_dm_lateral_inhibit
-        assert not axis.lateralActive and not axis.longitudinalActive
-        assert not command.latActive and not command.longActive and not state.enabled
+        assert sd.aol_availability_long_inhibit and not sd.aol_dm_lateral_inhibit
+        assert axis.lateralActive and not axis.longitudinalActive
+        assert command.latActive and not command.longActive and not state.enabled
+        assert not sd.events.contains(fixture.ET.ENABLE)
       assert delivered == [10_050_000_000, 10_100_000_000]
       assert sd.sm.logMonoTime['driverMonitoringState'] == 10_100_000_000
       assert sd.sm['driverMonitoringState'].alertLevel == log.DriverMonitoringState.AlertLevel.none

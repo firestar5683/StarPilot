@@ -10,7 +10,7 @@ from openpilot.starpilot.aol.tests.test_input_deadline_continuity import intent
 
 
 @pytest.mark.parametrize('fault', ['alert_three', 'lockout'])
-def test_source_zero_withdrawal_respects_dm_inhibit_after_current_dm_clears(fault):
+def test_source_zero_withdrawal_preserves_armed_dm_lateral_but_never_commands_without_source(fault):
   case = fixture.IoniqAvailabilityTests(methodName='runTest')
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
@@ -46,8 +46,9 @@ def test_source_zero_withdrawal_respects_dm_inhibit_after_current_dm_clears(faul
       axis, _, command = drive(5)
       assert delivered == [10_050_000_000]
       assert sd.sm.logMonoTime['driverMonitoringState'] == 10_050_000_000
-      assert sd.aol_dm_lateral_inhibit
-      assert not axis.lateralActive and not command.latActive
+      assert sd.aol_availability_long_inhibit and not sd.aol_dm_lateral_inhibit
+      assert axis.lateralActive and command.latActive
+      assert not axis.longitudinalActive and not command.longActive and not sd.enabled
       if fault == 'alert_three':
         assert sd.sm['driverMonitoringState'].alertLevel == log.DriverMonitoringState.AlertLevel.three
       else:
@@ -55,8 +56,9 @@ def test_source_zero_withdrawal_respects_dm_inhibit_after_current_dm_clears(faul
       current_fault[0] = False
       for tick in range(6, 11):
         axis, _, command = drive(tick)
-        assert sd.aol_dm_lateral_inhibit
-        assert not axis.lateralActive and not command.latActive
+        assert sd.aol_availability_long_inhibit and not sd.aol_dm_lateral_inhibit
+        assert axis.lateralActive and command.latActive
+        assert not axis.longitudinalActive and not command.longActive and not sd.enabled
       assert delivered == [10_050_000_000, 10_100_000_000]
       assert sd.sm['driverMonitoringState'].alertLevel == log.DriverMonitoringState.AlertLevel.none
       assert not sd.sm['driverMonitoringState'].lockout
@@ -66,9 +68,17 @@ def test_source_zero_withdrawal_respects_dm_inhibit_after_current_dm_clears(faul
       assert accepted.allowedLatch and accepted.lateralArmed and card.aol_card_intent.allowed_latch
       axis, _, command = drive(14, timeout=True, state_stamp=accepted_source,
         intent_message=intent(accepted_source, 11))
-      assert sd.aol_ordinary_source_pause
-      assert sd.aol_dm_lateral_inhibit
+      # DM already disabled ordinary LONG; its source-pause path cannot own this LAT-only gap.
+      assert not sd.aol_ordinary_source_pause
+      assert sd.aol_availability_pause.active
+      assert axis.faultReason == 'availabilityPause'
+      assert not sd.aol_authority_lost
+      assert sd.aol_publication_retained_intent is not None
+      assert sd.aol_publication_retained_intent.carStateLogMonoTime == accepted_source
+      assert sd.aol_availability_long_inhibit and not sd.aol_dm_lateral_inhibit
       assert axis.sourceCarStateMonoTime == 0 and not sd.conditional_car_state_valid
       assert not axis.lateralActive and not axis.longitudinalActive
       assert not command.latActive and not command.longActive
-      assert not axis.desiredLateral and not axis.nativeAcknowledged
+      assert axis.desiredLateral and axis.nativeAcknowledged
+      assert accepted.allowedLatch and accepted.lateralArmed
+      assert not sd.enabled and not sd.events.contains(fixture.ET.ENABLE)

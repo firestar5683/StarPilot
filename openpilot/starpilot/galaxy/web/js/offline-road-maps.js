@@ -237,12 +237,12 @@ export const OfflineRoadMapsPanel = {
         <div class="gx-offline-roads__stats">
           <div class="gx-offline-roads__stat"><span>Downloader</span><strong>{{ serviceLabel }}</strong></div>
           <div class="gx-offline-roads__stat"><span>Mapbox this month</span><strong>{{ usage.tiles.toLocaleString() }}</strong><small>of {{ Math.floor(usage.free * 0.99).toLocaleString() }} free tiles used</small></div>
-          <div v-if="storage" class="gx-offline-roads__stat gx-offline-roads__stat--wide"><span>On this comma</span><strong>{{ formatBytes(storage.used) }}</strong>
+          <div v-if="storage" class="gx-offline-roads__stat gx-offline-roads__stat--wide"><span>Offline overlay road lines</span><strong>{{ formatBytes(storage.used) }}</strong>
             <div class="gx-offline-roads__bar" role="img" :aria-label="formatBytes(storage.used) + ' used for road maps'">
               <i v-for="[label, value, color] in storage.parts" :key="label" :style="{ width: (storage.cap ? Math.max(value ? 1.5 : 0, value / storage.cap * 100) : 0) + '%', background: color }"></i></div>
             <small><span v-for="[label, value, color] in storage.parts" :key="label" class="gx-offline-roads__legend"><b :style="{ background: color }"></b>{{ label }} {{ formatBytes(value) }}</span></small></div>
         </div>
-        <GalaxySettingRow :row="switchRow('Save roads as you drive', data?.settings.saveDriven, 'Keeps the roads around everywhere you drive, so familiar places work offline without planning ahead.')"
+        <GalaxySettingRow :row="switchRow('Save roads as you drive', data?.settings.saveDriven, 'Downloads road lines around and ahead of your car while the map overlay is on and internet is available. Saved lines keep the overlay visible offline; older driven areas are removed when its 600 MB cache fills.')"
           :index="0" :busy="busy" :disabled="!data" :save-value="(index, value) => setSaveDriven(value === 'On')" />
         <div class="gx-offline-roads__picker">
           <div v-if="hasKey" class="gx-offline-roads__map"><canvas ref="canvas" tabindex="0" aria-label="Map. Tap or press Enter to center a new offline area; drag or use arrow keys to pan."></canvas>
@@ -275,7 +275,7 @@ export const OfflineRoadMapsPanel = {
             </div>
           </li>
         </ul>
-        <p v-else-if="data" class="gx-note">No offline areas yet. The overlay still saves the roads you drive{{ data.settings.saveDriven ? '' : ' when that is on' }}.</p>
+        <p v-else-if="data" class="gx-note">No offline areas yet.{{ data.settings.saveDriven ? ' Road lines are saved while the map overlay is on.' : ' Turn on Save roads as you drive to retain road lines along your drives.' }}</p>
         <p v-if="data?.route" class="gx-note">Active route: {{ data.route.done }} of {{ data.route.total }} corridor tiles checked.</p>
       </template>
     </section>`,

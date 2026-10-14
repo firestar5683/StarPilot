@@ -86,6 +86,7 @@ class FeatureRow:
   default_key: str = ""
   actions: tuple[tuple[str, bool], ...] = ()
   presets: tuple[tuple[str, str], ...] = ()
+  default_reset_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -476,8 +477,8 @@ def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | 
   return row_request(row, value)
 
 
-def row_default(row: FeatureRow) -> FeatureSettingsRequest | None:
-  if not row.available or not row.key or row.page or row.default_value is None:
+def row_default(row: FeatureRow, *, allow_inactive: bool = False) -> FeatureSettingsRequest | None:
+  if (not row.available and not (allow_inactive and row.default_reset_available)) or not row.key or row.page or row.default_value is None:
     return None
   if not row.default_key and row.default_value not in row.choices:
     if row.step:

@@ -179,7 +179,9 @@ class TestFastUpdate(unittest.TestCase):
     from openpilot.common.params import Params as NativeParams
     params = NativeParams(str(Path(self.temp.name) / 'params'))
     params.put_bool('IsOffroad', True, block=True)
-    source = type('Physical', (), {'allowed': lambda self: True, 'effective': lambda self: False, 'close': lambda self: None})()
+    source = type('Physical', (), {'allowed': lambda self: True, 'effective': lambda self: False,
+      'update_ready': lambda self, manager_offroad: manager_offroad and self.allowed() and self.effective() is False,
+      'close': lambda self: None})()
     updater = updated.Updater.__new__(updated.Updater)
     updater.params = params
     finalized = Path(self.temp.name) / 'finalized'

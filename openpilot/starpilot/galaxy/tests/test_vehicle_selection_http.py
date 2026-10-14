@@ -72,6 +72,7 @@ class VehicleSelectionHttpTest(unittest.TestCase):
     self.assertTrue(page['parked'] and page['valid'])
     self.assertIsNone(page['selected'])
     self.assertEqual(page['selectedLabel'], 'Auto detection')
+    self.assertEqual(page['selectionMode'], 'auto')
     self.assertIsNone(page['reported'])
     self.assertNotIn('MOCK', [item['platform'] for item in page['choices']])
     self.assertEqual(page['choices'], [{'platform': choice.platform, 'make': choice.make, 'label': choice.label}
@@ -91,9 +92,25 @@ class VehicleSelectionHttpTest(unittest.TestCase):
     self.assertEqual(readback['selected'], selected['platform'])
     self.assertEqual(readback['reported']['platform'], selected['platform'])
     self.assertNotEqual(readback['selectedLabel'], 'Auto detection')
+    self.assertEqual(readback['selectionMode'], 'manual')
     self.assertEqual(self.request('/api/auth/logout', {}, cookie)[0], 200)
     self.assertEqual(self.request('/api/vehicle-selection', cookie=cookie)[0], 401)
     self.assertEqual(self.request('/api/vehicle-selection/confirm', {'intent': preview['intent'], 'confirmed': True}, cookie)[0], 401)
+
+  def test_runtime_report_is_not_replaced_by_manually_selected_editor_context(self):
+    cookie = self.login()
+    first, second = self.gateway.catalog[:2]
+    self.context.reported = SimpleNamespace(carFingerprint=str(second.platform), notCar=False)
+    self.context.runtime_vehicle = lambda: (SimpleNamespace(carFingerprint=str(first.platform), notCar=False,
+                                                           fingerprintSource='fw'), b'actual-runtime-cp')
+    page = self.request('/api/vehicle-selection', cookie=cookie)[1]
+    self.assertEqual(page['reported']['platform'], str(first.platform))
+    self.assertEqual(page['reported']['origin'], 'detected')
+    self.context.runtime_vehicle = lambda: (SimpleNamespace(carFingerprint=str(first.platform), notCar=False,
+                                                           fingerprintSource='fixed'), b'manual-runtime-cp')
+    page = self.request('/api/vehicle-selection', cookie=cookie)[1]
+    self.assertEqual(page['reported']['origin'], 'manual')
+    self.assertEqual(page['selectionMode'], 'auto')  # Next start can differ from the last running selection.
 
   def test_invalid_saved_source_explicit_auto_repair_and_parked_revocation(self):
     cookie = self.login()

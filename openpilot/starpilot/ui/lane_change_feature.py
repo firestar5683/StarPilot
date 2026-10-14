@@ -26,6 +26,26 @@ CLOSE = "lane_change:close_gap"
 GAP = "lane_change:close_gap_seconds"
 PACE = "lane_change:pace"
 RESET = "lane_change:reset"
+
+
+def confirm_question(request: FeatureSettingsRequest) -> str:
+  if request.key == RESET:
+    return "Restore the default lane-change assistance, signal timing, pace and gap settings?"
+  if request.key == ENABLED and request.value == "Off":
+    return "Turn off lane-change assistance? The current assistance cancels after the preference refresh."
+  if request.key == AUTO and request.value == "Off":
+    return "Turn off automatic lane changes? New automatic triggers stop after the preference refresh."
+  label = {ENABLED: "lane-change assistance", AUTO: "automatic lane changes", SPEED: "minimum lane-change speed",
+           ONE: "one lane change per signal", PACE: "steering pace", DELAY: "signal delay",
+           WIDTH: "minimum adjacent lane width", CLOSE: "Close lane-change gap", GAP: "lane-change following time"}[request.key]
+  unit = request.display_unit
+  if not unit:
+    unit = "seconds" if request.key in (DELAY, GAP) else "feet" if request.key == WIDTH else ""
+  value = f"{request.value} {unit}".rstrip()
+  timing = ("Changes refresh during this drive." if request.key in (CLOSE, GAP) else
+            "Changes apply after the current signal and maneuver end.")
+  checks = ' Lane and blindspot checks remain required.' if request.key == AUTO and request.value == 'On' else ''
+  return f"Set {label} to {value}? {timing}{checks}"
 KEYS = frozenset((ENABLED, SPEED, ONE, AUTO, DELAY, WIDTH, CLOSE, GAP, PACE, RESET))
 
 
@@ -87,23 +107,26 @@ class LaneChangeFeature:
                       available=parked and allowed and self.authority("parked_preferences"), reason=reason)]
     policy = effective(saved)
     long_available = self.longitudinal_available()
-    inactive = "Saved for the next drive; driver nudge and blindspot checks remain available"
     speed = round(policy.minimum_speed_mps * multiplier, 3)
     rows = [replace(common, key=PACE, label="Lane Change Speed", value=str(round(1.0 + (8.0 - policy.duration_s) * 9.0 / 5.0, 2)),
                     step=1.0, minimum=1.0, maximum=10.0, unit="", available=allowed,
-                    reason="Higher values change lanes more quickly; lower values make steering gentler. This does not change the delay after signaling."),
+                    reason="Sets how quickly steering moves into the adjacent lane. Higher values change lanes " +
+                           "more quickly; lower values make steering gentler."),
             replace(common, key=ENABLED, label="Allow lane changes", value="On" if policy.enabled else "Off",
-                    choices=("Off", "On"), available=allowed, reason=inactive),
+                    choices=("Off", "On"), available=allowed,
+                    reason="Enables lane-change assistance after you signal. With Automatic Lane Changes off, give the wheel a nudge to begin."),
             replace(common, key=SPEED, label="Minimum lane-change speed", value=str(speed), step=1.0, minimum=MINIMUM_SPEED_MPS * multiplier,
                     maximum=math.floor(MAX_SPEED_MPS * multiplier * 1000) / 1000,
                     unit=unit if unit_valid else "", available=allowed and unit_valid,
-                    reason=inactive if unit_valid else "Saved speed units unavailable",
+                    reason="Sets the lowest speed at which lane-change assistance can begin." if unit_valid else "Saved speed units unavailable",
                     dependencies=(("IsMetric", unit_raw),), display_unit=unit if unit_valid else ""),
             replace(common, key=ONE, label="One change per signal", value="On" if policy.one_per_signal else "Off",
-                    choices=("Off", "On"), available=allowed, reason=inactive),
+                    choices=("Off", "On"), available=allowed,
+                    reason="Allows one assisted lane change until you release the turn signal."),
             replace(common, key=AUTO, label="Automatic Lane Changes", value="On" if policy.auto_lane_change else "Off",
                     choices=("Off", "On"), available=allowed,
-                    reason="Saved for the next drive; runs while steering assistance is active. Lane and blindspot checks still apply."),
+                    reason="Starts an assisted lane change after the turn signal delay without a steering nudge, " +
+                           "when the adjacent lane and blind spot are clear."),
             replace(common, key=DELAY, label="Automatic lane-change delay", value=str(round(policy.auto_delay_s, 1)),
                     step=0.1, minimum=0.0, maximum=5.0, unit="s", available=allowed,
                     reason="Time to wait after signaling before an automatic lane change; lane and blindspot checks still apply"),

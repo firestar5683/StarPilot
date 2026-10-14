@@ -2021,6 +2021,7 @@ class UiProcessIntentTests(unittest.TestCase):
 
     card = Car.__new__(Car)
     card.CP = stock(True)
+    card.aol_card_intent = None  # Real Card initializes this when no optional owner is selected.
     card.aol_process_fault_context = AolProcessFaultContext()
     class SM:
       seen = {'managerState': True}

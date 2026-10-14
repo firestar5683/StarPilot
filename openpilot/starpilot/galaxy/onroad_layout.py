@@ -12,6 +12,7 @@ from openpilot.starpilot.ui.onroad_customization import (
   MAX_BYTES, PARAM_KEY, customization_metadata, decode_document, default_document, validate_document,
 )
 from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.galaxy.setting_descriptions import description
 
 # Display preferences edited with the layout but saved in their own params. Groups order the editor.
 DISPLAY_GROUPS = {
@@ -60,7 +61,7 @@ class OnroadLayoutOwner:
       "rows": [{"key": row.key, "label": row.label, "group": DISPLAY_GROUPS[row.key], "choices": list(row.choices),
                 # Lead info follows the draft's Lead indicator, not the saved one.
                 "available": row.available or row.key == "LeadInfo" and parked and lead_readable and bool(row.choices),
-                "reason": row.reason, "requires": "HideLeadMarker" if row.key == "LeadInfo" else ""} for row in rows],
+                "reason": description(row), "requires": "HideLeadMarker" if row.key == "LeadInfo" else ""} for row in rows],
       "values": {row.key: row.value for row in rows},
       "defaults": {row.key: row.default_value for row in rows if row.default_value is not None},
     }

@@ -131,12 +131,16 @@ function editor() {
     $refs: { preview: { ...target, getBoundingClientRect: () => ({ left: 100, top: 100, width: 1080, height: 540 }) } } }
   for (const [key, getter] of Object.entries(OnroadLayoutPage.computed)) Object.defineProperty(vm, key, { get: () => getter.call(vm) })
   for (const [key, method] of Object.entries(OnroadLayoutPage.methods)) vm[key] = method.bind(vm)
+  // This editor fixture exercises interaction; native request/race behavior has its own actual feed tests.
+  vm.artFeed.start = () => { vm.artFeed.active = true }
+  vm.artFeed.update = () => {}
+  vm.artFeed.stop = () => { vm.artFeed.active = false }
   vm.state.data = snapshot(); vm.state.data.supportedProfiles = ['large', 'compact']; vm.state.draft = copy(vm.state.data.document); vm.state.status = "ready"; vm.state.selected = "current_speed"
   const publish = vm.feed.publish
   vm.feed = { load: () => calls.push("load"), save: (document) => calls.push(copy(document)) }
-  vm.previewFeed.start = () => previewCalls.push("start")
+  vm.previewFeed.start = () => { vm.previewFeed.active = true; previewCalls.push("start") }
   vm.previewFeed.update = (...args) => previewCalls.push(["update", ...args])
-  vm.previewFeed.stop = () => previewCalls.push("stop")
+  vm.previewFeed.stop = () => { vm.previewFeed.active = false; previewCalls.push("stop") }
   const event = (x, y, pointerId = 1) => ({ clientX: x, clientY: y, pointerId, button: 0, currentTarget: { setPointerCapture() { throw new Error("Capture must belong to the stable preview") } }, preventDefault() {} })
   return { vm, event, emitted, calls, previewCalls, captures, publish }
 }
@@ -297,8 +301,9 @@ const draftBeforePreview = copy(vm.state.draft)
 vm.mode = "local"
 vm.showDevicePreview()
 assert.equal(vm.state.devicePreviewOpen, true)
+assert.equal(vm.state.previewMode, "device")
 assert.deepEqual(previewCalls.map((call) => Array.isArray(call) ? call[0] : call), ["start", "update"])
-assert.deepEqual(previewCalls[1].slice(1), [draftBeforePreview, "large", "engaged"])
+assert.deepEqual(previewCalls[1].slice(1), [draftBeforePreview, "large", "engaged", false])
 vm.selectProfile("compact")
 assert.equal(previewCalls.at(-1)[2], "compact")
 vm.state.scene = "braking"
@@ -306,6 +311,7 @@ assert.equal(previewCalls.at(-1)[3], "braking")
 vm.selectProfile("large")
 vm.hideDevicePreview()
 assert.equal(vm.state.devicePreviewOpen, false)
+assert.equal(vm.previewFeed.active, false)
 assert.equal(previewCalls.at(-1), "stop")
 assert.deepEqual(copy(vm.state.draft), draftBeforePreview)
 const previewCount = previewCalls.length

@@ -15,6 +15,7 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.version import get_build_metadata
+from openpilot.system.crash_storage import writer, write_text
 
 
 class SentryProject(Enum):
@@ -113,10 +114,10 @@ def _attach_qlog(scope) -> None:
 
 def save_exception(text: str) -> None:
   path = Path(Paths.log_root()) / "crash"
-  path.mkdir(parents=True, exist_ok=True)
   stamp = datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S-%f")
-  (path / f"{stamp}.log").write_text(text)
-  (path / "error.txt").write_text("\n".join(text.splitlines()[-10:]))
+  with writer(path) as directory:
+    write_text(directory, f"{stamp}.log", text)
+    write_text(directory, "error.txt", "\n".join(text.splitlines()[-10:]))
 
 
 def capture_exception(exc: BaseException | None = None, *, crash_log: bool = True) -> None:

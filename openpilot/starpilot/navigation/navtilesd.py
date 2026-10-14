@@ -262,11 +262,30 @@ class TileDaemon:
   # ---- work
 
   def _store(self, kind: str, key: TileKey, data: bytes) -> bool:
+    sizes = {name: self._tile_size(name, key) for name in self.sizes}
     ok = self.store.write(kind, key, data)
+    if ok:
+      for name in self.sizes:
+        self.sizes[name] = max(0, self.sizes[name] + self._tile_size(name, key) - sizes[name])
     self.no_space = not ok
     if not ok:
+      # A replace may have succeeded before a directory-sync failure.
+      self.sizes = {name: self.store.size(name) for name in self.sizes}
       self.storage_retry_after = self.clock() + TRIM_INTERVAL_S
     return ok
+
+  def _tile_size(self, kind: str, key: TileKey) -> int:
+    try:
+      return self.store.path(kind, key).stat().st_size
+    except OSError:
+      return 0
+
+  def _promote(self, kind: str, key: TileKey) -> bool:
+    sizes = {name: self._tile_size(name, key) for name in self.sizes}
+    promoted = self.store.promote(kind, key)
+    for name in self.sizes:
+      self.sizes[name] = max(0, self.sizes[name] + self._tile_size(name, key) - sizes[name])
+    return promoted
 
   def _urgent_job(self) -> TileKey | None:
     while self.urgent:
@@ -274,7 +293,7 @@ class TileDaemon:
       if self.store.find(key) is None:
         return key
       if self.urgent_kind == "driven":
-        self.store.promote("driven", key)
+        self._promote("driven", key)
       self.store.touch(key)
     return None
 
@@ -334,8 +353,7 @@ class TileDaemon:
           self.no_space = True
           self.saved_full_at = self.sizes["saved"]
           return None
-        if self.store.promote("saved", key):
-          self.sizes["saved"] += size
+        if self._promote("saved", key):
           progress.done += 1
           progress.index += 1
           return 0.0
@@ -354,7 +372,6 @@ class TileDaemon:
         self.saved_full_at = self.sizes["saved"]
         return None
       if data is not None and self._store("saved", key, data):
-        self.sizes["saved"] += len(data) - old_size
         progress.done += 1
         progress.index += 1
       elif not self.fetcher.blocked and not self.no_space:

@@ -3,6 +3,7 @@ import { SettingsPage } from "./settings.js"
 import { GxNotice } from "./notice.js"
 import { SentryNotifications } from "./sentry-notifications.js"
 import { SnapshotFeed } from "./snapshot-feed.js"
+import { deleteRecords, storedSize } from "./record-deletion.js"
 
 // Historical motion records and independently configured notifications.
 const ID = /^[0-9a-f]{32}$/
@@ -10,6 +11,8 @@ const ID = /^[0-9a-f]{32}$/
 export function validSentryEvents(value) {
   if (value?.schemaVersion !== 1 || value.source !== "local" || typeof value.scanIncomplete !== "boolean" ||
       value.capacity !== 512 || !Array.isArray(value.events) || value.events.length > 512) return false
+  if (value.storageBytes !== undefined && (!Number.isSafeInteger(value.storageBytes) || value.storageBytes < 0)) return false
+  if (value.storageIncomplete !== undefined && typeof value.storageIncomplete !== "boolean") return false
   const seen = new Set()
   return value.events.every((event) => {
     if (event === null || typeof event !== "object" || Object.keys(event).some((key) => !["eventId", "kind", "systemTimeMs", "images"].includes(key)) ||
@@ -32,6 +35,15 @@ export class SentryEventsFeed extends SnapshotFeed {
   static subject = "local motion events"
   static unavailable = "Local motion events are unavailable."
   static invalid = "Local motion records are unavailable."
+  stop() { this.deleting = false; super.stop() }
+  emit() { this.publish({ status: this.status, data: this.data, error: this.error, deleting: this.deleting === true }) }
+  remove(eventId, confirm) {
+    if (eventId != null && !ID.test(eventId)) return Promise.resolve(false)
+    return deleteRecords(this, "./api/sentry/events/delete", eventId == null ? { all: true, confirmed: true } : { eventId }, {
+      valid: validSentryEvents, confirm, subject: "Sentry events",
+      accept: data => { this.data = data; this.status = "ready"; this.error = ""; this.emit() },
+    })
+  }
 }
 
 export const SentryEventsPage = {
@@ -39,7 +51,7 @@ export const SentryEventsPage = {
   components: { GxState, GxNotice, SentryNotifications, SettingsPage },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
-  data: () => ({ status: "idle", data: null, error: "" }),
+  data: () => ({ status: "idle", data: null, error: "", deleting: false }),
   created() { this.feed = new SentryEventsFeed({ publish: (update) => Object.assign(this.$data, update), unauthorized: this.unauthorized }) },
   mounted() {
     this.visibility = () => { if (document.hidden) this.feed.stop(); else if (this.mode === "local") this.feed.start() }
@@ -47,7 +59,7 @@ export const SentryEventsPage = {
     if (this.mode === "local" && !document.hidden) this.feed.start()
   },
   beforeUnmount() { document.removeEventListener("visibilitychange", this.visibility); this.feed.stop() },
-  methods: { systemTime },
+  methods: { systemTime, storedSize },
   template: `
     <div class="gx-view gx-home" aria-label="Sentry motion events">
       <header class="gx-settings__header gx-page-header"><div><h2>Sentry</h2>
@@ -59,14 +71,16 @@ export const SentryEventsPage = {
       <template v-else>
 
         <GxState v-if="status === 'loading'" loading>Reading local motion events…</GxState>
-        <GxNotice tone="danger" v-if="status === 'unavailable'">{{ error }}</GxNotice>
+        <GxNotice tone="danger" v-if="error">{{ error }}</GxNotice>
         <template v-if="status === 'ready' && data">
+          <div class="gx-actions"><p>{{ data.events.length }} events · {{ data.storageIncomplete ? 'At least ' : '' }}{{ storedSize(data.storageBytes) }} stored</p><button type="button" class="gx-btn" :disabled="deleting" @click="feed.remove(null)">Delete All</button></div>
           <GxNotice v-if="data.scanIncomplete" tone="warn">This scan was incomplete. More local motion events may exist.</GxNotice>
           <GxState v-if="!data.events.length">No local motion events found in this scan.</GxState>
           <section v-for="event in data.events" :key="event.eventId" class="gx-card gx-home__card">
             <h2>{{ event.kind === 'selfie' ? 'Selfie' : event.kind === 'alarm' ? 'Alarm' : 'Warning' }}</h2>
             <p>System time: {{ systemTime(event.systemTimeMs) }}</p>
             <small>Event ID: {{ event.eventId }}</small>
+            <button type="button" class="gx-btn" :disabled="deleting" @click="feed.remove(event.eventId)">Delete</button>
             <img v-for="camera in (event.images || [])" :key="camera" :src="'./api/sentry/image/' + event.eventId + '/' + camera" :alt="camera + ' camera at motion event'" class="gx-media" />
           </section>
         </template>

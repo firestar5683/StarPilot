@@ -46,8 +46,10 @@ def test_small_cycle_and_expired_physical_source_explicit_auto_recovery(fixture)
   f.physical.allowed.return_value = False
   f.now[0] += 0.5
   status = f.control.snapshot()
-  assert status['mode'] == 'offroad' and f.control.next_mode(status) == Mode.AUTO
+  assert status['mode'] == 'offroad' and f.control.next_mode(status) == Mode.ONROAD
   f.control.cycle(status, lambda: True)
+  assert f.control.snapshot()['mode'] == 'onroad'
+  f.control.cycle(f.control.snapshot(), lambda: True)
   assert f.control.snapshot()['mode'] == 'auto'
 
 
@@ -56,7 +58,7 @@ def test_displayed_admission_is_not_reused_for_action_and_auth_revocation(fixtur
   status = f.control.snapshot()
   f.physical.allowed.return_value = False
   with pytest.raises(Rejected):
-    f.control.change('onroad', status['revision'], lambda: True)
+    f.control.change('offroad', status['revision'], lambda: True)
   assert f.owner.snapshot().mode == Mode.AUTO
   f.physical.allowed.return_value = True
   with pytest.raises(Rejected):
@@ -184,8 +186,10 @@ def test_actual_manager_process_predicate_stops_park_producers_and_auto_recovers
   messages.logMonoTime['pandaStates'] = now[0] + 10_000_000_000
   messages.recv_time['pandaStates'] = now[0] / 1e9
   status = control.snapshot()
-  assert not status['overrideAllowed'] and control.next_mode(status) == Mode.AUTO
+  assert not status['overrideAllowed'] and control.next_mode(status) == Mode.ONROAD
   control.cycle(status, lambda: True)
+  assert fixture.owner.snapshot().mode == Mode.ONROAD
+  control.change('auto', fixture.owner.snapshot().revision, lambda: True)
   assert fixture.owner.snapshot().mode == Mode.AUTO
 
 
@@ -229,7 +233,7 @@ def test_concurrent_old_snapshot_cannot_repopulate_cache_after_acknowledged_chan
   assert f.control.snapshot()['mode'] == 'onroad'
 
 
-def test_native_offroad_confirmation_preserves_revision_without_requiring_healthy_can(fixture):
+def test_native_offroad_confirmation_preserves_revision_and_rechecks_park(fixture):
   from unittest.mock import patch
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.shell import ShellMode
@@ -265,5 +269,9 @@ def test_native_offroad_confirmation_preserves_revision_without_requiring_health
     native.display_page = 'system'
     native._drive_change('offroad', revision)
     f.physical.allowed.return_value = False
+    push.call_args.args[0]._callback(DialogResult.CONFIRM)
+    assert f.owner.snapshot().mode == Mode.AUTO
+    f.physical.allowed.return_value = True
+    native._drive_change('offroad', revision)
     push.call_args.args[0]._callback(DialogResult.CONFIRM)
     assert f.owner.snapshot().mode == Mode.OFFROAD
