@@ -519,6 +519,7 @@ class AppearanceSettingsTests(unittest.TestCase):
     fonts = Mock(spec=BitmapFonts)
     fonts.measure.return_value = NS(width=10, height=20)
     fonts.vertical_ink.side_effect = lambda text, role, size: (0., size * .7)
+    fonts.horizontal_ink.return_value = (0., 10.)
     with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card, patch.object(rl, "draw_line_ex"):
       UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), base)
       anchor = card.call_args.args[0]

@@ -56,19 +56,47 @@ export function sceneHidesWidget(scene, profile, id, layout = {}, widgets = {}) 
   return false
 }
 
+// The device renders one preview at a time and answers a second request with 429.
+// Feeds sharing a queue take turns instead, widget art before the backdrop.
+export class PreviewQueue {
+  constructor() { this.running = false; this.waiting = [] }
+
+  acquire(priority, signal) {
+    return new Promise((resolve, reject) => {
+      const cancel = () => { this.waiting = this.waiting.filter(item => item !== entry); reject(new Error("Preview request cancelled")) }
+      const entry = { priority, start: () => { signal.removeEventListener("abort", cancel); resolve() } }
+      if (signal.aborted) { reject(new Error("Preview request cancelled")); return }
+      signal.addEventListener("abort", cancel, { once: true })
+      this.waiting.push(entry)
+      this.waiting.sort((a, b) => a.priority - b.priority)
+      this.next()
+    })
+  }
+
+  next() {
+    if (this.running || !this.waiting.length) return
+    this.running = true
+    this.waiting.shift().start()
+  }
+
+  release() { this.running = false; this.next() }
+}
+
 export class LayoutPreviewFeed {
   constructor({ publish, unauthorized = () => {}, fetcher = (...args) => fetch(...args),
                 later = (fn, ms) => setTimeout(fn, ms), cancelTimer = (id) => clearTimeout(id),
-                urls = URL, art = false, backdrop = false }) {
-    Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer, urls, art, backdrop })
+                urls = URL, art = false, backdrop = false, queue = null }) {
+    Object.assign(this, { publish, unauthorized, fetcher, later, cancelTimer, urls, art, backdrop, queue })
     this.active = false
     this.version = 0
     this.timer = null
     this.request = null
     this.currentUrl = null
     this.pending = null
-    // Keep one native sheet per profile while switching views or refreshing it.
+    // Keep one native sheet per profile and scene, so returning to either is instant.
     this.artCache = new Map()
+    // The sheet last shown for a profile stands in for a scene that has not rendered yet.
+    this.latestArt = new Map()
     this.failureKey = null
     this.failures = 0
   }
@@ -97,6 +125,7 @@ export class LayoutPreviewFeed {
     if (this.currentUrl) urls.add(this.currentUrl)
     for (const url of urls) this.urls.revokeObjectURL(url)
     this.artCache.clear()
+    this.latestArt.clear()
     this.currentUrl = null
     this.publish({ url: null, ...(this.art ? {sprites: null} : {}) })
   }
@@ -106,21 +135,27 @@ export class LayoutPreviewFeed {
   // `key` stands in for the document when only part of it changes the image (the backdrop ignores positions).
   update(document, profile, scene, dragging = false, key = document) {
     if (!this.active || !document || !["large", "compact", "projection"].includes(profile) || !SCENES.includes(scene)) return
-    const inputKey = JSON.stringify({ key, profile, scene, dragging })
+    const documentKey = JSON.stringify(key)
+    const inputKey = JSON.stringify([documentKey, profile, scene, dragging])
     if (inputKey === this.inputKey) return
     this.inputKey = inputKey
+    // Picking a scene or screen is one discrete change, so only document edits are debounced.
+    const debounce = documentKey === this.documentKey ? 0 : 200
+    this.documentKey = documentKey
     this.version++
     if (this.timer !== null) this.cancelTimer(this.timer)
     this.timer = null
     this.pending = null
     this.request?.abort()
     if (dragging) { this.publish({ status: "editing", error: "" }); return }
-    const renderKey = JSON.stringify({ key, profile, scene })
+    const renderKey = JSON.stringify([documentKey, profile, scene])
     if (renderKey !== this.failureKey) { this.failureKey = renderKey; this.failures = 0 }
     if (this.art) {
-      const cached = this.artCache.get(profile)
-      this.currentUrl = cached?.url || null
-      this.publish({ url: this.currentUrl, sprites: cached?.sprites || null, scene: cached?.scene || null })
+      const cacheKey = profile + "\n" + scene, cached = this.artCache.get(cacheKey)
+      if (cached) this.latestArt.set(profile, cacheKey)
+      const shown = cached || this.artCache.get(this.latestArt.get(profile))
+      this.currentUrl = shown?.url || null
+      this.publish({ url: this.currentUrl, sprites: shown?.sprites || null, scene: shown?.scene || null })
       if (cached?.key === renderKey) {
         this.publish({ status: "ready", error: "" })
         return
@@ -129,7 +164,7 @@ export class LayoutPreviewFeed {
     this.pending = { document: JSON.parse(JSON.stringify(document)), key, profile, scene, version: this.version, renderKey }
     // Once a real outage is reported, keep the message stable through retries.
     if (!this.art || this.failures < 2) this.publish({ status: "updating", error: "" })
-    this.timer = this.later(() => { this.timer = null; this.dispatch() }, 200)
+    this.timer = this.later(() => { this.timer = null; this.dispatch() }, debounce)
   }
 
   retry() {
@@ -150,16 +185,17 @@ export class LayoutPreviewFeed {
     const aborted = new Promise((_, reject) => { rejectAborted = () => reject(new Error("Preview request cancelled")) })
     request.signal.addEventListener("abort", rejectAborted, { once: true })
     let failure = "Preview is unavailable. Reconnecting automatically…"
-    let denied = false
-    try {
-      await Promise.race([aborted, (async () => {
+    let denied = false, busy = false
+    const work = (async () => {
+      const held = !!this.queue && await this.queue.acquire(this.art ? 0 : 1, request.signal).then(() => true)
+      try {
         const response = await this.fetcher("./api/ui/layout/preview", { method: "POST", credentials: "same-origin",
           cache: "no-store", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ document: item.document, profile: item.profile, scene: item.scene, ...(this.art ? {art: true} : this.backdrop ? {art: "backdrop"} : {}) }), signal: request.signal })
         if (!this.active || item.version !== this.version || request.signal.aborted) return
         if (response.status === 401) { this.stop(); this.unauthorized(); return }
         if (response.status === 403) { denied = true; failure = "Turn off the vehicle to preview this layout."; throw new Error() }
-        if (response.status === 429) { failure = "Preview is busy. Retrying automatically…"; throw new Error() }
+        if (response.status === 429) { busy = true; failure = "Preview is busy. Retrying automatically…"; throw new Error() }
         if (!response.ok) { const detail = await response.json().catch(() => null); failure = detail?.error || failure; throw new Error() }
         if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("image/png")) throw new Error("Preview is unavailable. Reconnecting automatically…")
         const blob = await response.blob()
@@ -167,19 +203,31 @@ export class LayoutPreviewFeed {
         if (!blob.size || blob.size > 4 * 1024 * 1024) throw new Error("Preview is unavailable. Reconnecting automatically…")
         const sprites = this.art ? await widgetArtMetadata(blob) : null
         if (!this.active || item.version !== this.version || request.signal.aborted) return
-        const previousUrl = this.art ? this.artCache.get(item.profile)?.url : this.currentUrl
+        const cacheKey = item.profile + "\n" + item.scene
+        const previousUrl = this.art ? this.artCache.get(cacheKey)?.url : this.currentUrl
         this.currentUrl = this.urls.createObjectURL(blob)
-        if (this.art) this.artCache.set(item.profile, { key: item.renderKey, url: this.currentUrl, sprites, scene: item.scene })
+        if (this.art) {
+          this.artCache.set(cacheKey, { key: item.renderKey, url: this.currentUrl, sprites, scene: item.scene })
+          this.latestArt.set(item.profile, cacheKey)
+        }
         this.failures = 0
         this.publish({ status: "ready", error: "", url: this.currentUrl, scene: item.scene, profile: item.profile, ...(this.art ? {sprites} : {}) })
         if (previousUrl) this.urls.revokeObjectURL(previousUrl)
-      })()])
+      } finally {
+        // Hold the queue until the device answers, so the other feed is not turned away as busy.
+        if (held) this.queue.release()
+      }
+    })()
+    work.catch(() => {})  // A cancelled request settles after the race below has moved on.
+    try {
+      await Promise.race([aborted, work])
     } catch {
       if (this.active && item.version === this.version) {
         this.inputKey = null
         this.failures = denied ? 2 : this.failures + 1
         if (this.art && denied) this.clearImage()
-        const recovering = this.art && this.failures < 2
+        // Art retries promptly, as does any feed turned away by a busy renderer; real outages back off.
+        const recovering = (this.art || busy) && this.failures < 2
         this.publish({ status: recovering ? "updating" : "unavailable", error: recovering ? "" : failure })
         this.timer = this.later(() => { this.timer = null; this.retry() }, recovering ? 600 : 5000)
       }

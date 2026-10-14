@@ -2,7 +2,7 @@ import { GxState } from "./state.js"
 import { guardUnload } from "./unload-guard.js"
 import { PollTimer, connectionError } from "./polling.js"
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
-import { LayoutPreviewFeed, PREVIEW_SCENES, previewScene, sceneHidesWidget } from "./layout-preview.js"
+import { LayoutPreviewFeed, PREVIEW_SCENES, PreviewQueue, previewScene, sceneHidesWidget } from "./layout-preview.js"
 import { LEAD_INFO, PROJECTION_WORDMARK, editorSnapshot, projectionPayload } from "./projection-layout.js"
 import { GalaxySelect } from "./galaxy-select.js"
 import { GxNotice } from "./notice.js"
@@ -158,7 +158,7 @@ export const LayoutWidgetPreview = {
   template: `
     <g aria-hidden="true" class="gx-layout-widget-art" :fill="palette.text || '#ffffff'">
       <template v-if="native">
-        <svg v-if="art?.url && art.scene === scene && art.sprites?.sprites?.[widget.id]"
+        <svg v-if="art?.url && art.sprites?.sprites?.[widget.id]"
           :x="art.sprites.sprites[widget.id].offsetX || 0" :y="art.sprites.sprites[widget.id].offsetY || 0"
           :width="art.sprites.sprites[widget.id].width" :height="art.sprites.sprites[widget.id].height"
           :viewBox="[art.sprites.sprites[widget.id].x, art.sprites.sprites[widget.id].y, art.sprites.sprites[widget.id].width, art.sprites.sprites[widget.id].height].join(' ')"
@@ -331,9 +331,10 @@ export const OnroadLayoutPage = {
     }
     const feed = new OnroadLayoutFeed({ projection: props.projection, unauthorized: props.unauthorized, publish: apply })
     watch(() => !!state.drag || !!state.layerDrag, (dragging) => { if (!dragging && deferred) apply({}) }, { flush: "sync" })
-    const backdropFeed = new LayoutPreviewFeed({ backdrop: true, unauthorized: props.unauthorized,
+    const queue = new PreviewQueue()
+    const backdropFeed = new LayoutPreviewFeed({ backdrop: true, unauthorized: props.unauthorized, queue,
       publish: update => Object.assign(state.backdrop, update) })
-    const artFeed = new LayoutPreviewFeed({ art: true, unauthorized: props.unauthorized,
+    const artFeed = new LayoutPreviewFeed({ art: true, unauthorized: props.unauthorized, queue,
       publish: update => Object.assign(state.art, update) })
     watch(() => [state.draft && JSON.stringify(state.draft), state.profile, state.scene, !!state.drag,
                  !!state.layerDrag, state.data?.revision, state.data?.editable], () => {
@@ -391,8 +392,8 @@ export const OnroadLayoutPage = {
         ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.availableScenes.filter(test) }))
     },
     sceneBorder() { return previewScene(this.state.scene).border },
-    nativeBackdropReady() { return !!this.state.backdrop.url && this.state.backdrop.scene === this.state.scene &&
-      this.state.backdrop.profile === (this.projection ? "projection" : this.state.profile) },
+    // The last screen for this profile stays up while the next scene renders, instead of flashing the sketch.
+    nativeBackdropReady() { return !!this.state.backdrop.url && this.state.backdrop.profile === (this.projection ? "projection" : this.state.profile) },
     layout() { return this.state.draft?.layouts[this.state.profile] },
     projectionHasPipWidget() {
       return ["pip_left", "pip_right"].some(id => this.state.draft?.layouts?.large?.[id]?.enabled === true)

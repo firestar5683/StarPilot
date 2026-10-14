@@ -56,6 +56,7 @@ def test_compact_sign_pulses_while_large_numbers_and_frame_stay_stable(compact):
   fonts = Mock()
   fonts.measure.return_value = Mock(width=20, height=20)
   fonts.vertical_ink.side_effect = lambda text, role, size: (0., size * .7)
+  fonts.horizontal_ink.return_value = (0., 20.)
   shown = state()
   shown = replace(shown, speed_limit=replace(shown.speed_limit, accepted_adjusted_limit_mps=shown.speed_limit.speed_limit_mps))
   shown = replace(shown, appearance=replace(shown.appearance, show_speed_limit_sign=True))

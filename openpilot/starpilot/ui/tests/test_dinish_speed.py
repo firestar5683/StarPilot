@@ -1,15 +1,18 @@
 """Pinned numeric atlas and the larger stack's saved/touch geometry."""
 from dataclasses import replace
+from itertools import product
+import io
 import re
 from types import SimpleNamespace
 
 from PIL import Image
+import numpy as np
 import pyray as rl
 
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory, font_filename, font_path, validate_bitmap_font
 from openpilot.starpilot.ui.large_speed_geometry import WIDTH, PADDING
 from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
-from openpilot.starpilot.ui.onroad_state import slc_controls
+from openpilot.starpilot.ui.onroad_state import SpeedLimitObservation, slc_controls
 from openpilot.starpilot.ui.tests.test_speed_stack import road
 from openpilot.starpilot.system.android_auto.projection_layout import default_layout_for_viewport, validate_layout_for_viewport
 
@@ -60,6 +63,139 @@ def test_three_digit_values_units_and_long_status_fit_actual_fonts():
       fonts.close()
   finally:
     if owns_context and rl.is_window_ready():
+      rl.close_window()
+
+
+def test_card_alignment_uses_visible_glyphs_and_centres_the_number():
+  from unittest.mock import patch
+  from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
+  from openpilot.starpilot.ui.layout_preview_renderer import sample_state
+  owns_context = not rl.is_window_ready()
+  if owns_context:
+    rl.init_window(128, 128, "DINish native font fixture")
+  try:
+    fonts = BitmapFonts(Profile.LARGE, default_font_directory())
+    try:
+      # The fixed-width speed digits carry wide side bearings; their ink must still meet the padding.
+      left, right = fonts.horizontal_ink('55', FontRole.SPEED, 112)
+      assert left > 5 and right < fonts.measure('55', FontRole.SPEED, 112).width - 5
+      configurations = product(('left', 'center', 'right'), (False, True), (7, 55, 100, 199, None),
+                               ('split', 'max_only', 'limit_only'))
+      for align, metric, value, mode in configurations:
+        document = default_document()
+        document['speedAlign'] = align
+        document['showMaxSpeed'] = mode != 'limit_only'
+        state = sample_state('engaged', document)
+        factor = 3.6 if metric else 2.2369362921
+        speed = value / factor if value is not None else None
+        observation = (SpeedLimitObservation() if mode == 'max_only' else
+                       replace(state.speed_limit, accepted_adjusted_limit_mps=speed, effective_cluster_target_mps=speed))
+        state = replace(state, metric=metric, cruise_kph=speed * 3.6 if speed is not None else None, speed_limit=observation)
+        card = document['layouts']['large']['cruise_limits']
+        calls = []
+        with patch.object(fonts, 'draw', lambda text, role, size, x, y, *a, calls=calls, **k: calls.append((text, role, size, x, y))), \
+             patch('openpilot.starpilot.ui.onroad_large_widgets.draw_control_card'), patch.object(rl, 'draw_line_ex'):
+          UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
+        units = {'mph', 'km/h'}
+        for index, (text, role, size, x, y) in enumerate(calls):
+          ink_left, ink_right = fonts.horizontal_ink(text, role, size)
+          if align == 'left' and text not in units:
+            assert abs(x + ink_left - (card['x'] + PADDING)) < .5, text
+          elif align == 'right' and text not in units:
+            assert abs(x + ink_right - (card['x'] + WIDTH - PADDING)) < .5, text
+          elif align == 'center':
+            assert abs(x + (ink_left + ink_right) / 2 - (card['x'] + WIDTH / 2)) < .5, text
+          assert card['x'] + PADDING - .5 <= x + ink_left and x + ink_right <= card['x'] + WIDTH - PADDING + .5, (align, text)
+          if role == FontRole.SPEED and text != '–':
+            unit, unit_role, unit_size, unit_x, unit_y = calls[index + 1]
+            assert unit == ('km/h' if metric else 'mph')
+            unit_left, unit_right = fonts.horizontal_ink(unit, unit_role, unit_size)
+            unit_top, unit_bottom = fonts.vertical_ink(unit, unit_role, unit_size)
+            _, number_bottom = fonts.vertical_ink(text, role, size)
+            if align == 'center':
+              assert unit_y + unit_top >= y + number_bottom + 6
+              footer, footer_role, footer_size, _, footer_y = calls[index + 2]
+              footer_top, _ = fonts.vertical_ink(footer, footer_role, footer_size)
+              assert unit_y + unit_bottom + 6 <= footer_y + footer_top
+            elif align == 'right':
+              assert abs(x + ink_left - (unit_x + unit_right) - 14) < .5
+              assert abs(y + number_bottom - (unit_y + unit_bottom)) < .5
+            else:
+              assert abs(unit_x + unit_left - (x + ink_right) - 14) < .5
+              assert abs(y + number_bottom - (unit_y + unit_bottom)) < .5
+    finally:
+      fonts.close()
+  finally:
+    if owns_context and rl.is_window_ready():
+      rl.close_window()
+
+
+def test_galaxy_card_pixels_align_without_reading_font_textures():
+  from unittest.mock import patch
+  from openpilot.starpilot.ui.layout_preview_renderer import _Canvas, sample_state
+  from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
+  from openpilot.starpilot.system.android_auto.projection_layout import (
+    default_layout_for_viewport, projection_customization, validate_layout_for_viewport)
+
+  original_readback = rl.load_image_from_texture
+
+  def mobile_readback(texture):
+    image = original_readback(texture)
+    # Raylib's GLES texture readback unbinds the framebuffer instead of restoring
+    # the active preview target. Reproduce that side effect on desktop too.
+    rl.rl_disable_framebuffer()
+    return image
+
+  owns_context = not rl.is_window_ready()
+  if owns_context:
+    rl.init_window(128, 128, 'Galaxy card alignment fixture')
+  target = rl.load_render_texture(*Profile.LARGE.size)
+  try:
+    for align, projection in product(('center', 'right'), (False, True)):
+      # Start with cold font metrics, as when Galaxy creates its preview canvas.
+      with BitmapFonts(Profile.LARGE, default_font_directory()) as fonts:
+        document = default_document()
+        document['speedAlign'] = align
+        viewport = (1920, 1080) if projection else None
+        if projection:
+          layout = default_layout_for_viewport(viewport)
+          layout['speedAlign'] = align
+          layout['widgets']['cruise_limits']['opacity'] = 50
+          document = projection_customization(validate_layout_for_viewport(layout, viewport), document)
+        else:
+          document['widgetColors']['large']['cruise_limits'] = {'cardFill': '#10191F80'}
+          document = validate_document(document)
+        state = sample_state('engaged', document)  # MAX 55 / Your ceiling, SLC 49.
+        widget = UnifiedSpeedWidget(fonts)
+        canvas = _Canvas.__new__(_Canvas)
+        canvas.profile, canvas.viewport, canvas.fonts, canvas.target = Profile.LARGE, viewport, fonts, target
+        canvas.view = SimpleNamespace(_ordered_widgets=lambda content, state, widget=widget, **kw: widget.render(content, state))
+        canvas._settle = lambda state: None
+        with patch.dict('openpilot.starpilot.ui.layout_preview_renderer.RUNTIME_PREVIEW_WIDGETS', large=('cruise_limits',)), \
+             patch.object(rl, 'load_image_from_texture', side_effect=mobile_readback) as readback:
+          png = canvas.render_widget_art(state, document['layouts']['large'])
+          # A saved 50% background must show on the first frame, without a slider
+          # edit triggering another render after the font metrics are warm.
+          assert png == canvas.render_widget_art(state, document['layouts']['large'])
+          # Only the completed preview is read; measuring glyphs must never change its framebuffer.
+          assert readback.call_count == 2
+          assert readback.call_args.args[0].id == target.texture.id
+        with Image.open(io.BytesIO(png)) as image:
+          pixels = np.asarray(image.convert('RGBA'))
+        assert pixels[100, 10, 3] == 128
+        ink = (pixels[..., :3].min(axis=2) > 120) & (pixels[..., 3] > 200)
+        rows = np.flatnonzero(ink.any(axis=1))
+        lines = np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1)
+        assert len(lines) == (9 if align == 'center' else 7)
+        for line in lines:
+          columns = np.flatnonzero(ink[line].any(axis=0))
+          if align == 'center':
+            assert abs((columns[0] + columns[-1] + 1) / 2 - WIDTH / 2) <= 1.5
+          else:
+            assert abs(columns[-1] + 1 - (WIDTH - PADDING)) <= 1.5
+  finally:
+    rl.unload_render_texture(target)
+    if owns_context:
       rl.close_window()
 
 

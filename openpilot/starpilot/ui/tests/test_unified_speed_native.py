@@ -33,7 +33,8 @@ class UnifiedNativeTest(unittest.TestCase):
         state = OnroadState(active, False, 20, cruise, observation, metric=True,
                             longitudinal_active=active, longitudinal_overridden=pedal)
         fonts = SimpleNamespace(draw=Mock(), measure=lambda *args: SimpleNamespace(width=100, height=20),
-                                vertical_ink=lambda text, role, size: (0, 20 if text == '–' else 80))
+                                vertical_ink=lambda text, role, size: (0, 20 if text == '–' else 80),
+                                horizontal_ink=lambda text, role, size: (0, 100))
         with patch('openpilot.starpilot.ui.onroad_large_widgets.draw_control_card'), patch.object(rl, 'draw_line_ex'):
           UnifiedSpeedWidget(cast(BitmapFonts, fonts)).render(rl.Rectangle(30, 30, 1800, 1020), state)
         draws = {call.args[0]: call.args for call in fonts.draw.call_args_list}
@@ -63,7 +64,8 @@ class UnifiedNativeTest(unittest.TestCase):
                                            driver_override_active=True, override_basis=basis)
         state = OnroadState(True, False, 20, 40 / factor * 3.6, observation, metric=False, longitudinal_active=True)
         fonts = SimpleNamespace(draw=Mock(), measure=lambda *args: SimpleNamespace(width=100, height=20),
-                                vertical_ink=lambda text, role, size: (0, size * .7))
+                                vertical_ink=lambda text, role, size: (0, size * .7),
+                                horizontal_ink=lambda text, role, size: (0, 100))
         with patch('openpilot.starpilot.ui.onroad_large_widgets.draw_control_card'), patch.object(rl, 'draw_line_ex'):
           UnifiedSpeedWidget(cast(BitmapFonts, fonts)).render(rl.Rectangle(30, 30, 1800, 1020), state)
         draws = {call.args[0]: call.args for call in fonts.draw.call_args_list}
@@ -85,7 +87,8 @@ class UnifiedNativeTest(unittest.TestCase):
                                        effective_cluster_target_mps=45 / factor, action_enabled=True)
     state = OnroadState(True, False, 20, 40 / factor * 3.6, observation, metric=False, longitudinal_active=True)
     fonts = SimpleNamespace(draw=Mock(), measure=lambda *args: SimpleNamespace(width=100, height=20),
-                            vertical_ink=lambda text, role, size: (0, size * .7))
+                            vertical_ink=lambda text, role, size: (0, size * .7),
+                            horizontal_ink=lambda text, role, size: (0, 100))
     widget = UnifiedSpeedWidget(cast(BitmapFonts, fonts))
     with patch('openpilot.starpilot.ui.onroad_large_widgets.draw_control_card'), patch.object(rl, 'draw_line_ex'):
       widget.render(rl.Rectangle(30, 30, 1800, 1020), state)
@@ -111,7 +114,8 @@ class UnifiedNativeTest(unittest.TestCase):
                                        effective_cluster_target_mps=22, action_enabled=True)
     state = OnroadState(True, False, 20, 79.2, observation, metric=True, longitudinal_active=True)
     fonts = SimpleNamespace(draw=Mock(), measure=lambda *args: SimpleNamespace(width=100, height=20),
-                            vertical_ink=lambda text, role, size: (0, size * .7))
+                            vertical_ink=lambda text, role, size: (0, size * .7),
+                            horizontal_ink=lambda text, role, size: (0, 100))
     widget = UnifiedSpeedWidget(cast(BitmapFonts, fonts))
     with patch('openpilot.starpilot.ui.onroad_large_widgets.draw_control_card'), patch.object(rl, 'draw_line_ex'):
       widget.render(rl.Rectangle(30, 30, 1800, 1020), state)
@@ -190,7 +194,8 @@ class UnifiedNativeTest(unittest.TestCase):
     runtime = Runtime(parse({'SpeedLimitController': True, 'SLCPriority1': 'Dashboard'}), session_id='unified-malformed')
     message = runtime.step(sm, cp, now_ns=START).message.slcState
     fonts = SimpleNamespace(
-      draw=Mock(), measure=lambda *args: SimpleNamespace(width=10, height=10), vertical_ink=lambda text, role, size: (size * 0.2, size * 0.8)
+      draw=Mock(), measure=lambda *args: SimpleNamespace(width=10, height=10), vertical_ink=lambda text, role, size: (size * 0.2, size * 0.8),
+      horizontal_ink=lambda text, role, size: (0, 10)
     )
     widget = UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts)))
     for accepted, pending in ((-1, -2), (float('nan'), 12), (12, float('inf'))):

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {deflateSync} from 'node:zlib'
-import {LayoutPreviewFeed} from '../web/js/layout-preview.js'
+import {LayoutPreviewFeed,PreviewQueue} from '../web/js/layout-preview.js'
 import {widgetArtMetadata} from '../web/js/widget-art.js'
 import {LayoutWidgetPreview, OnroadLayoutPage} from '../web/js/onroad-layout.js'
 function chunk(kind, bytes) {
@@ -64,7 +64,15 @@ tick()
 assert.equal(updates.findLast(update=>update.status)?.status,'unavailable','Retry does not flicker the outage message')
 tick();await answer(5)
 assert.equal(updates.at(-1).status,'ready');assert.equal(feed.currentUrl,'blob:3')
-assert.deepEqual(revoked,['blob:2'],'Only a successfully replaced sheet is released')
+assert.deepEqual(revoked,[],'Each scene keeps its own sheet')
+feed.update(document,'large','cem_curve')
+assert.equal(feed.currentUrl,'blob:2','Returning to a rendered scene shows its sheet immediately')
+assert.equal(updates.at(-1).status,'ready');assert.equal(timers.size,0)
+feed.update(document,'large','aol')
+assert.equal(feed.currentUrl,'blob:2','An unrendered scene keeps the sheet on screen instead of outlines')
+assert.equal(updates.findLast(update=>'url' in update).scene,'cem_curve')
+assert.equal([...timers.values()][0].delay,0,'Scene changes skip the edit debounce')
+feed.update(document,'large','braking');assert.equal(feed.currentUrl,'blob:3')
 feed.pause();assert.equal(feed.active,false);assert.equal(feed.currentUrl,'blob:3')
 feed.start();feed.update(document,'large','braking')
 assert.equal(feed.currentUrl,'blob:3');assert.equal(timers.size,0,'Returning to a profile reuses matching artwork')
@@ -74,7 +82,7 @@ assert.equal(feed.currentUrl,'blob:3','Draft edits keep artwork while rendering 
 feed.pause();feed.start();feed.update(document,'compact','engaged');await answer(6)
 assert.equal(feed.currentUrl,'blob:1','A late response after switching views cannot replace cached art')
 assert.equal(updates.at(-1).status,'ready')
-feed.stop();assert.deepEqual(revoked,['blob:2','blob:1','blob:3'])
+feed.stop();assert.deepEqual(revoked,['blob:1','blob:2','blob:3'])
 assert.equal(feed.artCache.size,0);assert.equal(updates.at(-1).url,null)
 
 for(const status of [429,503]){
@@ -105,6 +113,29 @@ stalled.feed.update(document,'compact','engaged');stalled.tick();await stalled.a
 assert.equal(stalled.feed.currentUrl,'blob:2','Malformed replacement art cannot displace the last good sheet')
 stalled.feed.stop()
 
+// Art and backdrop share the device renderer: one request at a time, art first.
+{
+  const queue=new PreviewQueue(),requests=[],timers=new Map();let next=0
+  const options=extra=>({...extra,queue,publish(){},fetcher:(address,options)=>new Promise(resolve=>requests.push({options,resolve})),
+    later:(fn,delay)=>{timers.set(++next,{fn,delay});return next},cancelTimer:id=>timers.delete(id),
+    urls:{createObjectURL:()=>'blob:q',revokeObjectURL(){}}})
+  const backdrop=new LayoutPreviewFeed(options({backdrop:true})),art=new LayoutPreviewFeed(options({art:true}))
+  const run=()=>{for(const [id,{fn,delay}] of [...timers])if(delay<=200){timers.delete(id);fn()}}
+  backdrop.start();art.start();backdrop.update(document,'compact','engaged');art.update(document,'compact','engaged')
+  run()
+  await flush();assert.equal(requests.length,1,'The second feed waits instead of being turned away as busy')
+  assert.equal(JSON.parse(requests[0].options.body).art,'backdrop')
+  backdrop.update(document,'compact','aol');run()
+  await flush();assert.equal(requests.length,1,'Cancelling a request does not release the renderer before it answers')
+  requests[0].resolve({status:200,ok:true,headers:{get:()=>'image/png'},blob:async()=>image()});await flush()
+  assert.equal(requests.length,2);assert.equal(JSON.parse(requests[1].options.body).art,true,'Widget art goes before the backdrop')
+  requests[1].resolve({status:200,ok:true,headers:{get:()=>'image/png'},blob:async()=>image()});await flush()
+  assert.equal(requests.length,3);assert.equal(JSON.parse(requests[2].options.body).scene,'aol')
+  requests[2].resolve({status:429,ok:false,headers:{get:()=>null},json:async()=>null});await flush()
+  assert.equal([...timers.values()].at(-1).delay,600,'A busy renderer is retried promptly by the backdrop too')
+  backdrop.stop();art.stop()
+}
+
 // Exercise the real page watchers when changing preview modes and parked authority.
 const page=OnroadLayoutPage.setup({mode:'local',projection:false,unauthorized(){}})
 Object.assign(page.backdropFeed,{start(){},update(){},stop(){}})
@@ -112,7 +143,7 @@ const pageFeed=fixture()
 Object.assign(page.artFeed,pageFeed.options,{publish:update=>{Object.assign(page.state.art,update);pageFeed.updates.push(update)}})
 page.state.data={editable:true,revision:1,metadata:{profiles:{large:{widgets:{conditional_mode:{}}},compact:{widgets:{conditional_mode:{}}}}}}
 page.state.draft=document
-pageFeed.tick();await pageFeed.answer(0)
+pageFeed.tick();await flush();await pageFeed.answer(0)  // The page feed takes its turn in the shared render queue first.
 const artUrl=page.state.art.url
 assert(artUrl)
 page.state.data.editable=false
