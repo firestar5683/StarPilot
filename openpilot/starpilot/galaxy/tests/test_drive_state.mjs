@@ -39,3 +39,15 @@ onroad.state.overrideAllowed=true
 await onroad.change('offroad');assert.equal(requests.length,before)
 assert.match(DriveStatePanel.template, /\['onroad', 'auto'\]/)
 assert.doesNotMatch(DriveStatePanel.template, /v-for="mode in \['offroad'/)
+
+// A missing parked admission must not disable Galaxy Force Onroad.
+onroad.state.overrideAllowed=false
+const forceOnroad=onroad.change('onroad')
+assert.equal(requests.length,before+1)
+assert.deepEqual(JSON.parse(requests.at(-1).options.body),{mode:'onroad',revision:'a'.repeat(32)})
+const live={...snapshot('onroad','d'.repeat(32)),effective:'onroad',overrideAllowed:false}
+requests.at(-1).resolve(response(live));await flush()
+requests.at(-1).resolve(response(live));await forceOnroad;await flush()
+assert.equal(onroad.state.mode,'onroad')
+assert.equal(DriveStatePanel.computed.pending.call(onroad),false)
+console.log('PASS: Galaxy has no Offroad action; direct JS Offroad dispatch is ignored; Force Onroad works without parked admission')

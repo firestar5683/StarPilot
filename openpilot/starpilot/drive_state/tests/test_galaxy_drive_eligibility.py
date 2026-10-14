@@ -64,7 +64,7 @@ def test_requested_mode_never_claims_actual_update_authority(tmp_path):
   control = DriveStateControl(owner, physical, effective=lambda: False)
   state = control.snapshot()
   assert not state['overrideAllowed']
-  assert control.next_mode(state) == Mode.ONROAD
+  assert control.next_mode(state) == Mode.OFFROAD
   control.change('onroad', state['revision'], lambda: True)
   assert control.snapshot()['mode'] == 'onroad'
   assert control.snapshot()['effective'] == 'offroad'
@@ -151,3 +151,29 @@ def test_update_snapshot_keeps_one_admission_and_matching_reason():
     assert not view['parked'] and not view['canFastUpdate'] and not view['canInstall']
     assert view['reason'] == 'Current Panda status is stale'
     context.update_status.assert_called_once_with(True)
+
+
+@pytest.mark.parametrize('moving', [False, True])
+@pytest.mark.parametrize('engaged', [False, True])
+def test_local_force_offroad_with_ignition_on_keeps_park_authority_separate(fixture, tmp_path, moving, engaged):
+  f = fixture
+  f.sm.values['pandaStates'][0].ignitionLine = True
+  f.sm.values['deviceState'] = NS(started=True)
+  car = f.sm.values['carState']
+  car.standstill, car.gearShifter, car.vEgo = not moving, 'drive' if moving else 'park', 15.0 if moving else 0.0
+  f.sm.values['selfdriveState'].enabled = engaged
+  f.sm.values['selfdriveState'].active = engaged
+  owner = DriveStateOwner(Params(), tmp_path / 'local', alive=lambda _: True)
+  owner.initialize(pid=1, birth=2, boot=BOOT)
+  control = DriveStateControl(owner, f.source, effective=lambda: f.sm.values['deviceState'].started)
+  status = control.snapshot()
+  assert status['overrideAllowed'] is (not moving and not engaged)
+  assert control.next_mode(status) == Mode.OFFROAD
+  control.cycle(status, lambda: True)
+  from openpilot.starpilot.drive_state.resolver import should_start
+  f.sm.values['deviceState'].started = should_start(owner.snapshot().mode, {'ignition': True}, {'ready': True}, already_started=True)
+  assert owner.snapshot().mode == Mode.OFFROAD
+  assert control.snapshot()['effective'] == 'offroad'
+  assert f.source.allowed() is (not moving and not engaged)
+  if moving or engaged:
+    assert not f.source.update_ready(True)

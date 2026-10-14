@@ -136,7 +136,7 @@ def test_actual_compact_force_card_hitbox_dispatches_captured_owner_request(life
   session.drive_state.snapshot = lambda: {'mode': 'auto', 'revision': revision, 'available': True,
                                         'effective': 'onroad', 'overrideAllowed': allowed, 'reason': None if allowed else 'Current Panda status is stale'}
   snapshot = session.snapshot(runtime_app.ShellMode.SETTINGS)
-  assert snapshot.settings.destination(runtime_app.Destination.FORCE_DRIVE).reason == (None if allowed else "Current Panda status is stale")
+  assert snapshot.settings.destination(runtime_app.Destination.FORCE_DRIVE).reason is None
   index = next(i for i, item in enumerate(compact_menu(snapshot.settings)) if item[0] == runtime_app.Destination.FORCE_DRIVE)
   state = replace(snapshot.settings, compact_scroll_x=-422 * index, compact_y=0)
   inputs = SettingsInput(session.profile, lambda action: session._emit(ShellRequest('settings', action)))

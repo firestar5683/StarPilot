@@ -53,16 +53,16 @@ def test_small_cycle_and_expired_physical_source_explicit_auto_recovery(fixture)
   assert f.control.snapshot()['mode'] == 'auto'
 
 
-def test_displayed_admission_is_not_reused_for_action_and_auth_revocation(fixture):
+def test_local_offroad_ignores_park_admission_but_rechecks_authorization(fixture):
   f = fixture
   status = f.control.snapshot()
   f.physical.allowed.return_value = False
-  with pytest.raises(Rejected):
-    f.control.change('offroad', status['revision'], lambda: True)
-  assert f.owner.snapshot().mode == Mode.AUTO
-  f.physical.allowed.return_value = True
+  f.control.change('offroad', status['revision'], lambda: True)
+  assert f.owner.snapshot().mode == Mode.OFFROAD
+  status = f.control.snapshot()
   with pytest.raises(Rejected):
     f.control.cycle(status, lambda: False)
+  assert f.owner.snapshot().mode == Mode.OFFROAD
 
 
 def test_actual_native_small_and_big_dispatch_same_owner(fixture, monkeypatch):
@@ -233,7 +233,7 @@ def test_concurrent_old_snapshot_cannot_repopulate_cache_after_acknowledged_chan
   assert f.control.snapshot()['mode'] == 'onroad'
 
 
-def test_native_offroad_confirmation_preserves_revision_and_rechecks_park(fixture):
+def test_native_offroad_confirmation_preserves_revision_without_park_admission(fixture):
   from unittest.mock import patch
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.shell import ShellMode
@@ -269,9 +269,5 @@ def test_native_offroad_confirmation_preserves_revision_and_rechecks_park(fixtur
     native.display_page = 'system'
     native._drive_change('offroad', revision)
     f.physical.allowed.return_value = False
-    push.call_args.args[0]._callback(DialogResult.CONFIRM)
-    assert f.owner.snapshot().mode == Mode.AUTO
-    f.physical.allowed.return_value = True
-    native._drive_change('offroad', revision)
     push.call_args.args[0]._callback(DialogResult.CONFIRM)
     assert f.owner.snapshot().mode == Mode.OFFROAD

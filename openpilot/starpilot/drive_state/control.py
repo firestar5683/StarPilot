@@ -31,8 +31,9 @@ class DriveStateControl:
               'overrideAllowed': self.cached[2], 'reason': self.cached[3]}
 
   def change(self, mode, revision, authorized):
+    # Deliberate local requests may stop driving services while moving; Galaxy rejects Offroad in its action handler.
     result = self.owner.request(mode, expected_revision=revision, authorized=authorized,
-                                override_allowed=self.physical.allowed)
+                                override_allowed=lambda: True)
     with self.lock:
       self.cached = None
     return result
@@ -40,8 +41,7 @@ class DriveStateControl:
   @staticmethod
   def next_mode(status):
     mode = Mode(status['mode'])
-    desired = CYCLE[(CYCLE.index(mode) + 1) % len(CYCLE)]
-    return Mode.ONROAD if desired == Mode.OFFROAD and not status['overrideAllowed'] else desired
+    return CYCLE[(CYCLE.index(mode) + 1) % len(CYCLE)]
 
   def cycle(self, status, authorized):
     return self.change(self.next_mode(status).value, status['revision'], authorized)

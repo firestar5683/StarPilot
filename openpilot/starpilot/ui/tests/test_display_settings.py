@@ -137,10 +137,10 @@ class DisplaySettingsTests(unittest.TestCase):
     session._drive_change.reset_mock()
     session._display_ui(FeatureUiAction("action", fresh.rows[0], 2))
     session._drive_change.assert_called_once_with("onroad", "shown-revision")
-    self.assertFalse(fresh.rows[0].actions[1][1])  # Only Offroad requires parked admission.
+    self.assertTrue(fresh.rows[0].actions[1][1])  # Local Offroad remains available while moving.
     session._drive_change.reset_mock()
     session._display_ui(FeatureUiAction("action", fresh.rows[0], 1))
-    session._drive_change.assert_not_called()
+    session._drive_change.assert_called_once_with("offroad", "shown-revision")
 
   def test_display_submenu_opens_while_off_enabling_enters_and_back_keeps_the_hierarchy(self):
     with patch("openpilot.starpilot.ui.runtime_app.native_device.invalidate_display_preferences"):

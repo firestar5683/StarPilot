@@ -4,8 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 import tempfile
 from openpilot.starpilot.galaxy.tests import test_navigation_http as helpers
-from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode, Rejected
-import pytest
+from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode
 from openpilot.starpilot.drive_state.control import DriveStateControl
 from openpilot.starpilot.drive_state.tests.test_owner import Params, BOOT
 
@@ -46,7 +45,7 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
     self.assertEqual(self.drive_action('auto', revision=result[1]['revision'])[0], 409)
 
-  def test_physical_loss_blocks_offroad_but_onroad_and_auto_remain_recoverable(self):
+  def test_galaxy_blocks_offroad_but_onroad_and_auto_remain_recoverable(self):
     self.assertEqual(self.drive_action('offroad')[0], 403)
     self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
     self.allowed = False
@@ -76,14 +75,21 @@ class ForceHttpTest(helpers.NavigationHttpTest):
       self.assertEqual(self.drive_action('onroad', remote=True)[0], 409)
     self.assertEqual(self.params.writes, before)
 
-  def test_native_park_permission_revoked_during_commit_writes_nothing(self):
-    before = list(self.params.writes)
-    permission = iter((True, False))
-    self.physical.allowed = lambda: next(permission)
-    with pytest.raises(Rejected):
-      self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
-    self.assertEqual(self.params.writes, before)
-    self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
+  def test_native_force_offroad_does_not_query_park_permission_during_commit(self):
+    def unexpected():
+      raise AssertionError('Local Force Offroad does not require parked admission')
+    self.physical.allowed = unexpected
+    self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
+    self.assertEqual(self.drive.snapshot().mode, Mode.OFFROAD)
+
+  def test_galaxy_force_offroad_never_reaches_owner_for_local_or_remote_sessions(self):
+    for remote in (False, True):
+      for allowed in (False, True):
+        self.allowed = allowed
+        before = list(self.params.writes)
+        with patch.object(self.control, 'change', side_effect=AssertionError('Galaxy must reject before dispatch')):
+          self.assertEqual(self.drive_action('offroad', remote=remote)[0], 403)
+        self.assertEqual(self.params.writes, before)
 
   def test_authenticated_force_offroad_from_live_onroad_state(self):
     self._force_offroad_from_live_onroad_state(True)
@@ -112,16 +118,11 @@ class ForceHttpTest(helpers.NavigationHttpTest):
     self.assertEqual(status[1]['overrideAllowed'], can_valid)
     result = self.drive_action('offroad', remote=True)
     self.assertEqual(result[0], 403)
-    if can_valid:
-      self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
-      self.assertEqual(self.drive.snapshot().mode, Mode.OFFROAD)
-    else:
-      with pytest.raises(Rejected, match='Park'):
-        self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
-      self.assertEqual(self.drive.snapshot().mode, Mode.AUTO)
+    self.control.change('offroad', self.drive.snapshot().revision, lambda: True)
+    self.assertEqual(self.drive.snapshot().mode, Mode.OFFROAD)
     # hardwared consumes this same owner request through the actual resolver.
     messages.values['deviceState'].started = should_start(self.drive.snapshot().mode,
       {'ignition': True}, {'ready': True}, already_started=True)
-    self.assertEqual(messages.values['deviceState'].started, not can_valid)
+    self.assertFalse(messages.values['deviceState'].started)
     self.assertEqual(self.request('/api/drive-state/status', remote=True, cookie=self.remote_cookie)[1]['effective'],
-                     'offroad' if can_valid else 'onroad')
+                     'offroad')
