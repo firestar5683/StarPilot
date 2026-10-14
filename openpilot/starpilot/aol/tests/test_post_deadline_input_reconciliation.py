@@ -124,9 +124,6 @@ def test_source_arriving_after_expired_proof_before_owner_decision(full_op, latc
            mock.patch.object(sd.excessive_actuation_check, 'update', wraps=sd.excessive_actuation_check.update) as excessive:
         axis, state, command = step(4, timeout=True, state_stamp=BASE, offset_ns=9_000_000, intent_message=intent(BASE, 3, latched=latched),
                                     allowed=pulse != 'native_deny', long_allowed=pulse != 'native_deny')
-        print({'source': axis.sourceCarStateMonoTime, 'fault': str(axis.faultReason),
-               'enabled': state.enabled, 'lat': command.latActive, 'long': command.longActive,
-               'snapshot': sd.aol_intent_companion.last_snapshot, 'unread_carstate': len(queue)})
         if pulse == 'queue_overrun':
           assert not queue and len(visited) == 33 and sd.car_state_queue_invalid
           assert axis.sourceCarStateMonoTime == 0

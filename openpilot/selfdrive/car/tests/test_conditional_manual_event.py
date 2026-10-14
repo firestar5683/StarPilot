@@ -140,8 +140,6 @@ class CardManualEventTests(unittest.TestCase):
               last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
               rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[])
     initialize_publication_sources(fake)
-    fake.loop_timing = None
-    fake.timing_mark = MethodType(Car.timing_mark, fake)
     fake.radar_publish = MethodType(Car.radar_publish, fake)
     fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), state(), None)
@@ -244,8 +242,6 @@ class CardManualEventTests(unittest.TestCase):
               last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
               rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[])
     initialize_publication_sources(fake)
-    fake.loop_timing = None
-    fake.timing_mark = MethodType(Car.timing_mark, fake)
     fake.radar_publish = MethodType(Car.radar_publish, fake)
     fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), state(), None)
@@ -274,8 +270,6 @@ class CardManualEventTests(unittest.TestCase):
               rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[],
               can_log_mono_time=self.now + 2_000_000)
     initialize_publication_sources(fake)
-    fake.loop_timing = None
-    fake.timing_mark = MethodType(Car.timing_mark, fake)
     fake.radar_publish = MethodType(Car.radar_publish, fake)
     invalid = car.CarState(canValid=False)
     with patch('openpilot.selfdrive.car.card.REPLAY', True):
@@ -305,8 +299,6 @@ class CardManualEventTests(unittest.TestCase):
               can_rcv_cum_timeout_counter=0, rk=NS(remaining=0.0),
               v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[])
     initialize_publication_sources(fake)
-    fake.loop_timing = None
-    fake.timing_mark = MethodType(Car.timing_mark, fake)
     fake.radar_publish = MethodType(Car.radar_publish, fake)
     fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), release, None)

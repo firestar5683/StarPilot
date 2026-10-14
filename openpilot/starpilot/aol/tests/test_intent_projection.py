@@ -201,36 +201,6 @@ def test_actual_hkg_drain_precedes_shared_decision_clock(guard):
           assert not card.aol_card_intent.allowed_latch
 
 
-def test_authority_loss_diagnostic_is_bounded_and_logged_by_params_worker():
-  from types import SimpleNamespace
-  from openpilot.common.params import Params
-  from unittest.mock import Mock, patch
-  from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
-
-  with OpenpilotPrefix():
-    sd = SelfdriveD.__new__(SelfdriveD)
-    sd.sm = messaging.SubMaster(['aolSafetyWire'])
-    sd.sm.logMonoTime['aolSafetyWire'] = 100
-    sd.aol_car_state_log_ns = 90
-    arguments = {'companion': None, 'drained': False, 'native': None, 'source_current': False,
-                 'lost_active': True, 'lost_companion': True, 'lost_permission': False, 'upgraded': False}
-    for now in (6_000_000_000, 6_000_000_001, 12_000_000_000, 18_000_000_000):
-      sd.record_aol_authority_loss(now_ns=now, **arguments)
-    assert len(sd.aol_authority_reports) == 2
-    assert [row['decision_ns'] for row in sd.aol_authority_reports] == [12_000_000_000, 18_000_000_000]
-    sd.aol_replay = False
-    sd.params = Params()
-    sd.refresh_saved_driving_mode = Mock()
-    evt = SimpleNamespace(is_set=Mock(side_effect=[False, True]))
-    with (patch('openpilot.selfdrive.selfdrived.selfdrived.cloudlog.event') as report,
-          patch('openpilot.selfdrive.selfdrived.selfdrived.time.sleep')):
-      sd.params_thread(evt)
-    report.assert_called_once_with('selfdrived.authority_lost', error=True, decision_ns=12_000_000_000, source_ns=90,
-      intent_snapshot={}, intent_rejection='no_companion', drain_ok=False, drain_count=0,
-      source_current=False, source_expired=False, native_present=False, native_message_ns=100,
-      native_requested_lateral=False, native_allowed_lateral=False, lost_active=True,
-      lost_companion=True, lost_permission=False, pause_upgraded=False)
-    assert len(sd.aol_authority_reports) == 1
 
 
 @pytest.mark.parametrize('guard', [
@@ -284,7 +254,7 @@ def test_raw_observed_projection_restricts_without_renewing_authority(guard):
     assert result.observedMonoTime == source_ns
     assert result.validUntilMonoTime == source_ns + 200_000_000
     assert companion.integrity_epoch == 0
-    assert companion.last_snapshot['sm_projection']
+    assert companion.raw_projections[old_ns][0].pauseLateral
     assert old_ns not in companion.samples
   else:
     assert result is None

@@ -6,7 +6,6 @@ import threading
 import uuid
 from copy import copy
 from dataclasses import replace
-from collections import deque
 
 import openpilot.cereal.messaging as messaging
 
@@ -22,7 +21,6 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
-from openpilot.starpilot.selfdrive_loop_timing import SelfdriveLoopTiming, timed_params_read
 from openpilot.starpilot.gps.source import observation as gps_observation
 
 from openpilot.selfdrive.car.car_events import CarEvents
@@ -110,8 +108,6 @@ class SelfdriveD:
     self.aol_authority_lost = False
     self.aol_transport_pause = TransportPause(self.CP, self.aol_session_id)
     self.aol_fault_reason = 'none'
-    self.aol_authority_reports = deque(maxlen=2)
-    self.aol_last_authority_report_ns = 0
     self.steering_authority_unavailable = False
     self.steering_companion = (SteeringCompanion(messaging.sub_sock('starpilotCarState', conflate=False))
                                if monitored_profile(self.CP) else None)
@@ -126,9 +122,6 @@ class SelfdriveD:
     self.conditional_settings = ConditionalSettingsOwner(self.params) if self.conditional_replay else None
     self.conditional_consumer = ModeConsumer() if self.conditional_replay else None
     self.conditional_status = 'disabled'
-    self.conditional_trace = deque(maxlen=512)
-    self.conditional_trace_key = None
-    self.conditional_trace_sequence = 0
     self.controller_action_sock = messaging.sub_sock('slcAction', conflate=False)
     self.controller_action_owner = ModeActionOwner()
     self.switchback_capable = ioniq6_media_eligible(self.CP) and not self.CP.passive and not self.CP.dashcamOnly and not self.CP.notCar
@@ -237,8 +230,6 @@ class SelfdriveD:
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     # Observational only. Do not cache this qualification for authority decisions.
-    self.loop_timing = SelfdriveLoopTiming() if not REPLAY and self.aol_replay and qualified_ioniq6(self.CP) else None
-    self._loop_decision_ns = self._loop_decision_source_ns = self._loop_received_source_ns = 0
 
     # Determine startup event
     self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
@@ -351,7 +342,7 @@ class SelfdriveD:
       self.events.add(EventName.joystickDebug)
       self.startup_event = None
 
-    loading = timed_params_read(self, "ChestnutLoading", True)
+    loading = self.params.get_bool("ChestnutLoading")
     if self.big_model_loading and not loading:
       self.big_model_ready_t = time.monotonic()
     self.big_model_loading = loading
@@ -380,7 +371,7 @@ class SelfdriveD:
 
     # Check for user bookmark press
     if self.sm.updated['userBookmark']:
-      prime_type = timed_params_read(self, "PrimeType")
+      prime_type = self.params.get("PrimeType")
       paired = prime_type is not None and int(prime_type) >= 0
       self.events.add(EventName.userBookmark if paired else EventName.userBookmarkNotPaired)
 
@@ -500,7 +491,6 @@ class SelfdriveD:
         self.events.add(EventName.radarFault)
     hardware_events_added = len(self.events) - num_events
 
-    self.mark_loop_phase('environment_events_return')
     input_proof = getattr(self, 'aol_step_input_proof', None)
     reconcile_input = bool(input_proof is not None and not REPLAY and self.aol_replay and self.axis_transport_required and
                            self.CP.openpilotLongitudinalControl and qualified_ioniq6(self.CP) and
@@ -556,7 +546,6 @@ class SelfdriveD:
       for event in envelope_errors:
         self.events.add(event)
     self.event_car_state = CS
-    self.mark_loop_phase('physical_event_owners_return')
     if reconcile_input:
       self._update_steering_authority(CS)
     if any(physical_cancel(sample) for sample, _ in samples):
@@ -692,18 +681,11 @@ class SelfdriveD:
           self.params.put('LongitudinalPersonality', self.personality)
           self.events.add(EventName.personalityChanged)
 
-  def mark_loop_phase(self, name):
-    timing = getattr(self, 'loop_timing', None)
-    if timing is not None:
-      timing.mark(name)
 
   def data_sample(self):
     self.car_state_retained_source_ns = self.aol_car_state_log_ns
     self.car_state_retained_valid = getattr(self, 'conditional_car_state_valid', False)
-    self.mark_loop_phase('recv_one_start')
     _car_state = messaging.recv_one(self.car_state_sock)
-    self.mark_loop_phase('recv_one_return')
-    self._loop_received_source_ns = int(_car_state.logMonoTime) if _car_state is not None else 0
     samples = []
     queue_invalid = False
     if _car_state is not None:
@@ -721,9 +703,7 @@ class SelfdriveD:
           # A full bounded batch cannot establish that the receiver caught up.
           queue_invalid = True
         _car_state = samples[-1]
-    self.mark_loop_phase('raw_batch_before_sm')
     self.sm.update(0)
-    self.mark_loop_phase('submaster_return')
 
     if (getattr(self, 'aol_replay', False) and getattr(self, 'axis_transport_required', False) and
         not REPLAY):
@@ -834,9 +814,7 @@ class SelfdriveD:
     if getattr(self, 'aol_event_input_reconcile', False):
       remaining = max(0, 32 - getattr(self, 'aol_step_intent_drain_count', 0))
       max_messages = remaining if max_messages is None else min(max_messages, remaining)
-    self.mark_loop_phase('intent_drain_start')
     drained = companion.drain() if max_messages is None else companion.drain(max_messages=max_messages)
-    self.mark_loop_phase('intent_drain_return')
     # Empty later drains must not erase earlier restrictive burst evidence.
     self.aol_step_intent_drain_count = (getattr(self, 'aol_step_intent_drain_count', 0) +
                                        getattr(companion, 'last_drain_count', 0))
@@ -949,9 +927,7 @@ class SelfdriveD:
       wait_ns = max(0, wait_until_ns - time.monotonic_ns())
       polled = False
       if poller is not None and wait_ns >= 1_000_000:
-        self.mark_loop_phase('input_poll_start')
         polled = poller.poll(wait_ns // 1_000_000)
-        self.mark_loop_phase('input_poll_return')
       if polled:
         for _ in range(32 - len(samples)):
           following = messaging.recv_one_or_none(self.car_state_sock)
@@ -1427,7 +1403,6 @@ class SelfdriveD:
           bool(axis.nativeAcknowledged)) if reason == 'critical' else None)
         self.aol_published_stock_lateral_proof = (
           stock_lateral_fault_proof(self, CS, axis_msg, time.monotonic_ns()) if source_clock_scoped and reason == 'critical' else None)
-        self.mark_loop_phase('axis_send_return')
         self.aol_published_input_proof = None
         self.aol_published_input_native = None
         if (source_clock_scoped and reason == 'none' and axis_msg.valid and axis.qualified and
@@ -1481,7 +1456,6 @@ class SelfdriveD:
 
     ce_send, reason = (None, None) if axis_published else self.publish_axis_proof(CS, defer_events=True)
     self.pm.send('selfdriveState', ss_msg)
-    self.mark_loop_phase('selfdrive_send_return')
     if self.conditional_replay:
       self.conditional_ack_sequence += 1
       result = self.conditional_result
@@ -1523,7 +1497,6 @@ class SelfdriveD:
     if clocks is None:
       self.conditional_consumer.invalidate(time.monotonic_ns())
       self.conditional_status = 'clock_unavailable'
-      self.record_conditional_trace(time.monotonic_ns(), ('clock_unavailable',), ())
       return
     now_ns, boot_ns, skew_ns = clocks
     drive_id = int(self.sm['deviceState'].startedMonoTime)
@@ -1560,31 +1533,7 @@ class SelfdriveD:
     self.experimental_mode = result.experimental
     self.conditional_status = result.status
     self.conditional_result = result
-    consumer = self.conditional_consumer
-    try:
-      current = self.conditional_settings.current
-      car_valid = bool(self.conditional_car_state_valid and CS is not None and CS.canValid and not CS.canTimeout)
-      self.record_conditional_trace(
-        now_ns,
-        (result.accepted, consumer.rejection, verdict.status, configured, tuple(service_fresh(service) for service in required),
-         bool(self.initialized), bool(axis_active),
-         bool(getattr(self, 'aol_axis_publication_deferred', False)), car_valid,
-         bool(self.sm['carControl'].longActive), bool(self.sm.seen['slcState'] and self.sm.alive['slcState'])),
-        (now_ns - model_ns, now_ns - car_state_ns, now_ns - message_ns, now_ns - receipt_ns, now_ns - consumer.barrier_ns,
-         now_ns - snapshot.verified_mono_ns if snapshot is not None else None,
-         now_ns - current.verified_mono_ns if current is not None else None, skew_ns,
-         int(self.sm['slcState'].conditionalMode.sequence), consumer.last.sequence if consumer.last is not None else 0))
-    except Exception:
-      pass
 
-  def record_conditional_trace(self, now_ns, key, detail):
-    # cloudlog JSON formatting is too slow for the 100 Hz loop; params_thread sinks these.
-    trace = getattr(self, 'conditional_trace', None)
-    if trace is None or key == getattr(self, 'conditional_trace_key', None):
-      return
-    self.conditional_trace_key = key
-    self.conditional_trace_sequence = getattr(self, 'conditional_trace_sequence', 0) + 1
-    trace.append((self.conditional_trace_sequence, now_ns, key, detail))
 
   def _decide_aol_axes(self, CS, intent, native, *, now_ns=0, ordinary_lag=False):
     from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
@@ -1647,25 +1596,6 @@ class SelfdriveD:
                 current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id) == native and
                 healthy_transport(self.sm, self.CP, CS, self.aol_session_id, now_ns, native))
 
-  def record_aol_authority_loss(self, *, now_ns, companion, drained, native, source_current,
-                                lost_active, lost_companion, lost_permission, upgraded):
-    if now_ns - getattr(self, 'aol_last_authority_report_ns', 0) < 5_000_000_000:
-      return
-    if not hasattr(self, 'aol_authority_reports'):
-      self.aol_authority_reports = deque(maxlen=2)
-    self.aol_authority_reports.append({
-      'decision_ns': now_ns, 'source_ns': self.aol_car_state_log_ns,
-      'intent_snapshot': dict(companion.last_snapshot) if companion is not None and drained else {},
-      'intent_rejection': companion.last_rejection if companion is not None else 'no_companion',
-      'drain_ok': drained, 'drain_count': companion.last_drain_count if companion is not None else 0,
-      'source_current': source_current, 'source_expired': getattr(self, 'aol_expired_healthy_source', False),
-      'native_present': native is not None, 'native_message_ns': int(getattr(self.sm, 'logMonoTime', {}).get('aolSafetyWire', 0)),
-      'native_requested_lateral': bool(native is not None and native.requestedLateral),
-      'native_allowed_lateral': bool(native is not None and native.lateralAllowed),
-      'lost_active': lost_active, 'lost_companion': lost_companion,
-      'lost_permission': lost_permission, 'pause_upgraded': upgraded,
-    })
-    self.aol_last_authority_report_ns = now_ns
 
   def step(self):
     initial_state = (self.state_machine.state, self.state_machine.soft_disable_timer, self.enabled, self.active)
@@ -1681,7 +1611,6 @@ class SelfdriveD:
     self.aol_ordinary_source_pause = False
     self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
-    self.mark_loop_phase('data_sample_return')
     self.car_event_sample_count = 0
     self.aol_reconciled_sources = ()
     self.event_car_state = CS
@@ -1691,7 +1620,6 @@ class SelfdriveD:
     finally:
       self.event_input_refresh_pending = False
     CS = self.event_car_state
-    self.mark_loop_phase('events_return')
     if max(self.car_event_sample_count, len(getattr(self, 'car_state_samples', ()))) > 1 and any(self.events.contains(kind) for kind in (
         ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
       # A queued enable cannot override a cancellation or pedal edge in this batch.
@@ -1704,8 +1632,6 @@ class SelfdriveD:
                       not self.aol_replay or intent_companion is None or self.drain_axis_intent(intent_companion))
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
-      self._loop_decision_ns = now_ns
-      self._loop_decision_source_ns = self.aol_car_state_log_ns
       # Intent draining can cross the source cutoff. Check the original proof
       # against the same post-drain clock used by admission, before authority
       # state changes. This retains no new input, proof, deadline, or enable.
@@ -1717,9 +1643,7 @@ class SelfdriveD:
         self.CS_prev = CS
         del self.aol_step_input_proof
         return
-      self.mark_loop_phase('native_validation_start')
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
-      self.mark_loop_phase('native_validation_return')
       if native is None and self.initialized:
         lost_active_aol = self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active
         self.events.add(EventName.controlsMismatch)
@@ -1748,7 +1672,6 @@ class SelfdriveD:
                               previous=getattr(self, 'aol_last_intent', None),
                               companion=intent_companion, drain=False) if intent_drained else None
       intent = self.reconciled_intent(intent, previous_intent, reconciled_pairs, reconciled_epoch, now_ns)
-      self.mark_loop_phase('intent_admission_return')
       self.aol_last_intent = intent
       from openpilot.starpilot.aol.dm import dm_clear, observe_owner
       observe_owner(self, intent, previous_intent)
@@ -1854,11 +1777,9 @@ class SelfdriveD:
       if self.aol_authority_lost or pause:
         self.events.add(EventName.controlsMismatch)
         lost_active_aol |= pause
-    self.mark_loop_phase('authority_classification_return')
     was_enabled = self.enabled
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
-    self.mark_loop_phase('state_machine_return')
     if not was_enabled and self.enabled and self.events.contains(ET.ENABLE):
       self.aol_step_input_proof = None
     if lost_active_aol and ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
@@ -1917,20 +1838,13 @@ class SelfdriveD:
     if (getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause' and
         ET.WARNING not in self.state_machine.current_alert_types):
       self.state_machine.current_alert_types.append(ET.WARNING)
-    if self.aol_replay and self.aol_fault_reason == 'critical' and previous_fault_reason != 'critical':
-      self.record_aol_authority_loss(now_ns=now_ns, companion=intent_companion, drained=intent_drained, native=native,
-        source_current=source_current, lost_active=lost_active_aol, lost_companion=lost_companion,
-        lost_permission=lost_permission, upgraded=upgraded)
-    self.mark_loop_phase('axis_decision_return')
     axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
     if axis_published:
       self.aol_axis_publication_deferred = bool(not previous_deferred and self.defer_expired_axis_publication(CS, initial_state))
       if not self.aol_axis_publication_deferred:
         self.publish_axis_proof(CS, source_context=(initial_state, not previous_deferred))
     self.update_alerts(CS)
-    self.mark_loop_phase('alerts_return')
     self.update_conditional_mode(CS)
-    self.mark_loop_phase('conditional_return')
 
     self.publish_selfdriveState(CS, axis_published=axis_published)
 
@@ -1948,38 +1862,6 @@ class SelfdriveD:
 
   def params_thread(self, evt):
     while not evt.is_set():
-      timing = getattr(self, 'loop_timing', None)
-      if timing is not None:
-        timing.worker_mark(True)
-        try:
-          timing_report = timing.take_report()
-          if timing_report is not None:
-            cloudlog.event('selfdrived.loop_timing', **timing_report)
-        except Exception:
-          timing.sink_errors += 1
-      trace = getattr(self, 'conditional_trace', None)
-      if trace:
-        records = []
-        while trace and len(records) < 64:
-          try:
-            records.append(trace.popleft())
-          except IndexError:
-            break
-        try:
-          cloudlog.event('selfdrived.conditional_trace', records=records, columns=(
-            'trace_sequence', 'now_ns',
-            ('accepted', 'rejection', 'settings_status', 'configured', 'fresh_device_model_control', 'initialized',
-             'axis_longitudinal', 'axis_deferred', 'car_state_valid', 'long_active', 'slc_live'),
-            ('model_age_ns', 'car_state_age_ns', 'message_age_ns', 'receipt_age_ns', 'barrier_age_ns',
-             'snapshot_verified_age_ns', 'current_verified_age_ns', 'clock_skew_ns', 'proposal_sequence', 'accepted_sequence')))
-        except Exception:
-          pass
-      reports = getattr(self, 'aol_authority_reports', None)
-      if reports:
-        try:
-          cloudlog.event('selfdrived.authority_lost', error=True, **reports.popleft())
-        except IndexError:
-          pass
       self.is_metric = self.params.get_bool("IsMetric")
       if self.aol_replay:
         self.aol_settings = read_settings(self.params)
@@ -1989,8 +1871,6 @@ class SelfdriveD:
       self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
       self.refresh_saved_driving_mode(time.monotonic_ns())
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
-      if timing is not None:
-        timing.worker_mark(False)
       time.sleep(0.1)
 
   def run(self):
@@ -1999,14 +1879,8 @@ class SelfdriveD:
     try:
       t.start()
       while True:
-        if self.loop_timing is not None:
-          self._loop_decision_ns = self._loop_decision_source_ns = self._loop_received_source_ns = 0
-          self.loop_timing.begin(self.rk, getattr(self, 'aol_published_input_proof', None))
         self.step()
-        self.mark_loop_phase('step_return')
         self.rk.monitor_time()
-        if self.loop_timing is not None:
-          self.loop_timing.finish(self, self.rk)
     finally:
       e.set()
       t.join()

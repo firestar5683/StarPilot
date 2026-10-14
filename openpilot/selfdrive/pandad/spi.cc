@@ -12,7 +12,6 @@
 
 #include "common/util.h"
 #include "common/timing.h"
-#include "selfdrive/pandad/producer_timing.h"
 #include "common/swaglog.h"
 #include "panda/board/comms_definitions.h"
 #include "selfdrive/pandad/panda_comms.h"
@@ -42,8 +41,8 @@ const std::string SPI_DEVICE = "/dev/spidev0.0";
 class LockEx {
 public:
   LockEx(int fd_, std::recursive_mutex &m_) : fd(fd_), m(m_) {
-    { pandad_timing::Scope timing(pandad_timing::Mutex); m.lock(); }
-    { pandad_timing::Scope timing(pandad_timing::Flock); flock(fd, LOCK_EX); }
+    { m.lock(); }
+    { flock(fd, LOCK_EX); }
   }
 
   ~LockEx() {
@@ -225,47 +224,6 @@ static bool check_crc(const uint8_t *data, uint32_t len) {
 }
 
 
-// Scope lives inside existing hw_lock; destruction precedes LockEx unlock.
-class HolderReceiptScope {
-  spi_holder_timing::Receipt row{};
-  pandad_timing::Tick start{};
-public:
-  HolderReceiptScope(unsigned ep, unsigned request, unsigned tx, unsigned rx, const char *serial) noexcept {
-    start = pandad_timing::clock_now();
-    row.acquired = start.wall;
-    row.thread = uint64_t(syscall(SYS_gettid));
-    row.role = pandad_timing::capturing ? 1U : 2U; // main / concurrent-or-startup
-    row.endpoint = ep; row.request = request; row.tx = tx; row.rx = rx;
-    if (serial) std::strncpy(row.serial, serial, 32);
-    spi_holder_timing::active = &row;
-  }
-  ~HolderReceiptScope() noexcept {
-    auto end = pandad_timing::clock_now();
-    row.released = end.wall;
-    if (start.wall && end.wall >= start.wall && start.cpu && end.cpu >= start.cpu) {
-      row.cpu = end.cpu - start.cpu;
-    } else { row.invalid_clock = true; }
-    spi_holder_timing::history.append(row);
-    spi_holder_timing::active = nullptr;
-  }
-};
-class HolderPhaseScope {
-  pandad_timing::Tick start{};
-  bool ack;
-public:
-  explicit HolderPhaseScope(bool is_ack) noexcept : ack(is_ack) {
-    if (spi_holder_timing::active) start = pandad_timing::clock_now();
-  }
-  ~HolderPhaseScope() noexcept {
-    auto *row = spi_holder_timing::active;
-    if (!row) return;
-    auto end = pandad_timing::clock_now();
-    if (!start.wall || !end.wall || end.wall < start.wall || !start.cpu || !end.cpu || end.cpu < start.cpu) { row->invalid_clock = true; return; }
-    if (ack) { row->ack_wall += end.wall-start.wall; row->ack_cpu += end.cpu-start.cpu; }
-    else { row->ioctl_wall += end.wall-start.wall; row->ioctl_cpu += end.cpu-start.cpu; }
-  }
-};
-
 int PandaSpiHandle::spi_transfer_retry(uint8_t endpoint, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, unsigned int timeout) {
   // timeout of 0 means forever
   const double deadline = (timeout == 0) ? INFINITY : millis_since_boot() + std::max(timeout, SPI_MIN_TIMEOUT);
@@ -326,7 +284,7 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
   }
 
   int ret;
-  { pandad_timing::Scope timing(pandad_timing::Ioctl); HolderPhaseScope holder_ioctl(false); ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t); }
+  { ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t); }
   if (err_prob > 0 && chance(err_prob)) {
     printf("ioctl error\n");
     ret = -1;
@@ -343,23 +301,14 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
 // or the deadline. Every transfer either sees all of what the panda queued from its first byte, or
 // nothing it can mistake for a response. Returns the response length, or a negative SpiError
 int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint32_t id, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, double deadline) {
-  pandad_timing::TransactionScope transaction_timing(endpoint, endpoint == 0 && tx_data && tx_len ? tx_data[0] : 0, tx_len, max_rx_len, hw_serial.c_str());
-  pandad_timing::Scope transfer_timing(pandad_timing::Transfer);
+
   static const auto poll = [] {
     std::array<uint8_t, SPI_BUF_SIZE> p;
     p.fill(SPI_POLL);
     return p;
   }();
-
-  const auto wait_start = pandad_timing::clock_now(false).wall;
   LockEx lock(spi_fd, hw_lock);
-  const auto acquired = pandad_timing::clock_now(false).wall;
-  if (pandad_timing::capturing && endpoint == 0x81) {
-    spi_holder_timing::select_wait(spi_holder_timing::history, wait_start, acquired,
-                                  pandad_timing::frame.holders, pandad_timing::frame.invalid);
-  }
-  HolderReceiptScope holder(endpoint, endpoint == 0 && tx_data && tx_len ? tx_data[0] : 0,
-                            tx_len, max_rx_len, hw_serial.c_str());
+
 
   // the response is always read in one transfer of rx_len
   const uint32_t rx_len = sizeof(spi_resp_header) + max_rx_len + SPI_CRC_SIZE;
@@ -400,7 +349,7 @@ int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint32_t id, uint8_t *tx_data
       // read until the response. if the panda is ready again, it never got the request
       do {
         int poll_ret;
-        { pandad_timing::Scope response_timing(pandad_timing::Ack); HolderPhaseScope holder_response(true); poll_ret = xfer(poll.data(), rx_len); }
+        { poll_ret = xfer(poll.data(), rx_len); }
         if (poll_ret < 0) {
           break;
         }

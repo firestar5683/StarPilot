@@ -7,7 +7,6 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libc cimport errno
 from libc.string cimport strerror
-from libc.stdint cimport uint64_t
 from cython.operator import dereference
 
 
@@ -17,19 +16,6 @@ from .ipc cimport PubSocket as cppPubSocket
 from .ipc cimport Poller as cppPoller
 from .ipc cimport Message as cppMessage
 from .ipc cimport Event as cppEvent, SocketEventHandle as cppSocketEventHandle
-
-
-cdef extern from *:
-  """
-  #include <stdint.h>
-  #include <time.h>
-  static inline uint64_t msgq_receive_clock_ns() noexcept {
-    struct timespec ts{};
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
-    return uint64_t(ts.tv_sec) * 1000000000ULL + uint64_t(ts.tv_nsec);
-  }
-  """
-  uint64_t msgq_receive_clock_ns() noexcept nogil
 
 
 class IpcError(Exception):
@@ -175,15 +161,6 @@ cdef class Poller:
 cdef class SubSocket:
   cdef cppSubSocket * socket
   cdef bool is_owner
-  cdef bool receive_timing_enabled
-  cdef uint64_t rt_calls[2]
-  cdef uint64_t rt_messages
-  cdef uint64_t rt_nulls
-  cdef uint64_t rt_invalid
-  cdef uint64_t rt_totals[7]
-  cdef uint64_t rt_slowest[2][8]
-  cdef uint64_t rt_max[2]
-
   def __cinit__(self):
     with nogil:
       self.socket = cppSubSocket.create()
@@ -220,97 +197,18 @@ cdef class SubSocket:
     with nogil:
       self.socket.setTimeout(timeout)
 
-  cdef void _reset_receive_timing(self):
-    cdef int i, j
-    self.rt_messages = self.rt_nulls = self.rt_invalid = 0
-    for i in range(7):
-      self.rt_totals[i] = 0
-    for i in range(2):
-      self.rt_calls[i] = self.rt_max[i] = 0
-      for j in range(8):
-        self.rt_slowest[i][j] = 0
-
-  def set_receive_timing(self, bool enabled):
-    self.receive_timing_enabled = enabled
-    self._reset_receive_timing()
-
-  def take_receive_timing(self):
-    cdef int i, j
-    report = {
-      'schema_version': 1, 'clock': 'MONOTONIC',
-      'enabled': self.receive_timing_enabled,
-      'blocking_calls': self.rt_calls[0], 'nonblocking_calls': self.rt_calls[1],
-      'messages': self.rt_messages, 'nulls': self.rt_nulls,
-      'invalid_clock_samples': self.rt_invalid,
-      'totals_ns': dict(zip(('release', 'native', 'reacquire', 'copy', 'delete_release', 'delete_native', 'delete_reacquire'),
-                           [self.rt_totals[i] for i in range(7)])),
-      'boundary_names': ('before_release', 'native_entry', 'native_return', 'after_reacquire',
-                         'before_delete_release', 'delete_entry', 'delete_return', 'after_delete_reacquire'),
-      'slowest_blocking_ns': tuple(self.rt_slowest[0][j] for j in range(8)),
-      'slowest_nonblocking_ns': tuple(self.rt_slowest[1][j] for j in range(8)),
-    }
-    self._reset_receive_timing()
-    return report
-
   def receive(self, bool non_blocking=False):
     cdef cppMessage *msg
-    cdef uint64_t points[8]
-    cdef uint64_t elapsed
-    cdef int i, kind = 1 if non_blocking else 0
-    cdef bool valid = True
-    cdef bool has_message
-    # Disabled path retains the existing native call/copy/delete order.
-    if not self.receive_timing_enabled:
-      with nogil:
-        msg = self.socket.receive(non_blocking)
-      if msg == NULL:
-        return None
-      else:
-        sz = msg.getSize()
-        m = msg.getData()[:sz]
-        with nogil:
-          del msg
-        return m
-
-    points[0] = msgq_receive_clock_ns()
     with nogil:
-      points[1] = msgq_receive_clock_ns()
       msg = self.socket.receive(non_blocking)
-      points[2] = msgq_receive_clock_ns()
-    points[3] = msgq_receive_clock_ns()
-    has_message = msg != NULL
-    if not has_message:
-      self.rt_nulls += 1
-      for i in range(4, 8):
-        points[i] = 0
+    if msg == NULL:
+      return None
     else:
-      self.rt_messages += 1
       sz = msg.getSize()
       m = msg.getData()[:sz]
-      points[4] = msgq_receive_clock_ns()
       with nogil:
-        points[5] = msgq_receive_clock_ns()
         del msg
-        points[6] = msgq_receive_clock_ns()
-      points[7] = msgq_receive_clock_ns()
-    self.rt_calls[kind] += 1
-    for i in range(8 if has_message else 4):
-      if points[i] == 0 or (i > 0 and points[i] < points[i-1]):
-        valid = False
-    if not valid:
-      self.rt_invalid += 1
-    else:
-      for i in range(7 if has_message else 3):
-        self.rt_totals[i] += points[i+1] - points[i]
-      elapsed = points[7 if has_message else 3] - points[0]
-      if elapsed > self.rt_max[kind]:
-        self.rt_max[kind] = elapsed
-        for i in range(8):
-          self.rt_slowest[kind][i] = points[i]
-    if not has_message:
-      return None
-    return m
-
+      return m
 
 cdef class PubSocket:
   cdef cppPubSocket * socket

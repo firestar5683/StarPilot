@@ -19,8 +19,3 @@ if arch != "Darwin":
 
   if GetOption('extras') or any(target.startswith('openpilot/selfdrive/pandad/tests/') for target in COMMAND_LINE_TARGETS):
     env.Program('tests/test_panda_owner', ['tests/test_panda_owner.cc', 'panda_safety.cc'], LIBS=[panda] + libs)
-
-# Linux-only producer timing: gettid, THREAD rusage, and the native IPC backend.
-if arch != "Darwin" and (GetOption('extras') or any(target.startswith('openpilot/selfdrive/pandad/tests/') for target in COMMAND_LINE_TARGETS)):
-  env.Program('tests/test_producer_timing', ['tests/test_producer_timing.cc'], LIBS=['pthread'])
-  env.Program('tests/test_producer_sink', ['tests/test_producer_sink.cc'], LIBS=[common, 'pthread'])

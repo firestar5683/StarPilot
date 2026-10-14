@@ -25,7 +25,6 @@
 #include "common/ratekeeper.h"
 #include "common/swaglog.h"
 #include "common/timing.h"
-#include "selfdrive/pandad/producer_timing.h"
 #include "common/util.h"
 #include "common/hardware/hw.h"
 
@@ -123,7 +122,6 @@ void can_recv(std::vector<Panda *> &pandas, PubMaster *pm) {
       canData[i].setSrc(raw_can_data[i].src);
     }
     pm->send("can", msg);
-    if (pandad_timing::recorder) pandad_timing::recorder->can_publish(evt.getLogMonoTime(), raw_can_data.size());
   }
 }
 
@@ -457,18 +455,14 @@ void pandad_run(std::vector<Panda *> &pandas) {
   constexpr AolSafetyProfile aol_profiles[] = {HONDA_AOL_PROFILE, HONDA_STOCK_AOL_PROFILE, HONDA_NIDEC_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE, MAZDA_AOL_PROFILE, TESLA_PREAP_AOL_PROFILE, TESLA_SCREEN_AOL_PROFILE, TOYOTA_AOL_PROFILE};
   const AolProfileRegistry aol_registry{aol_profiles, std::size(aol_profiles)};
   AolAxisNegotiator aol_negotiator(aol_registry);
-
-  pandad_timing::Recorder producer_timing;
-  pandad_timing::recorder = &producer_timing;
   // Main loop: receive CAN first, then process lower priority panda and peripheral state.
   while (!do_exit) {
-    producer_timing.begin();
-    if (!check_all_connected(pandas)) { pandad_timing::capturing = false; break; }
-    { pandad_timing::Scope timing(pandad_timing::Can); can_recv(pandas, &pm); }
+    if (!check_all_connected(pandas)) { break; }
+    { can_recv(pandas, &pm); }
 
     // Process peripheral state at 20 Hz
     if (rk.frame() % 5 == 0) {
-      { pandad_timing::Scope timing(pandad_timing::Peripheral20); process_peripheral_state(peripheral_panda, &pm, no_fan_control, is_onroad); }
+      { process_peripheral_state(peripheral_panda, &pm, no_fan_control, is_onroad); }
     }
 
     // Process panda state at 10 Hz
@@ -485,7 +479,7 @@ void pandad_run(std::vector<Panda *> &pandas) {
         previous_aol_owner = panda;
       }
       std::optional<aol_safety_health_t> aol_status;
-      { pandad_timing::Scope timing(pandad_timing::AxisBefore); aol_status = (panda && (aol_replay || axis_received)) ? panda->get_aol_safety_state() : std::nullopt; }
+      { aol_status = (panda && (aol_replay || axis_received)) ? panda->get_aol_safety_state() : std::nullopt; }
       if (aol_status && !panda_safety.aolStatusMatches(panda, *aol_status)) aol_status.reset();
       const bool aol_runtime = aol_runtime_enabled(aol_replay, aol_status, aol_registry);
       if (sm.updated("deviceState")) {
@@ -511,14 +505,14 @@ void pandad_run(std::vector<Panda *> &pandas) {
       const uint8_t aol_expected_mode = aol_status ? aol_status->safety_mode : 0U;
       auto plan = aol_negotiator.prepare(aol_runtime ? aol_status : std::nullopt, axis_input, now_ns, aol_expected_mode);
       bool aol_write_ok;
-      { pandad_timing::Scope timing(pandad_timing::AxisWrite); aol_write_ok = panda && plan.capable && panda->set_aol_axis_request(plan.request_mask); }
+      { aol_write_ok = panda && plan.capable && panda->set_aol_axis_request(plan.request_mask); }
       if (aol_write_ok) {
         engaged = engaged || (plan.request_mask & 0x3U) != 0U || plan.retain_lateral_arm;
       }
       AolPandaStateSnapshot inventory;
-      { pandad_timing::Scope timing(pandad_timing::Health); process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, &inventory); }
+      { process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, &inventory); }
       std::optional<aol_safety_health_t> aol_after;
-      { pandad_timing::Scope timing(pandad_timing::AxisAfter); aol_after = (aol_write_ok && panda_safety.aolOwner() == panda) ? panda->get_aol_safety_state() : std::nullopt; }
+      { aol_after = (aol_write_ok && panda_safety.aolOwner() == panda) ? panda->get_aol_safety_state() : std::nullopt; }
       if (aol_after && !panda_safety.aolStatusMatches(panda, *aol_after)) aol_after.reset();
       auto outcome = aol_negotiator.complete(plan, aol_write_ok, aol_after);
       if (aol_runtime) {
@@ -548,18 +542,18 @@ void pandad_run(std::vector<Panda *> &pandas) {
         }
         pm.send("aolSafetyWire", axis_status_msg);
       }
-      { pandad_timing::Scope timing(pandad_timing::Configure); panda_safety.configureSafetyMode(is_onroad); }
+      { panda_safety.configureSafetyMode(is_onroad); }
     }
 
     // Send out peripheralState at 2Hz
     if (rk.frame() % 50 == 0) {
-      { pandad_timing::Scope timing(pandad_timing::Peripheral2); send_peripheral_state(peripheral_panda, &pm); }
+      { send_peripheral_state(peripheral_panda, &pm); }
     }
 
     // Forward logs from panda to cloudlog if available
     for (auto *panda : pandas) {
       std::string log;
-      { pandad_timing::Scope timing(pandad_timing::Serial); log = panda->serial_read(); }
+      { log = panda->serial_read(); }
       if (!log.empty()) {
         if (log.find("Register 0x") != std::string::npos) {
           // Log register divergent faults as errors
@@ -569,11 +563,9 @@ void pandad_run(std::vector<Panda *> &pandas) {
         }
       }
     }
-    { pandad_timing::Scope timing(pandad_timing::Rate); rk.keepTime(); }
-    producer_timing.finish();
+    { rk.keepTime(); }
   }
 
-  pandad_timing::recorder = nullptr;
   // Close relay on exit to prevent a fault
   if (is_onroad && !engaged) {
     for (auto *panda : pandas) {

@@ -23,7 +23,6 @@ class IntentCompanion:
     self.last_rejection = None
     self.last_drain_count = 0
     self.last_drain_ok = True
-    self.last_snapshot = {}
 
   def _observe(self, stamp, valid, raw):
     stamp = int(stamp)
@@ -108,16 +107,10 @@ class IntentCompanion:
 
   def current(self, sm, *, source_ns, now_ns, drain=True):
     self.last_rejection = None
-    self.last_snapshot = {'source_ns': int(source_ns), 'now_ns': int(now_ns),
-                          'sm_ns': int(sm.logMonoTime.get(INTENT_SERVICE, 0)),
-                          'latest_ns': self.latest[0] if self.latest is not None else 0,
-                          'integrity_epoch': self.integrity_epoch}
     if drain and not self.drain():
       return self._reject('drain_overrun')
     if not self.last_drain_ok:
       return self._reject('drain_overrun')
-    self.last_snapshot['latest_ns'] = self.latest[0] if self.latest is not None else 0
-    self.last_snapshot['integrity_epoch'] = self.integrity_epoch
     projection = None
     if sm.seen.get(INTENT_SERVICE, False):
       stamp = int(sm.logMonoTime[INTENT_SERVICE])
@@ -137,12 +130,6 @@ class IntentCompanion:
         projection = (stamp, True, verified[1])
       else:
         self._observe(stamp, sm.valid.get(INTENT_SERVICE, False), sm[INTENT_SERVICE])
-    self.last_snapshot.update(
-      latest_ns=self.latest[0] if self.latest is not None else 0,
-      latest_valid=self.latest[1] if self.latest is not None else False,
-      pair_present=source_ns in self.samples,
-      pair_fresh=self._fresh(self.samples[source_ns], now_ns) if source_ns in self.samples else False,
-      sm_projection=projection is not None, integrity_epoch=self.integrity_epoch)
     for stamp in tuple(self.samples):
       if not 0 < stamp <= now_ns or now_ns - stamp > INTENT_MAX_AGE_NS:
         del self.samples[stamp]

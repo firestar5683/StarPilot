@@ -3,7 +3,6 @@ import time
 from enum import StrEnum, auto
 
 from openpilot.cereal import log, messaging
-from openpilot.starpilot.selfdrive_loop_timing import timed_params_read
 from opendbc.car.structs import car
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.locationd.helpers import Pose
@@ -58,7 +57,7 @@ class ExcessiveActuationCheck:
 
 
 def update_big_model_status(owner) -> bool:
-  big_active = timed_params_read(owner, "ChestnutActive")
+  big_active = owner.params.get("ChestnutActive")
   fresh = owner.sm.seen['modelV2'] and owner.sm.alive['modelV2'] and owner.sm.valid['modelV2']
   published_big = fresh and owner.sm['modelV2'].big
   if published_big and (big_active is True or owner.sm['deviceState'].chestnutPresent):
