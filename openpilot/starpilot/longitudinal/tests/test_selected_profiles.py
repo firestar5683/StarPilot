@@ -65,7 +65,8 @@ class SelectedProfilesTests(unittest.TestCase):
     self.assertIsNone(selected.acceleration_max)
     ordinary, _ = self.run_planner()
     comfort, coast = self.run_planner(selected)
-    self.assertGreater(comfort.a_cruise, ordinary.a_cruise)
+    self.assertAlmostEqual(ordinary.a_cruise, -0.5)
+    self.assertAlmostEqual(comfort.a_cruise, -0.6)
     self.assertEqual(coast['full_brake_floor'], -0.6)
     self.assertIsNone(comfort.last_profile)
     self.assertEqual(comfort.mpc.params[0, 4], ordinary.mpc.params[0, 4])
@@ -235,12 +236,22 @@ class SelectedProfilesTests(unittest.TestCase):
     normal, _ = self.run_planner(SelectedProfileTuning(cruise_brake_magnitude=1.2))
     comfort, coast = self.run_planner(SelectedProfileTuning(cruise_brake_magnitude=0.6, braking_style='eco'))
     sport, _ = self.run_planner(SelectedProfileTuning(cruise_brake_magnitude=2.4, braking_style='sport'))
-    self.assertEqual(snapshot(ordinary), snapshot(normal))
-    self.assertGreater(comfort.a_cruise, ordinary.a_cruise)
-    self.assertLess(sport.a_cruise, ordinary.a_cruise)
+    # The upstream native floor is independent of StarPilot's named presets.
+    self.assertAlmostEqual(ordinary.a_cruise, -0.5)
+    self.assertAlmostEqual(normal.a_cruise, -1.2)
+    self.assertAlmostEqual(comfort.a_cruise, -0.6)
+    self.assertAlmostEqual(sport.a_cruise, -2.4)
+    self.assertGreater(comfort.a_cruise, normal.a_cruise)
+    self.assertLess(sport.a_cruise, normal.a_cruise)
     self.assertEqual(coast['full_brake_floor'], -0.6)
-    self.assertIsNone(comfort.last_profile)
-    self.assertEqual(comfort.mpc.params[0, 4], ordinary.mpc.params[0, 4])
+    for planner in (ordinary, normal, comfort, sport):
+      self.assertEqual(planner.output_a_target, planner.a_cruise)
+      self.assertEqual(str(planner.mpc.source), '0')
+      self.assertFalse(planner.output_should_stop)
+      self.assertIsNone(planner.last_profile)
+      self.assertEqual(planner.mpc._cached_cost_weights, ordinary.mpc._cached_cost_weights)
+      self.assertEqual(planner.mpc.params[:, [0, 1, 4, 5]].tolist(),
+                       ordinary.mpc.params[:, [0, 1, 4, 5]].tolist())
 
   def test_selected_braking_retains_native_hazard_priority(self):
     for kwargs in ({'lead': True}, {'force': True}):

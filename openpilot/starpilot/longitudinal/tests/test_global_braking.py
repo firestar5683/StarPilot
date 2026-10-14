@@ -37,17 +37,27 @@ class GlobalBrakingTests(unittest.TestCase):
     standard, _ = self.run_planner('standard')
     eco, _ = self.run_planner('eco')
     sport, _ = self.run_planner('sport')
-    self.assertEqual(snapshot(ordinary), snapshot(standard))
-    self.assertGreater(eco.a_cruise, ordinary.a_cruise)
-    self.assertLess(sport.a_cruise, ordinary.a_cruise)
-    self.assertAlmostEqual(eco.mpc.params[0, 4], ordinary.mpc.params[0, 4])
-    self.assertAlmostEqual(sport.mpc.params[0, 4], ordinary.mpc.params[0, 4])
+    # The upstream native floor is independent of StarPilot's named presets.
+    self.assertAlmostEqual(ordinary.a_cruise, -0.5)
+    self.assertAlmostEqual(standard.a_cruise, -1.2)
+    self.assertAlmostEqual(eco.a_cruise, -0.6)
+    self.assertAlmostEqual(sport.a_cruise, -2.4)
+    self.assertGreater(eco.a_cruise, standard.a_cruise)
+    self.assertLess(sport.a_cruise, standard.a_cruise)
+    for planner in (ordinary, standard, eco, sport):
+      self.assertEqual(planner.output_a_target, planner.a_cruise)
+      self.assertEqual(str(planner.mpc.source), '0')
+      self.assertFalse(planner.output_should_stop)
+      self.assertIsNone(planner.last_profile)
+      self.assertEqual(planner.mpc._cached_cost_weights, ordinary.mpc._cached_cost_weights)
+      self.assertEqual(planner.mpc.params[:, [0, 1, 4, 5]].tolist(),
+                       ordinary.mpc.params[:, [0, 1, 4, 5]].tolist())
 
   def test_slc_style_hazards_and_category_override(self):
     ceiling = CruiseCeiling(19.0, ACTIVE)
     eco, coast = self.run_planner('eco', ceiling=ceiling)
     self.assertEqual(coast['braking_style'], 'eco')
-    self.assertEqual(coast['full_brake_floor'], -1.2)
+    self.assertEqual(coast['full_brake_floor'], -0.6)
     self.assertIsNotNone(coast['slc_target'])
     lead, coast = self.run_planner('eco', ceiling=ceiling, lead=True)
     self.assertTrue(coast['relevant_lead'])

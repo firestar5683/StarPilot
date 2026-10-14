@@ -553,7 +553,9 @@ class ProfileRuntimeTests(unittest.TestCase):
           sm, _ = messages(lead=case == 'lead', e2e=case == 'e2e', force=case == 'force')
           sm['carControl'].longActive = True
           planner.update(sm)
-        self.assertAlmostEqual(planner.output_a_target, target, places=6)
+        actual = (float(planner.output_a_target), float(planner.a_cruise), str(planner.mpc.source),
+                  float(planner.v_desired_trajectory[0]))
+        self.assertAlmostEqual(planner.output_a_target, target, places=6, msg=f'actual native planner tuple: {actual!r}')
         self.assertAlmostEqual(planner.a_cruise, cruise, places=6)
         self.assertEqual(str(planner.mpc.source), source)
         self.assertAlmostEqual(planner.v_desired_trajectory[0], speed0, places=6)
@@ -650,8 +652,9 @@ class ProfileRuntimeTests(unittest.TestCase):
       self.assertEqual(soft.last_cruise_ceiling_status, 'applied')
       self.assertLessEqual(soft.a_cruise, baseline.a_cruise + 1e-8)
       self.assertLessEqual(strong.a_cruise, baseline.a_cruise + 1e-8)
-    self.assertAlmostEqual(soft.a_cruise, baseline.a_cruise)
-    self.assertLess(strong.a_cruise, baseline.a_cruise)
+    self.assertAlmostEqual(baseline.a_cruise, -0.5)
+    self.assertAlmostEqual(soft.a_cruise, -0.75)
+    self.assertLess(strong.a_cruise, soft.a_cruise)
 
   def test_selected_profile_keeps_lead_and_e2e_as_braking_candidates(self):
     selected = ProfileTuning('standard', 2.5, 1.5, 1.5, 1.5, 1.5, 1.5, 0.5, 0.75)
