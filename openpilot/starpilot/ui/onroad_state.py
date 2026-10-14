@@ -258,9 +258,12 @@ def _default_slc_controls(profile: Profile, state: OnroadState) -> tuple[SlcCont
       from openpilot.starpilot.ui.large_speed_geometry import WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y, ACTION_HEADER_HEIGHT
       target = observation.pending_adjusted_limit_mps
       label = f'Apply {round(target * (3.6 if state.metric else 2.2369362921))}' if target is not None and target > 0 else 'Apply'
+      # Name the speed each choice leaves you at: the new target, or the limit already in use.
+      current = observation.accepted_adjusted_limit_mps
+      keep = f'Keep {round(current * (3.6 if state.metric else 2.2369362921))}' if current is not None and current > 0 else 'Keep'
       return (SlcControl(request(SlcActionKind.ACCEPT), label,
                          (ACTION_X, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH // 2 - 6, ACTION_Y + ACTION_HEIGHT)),
-              SlcControl(request(SlcActionKind.REJECT), 'Keep',
+              SlcControl(request(SlcActionKind.REJECT), keep,
                          (ACTION_X + WIDTH // 2 + 6, ACTION_Y + ACTION_HEADER_HEIGHT, ACTION_X + WIDTH, ACTION_Y + ACTION_HEIGHT)))
     return (SlcControl(request(SlcActionKind.ACCEPT), "ACCEPT", (174, 180, 310, 234)),
             SlcControl(request(SlcActionKind.REJECT), "REJECT", (320, 180, 456, 234)))

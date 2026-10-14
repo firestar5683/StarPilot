@@ -281,7 +281,7 @@ class _Canvas:
       finally:
         rl.rl_pop_matrix()
 
-  def render(self, state: OnroadState, scene: str, *, label: bool = True, source_panel: bool = False) -> bytes:
+  def render(self, state: OnroadState, scene: str, *, label: bool = True) -> bytes:
     if self.view is None or self.fonts is None or self.target is None:
       raise RuntimeError("Layout preview resources are closed")
     self._settle(state)
@@ -299,10 +299,6 @@ class _Canvas:
         self.fonts.draw('StarPilot', FontRole.BRAND, 30, width - 210, height - 90)
       if self.profile == Profile.LARGE and self.viewport is None:
         render_sidebar(self.fonts, rl.Rectangle(width - SIDEBAR_WIDTH, 0, SIDEBAR_WIDTH, height))
-      # The backdrop omits the cruise card, so draw its open sources panel on its own.
-      if (source_panel and self.profile == Profile.LARGE and state.alert.size != AlertSize.FULL and
-          placement(state.customization, 'large', 'cruise_limits')['enabled']):
-        self.view.unified_speed.render_source_panel(rl.Rectangle(30, 30, width - 60, height - 60), state)
       if label:
         self._label(scene)
     finally:
@@ -394,12 +390,6 @@ class _Canvas:
       hud._set_speed_alpha.x = 1.0 if state.cruise_active else 0.0
       hud._wheel_alpha.x = 255 * 0.9 if state.lateral_active else 0.0
       hud._wheel_y.x = 0.0 if state.lateral_active else 25.0
-    if (speed := getattr(self.view, 'unified_speed', None)) is not None:
-      # A still frame shows the sources panel fully open or closed, never mid-slide.
-      opened = float(state.customization.get('speedSources', False) is True)
-      drawer = speed._source_drawer
-      drawer._open, drawer.progress, drawer._start_progress = bool(opened), opened, opened
-      speed._source_session = state.speed_limit.session_id
     self.view.torque_bar._torque_filter.x = state.torque_utilization if state.lateral_active else 0.0
     self.view.torque_bar._alpha_filter.x = 1.0 if state.lateral_active else 0.0
 
@@ -480,8 +470,7 @@ class LayoutPreviewRenderer:
       # Everything the car draws except the movable widgets, which the editor places over it.
       # A non-empty order that names no widget keeps the ordered path and draws none of them.
       order = {**state.customization.get('widgetOrder', {}), str(profile): ['backdrop']}
-      return self._canvas.render(replace(state, customization={**state.customization, 'widgetOrder': order}), scene,
-                                  label=False, source_panel=True)
+      return self._canvas.render(replace(state, customization={**state.customization, 'widgetOrder': order}), scene, label=False)
     return self._canvas.render(state, scene)
 
   def expire(self) -> None:

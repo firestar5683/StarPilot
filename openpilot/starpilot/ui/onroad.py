@@ -147,8 +147,6 @@ class OnroadView:
     if state.camera_available and self.camera_layer is None:
       raise ValueError("Camera observation requires a camera renderer")
     if self.fonts.profile == Profile.LARGE:
-      if state.alert.size == AlertSize.FULL or not placement(state.customization, "large", "cruise_limits")["enabled"]:
-        self.unified_speed.collapse_sources()
       self._large(state)
     else:
       self._compact(state)

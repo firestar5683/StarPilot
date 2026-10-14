@@ -18,7 +18,7 @@ metadata.widgets.car_exit = { label: "Exit to car", kind: "car_exit", width: 96,
 metadata.widgetOrder = [...(metadata.widgetOrder || Object.keys(native.metadata.profiles.large.widgets)), "car_exit"]
 const widgets = Object.fromEntries(Object.entries(metadata.widgets).map(([id, widget]) => [id,
   { ...widget.default, ...(widget.resizable ? { size: widget.resizable.default } : {}) }]))
-const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, leadIndicator: false, leadInfo: "Off", speedSources: false, canvas: { width: 2880, height: 1080 }, widgets }
+const doc = { version: 2, clock24Hour: false, largeUiGammaTrial: false, blindSpotBorder: false, signalBorder: false, blindSpotCamera: false, hidePersonalityAlerts: false, wheelPedalFeedback: false, leadIndicator: false, leadInfo: "Off", speedSources: false, speedSourcesCard: false, speedAlign: "left", canvas: { width: 2880, height: 1080 }, widgets }
 const raw = { version: 1, document: doc, defaults: copy(doc), metadata,
   screen: { width: 1280, height: 720, margin_width: 0, margin_height: 240 },
   revision: "aa-screen-and-layout", editable: true, valid: true,
@@ -221,7 +221,7 @@ draft.layouts.large.current_speed.x += 20
 assert.equal(await feed.save(draft), true)
 assert.equal(requests[0].url, "./api/android-auto/layout")
 assert.equal(requests[1].body.document.version, 2)
-assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "blindSpotCamera", "canvas", "clock24Hour", "hidePersonalityAlerts", "largeUiGammaTrial", "leadIndicator", "leadInfo", "signalBorder", "speedSources", "version", "wheelPedalFeedback", "widgets"])
+assert.deepEqual(Object.keys(requests[1].body.document).sort(), ["blindSpotBorder", "blindSpotCamera", "canvas", "clock24Hour", "hidePersonalityAlerts", "largeUiGammaTrial", "leadIndicator", "leadInfo", "signalBorder", "speedAlign", "speedSources", "speedSourcesCard", "version", "wheelPedalFeedback", "widgets"])
 assert.equal(requests[1].body.document.widgets.current_speed.x, 1170)
 assert.equal(updates.at(-1).notice, "Android Auto layout saved.")
 feed.stop()

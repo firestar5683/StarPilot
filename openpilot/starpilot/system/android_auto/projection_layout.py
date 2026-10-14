@@ -7,7 +7,7 @@ from pathlib import Path
 from openpilot.starpilot.system.android_auto.identity import DATA_DIR
 from openpilot.starpilot.system.android_auto.display_profile import screen_geometry
 from openpilot.starpilot.ui.onroad_customization import (CEM_GAUGE_WIDGET, CLOCK_WIDGET, MODE_WIDGET, STOPPED_TIMER_WIDGET, WHEEL_SIZES,
-                                                         customization_metadata, validate_widget_order)
+                                                         SPEED_ALIGNMENTS, customization_metadata, validate_widget_order)
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 
@@ -123,7 +123,8 @@ def layout_metadata_for_viewport(viewport):
 # Android Auto display switches, independent of the comma screen's preferences.
 DISPLAY_DEFAULTS = {'blindSpotBorder': False, 'signalBorder': False, 'blindSpotCamera': False,
                     'hidePersonalityAlerts': False, 'wheelPedalFeedback': False,
-                    'leadIndicator': False, 'leadInfo': 'Off', 'speedSources': False}
+                    'leadIndicator': False, 'leadInfo': 'Off', 'speedSources': False,
+                    'speedSourcesCard': False, 'speedAlign': 'left'}
 # Lead info shown above the lead marker, in LeadInfoMode order.
 LEAD_INFO_CHOICES = ('Off', 'Distance', 'Speed')
 
@@ -216,7 +217,8 @@ def validate_layout_for_viewport(value, viewport, *, _legacy_geometry=False):
   result.setdefault('largeUiGammaTrial', False)
   for field, default in DISPLAY_DEFAULTS.items():
     if field in value and (type(value[field]) is not type(default) or
-                           (field == 'leadInfo' and value[field] not in LEAD_INFO_CHOICES)):
+                           (field == 'leadInfo' and value[field] not in LEAD_INFO_CHOICES) or
+                           (field == 'speedAlign' and value[field] not in SPEED_ALIGNMENTS)):
       raise ValueError('Invalid projection display setting')
     result.setdefault(field, default)
   for key in set(metadata['widgets']) - set(value['widgets']):
@@ -341,6 +343,7 @@ def projection_customization(document, base_customization):
     red, green, blue, alpha = rgba(result, 'cardFill', 'large', 'cruise_limits')
     fill = f'#{red:02X}{green:02X}{blue:02X}{round(alpha * opacity / 100):02X}'
     result['widgetColors']['large'].setdefault('cruise_limits', {})['cardFill'] = fill
-  if 'speedSources' in document:
-    result['speedSources'] = document['speedSources']
+  for key in ('speedSources', 'speedSourcesCard', 'speedAlign'):
+    if key in document:
+      result[key] = document[key]
   return result

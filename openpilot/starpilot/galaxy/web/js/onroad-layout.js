@@ -368,7 +368,13 @@ export const OnroadLayoutPage = {
     modalLeavePrompt() { return this.pendingLeave && this.state.leavePresentation === "modal" },
     saveAvailable() { return !!this.state.data?.editable && !this.state.error && !this.state.needsReload && this.dirty && !this.state.drag && !this.state.layerDrag },
     canSavePending() { return this.saveAvailable && !this.busy },
-    profile() { return this.state.data?.metadata.profiles[this.state.profile] },
+    profile() {
+      const profile = this.state.data?.metadata.profiles[this.state.profile], cruise = profile?.widgets?.cruise_limits
+      // Speed-limit sources draw inside the cruise card or as a small card under it, so its box grows to match.
+      if (!cruise?.sourcesExtent || this.state.draft?.speedSources !== true) return profile
+      const grow = this.state.draft.speedSourcesCard === true ? cruise.sourcesExtent.card : cruise.sourcesExtent.inline
+      return { ...profile, widgets: { ...profile.widgets, cruise_limits: { ...cruise, height: cruise.height + grow } } }
+    },
     sceneGroups() {
       return [["Driving", scene => !/^(cem|slc)_/.test(scene.id)], ["Conditional experimental", scene => scene.id.startsWith("cem_")],
         ["Speed limit", scene => scene.id.startsWith("slc_")]].map(([label, test]) => ({ label, scenes: this.scenes.filter(test) }))
@@ -788,10 +794,26 @@ export const OnroadLayoutPage = {
       this.recordChange(before)
       this.state.notice = ""
     },
-    setSpeedSources(event) {
-      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits") return
+    setSpeedSources(key, value) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits" ||
+        !["speedSources", "speedSourcesCard"].includes(key)) return
+      const before = clone(this.state.draft), oldHeight = this.profile.widgets.cruise_limits.height
+      this.state.draft[key] = value === true
+      const card = this.layout.cruise_limits, actions = this.layout.speed_limit_actions, height = this.profile.widgets.cruise_limits.height
+      // Actions that sat right under the card follow its new bottom; both stay on screen.
+      if (actions && actions.x === card.x && actions.y === card.y + oldHeight + 22) actions.y = card.y + height + 22
+      for (const id of ["cruise_limits", "speed_limit_actions"].filter(id => this.layout[id])) {
+        const limits = placementLimits(this.profile, id, this.layout)
+        this.layout[id].y = Math.max(limits.minY, Math.min(this.layout[id].y, limits.maxY))
+      }
+      this.recordChange(before)
+      this.state.notice = ""
+    },
+    setSpeedAlign(align) {
+      if (!this.editable || this.state.drag || this.state.layerDrag || this.selectedWidget?.kind !== "cruise_limits" ||
+        !["left", "center", "right"].includes(align)) return
       const before = clone(this.state.draft)
-      this.state.draft.speedSources = event.target.checked
+      this.state.draft.speedAlign = align
       this.recordChange(before)
       this.state.notice = ""
     },
@@ -1384,7 +1406,19 @@ export const OnroadLayoutPage = {
                 <p v-if="selectedWidget.defaultAnchor === 'driver_side'" class="gx-note">The default position follows the driver’s side. A moved position stays where you place it.</p>
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
-                <label v-if="selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.speedSources === true" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setSpeedSources"> Show speed-limit sources</label>
+                <div v-if="selectedWidget.kind === 'cruise_limits'" class="gx-layout__favorite-display">
+                  <span>Text alignment</span>
+                  <div class="gx-segment" role="group" aria-label="Cruise and speed limit text alignment">
+                    <button v-for="align in ['left', 'center', 'right']" :key="align" class="gx-btn" type="button"
+                      :class="(state.draft.speedAlign || 'left') === align ? 'gx-btn--primary' : 'gx-btn--tonal'"
+                      :aria-pressed="(state.draft.speedAlign || 'left') === align" :disabled="!editAvailable || !!state.drag || !!state.layerDrag"
+                      @click="setSpeedAlign(align)">{{ align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right' }}</button>
+                  </div>
+                </div>
+                <GalaxySettingRow v-if="selectedWidget.kind === 'cruise_limits'" :row="switchRow('Show Speed-Limit Sources', state.draft.speedSources === true)" :index="0"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setSpeedSources('speedSources', value === 'On')" />
+                <GalaxySettingRow v-if="selectedWidget.kind === 'cruise_limits' && state.draft.speedSources === true" :row="switchRow('Show as Separate Card', state.draft.speedSourcesCard === true)" :index="1"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setSpeedSources('speedSourcesCard', value === 'On')" />
                 <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
                 <GalaxySettingRow v-if="projection && selectedWidget.kind === 'steering_wheel'" :row="switchRow('Brake and Acceleration Colors', state.draft.wheelPedalFeedback === true)" :index="0"
                   :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('wheelPedalFeedback', value)" />

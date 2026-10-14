@@ -27,7 +27,7 @@ export function editorSnapshot(raw) {
   const document = (value) => {
     if (value.version !== 2 || value.canvas?.width !== raw.metadata.width || value.canvas?.height !== raw.metadata.height)
       throw new Error("The saved Android Auto layout does not match its screen. Reload before editing.")
-    return { version: 6, clock24Hour: value.clock24Hour === true, largeUiGammaTrial: value.largeUiGammaTrial === true, blindSpotBorder: value.blindSpotBorder === true, signalBorder: value.signalBorder === true, blindSpotCamera: value.blindSpotCamera === true, hidePersonalityAlerts: value.hidePersonalityAlerts === true, wheelPedalFeedback: value.wheelPedalFeedback === true, leadIndicator: value.leadIndicator === true, leadInfo: LEAD_INFO.includes(value.leadInfo) ? value.leadInfo : "Off", speedSources: value.speedSources === true, ...(value.widgetOrder ? { widgetOrder: { large: clone(value.widgetOrder) } } : {}), palette: clone(colors.palette), layouts: { large: clone(value.widgets) },
+    return { version: 6, clock24Hour: value.clock24Hour === true, largeUiGammaTrial: value.largeUiGammaTrial === true, blindSpotBorder: value.blindSpotBorder === true, signalBorder: value.signalBorder === true, blindSpotCamera: value.blindSpotCamera === true, hidePersonalityAlerts: value.hidePersonalityAlerts === true, wheelPedalFeedback: value.wheelPedalFeedback === true, leadIndicator: value.leadIndicator === true, leadInfo: LEAD_INFO.includes(value.leadInfo) ? value.leadInfo : "Off", speedSources: value.speedSources === true, speedSourcesCard: value.speedSourcesCard === true, speedAlign: ["center", "right"].includes(value.speedAlign) ? value.speedAlign : "left", ...(value.widgetOrder ? { widgetOrder: { large: clone(value.widgetOrder) } } : {}), palette: clone(colors.palette), layouts: { large: clone(value.widgets) },
       widgetColors: { large: clone(colors.widgetColors) }, roadColors: { large: clone(colors.roadColors) } }
   }
   return { ...raw, projection: true, activeProfile: "large", document: document(raw.document), defaults: document(raw.defaults),
@@ -50,6 +50,8 @@ export function projectionPayload(body, metadata) {
     leadIndicator: body.document.leadIndicator === true,
     leadInfo: LEAD_INFO.includes(body.document.leadInfo) ? body.document.leadInfo : "Off",
     speedSources: body.document.speedSources === true,
+    speedSourcesCard: body.document.speedSourcesCard === true,
+    speedAlign: ["center", "right"].includes(body.document.speedAlign) ? body.document.speedAlign : "left",
     ...(body.document.widgetOrder?.large ? { widgetOrder: clone(body.document.widgetOrder.large) } : {}),
     widgets: clone(body.document.layouts.large) } }
 }

@@ -180,6 +180,7 @@ class TestProjectionLayout(unittest.TestCase):
     layout = default_layout_for_viewport((1920, 1080))
     self.assertEqual(layout['widgets']['cruise_limits']['opacity'], 100)
     self.assertIs(layout['speedSources'], False)
+    self.assertEqual(layout['speedAlign'], 'left')
     base = default_document()
     solid = rgba(base, 'cardFill', 'large', 'cruise_limits')
     native = projection_customization(layout, base)
@@ -196,6 +197,9 @@ class TestProjectionLayout(unittest.TestCase):
     del saved['speedSources']
     restored = validate_layout_for_viewport(saved, (1920, 1080))
     self.assertEqual((restored['widgets']['cruise_limits']['opacity'], restored['speedSources']), (100, False))
+    self.assertEqual(projection_customization(validate_layout_for_viewport({**layout, 'speedAlign': 'right'}, (1920, 1080)), base)['speedAlign'], 'right')
+    with self.assertRaises(ValueError):
+      validate_layout_for_viewport({**layout, 'speedAlign': 'justify'}, (1920, 1080))
     for bad in (-1, 101, 50.5, True):
       layout['widgets']['cruise_limits']['opacity'] = bad
       with self.assertRaises(ValueError):

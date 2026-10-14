@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadInput, OnroadState, SlcActionKind, SlcUiRequest, SpeedLimitObservation
 from openpilot.starpilot.ui.onroad_customization import default_document, validate_document, rgba
-from openpilot.starpilot.ui.large_speed_geometry import source_panel_bounds
 from openpilot.starpilot.ui.slc_action_dispatch import SlcActionDispatcher
 from openpilot.starpilot.ui.tests.test_slc_ui_actions import native_state, NOW
 from openpilot.starpilot.speed_limits.speed_domain import adjusted_limit, OffsetBand, OffsetSchedule
@@ -43,21 +42,6 @@ def test_numeric_card_and_sources_row_are_not_tap_targets_while_pending():
   assert not touch.claimed
   touch.release(100, 709, state)
   assert not emitted
-
-
-def test_saved_edge_geometry_keeps_panel_accessible():
-  viewport = N(x=30, y=30, width=1800, height=1020)
-  for card_x, card_y in ((88, 75), (1350, 528), (88, 528)):
-    for action_y in (567, 750, 942):
-      doc = default_document()
-      doc['layouts']['large']['cruise_limits'].update(x=card_x, y=card_y)
-      doc['layouts']['large']['speed_limit_actions'].update(x=card_x, y=action_y)
-      state = road(validate_document(doc))
-      bounds = source_panel_bounds(state, 200, viewport)
-      assert bounds is not None
-      x, y, width, height = bounds
-      assert 30 <= x and x + width <= 1830
-      assert 30 <= y and y + height <= 1050
 
 
 def test_v4_migration_preserves_settings_and_clamps_only_enlarged_widgets():
@@ -111,41 +95,3 @@ def test_publisher_receipt_survives_next_cycle_and_resets_with_session():
   assert runtime._command_ui_sequence == 0
 
 
-def test_disengaging_during_receipt_keeps_sources_separate_from_feedback():
-  state = road()
-  state = replace(state, longitudinal_active=False, speed_limit=replace(state.speed_limit, action_feedback='Applied'))
-  from openpilot.starpilot.ui.large_speed_geometry import ACTION_HEADER_HEIGHT, WIDTH
-  bounds = source_panel_bounds(state, 200, N(x=30, y=30, width=1800, height=1020))
-  assert bounds is not None
-  x, y, width, height = bounds
-  actions = state.customization['layouts']['large']['speed_limit_actions']
-  assert (x + width <= actions['x'] or x >= actions['x'] + WIDTH or
-          y + height <= actions['y'] or y >= actions['y'] + ACTION_HEADER_HEIGHT)
-
-
-def test_sources_popup_moves_past_gauge_and_keeps_enabled_widget_footprints_clear():
-  from openpilot.starpilot.ui.large_speed_geometry import GAP
-  from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, CEM_GAUGE_WIDGET, PROFILES, widget_size
-
-  from openpilot.starpilot.conditional_mode.policy import ModeChoice
-  from openpilot.starpilot.ui.conditional_status import ConditionalDisplay
-
-  viewport = N(x=30, y=30, width=1800, height=1020)
-  doc = default_document()
-  doc['layouts']['large']['speed_limit_actions']['y'] = 750
-  state = replace(road(validate_document(doc)), conditional_configured=ModeChoice.CEM,
-                  conditional_perception=ConditionalDisplay(ModeChoice.CEM, False, 'cem_stop', 8, 'planner', 1))
-  bounds = source_panel_bounds(state, 200, viewport)
-  assert bounds is not None
-  x, y, width, height = bounds
-  gauge = state.customization['layouts']['large'][CEM_GAUGE_WIDGET]
-  gauge_width, _ = widget_size(state.customization, 'large', CEM_GAUGE_WIDGET)
-  assert gauge['enabled'] and x >= gauge['x'] + gauge_width + GAP
-  assert viewport.x <= x and x + width <= viewport.x + viewport.width
-  assert viewport.y <= y and y + height <= viewport.y + viewport.height
-  for key in PROFILES['large']['widgets']:
-    saved = state.customization['layouts']['large'][key]
-    if saved['enabled'] and key not in CAMERA_WIDGETS:
-      widget_width, widget_height = widget_size(state.customization, 'large', key)
-      assert (x + width <= saved['x'] or x >= saved['x'] + widget_width or
-              y + height <= saved['y'] or y >= saved['y'] + widget_height), key

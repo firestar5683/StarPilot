@@ -487,14 +487,36 @@ assert.deepEqual(vm.sceneGroups.flatMap(group => group.scenes.map(scene => scene
 assert.match(OnroadLayoutPage.template, /<GalaxySelect class="gx-field gx-field--full" aria-label="Preview scene"/)
 // The widget open in Edit glows; the sources panel is a layout setting, not an on-screen toggle.
 assert.match(OnroadLayoutPage.template, /'is-editing': state\.showEditingAids && state\.inspectorPanel === 'edit' && state\.selected === widget\.id/)
+// Sources sit inside the cruise card (or a card right under it), so its box grows and actions right below follow.
+vm.state.data.metadata.profiles.large.widgets.cruise_limits.sourcesExtent = { inline: 76, card: 84 }
 vm.state.selected = "cruise_limits"
-vm.setSpeedSources({ target: { checked: true } })
+const sourcesCard = vm.layout.cruise_limits, sourcesActions = vm.layout.speed_limit_actions
+const actionsBefore = { ...sourcesActions }
+Object.assign(sourcesActions, { x: sourcesCard.x, y: sourcesCard.y + 522 + 22 })
+vm.setSpeedSources("speedSources", true)
 assert.equal(vm.state.draft.speedSources, true)
-vm.undo()
+assert.equal(vm.profile.widgets.cruise_limits.height, 522 + 76)
+assert.equal(sourcesActions.y, sourcesCard.y + 522 + 76 + 22)
+vm.setSpeedSources("speedSourcesCard", true)
+assert.equal(vm.profile.widgets.cruise_limits.height, 522 + 84)
+assert.equal(sourcesActions.y, sourcesCard.y + 522 + 84 + 22)
+vm.undo(); vm.undo()
 assert.notEqual(vm.state.draft.speedSources, true)
+assert.equal(vm.profile.widgets.cruise_limits.height, 522)
+assert.equal(vm.layout.speed_limit_actions.y, vm.layout.cruise_limits.y + 522 + 22)
+Object.assign(vm.layout.speed_limit_actions, actionsBefore)
 vm.state.selected = "current_speed"
-vm.setSpeedSources({ target: { checked: true } })
+vm.setSpeedSources("speedSources", true)
 assert.notEqual(vm.state.draft.speedSources, true) // Only from the cruise widget's own panel.
+vm.state.selected = "cruise_limits"
+vm.setSpeedAlign("center")
+assert.equal(vm.state.draft.speedAlign, "center")
+vm.setSpeedAlign("justify")
+assert.equal(vm.state.draft.speedAlign, "center") // Only left, center or right.
+vm.undo()
+assert.equal(vm.state.draft.speedAlign ?? "left", "left")
+vm.setSpeedSources("palette", true)
+assert.equal(vm.state.draft.palette === true, false) // Only the two sources settings.
 // Moving or removing widgets keeps the same backdrop; scene and size changes replace it.
 const backdropCount = backdropCalls.length
 vm.changePosition("current_speed", 720, 220)

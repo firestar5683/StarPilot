@@ -76,9 +76,29 @@ class DrawerNativeTest(unittest.TestCase):
     self.assertNotIn('speedSources', validate_document(doc))
     doc['speedSources'] = True
     self.assertIs(validate_document(doc)['speedSources'], True)
-    doc['speedSources'] = 1
-    with self.assertRaises(ValueError):
-      validate_document(doc)
+    doc['speedSourcesCard'] = True
+    self.assertIs(validate_document(doc)['speedSourcesCard'], True)
+    for key in ('speedSources', 'speedSourcesCard'):
+      with self.assertRaises(ValueError):
+        validate_document({**doc, key: 1})
+    self.assertNotIn('speedAlign', validate_document(default_document()))  # Left, the original look, by default.
+    for align in ('left', 'center', 'right'):
+      self.assertEqual(validate_document({**doc, 'speedAlign': align})['speedAlign'], align)
+    for bad in ('justify', 1, None):
+      with self.assertRaises(ValueError):
+        validate_document({**doc, 'speedAlign': bad})
+
+  def test_sources_grow_the_cruise_widget_by_one_row_or_an_attached_card(self):
+    from openpilot.starpilot.ui.large_speed_geometry import CARD_HEIGHT, GAP, SOURCE_ROW_HEIGHT, WIDTH
+    from openpilot.starpilot.ui.onroad_customization import customization_metadata, widget_size
+    doc = default_document()
+    self.assertEqual(widget_size(doc, 'large', 'cruise_limits'), (WIDTH, CARD_HEIGHT))
+    doc['speedSources'] = True
+    self.assertEqual(widget_size(doc, 'large', 'cruise_limits'), (WIDTH, CARD_HEIGHT + SOURCE_ROW_HEIGHT))
+    doc['speedSourcesCard'] = True
+    self.assertEqual(widget_size(doc, 'large', 'cruise_limits'), (WIDTH, CARD_HEIGHT + GAP + SOURCE_ROW_HEIGHT))
+    self.assertEqual(customization_metadata()['profiles']['large']['widgets']['cruise_limits']['sourcesExtent'],
+                     {'inline': SOURCE_ROW_HEIGHT, 'card': GAP + SOURCE_ROW_HEIGHT})
 
   def test_expired_producer_and_old_drive_transport_cannot_supply_readings(self):
     sm, cp = replay_inputs()
@@ -133,19 +153,8 @@ class DrawerNativeTest(unittest.TestCase):
     drawn = []
     fonts = SimpleNamespace(measure=lambda *args: SimpleNamespace(width=20, height=20), draw=lambda text, role, *args: drawn.append((text, role)))
     widget = UnifiedSpeedWidget(Mock(spec=BitmapFonts, **vars(fonts)))
-    widget._draw_source_contents(rl.Rectangle(264, 271, 248, 215), state)
-    self.assertIn(('Dashboard', FontRole.MEDIUM), drawn)
-    self.assertIn(('Vision', FontRole.NORMAL), drawn)
+    widget._draw_sources(rl.Rectangle(88, 545, 320, 76), state)
+    self.assertEqual([text for text, _ in drawn], ['Dash', '56', 'Vision', '56'])
+    self.assertIn(('56', FontRole.MEDIUM), drawn)  # The accepted source's reading is emphasised.
+    self.assertIn(('56', FontRole.NORMAL), drawn)
 
-  def test_custom_right_edge_keeps_panel_inside_viewport(self):
-    from openpilot.starpilot.ui.large_speed_geometry import source_panel_bounds
-    obs = SpeedLimitObservation(ObservationKind.VALID, 'dashboard', 25, session_id='edge')
-    doc = default_document()
-    doc['speedSources'] = True
-    doc['layouts']['large']['cruise_limits']['x'] = 1350
-    state = OnroadState(False, False, 20, 100, obs, customization=validate_document(doc))
-    bounds = source_panel_bounds(state, 200, rl.Rectangle(30, 30, 1800, 1020))
-    self.assertIsNotNone(bounds)
-    x, y, width, height = bounds
-    self.assertLessEqual(x + width, 1830)
-    self.assertLessEqual(y + height, 1050)

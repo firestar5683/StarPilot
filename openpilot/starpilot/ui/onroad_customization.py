@@ -9,10 +9,12 @@ from typing import Any, NotRequired, TypedDict
 
 from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
-from openpilot.starpilot.ui.large_speed_geometry import WIDTH, CARD_HEIGHT, ACTION_HEIGHT, ACTION_X, ACTION_Y
+from openpilot.starpilot.ui.large_speed_geometry import WIDTH, CARD_HEIGHT, ACTION_HEIGHT, ACTION_X, ACTION_Y, GAP, SOURCE_ROW_HEIGHT, sources_extent
 
 PARAM_KEY = "OnroadCustomizations"
 MAX_BYTES = 16384
+# Text alignment inside the cruise and speed-limit card; left is the original look.
+SPEED_ALIGNMENTS = ("left", "center", "right")
 PALETTE = {"cardFill": "#000000A6", "cardBorder": "#C4CDD0B4", "text": "#FFFFFFFF"}
 ROAD_COLORS = {"path": "#30FF9CFF", "pathEdge": "#00FF40FF", "laneLines": "#FFFFFFFF"}
 PATH_MODES = ("default", "color", "rainbow", "acceleration")
@@ -206,6 +208,8 @@ def widget_bounds(profile, widget):
 def customization_metadata():
   profiles = copy.deepcopy(PROFILES)
   profiles["large"]["widgets"]["driver_monitor"]["defaultAnchor"] = "driver_side"
+  # The editor grows the cruise box by these while speed-limit sources are shown.
+  profiles["large"]["widgets"]["cruise_limits"]["sourcesExtent"] = {"inline": SOURCE_ROW_HEIGHT, "card": GAP + SOURCE_ROW_HEIGHT}
   profiles["large"]["inputZones"] = [{"id": "favorites_drawer", "label": "Quick Select drawer",
                                        "x": 30, "y": 900, "width": 150, "height": 150}]
   profiles["compact"]["inputZones"] = [
@@ -263,6 +267,14 @@ def validate_document(value, *, _legacy_geometry=False):
     fields.add('speedSources')
     if type(value['speedSources']) is not bool:
       raise ValueError('Invalid speed source drawer preference')
+  if value['version'] >= 4 and 'speedSourcesCard' in value:
+    fields.add('speedSourcesCard')
+    if type(value['speedSourcesCard']) is not bool:
+      raise ValueError('Invalid speed source card preference')
+  if value['version'] >= 4 and 'speedAlign' in value:
+    fields.add('speedAlign')
+    if value['speedAlign'] not in SPEED_ALIGNMENTS:
+      raise ValueError('Invalid speed card alignment')
   if value['version'] >= 4 and 'widgetOrder' in value:
     fields.add('widgetOrder')
   if 'clock24Hour' in value:
@@ -418,6 +430,10 @@ def validate_document(value, *, _legacy_geometry=False):
       result['widgetOrder'][profile] = validate_widget_order(order, PROFILES[profile]['widgets'])
   if 'speedSources' in value:
     result['speedSources'] = value['speedSources']
+  if 'speedSourcesCard' in value:
+    result['speedSourcesCard'] = value['speedSourcesCard']
+  if 'speedAlign' in value:
+    result['speedAlign'] = value['speedAlign']
   if 'clock24Hour' in value:
     result['clock24Hour'] = value['clock24Hour']
   if 'showMaxSpeed' in value:
@@ -455,6 +471,8 @@ def placement(document, profile, widget):
 def widget_size(document, profile, widget):
   default = PROFILES[str(profile)]["widgets"][widget]
   position = placement(document, profile, widget)
+  if widget == "cruise_limits":
+    return default["width"], default["height"] + sources_extent(document)
   return (position.get("size", WHEEL_SIZES[str(profile)][1]),) * 2 if widget == "steering_wheel" else (default["width"], default["height"])
 
 

@@ -7,7 +7,7 @@ from PIL import Image
 import pyray as rl
 
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory, font_filename, font_path, validate_bitmap_font
-from openpilot.starpilot.ui.large_speed_geometry import WIDTH, PADDING, source_panel_bounds
+from openpilot.starpilot.ui.large_speed_geometry import WIDTH, PADDING
 from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
 from openpilot.starpilot.ui.onroad_state import slc_controls
 from openpilot.starpilot.ui.tests.test_speed_stack import road
@@ -81,17 +81,17 @@ def test_v5_geometry_migrates_and_keeps_custom_actions_independent():
   assert validate_document(doc)['layouts']['large']['speed_limit_actions']['y'] == 567
 
 
-def test_pending_buttons_and_source_popup_do_not_cover_monitor():
+def test_pending_buttons_name_both_speeds():
   state = road()
-  state = replace(state, speed_limit=replace(state.speed_limit, pending_speed_limit_mps=25))
+  state = replace(state, speed_limit=replace(state.speed_limit, pending_speed_limit_mps=25, pending_adjusted_limit_mps=24,
+                                             accepted_adjusted_limit_mps=22))
   apply, keep = slc_controls(Profile.LARGE, state)
   assert apply.bounds == (88, 611, 242, 675)
   assert keep.bounds == (254, 611, 408, 675)
-  panel = source_panel_bounds(state, 200, SimpleNamespace(x=30, y=30, width=1800, height=1020))
-  assert panel is not None
-  x, y, width, height = panel
-  assert x >= 280 or x + width <= 88 or y + height <= 808 or y >= 1000
-  assert x >= 1437 or x + width <= 439 or y + height <= 759 or y >= 999
+  # Each choice says the speed it leaves you at: the new target or the limit already in use.
+  assert (apply.label, keep.label) == ('Apply 54', 'Keep 49')
+  no_current = replace(state, speed_limit=replace(state.speed_limit, accepted_adjusted_limit_mps=None))
+  assert slc_controls(Profile.LARGE, no_current)[1].label == 'Keep'
 
 
 def test_projection_v1_layout_migrates_without_losing_other_widgets():
@@ -118,18 +118,3 @@ def test_committed_projection_v1_right_edge_is_preserved_and_clamped():
   assert migrated['widgets']['speed_limit_actions'] == {'x': 1510, 'y': 567, 'enabled': True}
 
 
-def test_projected_source_popup_avoids_moved_navigation_card():
-  from openpilot.starpilot.system.android_auto.projection_layout import projection_customization
-  viewport = (2880, 1080)
-  doc = default_layout_for_viewport(viewport)
-  rect = SimpleNamespace(x=30, y=30, width=2820, height=1020)
-  state = road(projection_customization(doc, default_document()))
-  first = source_panel_bounds(state, 200, rect)
-  assert first is not None
-  doc['widgets']['nav_card'].update(x=first[0], y=first[1], enabled=True)
-  state = road(projection_customization(doc, default_document()))
-  moved = source_panel_bounds(state, 200, rect)
-  if moved is not None:
-    x, y, width, height = moved
-    nx, ny = doc['widgets']['nav_card']['x'], doc['widgets']['nav_card']['y']
-    assert x + width <= nx or x >= nx + 560 or y + height <= ny or y >= ny + 195

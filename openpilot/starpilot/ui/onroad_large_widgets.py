@@ -7,7 +7,6 @@ HudRenderer and ExpButton. See the adjacent UI LICENSE for retained source.
 from pathlib import Path
 import hashlib
 import json
-import time
 
 import pyray as rl
 
@@ -16,7 +15,6 @@ from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState
 from openpilot.starpilot.ui.onroad_widget_style import draw_control_card
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole
 from openpilot.starpilot.ui.wheel_feedback import wheel_feedback_rgb
-from openpilot.starpilot.ui.speed_source_drawer import SpeedSourceDrawer
 from openpilot.starpilot.ui.unified_speed_presentation import resolve_unified_speed
 
 
@@ -35,59 +33,63 @@ class UnifiedSpeedWidget:
 
   def __init__(self, fonts: BitmapFonts):
     self.fonts = fonts
-    self._source_drawer = SpeedSourceDrawer()
-    self._source_session = None
 
-  def collapse_sources(self):
-    self._source_drawer.reset()
-
-  def _draw_source_contents(self, panel, state):
+  def _draw_sources(self, rect, state):
+    """Each enabled source as a small label over its reading; the accepted source is highlighted."""
+    from openpilot.starpilot.ui.large_speed_geometry import PADDING
     rows = [row for row in state.speed_limit.source_readings if row.enabled]
     if not rows:
-      _center(self.fonts, 'No sources enabled', FontRole.NORMAL, 28, panel, panel.y + 30)
+      _center(self.fonts, 'No sources enabled', FontRole.NORMAL, 26, rect, rect.y + 22)
       return
-    row_height = (panel.height - 32) / len(rows)
     active = state.speed_limit.accepted_source
-    labels = {'dashboard': 'Dashboard', 'map': 'Map', 'vision': 'Vision', 'online': 'Online'}
+    labels = {'dashboard': 'Dash', 'map': 'Map', 'vision': 'Vision', 'online': 'Online'}
+    cell = (rect.width - 2 * PADDING) / len(rows)
     for index, row in enumerate(rows):
-      role = FontRole.MEDIUM if row.source == active else FontRole.NORMAL
       color = rl.WHITE if row.source == active else rl.Color(170, 179, 174, 255)
       value = str(round(row.speed_mps * (3.6 if state.metric else 2.2369362921))) if row.kind == 'valid' and row.speed_mps is not None else '–'
-      label = labels[row.source]
-      size = 28
-      value_width = self.fonts.measure(value, role, 30).width
-      while size > 12 and self.fonts.measure(label, role, size).width > panel.width - 64 - value_width:
+      box = rl.Rectangle(rect.x + PADDING + index * cell, rect.y, cell, rect.height)
+      size = 22
+      while size > 12 and self.fonts.measure(labels[row.source], FontRole.NORMAL, size).width > cell - 4:
         size -= 1
-      y = panel.y + 16 + index * row_height
-      label_height = self.fonts.measure(label, role, size).height
-      value_height = self.fonts.measure(value, role, 30).height
-      self.fonts.draw(label, role, size, panel.x + 32, y + (row_height - label_height) / 2, color)
-      self.fonts.draw(value, role, 30, panel.x + panel.width - 32 - value_width, y + (row_height - value_height) / 2, color)
+      _center(self.fonts, labels[row.source], FontRole.NORMAL, size, box, rect.y + 10, color)
+      _center(self.fonts, value, FontRole.MEDIUM if row.source == active else FontRole.NORMAL, 30, box, rect.y + 36, color)
 
   def render(self, content: rl.Rectangle, state: OnroadState) -> None:
-    from openpilot.starpilot.ui.large_speed_geometry import WIDTH, MAX_ROW_HEIGHT, PADDING, card_height
+    from openpilot.starpilot.ui.large_speed_geometry import GAP, WIDTH, MAX_ROW_HEIGHT, PADDING, SOURCE_ROW_HEIGHT, card_height
     from openpilot.starpilot.ui.onroad_customization import placement
     shown = resolve_unified_speed(state)
     if shown.mode == 'hidden':
-      self.collapse_sources()
       return
     saved = placement(state.customization, 'large', 'cruise_limits')
-    rect = rl.Rectangle(saved['x'], saved['y'], WIDTH, card_height(shown.mode))
+    height = card_height(shown.mode)
+    rect = rl.Rectangle(saved['x'], saved['y'], WIDTH, height)
+    # Sources follow the Galaxy layout setting: a row in this card, or a small card of its own right below.
+    sources = (state.customization.get('speedSources') is True and shown.mode != 'max_only' and
+               state.speed_limit.kind == ObservationKind.VALID and bool(state.speed_limit.session_id))
+    separate = state.customization.get('speedSourcesCard') is True
+    if sources and not separate:
+      rect.height += SOURCE_ROW_HEIGHT
     fill = rl.Color(*rgba(state.customization, 'cardFill', 'large', 'cruise_limits'))
     border = rl.Color(*rgba(state.customization, 'cardBorder', 'large', 'cruise_limits'))
     text = rl.Color(*rgba(state.customization, 'text', 'large', 'cruise_limits'))
     muted, accent = rl.Color(172, 190, 203, 255), rl.Color(197, 163, 255, 255)
     draw_control_card(rect, fill=fill, border=border, border_width=1, roundness=.09)
 
-    def label(value, x, y, size=32, color=muted, role=FontRole.MEDIUM):
+    align = state.customization.get('speedAlign', 'left')
+
+    def start(width):
+      # Text sits left (the default), centred, or right within the card's padding.
+      return (rect.x + (WIDTH - width) / 2 if align == 'center' else
+              rect.x + WIDTH - PADDING - width if align == 'right' else rect.x + PADDING)
+
+    def label(value, y, size=32, color=muted, role=FontRole.MEDIUM):
       while size > 20 and self.fonts.measure(value, role, size).width > WIDTH - 2 * PADDING:
         size -= 1
       ink_top, _ = self.fonts.vertical_ink(value, role, size)
-      self.fonts.draw(value, role, size, x, y - ink_top, color)
+      self.fonts.draw(value, role, size, start(self.fonts.measure(value, role, size).width), y - ink_top, color)
 
     def row(title, value, top, footer, status='', active=False, footer_color=muted, footer_y=174):
-      left = rect.x + PADDING
-      label(title, left, top + 24, color=accent if active else muted)
+      label(title, top + 24, color=accent if active else muted)
       size, unit_size = 112, 28
       has_value = value != '–'
       unit_width = self.fonts.measure(shown.unit, FontRole.NORMAL, unit_size).width if has_value else 0
@@ -99,14 +101,15 @@ class UnifiedSpeedWidget:
       if not has_value:
         digit_top, digit_bottom = self.fonts.vertical_ink('0', FontRole.SPEED, size)
         number_y += ((digit_bottom - digit_top) - (number_bottom - number_top)) / 2
+      left = start(number_width + (14 + unit_width if has_value else 0))
       self.fonts.draw(value, FontRole.SPEED, size, left, number_y, text)
       if has_value:
         _, unit_bottom = self.fonts.vertical_ink(shown.unit, FontRole.NORMAL, unit_size)
         self.fonts.draw(shown.unit, FontRole.NORMAL, unit_size, left + number_width + 14,
                         top + 72 + number_bottom - number_top - unit_bottom, muted)
       if status:
-        label(status, left, top + 174, size=30, role=FontRole.NORMAL, color=accent if active else muted)
-      label(footer, left, top + footer_y, size=30, role=FontRole.NORMAL, color=footer_color)
+        label(status, top + 174, size=30, role=FontRole.NORMAL, color=accent if active else muted)
+      label(footer, top + footer_y, size=30, role=FontRole.NORMAL, color=footer_color)
 
     if shown.mode != 'limit_only':
       max_active = shown.active_side in ('max', 'shared') and shown.max_text != '–'
@@ -121,41 +124,13 @@ class UnifiedSpeedWidget:
         road_limit += f' {shown.offset_text}'
       row('SLC LIMIT', shown.limit_text, top, road_limit, shown.limit_status,
           active=shown.active_side in ('slc', 'shared'), footer_y=224)
-    session = state.speed_limit.session_id
-    if session != self._source_session:
-      self.collapse_sources()
-      self._source_session = session
-    available = state.speed_limit.kind == ObservationKind.VALID and bool(session) and shown.mode != 'max_only'
-    if not available:
-      self.collapse_sources()
-      return
-    # Sources open from the Galaxy layout setting; there is no on-screen toggle.
-    now = state.observed_ns / 1e9 if state.observed_ns else time.monotonic()
-    self._source_drawer.update(state.customization.get('speedSources', False), now)
-    self._draw_sources(content, state, fill, border)
-
-  def render_source_panel(self, content: rl.Rectangle, state: OnroadState) -> None:
-    """Only the open sources panel, for the layout preview, which places the card itself as a movable widget."""
-    shown = resolve_unified_speed(state)
-    if (shown.mode in ('hidden', 'max_only') or state.speed_limit.kind != ObservationKind.VALID or
-        not state.speed_limit.session_id or not state.customization.get('speedSources', False)):
-      return
-    self._draw_sources(content, state, rl.Color(*rgba(state.customization, 'cardFill', 'large', 'cruise_limits')),
-                       rl.Color(*rgba(state.customization, 'cardBorder', 'large', 'cruise_limits')))
-
-  def _draw_sources(self, content: rl.Rectangle, state: OnroadState, fill: rl.Color, border: rl.Color) -> None:
-    from openpilot.starpilot.ui.large_speed_geometry import PADDING, SOURCE_ROW_HEIGHT, source_panel_bounds
-    if self._source_drawer.progress <= 0:
-      return
-    rows = sum(row.enabled for row in state.speed_limit.source_readings)
-    height = max(1, rows) * SOURCE_ROW_HEIGHT + PADDING
-    panel_bounds = source_panel_bounds(state, height, content)
-    if panel_bounds is None:
-      self.collapse_sources()
-      return
-    panel = rl.Rectangle(*panel_bounds)
-    self._source_drawer.draw_panel(panel, content, fill, border,
-                                                       lambda panel: self._draw_source_contents(panel, state))
+    if sources:
+      row = rl.Rectangle(rect.x, rect.y + height + (GAP if separate else 0), WIDTH, SOURCE_ROW_HEIGHT)
+      if separate:
+        draw_control_card(row, fill=fill, border=border, border_width=1, roundness=.2)
+      else:
+        rl.draw_line_ex(rl.Vector2(rect.x + 1, row.y), rl.Vector2(rect.x + WIDTH - 1, row.y), 1, border)
+      self._draw_sources(row, state)
 
 
 class CurrentSpeedHud:

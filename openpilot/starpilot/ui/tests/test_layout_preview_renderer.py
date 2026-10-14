@@ -68,7 +68,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
     pending = sample_state("slc_pending", document)
     for profile in (Profile.LARGE, Profile.COMPACT):
       self.assertEqual([item.label for item in slc_controls(profile, pending)],
-                       ["Apply 54", "Keep"] if profile == Profile.LARGE else ["ACCEPT", "REJECT"])
+                       ["Apply 54", "Keep 49"] if profile == Profile.LARGE else ["ACCEPT", "REJECT"])
       self.assertEqual(len(slc_controls(profile, sample_state("engaged", document))), 1 if profile == Profile.LARGE else 0)
     manual = sample_state("experimental", document)
     self.assertTrue(manual.experimental_enabled)
@@ -120,7 +120,7 @@ class LayoutPreviewRendererTests(unittest.TestCase):
       self.assertEqual(renderer({"document": document, "profile": "compact", "scene": "braking", "art": "backdrop"}), b"png")
     state, scene = canvas.render.call_args.args
     self.assertEqual(scene, "braking")
-    self.assertEqual(canvas.render.call_args.kwargs, {"label": False, "source_panel": True})
+    self.assertEqual(canvas.render.call_args.kwargs, {"label": False})
     # An order naming no widget keeps the ordered path, so no movable widget is drawn.
     self.assertEqual(state.customization["widgetOrder"]["compact"], ["backdrop"])
     self.assertEqual(state.customization["layouts"], document["layouts"])
