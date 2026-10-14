@@ -146,6 +146,7 @@ class TestSounddSchedulerHistory(OpenpilotTestCase):
     owner.stream_report_at = owner.underflow_timing = None
     owner.last_callback_start_ns = 25_000_000
     owner.callback_tid = 7
+    mocker.patch("openpilot.selfdrive.ui.soundd.get_native_id", return_value=7)
     owner.callback_scheduler_history = _CallbackSchedulerHistory()
     for tick in range(4):
       scheduler_sample(owner.callback_scheduler_history, mocker, tick * 50_000_000, (tick, tick * 10, tick))
