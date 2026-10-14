@@ -73,6 +73,23 @@ class TestProjectionLayoutOwner(unittest.TestCase):
     self.assertEqual(json.loads(self.source.path.read_bytes()), payload['document'])
     self.assertFalse((self.root / 'OnroadCustomizations').exists())
 
+  def test_first_layout_starts_from_comma_display_choices(self):
+    self.screen()
+    for key, raw in {'BlindSpotMetrics': b'0', 'SignalMetrics': b'1', 'HidePersonalityAlerts': b'1', 'ShowBrakeStatus': b'1',
+                     'HideLeadMarker': b'0', 'LeadInfo': b'1', 'LeadInfoMode': b'1'}.items():
+      (self.root / key).write_bytes(raw)
+    value = self.owner.snapshot()
+    seeded = {key: value['document'][key] for key in ('blindSpotBorder', 'signalBorder', 'hidePersonalityAlerts',
+                                                       'wheelPedalFeedback', 'leadIndicator', 'leadInfo', 'blindSpotCamera')}
+    self.assertEqual(seeded, {'blindSpotBorder': False, 'signalBorder': True, 'hidePersonalityAlerts': True,
+                              'wheelPedalFeedback': True, 'leadIndicator': True, 'leadInfo': 'Distance', 'blindSpotCamera': False})
+    self.assertFalse(value['defaults']['signalBorder'], 'reset still returns to the plain defaults')
+    saved = self.owner.save(self.payload(), session_valid=lambda: True)
+    # Once saved, the AA screen keeps its own choices whatever the comma changes.
+    (self.root / 'SignalMetrics').write_bytes(b'0')
+    self.assertTrue(self.owner.snapshot()['document']['signalBorder'])
+    self.assertEqual(self.owner.snapshot()['document'], saved['document'])
+
   def test_disabled_retains_layout_but_unavailable(self):
     self.screen()
     self.owner.save(self.payload(), session_valid=lambda: True)

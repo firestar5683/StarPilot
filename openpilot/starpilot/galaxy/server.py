@@ -2030,7 +2030,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           self.json(403, {'error': 'Park before pairing the car'})
           return
         if not aa_setup_owner().enabled():
-          self.json(403, {'error': 'Enable experimental Android Auto first'})
+          self.json(403, {'error': 'Enable Android Auto first'})
           return
         try:
           setup_state = aa_setup_owner().status(identity)

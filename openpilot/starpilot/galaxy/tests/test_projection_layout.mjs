@@ -53,7 +53,9 @@ data.document.largeUiGammaTrial = true
 assert.equal(projectionPayload({document: data.document}, data.metadata).document.largeUiGammaTrial, true)
 assert.equal(validDocument({...data.document, largeUiGammaTrial: 1}, data.metadata), false)
 data.document.largeUiGammaTrial = false
-assert.match(OnroadLayoutPage.template, /Large UI Gamma Effect Trial/)
+assert.match(OnroadLayoutPage.template, /'Large UI Gamma Effect'/)
+assert.doesNotMatch(OnroadLayoutPage.template, /Effect Trial|type="checkbox" :checked="state\.draft\.wheelPedalFeedback/)
+assert.match(OnroadLayoutPage.template, /switchRow\('Brake and Acceleration Colors', state\.draft\.wheelPedalFeedback === true\)/)
 const gammaChanges = []
 const gammaVm = { projection: true, editable: true,
   state: { draft: { largeUiGammaTrial: false }, drag: null, layerDrag: null, notice: '' },
@@ -95,8 +97,8 @@ OnroadLayoutPage.methods.setProjectionLeadInfo.call(leadVm, "Both")
 assert.equal(leadVm.state.draft.leadInfo, "Speed")
 assert.equal(leadChanges.length, 2)
 assert.equal(validDocument({ ...native.document, signalBorder: true }, native.metadata), false, "the comma screen keeps its C4 settings")
-assert.match(OnroadLayoutPage.template, /Red blind-spot border/)
-assert.match(OnroadLayoutPage.template, /Amber signal border/)
+assert.match(OnroadLayoutPage.template, /Red Blind-Spot Border/)
+assert.match(OnroadLayoutPage.template, /Amber Signal Border/)
 const borderChanges = []
 const borderVm = { projection: true, editable: true, state: { draft: { blindSpotBorder: false, signalBorder: false }, drag: null, layerDrag: null, notice: '' },
   recordChange: before => borderChanges.push(before) }
@@ -118,7 +120,7 @@ assert.equal(editorSnapshot(olderCameraLayout).document.blindSpotCamera, false)
 for (const value of [1, 0, "true", null, [], {}])
   assert.equal(validDocument({ ...data.document, blindSpotCamera: value }, data.metadata), false)
 assert.equal(validDocument({ ...native.document, blindSpotCamera: true }, native.metadata), false)
-assert.match(OnroadLayoutPage.template, /Show camera on blind-spot warning/)
+assert.match(OnroadLayoutPage.template, /Show Camera on Blind-Spot Warning/)
 assert.match(OnroadLayoutPage.template, /setProjectionDisplay\('blindSpotCamera', value\)/)
 const cameraChanges = []
 const cameraVm = { projection: true, editable: true,

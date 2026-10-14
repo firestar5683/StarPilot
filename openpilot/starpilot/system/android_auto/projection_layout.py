@@ -143,14 +143,26 @@ def projection_appearance(appearance, document):
                  camera_view=CameraViewChoice.STANDARD, driver_camera_on_reverse=False)
 
 
-def default_layout(screen):
+def comma_display(appearance):
+  """The comma screen's display choices as AA switches, to start a car screen that has no saved layout."""
+  lead_indicator = appearance.show_lead_indicator is True
+  return {'blindSpotBorder': appearance.show_blindspot_border is True,
+          'signalBorder': appearance.show_signal_border is True,
+          'hidePersonalityAlerts': appearance.hide_personality_alerts is True,
+          'wheelPedalFeedback': appearance.wheel_pedal_feedback is True,
+          'leadIndicator': lead_indicator,
+          'leadInfo': LEAD_INFO_CHOICES[appearance.lead_info_mode] if lead_indicator else 'Off'}
+
+
+def default_layout(screen, display=None):
   geometry = screen_geometry(screen)
-  return default_layout_for_viewport((geometry.logical_width, geometry.logical_height))
+  return default_layout_for_viewport((geometry.logical_width, geometry.logical_height), display)
 
 
-def default_layout_for_viewport(viewport):
+def default_layout_for_viewport(viewport, display=None):
   metadata = layout_metadata_for_viewport(viewport)
-  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, **DISPLAY_DEFAULTS, 'canvas': {key: metadata[key] for key in ('width', 'height')},
+  display = {**DISPLAY_DEFAULTS, **{key: value for key, value in (display or {}).items() if key in DISPLAY_DEFAULTS}}
+  return {'version': 2, 'clock24Hour': False, 'largeUiGammaTrial': False, **display, 'canvas': {key: metadata[key] for key in ('width', 'height')},
           'widgets': {key: {**widget['default'], **({'size': 192} if key == 'steering_wheel' else {})}
                       for key, widget in metadata['widgets'].items()}}
 

@@ -1391,10 +1391,10 @@ export const OnroadLayoutPage = {
                 <p v-if="selectedWidget.note" class="gx-note">{{ selectedWidget.note }}</p>
                 <label v-if="selectedWidget.kind === 'clock'" class="gx-layout__clock-format"><input type="checkbox" :checked="!!state.draft.clock24Hour" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setClock24Hour"> Use 24-hour time</label>
                 <label v-if="!projection && selectedWidget.kind === 'cruise_limits'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.showMaxSpeed !== false" :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setShowMaxSpeed"> Show MAX speed</label>
-                <label v-if="projection && selectedWidget.kind === 'steering_wheel'" class="gx-layout__clock-format"><input type="checkbox" :checked="state.draft.wheelPedalFeedback === true"
-                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" @change="setProjectionDisplay('wheelPedalFeedback', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
-                <label v-if="!projection && selectedWidget.kind === 'steering_wheel' && displayRow('ShowBrakeStatus')" class="gx-layout__clock-format"><input type="checkbox" :checked="displayValue('ShowBrakeStatus') === 'On'"
-                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('ShowBrakeStatus'))" @change="setDisplay('ShowBrakeStatus', $event.target.checked ? 'On' : 'Off')"> Brake and acceleration colors</label>
+                <GalaxySettingRow v-if="projection && selectedWidget.kind === 'steering_wheel'" :row="switchRow('Brake and Acceleration Colors', state.draft.wheelPedalFeedback === true)" :index="0"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('wheelPedalFeedback', value)" />
+                <GalaxySettingRow v-if="!projection && selectedWidget.kind === 'steering_wheel' && displayRow('ShowBrakeStatus')" :row="switchRow('Brake and Acceleration Colors', displayValue('ShowBrakeStatus') === 'On')" :index="0"
+                  :disabled="!editAvailable || !!state.drag || !!state.layerDrag || !displayAvailable(displayRow('ShowBrakeStatus'))" :save-value="(index, value) => setDisplay('ShowBrakeStatus', value)" />
                 <div v-if="!projection && selectedWidget.kind === 'model_confidence' && displayRow('StockConfidenceBallWidget')" class="gx-layout__favorite-display">
                   <span>Style</span>
                   <div class="gx-segment" role="group" aria-label="Model confidence style">
@@ -1489,9 +1489,9 @@ export const OnroadLayoutPage = {
               <h5 class="gx-layout__display-group">Alerts and borders</h5>
               <GalaxySettingRow :row="switchRow('Hide Personality Alerts', state.draft.hidePersonalityAlerts === true)" :index="0"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('hidePersonalityAlerts', value)" />
-              <GalaxySettingRow :row="switchRow('Red blind-spot border', state.draft.blindSpotBorder === true)" :index="1"
+              <GalaxySettingRow :row="switchRow('Red Blind-Spot Border', state.draft.blindSpotBorder === true)" :index="1"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('blindSpotBorder', value)" />
-              <GalaxySettingRow :row="switchRow('Amber signal border', state.draft.signalBorder === true)" :index="2"
+              <GalaxySettingRow :row="switchRow('Amber Signal Border', state.draft.signalBorder === true)" :index="2"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setProjectionDisplay('signalBorder', value)" />
               <h5 class="gx-layout__display-group">Lead car</h5>
               <GalaxySettingRow :row="switchRow('Lead Indicator', state.draft.leadIndicator === true)" :index="0"
@@ -1499,12 +1499,12 @@ export const OnroadLayoutPage = {
               <GalaxySettingRow :row="projectionLeadInfoRow()" :index="1"
                 :disabled="!editable || !!state.drag || !!state.layerDrag || state.draft.leadIndicator !== true" :save-value="(index, value) => setProjectionLeadInfo(value)" />
               <h5 class="gx-layout__display-group">Camera</h5>
-              <GalaxySettingRow :row="switchRow('Show camera on blind-spot warning', state.draft.blindSpotCamera === true)" :index="0"
+              <GalaxySettingRow :row="switchRow('Show Camera on Blind-Spot Warning', state.draft.blindSpotCamera === true)" :index="0"
                 :disabled="!editable || !!state.drag || !!state.layerDrag || !projectionHasPipWidget" :save-value="(index, value) => setProjectionDisplay('blindSpotCamera', value)" />
               <p v-if="!projectionHasPipWidget" class="gx-note">Add a left or right blind-spot camera widget to enable this option.</p>
-              <GalaxySettingRow :row="switchRow('Large UI Gamma Effect Trial', state.draft.largeUiGammaTrial)" :index="1"
+              <GalaxySettingRow :row="switchRow('Large UI Gamma Effect', state.draft.largeUiGammaTrial)" :index="1"
                 :disabled="!editable || !!state.drag || !!state.layerDrag" :save-value="(index, value) => setLargeUiGammaTrial(value)" />
-              <p class="gx-note">Gamma trial: the large UI road-camera color effect on Android Auto (not shown in the preview).</p>
+              <p class="gx-note">The large UI road-camera color effect on Android Auto (not shown in the preview).</p>
             </section>
               <section v-if="!projection && displayGroups.length" v-show="state.inspectorPanel === 'display'" class="gx-layout__colors gx-layout__display" aria-label="Comma screen options">
                 <div class="gx-layout__subhead"><h4>Comma screen options</h4></div>

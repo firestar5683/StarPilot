@@ -77,6 +77,28 @@ class TestProjectionLayoutRuntime(unittest.TestCase):
         self.assertEqual(load_projection_layout(viewport, source), defaults)
         self.assertEqual(source.path.read_bytes(), raw)
 
+  def test_unsaved_layout_seeds_comma_display_choices(self):
+    with tempfile.TemporaryDirectory() as directory:
+      source = ProjectionLayoutSource(Path(directory) / 'layouts/document.json')
+      source.prepare()
+      viewport = (2880, 1080)
+      seed = {'signalBorder': True, 'leadIndicator': True, 'leadInfo': 'Speed', 'unknown': True}
+      loaded = load_projection_layout(viewport, source, lambda: seed)
+      self.assertEqual(loaded, default_layout_for_viewport(viewport, seed))
+      self.assertTrue(loaded['signalBorder'])
+      self.assertEqual(loaded['leadInfo'], 'Speed')
+      self.assertNotIn('unknown', loaded)
+      def broken():
+        raise OSError('params unreadable')
+      self.assertEqual(load_projection_layout(viewport, source, broken), default_layout_for_viewport(viewport))
+      source.path.write_bytes(b'bad')
+      self.assertEqual(load_projection_layout(viewport, source, lambda: seed), default_layout_for_viewport(viewport),
+                       'a corrupt saved layout is not a first layout')
+      watcher = ProjectionLayoutWatcher(viewport, source, lambda: seed)
+      watcher.load()
+      source.path.unlink()
+      self.assertTrue(watcher.poll()['signalBorder'])
+
   def test_saved_layout_loaded_once_and_next_connection_observes_save(self):
     with tempfile.TemporaryDirectory() as directory:
       source = ProjectionLayoutSource(Path(directory) / 'layouts/document.json')

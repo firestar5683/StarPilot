@@ -12,10 +12,28 @@ from openpilot.starpilot.system.android_auto.projection_layout import (
 )
 
 
-def load_projection_layout(viewport, source=None):
+def comma_display_seed():
+  """Display choices for a car screen with no saved layout yet: the comma screen's own."""
+  from openpilot.common.params import Params
+  from openpilot.starpilot.system.android_auto.projection_layout import comma_display
+  from openpilot.starpilot.ui.appearance_preferences import onroad_appearance
+  return comma_display(onroad_appearance(Params()))
+
+
+def _unsaved_layout(viewport, display_seed):
+  try:
+    display = display_seed() if display_seed is not None else None
+  except Exception:
+    display = None  # an unreadable comma preference must never block the car screen
+  return default_layout_for_viewport(viewport, display)
+
+
+def load_projection_layout(viewport, source=None, display_seed=None):
   raw, readable = read_saved(source or ProjectionLayoutSource(), DOCUMENT_KEY, MAX_BYTES)
-  if not readable or raw is None:
+  if not readable:
     return default_layout_for_viewport(viewport)
+  if raw is None:
+    return _unsaved_layout(viewport, display_seed)
   try:
     return decode_layout_for_viewport(raw, viewport)
   except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
@@ -28,9 +46,10 @@ CHECK_SECONDS = 1.0
 class ProjectionLayoutWatcher:
   """Loads the layout and, on its own thread, picks up each layout Galaxy saves."""
 
-  def __init__(self, viewport, source=None):
+  def __init__(self, viewport, source=None, display_seed=None):
     self.viewport = viewport
     self.source = source or ProjectionLayoutSource()
+    self.display_seed = display_seed
     self._stamp = None
     self._lock = threading.Lock()
     self._pending = None
@@ -71,7 +90,7 @@ class ProjectionLayoutWatcher:
 
   def load(self):
     self._stamp = self._current_stamp()
-    return load_projection_layout(self.viewport, self.source)
+    return load_projection_layout(self.viewport, self.source, self.display_seed)
 
   def poll(self):
     """Background thread only: the new layout after a save, or None. An unreadable file is retried."""
@@ -86,7 +105,7 @@ class ProjectionLayoutWatcher:
       return None
     self._stamp = stamp
     if raw is None:
-      return default_layout_for_viewport(self.viewport)
+      return _unsaved_layout(self.viewport, self.display_seed)
     try:
       return decode_layout_for_viewport(raw, self.viewport)
     except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
