@@ -12,6 +12,7 @@ from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK
 
 CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
 DRIVER_MONITOR_HOLD_NS = 350_000_000
+STANDBY_LOGO = Path(__file__).parents[3] / 'selfdrive/assets/images/starpilot_logo.png'
 BUBBLE_REDUNDANT_ALERTS = frozenset(('preLaneChangeLeft', 'preLaneChangeRight', 'laneChange',
                                      'laneChangeBlocked', 'laneChangeBlockedLoud'))
 
@@ -80,6 +81,23 @@ def native_dependencies():
       rl.set_shader_value(self.shader, self._engaged_loc, self._engaged_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
       rl.set_shader_value(self.shader, self._road_camera_loc, self._road_camera_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
 
+  def standby_logo(height):
+    """The StarPilot crescent, shrunk once on the CPU to its standby size; None if it cannot be loaded."""
+    image = rl.load_image(str(STANDBY_LOGO))
+    try:
+      if image.data == rl.ffi.NULL or image.width <= 0 or image.height <= 0:
+        return None
+      if image.height > height:
+        rl.image_resize(image, round(image.width * height / image.height), height)
+      texture = rl.load_texture_from_image(image)
+    finally:
+      if image.data != rl.ffi.NULL:
+        rl.unload_image(image)
+    if texture.id == 0:
+      return None
+    rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+    return texture
+
   return SimpleNamespace(rl=rl, ui_state=ui_state, camera=ProjectionRoadCamera,
                          onroad=OnroadView, monitor=DriverMonitorLayer, fonts=BitmapFonts,
                          font_role=FontRole, profile=Profile, font_directory=default_font_directory,
@@ -87,7 +105,7 @@ def native_dependencies():
                          shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
                          pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size,
                          alert=OnroadAlert, alert_size=AlertSize, map_overlay=MapOverlay, map_feed=MapFeed,
-                         favorites=ProjectionFavorites)
+                         favorites=ProjectionFavorites, standby_logo=standby_logo)
 
 
 class ProjectionOnroad:
@@ -110,6 +128,8 @@ class ProjectionOnroad:
     self.camera_stream = None  # the camera stream the last frame drew, or None
     self.native = dependencies or native_dependencies()
     native = self.native
+    self._standby_logo = None
+    self._standby_logo_tried = False
     if native.ui_state.projection_read_only is not True:
       raise RuntimeError('Projection UIState must be read-only')
     self._resources = ExitStack()
@@ -325,11 +345,39 @@ class ProjectionOnroad:
 
   def _standby(self):
     rl = self.native.rl
-    rl.draw_rectangle(0, 0, int(self.width), int(self.height), rl.Color(12, 26, 34, 255))
-    rl.draw_rectangle_rounded(rl.Rectangle(120, 140, self.width - 240, self.height - 280), 0.06, 16, rl.Color(18, 40, 57, 255))
-    rl.draw_rectangle_rounded_lines_ex(rl.Rectangle(120, 140, self.width - 240, self.height - 280), 0.06, 16, 4, rl.Color(50, 126, 144, 255))
-    self.fonts.draw('StarPilot', self.native.font_role.BRAND, 112, 220, 325)
-    self.fonts.draw('Ready when driving', self.native.font_role.MEDIUM, 55, 225, 475)
+    purple = rl.Color(188, 132, 255, 255)  # StarPilot purple, as on the comma's moon
+    rl.draw_rectangle(0, 0, int(self.width), int(self.height), rl.Color(10, 10, 22, 255))
+    panel_height = self.height - 280
+    panel = rl.Rectangle(120, 140, self.width - 240, panel_height)
+    rl.draw_rectangle_rounded(panel, 0.06, 16, rl.Color(26, 16, 46, 255))
+    rl.draw_rectangle_rounded_lines_ex(panel, 0.06, 16, 4, purple)
+    logo = self._standby_texture(int(panel_height * 0.6))
+    text_x = 220
+    if logo is not None:
+      rl.draw_texture(logo, 200, int((self.height - logo.height) / 2), rl.WHITE)
+      text_x = 200 + logo.width + 70
+    middle = self.height / 2
+    self.fonts.draw('StarPilot', self.native.font_role.BRAND, 112, text_x, middle - 130, purple)
+    self.fonts.draw('Ready when driving', self.native.font_role.MEDIUM, 55, text_x + 5, middle + 20, rl.Color(222, 204, 255, 255))
+
+  def _standby_texture(self, height):
+    """Load the logo the first time standby shows; a missing logo leaves the text-only screen."""
+    if not self._standby_logo_tried:
+      self._standby_logo_tried = True
+      load = getattr(self.native, 'standby_logo', None)
+      if load is not None:
+        try:
+          self._standby_logo = load(height)
+        except Exception:
+          self._standby_logo = None
+        if self._standby_logo is not None:
+          self._resources.callback(self._unload_standby_logo)
+    return self._standby_logo
+
+  def _unload_standby_logo(self):
+    if self._standby_logo is not None:
+      self.native.rl.unload_texture(self._standby_logo)
+      self._standby_logo = None
 
   def render(self):
     ui = self.native.ui_state

@@ -21,6 +21,7 @@ spec.loader.exec_module(projection)
 
 class FakeGraphics:
   BLACK = object()
+  WHITE = object()
 
   @staticmethod
   def Color(*values): return values
@@ -36,6 +37,9 @@ class FakeGraphics:
 
   @staticmethod
   def draw_rectangle_rounded_lines_ex(*_): pass
+
+  @staticmethod
+  def draw_texture(*_): pass
 
   @staticmethod
   def unload_texture(*_): pass
@@ -149,6 +153,30 @@ class TestProjectionOnroad(unittest.TestCase):
     view.close()
     self.assertEqual(events[-3:], ['view_closed', 'camera_closed', 'fonts_closed'])
     self.assertEqual(native.ui_state._offroad_transition_callbacks, [])
+
+  def test_standby_logo_loads_once_and_is_freed_on_close(self):
+    native, _ = self.dependencies()
+    logo = SimpleNamespace(width=300, height=250)
+    heights, drawn, unloaded = [], [], []
+    native.standby_logo = lambda height: heights.append(height) or logo
+    native.rl = SimpleNamespace(**{name: getattr(FakeGraphics, name) for name in dir(FakeGraphics) if not name.startswith('_')})
+    native.rl.draw_texture = lambda texture, *_: drawn.append(texture)
+    native.rl.unload_texture = unloaded.append
+    view = projection.ProjectionOnroad(dependencies=native)
+    view.render()
+    view.render()
+    self.assertEqual(heights, [576])
+    self.assertEqual(drawn, [logo, logo])
+    view.close()
+    self.assertEqual(unloaded, [logo])
+
+  def test_standby_without_logo_still_draws_text(self):
+    native, events = self.dependencies()
+    native.standby_logo = lambda _height: None
+    view = projection.ProjectionOnroad(dependencies=native)
+    self.addCleanup(view.close)
+    view.render()
+    self.assertEqual(events.count('draw'), 2)
 
   def test_side_camera_layer_uses_blinkers_saved_preview_and_projection_placements(self):
     native, events = self.dependencies()
