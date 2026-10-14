@@ -26,7 +26,11 @@ def armed_lateral_current(cp, cs, intent, native, *, source_ns, now_ns, axis_ses
 
 def lateral_event_context(self, CS, intent, native, now_ns, ordinary_lag):
   from openpilot.selfdrive.selfdrived.events import EventName
-  retained_dm_lateral = bool(intent is not None and
+  from openpilot.cereal import log
+  dm = self.sm['driverMonitoringState']
+  needs_exception = bool(dm.alertLevel == log.DriverMonitoringState.AlertLevel.three or
+    dm.lockout or dm.alwaysOnLockout or EventName.tooDistracted in self.events.names)
+  retained_dm_lateral = bool(needs_exception and intent is not None and
     getattr(self, 'aol_dm_retained_owner', None) == (intent.producerSessionId, self.aol_session_id) and
     self.sm.all_checks(['driverMonitoringState']) and
     armed_lateral_current(self.CP, CS, intent, native, source_ns=self.aol_car_state_log_ns,
